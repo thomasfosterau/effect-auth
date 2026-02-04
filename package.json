@@ -1,0 +1,37 @@
+{
+  "name": "effect-auth",
+  "version": "1.0.0",
+  "description": "An experimental Auth library for Effect.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "effect",
+    "authentication",
+    "authorization",
+    "auth",
+    "session"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "effect": "^3.19.15"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^0.27.0",
+    "@types/node": "^25.2.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
