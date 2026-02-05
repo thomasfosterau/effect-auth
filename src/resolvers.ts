@@ -2,7 +2,7 @@ import { Effect, RequestResolver } from "effect"
 import * as Requests from "./requests.js"
 import * as Errors from "./errors.js"
 import { SessionManager } from "./session.js"
-import { PasswordHasher } from "./password.js"
+import { PasswordHasherContext } from "./password.js"
 import { UserStore } from "./session.js"
 
 /**
@@ -56,7 +56,7 @@ export const makeVerifyCredentialsResolver = RequestResolver.fromEffect(
   (request: Requests.VerifyCredentialsRequest) =>
     Effect.gen(function* () {
       const userStore = yield* UserStore
-      const passwordHasher = yield* PasswordHasher
+      const passwordHasher = yield* PasswordHasherContext
 
       // Get user and their hashed password
       const user = yield* userStore.get(request.userId)
@@ -83,7 +83,7 @@ export const makeVerifyCredentialsResolver = RequestResolver.fromEffect(
 export const makeHashPasswordResolver = RequestResolver.fromEffect(
   (request: Requests.HashPasswordRequest) =>
     Effect.gen(function* () {
-      const passwordHasher = yield* PasswordHasher
+      const passwordHasher = yield* PasswordHasherContext
       return yield* passwordHasher.hash(request.password)
     })
 )
@@ -94,7 +94,7 @@ export const makeHashPasswordResolver = RequestResolver.fromEffect(
 export const makeVerifyPasswordResolver = RequestResolver.fromEffect(
   (request: Requests.VerifyPasswordRequest) =>
     Effect.gen(function* () {
-      const passwordHasher = yield* PasswordHasher
+      const passwordHasher = yield* PasswordHasherContext
       return yield* passwordHasher.verify(request.password, request.hash)
     })
 )

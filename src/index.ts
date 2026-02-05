@@ -13,6 +13,7 @@ export * from "./requests.js"
 
 // Password hashing (following Oslo patterns)
 export * from "./password.js"
+export * from "./password-traits.js"
 
 // Session management (following Lucia/Copenhagen guidelines)
 export * from "./session.js"
