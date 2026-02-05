@@ -10,13 +10,7 @@ Make sure you have built the project first:
 npm run build
 ```
 
-Then you can run any example with Node.js (requires Node 18+):
-
-```bash
-node --loader tsx examples/basic-auth.ts
-```
-
-Or with tsx:
+Then you can run any example with tsx (recommended):
 
 ```bash
 npx tsx examples/basic-auth.ts

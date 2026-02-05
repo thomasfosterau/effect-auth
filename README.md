@@ -277,7 +277,7 @@ See the `examples/` directory for complete examples:
 
 ## Contributing
 
-Contributions are welcome! Please see CONTRIBUTING.md for guidelines.
+Contributions are welcome! Please open an issue or pull request to get started.
 
 ## License
 

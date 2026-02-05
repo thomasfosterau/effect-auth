@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Context } from "effect"
-import { makeSessionManager, SessionStore, UserStore } from "../src/session.js"
-import type { Session, User, SessionConfig } from "../src/types.js"
-import { SessionNotFoundError, SessionExpiredError, UserNotFoundError } from "../src/errors.js"
+import { makeSessionManager, SessionStore, UserStore } from "./session.js"
+import type { Session, User, SessionConfig } from "./types.js"
+import { SessionNotFoundError, UserNotFoundError } from "./errors.js"
 
 // Mock implementations for testing
 const mockSessionStore = {

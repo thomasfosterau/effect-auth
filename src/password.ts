@@ -39,6 +39,19 @@ export const makePasswordHasher = (): PasswordHasher => {
   return {
     hash: (password: string) =>
       Effect.gen(function* () {
+        // Validate input
+        if (!password || typeof password !== "string") {
+          return yield* Effect.fail(new Errors.HashingError({
+            message: "Password must be a non-empty string"
+          }))
+        }
+
+        if (password.length < 1) {
+          return yield* Effect.fail(new Errors.HashingError({
+            message: "Password cannot be empty"
+          }))
+        }
+
         const salt = crypto.randomBytes(SALT_LENGTH)
         
         const derivedKey = yield* Effect.tryPromise({
@@ -60,6 +73,19 @@ export const makePasswordHasher = (): PasswordHasher => {
 
     verify: (password: string, hash: string) =>
       Effect.gen(function* () {
+        // Validate inputs
+        if (!password || typeof password !== "string") {
+          return yield* Effect.fail(new Errors.HashingError({
+            message: "Password must be a non-empty string"
+          }))
+        }
+
+        if (!hash || typeof hash !== "string") {
+          return yield* Effect.fail(new Errors.HashingError({
+            message: "Hash must be a non-empty string"
+          }))
+        }
+
         const parts = hash.split("$")
         
         if (parts.length !== 4) {

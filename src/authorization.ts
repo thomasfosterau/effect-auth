@@ -13,7 +13,7 @@ export interface AuthorizationPolicy {
     userId: string,
     resource: string,
     action: string
-  ) => Effect.Effect<boolean, Errors.PermissionDeniedError>
+  ) => Effect.Effect<boolean, never>
 }
 
 /**

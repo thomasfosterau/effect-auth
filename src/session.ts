@@ -125,13 +125,15 @@ export const makeSessionManager = (config: Types.SessionConfig): Effect.Effect<
       createSession: (userId, attributes = {}) =>
         Effect.gen(function* () {
           const sessionId = generateSessionId()
-          const now = Date.now()
-          const expiresAt = new Date(now + config.sessionExpiresIn.activePeriod)
+          const now = new Date()
+          const expiresAt = new Date(now.getTime() + config.sessionExpiresIn.activePeriod)
 
           const session: Types.Session = {
             id: sessionId,
             userId,
             expiresAt,
+            createdAt: now,
+            lastActivityAt: now,
             attributes
           }
 
@@ -143,8 +145,8 @@ export const makeSessionManager = (config: Types.SessionConfig): Effect.Effect<
           const session = yield* sessionStore.get(sessionId)
 
           // Check if session is expired
-          const now = Date.now()
-          if (session.expiresAt.getTime() < now) {
+          const now = new Date()
+          if (session.expiresAt.getTime() < now.getTime()) {
             // Delete expired session (ignore errors)
             yield* Effect.ignore(sessionStore.delete(sessionId))
             return yield* Effect.fail(
@@ -155,26 +157,54 @@ export const makeSessionManager = (config: Types.SessionConfig): Effect.Effect<
             )
           }
 
-          // Check if session should be extended (idle timeout)
-          const idleExpiry = now + config.sessionExpiresIn.idlePeriod
-          const activeExpiry = now + config.sessionExpiresIn.activePeriod
-          
-          // Extend session if it's past the idle period
-          const sessionAge = now - (session.expiresAt.getTime() - config.sessionExpiresIn.activePeriod)
-          if (sessionAge > config.sessionExpiresIn.idlePeriod) {
-            const updatedSession = {
-              ...session,
-              expiresAt: new Date(Math.min(idleExpiry, activeExpiry))
-            }
-            // Update session (ignore errors as it's not critical)
-            yield* Effect.ignore(sessionStore.update(updatedSession))
+          // Check if session has been idle for too long
+          const timeSinceLastActivity = now.getTime() - session.lastActivityAt.getTime()
+          if (timeSinceLastActivity > config.sessionExpiresIn.idlePeriod) {
+            // Session has been idle for too long
+            yield* Effect.ignore(sessionStore.delete(sessionId))
+            return yield* Effect.fail(
+              new Errors.SessionExpiredError({
+                message: "Session expired due to inactivity",
+                sessionId
+              })
+            )
           }
+
+          // Check if session has exceeded its absolute maximum lifetime
+          const sessionLifetime = now.getTime() - session.createdAt.getTime()
+          if (sessionLifetime > config.sessionExpiresIn.activePeriod) {
+            // Session has exceeded maximum lifetime
+            yield* Effect.ignore(sessionStore.delete(sessionId))
+            return yield* Effect.fail(
+              new Errors.SessionExpiredError({
+                message: "Session exceeded maximum lifetime",
+                sessionId
+              })
+            )
+          }
+
+          // Update session activity and potentially extend expiration
+          const newExpiresAt = new Date(
+            Math.min(
+              now.getTime() + config.sessionExpiresIn.idlePeriod, // Extend by idle period
+              session.createdAt.getTime() + config.sessionExpiresIn.activePeriod // But not beyond max lifetime
+            )
+          )
+
+          const updatedSession: Types.Session = {
+            ...session,
+            lastActivityAt: now,
+            expiresAt: newExpiresAt
+          }
+
+          // Update session (ignore errors as it's not critical)
+          yield* Effect.ignore(sessionStore.update(updatedSession))
 
           // Get user
           const user = yield* userStore.get(session.userId)
 
           return {
-            session,
+            session: updatedSession,
             user
           }
         }),
