@@ -80,8 +80,7 @@ export interface WebAuthnService {
   /** Verify registration response from client */
   verifyRegistration: (
     challenge: Uint8Array,
-    response: RegistrationResponse,
-    expectedOrigin: string
+    response: RegistrationResponse
   ) => Effect.Effect<RegistrationResult, Errors.WebAuthnVerificationError | Errors.ChallengeNotFoundError | Errors.ChallengeExpiredError | Errors.AuthError>
 
   /** Generate a challenge for authentication */
@@ -93,8 +92,7 @@ export interface WebAuthnService {
   /** Verify authentication response from client */
   verifyAuthentication: (
     challenge: Uint8Array,
-    response: AuthenticationResponse,
-    expectedOrigin: string
+    response: AuthenticationResponse
   ) => Effect.Effect<AuthenticationResult, Errors.WebAuthnVerificationError | Errors.CredentialNotFoundError | Errors.ChallengeNotFoundError | Errors.ChallengeExpiredError | Errors.AuthError>
 }
 
@@ -128,7 +126,7 @@ export const makeWebAuthnService = (
           return { challenge, expiresAt }
         }),
 
-      verifyRegistration: (challenge: Uint8Array, response: RegistrationResponse, _expectedOrigin: string) =>
+      verifyRegistration: (challenge: Uint8Array, response: RegistrationResponse) =>
         Effect.gen(function* () {
           // Get and verify challenge
           const storedChallenge = yield* challengeStore.get(challenge)
@@ -284,7 +282,7 @@ export const makeWebAuthnService = (
           return { challenge, expiresAt }
         }),
 
-      verifyAuthentication: (challenge: Uint8Array, response: AuthenticationResponse, _expectedOrigin: string) =>
+      verifyAuthentication: (challenge: Uint8Array, response: AuthenticationResponse) =>
         Effect.gen(function* () {
           // Get and verify challenge
           const storedChallenge = yield* challengeStore.get(challenge)
@@ -463,7 +461,7 @@ function bigintToBytes(value: bigint, minLength?: number): Uint8Array {
   const hex = value.toString(16).padStart(minLength ? minLength * 2 : 0, '0')
   const bytes = new Uint8Array(hex.length / 2)
   for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.substr(i * 2, 2), 16)
+    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16)
   }
   return bytes
 }

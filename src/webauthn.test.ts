@@ -183,7 +183,7 @@ describe("WebAuthn Service", () => {
         clientDataJSON: new Uint8Array([])
       }
 
-      yield* service.verifyRegistration(challenge, mockResponse, "https://example.com")
+      yield* service.verifyRegistration(challenge, mockResponse)
     })
 
     const result = await Effect.runPromise(
@@ -204,7 +204,7 @@ describe("WebAuthn Service", () => {
         clientDataJSON: new Uint8Array([])
       }
 
-      yield* service.verifyRegistration(fakeChallenge, mockResponse, "https://example.com")
+      yield* service.verifyRegistration(fakeChallenge, mockResponse)
     })
 
     const result = await Effect.runPromise(
@@ -247,7 +247,7 @@ describe("WebAuthn Service", () => {
 
       // Expect this to fail with ChallengeExpiredError
       const result = yield* Effect.flip(
-        service.verifyRegistration(challenge, mockResponse, "https://example.com")
+        service.verifyRegistration(challenge, mockResponse)
       )
 
       expect(result).toBeInstanceOf(ChallengeExpiredError)

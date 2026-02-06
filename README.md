@@ -256,8 +256,7 @@ const registerPasskey = Effect.gen(function* () {
       credentialId: clientCredentialId,
       attestationObject: clientAttestationObject,
       clientDataJSON: clientDataJSON
-    },
-    "https://example.com"
+    }
   )
   
   // Credential is now stored and ready for authentication
@@ -282,8 +281,7 @@ const authenticateWithPasskey = Effect.gen(function* () {
       authenticatorData: clientAuthenticatorData,
       clientDataJSON: clientDataJSON,
       signature: clientSignature
-    },
-    "https://example.com"
+    }
   )
   
   // User is authenticated, create session
