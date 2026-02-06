@@ -54,3 +54,33 @@ export class HashingError extends Data.TaggedError("HashingError")<{
   readonly message: string
   readonly cause?: unknown
 }> {}
+
+/**
+ * WebAuthn challenge not found error
+ */
+export class ChallengeNotFoundError extends Data.TaggedError("ChallengeNotFoundError")<{
+  readonly message: string
+}> {}
+
+/**
+ * WebAuthn challenge expired error
+ */
+export class ChallengeExpiredError extends Data.TaggedError("ChallengeExpiredError")<{
+  readonly message: string
+}> {}
+
+/**
+ * WebAuthn credential not found error
+ */
+export class CredentialNotFoundError extends Data.TaggedError("CredentialNotFoundError")<{
+  readonly message: string
+  readonly credentialId: string
+}> {}
+
+/**
+ * WebAuthn verification error
+ */
+export class WebAuthnVerificationError extends Data.TaggedError("WebAuthnVerificationError")<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
