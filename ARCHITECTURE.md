@@ -127,6 +127,49 @@ interface RoleStore {
 - `makeRoleBasedPolicy()`: Create role-based authorization policy
 - `requirePermission()`: Helper to enforce permissions (throws if denied)
 
+### 8. OTP Utilities (`src/otp.ts`)
+
+One-Time Password (OTP) support for Two-Factor Authentication:
+
+**Supported Algorithms:**
+- **TOTP (Time-Based OTP)**: RFC 6238 compliant
+- **HOTP (HMAC-Based OTP)**: RFC 4226 compliant
+
+**Key Features:**
+- Cryptographically secure secret generation
+- Base32 encoding/decoding for secrets
+- Support for SHA-1, SHA-256, and SHA-512 algorithms
+- Configurable code length (default: 6 digits)
+- Configurable time periods for TOTP (default: 30 seconds)
+- Time window support for TOTP verification (default: ±1 step)
+- OTP URI generation for QR codes (otpauth:// protocol)
+- Timing-safe token comparison
+
+**Core Functions:**
+
+```typescript
+// Secret generation
+generateSecret(length?: number): Effect<Buffer, HashingError>
+generateBase32Secret(length?: number): Effect<string, HashingError>
+
+// HOTP (counter-based)
+generateHOTP(secret, counter, config?): Effect<string, HashingError>
+verifyHOTP(token, secret, counter, config?): Effect<boolean, HashingError>
+
+// TOTP (time-based)
+generateTOTP(secret, config?): Effect<string, HashingError>
+verifyTOTP(token, secret, config?): Effect<boolean, HashingError>
+
+// URI generation for QR codes
+generateOTPURI(params: OTPURIParams): string
+```
+
+**Security Properties:**
+- Uses Node.js crypto module for HMAC and random generation
+- Implements dynamic truncation per RFC 4226 Section 5.3
+- Timing-safe comparison using `crypto.timingSafeEqual`
+- Compatible with Google Authenticator and other standard authenticator apps
+
 ## Request/Resolver Pattern
 
 The library uses Effect's Request/Resolver pattern for flexibility:
@@ -228,7 +271,8 @@ The library includes comprehensive tests:
 ## Future Enhancements
 
 Possible future additions:
-- Two-factor authentication (TOTP, WebAuthn)
+- ~~Two-factor authentication (TOTP, HOTP)~~ ✅ Implemented
+- WebAuthn support
 - OAuth 2.0 / OIDC integration
 - Token-based authentication (JWT)
 - Rate limiting utilities
@@ -243,3 +287,5 @@ Possible future additions:
 - [Oslo](https://github.com/pilcrowonpaper/oslo) - Authentication primitives
 - [Effect](https://effect.website/) - TypeScript effect system
 - [OWASP Password Storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+- [RFC 6238](https://www.rfc-editor.org/rfc/rfc6238) - TOTP: Time-Based One-Time Password Algorithm
+- [RFC 4226](https://www.rfc-editor.org/rfc/rfc4226) - HOTP: An HMAC-Based One-Time Password Algorithm

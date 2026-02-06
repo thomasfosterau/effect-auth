@@ -10,6 +10,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🧩 **Composable**: Use Effect's powerful composition capabilities
 - 🔄 **Bring Your Own Storage**: Implement storage adapters for any database or backend
 - 📦 **Zero Lock-in**: No vendor lock-in, works with any storage backend
+- 🔑 **Two-Factor Authentication**: TOTP and HOTP support following RFC 6238 and RFC 4226
 
 ## Installation
 
@@ -23,6 +24,7 @@ This library follows the Copenhagen Book guidelines for authentication:
 
 - **Sessions**: Secure session management with automatic expiration and renewal
 - **Password Hashing**: PBKDF2-SHA256 with recommended iterations (210,000+)
+- **Two-Factor Authentication**: TOTP and HOTP for multi-factor authentication
 - **Request/Resolver Pattern**: Use Effect's Request/Resolver pattern for custom implementations
 - **Authorization**: Flexible permission checking and role-based access control
 
@@ -193,6 +195,115 @@ const result = await Effect.runPromise(
 )
 ```
 
+## Two-Factor Authentication (TOTP/HOTP)
+
+Implement two-factor authentication using Time-based One-Time Passwords (TOTP, RFC 6238) or HMAC-based One-Time Passwords (HOTP, RFC 4226):
+
+### TOTP (Time-based)
+
+```typescript
+import { Effect } from "effect"
+import * as Auth from "effect-auth"
+
+const program = Effect.gen(function* () {
+  // Generate a secret for the user
+  const secret = yield* Auth.generateBase32Secret(20)
+  
+  // Generate a QR code URI for the user to scan
+  const uri = Auth.generateOTPURI({
+    type: "totp",
+    label: "user@example.com",
+    issuer: "MyApp",
+    secret,
+  })
+  
+  // Display QR code to user (use a QR code library to encode the URI)
+  console.log("Scan this URI with your authenticator app:", uri)
+  
+  // When the user submits a token, verify it
+  const userToken = "123456" // From user input
+  const isValid = yield* Auth.verifyTOTP(userToken, secret)
+  
+  if (isValid) {
+    // Token is valid, proceed with authentication
+    return { success: true }
+  } else {
+    // Token is invalid
+    return { success: false }
+  }
+})
+
+await Effect.runPromise(program)
+```
+
+### HOTP (Counter-based)
+
+```typescript
+import { Effect } from "effect"
+import * as Auth from "effect-auth"
+
+const program = Effect.gen(function* () {
+  // Generate a secret for the user
+  const secret = yield* Auth.generateBase32Secret(20)
+  
+  // Store initial counter (typically 0) for the user
+  let counter = 0
+  
+  // Generate a QR code URI
+  const uri = Auth.generateOTPURI({
+    type: "hotp",
+    label: "user@example.com",
+    issuer: "MyApp",
+    secret,
+    counter,
+  })
+  
+  // Display QR code to user
+  console.log("Scan this URI with your authenticator app:", uri)
+  
+  // When the user submits a token, verify it
+  const userToken = "123456" // From user input
+  const isValid = yield* Auth.verifyHOTP(userToken, secret, counter)
+  
+  if (isValid) {
+    // Token is valid, increment counter for next use
+    counter++
+    // Store updated counter in database
+    return { success: true, nextCounter: counter }
+  } else {
+    // Token is invalid
+    return { success: false }
+  }
+})
+
+await Effect.runPromise(program)
+```
+
+### Custom Configuration
+
+Both TOTP and HOTP support custom configurations:
+
+```typescript
+// TOTP with custom settings
+const totpConfig: Auth.TOTPConfig = {
+  period: 60,        // 60-second time window (default: 30)
+  digits: 8,         // 8-digit codes (default: 6)
+  algorithm: "sha256", // Use SHA-256 (default: "sha1")
+  window: 2,         // Accept tokens from ±2 time steps (default: 1)
+}
+
+const token = yield* Auth.generateTOTP(secret, totpConfig)
+const isValid = yield* Auth.verifyTOTP(token, secret, totpConfig)
+
+// HOTP with custom settings
+const hotpConfig: Auth.HOTPConfig = {
+  digits: 8,         // 8-digit codes (default: 6)
+  algorithm: "sha512", // Use SHA-512 (default: "sha1")
+}
+
+const hotpToken = yield* Auth.generateHOTP(secret, counter, hotpConfig)
+```
+
 ## API Reference
 
 ### Types
@@ -203,6 +314,9 @@ const result = await Effect.runPromise(
 - `SessionConfig`: Configuration for session expiration
 - `HashedPassword`: Hashed password with algorithm info
 - `Permission`: Permission check result
+- `TOTPConfig`: Configuration for TOTP generation and verification
+- `HOTPConfig`: Configuration for HOTP generation and verification
+- `OTPURIParams`: Parameters for generating OTP URIs (for QR codes)
 
 ### Services
 
@@ -212,6 +326,20 @@ const result = await Effect.runPromise(
 - `PasswordHasher`: Service for password hashing and verification
 - `AuthorizationPolicy`: Interface for permission checking
 - `RoleStore`: Interface for role-based authorization
+
+### OTP Functions
+
+All OTP functions return Effect types for composability:
+
+- `generateSecret(length?)`: Generate cryptographically secure random bytes
+- `generateBase32Secret(length?)`: Generate a base32-encoded secret
+- `encodeBase32(buffer)`: Encode bytes to base32 string
+- `decodeBase32(base32)`: Decode base32 string to bytes
+- `generateHOTP(secret, counter, config?)`: Generate HOTP token
+- `verifyHOTP(token, secret, counter, config?)`: Verify HOTP token
+- `generateTOTP(secret, config?)`: Generate TOTP token
+- `verifyTOTP(token, secret, config?)`: Verify TOTP token
+- `generateOTPURI(params)`: Generate OTP URI for QR codes
 
 ### Requests
 
@@ -265,6 +393,21 @@ Following Oslo guidelines:
 2. Check permissions at the application layer
 3. Use explicit permission checks
 4. Log authorization failures
+
+### Two-Factor Authentication
+
+Following RFC 6238 (TOTP) and RFC 4226 (HOTP) guidelines:
+
+1. Generate secrets with sufficient entropy (minimum 160 bits / 20 bytes)
+2. Use timing-safe comparisons when verifying tokens
+3. Implement rate limiting on verification endpoints to prevent brute force
+4. For TOTP, use a reasonable time window (default: ±1 step)
+5. For HOTP, increment counters only after successful verification
+6. Never reuse tokens within their validity window
+7. Store secrets securely (encrypted at rest)
+8. Use standard 6-digit codes for compatibility with authenticator apps
+9. Provide backup codes for account recovery
+10. Display QR codes securely over HTTPS
 
 ## Examples
 
