@@ -288,6 +288,8 @@ export const makeOAuthService = (
           if (options?.returnTo) {
             const stateStore = yield* OAuthStateStoreTag
             const stateEntry = yield* stateStore.get(result.state)
+            // Delete old state and create new one with returnTo
+            yield* stateStore.delete(result.state)
             yield* stateStore.create({
               ...stateEntry,
               returnTo: options.returnTo
@@ -408,20 +410,109 @@ export const makeOAuthService = (
           } satisfies OAuthCallbackResult
         }),
 
-      linkAccount: (_userId, _provider, _code, _state) =>
+      linkAccount: (userId, provider, code, state) =>
         Effect.gen(function* () {
-          // Use handleCallback with linkToUserId option
-          yield* OAuthStateStoreTag
-          yield* OAuthAccountStoreTag
-          return yield* Effect.succeed({
-            id: crypto.randomBytes(16).toString("hex"),
-            userId: _userId,
-            provider: _provider,
-            providerId: "",
-            accessToken: "",
-            createdAt: Date.now(),
+          // Properly implement OAuth flow for account linking
+          // This follows the same flow as handleCallback but links to existing user
+          const stateStore = yield* OAuthStateStoreTag
+          const accountStore = yield* OAuthAccountStoreTag
+
+          // Verify state
+          const stateEntry = yield* Effect.catchTag(
+            stateStore.get(state),
+            "AuthError",
+            () =>
+              Effect.fail(
+                new OAuthStateNotFoundError({
+                  message: "OAuth state not found or expired",
+                  state
+                })
+              )
+          )
+
+          if (stateEntry.provider !== provider) {
+            return yield* Effect.fail(
+              new OAuthProviderError({
+                message: `State provider mismatch: expected ${provider}, got ${stateEntry.provider}`,
+                provider
+              })
+            )
+          }
+
+          // Check expiration
+          if (Date.now() > stateEntry.expiresAt) {
+            yield* stateStore.delete(state)
+            return yield* Effect.fail(
+              new OAuthStateExpiredError({
+                message: "OAuth state expired",
+                state
+              })
+            )
+          }
+
+          const providerInstance = providers[provider]
+          if (!providerInstance) {
+            return yield* Effect.fail(
+              new OAuthProviderError({
+                message: `Provider ${provider} not found`,
+                provider
+              })
+            )
+          }
+
+          // Exchange code for tokens
+          const tokens = yield* providerInstance.exchangeCode(
+            code,
+            stateEntry.codeVerifier
+          )
+
+          // Get user info
+          const userInfo = yield* providerInstance.getUserInfo(
+            tokens.access_token
+          )
+
+          // Clean up state
+          yield* stateStore.delete(state)
+
+          // Check if this OAuth account is already linked to another user
+          const existingAccount = yield* accountStore.get(
+            provider,
+            userInfo.id
+          )
+
+          if (existingAccount && existingAccount.userId !== userId) {
+            return yield* Effect.fail(
+              new AuthError({
+                message: `This ${provider} account is already linked to another user`
+              })
+            )
+          }
+
+          // Create or update the account linked to this user
+          const account: OAuthAccount = {
+            id: existingAccount?.id ?? crypto.randomBytes(16).toString("hex"),
+            userId,
+            provider,
+            providerId: userInfo.id,
+            email: userInfo.email,
+            name: userInfo.name,
+            picture: userInfo.picture,
+            accessToken: tokens.access_token,
+            refreshToken: tokens.refresh_token,
+            expiresAt: tokens.expires_in
+              ? Date.now() + tokens.expires_in * 1000
+              : undefined,
+            createdAt: existingAccount?.createdAt ?? Date.now(),
             updatedAt: Date.now()
-          } as OAuthAccount)
+          }
+
+          if (existingAccount) {
+            yield* accountStore.update(account)
+          } else {
+            yield* accountStore.create(account)
+          }
+
+          return account
         }),
 
       unlinkAccount: (userId, provider) =>
@@ -439,7 +530,6 @@ export const makeOAuthService = (
           }
 
           yield* accountStore.delete(provider, account.providerId)
-          return undefined
         }),
 
       refreshAccessToken: (userId, provider) =>
