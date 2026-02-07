@@ -15,7 +15,11 @@
     "dist",
     "README.md",
     "LICENSE",
-    "ARCHITECTURE.md"
+    "ARCHITECTURE.md",
+    "SECURITY.md",
+    "AGENT_GUIDELINES.md",
+    "CONTRIBUTING.md",
+    "docs"
   ],
   "scripts": {
     "build": "tsc",
