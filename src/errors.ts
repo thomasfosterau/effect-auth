@@ -84,3 +84,61 @@ export class WebAuthnVerificationError extends Data.TaggedError("WebAuthnVerific
   readonly message: string
   readonly cause?: unknown
 }> {}
+
+/**
+ * OAuth state not found error
+ */
+export class OAuthStateNotFoundError extends Data.TaggedError("OAuthStateNotFoundError")<{
+  readonly message: string
+  readonly state: string
+}> {}
+
+/**
+ * OAuth state expired error
+ */
+export class OAuthStateExpiredError extends Data.TaggedError("OAuthStateExpiredError")<{
+  readonly message: string
+  readonly state: string
+}> {}
+
+/**
+ * OAuth provider error
+ */
+export class OAuthProviderError extends Data.TaggedError("OAuthProviderError")<{
+  readonly message: string
+  readonly provider: string
+  readonly cause?: unknown
+}> {}
+
+/**
+ * Rate limit exceeded error
+ */
+export class RateLimitError extends Data.TaggedError("RateLimitError")<{
+  readonly message: string
+  readonly key: string
+  readonly retryAfter?: number
+}> {}
+
+/**
+ * Email verification error
+ */
+export class EmailVerificationError extends Data.TaggedError("EmailVerificationError")<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
+
+/**
+ * Magic link error
+ */
+export class MagicLinkError extends Data.TaggedError("MagicLinkError")<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
+
+/**
+ * Password reset error
+ */
+export class PasswordResetError extends Data.TaggedError("PasswordResetError")<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}

@@ -26,9 +26,22 @@ export * from "./authorization.js"
 
 // OTP utilities (TOTP and HOTP, following Oslo patterns)
 export * from "./otp.js"
+
 // WebAuthn (passkey authentication)
 export * from "./webauthn-types.js"
 export * from "./webauthn.js"
+
+// OAuth 2.0 / OIDC (inspired by BetterAuth)
+export * from "./oauth-types.js"
+export * from "./oauth.js"
+
+// Email verification (inspired by BetterAuth)
+export * from "./email-verification-types.js"
+export * from "./email-verification.js"
+
+// Rate limiting (inspired by BetterAuth)
+export * from "./rate-limit-types.js"
+export * from "./rate-limit.js"
 
 // Re-export commonly used Effect types
 export { Effect, Context, Layer, RequestResolver } from "effect"
