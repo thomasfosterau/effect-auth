@@ -45,6 +45,7 @@
   },
   "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
   "dependencies": {
+    "@oslojs/webauthn": "^1.0.0",
     "effect": "^3.19.15"
   },
   "devDependencies": {

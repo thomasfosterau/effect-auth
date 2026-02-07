@@ -24,5 +24,11 @@ export * from "./resolvers.js"
 // Authorization
 export * from "./authorization.js"
 
+// OTP utilities (TOTP and HOTP, following Oslo patterns)
+export * from "./otp.js"
+// WebAuthn (passkey authentication)
+export * from "./webauthn-types.js"
+export * from "./webauthn.js"
+
 // Re-export commonly used Effect types
 export { Effect, Context, Layer, RequestResolver } from "effect"

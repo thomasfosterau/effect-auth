@@ -10,6 +10,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🧩 **Composable**: Use Effect's powerful composition capabilities
 - 🔄 **Bring Your Own Storage**: Implement storage adapters for any database or backend
 - 📦 **Zero Lock-in**: No vendor lock-in, works with any storage backend
+- 🔑 **Two-Factor Authentication**: TOTP and HOTP support following RFC 6238 and RFC 4226
 
 ## Installation
 
@@ -23,6 +24,7 @@ This library follows the Copenhagen Book guidelines for authentication:
 
 - **Sessions**: Secure session management with automatic expiration and renewal
 - **Password Hashing**: PBKDF2-SHA256 with recommended iterations (210,000+)
+- **Two-Factor Authentication**: TOTP and HOTP for multi-factor authentication
 - **Request/Resolver Pattern**: Use Effect's Request/Resolver pattern for custom implementations
 - **Authorization**: Flexible permission checking and role-based access control
 
@@ -193,6 +195,222 @@ const result = await Effect.runPromise(
 )
 ```
 
+## Two-Factor Authentication (TOTP/HOTP)
+
+Implement two-factor authentication using Time-based One-Time Passwords (TOTP, RFC 6238) or HMAC-based One-Time Passwords (HOTP, RFC 4226):
+
+### TOTP (Time-based)
+
+```typescript
+import { Effect } from "effect"
+import * as Auth from "effect-auth"
+
+const program = Effect.gen(function* () {
+  // Generate a secret for the user
+  const secret = yield* Auth.generateBase32Secret(20)
+  
+  // Generate a QR code URI for the user to scan
+  const uri = Auth.generateOTPURI({
+    type: "totp",
+    label: "user@example.com",
+    issuer: "MyApp",
+    secret,
+  })
+  
+  // Display QR code to user (use a QR code library to encode the URI)
+  console.log("Scan this URI with your authenticator app:", uri)
+  
+  // When the user submits a token, verify it
+  const userToken = "123456" // From user input
+  const isValid = yield* Auth.verifyTOTP(userToken, secret)
+  
+  if (isValid) {
+    // Token is valid, proceed with authentication
+    return { success: true }
+  } else {
+    // Token is invalid
+    return { success: false }
+  }
+})
+
+await Effect.runPromise(program)
+```
+
+### HOTP (Counter-based)
+
+```typescript
+import { Effect } from "effect"
+import * as Auth from "effect-auth"
+
+const program = Effect.gen(function* () {
+  // Generate a secret for the user
+  const secret = yield* Auth.generateBase32Secret(20)
+  
+  // Store initial counter (typically 0) for the user
+  let counter = 0
+  
+  // Generate a QR code URI
+  const uri = Auth.generateOTPURI({
+    type: "hotp",
+    label: "user@example.com",
+    issuer: "MyApp",
+    secret,
+    counter,
+  })
+  
+  // Display QR code to user
+  console.log("Scan this URI with your authenticator app:", uri)
+  
+  // When the user submits a token, verify it
+  const userToken = "123456" // From user input
+  const isValid = yield* Auth.verifyHOTP(userToken, secret, counter)
+  
+  if (isValid) {
+    // Token is valid, increment counter for next use
+    counter++
+    // Store updated counter in database
+    return { success: true, nextCounter: counter }
+  } else {
+    // Token is invalid
+    return { success: false }
+  }
+})
+
+await Effect.runPromise(program)
+```
+
+### Custom Configuration
+
+Both TOTP and HOTP support custom configurations:
+
+```typescript
+// TOTP with custom settings
+const totpConfig: Auth.TOTPConfig = {
+  period: 60,        // 60-second time window (default: 30)
+  digits: 8,         // 8-digit codes (default: 6)
+  algorithm: "sha256", // Use SHA-256 (default: "sha1")
+  window: 2,         // Accept tokens from ±2 time steps (default: 1)
+}
+
+const token = yield* Auth.generateTOTP(secret, totpConfig)
+const isValid = yield* Auth.verifyTOTP(token, secret, totpConfig)
+
+// HOTP with custom settings
+const hotpConfig: Auth.HOTPConfig = {
+  digits: 8,         // 8-digit codes (default: 6)
+  algorithm: "sha512", // Use SHA-512 (default: "sha1")
+}
+
+const hotpToken = yield* Auth.generateHOTP(secret, counter, hotpConfig)
+## WebAuthn / Passkeys
+
+Implement passwordless authentication using WebAuthn (Passkeys):
+
+```typescript
+import { Effect, Context } from "effect"
+import * as Auth from "effect-auth"
+
+// Implement challenge store (temporary storage for challenges)
+const challengeStore: Auth.ChallengeStore = {
+  create: (challenge) => 
+    Effect.succeed(challenge), // Store in Redis/memory
+  get: (challenge) => 
+    Effect.fail(new Auth.ChallengeNotFoundError({ message: "Not found" })),
+  delete: (challenge) => 
+    Effect.void
+}
+
+// Implement credential store (persistent storage for passkeys)
+const credentialStore: Auth.CredentialStore = {
+  create: (credential) => 
+    Effect.succeed(credential), // Store in database
+  get: (credentialId) => 
+    Effect.fail(new Auth.CredentialNotFoundError({ 
+      message: "Not found", 
+      credentialId 
+    })),
+  update: (credential) => 
+    Effect.succeed(credential),
+  delete: (credentialId) => 
+    Effect.void,
+  getByUserId: (userId) => 
+    Effect.succeed([]) // Return all user's credentials
+}
+
+const webAuthnConfig: Auth.WebAuthnConfig = {
+  relyingPartyId: "example.com",
+  relyingPartyName: "Example Corp",
+  expectedOrigin: "https://example.com",
+  challengeExpiresIn: 5 * 60 * 1000 // 5 minutes
+}
+
+// Registration flow
+const registerPasskey = Effect.gen(function* () {
+  const service = yield* Auth.makeWebAuthnService(webAuthnConfig)
+  
+  // Step 1: Generate challenge
+  const { challenge } = yield* service.generateRegistrationChallenge({
+    id: "user-123",
+    name: "user@example.com",
+    displayName: "User Name"
+  })
+  
+  // Send challenge to client, client creates credential
+  // Client returns: credentialId, attestationObject, clientDataJSON
+  
+  // Step 2: Verify registration response
+  const result = yield* service.verifyRegistration(
+    challenge,
+    {
+      credentialId: clientCredentialId,
+      attestationObject: clientAttestationObject,
+      clientDataJSON: clientDataJSON
+    }
+  )
+  
+  // Credential is now stored and ready for authentication
+  return result.credential
+})
+
+// Authentication flow
+const authenticateWithPasskey = Effect.gen(function* () {
+  const service = yield* Auth.makeWebAuthnService(webAuthnConfig)
+  
+  // Step 1: Generate challenge
+  const { challenge } = yield* service.generateAuthenticationChallenge("user-123")
+  
+  // Send challenge to client, client signs with passkey
+  // Client returns: credentialId, authenticatorData, clientDataJSON, signature
+  
+  // Step 2: Verify authentication response
+  const result = yield* service.verifyAuthentication(
+    challenge,
+    {
+      credentialId: clientCredentialId,
+      authenticatorData: clientAuthenticatorData,
+      clientDataJSON: clientDataJSON,
+      signature: clientSignature
+    }
+  )
+  
+  // User is authenticated, create session
+  const sessionManager = yield* Auth.makeSessionManager(sessionConfig)
+  const session = yield* sessionManager.createSession(result.credential.userId)
+  
+  return session
+})
+
+// Provide dependencies
+const webAuthnDependencies = Context.merge(
+  Context.make(Auth.ChallengeStore, challengeStore),
+  Context.make(Auth.CredentialStore, credentialStore)
+)
+
+await Effect.runPromise(
+  Effect.provide(registerPasskey, webAuthnDependencies)
+)
+```
+
 ## API Reference
 
 ### Types
@@ -203,6 +421,13 @@ const result = await Effect.runPromise(
 - `SessionConfig`: Configuration for session expiration
 - `HashedPassword`: Hashed password with algorithm info
 - `Permission`: Permission check result
+- `TOTPConfig`: Configuration for TOTP generation and verification
+- `HOTPConfig`: Configuration for HOTP generation and verification
+- `OTPURIParams`: Parameters for generating OTP URIs (for QR codes)
+- `WebAuthnChallenge`: Temporary challenge for WebAuthn operations
+- `WebAuthnCredential`: Stored passkey credential
+- `WebAuthnConfig`: Configuration for WebAuthn service
+- `WebAuthnUser`: User information for passkey registration
 
 ### Services
 
@@ -212,6 +437,23 @@ const result = await Effect.runPromise(
 - `PasswordHasher`: Service for password hashing and verification
 - `AuthorizationPolicy`: Interface for permission checking
 - `RoleStore`: Interface for role-based authorization
+- `ChallengeStore`: Interface for WebAuthn challenge storage
+- `CredentialStore`: Interface for WebAuthn credential storage
+- `WebAuthnService`: Service for passkey registration and authentication
+
+### OTP Functions
+
+All OTP functions return Effect types for composability:
+
+- `generateSecret(length?)`: Generate cryptographically secure random bytes
+- `generateBase32Secret(length?)`: Generate a base32-encoded secret
+- `encodeBase32(buffer)`: Encode bytes to base32 string
+- `decodeBase32(base32)`: Decode base32 string to bytes
+- `generateHOTP(secret, counter, config?)`: Generate HOTP token
+- `verifyHOTP(token, secret, counter, config?)`: Verify HOTP token
+- `generateTOTP(secret, config?)`: Generate TOTP token
+- `verifyTOTP(token, secret, config?)`: Verify TOTP token
+- `generateOTPURI(params)`: Generate OTP URI for QR codes
 
 ### Requests
 
@@ -237,6 +479,10 @@ All errors extend Effect's tagged errors:
 - `UserNotFoundError`: User not found
 - `PermissionDeniedError`: Permission denied
 - `HashingError`: Password hashing error
+- `ChallengeNotFoundError`: WebAuthn challenge not found
+- `ChallengeExpiredError`: WebAuthn challenge expired
+- `CredentialNotFoundError`: WebAuthn credential not found
+- `WebAuthnVerificationError`: WebAuthn verification failed
 
 ## Best Practices
 
@@ -280,6 +526,31 @@ Security is our top priority. See our [Security Policy](./SECURITY.md) for:
 - ✅ Cryptographically secure random generation
 - ✅ Secure session management following Copenhagen Book guidelines
 - ✅ Input validation and error handling
+### Two-Factor Authentication
+
+Following RFC 6238 (TOTP) and RFC 4226 (HOTP) guidelines:
+
+1. Generate secrets with sufficient entropy (minimum 160 bits / 20 bytes)
+2. Use timing-safe comparisons when verifying tokens
+3. Implement rate limiting on verification endpoints to prevent brute force
+4. For TOTP, use a reasonable time window (default: ±1 step)
+5. For HOTP, increment counters only after successful verification
+6. Never reuse tokens within their validity window
+7. Store secrets securely (encrypted at rest)
+8. Use standard 6-digit codes for compatibility with authenticator apps
+9. Provide backup codes for account recovery
+10. Display QR codes securely over HTTPS
+### WebAuthn
+
+Following FIDO2/WebAuthn standards and Oslo guidelines:
+
+1. Use secure random challenges (256 bits entropy)
+2. Implement challenge expiration (5 minutes recommended)
+3. Verify origin and relying party ID on every request
+4. Use counter-based replay protection
+5. Support multiple credentials per user
+6. Store credentials securely with public keys only
+7. Use ES256 (ECDSA with P-256) algorithm for broad compatibility
 
 ## Examples
 
@@ -289,6 +560,7 @@ See the `examples/` directory for complete examples:
 - User authentication flow
 - Role-based access control
 - Custom storage adapters
+- WebAuthn passkey authentication
 
 ## Documentation
 
