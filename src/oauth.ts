@@ -494,11 +494,11 @@ export const makeOAuthService = (
             userId,
             provider,
             providerId: userInfo.id,
-            email: userInfo.email,
-            name: userInfo.name,
-            picture: userInfo.picture,
+            ...(userInfo.email && { email: userInfo.email }),
+            ...(userInfo.name && { name: userInfo.name }),
+            ...(userInfo.picture && { picture: userInfo.picture }),
             accessToken: tokens.access_token,
-            refreshToken: tokens.refresh_token,
+            ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
             expiresAt: tokens.expires_in
               ? Date.now() + tokens.expires_in * 1000
               : undefined,

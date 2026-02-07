@@ -445,18 +445,18 @@ We considered wrapping BetterAuth but decided against it for:
 
 ### Phase 1: Core Infrastructure (Current PR)
 - [x] Analysis and documentation
-- [ ] OAuth2 provider framework
-- [ ] Email verification service
+- [x] OAuth2 provider framework
+- [x] Email verification service
 - [ ] Magic link service
-- [ ] Rate limiting service
+- [x] Rate limiting service
 - [ ] Account management utilities
 - [ ] Event system
 
 ### Phase 2: Provider Implementations
-- [ ] Google OAuth provider
-- [ ] GitHub OAuth provider
-- [ ] Discord OAuth provider
-- [ ] Microsoft OAuth provider
+- [x] Google OAuth provider
+- [x] GitHub OAuth provider
+- [x] Discord OAuth provider
+- [x] Microsoft OAuth provider
 - [ ] Generic OAuth2 provider
 
 ### Phase 3: Advanced Features
