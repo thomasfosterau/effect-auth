@@ -266,6 +266,21 @@ Following Oslo guidelines:
 3. Use explicit permission checks
 4. Log authorization failures
 
+## Security
+
+Security is our top priority. See our [Security Policy](./SECURITY.md) for:
+- How to report security vulnerabilities
+- Security guarantees and considerations
+- Implementation requirements for secure deployments
+- Best practices from OWASP, Lucia, Copenhagen Book, and Oslo
+
+**Key Security Features:**
+- ✅ PBKDF2-SHA256 with 210,000+ iterations (OWASP recommended)
+- ✅ Timing-safe comparisons for all security-sensitive operations
+- ✅ Cryptographically secure random generation
+- ✅ Secure session management following Copenhagen Book guidelines
+- ✅ Input validation and error handling
+
 ## Examples
 
 See the `examples/` directory for complete examples:
@@ -275,9 +290,20 @@ See the `examples/` directory for complete examples:
 - Role-based access control
 - Custom storage adapters
 
+## Documentation
+
+- [Agent Guidelines](./AGENT_GUIDELINES.md) - Guidelines for agents and contributors
+- [Architecture](./ARCHITECTURE.md) - Architectural overview and design patterns
+- [Security Policy](./SECURITY.md) - Security best practices and vulnerability reporting
+- [Multi-Algorithm Support](./docs/MULTI_ALGORITHM.md) - Guide for multiple password hashing algorithms
+
 ## Contributing
 
 Contributions are welcome! Please open an issue or pull request to get started.
+
+Before contributing, please review:
+- [Agent Guidelines](./AGENT_GUIDELINES.md) for coding standards and security requirements
+- [Security Policy](./SECURITY.md) for security considerations
 
 ## License
 
