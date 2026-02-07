@@ -9,7 +9,6 @@ import {
   parseClientDataJSON,
   parseAuthenticatorData,
   coseAlgorithmES256,
-  coseAlgorithmRS256,
   ClientDataType,
   type ClientData,
   type AuthenticatorData
@@ -225,15 +224,15 @@ export const makeWebAuthnService = (
             )
           }
 
-          // Verify algorithm
+          // Verify algorithm - only ES256 is currently supported
           const publicKey = authenticatorData.credential.publicKey
           const algorithm = publicKey.algorithm()
 
-          // Support ES256 and RS256
-          if (algorithm !== coseAlgorithmES256 && algorithm !== coseAlgorithmRS256) {
+          // Support ES256 only for now
+          if (algorithm !== coseAlgorithmES256) {
             return yield* Effect.fail(
               new Errors.WebAuthnVerificationError({
-                message: `Unsupported algorithm: ${algorithm}`
+                message: `Unsupported algorithm: ${algorithm}. Only ES256 is currently supported.`
               })
             )
           }
@@ -244,10 +243,19 @@ export const makeWebAuthnService = (
           // Serialize public key for storage
           const publicKeyBytes = serializePublicKey(publicKey, algorithm)
 
+          // Validate userId is present
+          if (!storedChallenge.userId) {
+            return yield* Effect.fail(
+              new Errors.WebAuthnVerificationError({
+                message: "Challenge missing user ID"
+              })
+            )
+          }
+
           // Create credential object
           const credential: WebAuthnCredential = {
             id: credentialId,
-            userId: storedChallenge.userId!,
+            userId: storedChallenge.userId,
             publicKey: publicKeyBytes,
             algorithm,
             counter: authenticatorData.signatureCounter,
@@ -376,12 +384,16 @@ export const makeWebAuthnService = (
           }
 
           // Verify counter (anti-replay protection)
-          if (authenticatorData.signatureCounter <= credential.counter) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "Invalid counter value (possible cloned authenticator)"
-              })
-            )
+          // If both counters are 0, the authenticator does not support counter-based replay protection
+          // and the counter check must be skipped per WebAuthn specification.
+          if (!(authenticatorData.signatureCounter === 0 && credential.counter === 0)) {
+            if (authenticatorData.signatureCounter <= credential.counter) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "Invalid counter value (possible cloned authenticator)"
+                })
+              )
+            }
           }
 
           // Verify signature
@@ -435,21 +447,6 @@ function serializePublicKey(publicKey: any, algorithm: number): Uint8Array {
     result.set(xBytes, 1)
     result.set(yBytes, 33)
     return result
-  } else if (algorithm === coseAlgorithmRS256) {
-    // RS256 - extract RSA key
-    const rsaKey = publicKey.rsa()
-    // For RSA, we'll store n and e as DER-encoded SPKI
-    // This is a simplified approach - in production you'd want proper DER encoding
-    const nBytes = bigintToBytes(rsaKey.n)
-    const eBytes = bigintToBytes(rsaKey.e)
-    // Simple concatenation for storage (in real use, proper SPKI encoding would be better)
-    const result = new Uint8Array(4 + nBytes.length + eBytes.length)
-    const view = new DataView(result.buffer)
-    view.setUint16(0, nBytes.length)
-    view.setUint16(2, eBytes.length)
-    result.set(nBytes, 4)
-    result.set(eBytes, 4 + nBytes.length)
-    return result
   }
   throw new Error(`Unsupported algorithm: ${algorithm}`)
 }
@@ -458,10 +455,12 @@ function serializePublicKey(publicKey: any, algorithm: number): Uint8Array {
  * Helper to convert bigint to bytes
  */
 function bigintToBytes(value: bigint, minLength?: number): Uint8Array {
-  const hex = value.toString(16).padStart(minLength ? minLength * 2 : 0, '0')
-  const bytes = new Uint8Array(hex.length / 2)
+  const hex = value.toString(16)
+  const paddedHex = hex.length % 2 === 0 ? hex : "0" + hex
+  const finalHex = paddedHex.padStart(minLength ? minLength * 2 : 0, "0")
+  const bytes = new Uint8Array(finalHex.length / 2)
   for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16)
+    bytes[i] = parseInt(finalHex.substring(i * 2, i * 2 + 2), 16)
   }
   return bytes
 }
@@ -494,8 +493,10 @@ function verifySignature(
           if (algorithm === coseAlgorithmES256) {
             // ES256 (ECDSA with P-256 and SHA-256)
             // publicKeyBytes format: 0x04 || x (32 bytes) || y (32 bytes)
-            // Create a proper ArrayBuffer copy
-            const keyBuffer = Buffer.from(publicKeyBytes).buffer
+            // Create a properly sized ArrayBuffer
+            const keyBuffer = new ArrayBuffer(publicKeyBytes.length)
+            const keyView = new Uint8Array(keyBuffer)
+            keyView.set(publicKeyBytes)
             return await crypto.subtle.importKey(
               "raw",
               keyBuffer,
@@ -503,10 +504,6 @@ function verifySignature(
               false,
               ["verify"]
             )
-          } else if (algorithm === coseAlgorithmRS256) {
-            // RS256 - would need proper SPKI encoding
-            // For now, this is simplified
-            throw new Error("RS256 signature verification not yet fully implemented")
           }
           throw new Error(`Unsupported algorithm: ${algorithm}`)
         },
@@ -518,8 +515,14 @@ function verifySignature(
 
       const verified = yield* Effect.tryPromise({
         try: async () => {
-          const signatureBuffer = Buffer.from(signature).buffer
-          const signedDataBuffer = Buffer.from(signedData).buffer
+          // Create properly sized ArrayBuffers
+          const signatureBuffer = new ArrayBuffer(signature.length)
+          const signatureView = new Uint8Array(signatureBuffer)
+          signatureView.set(signature)
+          
+          const signedDataBuffer = new ArrayBuffer(signedData.length)
+          const signedDataView = new Uint8Array(signedDataBuffer)
+          signedDataView.set(signedData)
           
           if (algorithm === coseAlgorithmES256) {
             return await crypto.subtle.verify(
@@ -528,14 +531,8 @@ function verifySignature(
               signatureBuffer,
               signedDataBuffer
             )
-          } else {
-            return await crypto.subtle.verify(
-              "RSASSA-PKCS1-v1_5",
-              publicKey,
-              signatureBuffer,
-              signedDataBuffer
-            )
           }
+          throw new Error(`Unsupported algorithm: ${algorithm}`)
         },
         catch: (error) => new Errors.WebAuthnVerificationError({
           message: "Failed to verify signature",
@@ -556,14 +553,15 @@ function verifySignature(
 }
 
 /**
- * Helper to compare two Uint8Arrays
+ * Helper to compare two Uint8Arrays using timing-safe comparison
  */
 function compareUint8Arrays(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false
+  if (a.length !== b.length) {
+    return false
   }
-  return true
+  const bufA = Buffer.from(a)
+  const bufB = Buffer.from(b)
+  return crypto.timingSafeEqual(bufA, bufB)
 }
 
 /**

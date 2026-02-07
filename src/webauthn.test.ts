@@ -16,8 +16,7 @@ import type {
 import { 
   ChallengeNotFoundError, 
   ChallengeExpiredError,
-  CredentialNotFoundError,
-  WebAuthnVerificationError 
+  CredentialNotFoundError
 } from "./errors.js"
 import * as crypto from "node:crypto"
 
@@ -261,7 +260,7 @@ describe("WebAuthn Service", () => {
   it("should store credential with correct user ID", async () => {
     const program = Effect.gen(function* () {
       const service = yield* makeWebAuthnService(config)
-      const { challenge } = yield* service.generateRegistrationChallenge(testUser)
+      yield* service.generateRegistrationChallenge(testUser)
 
       // Create a mock credential
       const mockCredential: WebAuthnCredential = {

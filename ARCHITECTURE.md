@@ -158,9 +158,9 @@ interface CredentialStore {
 
 interface WebAuthnService {
   generateRegistrationChallenge: (user: WebAuthnUser) => Effect<{ challenge: Uint8Array, expiresAt: number }, AuthError>
-  verifyRegistration: (challenge: Uint8Array, response: RegistrationResponse, expectedOrigin: string) => Effect<RegistrationResult, WebAuthnVerificationError | ChallengeNotFoundError | ChallengeExpiredError | AuthError>
+  verifyRegistration: (challenge: Uint8Array, response: RegistrationResponse) => Effect<RegistrationResult, WebAuthnVerificationError | ChallengeNotFoundError | ChallengeExpiredError | AuthError>
   generateAuthenticationChallenge: (userId: string) => Effect<{ challenge: Uint8Array, expiresAt: number }, AuthError>
-  verifyAuthentication: (challenge: Uint8Array, response: AuthenticationResponse, expectedOrigin: string) => Effect<AuthenticationResult, WebAuthnVerificationError | CredentialNotFoundError | ChallengeNotFoundError | ChallengeExpiredError | AuthError>
+  verifyAuthentication: (challenge: Uint8Array, response: AuthenticationResponse) => Effect<AuthenticationResult, WebAuthnVerificationError | CredentialNotFoundError | ChallengeNotFoundError | ChallengeExpiredError | AuthError>
 }
 ```
 
