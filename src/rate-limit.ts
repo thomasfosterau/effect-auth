@@ -19,19 +19,19 @@ import type {
 /**
  * Rate limit store context tag
  */
-export const RateLimitStore = Context.GenericTag<RateLimitStoreType>(
+export const RateLimitStoreTag = Context.GenericTag<RateLimitStoreType>(
   "effect-auth/RateLimitStore"
 )
 
 /**
  * Create a rate limiter service
  */
-export const makeRateLimiter = (): Effect<RateLimiter, never> =>
+export const makeRateLimiter = (): Effect.Effect<RateLimiter, never> =>
   Effect.sync(
     (): RateLimiter => ({
       checkLimit: (key, config) =>
         Effect.gen(function* () {
-          const store = yield* RateLimitStore
+          const store = yield* RateLimitStoreTagTag
           const entry = yield* store.get(key)
 
           const now = Date.now()
@@ -82,7 +82,7 @@ export const makeRateLimiter = (): Effect<RateLimiter, never> =>
 
       consumeToken: (key, config) =>
         Effect.gen(function* () {
-          const store = yield* RateLimitStore
+          const store = yield* RateLimitStoreTag
           const now = Date.now()
 
           const entry = yield* store.get(key)
@@ -144,13 +144,13 @@ export const makeRateLimiter = (): Effect<RateLimiter, never> =>
 
       resetLimit: (key) =>
         Effect.gen(function* () {
-          const store = yield* RateLimitStore
+          const store = yield* RateLimitStoreTag
           yield* store.delete(key)
         }),
 
       getRemainingTokens: (key, config) =>
         Effect.gen(function* () {
-          const store = yield* RateLimitStore
+          const store = yield* RateLimitStoreTag
           const entry = yield* store.get(key)
 
           if (!entry || Date.now() >= entry.resetAt) {

@@ -57,13 +57,13 @@ export interface EmailVerificationService {
   readonly createVerification: (
     userId: string,
     email: string
-  ) => Effect.Effect<{ token: string; expiresAt: number }, AuthError>
+  ) => Effect.Effect<{ token: string; expiresAt: number }, AuthError | EmailVerificationError, EmailVerificationStore>
 
   readonly verifyToken: (
     token: string
-  ) => Effect.Effect<EmailVerificationResult, EmailVerificationError | AuthError>
+  ) => Effect.Effect<EmailVerificationResult, EmailVerificationError | AuthError, EmailVerificationStore>
 
   readonly resendVerification: (
     userId: string
-  ) => Effect.Effect<void, AuthError | RateLimitError>
+  ) => Effect.Effect<void, AuthError | RateLimitError, EmailVerificationStore>
 }

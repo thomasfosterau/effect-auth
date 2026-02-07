@@ -2,7 +2,7 @@
  * Rate limiting types for effect-auth
  */
 
-import type { Effect as EffectType } from "effect/Effect"
+import * as Effect from "effect/Effect"
 import type { AuthError, RateLimitError } from "./errors.js"
 
 /**
@@ -28,14 +28,14 @@ export interface RateLimitEntry {
  * Storage interface for rate limiting
  */
 export interface RateLimitStore {
-  readonly get: (key: string) => EffectType<RateLimitEntry | null, never>
+  readonly get: (key: string) => Effect.Effect<RateLimitEntry | null, never>
   readonly set: (
     key: string,
     entry: RateLimitEntry,
     ttl: number
-  ) => EffectType<void, AuthError>
-  readonly increment: (key: string, ttl: number) => EffectType<number, AuthError>
-  readonly delete: (key: string) => EffectType<void, AuthError>
+  ) => Effect.Effect<void, AuthError>
+  readonly increment: (key: string, ttl: number) => Effect.Effect<number, AuthError>
+  readonly delete: (key: string) => Effect.Effect<void, AuthError>
 }
 
 /**
@@ -45,17 +45,17 @@ export interface RateLimiter {
   readonly checkLimit: (
     key: string,
     config: RateLimitConfig
-  ) => EffectType<boolean, RateLimitError>
+  ) => Effect.Effect<boolean, RateLimitError>
 
   readonly consumeToken: (
     key: string,
     config: RateLimitConfig
-  ) => EffectType<void, RateLimitError>
+  ) => Effect.Effect<void, RateLimitError>
 
-  readonly resetLimit: (key: string) => EffectType<void, AuthError>
+  readonly resetLimit: (key: string) => Effect.Effect<void, AuthError>
 
   readonly getRemainingTokens: (
     key: string,
     config: RateLimitConfig
-  ) => EffectType<number, never>
+  ) => Effect.Effect<number, never>
 }

@@ -21,7 +21,7 @@ import type {
 /**
  * Email verification store context tag
  */
-export const EmailVerificationStore = Context.GenericTag<EmailVerificationStoreType>(
+export const EmailVerificationStoreTag = Context.GenericTag<EmailVerificationStoreType>(
   "effect-auth/EmailVerificationStore"
 )
 
@@ -43,7 +43,7 @@ export const makeEmailVerificationService = (
     (): EmailVerificationService => ({
       createVerification: (userId: string, email: string) =>
         Effect.gen(function* () {
-          const store = yield* EmailVerificationStore
+          const store = yield* EmailVerificationStoreTagTag
           const token = yield* generateVerificationToken()
 
           const verification: EmailVerification = {
@@ -76,7 +76,7 @@ export const makeEmailVerificationService = (
 
       verifyToken: (token: string) =>
         Effect.gen(function* () {
-          const store = yield* EmailVerificationStore
+          const store = yield* EmailVerificationStoreTag
 
           const verification = yield* store.get(token)
 
@@ -112,7 +112,7 @@ export const makeEmailVerificationService = (
         Effect.gen(function* () {
           // Note: Rate limiting should be applied at the caller level
           // This method just creates a new verification token
-          const store = yield* EmailVerificationStore
+          const store = yield* EmailVerificationStoreTag
 
           // Delete existing verifications for this user
           yield* store.deleteByUserId(userId)
