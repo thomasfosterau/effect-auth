@@ -43,7 +43,7 @@ export const makeEmailVerificationService = (
     (): EmailVerificationService => ({
       createVerification: (userId: string, email: string) =>
         Effect.gen(function* () {
-          const store = yield* EmailVerificationStoreTagTag
+          const store = yield* EmailVerificationStoreTag
           const token = yield* generateVerificationToken()
 
           const verification: EmailVerification = {
