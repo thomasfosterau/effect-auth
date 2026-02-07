@@ -29,9 +29,8 @@ effect-auth follows industry best practices from **Lucia**, **Copenhagen Book**,
    - Secure session invalidation
 
 3. **Timing Attack Protection**:
-   - All security-sensitive comparisons use `crypto.timingSafeEqual`
-   - Password verification is timing-safe
-   - Session validation is timing-safe
+   - Password verification uses `crypto.timingSafeEqual` for constant-time comparison
+   - Other security-sensitive comparisons (including session handling) may depend on your storage and application logic; you should implement timing-safe comparisons where appropriate
 
 4. **Input Validation**:
    - All inputs are validated before processing
@@ -55,11 +54,7 @@ This library is a **generic authentication framework** that requires you to impl
 
 **DO NOT** open a public issue for security vulnerabilities.
 
-Instead, please report security vulnerabilities by emailing:
-
-**[MAINTAINER EMAIL]** (To be filled by repository maintainer)
-
-Or use GitHub Security Advisories:
+Please report security vulnerabilities via GitHub Security Advisories:
 https://github.com/thomasfosterau/effect-auth/security/advisories/new
 
 ### What to Include
@@ -265,13 +260,10 @@ See [Oslo library](https://github.com/pilcrowonpaper/oslo) for MFA primitives.
 
 ### Automated Testing
 
-Our test suite includes:
+Our test suite currently includes:
 
 - Password hashing security tests
-- Timing-safe comparison verification
 - Session expiration tests
-- Input validation tests
-- Error handling tests
 
 Run tests with: `npm test`
 
