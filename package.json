@@ -17,7 +17,8 @@
     "LICENSE",
     "ARCHITECTURE.md",
     "SECURITY.md",
-    "AGENT_GUIDELINES.md"
+    "AGENT_GUIDELINES.md",
+    "CONTRIBUTING.md"
   ],
   "scripts": {
     "build": "tsc",

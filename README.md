@@ -292,6 +292,7 @@ See the `examples/` directory for complete examples:
 
 ## Documentation
 
+- [Contributing Guide](./CONTRIBUTING.md) - How to contribute to this project
 - [Agent Guidelines](./AGENT_GUIDELINES.md) - Guidelines for agents and contributors
 - [Architecture](./ARCHITECTURE.md) - Architectural overview and design patterns
 - [Security Policy](./SECURITY.md) - Security best practices and vulnerability reporting
@@ -299,9 +300,10 @@ See the `examples/` directory for complete examples:
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or pull request to get started.
+Contributions are welcome! Please see our [Contributing Guide](./CONTRIBUTING.md) for details.
 
 Before contributing, please review:
+- [Contributing Guide](./CONTRIBUTING.md) for the development workflow
 - [Agent Guidelines](./AGENT_GUIDELINES.md) for coding standards and security requirements
 - [Security Policy](./SECURITY.md) for security considerations
 
