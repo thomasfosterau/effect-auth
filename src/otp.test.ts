@@ -152,17 +152,6 @@ describe("TOTP (RFC 6238)", () => {
   // Secret: "12345678901234567890" (ASCII)
   const rfcSecret = Buffer.from("12345678901234567890", "ascii")
   const rfcSecret32 = Buffer.from("12345678901234567890123456789012", "ascii")
-  const rfcSecret64 = Buffer.from("1234567890123456789012345678901234567890123456789012345678901234", "ascii")
-
-  // RFC 6238 test vectors (SHA1, 8 digits)
-  const sha1TestVectors = [
-    { time: 59, otp: "94287082" },
-    { time: 1111111109, otp: "07081804" },
-    { time: 1111111111, otp: "14050471" },
-    { time: 1234567890, otp: "89005924" },
-    { time: 2000000000, otp: "69279037" },
-    { time: 20000000000, otp: "65353130" },
-  ]
 
   // Note: We can't test exact time-based values without mocking Date.now()
   // But we can test the TOTP generation and verification logic
@@ -378,5 +367,266 @@ describe("Integration Tests", () => {
     const isValid = await Effect.runPromise(OTP.verifyHOTP(token, secret, 0))
     
     expect(isValid).toBe(true)
+  })
+})
+
+describe("Input Validation and Edge Cases", () => {
+  const validSecret = OTP.encodeBase32(Buffer.from("12345678901234567890", "ascii"))
+
+  describe("generateSecret validation", () => {
+    it("should reject length less than 16 bytes", async () => {
+      const result = await Effect.runPromise(
+        Effect.either(OTP.generateSecret(15))
+      )
+      
+      expect(result._tag).toBe("Left")
+      if (result._tag === "Left") {
+        expect(result.left._tag).toBe("HashingError")
+        expect(result.left.message).toContain("at least 16 bytes")
+      }
+    })
+
+    it("should reject negative length", async () => {
+      const result = await Effect.runPromise(
+        Effect.either(OTP.generateSecret(-1))
+      )
+      
+      expect(result._tag).toBe("Left")
+      if (result._tag === "Left") {
+        expect(result.left._tag).toBe("HashingError")
+      }
+    })
+
+    it("should reject non-integer length", async () => {
+      const result = await Effect.runPromise(
+        Effect.either(OTP.generateSecret(20.5))
+      )
+      
+      expect(result._tag).toBe("Left")
+      if (result._tag === "Left") {
+        expect(result.left._tag).toBe("HashingError")
+      }
+    })
+  })
+
+  describe("generateHOTP validation", () => {
+    it("should reject negative counter", async () => {
+      const result = await Effect.runPromise(
+        Effect.either(OTP.generateHOTP(validSecret, -1))
+      )
+      
+      expect(result._tag).toBe("Left")
+      if (result._tag === "Left") {
+        expect(result.left._tag).toBe("HashingError")
+        expect(result.left.message).toContain("non-negative")
+      }
+    })
+
+    it("should reject non-integer counter", async () => {
+      const result = await Effect.runPromise(
+        Effect.either(OTP.generateHOTP(validSecret, 1.5))
+      )
+      
+      expect(result._tag).toBe("Left")
+      if (result._tag === "Left") {
+        expect(result.left._tag).toBe("HashingError")
+      }
+    })
+
+    it("should reject digits less than 6", async () => {
+      const result = await Effect.runPromise(
+        Effect.either(OTP.generateHOTP(validSecret, 0, { digits: 5 }))
+      )
+      
+      expect(result._tag).toBe("Left")
+      if (result._tag === "Left") {
+        expect(result.left._tag).toBe("HashingError")
+        expect(result.left.message).toContain("between 6 and 8")
+      }
+    })
+
+    it("should reject digits greater than 8", async () => {
+      const result = await Effect.runPromise(
+        Effect.either(OTP.generateHOTP(validSecret, 0, { digits: 9 }))
+      )
+      
+      expect(result._tag).toBe("Left")
+      if (result._tag === "Left") {
+        expect(result.left._tag).toBe("HashingError")
+        expect(result.left.message).toContain("between 6 and 8")
+      }
+    })
+
+    it("should reject empty string secret", async () => {
+      const result = await Effect.runPromise(
+        Effect.either(OTP.generateHOTP("", 0))
+      )
+      
+      expect(result._tag).toBe("Left")
+      if (result._tag === "Left") {
+        expect(result.left._tag).toBe("HashingError")
+        expect(result.left.message).toContain("non-empty")
+      }
+    })
+
+    it("should reject empty buffer secret", async () => {
+      const result = await Effect.runPromise(
+        Effect.either(OTP.generateHOTP(Buffer.from([]), 0))
+      )
+      
+      expect(result._tag).toBe("Left")
+      if (result._tag === "Left") {
+        expect(result.left._tag).toBe("HashingError")
+        expect(result.left.message).toContain("cannot be empty")
+      }
+    })
+  })
+
+  describe("verifyHOTP validation", () => {
+    it("should reject empty token", async () => {
+      const result = await Effect.runPromise(
+        OTP.verifyHOTP("", validSecret, 0)
+      )
+      
+      expect(result).toBe(false)
+    })
+
+    it("should reject non-numeric token", async () => {
+      const result = await Effect.runPromise(
+        OTP.verifyHOTP("12a456", validSecret, 0)
+      )
+      
+      expect(result).toBe(false)
+    })
+
+    it("should reject token with special characters", async () => {
+      const result = await Effect.runPromise(
+        OTP.verifyHOTP("123-456", validSecret, 0)
+      )
+      
+      expect(result).toBe(false)
+    })
+  })
+
+  describe("verifyTOTP validation", () => {
+    it("should handle zero period by using default", async () => {
+      const token = await Effect.runPromise(
+        OTP.generateTOTP(validSecret)
+      )
+      
+      // Verify with zero period should fall back to default (30)
+      const result = await Effect.runPromise(
+        OTP.verifyTOTP(token, validSecret, { period: 0 })
+      )
+      
+      expect(result).toBe(true)
+    })
+
+    it("should handle negative period by using default", async () => {
+      const token = await Effect.runPromise(
+        OTP.generateTOTP(validSecret)
+      )
+      
+      // Verify with negative period should fall back to default (30)
+      const result = await Effect.runPromise(
+        OTP.verifyTOTP(token, validSecret, { period: -10 })
+      )
+      
+      expect(result).toBe(true)
+    })
+
+    it("should handle negative window by using default", async () => {
+      const token = await Effect.runPromise(
+        OTP.generateTOTP(validSecret)
+      )
+      
+      // Verify with negative window should fall back to default (1)
+      const result = await Effect.runPromise(
+        OTP.verifyTOTP(token, validSecret, { window: -5 })
+      )
+      
+      expect(result).toBe(true)
+    })
+
+    it("should floor non-integer period", async () => {
+      const token = await Effect.runPromise(
+        OTP.generateTOTP(validSecret, { period: 30 })
+      )
+      
+      // Should floor 30.9 to 30 and work correctly
+      const result = await Effect.runPromise(
+        OTP.verifyTOTP(token, validSecret, { period: 30.9 })
+      )
+      
+      expect(result).toBe(true)
+    })
+  })
+
+  describe("generateOTPURI validation", () => {
+    it("should reject empty secret", () => {
+      expect(() => {
+        OTP.generateOTPURI({
+          type: "totp",
+          label: "test@example.com",
+          issuer: "Test",
+          secret: "",
+        })
+      }).toThrow("cannot be empty")
+    })
+
+    it("should reject invalid base32 characters", () => {
+      expect(() => {
+        OTP.generateOTPURI({
+          type: "totp",
+          label: "test@example.com",
+          issuer: "Test",
+          secret: "INVALID@CHARS",
+        })
+      }).toThrow("Invalid Base32")
+    })
+
+    it("should reject non-string secret", () => {
+      expect(() => {
+        OTP.generateOTPURI({
+          type: "totp",
+          label: "test@example.com",
+          issuer: "Test",
+          secret: 123 as any,
+        })
+      }).toThrow("must be a string")
+    })
+
+    it("should require counter for HOTP", () => {
+      expect(() => {
+        OTP.generateOTPURI({
+          type: "hotp",
+          label: "test@example.com",
+          issuer: "Test",
+          secret: validSecret,
+        })
+      }).toThrow("Counter parameter is required")
+    })
+
+    it("should accept valid base32 with padding", () => {
+      const uri = OTP.generateOTPURI({
+        type: "totp",
+        label: "test@example.com",
+        issuer: "Test",
+        secret: "JBSWY3DPEBLW64TMMQ======",
+      })
+      
+      expect(uri).toContain("secret=JBSWY3DPEBLW64TMMQ")
+    })
+
+    it("should normalize secret to uppercase", () => {
+      const uri = OTP.generateOTPURI({
+        type: "totp",
+        label: "test@example.com",
+        issuer: "Test",
+        secret: "jbswy3dpehpk3pxp",
+      })
+      
+      expect(uri).toContain("secret=JBSWY3DPEHPK3PXP")
+    })
   })
 })

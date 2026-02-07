@@ -61,9 +61,14 @@ export interface OTPURIParams {
  */
 export const generateSecret = (length: number = 20): Effect.Effect<Buffer, Errors.HashingError> =>
   Effect.try({
-    try: () => crypto.randomBytes(length),
+    try: () => {
+      if (!Number.isInteger(length) || length < 16) {
+        throw new Error("Invalid secret length: must be a positive integer of at least 16 bytes")
+      }
+      return crypto.randomBytes(length)
+    },
     catch: (error) => new Errors.HashingError({
-      message: "Failed to generate random secret",
+      message: error instanceof Error ? error.message : "Failed to generate random secret",
       cause: error
     })
   })
@@ -146,13 +151,44 @@ export const generateHOTP = (
   config?: HOTPConfig
 ): Effect.Effect<string, Errors.HashingError> =>
   Effect.gen(function* () {
+    // Validate counter
+    if (!Number.isInteger(counter) || counter < 0) {
+      return yield* Effect.fail(new Errors.HashingError({
+        message: "Counter must be a non-negative integer"
+      }))
+    }
+
+    // Validate digits
     const digits = config?.digits ?? 6
+    if (!Number.isInteger(digits) || digits < 6 || digits > 8) {
+      return yield* Effect.fail(new Errors.HashingError({
+        message: "Invalid digits parameter for HOTP. It must be an integer between 6 and 8."
+      }))
+    }
+
     const algorithm = config?.algorithm ?? "sha1"
+
+    // Validate and decode secret if it's a string
+    if (typeof secret === "string") {
+      const trimmed = secret.trim()
+      if (trimmed.length === 0) {
+        return yield* Effect.fail(new Errors.HashingError({
+          message: "Secret must be a non-empty string"
+        }))
+      }
+    }
 
     // Decode secret if it's a string
     const secretBuffer = typeof secret === "string"
       ? yield* decodeBase32(secret)
       : secret
+
+    // Validate buffer is not empty
+    if (secretBuffer.length === 0) {
+      return yield* Effect.fail(new Errors.HashingError({
+        message: "Secret buffer cannot be empty"
+      }))
+    }
 
     // Create counter buffer (8 bytes, big-endian)
     const counterBuffer = Buffer.alloc(8)
@@ -192,6 +228,11 @@ export const verifyHOTP = (
   config?: HOTPConfig
 ): Effect.Effect<boolean, Errors.HashingError> =>
   Effect.gen(function* () {
+    // Validate token: must be a non-empty string of digits
+    if (!token || token.length === 0 || !/^\d+$/u.test(token)) {
+      return false
+    }
+
     const expectedToken = yield* generateHOTP(secret, counter, config)
     
     // Timing-safe comparison
@@ -242,8 +283,22 @@ export const verifyTOTP = (
   config?: TOTPConfig
 ): Effect.Effect<boolean, Errors.HashingError> =>
   Effect.gen(function* () {
-    const period = config?.period ?? 30
-    const window = config?.window ?? 1
+    // Validate and normalize period
+    let period = config?.period ?? 30
+    if (!Number.isFinite(period) || period <= 0) {
+      period = 30
+    } else {
+      period = Math.floor(period)
+    }
+
+    // Validate and normalize window
+    let window = config?.window ?? 1
+    if (!Number.isFinite(window) || window < 0) {
+      window = 1
+    } else {
+      window = Math.floor(window)
+    }
+
     const currentTime = Math.floor(Date.now() / 1000)
     const currentCounter = Math.floor(currentTime / period)
 
@@ -280,12 +335,33 @@ export const verifyTOTP = (
 export const generateOTPURI = (params: OTPURIParams): string => {
   const { type, label, issuer, secret, counter, period, digits, algorithm } = params
 
+  // Validate secret is a valid base32 string
+  if (typeof secret !== "string") {
+    throw new Error("Secret must be a string")
+  }
+  const trimmed = secret.trim()
+  if (trimmed.length === 0) {
+    throw new Error("Secret cannot be empty")
+  }
+  // Allow only Base32 characters A-Z and 2-7 (case-insensitive), with optional padding
+  if (!/^[A-Z2-7]+=*$/i.test(trimmed)) {
+    throw new Error("Invalid Base32 secret provided to generateOTPURI")
+  }
+
+  // Normalize secret for URI (trim and uppercase)
+  const normalizedSecret = trimmed.toUpperCase()
+
+  // Validate that counter is provided for HOTP
+  if (type === "hotp" && counter === undefined) {
+    throw new Error("Counter parameter is required for HOTP URIs")
+  }
+
   // Encode label and issuer for URI
   const encodedLabel = encodeURIComponent(label)
   const encodedIssuer = encodeURIComponent(issuer)
 
   // Build URI
-  let uri = `otpauth://${type}/${encodedIssuer}:${encodedLabel}?secret=${secret}&issuer=${encodedIssuer}`
+  let uri = `otpauth://${type}/${encodedIssuer}:${encodedLabel}?secret=${normalizedSecret}&issuer=${encodedIssuer}`
 
   // Add optional parameters
   if (type === "hotp" && counter !== undefined) {
