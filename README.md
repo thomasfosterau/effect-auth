@@ -193,6 +193,115 @@ const result = await Effect.runPromise(
 )
 ```
 
+## WebAuthn / Passkeys
+
+Implement passwordless authentication using WebAuthn (Passkeys):
+
+```typescript
+import { Effect, Context } from "effect"
+import * as Auth from "effect-auth"
+
+// Implement challenge store (temporary storage for challenges)
+const challengeStore: Auth.ChallengeStore = {
+  create: (challenge) => 
+    Effect.succeed(challenge), // Store in Redis/memory
+  get: (challenge) => 
+    Effect.fail(new Auth.ChallengeNotFoundError({ message: "Not found" })),
+  delete: (challenge) => 
+    Effect.void
+}
+
+// Implement credential store (persistent storage for passkeys)
+const credentialStore: Auth.CredentialStore = {
+  create: (credential) => 
+    Effect.succeed(credential), // Store in database
+  get: (credentialId) => 
+    Effect.fail(new Auth.CredentialNotFoundError({ 
+      message: "Not found", 
+      credentialId 
+    })),
+  update: (credential) => 
+    Effect.succeed(credential),
+  delete: (credentialId) => 
+    Effect.void,
+  getByUserId: (userId) => 
+    Effect.succeed([]) // Return all user's credentials
+}
+
+const webAuthnConfig: Auth.WebAuthnConfig = {
+  relyingPartyId: "example.com",
+  relyingPartyName: "Example Corp",
+  expectedOrigin: "https://example.com",
+  challengeExpiresIn: 5 * 60 * 1000 // 5 minutes
+}
+
+// Registration flow
+const registerPasskey = Effect.gen(function* () {
+  const service = yield* Auth.makeWebAuthnService(webAuthnConfig)
+  
+  // Step 1: Generate challenge
+  const { challenge } = yield* service.generateRegistrationChallenge({
+    id: "user-123",
+    name: "user@example.com",
+    displayName: "User Name"
+  })
+  
+  // Send challenge to client, client creates credential
+  // Client returns: credentialId, attestationObject, clientDataJSON
+  
+  // Step 2: Verify registration response
+  const result = yield* service.verifyRegistration(
+    challenge,
+    {
+      credentialId: clientCredentialId,
+      attestationObject: clientAttestationObject,
+      clientDataJSON: clientDataJSON
+    }
+  )
+  
+  // Credential is now stored and ready for authentication
+  return result.credential
+})
+
+// Authentication flow
+const authenticateWithPasskey = Effect.gen(function* () {
+  const service = yield* Auth.makeWebAuthnService(webAuthnConfig)
+  
+  // Step 1: Generate challenge
+  const { challenge } = yield* service.generateAuthenticationChallenge("user-123")
+  
+  // Send challenge to client, client signs with passkey
+  // Client returns: credentialId, authenticatorData, clientDataJSON, signature
+  
+  // Step 2: Verify authentication response
+  const result = yield* service.verifyAuthentication(
+    challenge,
+    {
+      credentialId: clientCredentialId,
+      authenticatorData: clientAuthenticatorData,
+      clientDataJSON: clientDataJSON,
+      signature: clientSignature
+    }
+  )
+  
+  // User is authenticated, create session
+  const sessionManager = yield* Auth.makeSessionManager(sessionConfig)
+  const session = yield* sessionManager.createSession(result.credential.userId)
+  
+  return session
+})
+
+// Provide dependencies
+const webAuthnDependencies = Context.merge(
+  Context.make(Auth.ChallengeStore, challengeStore),
+  Context.make(Auth.CredentialStore, credentialStore)
+)
+
+await Effect.runPromise(
+  Effect.provide(registerPasskey, webAuthnDependencies)
+)
+```
+
 ## API Reference
 
 ### Types
@@ -203,6 +312,10 @@ const result = await Effect.runPromise(
 - `SessionConfig`: Configuration for session expiration
 - `HashedPassword`: Hashed password with algorithm info
 - `Permission`: Permission check result
+- `WebAuthnChallenge`: Temporary challenge for WebAuthn operations
+- `WebAuthnCredential`: Stored passkey credential
+- `WebAuthnConfig`: Configuration for WebAuthn service
+- `WebAuthnUser`: User information for passkey registration
 
 ### Services
 
@@ -212,6 +325,9 @@ const result = await Effect.runPromise(
 - `PasswordHasher`: Service for password hashing and verification
 - `AuthorizationPolicy`: Interface for permission checking
 - `RoleStore`: Interface for role-based authorization
+- `ChallengeStore`: Interface for WebAuthn challenge storage
+- `CredentialStore`: Interface for WebAuthn credential storage
+- `WebAuthnService`: Service for passkey registration and authentication
 
 ### Requests
 
@@ -237,6 +353,10 @@ All errors extend Effect's tagged errors:
 - `UserNotFoundError`: User not found
 - `PermissionDeniedError`: Permission denied
 - `HashingError`: Password hashing error
+- `ChallengeNotFoundError`: WebAuthn challenge not found
+- `ChallengeExpiredError`: WebAuthn challenge expired
+- `CredentialNotFoundError`: WebAuthn credential not found
+- `WebAuthnVerificationError`: WebAuthn verification failed
 
 ## Best Practices
 
@@ -266,6 +386,18 @@ Following Oslo guidelines:
 3. Use explicit permission checks
 4. Log authorization failures
 
+### WebAuthn
+
+Following FIDO2/WebAuthn standards and Oslo guidelines:
+
+1. Use secure random challenges (256 bits entropy)
+2. Implement challenge expiration (5 minutes recommended)
+3. Verify origin and relying party ID on every request
+4. Use counter-based replay protection
+5. Support multiple credentials per user
+6. Store credentials securely with public keys only
+7. Use ES256 (ECDSA with P-256) algorithm for broad compatibility
+
 ## Examples
 
 See the `examples/` directory for complete examples:
@@ -274,6 +406,7 @@ See the `examples/` directory for complete examples:
 - User authentication flow
 - Role-based access control
 - Custom storage adapters
+- WebAuthn passkey authentication
 
 ## Contributing
 
