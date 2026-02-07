@@ -348,8 +348,8 @@ export const generateOTPURI = (params: OTPURIParams): string => {
     throw new Error("Invalid Base32 secret provided to generateOTPURI")
   }
 
-  // Normalize secret for URI (trim and uppercase)
-  const normalizedSecret = trimmed.toUpperCase()
+  // Normalize secret for URI (trim, uppercase, and remove padding)
+  const normalizedSecret = trimmed.toUpperCase().replace(/=+$/, "")
 
   // Validate that counter is provided for HOTP
   if (type === "hotp" && counter === undefined) {
