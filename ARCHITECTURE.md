@@ -169,6 +169,48 @@ generateOTPURI(params: OTPURIParams): string
 - Implements dynamic truncation per RFC 4226 Section 5.3
 - Timing-safe comparison using `crypto.timingSafeEqual`
 - Compatible with Google Authenticator and other standard authenticator apps
+### 8. WebAuthn (`src/webauthn.ts`, `src/webauthn-types.ts`)
+
+Passwordless authentication using passkeys following FIDO2/WebAuthn standards:
+
+**Key Features:**
+- Passkey registration and authentication
+- Challenge-based security (256 bits entropy)
+- Counter-based replay protection
+- Support for ES256 (ECDSA with P-256) algorithm
+- Origin and relying party ID verification
+- Multiple credentials per user
+
+**Service Interfaces:**
+
+```typescript
+interface ChallengeStore {
+  create: (challenge: WebAuthnChallenge) => Effect<WebAuthnChallenge, AuthError>
+  get: (challenge: Uint8Array) => Effect<WebAuthnChallenge, ChallengeNotFoundError>
+  delete: (challenge: Uint8Array) => Effect<void, AuthError>
+}
+
+interface CredentialStore {
+  create: (credential: WebAuthnCredential) => Effect<WebAuthnCredential, AuthError>
+  get: (credentialId: string) => Effect<WebAuthnCredential, CredentialNotFoundError>
+  update: (credential: WebAuthnCredential) => Effect<WebAuthnCredential, AuthError>
+  delete: (credentialId: string) => Effect<void, AuthError>
+  getByUserId: (userId: string) => Effect<readonly WebAuthnCredential[], AuthError>
+}
+
+interface WebAuthnService {
+  generateRegistrationChallenge: (user: WebAuthnUser) => Effect<{ challenge: Uint8Array, expiresAt: number }, AuthError>
+  verifyRegistration: (challenge: Uint8Array, response: RegistrationResponse) => Effect<RegistrationResult, WebAuthnVerificationError | ChallengeNotFoundError | ChallengeExpiredError | AuthError>
+  generateAuthenticationChallenge: (userId: string) => Effect<{ challenge: Uint8Array, expiresAt: number }, AuthError>
+  verifyAuthentication: (challenge: Uint8Array, response: AuthenticationResponse) => Effect<AuthenticationResult, WebAuthnVerificationError | CredentialNotFoundError | ChallengeNotFoundError | ChallengeExpiredError | AuthError>
+}
+```
+
+**Implementation powered by [@oslojs/webauthn](https://github.com/oslo-project/webauthn):**
+- Runtime-agnostic implementation
+- No third-party dependencies
+- Full TypeScript support
+- Standards-compliant FIDO2/WebAuthn
 
 ## Request/Resolver Pattern
 
@@ -213,6 +255,15 @@ This pattern allows:
 - ✅ Type-safe permission errors
 - ✅ Principle of least privilege support
 - ✅ Role-based access control
+
+### WebAuthn Security
+- ✅ Cryptographically secure random challenges (256 bits)
+- ✅ Challenge expiration (5 minutes default)
+- ✅ Origin verification on every request
+- ✅ Relying party ID verification
+- ✅ Counter-based replay protection
+- ✅ Public key cryptography (ES256)
+- ✅ No password storage or transmission
 
 ## Usage Patterns
 
@@ -273,6 +324,7 @@ The library includes comprehensive tests:
 Possible future additions:
 - ~~Two-factor authentication (TOTP, HOTP)~~ ✅ Implemented
 - WebAuthn support
+- Two-factor authentication (TOTP)
 - OAuth 2.0 / OIDC integration
 - Token-based authentication (JWT)
 - Rate limiting utilities
