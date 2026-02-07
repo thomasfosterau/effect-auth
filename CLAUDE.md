@@ -1,4 +1,4 @@
-# CLAUDE.md
+# Agent Instructions
 
 <!-- effect-solutions:start -->
 ## Effect Best Practices
