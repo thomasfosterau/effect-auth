@@ -31,7 +31,7 @@ export const makeRateLimiter = (): Effect.Effect<RateLimiter, never> =>
     (): RateLimiter => ({
       checkLimit: (key, config) =>
         Effect.gen(function* () {
-          const store = yield* RateLimitStoreTagTag
+          const store = yield* RateLimitStoreTag
           const entry = yield* store.get(key)
 
           const now = Date.now()
