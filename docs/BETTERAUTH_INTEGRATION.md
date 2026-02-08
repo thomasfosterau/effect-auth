@@ -18,10 +18,10 @@ BetterAuth is a comprehensive TypeScript authentication framework with excellent
 | WebAuthn/Passkeys | ✅ FIDO2 compliant | ✅ Via plugin | ✅ Native support |
 | OAuth2/OIDC | ❌ Not supported | ✅ 15+ providers | ✅ **NEW: Provider framework** |
 | Email Verification | ❌ Not supported | ✅ Built-in flows | ✅ **NEW: Verification service** |
-| Magic Links | ❌ Not supported | ✅ Passwordless flow | ✅ **NEW: Token-based magic links** |
-| Account Management | ❌ Not supported | ✅ Registration/reset | ✅ **NEW: User lifecycle** |
+| Magic Links | ❌ Not supported | ✅ Passwordless flow | 🔄 Future enhancement |
+| Account Management | ❌ Not supported | ✅ Registration/reset | 🔄 Future enhancement |
 | Rate Limiting | ❌ Not supported | ✅ Built-in | ✅ **NEW: Rate limiter service** |
-| Audit Logging | ❌ Not supported | ✅ Event hooks | ✅ **NEW: Event system** |
+| Audit Logging | ❌ Not supported | ✅ Event hooks | 🔄 Future enhancement |
 | Multi-tenancy | ❌ Not supported | ✅ Organizations | 🔄 Future enhancement |
 | SAML/Enterprise SSO | ❌ Not supported | ❌ Not supported | 🔄 Future enhancement |
 
@@ -82,7 +82,7 @@ interface OAuthAccountStore {
 **Services:**
 - `OAuthService`: Core OAuth2 flow management
 - `makeOAuthProvider`: Factory for provider configurations
-- Provider implementations: Google, GitHub, Discord, Microsoft, Apple
+- Provider implementations: Google, GitHub, Discord, Microsoft
 
 **Usage:**
 ```typescript

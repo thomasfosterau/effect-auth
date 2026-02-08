@@ -45,17 +45,17 @@ export interface RateLimiter {
   readonly checkLimit: (
     key: string,
     config: RateLimitConfig
-  ) => Effect.Effect<boolean, RateLimitError>
+  ) => Effect.Effect<boolean, RateLimitError, RateLimitStore>
 
   readonly consumeToken: (
     key: string,
     config: RateLimitConfig
-  ) => Effect.Effect<void, RateLimitError>
+  ) => Effect.Effect<void, RateLimitError, RateLimitStore>
 
-  readonly resetLimit: (key: string) => Effect.Effect<void, AuthError>
+  readonly resetLimit: (key: string) => Effect.Effect<void, AuthError, RateLimitStore>
 
   readonly getRemainingTokens: (
     key: string,
     config: RateLimitConfig
-  ) => Effect.Effect<number, never>
+  ) => Effect.Effect<number, never, RateLimitStore>
 }

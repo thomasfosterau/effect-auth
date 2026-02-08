@@ -137,7 +137,7 @@ const initiateGoogleLogin = Effect.gen(function* () {
 // Example 2: Handle OAuth Callback
 // =============================================================================
 
-const handleGoogleCallback = (code: string, state: string) =>
+export const handleGoogleCallback = (code: string, state: string) =>
   Effect.gen(function* () {
     const service = yield* oauthService
 
@@ -165,7 +165,7 @@ const handleGoogleCallback = (code: string, state: string) =>
 // Example 3: Link Additional OAuth Account
 // =============================================================================
 
-const linkGitHubAccount = (userId: string, code: string, state: string) =>
+export const linkGitHubAccount = (userId: string, code: string, state: string) =>
   Effect.gen(function* () {
     const service = yield* oauthService
 
@@ -185,7 +185,7 @@ const linkGitHubAccount = (userId: string, code: string, state: string) =>
 // Example 4: List User's OAuth Accounts
 // =============================================================================
 
-const listUserAccounts = (userId: string) =>
+export const listUserAccounts = (userId: string) =>
   Effect.gen(function* () {
     const accounts = yield* oauthAccountStore.getByUserId(userId)
 
@@ -202,7 +202,7 @@ const listUserAccounts = (userId: string) =>
 // Example 5: Unlink OAuth Account
 // =============================================================================
 
-const unlinkAccount = (userId: string, provider: string) =>
+export const unlinkAccount = (userId: string, provider: string) =>
   Effect.gen(function* () {
     const service = yield* oauthService
 
@@ -219,7 +219,7 @@ const unlinkAccount = (userId: string, provider: string) =>
 // Example 6: Refresh Access Token
 // =============================================================================
 
-const refreshGoogleToken = (userId: string) =>
+export const refreshGoogleToken = (userId: string) =>
   Effect.gen(function* () {
     const service = yield* oauthService
 
@@ -249,14 +249,14 @@ const runExample = Effect.gen(function* () {
   console.log("=".repeat(70))
 
   // Step 1: Initiate login
-  const { state } = yield* initiateGoogleLogin
+  yield* initiateGoogleLogin
 
   // Step 2: Simulate OAuth callback (in real app, this comes from provider)
-  const mockCode = "mock_authorization_code_from_google"
-
-  // Simulate the callback handling
-  // In a real app, you'd extract code and state from the callback URL
-  // const result = yield* handleGoogleCallback(mockCode, state)
+  // Uncomment the examples below to run them:
+  
+  // const mockCode = "mock_authorization_code_from_google"
+  // const mockState = "mock_state_from_step_1"
+  // const result = yield* handleGoogleCallback(mockCode, mockState)
 
   // Step 3: Link additional account (example)
   // yield* linkGitHubAccount("user-123", "mock_github_code", "mock_state")

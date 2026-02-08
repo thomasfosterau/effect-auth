@@ -22,7 +22,7 @@ import type {
  * Email verification store context tag
  */
 export const EmailVerificationStoreTag = Context.GenericTag<EmailVerificationStoreType>(
-  "effect-auth/EmailVerificationStore"
+  "@effect-auth/EmailVerificationStore"
 )
 
 /**
@@ -110,17 +110,15 @@ export const makeEmailVerificationService = (
 
       resendVerification: (userId: string) =>
         Effect.gen(function* () {
-          // Note: Rate limiting should be applied at the caller level
-          // This method just creates a new verification token
-          const store = yield* EmailVerificationStoreTag
-
-          // Delete existing verifications for this user
-          yield* store.deleteByUserId(userId)
-
-          // Would need to get user's email from UserStore here
-          // For now, this is a placeholder that requires the caller
-          // to provide the email via createVerification
-          return yield* Effect.void
+          // Note: This is a stub implementation. In a real application,
+          // you would need to retrieve the user's email address and call
+          // createVerification. For now, we fail with a descriptive error.
+          return yield* Effect.fail(
+            new EmailVerificationError({
+              message:
+                "resendVerification is not fully implemented: please use createVerification with the user's email address instead"
+            })
+          )
         })
     })
   )

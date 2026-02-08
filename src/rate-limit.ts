@@ -1,8 +1,8 @@
 /**
  * Rate limiting implementation
  *
- * Provides token bucket algorithm-based rate limiting with support
- * for sliding windows and configurable block durations.
+ * Provides fixed-window counter-based rate limiting with configurable
+ * block durations.
  *
  * @module rate-limit
  */
@@ -20,7 +20,7 @@ import type {
  * Rate limit store context tag
  */
 export const RateLimitStoreTag = Context.GenericTag<RateLimitStoreType>(
-  "effect-auth/RateLimitStore"
+  "@effect-auth/RateLimitStore"
 )
 
 /**

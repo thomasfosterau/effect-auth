@@ -32,14 +32,14 @@ import type {
  * OAuth state store context tag
  */
 export const OAuthStateStoreTag = Context.GenericTag<OAuthStateStoreType>(
-  "effect-auth/OAuthStateStore"
+  "@effect-auth/OAuthStateStore"
 )
 
 /**
  * OAuth account store context tag
  */
 export const OAuthAccountStoreTag = Context.GenericTag<OAuthAccountStoreType>(
-  "effect-auth/OAuthAccountStore"
+  "@effect-auth/OAuthAccountStore"
 )
 
 /**
@@ -380,9 +380,12 @@ export const makeOAuthService = (
           }
 
           // Create new account
+          // Note: For new accounts without linkToUserId, we create an unlinked account
+          // with empty userId. The caller should link it to a user after creating
+          // the user record in their database.
           const newAccount: OAuthAccount = {
             id: crypto.randomBytes(16).toString("hex"),
-            userId: options?.linkToUserId ?? "", // Will be linked later
+            userId: options?.linkToUserId ?? "",
             provider: stateEntry.provider,
             providerId: userInfo.id,
             ...(userInfo.email && { email: userInfo.email }),
@@ -402,11 +405,13 @@ export const makeOAuthService = (
           return {
             account: newAccount,
             isNewUser: true,
-            user: {
-              id: newAccount.userId,
-              ...(userInfo.email && { email: userInfo.email }),
-              ...(userInfo.name && { name: userInfo.name })
-            }
+            user: options?.linkToUserId
+              ? {
+                  id: newAccount.userId,
+                  ...(userInfo.email && { email: userInfo.email }),
+                  ...(userInfo.name && { name: userInfo.name })
+                }
+              : undefined
           } satisfies OAuthCallbackResult
         }),
 
@@ -580,6 +585,16 @@ export const makeOAuthService = (
                 cause
               })
           })
+
+          if (!response.ok) {
+            const errorText = yield* Effect.promise(() => response.text())
+            return yield* Effect.fail(
+              new OAuthProviderError({
+                message: `Token refresh failed: ${errorText}`,
+                provider
+              })
+            )
+          }
 
           const data = (yield* Effect.promise(() =>
             response.json()
