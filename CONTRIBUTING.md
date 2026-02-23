@@ -223,7 +223,6 @@ All changes should include:
    ```
    
    This will prompt you to:
-   - Select which packages to include (select effect-auth)
    - Choose the version bump type (patch, minor, or major)
    - Write a summary of the changes
    
