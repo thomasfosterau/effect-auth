@@ -1,6 +1,6 @@
 # effect-auth
 
-A generic authentication and authorization library for [Effect](https://effect.website/), following best practices from [Lucia](https://lucia-auth.com/), [Copenhagen](https://lucia-auth.com/copenhagen), and [Oslo](https://github.com/pilcrowonpaper/oslo) projects.
+A generic authentication and authorization library for [Effect](https://effect.website/), following best practices from [Lucia](https://lucia-auth.com/), [Copenhagen](https://lucia-auth.com/copenhagen), [Oslo](https://github.com/pilcrowonpaper/oslo), and [BetterAuth](https://www.better-auth.com/) projects.
 
 ## Features
 
@@ -11,6 +11,10 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🔄 **Bring Your Own Storage**: Implement storage adapters for any database or backend
 - 📦 **Zero Lock-in**: No vendor lock-in, works with any storage backend
 - 🔑 **Two-Factor Authentication**: TOTP and HOTP support following RFC 6238 and RFC 4226
+- 🌐 **OAuth 2.0 / Social Login**: Pre-built providers for Google, GitHub, Discord, Microsoft with PKCE support
+- ✉️ **Email Verification**: Secure token-based email verification flows
+- 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets for all auth operations
+- 🔓 **WebAuthn / Passkeys**: Passwordless authentication with FIDO2 compliance
 
 ## Installation
 
@@ -20,11 +24,14 @@ npm install effect-auth effect
 
 ## Core Concepts
 
-This library follows the Copenhagen Book guidelines for authentication:
+This library follows best practices from multiple authentication frameworks:
 
-- **Sessions**: Secure session management with automatic expiration and renewal
-- **Password Hashing**: PBKDF2-SHA256 with recommended iterations (210,000+)
-- **Two-Factor Authentication**: TOTP and HOTP for multi-factor authentication
+- **Sessions**: Secure session management with automatic expiration and renewal (Lucia/Copenhagen)
+- **Password Hashing**: PBKDF2-SHA256 with recommended iterations (210,000+) (Oslo/OWASP)
+- **Two-Factor Authentication**: TOTP and HOTP for multi-factor authentication (RFC 6238/4226)
+- **OAuth 2.0**: Social login with major providers (BetterAuth-inspired)
+- **Email Verification**: Secure verification flows with rate limiting (BetterAuth-inspired)
+- **Rate Limiting**: Protection against brute force attacks (BetterAuth-inspired)
 - **Request/Resolver Pattern**: Use Effect's Request/Resolver pattern for custom implementations
 - **Authorization**: Flexible permission checking and role-based access control
 
@@ -411,6 +418,309 @@ await Effect.runPromise(
 )
 ```
 
+## OAuth 2.0 / Social Login
+
+Authenticate users with OAuth2 providers like Google, GitHub, Discord, and Microsoft:
+
+```typescript
+import { Effect, Context } from "effect"
+import * as Auth from "effect-auth"
+
+// Implement OAuth state store (temporary, Redis/memory recommended)
+const oauthStateStore: Auth.OAuthStateStore = {
+  create: (state) => 
+    Effect.succeed(state), // Store in Redis with 10-minute TTL
+  get: (stateStr) => 
+    Effect.fail(new Auth.OAuthStateNotFoundError({ 
+      message: "State not found", 
+      state: stateStr 
+    })),
+  delete: (stateStr) => 
+    Effect.void
+}
+
+// Implement OAuth account store (persistent, database)
+const oauthAccountStore: Auth.OAuthAccountStore = {
+  create: (account) => 
+    Effect.succeed(account), // Store in database
+  get: (provider, providerId) => 
+    Effect.succeed(null), // Return account or null
+  getByUserId: (userId) => 
+    Effect.succeed([]), // Return all user's OAuth accounts
+  update: (account) => 
+    Effect.succeed(account),
+  linkToUser: (userId, account) => 
+    Effect.void,
+  unlinkFromUser: (userId, provider) => 
+    Effect.void,
+  delete: (provider, providerId) => 
+    Effect.void
+}
+
+// Configure OAuth providers
+const providers = {
+  google: Auth.GoogleProvider({
+    clientId: process.env.GOOGLE_CLIENT_ID!,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    redirectUri: "https://example.com/auth/google/callback"
+  }),
+  github: Auth.GitHubProvider({
+    clientId: process.env.GITHUB_CLIENT_ID!,
+    clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+    redirectUri: "https://example.com/auth/github/callback"
+  }),
+  discord: Auth.DiscordProvider({
+    clientId: process.env.DISCORD_CLIENT_ID!,
+    clientSecret: process.env.DISCORD_CLIENT_SECRET!,
+    redirectUri: "https://example.com/auth/discord/callback"
+  }),
+  microsoft: Auth.MicrosoftProvider({
+    clientId: process.env.MICROSOFT_CLIENT_ID!,
+    clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
+    redirectUri: "https://example.com/auth/microsoft/callback"
+  })
+}
+
+// Create OAuth service
+const oauthService = Effect.gen(function* () {
+  return yield* Auth.makeOAuthService(providers)
+})
+
+// Step 1: Generate authorization URL (initiate OAuth flow)
+const initiateOAuth = Effect.gen(function* () {
+  const service = yield* oauthService
+  
+  const { url, state } = yield* service.generateAuthorizationUrl("google", {
+    scopes: ["email", "profile"],
+    returnTo: "/dashboard" // Optional redirect after auth
+  })
+  
+  // Redirect user to this URL
+  console.log("Redirect to:", url)
+  return { url, state }
+})
+
+// Step 2: Handle OAuth callback
+const handleOAuthCallback = (code: string, state: string) =>
+  Effect.gen(function* () {
+    const service = yield* oauthService
+    
+    // Verify state and exchange code for tokens
+    const result = yield* service.handleCallback(state, code)
+    
+    if (result.isNewUser) {
+      // New user - create account
+      console.log("New user from OAuth:", result.account.email)
+      // Create user in your database
+      // Link OAuth account to new user
+    } else {
+      // Existing user - log them in
+      console.log("Existing user:", result.account.userId)
+    }
+    
+    // Create session
+    const sessionManager = yield* Auth.makeSessionManager(sessionConfig)
+    const session = yield* sessionManager.createSession(result.account.userId)
+    
+    return { session, account: result.account }
+  })
+
+// Link additional OAuth account to existing user
+const linkOAuthAccount = (userId: string, provider: string, code: string, state: string) =>
+  Effect.gen(function* () {
+    const service = yield* oauthService
+    
+    const account = yield* service.linkAccount(userId, provider, code, state)
+    
+    console.log(`Linked ${provider} account to user ${userId}`)
+    return account
+  })
+
+// Refresh OAuth access token
+const refreshToken = (userId: string, provider: string) =>
+  Effect.gen(function* () {
+    const service = yield* oauthService
+    
+    const newAccessToken = yield* service.refreshAccessToken(userId, provider)
+    
+    return newAccessToken
+  })
+
+// Provide dependencies and run
+const oauthDependencies = Context.merge(
+  Context.make(Auth.OAuthStateStoreTag, oauthStateStore),
+  Context.make(Auth.OAuthAccountStoreTag, oauthAccountStore)
+)
+
+await Effect.runPromise(
+  Effect.provide(initiateOAuth, oauthDependencies)
+)
+```
+
+## Email Verification
+
+Implement secure email verification flows:
+
+```typescript
+import { Effect, Context } from "effect"
+import * as Auth from "effect-auth"
+
+// Implement email verification store
+const emailVerificationStore: Auth.EmailVerificationStore = {
+  create: (verification) => 
+    Effect.succeed(verification), // Store in database
+  get: (token) => 
+    Effect.succeed(null), // Return verification or null
+  delete: (token) => 
+    Effect.void,
+  deleteByUserId: (userId) => 
+    Effect.void
+}
+
+// Configure email verification service
+const emailVerifier = Effect.gen(function* () {
+  return yield* Auth.makeEmailVerificationService({
+    expiresIn: 24 * 60 * 60 * 1000, // 24 hours
+    sendEmail: (to, token) => 
+      Effect.tryPromise({
+        try: () => 
+          emailClient.send({
+            to,
+            subject: "Verify your email",
+            html: `Click here to verify: https://example.com/verify?token=${token}`
+          }),
+        catch: (error) => 
+          new Auth.EmailVerificationError({
+            message: "Failed to send email",
+            cause: error
+          })
+      })
+  })
+})
+
+// Send verification email
+const sendVerification = (userId: string, email: string) =>
+  Effect.gen(function* () {
+    const service = yield* emailVerifier
+    
+    const { token, expiresAt } = yield* service.createVerification(userId, email)
+    
+    console.log(`Verification email sent to ${email}`)
+    return { token, expiresAt }
+  })
+
+// Verify token
+const verifyEmail = (token: string) =>
+  Effect.gen(function* () {
+    const service = yield* emailVerifier
+    
+    const result = yield* service.verifyToken(token)
+    
+    if (result.verified) {
+      console.log(`Email ${result.email} verified for user ${result.userId}`)
+      // Update user's email verification status in database
+    }
+    
+    return result
+  })
+
+// Provide dependencies
+const emailDependencies = Context.make(
+  Auth.EmailVerificationStoreTag,
+  emailVerificationStore
+)
+
+await Effect.runPromise(
+  Effect.provide(verifyEmail("token123"), emailDependencies)
+)
+```
+
+## Rate Limiting
+
+Protect your authentication endpoints with rate limiting:
+
+```typescript
+import { Effect, Context } from "effect"
+import * as Auth from "effect-auth"
+
+// Implement rate limit store (Redis recommended for distributed systems)
+const rateLimitStore: Auth.RateLimitStore = {
+  get: (key) => 
+    Effect.succeed(null), // Return entry or null from Redis
+  set: (key, entry, ttl) => 
+    Effect.void, // Store in Redis with TTL
+  increment: (key, ttl) => 
+    Effect.succeed(1), // Atomic increment in Redis
+  delete: (key) => 
+    Effect.void
+}
+
+// Create rate limiter
+const rateLimiter = Effect.gen(function* () {
+  return yield* Auth.makeRateLimiter()
+})
+
+// Apply rate limiting to login endpoint
+const login = (email: string, password: string, ip: string) =>
+  Effect.gen(function* () {
+    const limiter = yield* rateLimiter
+    
+    // Rate limit by IP address
+    yield* limiter.consumeToken(`login:${ip}`, Auth.RateLimitPresets.login)
+    
+    // Proceed with login...
+    const hasher = yield* Auth.PasswordHasher
+    const userStore = yield* Auth.UserStore
+    
+    const user = yield* userStore.get(email)
+    const hash = yield* userStore.getCredentials(user.id)
+    const isValid = yield* hasher.verify(password, hash)
+    
+    if (!isValid) {
+      return yield* Effect.fail(
+        new Auth.InvalidCredentialsError({ message: "Invalid credentials" })
+      )
+    }
+    
+    // Create session
+    const sessionManager = yield* Auth.makeSessionManager(sessionConfig)
+    const session = yield* sessionManager.createSession(user.id)
+    
+    return session
+  })
+
+// Custom rate limit configuration
+const customRateLimit: Auth.RateLimitConfig = {
+  maxRequests: 10,
+  windowMs: 60 * 1000, // 1 minute
+  blockDurationMs: 5 * 60 * 1000 // 5 minute block
+}
+
+// Use pre-configured rate limits
+const rateLimits = {
+  login: Auth.RateLimitPresets.login, // 5 per 15 min
+  passwordReset: Auth.RateLimitPresets.passwordReset, // 3 per hour
+  emailVerification: Auth.RateLimitPresets.emailVerification, // 3 per 10 min
+  registration: Auth.RateLimitPresets.registration, // 3 per hour
+  oauth: Auth.RateLimitPresets.oauth, // 10 per 5 min
+  totpVerification: Auth.RateLimitPresets.totpVerification // 5 per 5 min
+}
+
+// Provide dependencies
+const rateLimitDependencies = Context.make(
+  Auth.RateLimitStoreTag,
+  rateLimitStore
+)
+
+await Effect.runPromise(
+  Effect.provide(
+    login("user@example.com", "password", "192.168.1.1"),
+    rateLimitDependencies
+  )
+)
+```
+
+
 ## API Reference
 
 ### Types
@@ -428,6 +738,15 @@ await Effect.runPromise(
 - `WebAuthnCredential`: Stored passkey credential
 - `WebAuthnConfig`: Configuration for WebAuthn service
 - `WebAuthnUser`: User information for passkey registration
+- `OAuthProviderConfig`: OAuth2 provider configuration
+- `OAuthState`: OAuth state for CSRF protection
+- `OAuthAccount`: OAuth account linked to user
+- `OAuthTokenResponse`: OAuth2 token exchange response
+- `OAuthUserInfo`: User info from OAuth provider
+- `EmailVerification`: Email verification token data
+- `EmailVerificationConfig`: Email verification service configuration
+- `RateLimitConfig`: Rate limiting configuration
+- `RateLimitEntry`: Rate limit entry data
 
 ### Services
 
@@ -440,6 +759,40 @@ await Effect.runPromise(
 - `ChallengeStore`: Interface for WebAuthn challenge storage
 - `CredentialStore`: Interface for WebAuthn credential storage
 - `WebAuthnService`: Service for passkey registration and authentication
+- `OAuthStateStore`: Interface for OAuth state storage (temporary)
+- `OAuthAccountStore`: Interface for OAuth account storage (persistent)
+- `OAuthService`: Service for OAuth2 flows
+- `EmailVerificationStore`: Interface for email verification storage
+- `EmailVerificationService`: Service for email verification
+- `RateLimitStore`: Interface for rate limit storage
+- `RateLimiter`: Service for rate limiting
+
+### OAuth Functions
+
+- `makeOAuthProvider(name, config, usePKCE?)`: Create a custom OAuth provider
+- `makeOAuthService(providers)`: Create OAuth service with configured providers
+- `GoogleProvider(config)`: Pre-built Google OAuth provider
+- `GitHubProvider(config)`: Pre-built GitHub OAuth provider
+- `DiscordProvider(config)`: Pre-built Discord OAuth provider
+- `MicrosoftProvider(config)`: Pre-built Microsoft OAuth provider
+- `generateState()`: Generate secure OAuth state parameter
+- `generatePKCE()`: Generate PKCE code verifier and challenge
+
+### Email Verification Functions
+
+- `makeEmailVerificationService(config)`: Create email verification service
+- `generateVerificationToken()`: Generate secure verification token
+
+### Rate Limiting Functions
+
+- `makeRateLimiter()`: Create rate limiter service
+- `RateLimitPresets`: Pre-configured rate limits for common operations
+  - `RateLimitPresets.login`: 5 per 15 minutes
+  - `RateLimitPresets.passwordReset`: 3 per hour
+  - `RateLimitPresets.emailVerification`: 3 per 10 minutes
+  - `RateLimitPresets.registration`: 3 per hour
+  - `RateLimitPresets.oauth`: 10 per 5 minutes
+  - `RateLimitPresets.totpVerification`: 5 per 5 minutes
 
 ### OTP Functions
 
@@ -483,6 +836,13 @@ All errors extend Effect's tagged errors:
 - `ChallengeExpiredError`: WebAuthn challenge expired
 - `CredentialNotFoundError`: WebAuthn credential not found
 - `WebAuthnVerificationError`: WebAuthn verification failed
+- `OAuthStateNotFoundError`: OAuth state not found
+- `OAuthStateExpiredError`: OAuth state expired
+- `OAuthProviderError`: OAuth provider error
+- `RateLimitError`: Rate limit exceeded
+- `EmailVerificationError`: Email verification error
+- `MagicLinkError`: Magic link error
+- `PasswordResetError`: Password reset error
 
 ## Best Practices
 
@@ -552,6 +912,43 @@ Following FIDO2/WebAuthn standards and Oslo guidelines:
 6. Store credentials securely with public keys only
 7. Use ES256 (ECDSA with P-256) algorithm for broad compatibility
 
+### OAuth 2.0 / Social Login
+
+Following OAuth 2.0 and OpenID Connect standards:
+
+1. Use PKCE (Proof Key for Code Exchange) for enhanced security
+2. Implement state parameter for CSRF protection
+3. Store OAuth state temporarily (10 minutes max)
+4. Validate redirect URIs strictly
+5. Handle token refresh for long-lived sessions
+6. Support account linking for existing users
+7. Rate limit OAuth flows to prevent abuse
+8. Never expose client secrets in client-side code
+
+### Email Verification
+
+Following BetterAuth and industry best practices:
+
+1. Use cryptographically secure tokens (256 bits entropy)
+2. Set reasonable expiration times (24 hours recommended)
+3. One-time use tokens only
+4. Rate limit verification requests
+5. Send verification emails over secure channels
+6. Never include sensitive data in verification URLs
+7. Implement resend functionality with rate limiting
+
+### Rate Limiting
+
+Following BetterAuth and OWASP guidelines:
+
+1. Apply rate limits to all authentication endpoints
+2. Use IP-based limits for anonymous operations
+3. Use user-based limits for authenticated operations
+4. Implement progressive delays or blocks
+5. Log rate limit violations for security monitoring
+6. Use distributed rate limiting for multi-server deployments
+7. Configure appropriate limits per operation type
+
 ## Examples
 
 See the `examples/` directory for complete examples:
@@ -561,6 +958,9 @@ See the `examples/` directory for complete examples:
 - Role-based access control
 - Custom storage adapters
 - WebAuthn passkey authentication
+- OAuth2 social login integration
+- Email verification flows
+- Rate limiting implementation
 
 ## Documentation
 
@@ -568,6 +968,7 @@ See the `examples/` directory for complete examples:
 - [Agent Guidelines](./AGENT_GUIDELINES.md) - Guidelines for agents and contributors
 - [Architecture](./ARCHITECTURE.md) - Architectural overview and design patterns
 - [Security Policy](./SECURITY.md) - Security best practices and vulnerability reporting
+- [BetterAuth Integration](./docs/BETTERAUTH_INTEGRATION.md) - Detailed BetterAuth feature integration guide
 - [Multi-Algorithm Support](./docs/MULTI_ALGORITHM.md) - Guide for multiple password hashing algorithms
 
 ## Contributing
@@ -590,5 +991,10 @@ This library is inspired by and follows guidelines from:
 - [Lucia](https://lucia-auth.com/) - Modern authentication library
 - [The Copenhagen Book](https://lucia-auth.com/copenhagen) - Authentication best practices
 - [Oslo](https://github.com/pilcrowonpaper/oslo) - Authentication primitives
+- [BetterAuth](https://www.better-auth.com/) - Comprehensive TypeScript authentication framework
 - [Effect](https://effect.website/) - Powerful TypeScript framework
+- [OWASP](https://owasp.org/) - Web application security standards
+
+Special thanks to the BetterAuth project for inspiring the OAuth2, email verification, and rate limiting implementations.
+
 
