@@ -1,0 +1,47 @@
+{
+  "name": "@effect-auth/adapter-drizzle",
+  "version": "0.0.1",
+  "description": "Drizzle ORM adapter for effect-auth – implements SessionStore and UserStore via PostgreSQL.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit && vitest --typecheck --run"
+  },
+  "keywords": [
+    "effect",
+    "auth",
+    "drizzle",
+    "postgresql",
+    "adapter"
+  ],
+  "author": "",
+  "license": "ISC",
+  "peerDependencies": {
+    "drizzle-orm": ">=0.36.0",
+    "effect": ">=3.0.0",
+    "effect-auth": "*"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^0.27.0",
+    "@types/node": "^25.2.0",
+    "drizzle-orm": "^0.45.1",
+    "effect": "^3.19.15",
+    "effect-auth": "file:../..",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

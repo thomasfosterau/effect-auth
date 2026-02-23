@@ -21,6 +21,9 @@
     "CONTRIBUTING.md",
     "docs"
   ],
+  "workspaces": [
+    "adapters/*"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
