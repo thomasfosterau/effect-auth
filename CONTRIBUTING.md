@@ -217,24 +217,35 @@ All changes should include:
 
 ### Pull Request Process
 
-1. **Update documentation**:
+1. **Create a changeset** (for features, fixes, or breaking changes):
+   ```bash
+   npm run changeset
+   ```
+   
+   This will prompt you to:
+   - Choose the version bump type (patch, minor, or major)
+   - Write a summary of the changes
+   
+   A changeset file will be created in `.changeset/` - commit this with your changes.
+
+2. **Update documentation**:
    - Update README.md if adding/changing features
    - Update ARCHITECTURE.md if changing design
    - Update examples if relevant
 
-2. **Ensure quality**:
+3. **Ensure quality**:
    ```bash
    npm run build  # Must compile successfully
    npm test       # All tests must pass
    npm audit      # Check for vulnerabilities
    ```
 
-3. **Push to your fork**:
+4. **Push to your fork**:
    ```bash
    git push origin feature/your-feature-name
    ```
 
-4. **Open a Pull Request**:
+5. **Open a Pull Request**:
    - Use a clear, descriptive title
    - Explain what changes you made and why
    - Reference any related issues
@@ -274,6 +285,20 @@ Fixes #123
 3. **Security review** for security-sensitive changes
 4. **Feedback addressed** by contributor
 5. **Merge** when approved
+
+### Release Process
+
+Releases are automated using [Changesets](https://github.com/changesets/changesets):
+
+1. **Changesets are merged**: When PRs with changesets are merged to `main`
+2. **Release PR is created**: The Release workflow automatically creates a "Version Packages" PR
+3. **Release PR is merged**: When the maintainer merges this PR:
+   - Package versions are bumped based on changesets
+   - CHANGELOG.md is updated
+   - Changes are published to npm
+   - Git tags are created
+
+Contributors don't need to worry about versioning - just create changesets for your changes!
 
 ## Security
 
