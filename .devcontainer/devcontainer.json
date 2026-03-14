@@ -1,0 +1,29 @@
+{
+	"name": "effect-auth",
+	"image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm",
+	"remoteUser": "node",
+	"features": {
+		"ghcr.io/devcontainers/features/bun:1": {}
+	},
+	"postCreateCommand": "bun install",
+	"forwardPorts": [
+		4321
+	],
+	"portsAttributes": {
+		"4321": {
+			"label": "Astro docs",
+			"onAutoForward": "notify"
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"astro-build.astro-vscode"
+			],
+			"settings": {
+				"js/ts.tsdk.path": "./node_modules/typescript/lib",
+				"js/ts.tsdk.promptToUseWorkspaceVersion": true
+			}
+		}
+	}
+}

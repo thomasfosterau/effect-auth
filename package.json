@@ -5,6 +5,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "type": "module",
+  "packageManager": "bun@1.2.5",
+  "engines": {
+    "bun": ">=1.2.0"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -22,15 +26,19 @@
     "docs"
   ],
   "scripts": {
-    "build": "tsc",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc --noEmit && vitest --typecheck --run",
-    "prepare": "effect-language-service patch",
-    "prepublishOnly": "npm run build && npm run typecheck && npm test",
-    "changeset": "changeset",
-    "version": "changeset version",
-    "release": "npm run build && changeset publish"
+    "nx": "nx",
+    "build": "nx build effect-auth",
+    "test": "nx test effect-auth",
+    "test:watch": "nx run effect-auth:test --configuration=watch",
+    "typecheck": "nx typecheck effect-auth",
+    "prepare": "bunx effect-language-service patch",
+    "prepublishOnly": "nx run-many -t build,typecheck,test --projects effect-auth",
+    "changeset": "nx changeset effect-auth",
+    "version": "nx version effect-auth",
+    "release": "nx run effect-auth:build && nx run effect-auth:release",
+    "dev:site": "nx dev site",
+    "build:site": "nx build site",
+    "preview:site": "nx preview site"
   },
   "keywords": [
     "effect",
@@ -58,6 +66,7 @@
     "@effect/language-service": "^0.73.0",
     "@effect/vitest": "^0.27.0",
     "@types/node": "^25.2.0",
+    "nx": "^22.5.4",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },

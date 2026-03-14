@@ -224,9 +224,9 @@ const hash = async (password: string): Promise<HashedPassword> => { ... }
 ### Test Framework
 
 - **Framework**: Vitest with `@effect/vitest`
-- **Build Command**: `npm run build`
-- **Test Command**: `npm test`
-- **Watch Mode**: `npm run test:watch`
+- **Build Command**: `bun run build`
+- **Test Command**: `bun run test`
+- **Watch Mode**: `bun run test:watch`
 
 ### Test Coverage Requirements
 
@@ -317,10 +317,10 @@ See `docs/MULTI_ALGORITHM.md` for detailed guidance on:
 
 Before committing code:
 
-1. **Build**: `npm run build` - Must pass without errors
-2. **Tests**: `npm test` - All tests must pass
+1. **Build**: `bun run build` - Must pass without errors
+2. **Tests**: `bun run test` - All tests must pass
 3. **Manual Review**: Review changes for security issues
-4. **Dependency Audit**: Run `npm audit` and address issues
+4. **Dependency Audit**: Run `bun audit` and address issues
 5. **Secret Scanning**: Verify no secrets in code
 
 ### Making a Pull Request

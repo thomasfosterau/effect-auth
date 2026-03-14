@@ -19,7 +19,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 ## Installation
 
 ```bash
-npm install effect-auth effect
+bun add effect-auth effect
 ```
 
 ## Core Concepts

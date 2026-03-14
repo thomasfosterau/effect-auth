@@ -265,14 +265,14 @@ Our test suite currently includes:
 - Password hashing security tests
 - Session expiration tests
 
-Run tests with: `npm test`
+Run tests with: `bun run test`
 
 ### Manual Security Review
 
 Before each release, we perform:
 
 - Code review of all security-sensitive changes
-- Dependency vulnerability scanning (`npm audit`)
+- Dependency vulnerability scanning (`bun audit`)
 - Review of error messages for information leakage
 - Review of logging for sensitive data
 
@@ -286,7 +286,7 @@ We welcome security researchers to audit this library. Please report any finding
 
 We monitor dependencies for known vulnerabilities:
 
-- `npm audit` is run regularly
+- `bun audit` is run regularly
 - GitHub Dependabot alerts are enabled
 - Security patches are prioritized
 
@@ -340,7 +340,7 @@ Security updates are announced through:
 When a security update is released:
 
 1. **Read the advisory**: Understand the vulnerability
-2. **Update immediately**: Run `npm update effect-auth`
+2. **Update immediately**: Run `bun update effect-auth`
 3. **Review your code**: Check if you're affected
 4. **Test thoroughly**: Run your test suite
 5. **Deploy quickly**: Deploy to production as soon as possible

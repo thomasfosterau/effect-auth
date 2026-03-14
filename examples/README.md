@@ -7,13 +7,13 @@ This directory contains complete, runnable examples demonstrating the features o
 Make sure you have built the project first:
 
 ```bash
-npm run build
+bun run build
 ```
 
-Then you can run any example with tsx (recommended):
+Then you can run any example directly with Bun:
 
 ```bash
-npx tsx examples/basic-auth.ts
+bun run examples/basic-auth.ts
 ```
 
 ## Available Examples
@@ -30,7 +30,7 @@ Demonstrates the complete authentication flow:
 
 **Run:**
 ```bash
-npx tsx examples/basic-auth.ts
+bun run examples/basic-auth.ts
 ```
 
 ### 2. Authorization (`authorization.ts`)
@@ -45,7 +45,7 @@ Demonstrates role-based access control:
 
 **Run:**
 ```bash
-npx tsx examples/authorization.ts
+bun run examples/authorization.ts
 ```
 
 ## Key Concepts Demonstrated

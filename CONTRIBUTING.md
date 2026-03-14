@@ -40,8 +40,7 @@ Before contributing, please:
 
 ### Prerequisites
 
-- **Node.js**: Version 18+ recommended
-- **npm**: Version 9+ recommended
+- **Bun**: Version 1.2+ recommended
 - **TypeScript**: Included as dev dependency
 
 ### Installation
@@ -56,15 +55,13 @@ Before contributing, please:
 
 3. **Install dependencies**:
    ```bash
-   npm install --legacy-peer-deps
+   bun install
    ```
-   
-   Note: `--legacy-peer-deps` is required due to vitest version conflicts.
 
 4. **Verify setup**:
    ```bash
-   npm run build  # Should compile successfully
-   npm test       # Should pass all tests
+   bun run build  # Should compile successfully
+   bun run test   # Should pass all tests
    ```
 
 ### Project Structure
@@ -125,8 +122,8 @@ effect-auth/
 
 4. **Test your changes**:
    ```bash
-   npm run build  # Ensure it compiles
-   npm test       # Ensure tests pass
+   bun run build  # Ensure it compiles
+   bun run test   # Ensure tests pass
    ```
 
 ### Code Style
@@ -171,10 +168,10 @@ Example: Adding a new password algorithm
 
 ```bash
 # Run all tests
-npm test
+bun run test
 
 # Run tests in watch mode
-npm run test:watch
+bun run test:watch
 ```
 
 ### Writing Tests
@@ -219,7 +216,7 @@ All changes should include:
 
 1. **Create a changeset** (for features, fixes, or breaking changes):
    ```bash
-   npm run changeset
+   bun run changeset
    ```
    
    This will prompt you to:
@@ -235,9 +232,9 @@ All changes should include:
 
 3. **Ensure quality**:
    ```bash
-   npm run build  # Must compile successfully
-   npm test       # All tests must pass
-   npm audit      # Check for vulnerabilities
+   bun run build  # Must compile successfully
+   bun run test   # All tests must pass
+   bun audit      # Check for vulnerabilities
    ```
 
 4. **Push to your fork**:
