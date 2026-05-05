@@ -144,3 +144,5 @@ vite.config.ts.timestamp-*
 # Changesets - ignore the temporary changeset markdown files
 .changeset/*.md
 !.changeset/README.md
+
+.nx

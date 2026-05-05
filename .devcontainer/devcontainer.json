@@ -3,7 +3,9 @@
 	"image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm",
 	"remoteUser": "node",
 	"features": {
-		"ghcr.io/devcontainers/features/bun:1": {}
+		"ghcr.io/devcontainers-extra/features/bun:1": {},
+		"ghcr.io/devcontainers/features/common-utils:2": {},
+		"ghcr.io/devcontainers-extra/features/ripgrep:1": {}
 	},
 	"postCreateCommand": "bun install",
 	"forwardPorts": [
