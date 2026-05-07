@@ -1,19 +1,19 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Context } from "effect"
-import { makeSessionManager, SessionStore, UserStore } from "./session.js"
-import type { Session, User, SessionConfig } from "./types.js"
-import { SessionNotFoundError, UserNotFoundError } from "./errors.js"
+import { makeSessionManager, SessionStore, UserStore } from "./Session.js"
+import type { Session, User, SessionConfig } from "./Types.js"
+import { SessionNotFoundError, UserNotFoundError } from "./Errors.js"
 
 // Mock implementations for testing
 const mockSessionStore = {
   sessions: new Map<string, Session>(),
-  
+
   create: (session: Session) =>
     Effect.sync(() => {
       mockSessionStore.sessions.set(session.id, session)
       return session
     }),
-  
+
   get: (sessionId: string) =>
     Effect.gen(function* () {
       const session = mockSessionStore.sessions.get(sessionId)
@@ -27,18 +27,18 @@ const mockSessionStore = {
       }
       return session
     }),
-  
+
   update: (session: Session) =>
     Effect.sync(() => {
       mockSessionStore.sessions.set(session.id, session)
       return session
     }),
-  
+
   delete: (sessionId: string) =>
     Effect.sync(() => {
       mockSessionStore.sessions.delete(sessionId)
     }),
-  
+
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
       for (const [id, session] of mockSessionStore.sessions.entries()) {
@@ -54,7 +54,7 @@ const mockUserStore = {
     ["user1", { id: "user1", attributes: { name: "Test User" } }],
     ["user2", { id: "user2", attributes: { name: "Another User" } }]
   ]),
-  
+
   get: (userId: string) =>
     Effect.gen(function* () {
       const user = mockUserStore.users.get(userId)
@@ -68,7 +68,7 @@ const mockUserStore = {
       }
       return user
     }),
-  
+
   getCredentials: (userId: string) =>
     Effect.succeed("hashed-password")
 }
@@ -175,13 +175,13 @@ describe("SessionManager", () => {
       const session1 = yield* manager.createSession("user1")
       const session2 = yield* manager.createSession("user1")
       const session3 = yield* manager.createSession("user2")
-      
+
       yield* manager.invalidateUserSessions("user1")
-      
+
       const result1 = yield* Effect.either(manager.validateSession(session1.id))
       const result2 = yield* Effect.either(manager.validateSession(session2.id))
       const result3 = yield* manager.validateSession(session3.id)
-      
+
       return { result1, result2, result3 }
     })
 

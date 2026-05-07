@@ -1,6 +1,6 @@
 import * as Request from "effect/Request"
-import type * as Types from "./types.js"
-import type * as Errors from "./errors.js"
+import type * as Types from "./Types.js"
+import type * as Errors from "./Errors.js"
 
 /**
  * Request to create a new session for a user

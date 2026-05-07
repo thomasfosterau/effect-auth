@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { Effect } from "effect"
-import * as OTP from "./otp.js"
+import * as OTP from "./Otp.js"
 
 describe("OTP Secret Generation", () => {
   it("should generate random bytes", async () => {

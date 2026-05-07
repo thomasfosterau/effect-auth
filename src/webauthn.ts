@@ -1,10 +1,121 @@
 /**
+ * WebAuthn types for passkey authentication
+ * Following Copenhagen/Oslo guidelines for WebAuthn implementation
+ */
+
+/**
+ * Represents a WebAuthn challenge used during registration and authentication
+ */
+export interface WebAuthnChallenge {
+  /** Challenge bytes (random value) */
+  challenge: Uint8Array
+  /** Expiration timestamp */
+  expiresAt: number
+  /** User ID associated with the challenge (optional, used for authentication) */
+  userId?: string
+}
+
+/**
+ * Represents a stored WebAuthn credential (passkey)
+ */
+export interface WebAuthnCredential {
+  /** Unique credential ID */
+  id: string
+  /** User ID this credential belongs to */
+  userId: string
+  /** Public key in COSE format */
+  publicKey: Uint8Array
+  /** Algorithm used (COSE algorithm identifier) */
+  algorithm: number
+  /** Counter value to prevent replay attacks */
+  counter: number
+  /** When the credential was created */
+  createdAt: number
+  /** Optional credential name/label */
+  name?: string
+  /** Transports this credential supports */
+  transports?: readonly string[]
+}
+
+/**
+ * Configuration for WebAuthn service
+ */
+export interface WebAuthnConfig {
+  /** Relying party ID (typically your domain) */
+  relyingPartyId: string
+  /** Relying party name */
+  relyingPartyName: string
+  /** Expected origin(s) for WebAuthn requests */
+  expectedOrigin: string | readonly string[]
+  /** Challenge expiration time in milliseconds (default: 5 minutes) */
+  challengeExpiresIn?: number
+}
+
+/**
+ * User information for WebAuthn registration
+ */
+export interface WebAuthnUser {
+  /** User ID */
+  id: string
+  /** Username or email */
+  name: string
+  /** Display name */
+  displayName: string
+}
+
+/**
+ * Registration response from client
+ */
+export interface RegistrationResponse {
+  /** Credential ID */
+  credentialId: Uint8Array
+  /** Attestation object from client */
+  attestationObject: Uint8Array
+  /** Client data JSON from client */
+  clientDataJSON: Uint8Array
+}
+
+/**
+ * Authentication response from client
+ */
+export interface AuthenticationResponse {
+  /** Credential ID */
+  credentialId: Uint8Array
+  /** Authenticator data from client */
+  authenticatorData: Uint8Array
+  /** Client data JSON from client */
+  clientDataJSON: Uint8Array
+  /** Signature from authenticator */
+  signature: Uint8Array
+}
+
+/**
+ * Result of successful registration
+ */
+export interface RegistrationResult {
+  /** The newly created credential */
+  credential: WebAuthnCredential
+  /** Whether the authenticator was verified */
+  verified: boolean
+}
+
+/**
+ * Result of successful authentication
+ */
+export interface AuthenticationResult {
+  /** The credential used for authentication */
+  credential: WebAuthnCredential
+  /** Updated counter value */
+  newCounter: number
+}
+
+/**
  * WebAuthn service for passkey authentication
  * Following Oslo/Copenhagen guidelines for WebAuthn implementation
  */
 
-import { Effect, Context } from "effect"
-import { 
+import { Context, Effect, Layer } from "effect"
+import {
   parseAttestationObject,
   parseClientDataJSON,
   parseAuthenticatorData,
@@ -14,17 +125,7 @@ import {
   type AuthenticatorData
 } from "@oslojs/webauthn"
 import * as crypto from "node:crypto"
-import * as Errors from "./errors.js"
-import type {
-  WebAuthnChallenge,
-  WebAuthnCredential,
-  WebAuthnConfig,
-  WebAuthnUser,
-  RegistrationResponse,
-  AuthenticationResponse,
-  RegistrationResult,
-  AuthenticationResult
-} from "./webauthn-types.js"
+import * as Errors from "./Errors.js"
 
 /**
  * WebAuthn challenge store interface
@@ -59,12 +160,24 @@ export interface CredentialStore {
 /**
  * Context tag for ChallengeStore
  */
-export const ChallengeStore = Context.GenericTag<ChallengeStore>("ChallengeStore")
+export class ChallengeStoreTag extends Context.Tag("@effect-auth/ChallengeStore")<
+  ChallengeStoreTag,
+  ChallengeStore
+>() { }
+
+// Public ergonomic alias
+export const ChallengeStore = ChallengeStoreTag
 
 /**
  * Context tag for CredentialStore
  */
-export const CredentialStore = Context.GenericTag<CredentialStore>("CredentialStore")
+export class CredentialStoreTag extends Context.Tag("@effect-auth/CredentialStore")<
+  CredentialStoreTag,
+  CredentialStore
+>() { }
+
+// Public ergonomic alias
+export const CredentialStore = CredentialStoreTag
 
 /**
  * WebAuthn service for managing passkey registration and authentication
@@ -95,15 +208,23 @@ export interface WebAuthnService {
   ) => Effect.Effect<AuthenticationResult, Errors.WebAuthnVerificationError | Errors.CredentialNotFoundError | Errors.ChallengeNotFoundError | Errors.ChallengeExpiredError | Errors.AuthError>
 }
 
+export class WebAuthnServiceTag extends Context.Tag("@effect-auth/WebAuthnService")<
+  WebAuthnServiceTag,
+  WebAuthnService
+>() { }
+
+// Public ergonomic alias
+export const WebAuthnService = WebAuthnServiceTag
+
 /**
  * Create a WebAuthn service
  */
 export const makeWebAuthnService = (
   config: WebAuthnConfig
-): Effect.Effect<WebAuthnService, never, ChallengeStore | CredentialStore> =>
+): Effect.Effect<WebAuthnService, never, ChallengeStoreTag | CredentialStoreTag> =>
   Effect.gen(function* () {
-    const challengeStore = yield* ChallengeStore
-    const credentialStore = yield* CredentialStore
+    const challengeStore = yield* ChallengeStoreTag
+    const credentialStore = yield* CredentialStoreTag
 
     const challengeExpiresIn = config.challengeExpiresIn ?? 5 * 60 * 1000 // 5 minutes default
 
@@ -129,7 +250,7 @@ export const makeWebAuthnService = (
         Effect.gen(function* () {
           // Get and verify challenge
           const storedChallenge = yield* challengeStore.get(challenge)
-          
+
           if (Date.now() > storedChallenge.expiresAt) {
             yield* challengeStore.delete(challenge)
             return yield* Effect.fail(
@@ -162,10 +283,10 @@ export const makeWebAuthnService = (
           }
 
           // Verify origin
-          const origins = Array.isArray(config.expectedOrigin) 
-            ? config.expectedOrigin 
+          const origins = Array.isArray(config.expectedOrigin)
+            ? config.expectedOrigin
             : [config.expectedOrigin]
-          
+
           if (!origins.includes(clientData.origin)) {
             return yield* Effect.fail(
               new Errors.WebAuthnVerificationError({
@@ -294,7 +415,7 @@ export const makeWebAuthnService = (
         Effect.gen(function* () {
           // Get and verify challenge
           const storedChallenge = yield* challengeStore.get(challenge)
-          
+
           if (Date.now() > storedChallenge.expiresAt) {
             yield* challengeStore.delete(challenge)
             return yield* Effect.fail(
@@ -331,10 +452,10 @@ export const makeWebAuthnService = (
           }
 
           // Verify origin
-          const origins = Array.isArray(config.expectedOrigin) 
-            ? config.expectedOrigin 
+          const origins = Array.isArray(config.expectedOrigin)
+            ? config.expectedOrigin
             : [config.expectedOrigin]
-          
+
           if (!origins.includes(clientData.origin)) {
             return yield* Effect.fail(
               new Errors.WebAuthnVerificationError({
@@ -431,6 +552,9 @@ export const makeWebAuthnService = (
     }
   })
 
+export const WebAuthnServiceLayer = (config: WebAuthnConfig) =>
+  Layer.effect(WebAuthnServiceTag, makeWebAuthnService(config))
+
 /**
  * Helper to serialize public key for storage
  */
@@ -519,11 +643,11 @@ function verifySignature(
           const signatureBuffer = new ArrayBuffer(signature.length)
           const signatureView = new Uint8Array(signatureBuffer)
           signatureView.set(signature)
-          
+
           const signedDataBuffer = new ArrayBuffer(signedData.length)
           const signedDataView = new Uint8Array(signedDataBuffer)
           signedDataView.set(signedData)
-          
+
           if (algorithm === coseAlgorithmES256) {
             return await crypto.subtle.verify(
               { name: "ECDSA", hash: "SHA-256" },

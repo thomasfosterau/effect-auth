@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import * as crypto from "node:crypto"
-import * as Errors from "./errors.js"
+import * as Errors from "./Errors.js"
 
 /**
  * OTP (One-Time Password) utilities for HOTP and TOTP
@@ -108,7 +108,7 @@ export const decodeBase32 = (base32: string): Effect.Effect<Buffer, Errors.Hashi
     try: () => {
       const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
       const cleanBase32 = base32.toUpperCase().replace(/[=\s]/g, "")
-      
+
       let bits = 0
       let value = 0
       const output: number[] = []
@@ -234,12 +234,12 @@ export const verifyHOTP = (
     }
 
     const expectedToken = yield* generateHOTP(secret, counter, config)
-    
+
     // Timing-safe comparison
     if (token.length !== expectedToken.length) {
       return false
     }
-    
+
     return crypto.timingSafeEqual(
       Buffer.from(token),
       Buffer.from(expectedToken)
@@ -261,11 +261,12 @@ export const generateTOTP = (
   const period = config?.period ?? 30
   const currentTime = Math.floor(Date.now() / 1000)
   const counter = Math.floor(currentTime / period)
+  const hotpConfig: HOTPConfig = {
+    ...(config?.digits !== undefined && { digits: config.digits }),
+    ...(config?.algorithm !== undefined && { algorithm: config.algorithm })
+  }
 
-  return generateHOTP(secret, counter, {
-    digits: config?.digits,
-    algorithm: config?.algorithm
-  })
+  return generateHOTP(secret, counter, hotpConfig)
 }
 
 /**
@@ -305,10 +306,11 @@ export const verifyTOTP = (
     // Check current time step and adjacent steps within window
     for (let i = -window; i <= window; i++) {
       const counter = currentCounter + i
-      const expectedToken = yield* generateHOTP(secret, counter, {
-        digits: config?.digits,
-        algorithm: config?.algorithm
-      })
+      const hotpConfig: HOTPConfig = {
+        ...(config?.digits !== undefined && { digits: config.digits }),
+        ...(config?.algorithm !== undefined && { algorithm: config.algorithm })
+      }
+      const expectedToken = yield* generateHOTP(secret, counter, hotpConfig)
 
       // Timing-safe comparison
       if (token.length === expectedToken.length) {

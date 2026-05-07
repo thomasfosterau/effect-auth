@@ -1,28 +1,146 @@
-import { Effect, Context } from "effect"
+/**
+ * Password Hashing Traits and Multi-Algorithm Support
+ * 
+ * Inspired by Rust's password_hash crate, this module provides:
+ * - Trait-based API (PasswordHasher interface) for algorithm-agnostic hashing
+ * - PHC string format support (algorithm$params$salt$hash)
+ * - Multi-algorithm verification for seamless migration
+ * - Extensible design for custom algorithms
+ */
+
+import { Context, Effect, Layer } from "effect"
+import type * as Types from "./Types.js"
+import * as Errors from "./Errors.js"
+
+/**
+ * Core password hashing interface (trait)
+ * Implement this interface to support custom password hashing algorithms
+ */
+export interface PasswordHasher {
+  /**
+   * Unique identifier for this algorithm (used in PHC format)
+   */
+  readonly algorithm: string
+
+  /**
+   * Hash a password using this algorithm
+   */
+  readonly hash: (password: string) => Effect.Effect<Types.HashedPassword, Errors.HashingError>
+
+  /**
+   * Verify a password against a hash using this algorithm
+   */
+  readonly verify: (password: string, hash: string) => Effect.Effect<boolean, Errors.HashingError>
+}
+
+/**
+ * Multi-algorithm password verifier
+ * Supports verifying passwords against different hash formats,
+ * enabling seamless migration between algorithms
+ */
+export interface MultiAlgorithmVerifier {
+  /**
+   * Verify a password against a hash, automatically detecting the algorithm
+   * from the PHC format string
+   */
+  readonly verify: (password: string, hash: string) => Effect.Effect<boolean, Errors.HashingError>
+}
+
+/**
+ * Tag for PasswordHasher service
+ */
+export class PasswordHasherTag extends Context.Tag("@effect-auth/PasswordHasher")<
+  PasswordHasherTag,
+  PasswordHasher
+>() { }
+
+// Public ergonomic alias
+export const PasswordHasher = PasswordHasherTag
+
+/**
+ * Tag for MultiAlgorithmVerifier service
+ */
+export class MultiAlgorithmVerifierTag extends Context.Tag("@effect-auth/MultiAlgorithmVerifier")<
+  MultiAlgorithmVerifierTag,
+  MultiAlgorithmVerifier
+>() { }
+
+// Public ergonomic alias
+export const MultiAlgorithmVerifier = MultiAlgorithmVerifierTag
+
+/**
+ * Parse a PHC format string to extract the algorithm identifier
+ */
+const parseAlgorithm = (hash: string): Effect.Effect<string, Errors.HashingError> =>
+  Effect.sync(() => {
+    const parts = hash.split("$")
+    if (parts.length < 2) {
+      return Effect.fail(new Errors.HashingError({
+        message: "Invalid hash format: missing algorithm identifier"
+      }))
+    }
+    return Effect.succeed(parts[0])
+  }).pipe(Effect.flatten)
+
+/**
+ * Create a multi-algorithm verifier that supports multiple password hashers
+ * This allows you to verify passwords that were hashed with different algorithms,
+ * which is useful during algorithm migration
+ * 
+ * @example
+ * ```typescript
+ * const verifier = makeMultiAlgorithmVerifier([
+ *   makePBKDF2Hasher(),
+ *   makeArgon2Hasher(),
+ *   makeBcryptHasher()
+ * ])
+ * 
+ * // Will automatically detect which algorithm was used
+ * const isValid = yield* verifier.verify(password, storedHash)
+ * ```
+ */
+export const makeMultiAlgorithmVerifier = (
+  hashers: readonly PasswordHasher[]
+): MultiAlgorithmVerifier => {
+  const hasherMap = new Map(hashers.map(h => [h.algorithm, h]))
+
+  return {
+    verify: (password, hash) =>
+      Effect.gen(function* () {
+        const algorithm = yield* parseAlgorithm(hash)
+        const hasher = hasherMap.get(algorithm)
+
+        if (!hasher) {
+          return yield* Effect.fail(
+            new Errors.HashingError({
+              message: `Unsupported algorithm: ${algorithm}. Available: ${Array.from(hasherMap.keys()).join(", ")}`
+            })
+          )
+        }
+
+        return yield* hasher.verify(password, hash)
+      })
+  }
+}
+
+/**
+ * Create a layer that provides a multi-algorithm verifier
+ */
+export const makeMultiAlgorithmVerifierLayer = (hashers: readonly PasswordHasher[]) =>
+  Layer.succeed(MultiAlgorithmVerifierTag, makeMultiAlgorithmVerifier(hashers))
+
 import * as crypto from "node:crypto"
 import { promisify } from "node:util"
-import * as Errors from "./errors.js"
-import type { PasswordHasher as IPasswordHasher } from "./password-traits.js"
-import { PasswordHasher as PasswordHasherContext } from "./password-traits.js"
 
 const pbkdf2 = promisify(crypto.pbkdf2)
 
-// Re-export the trait-based interfaces and Context tags
-export type { PasswordHasher, MultiAlgorithmVerifier } from "./password-traits.js"
-export { 
-  makeMultiAlgorithmVerifier, 
-  makeMultiAlgorithmVerifierLayer,
-  PasswordHasher as PasswordHasherContext,
-  MultiAlgorithmVerifier as MultiAlgorithmVerifierContext
-} from "./password-traits.js"
-
-export type { HashedPassword } from "./types.js"
+export type { HashedPassword } from "./Types.js"
 
 /**
  * PBKDF2 Password Hasher implementing the PasswordHasher trait
  * Following Copenhagen/Oslo guidelines for secure password hashing
  */
-export const makePBKDF2Hasher = (): IPasswordHasher => {
+export const makePBKDF2Hasher = (): PasswordHasher => {
   const ALGORITHM = "pbkdf2-sha256"
   const ITERATIONS = 210000 // OWASP recommended minimum
   const KEY_LENGTH = 64
@@ -46,7 +164,7 @@ export const makePBKDF2Hasher = (): IPasswordHasher => {
         }
 
         const salt = crypto.randomBytes(SALT_LENGTH)
-        
+
         const derivedKey = yield* Effect.tryPromise({
           try: () => pbkdf2(password, salt, ITERATIONS, KEY_LENGTH, "sha256"),
           catch: (error) => new Errors.HashingError({
@@ -80,7 +198,7 @@ export const makePBKDF2Hasher = (): IPasswordHasher => {
         }
 
         const parts = hash.split("$")
-        
+
         if (parts.length !== 4) {
           return yield* Effect.fail(new Errors.HashingError({
             message: "Invalid hash format"
@@ -118,9 +236,14 @@ export const makePBKDF2Hasher = (): IPasswordHasher => {
 export const makePasswordHasher = makePBKDF2Hasher
 
 /**
+ * Backward-compatible Context value that provides the default PBKDF2 password hasher
+ */
+export const PasswordHasherLive = Context.make(PasswordHasherTag, makePBKDF2Hasher())
+
+/**
  * Layer that provides the default PBKDF2 password hasher
  */
-export const PasswordHasherLive = Context.make(PasswordHasherContext, makePBKDF2Hasher())
+export const PasswordHasherLayer = Layer.succeed(PasswordHasherTag, makePBKDF2Hasher())
 
 /**
  * Layer that provides PBKDF2 password hasher explicitly

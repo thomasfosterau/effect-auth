@@ -1,15 +1,21 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { Effect, Context } from "effect"
-import * as Requests from "./requests.js"
-import * as Resolvers from "./resolvers.js"
-import { makeSessionManager, SessionStore, UserStore } from "./session.js"
-import { PasswordHasher, PasswordHasherLive, makePasswordHasher } from "./password.js"
-import type { Session, User, SessionConfig } from "./types.js"
+import * as Requests from "./Requests.js"
+import * as Resolvers from "./Resolvers.js"
+import {
+  type SessionStore,
+  type UserStore
+} from "./Session.js"
+import {
+  SessionStore as SessionStoreTag,
+  UserStore as UserStoreTag
+} from "./Session.js"
+import { PasswordHasherLive, makePasswordHasher } from "./Password.js"
+import type { Session, User, SessionConfig } from "./Types.js"
 import {
   SessionNotFoundError,
-  UserNotFoundError,
-  InvalidCredentialsError
-} from "./errors.js"
+  UserNotFoundError
+} from "./Errors.js"
 
 // Mock stores for testing
 const sessions = new Map<string, Session>()
@@ -89,18 +95,19 @@ describe("Resolvers", () => {
     credentials.clear()
   })
 
-  describe("HashPasswordResolver", () => {
-    it("should hash a password using the resolver", async () => {
-      const request = Requests.HashPasswordRequest({ password: "testPassword123" })
-      const program = Effect.request(request, Resolvers.makeHashPasswordResolver)
+  const SessionStoreTest = Context.make(SessionStoreTag, mockSessionStore)
+  const UserStoreTest = Context.make(UserStoreTag, mockUserStore)
 
-      const result = await Effect.runPromise(
-        Effect.provide(program, PasswordHasherLive)
-      )
+  it("should hash a password using the resolver", async () => {
+    const request = Requests.HashPasswordRequest({ password: "testPassword123" })
+    const program = Effect.request(request, Resolvers.makeHashPasswordResolver)
 
-      expect(result.hash).toBeDefined()
-      expect(result.algorithm).toBe("pbkdf2-sha256")
-    })
+    const result = await Effect.runPromise(
+      Effect.provide(program, PasswordHasherLive)
+    )
+
+    expect(result.hash).toBeDefined()
+    expect(result.algorithm).toBe("pbkdf2-sha256")
   })
 
   describe("VerifyPasswordResolver", () => {
@@ -151,7 +158,7 @@ describe("Resolvers", () => {
     it("should verify valid credentials", async () => {
       const program = Effect.gen(function* () {
         const hasher = makePasswordHasher()
-        
+
         // Setup: hash a password and store it
         const hashed = yield* hasher.hash("userPassword123")
         credentials.set("user1", hashed.hash)
@@ -165,7 +172,7 @@ describe("Resolvers", () => {
       })
 
       const testContext = Context.merge(
-        Context.make(UserStore, mockUserStore),
+        Context.make(UserStoreTag, mockUserStore),
         PasswordHasherLive
       )
 
@@ -179,7 +186,7 @@ describe("Resolvers", () => {
     it("should fail with invalid credentials", async () => {
       const program = Effect.gen(function* () {
         const hasher = makePasswordHasher()
-        
+
         // Setup: hash a password and store it
         const hashed = yield* hasher.hash("correctPassword")
         credentials.set("user1", hashed.hash)
@@ -193,7 +200,7 @@ describe("Resolvers", () => {
       })
 
       const testContext = Context.merge(
-        Context.make(UserStore, mockUserStore),
+        Context.make(UserStoreTag, mockUserStore),
         PasswordHasherLive
       )
 

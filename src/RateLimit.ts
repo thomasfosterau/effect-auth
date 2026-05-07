@@ -1,4 +1,66 @@
 /**
+ * Rate limiting types for effect-auth
+ */
+
+import { Context, Effect, Layer } from "effect"
+import { RateLimitError, type AuthError } from "./Errors.js"
+
+/**
+ * Rate limit configuration
+ */
+export interface RateLimitConfig {
+  readonly maxRequests: number
+  readonly windowMs: number
+  readonly blockDurationMs?: number
+}
+
+/**
+ * Rate limit entry
+ */
+export interface RateLimitEntry {
+  readonly key: string
+  readonly count: number
+  readonly resetAt: number
+  readonly blockedUntil?: number
+}
+
+/**
+ * Storage interface for rate limiting
+ */
+export interface RateLimitStore {
+  readonly get: (key: string) => Effect.Effect<RateLimitEntry | null, never>
+  readonly set: (
+    key: string,
+    entry: RateLimitEntry,
+    ttl: number
+  ) => Effect.Effect<void, AuthError>
+  readonly increment: (key: string, ttl: number) => Effect.Effect<number, AuthError>
+  readonly delete: (key: string) => Effect.Effect<void, AuthError>
+}
+
+/**
+ * Rate limiter service
+ */
+export interface RateLimiter {
+  readonly checkLimit: (
+    key: string,
+    config: RateLimitConfig
+  ) => Effect.Effect<boolean, RateLimitError | AuthError, RateLimitStoreTag>
+
+  readonly consumeToken: (
+    key: string,
+    config: RateLimitConfig
+  ) => Effect.Effect<void, RateLimitError | AuthError, RateLimitStoreTag>
+
+  readonly resetLimit: (key: string) => Effect.Effect<void, AuthError, RateLimitStoreTag>
+
+  readonly getRemainingTokens: (
+    key: string,
+    config: RateLimitConfig
+  ) => Effect.Effect<number, never, RateLimitStoreTag>
+}
+
+/**
  * Rate limiting implementation
  *
  * Provides fixed-window counter-based rate limiting with configurable
@@ -7,21 +69,24 @@
  * @module rate-limit
  */
 
-import { Context, Effect } from "effect"
-import { RateLimitError } from "./errors.js"
-import type {
-  RateLimitStore as RateLimitStoreType,
-  RateLimiter,
-  RateLimitConfig,
-  RateLimitEntry
-} from "./rate-limit-types.js"
-
 /**
  * Rate limit store context tag
  */
-export const RateLimitStoreTag = Context.GenericTag<RateLimitStoreType>(
-  "@effect-auth/RateLimitStore"
-)
+export class RateLimitStoreTag extends Context.Tag("@effect-auth/RateLimitStore")<
+  RateLimitStoreTag,
+  RateLimitStore
+>() { }
+
+// Public ergonomic alias
+export const RateLimitStore = RateLimitStoreTag
+
+export class RateLimiterTag extends Context.Tag("@effect-auth/RateLimiter")<
+  RateLimiterTag,
+  RateLimiter
+>() { }
+
+// Public ergonomic alias
+export const RateLimiter = RateLimiterTag
 
 /**
  * Create a rate limiter service
@@ -161,6 +226,9 @@ export const makeRateLimiter = (): Effect.Effect<RateLimiter, never> =>
         })
     })
   )
+
+export const RateLimiterLayer = () =>
+  Layer.effect(RateLimiterTag, makeRateLimiter())
 
 /**
  * Common rate limit configurations

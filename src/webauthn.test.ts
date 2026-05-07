@@ -1,23 +1,23 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { Effect, Context } from "effect"
-import { 
-  makeWebAuthnService, 
-  ChallengeStore, 
+import {
+  makeWebAuthnService,
+  ChallengeStore,
   CredentialStore,
   base64UrlDecode
-} from "./webauthn.js"
+} from "./WebAuthn.js"
 import type {
   WebAuthnChallenge,
   WebAuthnCredential,
   WebAuthnConfig,
   WebAuthnUser,
   RegistrationResponse
-} from "./webauthn-types.js"
-import { 
-  ChallengeNotFoundError, 
+} from "./WebAuthn.js"
+import {
+  ChallengeNotFoundError,
   ChallengeExpiredError,
   CredentialNotFoundError
-} from "./errors.js"
+} from "./Errors.js"
 import * as crypto from "node:crypto"
 
 // Mock implementations for testing
@@ -220,7 +220,7 @@ describe("WebAuthn Service", () => {
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
       .replace(/=/g, "")
-    
+
     const decoded = base64UrlDecode(encoded)
     expect(decoded).toEqual(original)
   })

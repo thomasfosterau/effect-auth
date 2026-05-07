@@ -4,9 +4,9 @@ import {
   makePBKDF2Hasher,
   makeMultiAlgorithmVerifier,
   PasswordHasherLive
-} from "./password.js"
-import type { PasswordHasher } from "./password-traits.js"
-import * as Errors from "./errors.js"
+} from "./Password.js"
+import type { PasswordHasher } from "./Password.js"
+import * as Errors from "./Errors.js"
 
 // Mock hasher for testing multi-algorithm support
 const makeMockBcryptHasher = (): PasswordHasher => ({

@@ -1,4 +1,177 @@
 /**
+ * OAuth 2.0 and OpenID Connect types for effect-auth
+ *
+ * Provides type definitions for OAuth2 flows, provider configurations,
+ * and related data structures.
+ */
+
+import { Context, Effect, Layer } from "effect"
+import {
+  AuthError,
+  OAuthProviderError,
+  OAuthStateNotFoundError,
+  OAuthStateExpiredError
+} from "./Errors.js"
+
+/**
+ * OAuth2 provider configuration
+ */
+export interface OAuthProviderConfig {
+  readonly clientId: string
+  readonly clientSecret: string
+  readonly redirectUri: string
+  readonly authorizationEndpoint: string
+  readonly tokenEndpoint: string
+  readonly userInfoEndpoint?: string
+  readonly scopes: readonly string[]
+}
+
+/**
+ * OAuth2 state for CSRF protection
+ */
+export interface OAuthState {
+  readonly state: string
+  readonly provider: string
+  readonly codeVerifier?: string // For PKCE
+  readonly returnTo?: string
+  readonly createdAt: number
+  readonly expiresAt: number
+}
+
+/**
+ * OAuth account linking to user
+ */
+export interface OAuthAccount {
+  readonly id: string
+  readonly userId: string
+  readonly provider: string
+  readonly providerId: string
+  readonly email?: string
+  readonly name?: string
+  readonly picture?: string
+  readonly accessToken: string
+  readonly refreshToken?: string
+  readonly expiresAt?: number
+  readonly createdAt: number
+  readonly updatedAt: number
+}
+
+/**
+ * OAuth2 token response
+ */
+export interface OAuthTokenResponse {
+  readonly access_token: string
+  readonly token_type: string
+  readonly expires_in?: number
+  readonly refresh_token?: string
+  readonly scope?: string
+  readonly id_token?: string // For OIDC
+}
+
+/**
+ * User info from OAuth provider
+ */
+export interface OAuthUserInfo {
+  readonly id: string
+  readonly email?: string
+  readonly email_verified?: boolean
+  readonly name?: string
+  readonly picture?: string
+  readonly given_name?: string
+  readonly family_name?: string
+  readonly locale?: string
+  readonly [key: string]: unknown
+}
+
+/**
+ * Authorization URL generation result
+ */
+export interface AuthorizationUrlResult {
+  readonly url: string
+  readonly state: string
+  readonly codeVerifier?: string
+}
+
+/**
+ * OAuth callback result
+ */
+export interface OAuthCallbackResult {
+  readonly account: OAuthAccount
+  readonly isNewUser: boolean
+  readonly user?: {
+    readonly id: string
+    readonly email?: string
+    readonly name?: string
+  }
+}
+
+/**
+ * Storage interface for OAuth state (temporary, Redis/memory)
+ */
+export interface OAuthStateStore {
+  readonly create: (
+    state: OAuthState
+  ) => Effect.Effect<OAuthState, AuthError>
+  readonly get: (
+    state: string
+  ) => Effect.Effect<OAuthState, AuthError>
+  readonly delete: (state: string) => Effect.Effect<void, AuthError>
+}
+
+/**
+ * Storage interface for OAuth accounts (persistent, database)
+ */
+export interface OAuthAccountStore {
+  readonly create: (
+    account: OAuthAccount
+  ) => Effect.Effect<OAuthAccount, AuthError>
+  readonly get: (
+    provider: string,
+    providerId: string
+  ) => Effect.Effect<OAuthAccount | null, AuthError>
+  readonly getByUserId: (
+    userId: string
+  ) => Effect.Effect<readonly OAuthAccount[], AuthError>
+  readonly update: (
+    account: OAuthAccount
+  ) => Effect.Effect<OAuthAccount, AuthError>
+  readonly linkToUser: (
+    userId: string,
+    account: OAuthAccount
+  ) => Effect.Effect<void, AuthError>
+  readonly unlinkFromUser: (
+    userId: string,
+    provider: string
+  ) => Effect.Effect<void, AuthError>
+  readonly delete: (
+    provider: string,
+    providerId: string
+  ) => Effect.Effect<void, AuthError>
+}
+
+/**
+ * OAuth provider interface
+ */
+export interface OAuthProvider {
+  readonly name: string
+  readonly config: OAuthProviderConfig
+  readonly generateAuthorizationUrl: (
+    scopes?: readonly string[]
+  ) => Effect.Effect<
+    AuthorizationUrlResult,
+    OAuthProviderError | AuthError,
+    OAuthStateStoreTag
+  >
+  readonly exchangeCode: (
+    code: string,
+    codeVerifier?: string
+  ) => Effect.Effect<OAuthTokenResponse, OAuthProviderError>
+  readonly getUserInfo: (
+    accessToken: string
+  ) => Effect.Effect<OAuthUserInfo, OAuthProviderError>
+}
+
+/**
  * OAuth 2.0 and OpenID Connect implementation for effect-auth
  *
  * Provides a generic OAuth2 client with authorization code flow,
@@ -6,41 +179,29 @@
  *
  * @module oauth
  */
-
-import { Context, Effect } from "effect"
 import * as crypto from "node:crypto"
-import {
-  AuthError,
-  OAuthProviderError,
-  OAuthStateNotFoundError,
-  OAuthStateExpiredError
-} from "./errors.js"
-import type {
-  OAuthProviderConfig,
-  OAuthState,
-  OAuthStateStore as OAuthStateStoreType,
-  OAuthAccountStore as OAuthAccountStoreType,
-  OAuthProvider,
-  AuthorizationUrlResult,
-  OAuthTokenResponse,
-  OAuthUserInfo,
-  OAuthCallbackResult,
-  OAuthAccount
-} from "./oauth-types.js"
 
 /**
  * OAuth state store context tag
  */
-export const OAuthStateStoreTag = Context.GenericTag<OAuthStateStoreType>(
-  "@effect-auth/OAuthStateStore"
-)
+export class OAuthStateStoreTag extends Context.Tag("@effect-auth/OAuthStateStore")<
+  OAuthStateStoreTag,
+  OAuthStateStore
+>() { }
+
+// Public ergonomic alias
+export const OAuthStateStore = OAuthStateStoreTag
 
 /**
  * OAuth account store context tag
  */
-export const OAuthAccountStoreTag = Context.GenericTag<OAuthAccountStoreType>(
-  "@effect-auth/OAuthAccountStore"
-)
+export class OAuthAccountStoreTag extends Context.Tag("@effect-auth/OAuthAccountStore")<
+  OAuthAccountStoreTag,
+  OAuthAccountStore
+>() { }
+
+// Public ergonomic alias
+export const OAuthAccountStore = OAuthAccountStoreTag
 
 /**
  * Generate a cryptographically secure random state parameter
@@ -222,7 +383,7 @@ export interface OAuthService {
   ) => Effect.Effect<
     AuthorizationUrlResult,
     AuthError | OAuthProviderError,
-    OAuthStateStoreType
+    OAuthStateStoreTag
   >
 
   readonly handleCallback: (
@@ -235,7 +396,7 @@ export interface OAuthService {
     | OAuthProviderError
     | OAuthStateNotFoundError
     | OAuthStateExpiredError,
-    OAuthStateStoreType | OAuthAccountStoreType
+    OAuthStateStoreTag | OAuthAccountStoreTag
   >
 
   readonly linkAccount: (
@@ -245,20 +406,28 @@ export interface OAuthService {
     state: string
   ) => Effect.Effect<
     OAuthAccount,
-    AuthError | OAuthProviderError,
-    OAuthStateStoreType | OAuthAccountStoreType
+    AuthError | OAuthProviderError | OAuthStateNotFoundError | OAuthStateExpiredError,
+    OAuthStateStoreTag | OAuthAccountStoreTag
   >
 
   readonly unlinkAccount: (
     userId: string,
     provider: string
-  ) => Effect.Effect<void, AuthError, OAuthAccountStoreType>
+  ) => Effect.Effect<void, AuthError, OAuthAccountStoreTag>
 
   readonly refreshAccessToken: (
     userId: string,
     provider: string
-  ) => Effect.Effect<string, AuthError | OAuthProviderError, OAuthAccountStoreType>
+  ) => Effect.Effect<string, AuthError | OAuthProviderError, OAuthAccountStoreTag>
 }
+
+export class OAuthServiceTag extends Context.Tag("@effect-auth/OAuthService")<
+  OAuthServiceTag,
+  OAuthService
+>() { }
+
+// Public ergonomic alias
+export const OAuthService = OAuthServiceTag
 
 /**
  * Create an OAuth service with configured providers
@@ -405,13 +574,15 @@ export const makeOAuthService = (
           return {
             account: newAccount,
             isNewUser: true,
-            user: options?.linkToUserId
+            ...(options?.linkToUserId
               ? {
+                user: {
                   id: newAccount.userId,
                   ...(userInfo.email && { email: userInfo.email }),
                   ...(userInfo.name && { name: userInfo.name })
                 }
-              : undefined
+              }
+              : {})
           } satisfies OAuthCallbackResult
         }),
 
@@ -504,9 +675,9 @@ export const makeOAuthService = (
             ...(userInfo.picture && { picture: userInfo.picture }),
             accessToken: tokens.access_token,
             ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
-            expiresAt: tokens.expires_in
-              ? Date.now() + tokens.expires_in * 1000
-              : undefined,
+            ...(tokens.expires_in && {
+              expiresAt: Date.now() + tokens.expires_in * 1000
+            }),
             createdAt: existingAccount?.createdAt ?? Date.now(),
             updatedAt: Date.now()
           }
@@ -617,6 +788,11 @@ export const makeOAuthService = (
         })
     })
   )
+
+export const OAuthServiceLayer = (
+  providers: Record<string, OAuthProvider>
+) =>
+  Layer.effect(OAuthServiceTag, makeOAuthService(providers))
 
 /**
  * Pre-built OAuth providers

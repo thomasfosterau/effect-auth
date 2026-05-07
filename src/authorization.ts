@@ -1,5 +1,5 @@
-import { Effect, Context } from "effect"
-import * as Errors from "./errors.js"
+import { Context, Effect, Layer } from "effect"
+import * as Errors from "./Errors.js"
 
 /**
  * Authorization policy interface
@@ -19,9 +19,13 @@ export interface AuthorizationPolicy {
 /**
  * Tag for AuthorizationPolicy service
  */
-export const AuthorizationPolicy = Context.GenericTag<AuthorizationPolicy>(
-  "@effect-auth/AuthorizationPolicy"
-)
+export class AuthorizationPolicyTag extends Context.Tag("@effect-auth/AuthorizationPolicy")<
+  AuthorizationPolicyTag,
+  AuthorizationPolicy
+>() { }
+
+// Public ergonomic alias
+export const AuthorizationPolicy = AuthorizationPolicyTag
 
 /**
  * Simple role-based authorization policy
@@ -32,7 +36,7 @@ export interface RoleStore {
    * Get roles for a user
    */
   readonly getUserRoles: (userId: string) => Effect.Effect<readonly string[], never>
-  
+
   /**
    * Get permissions for a role
    */
@@ -44,7 +48,13 @@ export interface RoleStore {
 /**
  * Tag for RoleStore service
  */
-export const RoleStore = Context.GenericTag<RoleStore>("@effect-auth/RoleStore")
+export class RoleStoreTag extends Context.Tag("@effect-auth/RoleStore")<
+  RoleStoreTag,
+  RoleStore
+>() { }
+
+// Public ergonomic alias
+export const RoleStore = RoleStoreTag
 
 /**
  * Create a simple role-based authorization policy
@@ -52,10 +62,10 @@ export const RoleStore = Context.GenericTag<RoleStore>("@effect-auth/RoleStore")
 export const makeRoleBasedPolicy = (): Effect.Effect<
   AuthorizationPolicy,
   never,
-  RoleStore
+  RoleStoreTag
 > =>
   Effect.gen(function* () {
-    const roleStore = yield* RoleStore
+    const roleStore = yield* RoleStoreTag
 
     return {
       checkPermission: (userId, resource, action) =>
@@ -66,7 +76,7 @@ export const makeRoleBasedPolicy = (): Effect.Effect<
           // Check if any role has the required permission
           for (const role of roles) {
             const permissions = yield* roleStore.getRolePermissions(role)
-            
+
             const hasPermission = permissions.some(
               (p) => p.resource === resource && p.action === action
             )
@@ -81,6 +91,9 @@ export const makeRoleBasedPolicy = (): Effect.Effect<
     }
   })
 
+export const AuthorizationPolicyLayer = () =>
+  Layer.effect(AuthorizationPolicyTag, makeRoleBasedPolicy())
+
 /**
  * Utility function to require permission
  * Throws PermissionDeniedError if permission is not granted
@@ -89,9 +102,9 @@ export const requirePermission = (
   userId: string,
   resource: string,
   action: string
-): Effect.Effect<void, Errors.PermissionDeniedError, AuthorizationPolicy> =>
+): Effect.Effect<void, Errors.PermissionDeniedError, AuthorizationPolicyTag> =>
   Effect.gen(function* () {
-    const policy = yield* AuthorizationPolicy
+    const policy = yield* AuthorizationPolicyTag
     const hasPermission = yield* policy.checkPermission(userId, resource, action)
 
     if (!hasPermission) {

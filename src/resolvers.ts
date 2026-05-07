@@ -1,9 +1,8 @@
 import { Effect, RequestResolver } from "effect"
-import * as Requests from "./requests.js"
-import * as Errors from "./errors.js"
-import { SessionManager } from "./session.js"
-import { PasswordHasherContext } from "./password.js"
-import { UserStore } from "./session.js"
+import * as Requests from "./Requests.js"
+import * as Errors from "./Errors.js"
+import { SessionManagerTag, UserStoreTag } from "./Session.js"
+import { PasswordHasherTag } from "./Password.js"
 
 /**
  * Create a resolver for session creation
@@ -11,7 +10,7 @@ import { UserStore } from "./session.js"
 export const makeCreateSessionResolver = RequestResolver.fromEffect(
   (request: Requests.CreateSessionRequest) =>
     Effect.gen(function* () {
-      const sessionManager = yield* SessionManager
+      const sessionManager = yield* SessionManagerTag
       return yield* sessionManager.createSession(request.userId, request.attributes)
     })
 )
@@ -22,7 +21,7 @@ export const makeCreateSessionResolver = RequestResolver.fromEffect(
 export const makeValidateSessionResolver = RequestResolver.fromEffect(
   (request: Requests.ValidateSessionRequest) =>
     Effect.gen(function* () {
-      const sessionManager = yield* SessionManager
+      const sessionManager = yield* SessionManagerTag
       return yield* sessionManager.validateSession(request.sessionId)
     })
 )
@@ -33,7 +32,7 @@ export const makeValidateSessionResolver = RequestResolver.fromEffect(
 export const makeInvalidateSessionResolver = RequestResolver.fromEffect(
   (request: Requests.InvalidateSessionRequest) =>
     Effect.gen(function* () {
-      const sessionManager = yield* SessionManager
+      const sessionManager = yield* SessionManagerTag
       return yield* sessionManager.invalidateSession(request.sessionId)
     })
 )
@@ -44,7 +43,7 @@ export const makeInvalidateSessionResolver = RequestResolver.fromEffect(
 export const makeInvalidateUserSessionsResolver = RequestResolver.fromEffect(
   (request: Requests.InvalidateUserSessionsRequest) =>
     Effect.gen(function* () {
-      const sessionManager = yield* SessionManager
+      const sessionManager = yield* SessionManagerTag
       return yield* sessionManager.invalidateUserSessions(request.userId)
     })
 )
@@ -55,8 +54,8 @@ export const makeInvalidateUserSessionsResolver = RequestResolver.fromEffect(
 export const makeVerifyCredentialsResolver = RequestResolver.fromEffect(
   (request: Requests.VerifyCredentialsRequest) =>
     Effect.gen(function* () {
-      const userStore = yield* UserStore
-      const passwordHasher = yield* PasswordHasherContext
+      const userStore = yield* UserStoreTag
+      const passwordHasher = yield* PasswordHasherTag
 
       // Get user and their hashed password
       const user = yield* userStore.get(request.userId)
@@ -83,7 +82,7 @@ export const makeVerifyCredentialsResolver = RequestResolver.fromEffect(
 export const makeHashPasswordResolver = RequestResolver.fromEffect(
   (request: Requests.HashPasswordRequest) =>
     Effect.gen(function* () {
-      const passwordHasher = yield* PasswordHasherContext
+      const passwordHasher = yield* PasswordHasherTag
       return yield* passwordHasher.hash(request.password)
     })
 )
@@ -94,7 +93,7 @@ export const makeHashPasswordResolver = RequestResolver.fromEffect(
 export const makeVerifyPasswordResolver = RequestResolver.fromEffect(
   (request: Requests.VerifyPasswordRequest) =>
     Effect.gen(function* () {
-      const passwordHasher = yield* PasswordHasherContext
+      const passwordHasher = yield* PasswordHasherTag
       return yield* passwordHasher.verify(request.password, request.hash)
     })
 )

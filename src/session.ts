@@ -1,7 +1,7 @@
-import { Effect, Context } from "effect"
+import { Context, Effect, Layer } from "effect"
 import * as crypto from "node:crypto"
-import type * as Types from "./types.js"
-import * as Errors from "./errors.js"
+import type * as Types from "./Types.js"
+import * as Errors from "./Errors.js"
 
 /**
  * Session store interface for managing session persistence
@@ -13,22 +13,22 @@ export interface SessionStore {
    * Create a new session
    */
   readonly create: (session: Types.Session) => Effect.Effect<Types.Session, Errors.AuthError>
-  
+
   /**
    * Get a session by ID
    */
   readonly get: (sessionId: string) => Effect.Effect<Types.Session, Errors.SessionNotFoundError>
-  
+
   /**
    * Update a session
    */
   readonly update: (session: Types.Session) => Effect.Effect<Types.Session, Errors.AuthError>
-  
+
   /**
    * Delete a session
    */
   readonly delete: (sessionId: string) => Effect.Effect<void, Errors.AuthError>
-  
+
   /**
    * Delete all sessions for a user
    */
@@ -38,7 +38,13 @@ export interface SessionStore {
 /**
  * Tag for SessionStore service
  */
-export const SessionStore = Context.GenericTag<SessionStore>("@effect-auth/SessionStore")
+export class SessionStoreTag extends Context.Tag("@effect-auth/SessionStore")<
+  SessionStoreTag,
+  SessionStore
+>() { }
+
+// Public ergonomic alias
+export const SessionStore = SessionStoreTag
 
 /**
  * User store interface for managing user persistence
@@ -49,7 +55,7 @@ export interface UserStore {
    * Get a user by ID
    */
   readonly get: (userId: string) => Effect.Effect<Types.User, Errors.UserNotFoundError>
-  
+
   /**
    * Get user credentials (hashed password)
    */
@@ -59,7 +65,13 @@ export interface UserStore {
 /**
  * Tag for UserStore service
  */
-export const UserStore = Context.GenericTag<UserStore>("@effect-auth/UserStore")
+export class UserStoreTag extends Context.Tag("@effect-auth/UserStore")<
+  UserStoreTag,
+  UserStore
+>() { }
+
+// Public ergonomic alias
+export const UserStore = UserStoreTag
 
 /**
  * Session manager service
@@ -72,7 +84,7 @@ export interface SessionManager {
     userId: string,
     attributes?: Record<string, unknown>
   ) => Effect.Effect<Types.Session, Errors.AuthError>
-  
+
   /**
    * Validate a session and return it with the user
    */
@@ -82,12 +94,12 @@ export interface SessionManager {
     Types.SessionWithUser,
     Errors.SessionNotFoundError | Errors.SessionExpiredError | Errors.UserNotFoundError
   >
-  
+
   /**
    * Invalidate a session
    */
   readonly invalidateSession: (sessionId: string) => Effect.Effect<void, Errors.AuthError>
-  
+
   /**
    * Invalidate all sessions for a user
    */
@@ -97,7 +109,13 @@ export interface SessionManager {
 /**
  * Tag for SessionManager service
  */
-export const SessionManager = Context.GenericTag<SessionManager>("@effect-auth/SessionManager")
+export class SessionManagerTag extends Context.Tag("@effect-auth/SessionManager")<
+  SessionManagerTag,
+  SessionManager
+>() { }
+
+// Public ergonomic alias
+export const SessionManager = SessionManagerTag
 
 /**
  * Generate a secure random session ID
@@ -115,11 +133,11 @@ const generateSessionId = (): string => {
 export const makeSessionManager = (config: Types.SessionConfig): Effect.Effect<
   SessionManager,
   never,
-  SessionStore | UserStore
+  SessionStoreTag | UserStoreTag
 > =>
   Effect.gen(function* () {
-    const sessionStore = yield* SessionStore
-    const userStore = yield* UserStore
+    const sessionStore = yield* SessionStoreTag
+    const userStore = yield* UserStoreTag
 
     return {
       createSession: (userId, attributes = {}) =>
@@ -214,3 +232,6 @@ export const makeSessionManager = (config: Types.SessionConfig): Effect.Effect<
       invalidateUserSessions: (userId) => sessionStore.deleteByUserId(userId)
     }
   })
+
+export const SessionManagerLayer = (config: Types.SessionConfig) =>
+  Layer.effect(SessionManagerTag, makeSessionManager(config))

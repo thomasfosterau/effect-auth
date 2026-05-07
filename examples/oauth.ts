@@ -238,8 +238,8 @@ export const refreshGoogleToken = (userId: string) =>
 // =============================================================================
 
 const dependencies = Context.merge(
-  Context.make(Auth.OAuthStateStoreTag, oauthStateStore),
-  Context.make(Auth.OAuthAccountStoreTag, oauthAccountStore)
+  Context.make(Auth.OAuthStateStore, oauthStateStore),
+  Context.make(Auth.OAuthAccountStore, oauthAccountStore)
 )
 
 // Example: Run the OAuth flow simulation
@@ -253,7 +253,7 @@ const runExample = Effect.gen(function* () {
 
   // Step 2: Simulate OAuth callback (in real app, this comes from provider)
   // Uncomment the examples below to run them:
-  
+
   // const mockCode = "mock_authorization_code_from_google"
   // const mockState = "mock_state_from_step_1"
   // const result = yield* handleGoogleCallback(mockCode, mockState)

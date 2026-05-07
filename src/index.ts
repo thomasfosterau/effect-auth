@@ -7,41 +7,36 @@
  */
 
 // Core types
-export * from "./types.js"
-export * from "./errors.js"
-export * from "./requests.js"
+export * from "./Types.js"
+export * from "./Errors.js"
+export * from "./Requests.js"
 
 // Password hashing (following Oslo patterns)
-export * from "./password.js"
-export * from "./password-traits.js"
+export * from "./Password.js"
 
 // Session management (following Lucia/Copenhagen guidelines)
-export * from "./session.js"
+export * from "./Session.js"
 
 // Request resolvers
-export * from "./resolvers.js"
+export * from "./Resolvers.js"
 
 // Authorization
-export * from "./authorization.js"
+export * from "./Authorization.js"
 
 // OTP utilities (TOTP and HOTP, following Oslo patterns)
-export * from "./otp.js"
+export * from "./Otp.js"
 
 // WebAuthn (passkey authentication)
-export * from "./webauthn-types.js"
-export * from "./webauthn.js"
+export * from "./WebAuthn.js"
 
 // OAuth 2.0 / OIDC (inspired by BetterAuth)
-export * from "./oauth-types.js"
-export * from "./oauth.js"
+export * from "./OAuth.js"
 
 // Email verification (inspired by BetterAuth)
-export * from "./email-verification-types.js"
-export * from "./email-verification.js"
+export * from "./EmailVerification.js"
 
 // Rate limiting (inspired by BetterAuth)
-export * from "./rate-limit-types.js"
-export * from "./rate-limit.js"
+export * from "./RateLimit.js"
 
 // Re-export commonly used Effect types
 export { Effect, Context, Layer, RequestResolver } from "effect"

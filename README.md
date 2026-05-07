@@ -548,8 +548,8 @@ const refreshToken = (userId: string, provider: string) =>
 
 // Provide dependencies and run
 const oauthDependencies = Context.merge(
-  Context.make(Auth.OAuthStateStoreTag, oauthStateStore),
-  Context.make(Auth.OAuthAccountStoreTag, oauthAccountStore)
+  Context.make(Auth.OAuthStateStore, oauthStateStore),
+  Context.make(Auth.OAuthAccountStore, oauthAccountStore)
 )
 
 await Effect.runPromise(
@@ -626,7 +626,7 @@ const verifyEmail = (token: string) =>
 
 // Provide dependencies
 const emailDependencies = Context.make(
-  Auth.EmailVerificationStoreTag,
+  Auth.EmailVerificationStore,
   emailVerificationStore
 )
 
@@ -708,7 +708,7 @@ const rateLimits = {
 
 // Provide dependencies
 const rateLimitDependencies = Context.make(
-  Auth.RateLimitStoreTag,
+  Auth.RateLimitStore,
   rateLimitStore
 )
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { Effect } from "effect"
-import { makePasswordHasher, PasswordHasherLive } from "./password.js"
+import { makePasswordHasher, PasswordHasherLive } from "./Password.js"
 
 describe("PasswordHasher", () => {
   const hasher = makePasswordHasher()

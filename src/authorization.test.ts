@@ -5,8 +5,8 @@ import {
   requirePermission,
   RoleStore,
   AuthorizationPolicy
-} from "./authorization.js"
-import { PermissionDeniedError } from "./errors.js"
+} from "./Authorization.js"
+import { PermissionDeniedError } from "./Errors.js"
 
 // Mock role store for testing
 const mockRoleStore: RoleStore = {
