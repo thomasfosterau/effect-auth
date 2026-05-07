@@ -3,6 +3,9 @@ import * as Requests from "./Requests.js"
 import * as Errors from "./Errors.js"
 import { SessionManagerTag, UserStoreTag } from "./Session.js"
 import { PasswordHasherTag } from "./Password.js"
+import { AuthLifecycleServiceTag } from "./AuthLifecycle.js"
+import { PasswordResetServiceTag } from "./PasswordReset.js"
+import { UserServiceTag } from "./User.js"
 
 /**
  * Create a resolver for session creation
@@ -95,5 +98,120 @@ export const makeVerifyPasswordResolver = RequestResolver.fromEffect(
     Effect.gen(function* () {
       const passwordHasher = yield* PasswordHasherTag
       return yield* passwordHasher.verify(request.password, request.hash)
+    })
+)
+
+/**
+ * Resolver for SignUpEmailRequest
+ */
+export const signUpEmailResolver = RequestResolver.makeBatched(
+  (requests: Array<Requests.SignUpEmailRequest>) =>
+    Effect.forEach(requests, (request) =>
+      Effect.gen(function* () {
+        const authLifecycle = yield* AuthLifecycleServiceTag
+        return yield* authLifecycle.signUp(request.input)
+      })
+    )
+)
+
+/**
+ * Resolver for SignInEmailRequest
+ */
+export const signInEmailResolver = RequestResolver.makeBatched(
+  (requests: Array<Requests.SignInEmailRequest>) =>
+    Effect.forEach(requests, (request) =>
+      Effect.gen(function* () {
+        const authLifecycle = yield* AuthLifecycleServiceTag
+        return yield* authLifecycle.signIn(request.input)
+      })
+    )
+)
+
+/**
+ * Resolver for VerifyEmailRequest
+ */
+export const verifyEmailResolver = RequestResolver.makeBatched((requests: Array<Requests.VerifyEmailRequest>) =>
+  Effect.forEach(requests, (request) =>
+    Effect.gen(function* () {
+      const authLifecycle = yield* AuthLifecycleServiceTag
+      return yield* authLifecycle.verifyEmail(request.input)
+    })
+  )
+)
+
+/**
+ * Resolver for RequestPasswordResetRequest
+ */
+export const makeRequestPasswordResetResolver = RequestResolver.fromEffect(
+  (request: Requests.RequestPasswordResetRequest) =>
+    Effect.gen(function* () {
+      const passwordReset = yield* PasswordResetServiceTag
+      return yield* passwordReset.requestPasswordReset(request.email)
+    })
+)
+
+/**
+ * Resolver for ResetPasswordRequest
+ */
+export const makeResetPasswordResolver = RequestResolver.fromEffect(
+  (request: Requests.ResetPasswordRequest) =>
+    Effect.gen(function* () {
+      const passwordReset = yield* PasswordResetServiceTag
+      return yield* passwordReset.resetPassword(request.token, request.newPassword)
+    })
+)
+
+/**
+ * Resolver for GetUserRequest
+ */
+export const makeGetUserResolver = RequestResolver.fromEffect(
+  (request: Requests.GetUserRequest) =>
+    Effect.gen(function* () {
+      const userService = yield* UserServiceTag
+      return yield* userService.getUser(request.userId)
+    })
+)
+
+/**
+ * Resolver for GetUserByEmailRequest
+ */
+export const makeGetUserByEmailResolver = RequestResolver.fromEffect(
+  (request: Requests.GetUserByEmailRequest) =>
+    Effect.gen(function* () {
+      const userService = yield* UserServiceTag
+      return yield* userService.getUserByEmail(request.email)
+    })
+)
+
+/**
+ * Resolver for UpdateUserAttributesRequest
+ */
+export const makeUpdateUserAttributesResolver = RequestResolver.fromEffect(
+  (request: Requests.UpdateUserAttributesRequest) =>
+    Effect.gen(function* () {
+      const userService = yield* UserServiceTag
+      return yield* userService.updateUserAttributes(request.userId, request.attributes)
+    })
+)
+
+/**
+ * Resolver for MarkEmailVerifiedRequest
+ */
+export const makeMarkEmailVerifiedResolver = RequestResolver.fromEffect(
+  (request: Requests.MarkEmailVerifiedRequest) =>
+    Effect.gen(function* () {
+      const userService = yield* UserServiceTag
+      return yield* userService.markEmailVerified(request.userId)
+    })
+)
+
+/**
+ * Resolver for DeleteUserRequest
+ */
+export const makeDeleteUserResolver = RequestResolver.fromEffect(
+  (request: Requests.DeleteUserRequest) =>
+    Effect.gen(function* () {
+      const userService = yield* UserServiceTag
+      return yield* userService.deleteUser(request.userId)
     })
 )

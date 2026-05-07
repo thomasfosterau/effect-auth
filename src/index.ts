@@ -38,5 +38,17 @@ export * from "./EmailVerification.js"
 // Rate limiting (inspired by BetterAuth)
 export * from "./RateLimit.js"
 
+// Email and password authentication flows
+export * from "./EmailPassword.js"
+
+// Password reset flows
+export * from "./PasswordReset.js"
+
+// User service primitive
+export * from "./User.js"
+
+// High-level auth lifecycle orchestration
+export * from "./AuthLifecycle.js"
+
 // Re-export commonly used Effect types
 export { Effect, Context, Layer, RequestResolver } from "effect"
