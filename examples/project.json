@@ -1,0 +1,16 @@
+{
+  "name": "examples",
+  "projectType": "application",
+  "root": "examples",
+  "sourceRoot": "examples",
+  "targets": {
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["effect-auth:build"],
+      "options": {
+        "cwd": "examples",
+        "command": "bunx tsc --noEmit"
+      }
+    }
+  }
+}

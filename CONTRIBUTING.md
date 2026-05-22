@@ -48,12 +48,14 @@ Before contributing, please:
 1. **Fork the repository** on GitHub
 
 2. **Clone your fork**:
+
    ```bash
    git clone https://github.com/YOUR_USERNAME/effect-auth.git
    cd effect-auth
    ```
 
 3. **Install dependencies**:
+
    ```bash
    bun install
    ```
@@ -102,6 +104,7 @@ effect-auth/
 ### Development Workflow
 
 1. **Create a branch**:
+
    ```bash
    git checkout -b feature/your-feature-name
    ```
@@ -113,9 +116,10 @@ effect-auth/
    - Update documentation as needed
 
 3. **Write good commit messages**:
+
    ```
    Brief description (50 chars or less)
-   
+
    More detailed explanation if needed. Explain what and why,
    not how. Reference issues with #123.
    ```
@@ -183,22 +187,22 @@ bun run test:watch
 Example test structure:
 
 ```typescript
-import { describe, it, expect } from "vitest"
-import { Effect } from "effect"
+import { describe, it, expect } from "vitest";
+import { Effect } from "effect";
 
 describe("MyFeature", () => {
   it("should work correctly", () =>
     Effect.gen(function* () {
-      const result = yield* myFunction()
-      expect(result).toBe(expected)
-    }).pipe(Effect.runPromise))
-  
+      const result = yield* myFunction();
+      expect(result).toBe(expected);
+    }).pipe(Effect.runPromise));
+
   it("should handle errors", () =>
     Effect.gen(function* () {
-      const result = yield* Effect.flip(myFunction())
-      expect(result._tag).toBe("MyError")
-    }).pipe(Effect.runPromise))
-})
+      const result = yield* Effect.flip(myFunction());
+      expect(result._tag).toBe("MyError");
+    }).pipe(Effect.runPromise));
+});
 ```
 
 ### Test Requirements
@@ -215,14 +219,15 @@ All changes should include:
 ### Pull Request Process
 
 1. **Create a changeset** (for features, fixes, or breaking changes):
+
    ```bash
    bun run changeset
    ```
-   
+
    This will prompt you to:
    - Choose the version bump type (patch, minor, or major)
    - Write a summary of the changes
-   
+
    A changeset file will be created in `.changeset/` - commit this with your changes.
 
 2. **Update documentation**:
@@ -231,6 +236,7 @@ All changes should include:
    - Update examples if relevant
 
 3. **Ensure quality**:
+
    ```bash
    bun run build  # Must compile successfully
    bun run test   # All tests must pass
@@ -238,6 +244,7 @@ All changes should include:
    ```
 
 4. **Push to your fork**:
+
    ```bash
    git push origin feature/your-feature-name
    ```
@@ -253,25 +260,32 @@ All changes should include:
 
 ```markdown
 ## Description
+
 Brief description of changes
 
 ## Motivation
+
 Why are these changes needed?
 
 ## Changes Made
+
 - Change 1
 - Change 2
 
 ## Testing
+
 How were these changes tested?
 
 ## Security Considerations
+
 Any security implications?
 
 ## Breaking Changes
+
 Are there any breaking changes?
 
 ## Related Issues
+
 Fixes #123
 ```
 
@@ -304,6 +318,7 @@ Contributors don't need to worry about versioning - just create changesets for y
 **DO NOT** open public issues for security vulnerabilities.
 
 See [SECURITY.md](./SECURITY.md) for:
+
 - How to report security issues
 - Security requirements
 - Security best practices
@@ -355,4 +370,3 @@ By contributing to effect-auth, you agree that your contributions will be licens
 ---
 
 Thank you for contributing to effect-auth! 🎉
-

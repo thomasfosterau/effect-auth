@@ -29,6 +29,7 @@ Demonstrates the complete authentication flow:
 - Session invalidation
 
 **Run:**
+
 ```bash
 bun run examples/basic-auth.ts
 ```
@@ -44,6 +45,7 @@ Demonstrates role-based access control:
 - Multiple roles per user
 
 **Run:**
+
 ```bash
 bun run examples/authorization.ts
 ```
@@ -66,10 +68,10 @@ The examples demonstrate Effect's powerful composition:
 
 ```typescript
 const program = Effect.gen(function* () {
-  const service = yield* MyService
-  const result = yield* service.doSomething()
-  return result
-})
+  const service = yield* MyService;
+  const result = yield* service.doSomething();
+  return result;
+});
 ```
 
 ### Error Handling
@@ -77,7 +79,7 @@ const program = Effect.gen(function* () {
 Examples show Effect's type-safe error handling:
 
 ```typescript
-const result = yield* Effect.either(operation)
+const result = yield * Effect.either(operation);
 if (result._tag === "Left") {
   // Handle error
 } else {
@@ -92,11 +94,8 @@ All examples use Effect's Context for dependency injection:
 ```typescript
 Effect.provide(
   program,
-  Context.merge(
-    Context.make(SessionStore, mySessionStore),
-    Context.make(UserStore, myUserStore)
-  )
-)
+  Context.merge(Context.make(SessionStore, mySessionStore), Context.make(UserStore, myUserStore)),
+);
 ```
 
 ## Creating Your Own Examples

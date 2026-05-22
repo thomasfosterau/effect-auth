@@ -100,6 +100,7 @@ When implementing effect-auth in your application, you **MUST**:
    - Use HSTS headers
 
 2. **Secure Cookies**: Set proper cookie flags
+
    ```typescript
    {
      httpOnly: true,      // Prevent JavaScript access
@@ -374,4 +375,3 @@ https://github.com/thomasfosterau/effect-auth/issues
 
 **Last Updated**: 2026-02-07
 **Version**: 1.0.0
-
