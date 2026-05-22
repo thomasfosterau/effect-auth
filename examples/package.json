@@ -1,0 +1,10 @@
+{
+  "name": "@effect-auth/examples",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "effect": "^3.19.15",
+    "effect-auth": "workspace:*"
+  }
+}

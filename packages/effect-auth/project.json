@@ -1,0 +1,53 @@
+{
+  "name": "effect-auth",
+  "projectType": "library",
+  "root": "packages/effect-auth",
+  "sourceRoot": "packages/effect-auth/src",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/dist"],
+      "options": {
+        "cwd": "packages/effect-auth",
+        "command": "vp exec tsc"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "packages/effect-auth",
+        "command": "vp test run"
+      },
+      "configurations": {
+        "watch": {
+          "command": "vp test watch"
+        }
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "packages/effect-auth",
+        "command": "vp exec tsc --noEmit && vp test --typecheck --run"
+      }
+    },
+    "changeset": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "bunx changeset"
+      }
+    },
+    "version": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "bunx changeset version"
+      }
+    },
+    "release": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "bunx changeset publish"
+      }
+    }
+  }
+}

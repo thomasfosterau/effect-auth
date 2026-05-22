@@ -17,6 +17,7 @@ Effect Auth is a generic, type-safe authentication and authorization library for
 ### 1. Core Types (`src/types.ts`)
 
 Defines fundamental data structures:
+
 - `User`: User representation with ID and attributes
 - `Session`: Active session with expiration
 - `SessionWithUser`: Combined session and user data
@@ -27,6 +28,7 @@ Defines fundamental data structures:
 ### 2. Error Types (`src/errors.ts`)
 
 Type-safe errors using Effect's Data.TaggedError:
+
 - `AuthError`: Base authentication error
 - `InvalidCredentialsError`: Invalid credentials
 - `SessionNotFoundError`: Session not found
@@ -38,6 +40,7 @@ Type-safe errors using Effect's Data.TaggedError:
 ### 3. Request Types (`src/requests.ts`)
 
 Effect Request types for all operations:
+
 - `CreateSessionRequest`: Create new session
 - `ValidateSessionRequest`: Validate existing session
 - `InvalidateSessionRequest`: Invalidate session
@@ -50,6 +53,7 @@ Effect Request types for all operations:
 ### 4. Password Hashing (`src/password.ts`)
 
 Secure password hashing following Oslo guidelines:
+
 - **Algorithm**: PBKDF2-SHA256
 - **Iterations**: 210,000 (OWASP recommended)
 - **Key Length**: 64 bytes
@@ -57,10 +61,11 @@ Secure password hashing following Oslo guidelines:
 - **Timing-Safe Comparison**: Uses `crypto.timingSafeEqual`
 
 **Service Interface:**
+
 ```typescript
 interface PasswordHasher {
-  hash: (password: string) => Effect<HashedPassword, HashingError>
-  verify: (password: string, hash: string) => Effect<boolean, HashingError>
+  hash: (password: string) => Effect<HashedPassword, HashingError>;
+  verify: (password: string, hash: string) => Effect<boolean, HashingError>;
 }
 ```
 
@@ -69,6 +74,7 @@ interface PasswordHasher {
 Following Lucia/Copenhagen guidelines:
 
 **Key Features:**
+
 - Secure random session IDs (160 bits entropy)
 - Active period timeout (e.g., 30 days max lifetime)
 - Idle period timeout (e.g., 14 days of inactivity)
@@ -79,29 +85,35 @@ Following Lucia/Copenhagen guidelines:
 
 ```typescript
 interface SessionStore {
-  create: (session: Session) => Effect<Session, AuthError>
-  get: (sessionId: string) => Effect<Session, SessionNotFoundError>
-  update: (session: Session) => Effect<Session, AuthError>
-  delete: (sessionId: string) => Effect<void, AuthError>
-  deleteByUserId: (userId: string) => Effect<void, AuthError>
+  create: (session: Session) => Effect<Session, AuthError>;
+  get: (sessionId: string) => Effect<Session, SessionNotFoundError>;
+  update: (session: Session) => Effect<Session, AuthError>;
+  delete: (sessionId: string) => Effect<void, AuthError>;
+  deleteByUserId: (userId: string) => Effect<void, AuthError>;
 }
 
 interface UserStore {
-  get: (userId: string) => Effect<User, UserNotFoundError>
-  getCredentials: (userId: string) => Effect<string, UserNotFoundError>
+  get: (userId: string) => Effect<User, UserNotFoundError>;
+  getCredentials: (userId: string) => Effect<string, UserNotFoundError>;
 }
 
 interface SessionManager {
-  createSession: (userId: string, attributes?: Record<string, unknown>) => Effect<Session, AuthError>
-  validateSession: (sessionId: string) => Effect<SessionWithUser, SessionNotFoundError | SessionExpiredError | UserNotFoundError>
-  invalidateSession: (sessionId: string) => Effect<void, AuthError>
-  invalidateUserSessions: (userId: string) => Effect<void, AuthError>
+  createSession: (
+    userId: string,
+    attributes?: Record<string, unknown>,
+  ) => Effect<Session, AuthError>;
+  validateSession: (
+    sessionId: string,
+  ) => Effect<SessionWithUser, SessionNotFoundError | SessionExpiredError | UserNotFoundError>;
+  invalidateSession: (sessionId: string) => Effect<void, AuthError>;
+  invalidateUserSessions: (userId: string) => Effect<void, AuthError>;
 }
 ```
 
 ### 6. Resolvers (`src/resolvers.ts`)
 
 Effect RequestResolvers for all Request types:
+
 - Connects Requests to their implementations
 - Uses Effect's `RequestResolver.fromEffect`
 - Integrates with SessionManager, PasswordHasher, and stores
@@ -114,16 +126,23 @@ Role-Based Access Control (RBAC):
 
 ```typescript
 interface AuthorizationPolicy {
-  checkPermission: (userId: string, resource: string, action: string) => Effect<boolean, PermissionDeniedError>
+  checkPermission: (
+    userId: string,
+    resource: string,
+    action: string,
+  ) => Effect<boolean, PermissionDeniedError>;
 }
 
 interface RoleStore {
-  getUserRoles: (userId: string) => Effect<readonly string[], never>
-  getRolePermissions: (role: string) => Effect<readonly { resource: string; action: string }[], never>
+  getUserRoles: (userId: string) => Effect<readonly string[], never>;
+  getRolePermissions: (
+    role: string,
+  ) => Effect<readonly { resource: string; action: string }[], never>;
 }
 ```
 
 **Utility Functions:**
+
 - `makeRoleBasedPolicy()`: Create role-based authorization policy
 - `requirePermission()`: Helper to enforce permissions (throws if denied)
 
@@ -132,10 +151,12 @@ interface RoleStore {
 One-Time Password (OTP) support for Two-Factor Authentication:
 
 **Supported Algorithms:**
+
 - **TOTP (Time-Based OTP)**: RFC 6238 compliant
 - **HOTP (HMAC-Based OTP)**: RFC 4226 compliant
 
 **Key Features:**
+
 - Cryptographically secure secret generation
 - Base32 encoding/decoding for secrets
 - Support for SHA-1, SHA-256, and SHA-512 algorithms
@@ -165,15 +186,18 @@ generateOTPURI(params: OTPURIParams): string
 ```
 
 **Security Properties:**
+
 - Uses Node.js crypto module for HMAC and random generation
 - Implements dynamic truncation per RFC 4226 Section 5.3
 - Timing-safe comparison using `crypto.timingSafeEqual`
 - Compatible with Google Authenticator and other standard authenticator apps
+
 ### 8. WebAuthn (`src/webauthn.ts`, `src/webauthn-types.ts`)
 
 Passwordless authentication using passkeys following FIDO2/WebAuthn standards:
 
 **Key Features:**
+
 - Passkey registration and authentication
 - Challenge-based security (256 bits entropy)
 - Counter-based replay protection
@@ -185,28 +209,49 @@ Passwordless authentication using passkeys following FIDO2/WebAuthn standards:
 
 ```typescript
 interface ChallengeStore {
-  create: (challenge: WebAuthnChallenge) => Effect<WebAuthnChallenge, AuthError>
-  get: (challenge: Uint8Array) => Effect<WebAuthnChallenge, ChallengeNotFoundError>
-  delete: (challenge: Uint8Array) => Effect<void, AuthError>
+  create: (challenge: WebAuthnChallenge) => Effect<WebAuthnChallenge, AuthError>;
+  get: (challenge: Uint8Array) => Effect<WebAuthnChallenge, ChallengeNotFoundError>;
+  delete: (challenge: Uint8Array) => Effect<void, AuthError>;
 }
 
 interface CredentialStore {
-  create: (credential: WebAuthnCredential) => Effect<WebAuthnCredential, AuthError>
-  get: (credentialId: string) => Effect<WebAuthnCredential, CredentialNotFoundError>
-  update: (credential: WebAuthnCredential) => Effect<WebAuthnCredential, AuthError>
-  delete: (credentialId: string) => Effect<void, AuthError>
-  getByUserId: (userId: string) => Effect<readonly WebAuthnCredential[], AuthError>
+  create: (credential: WebAuthnCredential) => Effect<WebAuthnCredential, AuthError>;
+  get: (credentialId: string) => Effect<WebAuthnCredential, CredentialNotFoundError>;
+  update: (credential: WebAuthnCredential) => Effect<WebAuthnCredential, AuthError>;
+  delete: (credentialId: string) => Effect<void, AuthError>;
+  getByUserId: (userId: string) => Effect<readonly WebAuthnCredential[], AuthError>;
 }
 
 interface WebAuthnService {
-  generateRegistrationChallenge: (user: WebAuthnUser) => Effect<{ challenge: Uint8Array, expiresAt: number }, AuthError>
-  verifyRegistration: (challenge: Uint8Array, response: RegistrationResponse) => Effect<RegistrationResult, WebAuthnVerificationError | ChallengeNotFoundError | ChallengeExpiredError | AuthError>
-  generateAuthenticationChallenge: (userId: string) => Effect<{ challenge: Uint8Array, expiresAt: number }, AuthError>
-  verifyAuthentication: (challenge: Uint8Array, response: AuthenticationResponse) => Effect<AuthenticationResult, WebAuthnVerificationError | CredentialNotFoundError | ChallengeNotFoundError | ChallengeExpiredError | AuthError>
+  generateRegistrationChallenge: (
+    user: WebAuthnUser,
+  ) => Effect<{ challenge: Uint8Array; expiresAt: number }, AuthError>;
+  verifyRegistration: (
+    challenge: Uint8Array,
+    response: RegistrationResponse,
+  ) => Effect<
+    RegistrationResult,
+    WebAuthnVerificationError | ChallengeNotFoundError | ChallengeExpiredError | AuthError
+  >;
+  generateAuthenticationChallenge: (
+    userId: string,
+  ) => Effect<{ challenge: Uint8Array; expiresAt: number }, AuthError>;
+  verifyAuthentication: (
+    challenge: Uint8Array,
+    response: AuthenticationResponse,
+  ) => Effect<
+    AuthenticationResult,
+    | WebAuthnVerificationError
+    | CredentialNotFoundError
+    | ChallengeNotFoundError
+    | ChallengeExpiredError
+    | AuthError
+  >;
 }
 ```
 
 **Implementation powered by [@oslojs/webauthn](https://github.com/oslo-project/webauthn):**
+
 - Runtime-agnostic implementation
 - No third-party dependencies
 - Full TypeScript support
@@ -220,16 +265,15 @@ The library uses Effect's Request/Resolver pattern for flexibility:
 // Define a request
 const validateSession = Effect.request(
   ValidateSessionRequest({ sessionId: "abc123" }),
-  makeValidateSessionResolver
-)
+  makeValidateSessionResolver,
+);
 
 // Execute the request
-const result = await Effect.runPromise(
-  Effect.provide(validateSession, dependencies)
-)
+const result = await Effect.runPromise(Effect.provide(validateSession, dependencies));
 ```
 
 This pattern allows:
+
 - **Batching**: Multiple requests can be batched together
 - **Caching**: Requests can be cached automatically
 - **Testability**: Easy to mock resolvers in tests
@@ -238,12 +282,14 @@ This pattern allows:
 ## Security Considerations
 
 ### Password Security
+
 - ✅ PBKDF2-SHA256 with 210,000 iterations (OWASP recommended)
 - ✅ Random salt per password (16 bytes)
 - ✅ Timing-safe comparison to prevent timing attacks
 - ✅ Never store plaintext passwords
 
 ### Session Security
+
 - ✅ Cryptographically secure random IDs (160 bits entropy)
 - ✅ Both active and idle timeout periods
 - ✅ Automatic session expiration
@@ -251,12 +297,14 @@ This pattern allows:
 - ✅ Ability to invalidate all user sessions
 
 ### Authorization Security
+
 - ✅ Explicit permission checks
 - ✅ Type-safe permission errors
 - ✅ Principle of least privilege support
 - ✅ Role-based access control
 
 ### WebAuthn Security
+
 - ✅ Cryptographically secure random challenges (256 bits)
 - ✅ Challenge expiration (5 minutes default)
 - ✅ Origin verification on every request
@@ -271,26 +319,26 @@ This pattern allows:
 
 ```typescript
 // Hash password
-const hasher = yield* PasswordHasher
-const hashed = yield* hasher.hash("password")
+const hasher = yield * PasswordHasher;
+const hashed = yield * hasher.hash("password");
 
 // Create session after successful auth
-const manager = yield* makeSessionManager(config)
-const session = yield* manager.createSession("user-id")
+const manager = yield * makeSessionManager(config);
+const session = yield * manager.createSession("user-id");
 
 // Validate session on subsequent requests
-const { session, user } = yield* manager.validateSession(session.id)
+const { session, user } = yield * manager.validateSession(session.id);
 ```
 
 ### 2. Permission Checking
 
 ```typescript
 // Check permission
-const policy = yield* makeRoleBasedPolicy()
-const canCreate = yield* policy.checkPermission("user-id", "posts", "create")
+const policy = yield * makeRoleBasedPolicy();
+const canCreate = yield * policy.checkPermission("user-id", "posts", "create");
 
 // Require permission (throws if denied)
-yield* requirePermission("user-id", "posts", "create")
+yield * requirePermission("user-id", "posts", "create");
 ```
 
 ### 3. Custom Storage Implementation
@@ -299,16 +347,17 @@ Users implement storage interfaces for their database:
 
 ```typescript
 const sessionStore: SessionStore = {
-  create: (session) => 
+  create: (session) =>
     // Your database implementation
     Effect.tryPromise(() => db.sessions.insert(session)),
   // ... other methods
-}
+};
 ```
 
 ## Testing
 
 The library includes comprehensive tests:
+
 - **Password hashing tests**: Verify security properties
 - **Session management tests**: Test creation, validation, expiration
 - **Mock implementations**: Easy-to-use mocks for testing
@@ -322,6 +371,7 @@ The library includes comprehensive tests:
 ## Future Enhancements
 
 Possible future additions:
+
 - ~~Two-factor authentication (TOTP, HOTP)~~ ✅ Implemented
 - WebAuthn support
 - Two-factor authentication (TOTP)
