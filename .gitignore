@@ -147,3 +147,7 @@ vite.config.ts.timestamp-*
 
 .nx
 .claude/settings.local.json
+
+# @effect/docgen intermediate output — synced into site/src/content/docs/reference/api
+packages/effect-auth/docs/
+

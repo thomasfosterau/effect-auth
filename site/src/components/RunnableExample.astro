@@ -1,0 +1,180 @@
+---
+interface Props {
+  files: Record<string, string>;
+  entry?: string;
+  deps?: Record<string, string>;
+  label?: string;
+}
+
+const { files, entry = "index.ts", deps = {}, label = "Run example" } =
+  Astro.props;
+
+const payload = JSON.stringify({ files, entry, deps });
+---
+
+<runnable-example data-payload={payload}>
+  <div class="re-bar">
+    <button type="button" class="re-run">{label}</button>
+    <span class="re-status" aria-live="polite"></span>
+  </div>
+  <pre class="re-output" aria-label="Program output"></pre>
+</runnable-example>
+
+<style>
+  runnable-example {
+    display: block;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    overflow: hidden;
+    margin: 1.5rem 0;
+  }
+  .re-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--sl-color-gray-6);
+    border-bottom: 1px solid var(--sl-color-gray-5);
+  }
+  .re-run {
+    background: var(--sl-color-accent);
+    color: var(--sl-color-white);
+    border: none;
+    padding: 0.35rem 0.9rem;
+    border-radius: 0.35rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+  }
+  .re-run:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+  .re-status {
+    font-size: 0.85rem;
+    color: var(--sl-color-gray-2);
+  }
+  .re-output {
+    margin: 0;
+    padding: 0.75rem 1rem;
+    background: var(--sl-color-black);
+    color: var(--sl-color-white);
+    min-height: 6rem;
+    max-height: 24rem;
+    overflow: auto;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+</style>
+
+<script>
+  type Payload = {
+    files: Record<string, string>;
+    entry: string;
+    deps: Record<string, string>;
+  };
+
+  class RunnableExample extends HTMLElement {
+    private booted = false;
+    private container: any | null = null;
+
+    connectedCallback() {
+      const button = this.querySelector<HTMLButtonElement>(".re-run")!;
+      button.addEventListener("click", () => this.run());
+    }
+
+    private setStatus(text: string) {
+      const el = this.querySelector<HTMLElement>(".re-status");
+      if (el) el.textContent = text;
+    }
+
+    private append(text: string) {
+      const out = this.querySelector<HTMLElement>(".re-output");
+      if (out) out.textContent = (out.textContent ?? "") + text;
+    }
+
+    private clear() {
+      const out = this.querySelector<HTMLElement>(".re-output");
+      if (out) out.textContent = "";
+    }
+
+    private async ensureContainer() {
+      if (this.container) return this.container;
+      if (!window.crossOriginIsolated) {
+        throw new Error(
+          "Page is not cross-origin isolated. WebContainers requires COOP/COEP headers.",
+        );
+      }
+      const { WebContainer } = await import("@webcontainer/api");
+      this.container = await WebContainer.boot();
+      return this.container;
+    }
+
+    private async run() {
+      if (this.booted) {
+        this.clear();
+      }
+      const button = this.querySelector<HTMLButtonElement>(".re-run")!;
+      button.disabled = true;
+      this.setStatus("Booting…");
+
+      try {
+        const payload = JSON.parse(this.dataset.payload!) as Payload;
+        const container = await this.ensureContainer();
+
+        const filesTree: Record<string, any> = {
+          "package.json": {
+            file: {
+              contents: JSON.stringify(
+                {
+                  name: "runnable-example",
+                  type: "module",
+                  dependencies: payload.deps,
+                },
+                null,
+                2,
+              ),
+            },
+          },
+        };
+        for (const [path, contents] of Object.entries(payload.files)) {
+          filesTree[path] = { file: { contents } };
+        }
+        await container.mount(filesTree);
+
+        if (!this.booted) {
+          this.setStatus("Installing dependencies…");
+          const install = await container.spawn("npm", ["install"]);
+          install.output.pipeTo(
+            new WritableStream({ write: (chunk) => this.append(chunk) }),
+          );
+          const code = await install.exit;
+          if (code !== 0) throw new Error(`npm install exited with ${code}`);
+          this.booted = true;
+        }
+
+        this.setStatus("Running…");
+        this.clear();
+        const proc = await container.spawn("npx", [
+          "--yes",
+          "tsx",
+          payload.entry,
+        ]);
+        proc.output.pipeTo(
+          new WritableStream({ write: (chunk) => this.append(chunk) }),
+        );
+        const code = await proc.exit;
+        this.setStatus(code === 0 ? "Done" : `Exited with code ${code}`);
+      } catch (err) {
+        this.setStatus("Error");
+        this.append("\n" + (err instanceof Error ? err.message : String(err)));
+      } finally {
+        button.disabled = false;
+      }
+    }
+  }
+
+  if (!customElements.get("runnable-example")) {
+    customElements.define("runnable-example", RunnableExample);
+  }
+</script>

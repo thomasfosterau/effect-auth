@@ -1,0 +1,70 @@
+---
+title: Getting Started
+description: Install Effect Auth and wire up your first authentication flow.
+---
+
+Effect Auth is a set of authentication and authorization primitives built on
+[Effect](https://effect.website). It is **storage-agnostic** — you bring your
+own database — and ships as `Service`s and `Layer`s that compose with the rest
+of your Effect application.
+
+## Install
+
+```bash
+bun add effect effect-auth
+```
+
+## A first program with Effect
+
+Before wiring up auth, here's a Twoslash-checked Effect snippet — hover any
+identifier to see its type.
+
+```ts twoslash
+import { Effect } from "effect";
+
+const program = Effect.gen(function* () {
+  const greeting = yield* Effect.succeed("hello, effect-auth");
+  yield* Effect.log(greeting);
+  return greeting.length;
+});
+
+const length = await Effect.runPromise(program);
+//    ^?
+```
+
+## Provide a SessionStore
+
+`SessionStore` is the persistence boundary. Implement it against Redis,
+Postgres, or anything that can read and write a `Session` record.
+
+```ts
+import { Effect } from "effect";
+import * as Auth from "effect-auth";
+
+const sessions = new Map<string, Auth.Session>();
+
+const sessionStore: Auth.SessionStore = {
+  create: (s) => Effect.sync(() => (sessions.set(s.id, s), s)),
+  get: (id) =>
+    Effect.gen(function* () {
+      const s = sessions.get(id);
+      if (!s)
+        return yield* Effect.fail(
+          new Auth.SessionNotFoundError({ message: "not found", sessionId: id }),
+        );
+      return s;
+    }),
+  update: (s) => Effect.sync(() => (sessions.set(s.id, s), s)),
+  delete: (id) => Effect.sync(() => void sessions.delete(id)),
+  deleteByUserId: (uid) =>
+    Effect.sync(() => {
+      for (const [id, s] of sessions) if (s.userId === uid) sessions.delete(id);
+    }),
+};
+```
+
+## Next steps
+
+- See [Sessions](/guides/sessions/) for the full session lifecycle.
+- Browse the [API Reference](/reference/api/) for every exported module.
+- Try the live [Playground](/playground/) in your browser.

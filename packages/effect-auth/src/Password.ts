@@ -91,14 +91,17 @@ const parseAlgorithm = (hash: string): Effect.Effect<string, Errors.HashingError
  *
  * @example
  * ```typescript
- * const verifier = makeMultiAlgorithmVerifier([
- *   makePBKDF2Hasher(),
- *   makeArgon2Hasher(),
- *   makeBcryptHasher()
- * ])
+ * import { Effect } from "effect"
  *
- * // Will automatically detect which algorithm was used
- * const isValid = yield* verifier.verify(password, storedHash)
+ * declare const verifier: { verify: (p: string, h: string) => Effect.Effect<boolean> }
+ * declare const password: string
+ * declare const storedHash: string
+ *
+ * const program = Effect.gen(function* () {
+ *   // Will automatically detect which algorithm was used.
+ *   const isValid = yield* verifier.verify(password, storedHash)
+ *   return isValid
+ * })
  * ```
  */
 export const makeMultiAlgorithmVerifier = (
@@ -136,7 +139,10 @@ import { promisify } from "node:util";
 
 const pbkdf2 = promisify(crypto.pbkdf2);
 
-export type { HashedPassword } from "./Types.js";
+export type {
+  /** Re-export of {@link Types.HashedPassword} for convenience. */
+  HashedPassword,
+} from "./Types.js";
 
 /**
  * PBKDF2 Password Hasher implementing the PasswordHasher trait
