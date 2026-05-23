@@ -1,0 +1,19 @@
+# Cloudflare Pages configuration for the Effect Auth docs site.
+#
+# Deploy paths:
+#   1. Dashboard / Git integration (recommended) — connect this repo at
+#      https://dash.cloudflare.com/?to=/:account/workers-and-pages and set:
+#        Build command:           bun install && bun run build:site
+#        Build output directory:  site/dist
+#        Root directory:          /
+#        Environment variables:   NODE_VERSION=22, BUN_VERSION=1.2.5
+#
+#   2. Direct upload via Wrangler from inside `site/`:
+#        bunx wrangler pages deploy ./dist
+#
+# COOP/COEP headers required by StackBlitz WebContainers are served via
+# `public/_headers` and copied into `dist/` at build time.
+
+name = "effect-auth-docs"
+compatibility_date = "2026-05-01"
+pages_build_output_dir = "./dist"

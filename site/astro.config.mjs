@@ -11,6 +11,8 @@ const crossOriginIsolationHeaders = {
 };
 
 export default defineConfig({
+  // Update this once a custom domain is connected in the Cloudflare Pages dashboard.
+  site: "https://effect-auth-docs.pages.dev",
   vite: {
     server: { headers: crossOriginIsolationHeaders },
     preview: { headers: crossOriginIsolationHeaders },
