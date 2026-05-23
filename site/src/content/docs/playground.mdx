@@ -5,6 +5,26 @@ description: Run Effect Auth examples in the browser via StackBlitz WebContainer
 
 import RunnableExample from "../../components/RunnableExample.astro";
 
+export const helloDeps = {
+  effect: "^3.19.15",
+  tsx: "^4.19.0",
+  typescript: "^5.6.0",
+};
+
+export const helloFiles = {
+  "index.ts": [
+    'import { Effect } from "effect"',
+    "",
+    "const program = Effect.gen(function* () {",
+    '  yield* Effect.log("Effect Auth — hello from a WebContainer")',
+    '  yield* Effect.log("Replace this with a real Effect Auth example.")',
+    "})",
+    "",
+    "Effect.runPromise(program)",
+    "",
+  ].join("\n"),
+};
+
 The examples below boot a Node.js runtime inside your browser using
 [StackBlitz WebContainers](https://webcontainers.io/) and execute real Effect
 programs. The first run installs dependencies; subsequent runs reuse the
@@ -18,22 +38,9 @@ page. This site sets the necessary `COOP`/`COEP` headers in dev and via
 
 ## Hash and verify a password
 
-<RunnableExample
-  deps={{ "effect": "^3.19.15", "tsx": "^4.19.0", "typescript": "^5.6.0" }}
-  files={{
-    "index.ts": `import { Effect } from "effect"
-
-const program = Effect.gen(function* () {
-yield* Effect.log("Effect Auth — hello from a WebContainer")
-yield\* Effect.log("Replace this with a real Effect Auth example.")
-})
-
-Effect.runPromise(program)
-`,
-}}
-/>
+<RunnableExample files={helloFiles} deps={helloDeps} />
 
 ## Add your own
 
-Edit `site/src/content/docs/playground.mdx` and drop in another
-`<RunnableExample>` with the files and deps you need.
+Edit `site/src/content/docs/playground.mdx` — define your `files` and `deps`
+as `export const` values, then drop in another `<RunnableExample>`.

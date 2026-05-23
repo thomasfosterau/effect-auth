@@ -62,15 +62,12 @@ them with `Effect.catchTags` for ergonomic, type-safe recovery — Twoslash
 will pick the right type on hover.
 
 ```ts twoslash
-import { Effect, Data } from "effect";
+import { Data } from "effect";
 
 class SessionNotFound extends Data.TaggedError("SessionNotFound")<{
   readonly sessionId: string;
 }> {}
 
-const failing = Effect.fail(new SessionNotFound({ sessionId: "abc" }));
-const recovered = failing.pipe(
-  Effect.catchTag("SessionNotFound", (err) => Effect.succeed(err.sessionId)),
-);
+const err = new SessionNotFound({ sessionId: "abc" });
 //    ^?
 ```
