@@ -1,39 +1,35 @@
 ---
-title: Welcome to Starlight
-description: Get started building your docs site with Starlight.
-template: splash # Remove or comment out this line to display the site sidebar on this page.
+title: Effect Auth
+description: Authentication and authorization primitives for the Effect ecosystem.
+template: splash
 hero:
-  tagline: Congrats on setting up a new Starlight project!
-  image:
-    file: ../../assets/houston.webp
+  tagline: Composable auth primitives built on Effect — sessions, passwords, OTP, WebAuthn, OAuth.
   actions:
-    - text: Example Guide
-      link: /guides/example/
+    - text: Get started
+      link: /guides/getting-started/
       icon: right-arrow
-    - text: Read the Starlight docs
-      link: https://starlight.astro.build
+    - text: View on GitHub
+      link: https://github.com/thomasfosterau/effect-auth
       icon: external
       variant: minimal
 ---
 
 import { Card, CardGrid } from "@astrojs/starlight/components";
 
-## Next steps
+## Why Effect Auth
 
 <CardGrid stagger>
-  <Card title="Update content" icon="pencil">
-    Edit `src/content/docs/index.mdx` to see this page change.
+  <Card title="Effect-native" icon="puzzle">
+    Built around `Request`/`Resolver`, services, and layers — no framework lock-in, no global state.
   </Card>
-  <Card title="Change page layout" icon="document">
-    Delete `template: splash` in `src/content/docs/index.mdx` to display a sidebar on this page.
+  <Card title="Batteries included" icon="rocket">
+    Sessions, password hashing, OTP, WebAuthn, OAuth, email verification, rate limiting, and
+    password resets.
   </Card>
-  <Card title="Add new content" icon="add-document">
-    Add Markdown or MDX files to `src/content/docs` to create new pages.
+  <Card title="Drop-in primitives" icon="setting">
+    Use just the pieces you need. Bring your own storage, transport, and identity model.
   </Card>
-  <Card title="Configure your site" icon="setting">
-    Edit your `sidebar` and other config in `astro.config.mjs`.
-  </Card>
-  <Card title="Read the docs" icon="open-book">
-    Learn more in [the Starlight Docs](https://starlight.astro.build/).
+  <Card title="Try it live" icon="seti:typescript">
+    Real, runnable Effect programs in the browser — see [the playground](/playground/).
   </Card>
 </CardGrid>

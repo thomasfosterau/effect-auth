@@ -32,7 +32,8 @@
     "release": "nx run effect-auth:build && nx run effect-auth:release",
     "dev:site": "nx dev site",
     "build:site": "nx build site",
-    "preview:site": "nx preview site"
+    "preview:site": "nx preview site",
+    "docs:api": "nx docs effect-auth && bun run --cwd site sync:api"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",

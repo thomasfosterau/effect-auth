@@ -6,49 +6,61 @@
  * for flexible, composable authentication flows.
  */
 
-// Core types
+/** Core domain types. */
 export * from "./Types.js";
+
+/** Tagged errors raised across the library. */
 export * from "./Errors.js";
+
+/** Effect `Request` definitions for auth operations. */
 export * from "./Requests.js";
 
-// Password hashing (following Oslo patterns)
+/** Password hashing (following Oslo patterns). */
 export * from "./Password.js";
 
-// Session management (following Lucia/Copenhagen guidelines)
+/** Session management (following Lucia/Copenhagen guidelines). */
 export * from "./Session.js";
 
-// Request resolvers
+/** Request resolvers wiring stores to requests. */
 export * from "./Resolvers.js";
 
-// Authorization
+/** Authorization primitives. */
 export * from "./Authorization.js";
 
-// OTP utilities (TOTP and HOTP, following Oslo patterns)
+/** OTP utilities (TOTP and HOTP, following Oslo patterns). */
 export * from "./Otp.js";
 
-// WebAuthn (passkey authentication)
+/** WebAuthn (passkey authentication). */
 export * from "./WebAuthn.js";
 
-// OAuth 2.0 / OIDC (inspired by BetterAuth)
+/** OAuth 2.0 / OIDC (inspired by BetterAuth). */
 export * from "./OAuth.js";
 
-// Email verification (inspired by BetterAuth)
+/** Email verification (inspired by BetterAuth). */
 export * from "./EmailVerification.js";
 
-// Rate limiting (inspired by BetterAuth)
+/** Rate limiting (inspired by BetterAuth). */
 export * from "./RateLimit.js";
 
-// Email and password authentication flows
+/** Email and password authentication flows. */
 export * from "./EmailPassword.js";
 
-// Password reset flows
+/** Password reset flows. */
 export * from "./PasswordReset.js";
 
-// User service primitive
+/** User service primitive. */
 export * from "./User.js";
 
-// High-level auth lifecycle orchestration
+/** High-level auth lifecycle orchestration. */
 export * from "./AuthLifecycle.js";
 
-// Re-export commonly used Effect types
-export { Effect, Context, Layer, RequestResolver } from "effect";
+export {
+  /** Re-export of `Effect` from `effect`. */
+  Effect,
+  /** Re-export of `Context` from `effect`. */
+  Context,
+  /** Re-export of `Layer` from `effect`. */
+  Layer,
+  /** Re-export of `RequestResolver` from `effect`. */
+  RequestResolver,
+} from "effect";

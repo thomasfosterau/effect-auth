@@ -31,6 +31,14 @@
         "command": "vp exec tsc --noEmit && vp test --typecheck --run"
       }
     },
+    "docs": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/docs"],
+      "options": {
+        "cwd": "packages/effect-auth",
+        "command": "bun run docs"
+      }
+    },
     "changeset": {
       "executor": "nx:run-commands",
       "options": {

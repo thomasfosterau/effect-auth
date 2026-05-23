@@ -1,0 +1,73 @@
+---
+title: Sessions
+description: Create, validate, and invalidate sessions with the SessionManager service.
+---
+
+Sessions in Effect Auth follow the Lucia / Copenhagen model: opaque session
+IDs, an active period during which the session is freely usable, and an idle
+period that triggers rolling renewal on activity.
+
+## Configure expiry
+
+```ts
+import * as Auth from "effect-auth";
+
+const sessionConfig: Auth.SessionConfig = {
+  sessionExpiresIn: {
+    activePeriod: 1000 * 60 * 60 * 24 * 30, // 30 days
+    idlePeriod: 1000 * 60 * 60 * 24 * 14, // renew if older than 14d
+  },
+};
+```
+
+## Create and validate
+
+```ts
+import { Effect } from "effect";
+import * as Auth from "effect-auth";
+
+declare const sessionConfig: Auth.SessionConfig;
+
+const program = Effect.gen(function* () {
+  const sessions = yield* Auth.makeSessionManager(sessionConfig);
+
+  const session = yield* sessions.createSession("user-1", {
+    ip: "192.168.1.1",
+    userAgent: "Mozilla/5.0",
+  });
+
+  const { session: valid, user } = yield* sessions.validateSession(session.id);
+  yield* Effect.log(`signed in as ${user.attributes.email}`);
+  return valid;
+});
+```
+
+## Invalidate all sessions for a user
+
+Useful after a password change or "sign out everywhere":
+
+```ts
+import { Effect } from "effect";
+import * as Auth from "effect-auth";
+
+declare const sessions: Auth.SessionManager;
+
+const signOutEverywhere = (userId: string) => sessions.invalidateUserSessions(userId);
+```
+
+## Error model
+
+Session operations fail with tagged errors from `effect-auth`. Pattern-match
+them with `Effect.catchTags` for ergonomic, type-safe recovery — Twoslash
+will pick the right type on hover.
+
+```ts twoslash
+import { Data } from "effect";
+
+class SessionNotFound extends Data.TaggedError("SessionNotFound")<{
+  readonly sessionId: string;
+}> {}
+
+const err = new SessionNotFound({ sessionId: "abc" });
+//    ^?
+```

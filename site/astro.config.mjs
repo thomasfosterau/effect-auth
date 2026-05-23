@@ -1,24 +1,52 @@
 // @ts-check
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import ecTwoSlash from "expressive-code-twoslash";
 
-// https://astro.build/config
+// COOP/COEP headers are required for StackBlitz WebContainers (used by
+// <RunnableExample>). Mirrored for production in `public/_headers`.
+const crossOriginIsolationHeaders = {
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "Cross-Origin-Opener-Policy": "same-origin",
+};
+
 export default defineConfig({
+  // Update this once a custom domain is connected in the Cloudflare Pages dashboard.
+  site: "https://effect-auth-docs.pages.dev",
+  vite: {
+    server: { headers: crossOriginIsolationHeaders },
+    preview: { headers: crossOriginIsolationHeaders },
+  },
   integrations: [
     starlight({
-      title: "My Docs",
-      social: [{ icon: "github", label: "GitHub", href: "https://github.com/withastro/starlight" }],
+      title: "Effect Auth",
+      description: "Authentication and authorization primitives for the Effect ecosystem.",
+      social: [
+        {
+          icon: "github",
+          label: "GitHub",
+          href: "https://github.com/thomasfosterau/effect-auth",
+        },
+      ],
+      expressiveCode: {
+        plugins: [ecTwoSlash()],
+        themes: ["github-dark", "github-light"],
+      },
       sidebar: [
         {
           label: "Guides",
           items: [
-            // Each item here is one entry in the navigation menu.
-            { label: "Example Guide", slug: "guides/example" },
+            { label: "Getting Started", slug: "guides/getting-started" },
+            { label: "Sessions", slug: "guides/sessions" },
+            { label: "Multi-Algorithm Hashing", slug: "guides/multi-algorithm" },
+            { label: "BetterAuth Integration", slug: "guides/betterauth-integration" },
           ],
         },
+        { label: "Playground", slug: "playground" },
         {
-          label: "Reference",
-          autogenerate: { directory: "reference" },
+          label: "API Reference",
+          autogenerate: { directory: "reference/api" },
+          collapsed: true,
         },
       ],
     }),
