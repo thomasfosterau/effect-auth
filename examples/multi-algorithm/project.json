@@ -1,0 +1,16 @@
+{
+  "name": "multi-algorithm-example",
+  "projectType": "application",
+  "root": "examples/multi-algorithm",
+  "sourceRoot": "examples/multi-algorithm",
+  "targets": {
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["effect-auth:build"],
+      "options": {
+        "cwd": "examples/multi-algorithm",
+        "command": "bunx tsc --noEmit"
+      }
+    }
+  }
+}
