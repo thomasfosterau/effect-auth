@@ -17,9 +17,20 @@ const DST = resolve(here, "../src/content/docs/reference/api");
 
 const titleFromName = (file) => file.replace(/\.ts\.md$/, "").replace(/\.md$/, "");
 
+// docgen renders re-export signatures using TypeScript's checker, which
+// includes absolute on-disk paths to type declaration files
+// (e.g. `typeof import("/.../node_modules/effect/dist/dts/Effect")`).
+// Collapse those to bare package paths so the rendered signature is portable
+// and readable.
+const cleanAbsoluteTypePaths = (body) =>
+  body.replace(/import\("([^"]*\/node_modules\/)([^"]+)"\)/g, (_match, _prefix, rest) => {
+    const cleaned = rest.replace(/\/dist\/dts\//, "/").replace(/\.d\.ts$/, "");
+    return `import("${cleaned}")`;
+  });
+
 const rewrite = (raw, title) => {
   const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n?/);
-  const body = fmMatch ? raw.slice(fmMatch[0].length) : raw;
+  const body = cleanAbsoluteTypePaths(fmMatch ? raw.slice(fmMatch[0].length) : raw);
   const description = `API reference for the ${title} module.`;
   const frontmatter = `---\ntitle: ${JSON.stringify(title)}\ndescription: ${JSON.stringify(description)}\n---\n\n`;
   return frontmatter + body;

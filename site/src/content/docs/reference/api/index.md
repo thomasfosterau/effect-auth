@@ -215,7 +215,7 @@ Re-export of `Context` from `effect`.
 **Signature**
 
 ```ts
-export declare const Context: typeof import("/home/user/effect-auth/node_modules/effect/dist/dts/Context");
+export declare const Context: typeof import("effect/Context");
 ```
 
 ## Effect
@@ -225,7 +225,7 @@ Re-export of `Effect` from `effect`.
 **Signature**
 
 ```ts
-export declare const Effect: typeof import("/home/user/effect-auth/node_modules/effect/dist/dts/Effect");
+export declare const Effect: typeof import("effect/Effect");
 ```
 
 ## Layer
@@ -235,7 +235,7 @@ Re-export of `Layer` from `effect`.
 **Signature**
 
 ```ts
-export declare const Layer: typeof import("/home/user/effect-auth/node_modules/effect/dist/dts/Layer");
+export declare const Layer: typeof import("effect/Layer");
 ```
 
 ## RequestResolver
@@ -245,5 +245,5 @@ Re-export of `RequestResolver` from `effect`.
 **Signature**
 
 ```ts
-export declare const RequestResolver: typeof import("/home/user/effect-auth/node_modules/effect/dist/dts/RequestResolver");
+export declare const RequestResolver: typeof import("effect/RequestResolver");
 ```

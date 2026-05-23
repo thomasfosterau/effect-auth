@@ -36,6 +36,8 @@ export default defineConfig({
           items: [
             { label: "Getting Started", slug: "guides/getting-started" },
             { label: "Sessions", slug: "guides/sessions" },
+            { label: "Multi-Algorithm Hashing", slug: "guides/multi-algorithm" },
+            { label: "BetterAuth Integration", slug: "guides/betterauth-integration" },
           ],
         },
         { label: "Playground", slug: "playground" },
