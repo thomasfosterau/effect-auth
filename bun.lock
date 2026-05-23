@@ -13,7 +13,7 @@
         "vite-plus": "^0.1.22",
       },
     },
-    "examples": {
+    "examples/snippets": {
       "name": "@effect-auth/examples",
       "version": "0.0.0",
       "dependencies": {
@@ -116,7 +116,7 @@
 
     "@ec-ts/vfs": ["@ec-ts/vfs@1.0.0", "", { "peerDependencies": { "typescript": "^5.5.0" } }, "sha512-GQYRPMp58p9ak+TOwSLB/HZ+iknFyTRjqMTdXDkitNN3h5yjHuO+yeeO+/cuXiv7dyXGLYs4HaYrFgRKImp8yg=="],
 
-    "@effect-auth/examples": ["@effect-auth/examples@workspace:examples"],
+    "@effect-auth/examples": ["@effect-auth/examples@workspace:examples/snippets"],
 
     "@effect/docgen": ["@effect/docgen@0.5.2", "", { "dependencies": { "@effect/markdown-toc": "^0.1.0", "doctrine": "^3.0.0", "glob": "^10.3.12", "prettier": "^3.2.5" }, "peerDependencies": { "tsx": "^4.1.0", "typescript": "^5.2.2" }, "bin": { "docgen": "bin.cjs" } }, "sha512-gqBxAhp58R18vT5+ORobWRQ/2MaF5vH0k1zggSct54J41k8TKF5mYIW1qG5tkOVCejet+8K5MKsWK3gzIkaoMw=="],
 

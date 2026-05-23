@@ -1,127 +1,61 @@
 # Examples
 
-This directory contains complete, runnable examples demonstrating the features of effect-auth.
+This directory contains runnable examples that demonstrate how to use
+`effect-auth`. There are two kinds of examples:
 
-## Running the Examples
+## Snippets — short, single-file demos
 
-Make sure you have built the project first:
+[`snippets/`](./snippets) — focused scripts that show off individual
+features of the library (password hashing, sessions, authorization, OAuth,
+WebAuthn, multi-algorithm hashing).
+
+Make sure you have built the package first:
 
 ```bash
 bun run build
 ```
 
-Then you can run any example directly with Bun:
+Then run any snippet directly:
 
 ```bash
-bun run examples/basic-auth.ts
+bun run examples/snippets/basic-auth.ts
+bun run examples/snippets/authorization.ts
+bun run examples/snippets/oauth.ts
+bun run examples/snippets/webauthn.ts
+bun run examples/snippets/multi-algorithm.ts
 ```
 
-## Available Examples
+## RealWorld apps — full Conduit implementations per framework
 
-### 1. Basic Authentication (`basic-auth.ts`)
+Each subdirectory below is an end-to-end implementation of the
+[RealWorld / Conduit](https://github.com/gothinkster/realworld) spec
+(a Medium clone — auth, articles, comments, favorites, follows, tags,
+feeds) showing idiomatic `effect-auth` integration for that framework:
 
-Demonstrates the complete authentication flow:
+| Framework            | Path                                                      |
+| -------------------- | --------------------------------------------------------- |
+| SvelteKit            | [`realworld-sveltekit/`](./realworld-sveltekit)           |
+| Next.js (App Router) | [`realworld-nextjs/`](./realworld-nextjs)                 |
+| Nuxt                 | [`realworld-nuxt/`](./realworld-nuxt)                     |
+| Remix                | [`realworld-remix/`](./realworld-remix)                   |
+| TanStack Start       | [`realworld-tanstack-start/`](./realworld-tanstack-start) |
+| Hono                 | [`realworld-hono/`](./realworld-hono)                     |
 
-- Password hashing with PBKDF2-SHA256
-- Session creation and management
-- Session validation
-- Credential verification
-- Session invalidation
+Each app is fully self-contained — its own SQLite database, its own
+`effect-auth` storage adapters, its own UI. This is intentional: pick
+the framework you care about and read it top-to-bottom without jumping
+into shared code.
 
-**Run:**
+All RealWorld apps share these conventions:
 
-```bash
-bun run examples/basic-auth.ts
-```
+- **Database**: SQLite via [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) and [Drizzle ORM](https://orm.drizzle.team).
+- **Auth**: Email + password + opaque session cookies (no JWTs). Password hashing via `effect-auth`'s default PBKDF2-SHA256 hasher.
+- **API contract**: Matches the canonical Conduit JSON spec, so you can point the [Conduit Postman collection](https://github.com/gothinkster/realworld/tree/main/api) at any of them.
 
-### 2. Authorization (`authorization.ts`)
+See each app's `README.md` for run instructions and what's different
+about that framework's integration.
 
-Demonstrates role-based access control:
-
-- Setting up roles and permissions
-- Checking permissions for different users
-- Using `requirePermission` to protect operations
-- Handling permission denied errors
-- Multiple roles per user
-
-**Run:**
-
-```bash
-bun run examples/authorization.ts
-```
-
-## Key Concepts Demonstrated
-
-### Storage Adapters
-
-Both examples show how to implement storage adapters:
-
-- **SessionStore**: For persisting sessions (using in-memory Map for demo)
-- **UserStore**: For retrieving user data
-- **RoleStore**: For role-based authorization
-
-In production, replace these with real database implementations (PostgreSQL, Redis, MongoDB, etc.).
-
-### Effect Composition
-
-The examples demonstrate Effect's powerful composition:
-
-```typescript
-const program = Effect.gen(function* () {
-  const service = yield* MyService;
-  const result = yield* service.doSomething();
-  return result;
-});
-```
-
-### Error Handling
-
-Examples show Effect's type-safe error handling:
-
-```typescript
-const result = yield * Effect.either(operation);
-if (result._tag === "Left") {
-  // Handle error
-} else {
-  // Handle success
-}
-```
-
-### Dependency Injection
-
-All examples use Effect's Context for dependency injection:
-
-```typescript
-Effect.provide(
-  program,
-  Context.merge(Context.make(SessionStore, mySessionStore), Context.make(UserStore, myUserStore)),
-);
-```
-
-## Creating Your Own Examples
-
-To create a new example:
-
-1. Create a new `.ts` file in this directory
-2. Import from `../src/index.js`
-3. Implement required storage adapters
-4. Create an Effect program demonstrating the feature
-5. Add error handling and logging
-6. Export your program and run function
-
-## Production Considerations
-
-When adapting these examples for production:
-
-1. **Use Real Databases**: Replace in-memory Maps with proper database connections
-2. **Add Error Handling**: Implement comprehensive error handling and logging
-3. **Secure Storage**: Use secure, encrypted storage for sensitive data
-4. **Connection Pooling**: Use connection pools for database access
-5. **Rate Limiting**: Implement rate limiting for authentication attempts
-6. **Monitoring**: Add monitoring and alerting for security events
-7. **Testing**: Write comprehensive tests for your implementations
-
-## Further Reading
+## Further reading
 
 - [Effect Documentation](https://effect.website/)
 - [Lucia Authentication](https://lucia-auth.com/)
