@@ -1,14 +1,14 @@
 {
-  "name": "examples",
+  "name": "authorization-example",
   "projectType": "application",
-  "root": "examples",
-  "sourceRoot": "examples",
+  "root": "examples/authorization",
+  "sourceRoot": "examples/authorization",
   "targets": {
     "typecheck": {
       "executor": "nx:run-commands",
       "dependsOn": ["effect-auth:build"],
       "options": {
-        "cwd": "examples",
+        "cwd": "examples/authorization",
         "command": "bunx tsc --noEmit"
       }
     }

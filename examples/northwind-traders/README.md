@@ -11,8 +11,16 @@ exercised — token exchange is left as a comment).
 
 ## Run
 
+From the repo root:
+
 ```bash
-bun run examples/northwind-traders/main.ts
+bun --filter @effect-auth-examples/northwind-traders start
+```
+
+Or from this directory:
+
+```bash
+bun run main.ts
 ```
 
 The scenario prints a banner for each step and narrates the result.

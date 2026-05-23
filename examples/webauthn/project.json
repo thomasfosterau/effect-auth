@@ -1,0 +1,16 @@
+{
+  "name": "webauthn-example",
+  "projectType": "application",
+  "root": "examples/webauthn",
+  "sourceRoot": "examples/webauthn",
+  "targets": {
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["effect-auth:build"],
+      "options": {
+        "cwd": "examples/webauthn",
+        "command": "bunx tsc --noEmit"
+      }
+    }
+  }
+}

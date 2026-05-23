@@ -1,8 +1,12 @@
 {
-  "name": "@effect-auth/examples",
+  "name": "@effect-auth-examples/webauthn",
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "start": "bun run index.ts",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "effect": "^3.19.15",
     "effect-auth": "workspace:*"

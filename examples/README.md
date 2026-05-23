@@ -1,54 +1,39 @@
 # Examples
 
-This directory contains complete, runnable examples demonstrating the features of effect-auth.
+Each example is its own workspace package under this directory. Drop into a
+package and run it directly, or invoke it from the repo root via Bun's
+`--filter` flag.
 
-## Running the Examples
+## Running
 
-Make sure you have built the project first:
+Build the library first so its declaration files exist:
 
 ```bash
 bun run build
 ```
 
-Then you can run any example directly with Bun:
+Then run any example via its workspace name:
 
 ```bash
-bun run examples/basic-auth.ts
+bun --filter @effect-auth-examples/basic-auth start
+```
+
+…or by entering the directory:
+
+```bash
+cd examples/basic-auth && bun run index.ts
 ```
 
 ## Available Examples
 
-### 1. Basic Authentication (`basic-auth.ts`)
-
-Demonstrates the complete authentication flow:
-
-- Password hashing with PBKDF2-SHA256
-- Session creation and management
-- Session validation
-- Credential verification
-- Session invalidation
-
-**Run:**
-
-```bash
-bun run examples/basic-auth.ts
-```
-
-### 2. Authorization (`authorization.ts`)
-
-Demonstrates role-based access control:
-
-- Setting up roles and permissions
-- Checking permissions for different users
-- Using `requirePermission` to protect operations
-- Handling permission denied errors
-- Multiple roles per user
-
-**Run:**
-
-```bash
-bun run examples/authorization.ts
-```
+| Package                                   | Path                 | Demonstrates                                                                                      |
+| ----------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------- |
+| `@effect-auth-examples/basic-auth`        | `basic-auth/`        | Password hashing, session create/validate/invalidate.                                             |
+| `@effect-auth-examples/authorization`     | `authorization/`     | Role-based access control, `requirePermission`.                                                   |
+| `@effect-auth-examples/oauth`             | `oauth/`             | OAuth 2.0 social-login flows.                                                                     |
+| `@effect-auth-examples/webauthn`          | `webauthn/`          | Passkey / WebAuthn flow.                                                                          |
+| `@effect-auth-examples/multi-algorithm`   | `multi-algorithm/`   | Multi-algorithm password verification.                                                            |
+| `@effect-auth-examples/northwind-traders` | `northwind-traders/` | End-to-end app: sign-up, email verification, sessions, RBAC, rate-limiting, OAuth URL generation. |
 
 ## Key Concepts Demonstrated
 
@@ -100,14 +85,17 @@ Effect.provide(
 
 ## Creating Your Own Examples
 
-To create a new example:
+Each example is a standalone workspace package. To add one:
 
-1. Create a new `.ts` file in this directory
-2. Import from `../src/index.js`
-3. Implement required storage adapters
-4. Create an Effect program demonstrating the feature
-5. Add error handling and logging
-6. Export your program and run function
+1. Create a new directory under `examples/` (e.g. `examples/my-feature/`).
+2. Add a `package.json` with `"effect-auth": "workspace:*"` as a dependency and
+   a `start` script that runs your entry file.
+3. Add a `tsconfig.json` extending `../../tsconfig.base.json`.
+4. Add a `project.json` if you want an nx target for typecheck (mirror the
+   other examples).
+5. Write your example as `index.ts` (or any other entry file referenced from
+   your `start` script). Import `* as Auth from "effect-auth"`.
+6. Run `bun install` at the repo root so the workspace is linked.
 
 ## Production Considerations
 

@@ -13,8 +13,48 @@
         "vite-plus": "^0.1.22",
       },
     },
-    "examples": {
-      "name": "@effect-auth/examples",
+    "examples/authorization": {
+      "name": "@effect-auth-examples/authorization",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "^3.19.15",
+        "effect-auth": "workspace:*",
+      },
+    },
+    "examples/basic-auth": {
+      "name": "@effect-auth-examples/basic-auth",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "^3.19.15",
+        "effect-auth": "workspace:*",
+      },
+    },
+    "examples/multi-algorithm": {
+      "name": "@effect-auth-examples/multi-algorithm",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "^3.19.15",
+        "effect-auth": "workspace:*",
+      },
+    },
+    "examples/northwind-traders": {
+      "name": "@effect-auth-examples/northwind-traders",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "^3.19.15",
+        "effect-auth": "workspace:*",
+      },
+    },
+    "examples/oauth": {
+      "name": "@effect-auth-examples/oauth",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "^3.19.15",
+        "effect-auth": "workspace:*",
+      },
+    },
+    "examples/webauthn": {
+      "name": "@effect-auth-examples/webauthn",
       "version": "0.0.0",
       "dependencies": {
         "effect": "^3.19.15",
@@ -116,7 +156,17 @@
 
     "@ec-ts/vfs": ["@ec-ts/vfs@1.0.0", "", { "peerDependencies": { "typescript": "^5.5.0" } }, "sha512-GQYRPMp58p9ak+TOwSLB/HZ+iknFyTRjqMTdXDkitNN3h5yjHuO+yeeO+/cuXiv7dyXGLYs4HaYrFgRKImp8yg=="],
 
-    "@effect-auth/examples": ["@effect-auth/examples@workspace:examples"],
+    "@effect-auth-examples/authorization": ["@effect-auth-examples/authorization@workspace:examples/authorization"],
+
+    "@effect-auth-examples/basic-auth": ["@effect-auth-examples/basic-auth@workspace:examples/basic-auth"],
+
+    "@effect-auth-examples/multi-algorithm": ["@effect-auth-examples/multi-algorithm@workspace:examples/multi-algorithm"],
+
+    "@effect-auth-examples/northwind-traders": ["@effect-auth-examples/northwind-traders@workspace:examples/northwind-traders"],
+
+    "@effect-auth-examples/oauth": ["@effect-auth-examples/oauth@workspace:examples/oauth"],
+
+    "@effect-auth-examples/webauthn": ["@effect-auth-examples/webauthn@workspace:examples/webauthn"],
 
     "@effect/docgen": ["@effect/docgen@0.5.2", "", { "dependencies": { "@effect/markdown-toc": "^0.1.0", "doctrine": "^3.0.0", "glob": "^10.3.12", "prettier": "^3.2.5" }, "peerDependencies": { "tsx": "^4.1.0", "typescript": "^5.2.2" }, "bin": { "docgen": "bin.cjs" } }, "sha512-gqBxAhp58R18vT5+ORobWRQ/2MaF5vH0k1zggSct54J41k8TKF5mYIW1qG5tkOVCejet+8K5MKsWK3gzIkaoMw=="],
 
