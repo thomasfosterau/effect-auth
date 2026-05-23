@@ -1,0 +1,7 @@
+node_modules
+.next
+out
+conduit.db
+conduit.db-*
+.env*
+!.env.example
