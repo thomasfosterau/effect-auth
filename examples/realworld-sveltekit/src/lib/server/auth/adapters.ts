@@ -1,0 +1,100 @@
+import * as Auth from "effect-auth";
+import { Effect } from "effect";
+import { eq } from "drizzle-orm";
+import { db, schema } from "../db/client.js";
+
+const rowToSession = (row: typeof schema.sessions.$inferSelect): Auth.Session => ({
+  id: row.id,
+  userId: row.userId,
+  expiresAt: row.expiresAt,
+  createdAt: row.createdAt,
+  lastActivityAt: row.lastActivityAt,
+  attributes: (row.attributes ?? {}) as Record<string, unknown>,
+});
+
+export const sessionStore: Auth.SessionStore = {
+  create: (session) =>
+    Effect.sync(() => {
+      db.insert(schema.sessions)
+        .values({
+          id: session.id,
+          userId: session.userId,
+          expiresAt: session.expiresAt,
+          createdAt: session.createdAt,
+          lastActivityAt: session.lastActivityAt,
+          attributes: (session.attributes ?? null) as never,
+        })
+        .run();
+      return session;
+    }),
+
+  get: (sessionId) =>
+    Effect.gen(function* () {
+      const row = db.select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)).get();
+      if (!row) {
+        return yield* Effect.fail(
+          new Auth.SessionNotFoundError({ message: "Session not found", sessionId }),
+        );
+      }
+      return rowToSession(row);
+    }),
+
+  update: (session) =>
+    Effect.sync(() => {
+      db.update(schema.sessions)
+        .set({
+          expiresAt: session.expiresAt,
+          lastActivityAt: session.lastActivityAt,
+          attributes: (session.attributes ?? null) as never,
+        })
+        .where(eq(schema.sessions.id, session.id))
+        .run();
+      return session;
+    }),
+
+  delete: (sessionId) =>
+    Effect.sync(() => {
+      db.delete(schema.sessions).where(eq(schema.sessions.id, sessionId)).run();
+    }),
+
+  deleteByUserId: (userId) =>
+    Effect.sync(() => {
+      db.delete(schema.sessions).where(eq(schema.sessions.userId, userId)).run();
+    }),
+};
+
+export const userStore: Auth.UserStore = {
+  get: (userId) =>
+    Effect.gen(function* () {
+      const row = db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+      if (!row) {
+        return yield* Effect.fail(
+          new Auth.UserNotFoundError({ message: "User not found", userId }),
+        );
+      }
+      return {
+        id: row.id,
+        attributes: {
+          email: row.email,
+          username: row.username,
+          bio: row.bio,
+          image: row.image,
+        },
+      } satisfies Auth.User;
+    }),
+
+  getCredentials: (userId) =>
+    Effect.gen(function* () {
+      const row = db
+        .select({ passwordHash: schema.users.passwordHash })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .get();
+      if (!row) {
+        return yield* Effect.fail(
+          new Auth.UserNotFoundError({ message: "User not found", userId }),
+        );
+      }
+      return row.passwordHash;
+    }),
+};

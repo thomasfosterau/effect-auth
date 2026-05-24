@@ -1,10 +1,17 @@
 # Examples
 
-Each example is its own workspace package under this directory. Drop into a
-package and run it directly, or invoke it from the repo root via Bun's
-`--filter` flag.
+Each example under this directory is its own workspace package. They fall
+into two groups:
 
-## Running
+- **Snippets and demos** — focused, single-file examples that show one
+  feature of `effect-auth` in isolation (password hashing, sessions,
+  OAuth, WebAuthn, etc.), plus the larger Northwind Traders end-to-end
+  app.
+- **RealWorld apps** — full implementations of the
+  [RealWorld / Conduit](https://github.com/gothinkster/realworld) spec
+  (a Medium clone with auth, articles, comments, follows, favorites,
+  tags, feeds) showing idiomatic `effect-auth` integration per
+  framework.
 
 Build the library first so its declaration files exist:
 
@@ -12,7 +19,9 @@ Build the library first so its declaration files exist:
 bun run build
 ```
 
-Then run any example via its workspace name:
+## Snippets and demos
+
+Run any snippet via its workspace name:
 
 ```bash
 bun --filter @effect-auth-examples/basic-auth start
@@ -24,8 +33,6 @@ bun --filter @effect-auth-examples/basic-auth start
 cd examples/basic-auth && bun run index.ts
 ```
 
-## Available Examples
-
 | Package                                   | Path                 | Demonstrates                                                                                      |
 | ----------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------- |
 | `@effect-auth-examples/basic-auth`        | `basic-auth/`        | Password hashing, session create/validate/invalidate.                                             |
@@ -35,55 +42,35 @@ cd examples/basic-auth && bun run index.ts
 | `@effect-auth-examples/multi-algorithm`   | `multi-algorithm/`   | Multi-algorithm password verification.                                                            |
 | `@effect-auth-examples/northwind-traders` | `northwind-traders/` | End-to-end app: sign-up, email verification, sessions, RBAC, rate-limiting, OAuth URL generation. |
 
-## Key Concepts Demonstrated
+## RealWorld apps — full Conduit implementations per framework
 
-### Storage Adapters
+Each subdirectory below is an end-to-end implementation of the Conduit
+spec showing idiomatic `effect-auth` integration for that framework:
 
-Both examples show how to implement storage adapters:
+| Framework            | Path                                                      |
+| -------------------- | --------------------------------------------------------- |
+| SvelteKit            | [`realworld-sveltekit/`](./realworld-sveltekit)           |
+| Next.js (App Router) | [`realworld-nextjs/`](./realworld-nextjs)                 |
+| Nuxt                 | [`realworld-nuxt/`](./realworld-nuxt)                     |
+| React Router 7       | [`realworld-react-router/`](./realworld-react-router)     |
+| TanStack Start       | [`realworld-tanstack-start/`](./realworld-tanstack-start) |
+| Hono                 | [`realworld-hono/`](./realworld-hono)                     |
 
-- **SessionStore**: For persisting sessions (using in-memory Map for demo)
-- **UserStore**: For retrieving user data
-- **RoleStore**: For role-based authorization
+Each app is fully self-contained — its own SQLite database, its own
+`effect-auth` storage adapters, its own UI. This is intentional: pick
+the framework you care about and read it top-to-bottom without jumping
+into shared code.
 
-In production, replace these with real database implementations (PostgreSQL, Redis, MongoDB, etc.).
+All RealWorld apps share these conventions:
 
-### Effect Composition
+- **Database**: SQLite via [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) and [Drizzle ORM](https://orm.drizzle.team).
+- **Auth**: Email + password + opaque session cookies (no JWTs). Password hashing via `effect-auth`'s default PBKDF2-SHA256 hasher.
+- **API contract**: Matches the canonical Conduit JSON spec, so you can point the [Conduit Postman collection](https://github.com/gothinkster/realworld/tree/main/api) at any of them.
 
-The examples demonstrate Effect's powerful composition:
+See each app's `README.md` for run instructions and what's different
+about that framework's integration.
 
-```typescript
-const program = Effect.gen(function* () {
-  const service = yield* MyService;
-  const result = yield* service.doSomething();
-  return result;
-});
-```
-
-### Error Handling
-
-Examples show Effect's type-safe error handling:
-
-```typescript
-const result = yield * Effect.either(operation);
-if (result._tag === "Left") {
-  // Handle error
-} else {
-  // Handle success
-}
-```
-
-### Dependency Injection
-
-All examples use Effect's Context for dependency injection:
-
-```typescript
-Effect.provide(
-  program,
-  Context.merge(Context.make(SessionStore, mySessionStore), Context.make(UserStore, myUserStore)),
-);
-```
-
-## Creating Your Own Examples
+## Creating Your Own Example
 
 Each example is a standalone workspace package. To add one:
 
@@ -97,19 +84,7 @@ Each example is a standalone workspace package. To add one:
    your `start` script). Import `* as Auth from "effect-auth"`.
 6. Run `bun install` at the repo root so the workspace is linked.
 
-## Production Considerations
-
-When adapting these examples for production:
-
-1. **Use Real Databases**: Replace in-memory Maps with proper database connections
-2. **Add Error Handling**: Implement comprehensive error handling and logging
-3. **Secure Storage**: Use secure, encrypted storage for sensitive data
-4. **Connection Pooling**: Use connection pools for database access
-5. **Rate Limiting**: Implement rate limiting for authentication attempts
-6. **Monitoring**: Add monitoring and alerting for security events
-7. **Testing**: Write comprehensive tests for your implementations
-
-## Further Reading
+## Further reading
 
 - [Effect Documentation](https://effect.website/)
 - [Lucia Authentication](https://lucia-auth.com/)

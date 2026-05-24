@@ -1,0 +1,22 @@
+{
+  "name": "realworld-nuxt",
+  "projectType": "application",
+  "root": "examples/realworld-nuxt",
+  "sourceRoot": "examples/realworld-nuxt",
+  "targets": {
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": { "cwd": "examples/realworld-nuxt", "command": "bun run dev" }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["effect-auth:build"],
+      "options": { "cwd": "examples/realworld-nuxt", "command": "bun run build" }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["effect-auth:build"],
+      "options": { "cwd": "examples/realworld-nuxt", "command": "bun run typecheck" }
+    }
+  }
+}
