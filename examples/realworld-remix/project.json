@@ -1,0 +1,22 @@
+{
+  "name": "realworld-remix",
+  "projectType": "application",
+  "root": "examples/realworld-remix",
+  "sourceRoot": "examples/realworld-remix/app",
+  "targets": {
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": { "cwd": "examples/realworld-remix", "command": "bun run dev" }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["effect-auth:build"],
+      "options": { "cwd": "examples/realworld-remix", "command": "bun run build" }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["effect-auth:build"],
+      "options": { "cwd": "examples/realworld-remix", "command": "bun run typecheck" }
+    }
+  }
+}

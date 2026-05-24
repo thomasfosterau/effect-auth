@@ -1,0 +1,7 @@
+node_modules
+build
+.cache
+.env*
+!.env.example
+conduit.db
+conduit.db-*

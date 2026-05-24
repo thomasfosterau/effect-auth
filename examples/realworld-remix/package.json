@@ -1,0 +1,33 @@
+{
+  "name": "@effect-auth/example-realworld-remix",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "remix vite:dev --port 3002",
+    "build": "remix vite:build",
+    "start": "remix-serve build/server/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remix-run/node": "^2.15.0",
+    "@remix-run/react": "^2.15.0",
+    "@remix-run/serve": "^2.15.0",
+    "better-sqlite3": "^11.7.0",
+    "drizzle-orm": "^0.36.4",
+    "effect": "^3.19.15",
+    "effect-auth": "workspace:*",
+    "isbot": "^5.1.21",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@remix-run/dev": "^2.15.0",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.11",
+    "vite-tsconfig-paths": "^5.1.4"
+  }
+}
