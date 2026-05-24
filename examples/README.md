@@ -37,7 +37,7 @@ feeds) showing idiomatic `effect-auth` integration for that framework:
 | SvelteKit            | [`realworld-sveltekit/`](./realworld-sveltekit)           |
 | Next.js (App Router) | [`realworld-nextjs/`](./realworld-nextjs)                 |
 | Nuxt                 | [`realworld-nuxt/`](./realworld-nuxt)                     |
-| Remix                | [`realworld-remix/`](./realworld-remix)                   |
+| React Router 7       | [`realworld-react-router/`](./realworld-react-router)     |
 | TanStack Start       | [`realworld-tanstack-start/`](./realworld-tanstack-start) |
 | Hono                 | [`realworld-hono/`](./realworld-hono)                     |
 
