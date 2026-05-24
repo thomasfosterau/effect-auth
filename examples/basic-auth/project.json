@@ -1,0 +1,16 @@
+{
+  "name": "basic-auth-example",
+  "projectType": "application",
+  "root": "examples/basic-auth",
+  "sourceRoot": "examples/basic-auth",
+  "targets": {
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["effect-auth:build"],
+      "options": {
+        "cwd": "examples/basic-auth",
+        "command": "bunx tsc --noEmit"
+      }
+    }
+  }
+}

@@ -1,36 +1,51 @@
 # Examples
 
-This directory contains runnable examples that demonstrate how to use
-`effect-auth`. There are two kinds of examples:
+Each example under this directory is its own workspace package. They fall
+into two groups:
 
-## Snippets — short, single-file demos
+- **Snippets and demos** — focused, single-file examples that show one
+  feature of `effect-auth` in isolation (password hashing, sessions,
+  OAuth, WebAuthn, etc.), plus the larger Northwind Traders end-to-end
+  app.
+- **RealWorld apps** — full implementations of the
+  [RealWorld / Conduit](https://github.com/gothinkster/realworld) spec
+  (a Medium clone with auth, articles, comments, follows, favorites,
+  tags, feeds) showing idiomatic `effect-auth` integration per
+  framework.
 
-[`snippets/`](./snippets) — focused scripts that show off individual
-features of the library (password hashing, sessions, authorization, OAuth,
-WebAuthn, multi-algorithm hashing).
-
-Make sure you have built the package first:
+Build the library first so its declaration files exist:
 
 ```bash
 bun run build
 ```
 
-Then run any snippet directly:
+## Snippets and demos
+
+Run any snippet via its workspace name:
 
 ```bash
-bun run examples/snippets/basic-auth.ts
-bun run examples/snippets/authorization.ts
-bun run examples/snippets/oauth.ts
-bun run examples/snippets/webauthn.ts
-bun run examples/snippets/multi-algorithm.ts
+bun --filter @effect-auth-examples/basic-auth start
 ```
+
+…or by entering the directory:
+
+```bash
+cd examples/basic-auth && bun run index.ts
+```
+
+| Package                                   | Path                 | Demonstrates                                                                                      |
+| ----------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------- |
+| `@effect-auth-examples/basic-auth`        | `basic-auth/`        | Password hashing, session create/validate/invalidate.                                             |
+| `@effect-auth-examples/authorization`     | `authorization/`     | Role-based access control, `requirePermission`.                                                   |
+| `@effect-auth-examples/oauth`             | `oauth/`             | OAuth 2.0 social-login flows.                                                                     |
+| `@effect-auth-examples/webauthn`          | `webauthn/`          | Passkey / WebAuthn flow.                                                                          |
+| `@effect-auth-examples/multi-algorithm`   | `multi-algorithm/`   | Multi-algorithm password verification.                                                            |
+| `@effect-auth-examples/northwind-traders` | `northwind-traders/` | End-to-end app: sign-up, email verification, sessions, RBAC, rate-limiting, OAuth URL generation. |
 
 ## RealWorld apps — full Conduit implementations per framework
 
-Each subdirectory below is an end-to-end implementation of the
-[RealWorld / Conduit](https://github.com/gothinkster/realworld) spec
-(a Medium clone — auth, articles, comments, favorites, follows, tags,
-feeds) showing idiomatic `effect-auth` integration for that framework:
+Each subdirectory below is an end-to-end implementation of the Conduit
+spec showing idiomatic `effect-auth` integration for that framework:
 
 | Framework            | Path                                                      |
 | -------------------- | --------------------------------------------------------- |
@@ -54,6 +69,20 @@ All RealWorld apps share these conventions:
 
 See each app's `README.md` for run instructions and what's different
 about that framework's integration.
+
+## Creating Your Own Example
+
+Each example is a standalone workspace package. To add one:
+
+1. Create a new directory under `examples/` (e.g. `examples/my-feature/`).
+2. Add a `package.json` with `"effect-auth": "workspace:*"` as a dependency and
+   a `start` script that runs your entry file.
+3. Add a `tsconfig.json` extending `../../tsconfig.base.json`.
+4. Add a `project.json` if you want an nx target for typecheck (mirror the
+   other examples).
+5. Write your example as `index.ts` (or any other entry file referenced from
+   your `start` script). Import `* as Auth from "effect-auth"`.
+6. Run `bun install` at the repo root so the workspace is linked.
 
 ## Further reading
 
