@@ -1,0 +1,25 @@
+{
+  "name": "@effect-auth/example-realworld-hono",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "better-sqlite3": "^11.7.0",
+    "drizzle-orm": "^0.36.4",
+    "effect": "^3.19.15",
+    "effect-auth": "workspace:*",
+    "hono": "^4.6.13"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^25.2.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3"
+  }
+}
