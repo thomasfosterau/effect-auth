@@ -1,0 +1,48 @@
+{
+  "name": "@effect-auth/alchemy",
+  "version": "0.1.0",
+  "description": "Cloudflare D1-backed storage layers for effect-auth, designed to be provisioned and bound with Alchemy v2.",
+  "keywords": [
+    "alchemy",
+    "auth",
+    "authentication",
+    "cloudflare",
+    "d1",
+    "effect",
+    "effect-auth",
+    "session"
+  ],
+  "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
+  "bugs": {
+    "url": "https://github.com/thomasfosterau/effect-auth/issues"
+  },
+  "license": "ISC",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thomasfosterau/effect-auth.git"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vp test run",
+    "typecheck": "tsc --noEmit && vp test --typecheck --run"
+  },
+  "dependencies": {
+    "effect": "^3.19.15",
+    "effect-auth": "workspace:*"
+  }
+}
