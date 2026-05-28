@@ -114,7 +114,10 @@ export const CheckPermissionRequest =
  */
 export interface SignUpEmailRequest extends Request.Request<
   AuthLifecycle.AuthLifecycleResult,
-  Errors.AuthError | Errors.HashingError | Errors.EmailVerificationError
+  | Errors.AuthError
+  | Errors.HashingError
+  | Errors.EmailVerificationError
+  | Errors.EmailNotVerifiedError
 > {
   readonly _tag: "SignUpEmailRequest";
   readonly input: {
@@ -153,7 +156,7 @@ export const SignInEmailRequest = Request.tagged<SignInEmailRequest>("SignInEmai
  */
 export interface VerifyEmailRequest extends Request.Request<
   AuthLifecycle.AuthLifecycleResult,
-  Errors.AuthError | Errors.EmailVerificationError
+  Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError
 > {
   readonly _tag: "VerifyEmailRequest";
   readonly input: {
