@@ -1,8 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Either } from "effect";
-import { DatabaseSync } from "node:sqlite";
 import * as Auth from "effect-auth";
-import { migrate } from "./Schema.js";
+import { migrate, schemaStatements } from "./Schema.js";
 import {
   layer,
   makeChallengeStore,
@@ -22,12 +21,44 @@ import type { D1Database, D1PreparedStatement, D1Result } from "./D1.js";
 
 type SqlValue = null | number | bigint | string | Uint8Array;
 
+interface SqliteStatement {
+  all(...params: SqlValue[]): unknown[];
+  get(...params: SqlValue[]): unknown;
+  run(...params: SqlValue[]): unknown;
+}
+interface SqliteDatabase {
+  prepare(sql: string): SqliteStatement;
+}
+
 /**
- * Wraps Node's built-in synchronous SQLite (also a SQLite engine, like D1) in
- * the minimal async D1 client shape these stores expect.
+ * Load whichever embedded SQLite engine is available — Node's built-in
+ * `node:sqlite` (Node >= 22.13) or `better-sqlite3`. Both are real SQLite
+ * engines, like D1. The suite skips if neither can be loaded.
  */
-const makeTestDb = (): { db: D1Database; sqlite: DatabaseSync } => {
-  const sqlite = new DatabaseSync(":memory:");
+const loadSqlite = async (): Promise<(() => SqliteDatabase) | null> => {
+  try {
+    const { DatabaseSync } = await import("node:sqlite");
+    return () => new DatabaseSync(":memory:") as unknown as SqliteDatabase;
+  } catch {
+    // node:sqlite unavailable or requires --experimental-sqlite
+  }
+  try {
+    const { default: Database } = await import("better-sqlite3");
+    return () => new Database(":memory:") as unknown as SqliteDatabase;
+  } catch {
+    // better-sqlite3 not installed
+  }
+  return null;
+};
+
+const newSqlite = await loadSqlite();
+
+/**
+ * Wraps the embedded SQLite engine in the minimal async D1 client shape these
+ * stores expect.
+ */
+const makeTestDb = (): { db: D1Database; sqlite: SqliteDatabase } => {
+  const sqlite = newSqlite!();
   const db: D1Database = {
     prepare(sql: string): D1PreparedStatement {
       let bound: SqlValue[] = [];
@@ -55,13 +86,22 @@ const makeTestDb = (): { db: D1Database; sqlite: DatabaseSync } => {
   return { db, sqlite };
 };
 
-const setup = async (): Promise<{ db: D1Database; sqlite: DatabaseSync }> => {
+const setup = async (): Promise<{ db: D1Database; sqlite: SqliteDatabase }> => {
   const handles = makeTestDb();
   await Effect.runPromise(migrate(handles.db));
   return handles;
 };
 
-describe("@effect-auth/alchemy stores", () => {
+describe("@effect-auth/alchemy package", () => {
+  it("exposes schema statements and a layer factory", () => {
+    expect(schemaStatements.length).toBeGreaterThan(0);
+    expect(typeof layer).toBe("function");
+  });
+});
+
+const suite = newSqlite ? describe : describe.skip;
+
+suite("@effect-auth/alchemy stores", () => {
   it("session store: create / get / update / delete by user", async () => {
     const { db } = await setup();
     const store = makeSessionStore(db);
