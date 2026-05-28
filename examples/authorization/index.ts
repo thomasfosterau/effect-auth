@@ -8,7 +8,7 @@
  * - Using requirePermission helper
  */
 
-import { Effect, Context } from "effect";
+import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
 // Define roles and permissions
@@ -68,6 +68,17 @@ const roleStore: Auth.RoleStore = {
       return permissions || [];
     }),
 };
+
+/**
+ * Provides both the RoleStore and a role-based AuthorizationPolicy built from it.
+ */
+const RoleStoreLayer = Layer.succeed(Auth.RoleStore, roleStore);
+const AppLayer = Layer.merge(
+  RoleStoreLayer,
+  Layer.effect(Auth.AuthorizationPolicy, Auth.makeRoleBasedPolicy()).pipe(
+    Layer.provide(RoleStoreLayer),
+  ),
+);
 
 /**
  * Authorization flow example
@@ -197,17 +208,13 @@ const protectedOperationsExample = Effect.gen(function* () {
 const runExamples = async () => {
   try {
     // Run authorization flow
-    const authResult = await Effect.runPromise(
-      Effect.provide(authorizationFlow, Context.make(Auth.RoleStore, roleStore)),
-    );
+    const authResult = await Effect.runPromise(Effect.provide(authorizationFlow, AppLayer));
 
     console.log("\n📊 Authorization Test Results:");
     console.log(JSON.stringify(authResult, null, 2));
 
     // Run protected operations example
-    const opsResult = await Effect.runPromise(
-      Effect.provide(protectedOperationsExample, Context.make(Auth.RoleStore, roleStore)),
-    );
+    const opsResult = await Effect.runPromise(Effect.provide(protectedOperationsExample, AppLayer));
 
     console.log("\n📊 Protected Operations Results:");
     console.log(JSON.stringify(opsResult, null, 2));
