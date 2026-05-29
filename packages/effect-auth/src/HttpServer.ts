@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Layer, Path } from "effect";
+import { Context, Effect, FileSystem, Layer, Path } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import {
   Etag,
@@ -224,6 +224,11 @@ export interface AuthWebHandlerOptions {
   readonly services: Layer.Layer<AuthServices>;
   /** Cookie configuration. */
   readonly cookie?: CookieConfig;
+  /**
+   * Mount path prefix to strip before routing, e.g. `"/api/auth"`. When set, a
+   * request to `/api/auth/sign-in` is routed to the `/sign-in` endpoint.
+   */
+  readonly prefix?: string;
 }
 
 /**
@@ -232,7 +237,12 @@ export interface AuthWebHandlerOptions {
  * Mount the returned `handler` in any framework (SvelteKit/Next/Hono/...).
  * `dispose` releases the handler's scope.
  */
-export const makeAuthWebHandler = (options: AuthWebHandlerOptions) => {
+export const makeAuthWebHandler = (
+  options: AuthWebHandlerOptions,
+): {
+  readonly handler: (request: Request, context?: Context.Context<never>) => Promise<Response>;
+  readonly dispose: () => Promise<void>;
+} => {
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
     Layer.provide(authGroupLayer(options.cookie)),
     Layer.provide(PlatformLayer),
@@ -242,5 +252,18 @@ export const makeAuthWebHandler = (options: AuthWebHandlerOptions) => {
   // (provideMerge) both satisfies them at runtime and zeroes the web handler's
   // leftover context (HR), yielding a plain `(request) => Promise<Response>`.
   const appLayer = apiLayer.pipe(Layer.provideMerge(options.services));
-  return HttpRouter.toWebHandler(appLayer);
+  const web = HttpRouter.toWebHandler(appLayer);
+
+  const prefix = options.prefix;
+  if (prefix === undefined || prefix === "") return web;
+
+  const handler = (request: Request, context?: Context.Context<never>): Promise<Response> => {
+    const url = new URL(request.url);
+    if (url.pathname === prefix || url.pathname.startsWith(`${prefix}/`)) {
+      url.pathname = url.pathname.slice(prefix.length) || "/";
+      return web.handler(new Request(url, request), context);
+    }
+    return web.handler(request, context);
+  };
+  return { handler, dispose: web.dispose };
 };

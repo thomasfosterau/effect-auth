@@ -208,6 +208,19 @@ describe("HTTP auth protocol", () => {
     expect(after.status).toBe(401);
   });
 
+  it("routes under a mount prefix", async () => {
+    const handler = makeAuthWebHandler({
+      services: makeTestServices(),
+      cookie: { secure: false },
+      prefix: "/api/auth",
+    }).handler;
+    const res = await handler(
+      jsonRequest("/api/auth/sign-up", { email: "a@b.com", password: "pw" }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toContain("conduit_session=");
+  });
+
   it("works through the derived typed client (in-memory)", async () => {
     const { handler } = makeAuthWebHandler({
       services: makeTestServices(),
