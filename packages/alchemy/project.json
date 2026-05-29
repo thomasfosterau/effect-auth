@@ -1,0 +1,36 @@
+{
+  "name": "effect-auth-alchemy",
+  "projectType": "library",
+  "root": "packages/alchemy",
+  "sourceRoot": "packages/alchemy/src",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/dist"],
+      "dependsOn": ["effect-auth:build"],
+      "options": {
+        "cwd": "packages/alchemy",
+        "command": "vp exec tsc"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "packages/alchemy",
+        "command": "vp test run"
+      },
+      "configurations": {
+        "watch": {
+          "command": "vp test watch"
+        }
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "packages/alchemy",
+        "command": "vp exec tsc --noEmit && vp test --typecheck --run"
+      }
+    }
+  }
+}
