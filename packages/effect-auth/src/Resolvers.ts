@@ -1,4 +1,5 @@
 import { Effect, RequestResolver } from "effect";
+import * as Request from "effect/Request";
 import * as Requests from "./Requests.js";
 import * as Errors from "./Errors.js";
 import { SessionManagerTag, UserStoreTag } from "./Session.js";
@@ -105,12 +106,18 @@ export const makeVerifyPasswordResolver = RequestResolver.fromEffect(
  * Resolver for SignUpEmailRequest
  */
 export const signUpEmailResolver = RequestResolver.makeBatched(
-  (requests: Array<Requests.SignUpEmailRequest>) =>
-    Effect.forEach(requests, (request) =>
-      Effect.gen(function* () {
-        const authLifecycle = yield* AuthLifecycleServiceTag;
-        return yield* authLifecycle.signUp(request.input);
-      }),
+  (requests: ReadonlyArray<Requests.SignUpEmailRequest>) =>
+    Effect.forEach(
+      requests,
+      (request) =>
+        Request.completeEffect(
+          request,
+          Effect.gen(function* () {
+            const authLifecycle = yield* AuthLifecycleServiceTag;
+            return yield* authLifecycle.signUp(request.input);
+          }),
+        ),
+      { discard: true },
     ),
 );
 
@@ -118,12 +125,18 @@ export const signUpEmailResolver = RequestResolver.makeBatched(
  * Resolver for SignInEmailRequest
  */
 export const signInEmailResolver = RequestResolver.makeBatched(
-  (requests: Array<Requests.SignInEmailRequest>) =>
-    Effect.forEach(requests, (request) =>
-      Effect.gen(function* () {
-        const authLifecycle = yield* AuthLifecycleServiceTag;
-        return yield* authLifecycle.signIn(request.input);
-      }),
+  (requests: ReadonlyArray<Requests.SignInEmailRequest>) =>
+    Effect.forEach(
+      requests,
+      (request) =>
+        Request.completeEffect(
+          request,
+          Effect.gen(function* () {
+            const authLifecycle = yield* AuthLifecycleServiceTag;
+            return yield* authLifecycle.signIn(request.input);
+          }),
+        ),
+      { discard: true },
     ),
 );
 
@@ -131,12 +144,18 @@ export const signInEmailResolver = RequestResolver.makeBatched(
  * Resolver for VerifyEmailRequest
  */
 export const verifyEmailResolver = RequestResolver.makeBatched(
-  (requests: Array<Requests.VerifyEmailRequest>) =>
-    Effect.forEach(requests, (request) =>
-      Effect.gen(function* () {
-        const authLifecycle = yield* AuthLifecycleServiceTag;
-        return yield* authLifecycle.verifyEmail(request.input);
-      }),
+  (requests: ReadonlyArray<Requests.VerifyEmailRequest>) =>
+    Effect.forEach(
+      requests,
+      (request) =>
+        Request.completeEffect(
+          request,
+          Effect.gen(function* () {
+            const authLifecycle = yield* AuthLifecycleServiceTag;
+            return yield* authLifecycle.verifyEmail(request.input);
+          }),
+        ),
+      { discard: true },
     ),
 );
 
