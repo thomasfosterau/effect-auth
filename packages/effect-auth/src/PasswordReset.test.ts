@@ -280,14 +280,14 @@ describe("PasswordResetService", () => {
         sendResetPassword: () => Effect.void,
       });
 
-      return yield* Effect.either(service.resetPassword("missing-token", "new-password-123"));
+      return yield* Effect.result(service.resetPassword("missing-token", "new-password-123"));
     });
 
     const result = await Effect.runPromise(Effect.provide(program, testContext));
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("PasswordResetError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("PasswordResetError");
     }
   });
 });

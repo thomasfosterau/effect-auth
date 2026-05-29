@@ -68,18 +68,16 @@ export interface RateLimiter {
 /**
  * Rate limit store context tag
  */
-export class RateLimitStoreTag extends Context.Tag("@effect-auth/RateLimitStore")<
-  RateLimitStoreTag,
-  RateLimitStore
->() {}
+export class RateLimitStoreTag extends Context.Service<RateLimitStoreTag, RateLimitStore>()(
+  "@effect-auth/RateLimitStore",
+) {}
 
 // Public ergonomic alias
 export const RateLimitStore = RateLimitStoreTag;
 
-export class RateLimiterTag extends Context.Tag("@effect-auth/RateLimiter")<
-  RateLimiterTag,
-  RateLimiter
->() {}
+export class RateLimiterTag extends Context.Service<RateLimiterTag, RateLimiter>()(
+  "@effect-auth/RateLimiter",
+) {}
 
 // Public ergonomic alias
 export const RateLimiter = RateLimiterTag;

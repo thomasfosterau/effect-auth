@@ -182,11 +182,11 @@ describe("Resolvers", () => {
         PasswordHasherLive,
       );
 
-      const result = await Effect.runPromise(Effect.either(Effect.provide(program, testContext)));
+      const result = await Effect.runPromise(Effect.result(Effect.provide(program, testContext)));
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("InvalidCredentialsError");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("InvalidCredentialsError");
       }
     });
   });

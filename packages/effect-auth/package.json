@@ -41,7 +41,7 @@
   },
   "dependencies": {
     "@oslojs/webauthn": "^1.0.0",
-    "effect": "^3.19.15"
+    "effect": "4.0.0-beta.59"
   },
   "devDependencies": {
     "@effect/docgen": "^0.5.2",

@@ -234,7 +234,7 @@ describe("EmailPasswordService", () => {
 
     const program = Effect.gen(function* () {
       const service = yield* makeEmailPasswordService();
-      return yield* Effect.either(
+      return yield* Effect.result(
         service.signIn({
           email: "invalid@example.com",
           password: "wrong-password",
@@ -244,9 +244,9 @@ describe("EmailPasswordService", () => {
 
     const result = await Effect.runPromise(Effect.provide(program, testContext));
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("InvalidCredentialsError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("InvalidCredentialsError");
     }
   });
 
@@ -272,7 +272,7 @@ describe("EmailPasswordService", () => {
       const service = yield* makeEmailPasswordService({
         requireEmailVerification: true,
       });
-      return yield* Effect.either(
+      return yield* Effect.result(
         service.signIn({
           email: "unverified@example.com",
           password: "password-123",
@@ -282,9 +282,9 @@ describe("EmailPasswordService", () => {
 
     const result = await Effect.runPromise(Effect.provide(program, testContext));
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("EmailNotVerifiedError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("EmailNotVerifiedError");
     }
   });
 });

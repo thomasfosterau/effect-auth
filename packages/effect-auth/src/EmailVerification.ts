@@ -86,17 +86,18 @@ import * as crypto from "node:crypto";
 /**
  * Email verification store context tag
  */
-export class EmailVerificationStoreTag extends Context.Tag("@effect-auth/EmailVerificationStore")<
+export class EmailVerificationStoreTag extends Context.Service<
   EmailVerificationStoreTag,
   EmailVerificationStore
->() {}
+>()("@effect-auth/EmailVerificationStore") {}
 
 // Public ergonomic alias
 export const EmailVerificationStore = EmailVerificationStoreTag;
 
-export class EmailVerificationServiceTag extends Context.Tag(
-  "@effect-auth/EmailVerificationService",
-)<EmailVerificationServiceTag, EmailVerificationService>() {}
+export class EmailVerificationServiceTag extends Context.Service<
+  EmailVerificationServiceTag,
+  EmailVerificationService
+>()("@effect-auth/EmailVerificationService") {}
 
 // Public ergonomic alias
 export const EmailVerificationService = EmailVerificationServiceTag;
@@ -133,7 +134,7 @@ export const makeEmailVerificationService = (
           yield* store.create(verification);
 
           // Send verification email
-          yield* Effect.catchAll(config.sendEmail(email, token), (error) =>
+          yield* Effect.catch(config.sendEmail(email, token), (error) =>
             Effect.fail(
               new EmailVerificationError({
                 message: `Failed to send verification email to ${email}`,

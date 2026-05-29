@@ -74,10 +74,10 @@ export interface AuthLifecycleService {
   >;
 }
 
-export class AuthLifecycleServiceTag extends Context.Tag("@effect-auth/AuthLifecycleService")<
+export class AuthLifecycleServiceTag extends Context.Service<
   AuthLifecycleServiceTag,
   AuthLifecycleService
->() {}
+>()("@effect-auth/AuthLifecycleService") {}
 
 export const AuthLifecycleService = AuthLifecycleServiceTag;
 
