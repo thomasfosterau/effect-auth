@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect } from "effect";
 import { makeEmailPasswordService, EmailPasswordStore } from "./EmailPassword.js";
+import { Hooks } from "./Hooks.js";
 import { makeSessionManager, SessionStore, SessionManager, UserStore } from "./Session.js";
 import { PasswordHasherLive, makePasswordHasher } from "./Password.js";
 import type { Session, User, SessionConfig } from "./Types.js";
@@ -175,7 +176,9 @@ describe("EmailPasswordService", () => {
       return result;
     });
 
-    const result = await Effect.runPromise(Effect.provide(program, testContext));
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
 
     expect(result.session?.userId).toBe(result.user.id);
   });
@@ -208,7 +211,9 @@ describe("EmailPasswordService", () => {
       });
     });
 
-    const result = await Effect.runPromise(Effect.provide(program, testContext));
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
 
     expect(result.user.id).toBe(user.id);
     expect(result.session).toBeDefined();
@@ -242,7 +247,9 @@ describe("EmailPasswordService", () => {
       );
     });
 
-    const result = await Effect.runPromise(Effect.provide(program, testContext));
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
 
     expect(result._tag).toBe("Left");
     if (result._tag === "Left") {
@@ -280,7 +287,9 @@ describe("EmailPasswordService", () => {
       );
     });
 
-    const result = await Effect.runPromise(Effect.provide(program, testContext));
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
 
     expect(result._tag).toBe("Left");
     if (result._tag === "Left") {

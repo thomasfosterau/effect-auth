@@ -7,6 +7,7 @@ import {
   type PasswordResetToken,
 } from "./PasswordReset.js";
 import { makeSessionManager, SessionStore, SessionManager, UserStore } from "./Session.js";
+import { Hooks } from "./Hooks.js";
 import { PasswordHasherLive, makePasswordHasher } from "./Password.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 import * as Errors from "./Errors.js";
@@ -193,7 +194,9 @@ describe("PasswordResetService", () => {
       yield* service.requestPasswordReset("reset@example.com");
     });
 
-    await Effect.runPromise(Effect.provide(program, testContext));
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
 
     expect(sentEmails.length).toBe(1);
     expect(sentEmails[0]?.email).toBe("reset@example.com");
@@ -211,7 +214,9 @@ describe("PasswordResetService", () => {
       yield* service.requestPasswordReset("missing@example.com");
     });
 
-    await Effect.runPromise(Effect.provide(program, testContext));
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
 
     expect(sentEmails.length).toBe(0);
     expect(resetTokens.size).toBe(0);
@@ -261,7 +266,9 @@ describe("PasswordResetService", () => {
       return yield* service.resetPassword("token-123", "new-password-123");
     });
 
-    const result = await Effect.runPromise(Effect.provide(program, testContext));
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
 
     const updatedHash = passwordHashes.get(user.id);
     expect(result.userId).toBe(user.id);
@@ -283,7 +290,9 @@ describe("PasswordResetService", () => {
       return yield* Effect.either(service.resetPassword("missing-token", "new-password-123"));
     });
 
-    const result = await Effect.runPromise(Effect.provide(program, testContext));
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
 
     expect(result._tag).toBe("Left");
     if (result._tag === "Left") {

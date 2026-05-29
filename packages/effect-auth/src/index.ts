@@ -54,6 +54,12 @@ export * from "./User.js";
 /** High-level auth lifecycle orchestration. */
 export * from "./AuthLifecycle.js";
 
+/** Typed, composable hooks/plugin system. */
+export * from "./Hooks.js";
+
+/** Example plugins built on the hooks system. */
+export * from "./plugins/index.js";
+
 export {
   /** Re-export of `Effect` from `effect`. */
   Effect,

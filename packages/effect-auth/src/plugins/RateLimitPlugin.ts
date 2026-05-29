@@ -1,0 +1,39 @@
+/**
+ * Rate limiting plugin (transform hook with short-circuit).
+ *
+ * Consumes a rate-limit token on `beforeSignIn`, keyed by email. When the limit
+ * is exceeded the hook *fails* with `RateLimitError`, which propagates through
+ * the auth error channel and short-circuits the sign-in - demonstrating the
+ * "deny" pattern within a transform hook.
+ *
+ * Demonstrates a plugin that declares its own service dependencies: the
+ * resulting Layer is `Layer<Hooks, never, Hooks | RateLimiter | RateLimitStore>`.
+ *
+ * @module plugins/rate-limit
+ */
+import { Effect } from "effect";
+import type { SignInInput } from "../EmailPassword.js";
+import { makePlugin } from "../Hooks.js";
+import { RateLimitPresets, RateLimitStoreTag, RateLimiterTag } from "../RateLimit.js";
+
+const normalize = (email: string): string => email.trim().toLowerCase();
+
+/**
+ * Rate-limits sign-in attempts per email using {@link RateLimitPresets.login}.
+ *
+ * `Layer<Hooks, never, Hooks | RateLimiterTag | RateLimitStoreTag>` - the
+ * limiter and its store are acquired when the layer is built.
+ */
+export const RateLimitPlugin = makePlugin(
+  Effect.gen(function* () {
+    const rateLimiter = yield* RateLimiterTag;
+    const store = yield* RateLimitStoreTag;
+
+    return {
+      beforeSignIn: (input: SignInInput) =>
+        rateLimiter
+          .consumeToken(`signin:${normalize(input.email)}`, RateLimitPresets.login)
+          .pipe(Effect.provideService(RateLimitStoreTag, store), Effect.as(input)),
+    };
+  }),
+);

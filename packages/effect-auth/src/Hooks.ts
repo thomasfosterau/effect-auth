@@ -1,0 +1,330 @@
+/**
+ * Hooks - a typed, composable plugin system for the auth lifecycle.
+ *
+ * The {@link Hooks} service exposes a fixed set of *hook points* that fire at
+ * every significant moment in the auth flow. Plugins are authored with
+ * {@link makePlugin}, which produces a *decorator* Layer: it requires the
+ * previous (inner) `Hooks` implementation and provides a wrapped one, threading
+ * the inner call automatically so plugin authors never deal with `inner`.
+ *
+ * Two flavours of hook:
+ *
+ * - **Transform** ({@link Transform}) - receives a value and returns a
+ *   (possibly modified) value of the same type. Sits in the critical path and
+ *   may *short-circuit* by failing in the Effect error channel.
+ * - **Tap** ({@link Tap}) - observes a value and performs a side effect. Tap
+ *   functions are authored as `void`-returning Effects via {@link Hooks.tap},
+ *   which adapts them to the canonical value-threading shape.
+ *
+ * Plugins stack with `Layer.provide`; {@link composePlugins} makes that clean.
+ *
+ * @example
+ * ```ts
+ * import { Hooks, composePlugins } from "effect-auth"
+ *
+ * const layer = composePlugins([
+ *   RateLimitPlugin,      // beforeSignIn: short-circuits with RateLimitError
+ *   NormalizeEmailPlugin, // beforeSignUp/beforeSignIn: lowercases email
+ *   AuditPlugin,          // afterSignIn/afterSignUp/afterSignOut: logs
+ * ]).pipe(Layer.provide(Hooks.Default))
+ * ```
+ *
+ * @module hooks
+ */
+import { Effect, Layer } from "effect";
+import type * as Errors from "./Errors.js";
+import type { AuthResult, SignInInput, SignUpInput } from "./EmailPassword.js";
+import type { EmailVerificationResult } from "./EmailVerification.js";
+import type { PasswordResetResult } from "./PasswordReset.js";
+import type * as Types from "./Types.js";
+
+/**
+ * The error channel permitted for every hook. Hooks participate in the existing
+ * auth error channel; a transform that fails with one of these short-circuits
+ * the operation. Kept intentionally small (the realistic set a plugin raises)
+ * so integrated method signatures don't balloon.
+ */
+export type HookError = Errors.AuthError | Errors.RateLimitError;
+
+/** A reference to a session, used by sign-out / validation hooks. */
+export interface SessionRef {
+  readonly sessionId: string;
+}
+
+/** Named arguments for the `beforeCreateSession` hook. */
+export interface CreateSessionArgs {
+  readonly userId: string;
+  readonly attributes?: Record<string, unknown>;
+}
+
+/** Named arguments for the `beforeResetPassword` hook. */
+export interface ResetPasswordArgs {
+  readonly token: string;
+  readonly newPassword: string;
+}
+
+/** Named arguments for the email-verification creation hooks. */
+export interface CreateVerificationArgs {
+  readonly userId: string;
+  readonly email: string;
+}
+
+/** Named arguments for the `beforeVerifyEmail` hook. */
+export interface VerifyEmailArgs {
+  readonly token: string;
+}
+
+/** A reference to an email address, used by password-reset hooks. */
+export interface EmailRef {
+  readonly email: string;
+}
+
+/**
+ * A **transform** hook: maps a value to a new value of the same type.
+ *
+ * Returning a modified value mutates what flows downstream; failing in the
+ * error channel short-circuits the operation (this is how a "deny" - e.g. a
+ * rate-limit rejection - is expressed).
+ */
+export type Transform<V> = (value: V) => Effect.Effect<V, HookError, never>;
+
+/**
+ * A **tap** hook: observes a value (side-effect only).
+ *
+ * Structurally identical to {@link Transform} - in the canonical runtime every
+ * hook threads its value through unchanged - but the name documents intent.
+ * Author tap implementations with {@link Hooks.tap}, which lets you write a
+ * `void`-returning Effect and adapts it to thread the value automatically.
+ */
+export type Tap<V> = (value: V) => Effect.Effect<V, HookError, never>;
+
+/**
+ * The full set of hook points and their (canonical) signatures.
+ *
+ * `before*` hooks are transforms (pre-process, validate, or short-circuit the
+ * input); `after*` hooks are taps (observe the result). A plugin supplies a
+ * `Partial<HookDefs>` - only the hooks it cares about - via {@link makePlugin};
+ * everything else falls through to the no-op default.
+ */
+export interface HookDefs {
+  readonly beforeSignUp: Transform<SignUpInput>;
+  readonly afterSignUp: Tap<AuthResult>;
+  readonly beforeSignIn: Transform<SignInInput>;
+  readonly afterSignIn: Tap<AuthResult>;
+  readonly beforeSignOut: Transform<SessionRef>;
+  readonly afterSignOut: Tap<SessionRef>;
+  readonly beforeCreateSession: Transform<CreateSessionArgs>;
+  readonly afterCreateSession: Tap<Types.Session>;
+  readonly beforeValidateSession: Transform<SessionRef>;
+  readonly afterValidateSession: Tap<Types.SessionWithUser>;
+  readonly beforeRequestPasswordReset: Transform<EmailRef>;
+  readonly afterRequestPasswordReset: Tap<EmailRef>;
+  readonly beforeResetPassword: Transform<ResetPasswordArgs>;
+  readonly afterResetPassword: Tap<PasswordResetResult>;
+  readonly beforeCreateVerification: Transform<CreateVerificationArgs>;
+  readonly afterCreateVerification: Tap<CreateVerificationArgs>;
+  readonly beforeVerifyEmail: Transform<VerifyEmailArgs>;
+  readonly afterVerifyEmail: Tap<EmailVerificationResult>;
+}
+
+/** Identity hook - passes the value through unchanged (the no-op default). */
+const identity = <V>(value: V): Effect.Effect<V, HookError, never> => Effect.succeed(value);
+
+/** Build the no-op default implementation: identity for every hook point. */
+const makeNoopHooks = (): HookDefs => ({
+  beforeSignUp: identity,
+  afterSignUp: identity,
+  beforeSignIn: identity,
+  afterSignIn: identity,
+  beforeSignOut: identity,
+  afterSignOut: identity,
+  beforeCreateSession: identity,
+  afterCreateSession: identity,
+  beforeValidateSession: identity,
+  afterValidateSession: identity,
+  beforeRequestPasswordReset: identity,
+  afterRequestPasswordReset: identity,
+  beforeResetPassword: identity,
+  afterResetPassword: identity,
+  beforeCreateVerification: identity,
+  afterCreateVerification: identity,
+  beforeVerifyEmail: identity,
+  afterVerifyEmail: identity,
+});
+
+/**
+ * The `Hooks` service. Every auth operation that fires hooks reads the current
+ * `Hooks` from context, so the active plugin stack can be swapped per request.
+ *
+ * `Hooks.Default` provides the no-op base (identity for every hook).
+ */
+export class Hooks extends Effect.Service<Hooks>()("@effect-auth/Hooks", {
+  succeed: makeNoopHooks(),
+}) {
+  /**
+   * Adapt a `void`-returning observer into a canonical {@link Tap} that threads
+   * the observed value through unchanged. Use this for `after*` hook points.
+   *
+   * @example
+   * ```ts
+   * afterSignIn: Hooks.tap((result: AuthResult) =>
+   *   Effect.logInfo("signed in", { userId: result.user.id })
+   * )
+   * ```
+   */
+  static readonly tap =
+    <V>(fn: (value: V) => Effect.Effect<void, HookError, never>): Tap<V> =>
+    (value: V): Effect.Effect<V, HookError, never> =>
+      fn(value).pipe(Effect.as(value));
+
+  /**
+   * Identity helper for authoring {@link Transform} hooks. Purely for symmetry
+   * with {@link Hooks.tap}; a bare `(value) => Effect<value>` works just as well.
+   */
+  static readonly transform = <V>(fn: Transform<V>): Transform<V> => fn;
+}
+
+/** A plugin's hook implementations - any subset of the hook points. */
+export type PluginImpls = Partial<HookDefs>;
+
+/** Options controlling how a plugin's hooks behave. */
+export interface MakePluginOptions {
+  /**
+   * When `true`, failures from this plugin's hooks are caught, logged via
+   * `Effect.logError`, and swallowed (the value flows on unchanged). Intended
+   * for best-effort, tap-only plugins (e.g. audit logging) where a logging
+   * failure must never break the auth operation.
+   *
+   * Defaults to `false`: hook failures propagate through the error channel.
+   * Transform hooks rely on propagation for their short-circuit semantics, so
+   * `isolateTaps` should only be enabled for tap-only plugins.
+   */
+  readonly isolateTaps?: boolean;
+}
+
+/**
+ * Wrap an inner implementation with a plugin's hooks. For each hook the plugin
+ * provides, the result calls `inner` first and pipes its output into the
+ * plugin's function (uniform value-threading - this is the same combinator for
+ * transforms and taps, so no runtime kind detection is needed). Hooks the
+ * plugin doesn't provide fall through to `inner` untouched.
+ */
+const wrapHooks = (inner: HookDefs, impls: PluginImpls, options: MakePluginOptions): HookDefs => {
+  const innerRecord = inner as unknown as Record<string, Transform<unknown>>;
+  const result: Record<string, Transform<unknown>> = { ...innerRecord };
+
+  for (const key of Object.keys(impls) as Array<keyof HookDefs>) {
+    const pluginFn = impls[key] as Transform<unknown> | undefined;
+    if (pluginFn === undefined) {
+      continue;
+    }
+    const innerFn = innerRecord[key as string]!;
+
+    result[key as string] = (value: unknown) =>
+      innerFn(value).pipe(
+        Effect.flatMap((innerOut: unknown) => {
+          const ran = pluginFn(innerOut);
+          if (!options.isolateTaps) {
+            return ran;
+          }
+          return ran.pipe(
+            Effect.catchAll((error) =>
+              Effect.logError(`[effect-auth/hooks] '${String(key)}' failed (isolated)`, error).pipe(
+                Effect.as(innerOut),
+              ),
+            ),
+          );
+        }),
+      );
+  }
+
+  return result as unknown as HookDefs;
+};
+
+/**
+ * Build a plugin as a wrapping Layer.
+ *
+ * A plugin only specifies the hooks it cares about. The returned Layer
+ * *requires* `Hooks` (the previous implementation in the stack) and *provides*
+ * `Hooks` (the wrapped one), so plugins compose by `Layer.provide` stacking.
+ *
+ * Two forms:
+ *
+ * - **Static** - pass the implementations directly. The plugin's hook functions
+ *   must be self-contained (`R = never`), so this form is for zero-dependency
+ *   plugins. Returns `Layer<Hooks, never, Hooks>`.
+ * - **Effectful** - pass an `Effect` that acquires the plugin's own service
+ *   dependencies (`yield* SomeService`) and returns the implementations. Those
+ *   dependencies surface in the Layer's requirements:
+ *   `Layer<Hooks, never, Hooks | SomeService>`.
+ *
+ * @example Zero-dependency
+ * ```ts
+ * const NormalizeEmail = makePlugin({
+ *   beforeSignUp: (input) => Effect.succeed({ ...input, email: input.email.toLowerCase() }),
+ * })
+ * ```
+ *
+ * @example With dependencies
+ * ```ts
+ * const RateLimit = makePlugin(
+ *   Effect.gen(function* () {
+ *     const limiter = yield* RateLimiter
+ *     return { beforeSignIn: (input) => limiter.consumeToken(...).pipe(Effect.as(input)) }
+ *   })
+ * )
+ * ```
+ */
+export function makePlugin<R>(
+  build: Effect.Effect<PluginImpls, never, R>,
+  options?: MakePluginOptions,
+): Layer.Layer<Hooks, never, Hooks | R>;
+export function makePlugin(
+  impls: PluginImpls,
+  options?: MakePluginOptions,
+): Layer.Layer<Hooks, never, Hooks>;
+export function makePlugin(
+  source: PluginImpls | Effect.Effect<PluginImpls, never, unknown>,
+  options: MakePluginOptions = {},
+): Layer.Layer<Hooks, never, unknown> {
+  return Layer.effect(
+    Hooks,
+    Effect.gen(function* () {
+      const inner = yield* Hooks;
+      const impls = Effect.isEffect(source) ? yield* source : source;
+      return Hooks.make(wrapHooks(inner, impls, options));
+    }),
+  );
+}
+
+/**
+ * Compose an ordered array of plugin Layers into a single Layer, folding them
+ * with `Layer.provide`.
+ *
+ * **Ordering:** array order is execution order for transforms - `plugins[0]`
+ * runs first (closest to the base `Hooks.Default`), `plugins[length - 1]` last;
+ * the caller observes the last plugin's output. Taps fire in the same order.
+ *
+ * The result still *requires* the base `Hooks` (provide `Hooks.Default`) plus
+ * the union of every plugin's own dependencies.
+ *
+ * @example
+ * ```ts
+ * const layer = composePlugins([RateLimit, NormalizeEmail, Audit]).pipe(
+ *   Layer.provide(Hooks.Default),
+ * )
+ * ```
+ */
+export const composePlugins = <RIn = never>(
+  plugins: ReadonlyArray<Layer.Layer<Hooks, never, RIn | Hooks>>,
+): Layer.Layer<Hooks, never, RIn | Hooks> => {
+  if (plugins.length === 0) {
+    // Identity passthrough: requires Hooks, provides Hooks unchanged.
+    return Layer.effect(Hooks, Hooks);
+  }
+  return plugins.reduce((acc, plugin) => plugin.pipe(Layer.provide(acc))) as Layer.Layer<
+    Hooks,
+    never,
+    RIn | Hooks
+  >;
+};

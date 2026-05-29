@@ -17,7 +17,7 @@ significant moment in the auth lifecycle. Two flavours:
   failing in the Effect error channel.
 - **Tap hooks** — observe a value, return `void`. Side-effect only.
 
-Plugins are authored with `makePlugin`, which produces a *decorator layer*
+Plugins are authored with `makePlugin`, which produces a _decorator layer_
 `Layer<Hooks, never, Hooks | PluginDeps>`. The helper threads the previous
 (inner) implementation automatically, so plugin authors never touch `inner`.
 Plugins stack via `Layer.provide`; `composePlugins` makes that call site clean.
@@ -40,34 +40,34 @@ types (`User`, `Session`, `SessionWithUser`, `Credentials`) live in `Types.ts`.
 
 Relevant operations, where a hook could fire, and the services involved:
 
-| Module (`src/…`) | Operation | Input | Output (success) | Deps in scope |
-|---|---|---|---|---|
-| `EmailPassword.ts` | `signUp` | `SignUpInput` | `AuthResult` `{user, session?}` | `EmailPasswordStore`, `PasswordHasher`, `SessionManager` |
-| `EmailPassword.ts` | `signIn` | `SignInInput` | `AuthResult` | same |
-| `AuthLifecycle.ts` | `signUp` | `SignUpInput` | `AuthLifecycleResult` | + `EmailVerificationService/Store` |
-| `AuthLifecycle.ts` | `signIn` | `SignInInput` | `AuthLifecycleResult` | same |
-| `AuthLifecycle.ts` | `verifyEmail` | `VerifyEmailInput` `{token,…}` | `AuthLifecycleResult` | `UserService(+Store)`, `SessionManager`, `EmailVerificationService(+Store)` |
-| `Session.ts` | `createSession` | `(userId, attributes?)` | `Session` | `SessionStore`, `UserStore` |
-| `Session.ts` | `validateSession` | `(sessionId)` | `SessionWithUser` | same |
-| `Session.ts` | `invalidateSession` | `(sessionId)` | `void` | `SessionStore` |
-| `Session.ts` | `invalidateUserSessions` | `(userId)` | `void` | `SessionStore` |
-| `PasswordReset.ts` | `requestPasswordReset` | `(email)` | `void` | `PasswordResetStore`, `PasswordResetUserStore` |
-| `PasswordReset.ts` | `resetPassword` | `(token, newPassword)` | `PasswordResetResult` | + `PasswordHasher`, `SessionManager` |
-| `EmailVerification.ts` | `createVerification` | `(userId, email)` | `{token, expiresAt}` | `EmailVerificationStore` |
-| `EmailVerification.ts` | `verifyToken` | `(token)` | `EmailVerificationResult` | same |
-| `OAuth.ts` | `generateAuthorizationUrl` / `exchangeCode` / `getUserInfo` | various | `OAuthResult`/`OAuthAccount` | `OAuthStateStore`, `OAuthAccountStore` |
-| `WebAuthn.ts` | `verifyRegistration` / `verifyAuthentication` | challenge + response | `Registration/AuthenticationResult` | `ChallengeStore`, `CredentialStore` |
-| `Authorization.ts` | `checkPermission` | `(userId, resource, action)` | `boolean`/`Permission` | `RoleStore` |
+| Module (`src/…`)       | Operation                                                   | Input                          | Output (success)                    | Deps in scope                                                               |
+| ---------------------- | ----------------------------------------------------------- | ------------------------------ | ----------------------------------- | --------------------------------------------------------------------------- |
+| `EmailPassword.ts`     | `signUp`                                                    | `SignUpInput`                  | `AuthResult` `{user, session?}`     | `EmailPasswordStore`, `PasswordHasher`, `SessionManager`                    |
+| `EmailPassword.ts`     | `signIn`                                                    | `SignInInput`                  | `AuthResult`                        | same                                                                        |
+| `AuthLifecycle.ts`     | `signUp`                                                    | `SignUpInput`                  | `AuthLifecycleResult`               | + `EmailVerificationService/Store`                                          |
+| `AuthLifecycle.ts`     | `signIn`                                                    | `SignInInput`                  | `AuthLifecycleResult`               | same                                                                        |
+| `AuthLifecycle.ts`     | `verifyEmail`                                               | `VerifyEmailInput` `{token,…}` | `AuthLifecycleResult`               | `UserService(+Store)`, `SessionManager`, `EmailVerificationService(+Store)` |
+| `Session.ts`           | `createSession`                                             | `(userId, attributes?)`        | `Session`                           | `SessionStore`, `UserStore`                                                 |
+| `Session.ts`           | `validateSession`                                           | `(sessionId)`                  | `SessionWithUser`                   | same                                                                        |
+| `Session.ts`           | `invalidateSession`                                         | `(sessionId)`                  | `void`                              | `SessionStore`                                                              |
+| `Session.ts`           | `invalidateUserSessions`                                    | `(userId)`                     | `void`                              | `SessionStore`                                                              |
+| `PasswordReset.ts`     | `requestPasswordReset`                                      | `(email)`                      | `void`                              | `PasswordResetStore`, `PasswordResetUserStore`                              |
+| `PasswordReset.ts`     | `resetPassword`                                             | `(token, newPassword)`         | `PasswordResetResult`               | + `PasswordHasher`, `SessionManager`                                        |
+| `EmailVerification.ts` | `createVerification`                                        | `(userId, email)`              | `{token, expiresAt}`                | `EmailVerificationStore`                                                    |
+| `EmailVerification.ts` | `verifyToken`                                               | `(token)`                      | `EmailVerificationResult`           | same                                                                        |
+| `OAuth.ts`             | `generateAuthorizationUrl` / `exchangeCode` / `getUserInfo` | various                        | `OAuthResult`/`OAuthAccount`        | `OAuthStateStore`, `OAuthAccountStore`                                      |
+| `WebAuthn.ts`          | `verifyRegistration` / `verifyAuthentication`               | challenge + response           | `Registration/AuthenticationResult` | `ChallengeStore`, `CredentialStore`                                         |
+| `Authorization.ts`     | `checkPermission`                                           | `(userId, resource, action)`   | `boolean`/`Permission`              | `RoleStore`                                                                 |
 
 > **Note on "token refresh":** the library has **no separate refresh-token
-> endpoint**. `Session.validateSession` implements *sliding* expiry (it extends
+> endpoint**. `Session.validateSession` implements _sliding_ expiry (it extends
 > `expiresAt` on each successful validation). The closest hook to "token
 > refresh" is therefore `afterValidateSession` (a session was re-validated and
 > its lifetime extended). We model it there rather than inventing a new flow.
 
 ### 1.1 Integration scope
 
-There are far more *possible* hook points than are worth wiring on day one.
+There are far more _possible_ hook points than are worth wiring on day one.
 We define the **full** `HookDefs` (so the type is stable), but propose to
 **wire** only the core lifecycle in Phase 2b:
 
@@ -76,8 +76,8 @@ We define the **full** `HookDefs` (so the type is stable), but propose to
   create/verify.
 - **Defined but not yet wired (Phase 2b stretch / future):** OAuth callback,
   WebAuthn authentication, permission checks. They are included in `HookDefs`
-  but their call sites are deferred so the PR stays reviewable. *(Flag for
-  review: wire all of them now, or defer? Recommendation: defer.)*
+  but their call sites are deferred so the PR stays reviewable. _(Flag for
+  review: wire all of them now, or defer? Recommendation: defer.)_
 
 ---
 
@@ -89,29 +89,29 @@ result). A few `before*` hooks that only gate (never modify) are still modelled
 as transforms returning the input unchanged, so the short-circuit channel is
 available uniformly.
 
-| Hook | Kind | Input → Output | Typical use |
-|---|---|---|---|
-| `beforeSignUp` | transform | `SignUpInput → SignUpInput` | normalise email, enrich attributes, registration rate-limit |
-| `afterSignUp` | tap | `AuthResult → void` | audit, welcome email, analytics |
-| `beforeSignIn` | transform | `SignInInput → SignInInput` | **rate-limit short-circuit**, normalise email |
-| `afterSignIn` | tap | `AuthResult → void` | audit, "new device" notification |
-| `beforeSignOut` | transform | `{ sessionId } → { sessionId }` | gate / log intent |
-| `afterSignOut` | tap | `{ sessionId } → void` | audit, cache invalidation |
-| `beforeCreateSession` | transform | `CreateSessionArgs → CreateSessionArgs` | inject session attributes (device, ip) |
-| `afterCreateSession` | tap | `Session → void` | audit, session metrics |
-| `beforeValidateSession` | transform | `{ sessionId } → { sessionId }` | (rare) pre-checks |
-| `afterValidateSession` | tap | `SessionWithUser → void` | "session refreshed" / sliding-expiry audit |
-| `beforeRequestPasswordReset` | transform | `{ email } → { email }` | rate-limit short-circuit, normalise |
-| `afterRequestPasswordReset` | tap | `{ email } → void` | audit (note: existence not revealed) |
-| `beforeResetPassword` | transform | `ResetPasswordArgs → ResetPasswordArgs` | extra password policy |
-| `afterResetPassword` | tap | `PasswordResetResult → void` | audit, "password changed" email |
-| `beforeCreateVerification` | transform | `{ userId, email } → { userId, email }` | rate-limit short-circuit |
-| `afterCreateVerification` | tap | `{ userId, email } → void` | audit |
-| `beforeVerifyEmail` | transform | `{ token } → { token }` | — |
-| `afterVerifyEmail` | tap | `EmailVerificationResult → void` | audit, post-verify enrichment |
-| *(deferred)* `afterOAuthCallback` | tap | `OAuthResult → void` | audit social login |
-| *(deferred)* `afterWebAuthnAuthentication` | tap | `AuthenticationResult → void` | audit passkey login |
-| *(deferred)* `beforePermissionCheck` | transform | `PermissionQuery → PermissionQuery` | policy augmentation |
+| Hook                                       | Kind      | Input → Output                          | Typical use                                                 |
+| ------------------------------------------ | --------- | --------------------------------------- | ----------------------------------------------------------- |
+| `beforeSignUp`                             | transform | `SignUpInput → SignUpInput`             | normalise email, enrich attributes, registration rate-limit |
+| `afterSignUp`                              | tap       | `AuthResult → void`                     | audit, welcome email, analytics                             |
+| `beforeSignIn`                             | transform | `SignInInput → SignInInput`             | **rate-limit short-circuit**, normalise email               |
+| `afterSignIn`                              | tap       | `AuthResult → void`                     | audit, "new device" notification                            |
+| `beforeSignOut`                            | transform | `{ sessionId } → { sessionId }`         | gate / log intent                                           |
+| `afterSignOut`                             | tap       | `{ sessionId } → void`                  | audit, cache invalidation                                   |
+| `beforeCreateSession`                      | transform | `CreateSessionArgs → CreateSessionArgs` | inject session attributes (device, ip)                      |
+| `afterCreateSession`                       | tap       | `Session → void`                        | audit, session metrics                                      |
+| `beforeValidateSession`                    | transform | `{ sessionId } → { sessionId }`         | (rare) pre-checks                                           |
+| `afterValidateSession`                     | tap       | `SessionWithUser → void`                | "session refreshed" / sliding-expiry audit                  |
+| `beforeRequestPasswordReset`               | transform | `{ email } → { email }`                 | rate-limit short-circuit, normalise                         |
+| `afterRequestPasswordReset`                | tap       | `{ email } → void`                      | audit (note: existence not revealed)                        |
+| `beforeResetPassword`                      | transform | `ResetPasswordArgs → ResetPasswordArgs` | extra password policy                                       |
+| `afterResetPassword`                       | tap       | `PasswordResetResult → void`            | audit, "password changed" email                             |
+| `beforeCreateVerification`                 | transform | `{ userId, email } → { userId, email }` | rate-limit short-circuit                                    |
+| `afterCreateVerification`                  | tap       | `{ userId, email } → void`              | audit                                                       |
+| `beforeVerifyEmail`                        | transform | `{ token } → { token }`                 | —                                                           |
+| `afterVerifyEmail`                         | tap       | `EmailVerificationResult → void`        | audit, post-verify enrichment                               |
+| _(deferred)_ `afterOAuthCallback`          | tap       | `OAuthResult → void`                    | audit social login                                          |
+| _(deferred)_ `afterWebAuthnAuthentication` | tap       | `AuthenticationResult → void`           | audit passkey login                                         |
+| _(deferred)_ `beforePermissionCheck`       | transform | `PermissionQuery → PermissionQuery`     | policy augmentation                                         |
 
 `CreateSessionArgs`, `ResetPasswordArgs`, etc. are small new record types
 introduced alongside the hook defs (they wrap the existing positional
@@ -127,8 +127,7 @@ needs no `Option`:
 
 ```ts
 beforeSignIn: (input) =>
-  rateLimiter.consumeToken(`signin:${input.email}`, RateLimitPresets.login)
-    .pipe(Effect.as(input)) // success → pass input through; fail → RateLimitError short-circuits
+  rateLimiter.consumeToken(`signin:${input.email}`, RateLimitPresets.login).pipe(Effect.as(input)); // success → pass input through; fail → RateLimitError short-circuits
 ```
 
 The failure type is added to the hook's `E` channel and therefore to the auth
@@ -143,16 +142,16 @@ composes with `Effect.catchTag`.
 
 ## 4. Error handling for **tap** hooks (decision required — recommendation inside)
 
-The task explicitly asks: *should a failing tap hook abort the operation or just
-log? configurable per-hook?* Decision:
+The task explicitly asks: _should a failing tap hook abort the operation or just
+log? configurable per-hook?_ Decision:
 
 - **Transform hooks: errors ALWAYS propagate.** They are in the critical path
   and are the short-circuit mechanism. Non-negotiable.
 - **Tap hooks: propagate by default, with an opt-in `isolate` mode.**
-  - *Default `propagate`*: a failing tap fails the operation. Honest and
+  - _Default `propagate`_: a failing tap fails the operation. Honest and
     type-safe — the failure shows up in `E`. Good for taps that represent real
     invariants (e.g. "must record audit row before returning").
-  - *Opt-in `isolate`*: the tap's failure is caught, logged via
+  - _Opt-in `isolate`_: the tap's failure is caught, logged via
     `Effect.logError`, and swallowed (the hook returns the value unchanged).
     Good for best-effort side effects (analytics, non-critical notifications).
     Configured per-plugin via a `makePlugin(impl, { isolateTaps: true })` option
@@ -180,8 +179,8 @@ export class Hooks extends Effect.Service<Hooks>()("@effect-auth/Hooks", {
 // Hooks.Default : Layer<Hooks, never, never>
 ```
 
-`makePlugin` returns a **decorator layer** that *requires* `Hooks` (the inner
-impl) and *provides* `Hooks` (the wrapped impl), plus whatever services the
+`makePlugin` returns a **decorator layer** that _requires_ `Hooks` (the inner
+impl) and _provides_ `Hooks` (the wrapped impl), plus whatever services the
 plugin's own hook bodies use:
 
 ```ts
@@ -190,7 +189,7 @@ makePlugin(impl): Layer<Hooks, never, Hooks | RateLimiter | RateLimitStore> // w
 ```
 
 Composition (`composePlugins`) folds an array with `Layer.provide` so each
-plugin is built on top of the previous one. The final layer still *requires*
+plugin is built on top of the previous one. The final layer still _requires_
 the base `Hooks` plus the union of all plugin deps:
 
 ```
@@ -199,7 +198,7 @@ composePlugins([A, B, C]) : Layer<Hooks, never, Hooks | DepsA | DepsB | DepsC>
         .pipe(Layer.provide(rateLimiterLayer, …))   // satisfy plugin deps
 ```
 
-**Ordering guarantee (proposed):** *array order = execution order for transforms*
+**Ordering guarantee (proposed):** _array order = execution order for transforms_
 — `plugins[0]`'s transform runs **first** (closest to `Hooks.Default`), then
 `plugins[1]`, etc.; the caller sees the last plugin's output. Taps fire in the
 same order (`plugins[0]` first). The swap-order test in §8 relies on this.
@@ -223,46 +222,46 @@ from `yield* Hooks` inside the decorator layer.
 
 The constraints say **(a)** "transform vs tap derived from type signatures, not
 a manual annotation" **and** **(b)** "no runtime type reflection." These two
-cannot both hold *literally* for `void`-returning taps, and it's worth being
+cannot both hold _literally_ for `void`-returning taps, and it's worth being
 explicit about why before we commit:
 
 - A transform's wrapper uses `flatMap` (thread inner's output into the plugin).
-- A tap's wrapper uses `zipRight` and re-supplies the *original* value (inner
+- A tap's wrapper uses `zipRight` and re-supplies the _original_ value (inner
   returns `void`, so there's nothing to thread).
 - These are **different runtime combinators**. To pick between them per hook,
-  `makePlugin` needs *some* runtime signal of each hook's kind. TypeScript types
+  `makePlugin` needs _some_ runtime signal of each hook's kind. TypeScript types
   are erased at runtime, so "derive purely from the type, with zero runtime
   data, and no reflection" is impossible the moment a tap returns `void`.
 
 Three ways to resolve it:
 
 **Option R1 — canonical value-threading + `tap()` constructor (recommended).**
-Make *every* hook canonically `(v: V) => Effect<V, E, R>` at the service
+Make _every_ hook canonically `(v: V) => Effect<V, E, R>` at the service
 boundary. Defaults are `Effect.succeed` (identity) for all. The wrapper is then
 **uniformly `flatMap`** — one combinator, **no reflection, no per-hook branch**.
 Tap authors keep writing `void`-returning bodies and wrap them with a tiny
 constructor `Hooks.tap(fn)` = `(v) => fn(v).pipe(Effect.as(v))`. Transforms use
 `Hooks.transform(fn)` (or a bare fn). The transform/tap intent is still encoded
-in `HookDefs` via `Transform<V>` / `Tap<V>` type aliases, so the *types* enforce
-correct author signatures. *Trade-off:* using `Hooks.tap(...)` is arguably a
+in `HookDefs` via `Transform<V>` / `Tap<V>` type aliases, so the _types_ enforce
+correct author signatures. _Trade-off:_ using `Hooks.tap(...)` is arguably a
 light "annotation," but it's a **value constructor**, not a config flag, and it
 buys us a genuinely reflection-free, branch-free runtime.
 
 **Option R2 — single hook spec (one-time, central).** Declare the hook registry
-once as data that carries each hook's kind, and *derive* the `HookDefs` type
+once as data that carries each hook's kind, and _derive_ the `HookDefs` type
 from it. `makePlugin` reads the spec at layer-build time to choose `flatMap` vs
-`zipRight`. Plugin authors annotate **nothing**. *Trade-off:* the kind lives in
+`zipRight`. Plugin authors annotate **nothing**. _Trade-off:_ the kind lives in
 a central value rather than being inferred from each function's return type —
 defensible as "the kind is part of `HookDefs`," but a stricter reading of
 constraint (a) might object.
 
 **Option R3 — per-key combinator map passed to `makePlugin`.** Rejected: that
-*is* the per-plugin manual annotation the task forbids.
+_is_ the per-plugin manual annotation the task forbids.
 
 > **Recommendation:** **R1.** It satisfies (b) exactly (uniform `flatMap`, no
 > reflection), keeps the type-level transform/tap distinction in `HookDefs`,
 > and the only cost is a one-token `Hooks.tap(...)` wrapper at authoring time.
-> If you prefer *zero* author-side tokens, choose **R2** and we accept the
+> If you prefer _zero_ author-side tokens, choose **R2** and we accept the
 > looser reading of (a). **Please pick R1 or R2 in review.**
 
 ---
@@ -275,52 +274,64 @@ for a value-threading transform whose author writes `void`). Under R2 the
 spec.
 
 ```ts
-import { Effect } from "effect"
-import type * as Types from "./Types.js"
-import type * as Errors from "./Errors.js"
-import type { SignUpInput, SignInInput, AuthResult } from "./EmailPassword.js"
-import type { EmailVerificationResult } from "./EmailVerification.js"
-import type { PasswordResetResult } from "./PasswordReset.js"
+import { Effect } from "effect";
+import type * as Types from "./Types.js";
+import type * as Errors from "./Errors.js";
+import type { SignUpInput, SignInInput, AuthResult } from "./EmailPassword.js";
+import type { EmailVerificationResult } from "./EmailVerification.js";
+import type { PasswordResetResult } from "./PasswordReset.js";
 
 /** A transform hook: maps a value to a new value of the same type. */
-export type Transform<V, E = never, R = never> = (value: V) => Effect.Effect<V, E, R>
+export type Transform<V, E = never, R = never> = (value: V) => Effect.Effect<V, E, R>;
 
 /**
  * A tap hook: observes a value, returns void. Canonically stored as a
  * value-threading transform (R1); authored via `Hooks.tap`.
  */
-export type Tap<V, E = never, R = never> = (value: V) => Effect.Effect<void, E, R>
+export type Tap<V, E = never, R = never> = (value: V) => Effect.Effect<void, E, R>;
 
 // Small named-argument wrappers around existing positional calls:
 export interface CreateSessionArgs {
-  readonly userId: string
-  readonly attributes?: Record<string, unknown>
+  readonly userId: string;
+  readonly attributes?: Record<string, unknown>;
 }
-export interface SessionRef { readonly sessionId: string }
-export interface ResetPasswordArgs { readonly token: string; readonly newPassword: string }
-export interface CreateVerificationArgs { readonly userId: string; readonly email: string }
-export interface VerifyEmailArgs { readonly token: string }
-export interface EmailRef { readonly email: string }
+export interface SessionRef {
+  readonly sessionId: string;
+}
+export interface ResetPasswordArgs {
+  readonly token: string;
+  readonly newPassword: string;
+}
+export interface CreateVerificationArgs {
+  readonly userId: string;
+  readonly email: string;
+}
+export interface VerifyEmailArgs {
+  readonly token: string;
+}
+export interface EmailRef {
+  readonly email: string;
+}
 
 export interface HookDefs {
-  readonly beforeSignUp: Transform<SignUpInput>
-  readonly afterSignUp: Tap<AuthResult>
-  readonly beforeSignIn: Transform<SignInInput>
-  readonly afterSignIn: Tap<AuthResult>
-  readonly beforeSignOut: Transform<SessionRef>
-  readonly afterSignOut: Tap<SessionRef>
-  readonly beforeCreateSession: Transform<CreateSessionArgs>
-  readonly afterCreateSession: Tap<Types.Session>
-  readonly beforeValidateSession: Transform<SessionRef>
-  readonly afterValidateSession: Tap<Types.SessionWithUser>
-  readonly beforeRequestPasswordReset: Transform<EmailRef>
-  readonly afterRequestPasswordReset: Tap<EmailRef>
-  readonly beforeResetPassword: Transform<ResetPasswordArgs>
-  readonly afterResetPassword: Tap<PasswordResetResult>
-  readonly beforeCreateVerification: Transform<CreateVerificationArgs>
-  readonly afterCreateVerification: Tap<CreateVerificationArgs>
-  readonly beforeVerifyEmail: Transform<VerifyEmailArgs>
-  readonly afterVerifyEmail: Tap<EmailVerificationResult>
+  readonly beforeSignUp: Transform<SignUpInput>;
+  readonly afterSignUp: Tap<AuthResult>;
+  readonly beforeSignIn: Transform<SignInInput>;
+  readonly afterSignIn: Tap<AuthResult>;
+  readonly beforeSignOut: Transform<SessionRef>;
+  readonly afterSignOut: Tap<SessionRef>;
+  readonly beforeCreateSession: Transform<CreateSessionArgs>;
+  readonly afterCreateSession: Tap<Types.Session>;
+  readonly beforeValidateSession: Transform<SessionRef>;
+  readonly afterValidateSession: Tap<Types.SessionWithUser>;
+  readonly beforeRequestPasswordReset: Transform<EmailRef>;
+  readonly afterRequestPasswordReset: Tap<EmailRef>;
+  readonly beforeResetPassword: Transform<ResetPasswordArgs>;
+  readonly afterResetPassword: Tap<PasswordResetResult>;
+  readonly beforeCreateVerification: Transform<CreateVerificationArgs>;
+  readonly afterCreateVerification: Tap<CreateVerificationArgs>;
+  readonly beforeVerifyEmail: Transform<VerifyEmailArgs>;
+  readonly afterVerifyEmail: Tap<EmailVerificationResult>;
 }
 ```
 
@@ -333,17 +344,13 @@ the operation's error channel.
 
 ```ts
 export interface MakePluginOptions {
-  readonly isolateTaps?: boolean // default false → propagate (see §4)
+  readonly isolateTaps?: boolean; // default false → propagate (see §4)
 }
 
 export const makePlugin: <Impl extends Partial<HookDefs>>(
   impl: Impl,
   options?: MakePluginOptions,
-) => Layer.Layer<
-  Hooks,
-  never,
-  Hooks | Effect.Effect.Context<ReturnType<Impl[keyof Impl] & {}>>
-> // R = Hooks ∪ union of every hook body's R
+) => Layer.Layer<Hooks, never, Hooks | Effect.Effect.Context<ReturnType<Impl[keyof Impl] & {}>>>; // R = Hooks ∪ union of every hook body's R
 ```
 
 (The exact `R` extraction is a mapped/conditional type over `Impl`; final form
@@ -355,7 +362,7 @@ lands in implementation. Key property: a plugin that uses `RateLimiter` yields
 ```ts
 export const composePlugins: <Layers extends ReadonlyArray<Layer.Layer<Hooks, never, any>>>(
   plugins: Layers,
-) => Layer.Layer<Hooks, never, Hooks | /* union of all RIn minus Hooks */ any>
+) => Layer.Layer<Hooks, never, Hooks | /* union of all RIn minus Hooks */ any>;
 ```
 
 ---
@@ -371,7 +378,7 @@ considered:
   `SessionManager` (for create/validate/invalidate).
 
 **Recommendation: (ii) + EmailPassword.** Wire hooks where the operation is
-*owned*:
+_owned_:
 
 - `EmailPassword.signUp/signIn` gain `beforeSignUp/afterSignUp`,
   `beforeSignIn/afterSignIn`.
@@ -460,4 +467,7 @@ Everything else (wrapping internals) stays module-private.
 - **O6.** Adding `Hooks` to existing methods' `R`/`E` is technically a
   **breaking change** to those signatures. Acceptable (pre-1.0, `0.0.0`), or do
   we want a non-breaking opt-in wrapper? Recommendation: acceptable pre-1.0.
+
+```
+
 ```
