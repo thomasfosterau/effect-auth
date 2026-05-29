@@ -15,7 +15,7 @@ export const validateSession = async (sessionId: string) =>
     Effect.gen(function* () {
       const manager = yield* Auth.makeSessionManager(sessionConfig);
       return yield* manager.validateSession(sessionId);
-    }).pipe(Effect.either),
+    }).pipe(Effect.result),
   );
 
 export const invalidateSession = async (sessionId: string) =>

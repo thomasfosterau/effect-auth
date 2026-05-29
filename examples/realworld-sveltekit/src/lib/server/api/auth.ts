@@ -18,8 +18,8 @@ export async function resolveApiUser(event: RequestEvent): Promise<ConduitProfil
   if ((scheme !== "Token" && scheme !== "Bearer") || !value) return null;
 
   const result = await validateSession(value);
-  if (result._tag === "Left") return null;
-  return getUserById(result.right.session.userId);
+  if (result._tag === "Failure") return null;
+  return getUserById(result.success.session.userId);
 }
 
 export async function requireApiUser(event: RequestEvent): Promise<ConduitProfile> {

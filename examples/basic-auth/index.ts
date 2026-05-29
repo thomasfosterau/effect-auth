@@ -174,8 +174,8 @@ const authenticationFlow = Effect.gen(function* () {
   // 7. Invalidate all user sessions
   console.log("7️⃣ Invalidating all user sessions...");
   yield* sessionManager.invalidateUserSessions("user-1");
-  const result = yield* Effect.either(sessionManager.validateSession(session.id));
-  if (result._tag === "Left") {
+  const result = yield* Effect.result(sessionManager.validateSession(session.id));
+  if (result._tag === "Failure") {
     console.log("   ✅ All sessions invalidated successfully\n");
   }
 

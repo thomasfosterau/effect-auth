@@ -58,7 +58,7 @@ export const validateSession = (sessionId: string) =>
     Effect.gen(function* () {
       const m = yield* Auth.makeSessionManager(sessionConfig);
       return yield* m.validateSession(sessionId);
-    }).pipe(Effect.either),
+    }).pipe(Effect.result),
   );
 
 export const invalidateSession = (sessionId: string) =>

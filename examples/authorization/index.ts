@@ -115,9 +115,9 @@ const authorizationFlow = Effect.gen(function* () {
 
   // Test 5: Using requirePermission (will fail)
   console.log("5️⃣ Using requirePermission for invalid permission...");
-  const result = yield* Effect.either(Auth.requirePermission("user-3", "posts", "delete"));
-  if (result._tag === "Left") {
-    console.log(`   ❌ Permission denied: ${result.left.message}\n`);
+  const result = yield* Effect.result(Auth.requirePermission("user-3", "posts", "delete"));
+  if (result._tag === "Failure") {
+    console.log(`   ❌ Permission denied: ${result.failure.message}\n`);
   }
 
   // Test 6: User with multiple roles
@@ -186,11 +186,11 @@ const protectedOperationsExample = Effect.gen(function* () {
 
   // Viewer tries to create a post (should fail)
   console.log("3️⃣ Viewer attempting to create post...");
-  const viewerResult = yield* Effect.either(
+  const viewerResult = yield* Effect.result(
     createPost("user-3", "Viewer Post", "This should fail"),
   );
-  if (viewerResult._tag === "Left") {
-    console.log(`   ❌ Denied: ${viewerResult.left.message}\n`);
+  if (viewerResult._tag === "Failure") {
+    console.log(`   ❌ Denied: ${viewerResult.failure.message}\n`);
   }
 
   console.log("✨ Protected operations example completed!");
@@ -198,7 +198,7 @@ const protectedOperationsExample = Effect.gen(function* () {
   return {
     adminPost,
     editorPost,
-    viewerDenied: viewerResult._tag === "Left",
+    viewerDenied: viewerResult._tag === "Failure",
   };
 });
 

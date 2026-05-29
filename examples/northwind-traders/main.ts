@@ -84,14 +84,14 @@ const scenario = Effect.gen(function* () {
 
   banner("Step 5 — Trip the login rate limiter");
   for (let attempt = 1; attempt <= 6; attempt++) {
-    const result = yield* Effect.either(
+    const result = yield* Effect.result(
       signInWithRateLimit({
         email: "nancy.davolio@northwind.example",
         password: "wrong-password",
       }),
     );
-    if (result._tag === "Left") {
-      console.log(`  attempt ${attempt}: ${result.left._tag} — ${result.left.message}`);
+    if (result._tag === "Failure") {
+      console.log(`  attempt ${attempt}: ${result.failure._tag} — ${result.failure.message}`);
     } else {
       console.log(`  attempt ${attempt}: unexpected success`);
     }
@@ -112,9 +112,9 @@ const scenario = Effect.gen(function* () {
   );
 
   banner("Step 7 — SalesRep tries to discontinue a product (denied)");
-  const denied = yield* Effect.either(northwind.discontinueProduct(salesRep.id, "prod-chang"));
-  if (denied._tag === "Left") {
-    console.log(`  Denied: ${denied.left._tag} — ${denied.left.message}`);
+  const denied = yield* Effect.result(northwind.discontinueProduct(salesRep.id, "prod-chang"));
+  if (denied._tag === "Failure") {
+    console.log(`  Denied: ${denied.failure._tag} — ${denied.failure.message}`);
   } else {
     console.log(`  Unexpectedly succeeded`);
   }
@@ -135,9 +135,9 @@ const scenario = Effect.gen(function* () {
 
   banner("Step 10 — Sign out");
   yield* sessionManager.invalidateSession(session.id);
-  const afterSignOut = yield* Effect.either(sessionManager.validateSession(session.id));
-  if (afterSignOut._tag === "Left") {
-    console.log(`  Session invalidated: ${afterSignOut.left._tag}`);
+  const afterSignOut = yield* Effect.result(sessionManager.validateSession(session.id));
+  if (afterSignOut._tag === "Failure") {
+    console.log(`  Session invalidated: ${afterSignOut.failure._tag}`);
   } else {
     console.log(`  Session unexpectedly still valid`);
   }

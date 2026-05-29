@@ -32,7 +32,7 @@ export async function resolveCurrentUser(
   if (!sid) sid = getCookie(c, SESSION_COOKIE) ?? null;
   if (!sid) return { user: null, sessionId: null };
   const r = await validateSession(sid);
-  if (r._tag === "Left") return { user: null, sessionId: null };
-  const user = getUserById(r.right.session.userId);
+  if (r._tag === "Failure") return { user: null, sessionId: null };
+  const user = getUserById(r.success.session.userId);
   return { user, sessionId: sid };
 }
