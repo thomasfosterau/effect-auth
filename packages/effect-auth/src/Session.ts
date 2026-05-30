@@ -2,6 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import type * as Types from "./Types.js";
 import * as Errors from "./Errors.js";
+import { Hooks, type HookError } from "./Hooks.js";
 
 /**
  * Session store interface for managing session persistence
@@ -81,7 +82,7 @@ export interface SessionManager {
   readonly createSession: (
     userId: string,
     attributes?: Record<string, unknown>,
-  ) => Effect.Effect<Types.Session, Errors.AuthError>;
+  ) => Effect.Effect<Types.Session, Errors.AuthError | HookError, Hooks>;
 
   /**
    * Validate a session and return it with the user
@@ -90,13 +91,16 @@ export interface SessionManager {
     sessionId: string,
   ) => Effect.Effect<
     Types.SessionWithUser,
-    Errors.SessionNotFoundError | Errors.SessionExpiredError | Errors.UserNotFoundError
+    Errors.SessionNotFoundError | Errors.SessionExpiredError | Errors.UserNotFoundError | HookError,
+    Hooks
   >;
 
   /**
    * Invalidate a session
    */
-  readonly invalidateSession: (sessionId: string) => Effect.Effect<void, Errors.AuthError>;
+  readonly invalidateSession: (
+    sessionId: string,
+  ) => Effect.Effect<void, Errors.AuthError | HookError, Hooks>;
 
   /**
    * Invalidate all sessions for a user
@@ -135,26 +139,36 @@ export const makeSessionManager = (
     const userStore = yield* UserStoreTag;
 
     return {
-      createSession: (userId, attributes = {}) =>
+      createSession: (rawUserId, rawAttributes = {}) =>
         Effect.gen(function* () {
+          const hooks = yield* Hooks;
+          const args = yield* hooks.beforeCreateSession({
+            userId: rawUserId,
+            attributes: rawAttributes,
+          });
+
           const sessionId = generateSessionId();
           const now = new Date();
           const expiresAt = new Date(now.getTime() + config.sessionExpiresIn.activePeriod);
 
           const session: Types.Session = {
             id: sessionId,
-            userId,
+            userId: args.userId,
             expiresAt,
             createdAt: now,
             lastActivityAt: now,
-            attributes,
+            attributes: args.attributes ?? {},
           };
 
-          return yield* sessionStore.create(session);
+          const created = yield* sessionStore.create(session);
+          return yield* hooks.afterCreateSession(created);
         }),
 
-      validateSession: (sessionId) =>
+      validateSession: (rawSessionId) =>
         Effect.gen(function* () {
+          const hooks = yield* Hooks;
+          const { sessionId } = yield* hooks.beforeValidateSession({ sessionId: rawSessionId });
+
           const session = yield* sessionStore.get(sessionId);
 
           // Check if session is expired
@@ -216,13 +230,19 @@ export const makeSessionManager = (
           // Get user
           const user = yield* userStore.get(session.userId);
 
-          return {
+          return yield* hooks.afterValidateSession({
             session: updatedSession,
             user,
-          };
+          });
         }),
 
-      invalidateSession: (sessionId) => sessionStore.delete(sessionId),
+      invalidateSession: (rawSessionId) =>
+        Effect.gen(function* () {
+          const hooks = yield* Hooks;
+          const { sessionId } = yield* hooks.beforeSignOut({ sessionId: rawSessionId });
+          yield* sessionStore.delete(sessionId);
+          yield* hooks.afterSignOut({ sessionId });
+        }),
 
       invalidateUserSessions: (userId) => sessionStore.deleteByUserId(userId),
     };

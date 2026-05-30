@@ -25,7 +25,8 @@ const globalForAuth = globalThis as unknown as {
 const sharedContext = globalForAuth.__conduitAuthContext ?? AppContext;
 if (process.env.NODE_ENV !== "production") globalForAuth.__conduitAuthContext = sharedContext;
 
-export const runAuth = <A, E>(eff: Effect.Effect<A, E, AppServices>) =>
-  Effect.runPromise(Effect.provide(eff, sharedContext));
+export const runAuth = <A, E>(eff: Effect.Effect<A, E, AppServices | Auth.Hooks>) =>
+  // No-op hooks base; swap for `composePlugins([...]).pipe(Layer.provide(Auth.Hooks.Default))`.
+  Effect.runPromise(Effect.provide(eff, sharedContext).pipe(Effect.provide(Auth.Hooks.Default)));
 
 export { Auth };

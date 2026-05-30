@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.js";
+import { Hooks, type HookError } from "./Hooks.js";
 import {
   EmailPasswordStoreTag,
   type SignInInput,
@@ -38,12 +39,14 @@ export interface AuthLifecycleService {
     | Errors.AuthError
     | Errors.HashingError
     | Errors.EmailVerificationError
-    | Errors.EmailNotVerifiedError,
+    | Errors.EmailNotVerifiedError
+    | HookError,
     | EmailPasswordStoreTag
     | PasswordHasherTag
     | SessionManagerTag
     | EmailVerificationServiceTag
     | EmailVerificationStoreTag
+    | Hooks
   >;
 
   readonly signIn: (
@@ -53,24 +56,27 @@ export interface AuthLifecycleService {
     | Errors.AuthError
     | Errors.HashingError
     | Errors.InvalidCredentialsError
-    | Errors.EmailVerificationError,
+    | Errors.EmailVerificationError
+    | HookError,
     | EmailPasswordStoreTag
     | PasswordHasherTag
     | SessionManagerTag
     | EmailVerificationServiceTag
     | EmailVerificationStoreTag
+    | Hooks
   >;
 
   readonly verifyEmail: (
     input: VerifyEmailInput,
   ) => Effect.Effect<
     AuthLifecycleResult,
-    Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError,
+    Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError | HookError,
     | UserServiceTag
     | UserServiceStoreTag
     | SessionManagerTag
     | EmailVerificationServiceTag
     | EmailVerificationStoreTag
+    | Hooks
   >;
 }
 

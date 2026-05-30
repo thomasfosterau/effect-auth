@@ -206,7 +206,7 @@ const runExample = async () => {
           Context.make(Auth.SessionStore, sessionStore),
           Context.merge(Context.make(Auth.UserStore, userStore), Auth.PasswordHasherLive),
         ),
-      ),
+      ).pipe(Effect.provide(Auth.Hooks.Default)),
     );
 
     console.log("\n📊 Final Result:");

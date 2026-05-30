@@ -29,8 +29,15 @@ import { UserServiceTag } from "./User.js";
  */
 export const makeCreateSessionResolver = Effect.gen(function* () {
   const sessionManager = yield* SessionManagerTag;
+  // createSession now requires `Hooks` in its context; capture it and provide
+  // it to the per-entry effect (fromEffect requires `R = never`).
+  const context =
+    yield* Effect.context<Effect.Services<ReturnType<typeof sessionManager.createSession>>>();
   return RequestResolver.fromEffect((entry: Request.Entry<Requests.CreateSessionRequest>) =>
-    sessionManager.createSession(entry.request.userId, entry.request.attributes),
+    Effect.provide(
+      sessionManager.createSession(entry.request.userId, entry.request.attributes),
+      context,
+    ),
   );
 });
 
@@ -39,8 +46,10 @@ export const makeCreateSessionResolver = Effect.gen(function* () {
  */
 export const makeValidateSessionResolver = Effect.gen(function* () {
   const sessionManager = yield* SessionManagerTag;
+  const context =
+    yield* Effect.context<Effect.Services<ReturnType<typeof sessionManager.validateSession>>>();
   return RequestResolver.fromEffect((entry: Request.Entry<Requests.ValidateSessionRequest>) =>
-    sessionManager.validateSession(entry.request.sessionId),
+    Effect.provide(sessionManager.validateSession(entry.request.sessionId), context),
   );
 });
 
@@ -49,8 +58,10 @@ export const makeValidateSessionResolver = Effect.gen(function* () {
  */
 export const makeInvalidateSessionResolver = Effect.gen(function* () {
   const sessionManager = yield* SessionManagerTag;
+  const context =
+    yield* Effect.context<Effect.Services<ReturnType<typeof sessionManager.invalidateSession>>>();
   return RequestResolver.fromEffect((entry: Request.Entry<Requests.InvalidateSessionRequest>) =>
-    sessionManager.invalidateSession(entry.request.sessionId),
+    Effect.provide(sessionManager.invalidateSession(entry.request.sessionId), context),
   );
 });
 

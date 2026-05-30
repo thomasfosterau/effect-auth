@@ -31,7 +31,7 @@
  *
  * @module hooks
  */
-import { Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import type * as Errors from "./Errors.js";
 import type { AuthResult, SignInInput, SignUpInput } from "./EmailPassword.js";
 import type { EmailVerificationResult } from "./EmailVerification.js";
@@ -158,9 +158,10 @@ const makeNoopHooks = (): HookDefs => ({
  *
  * `Hooks.Default` provides the no-op base (identity for every hook).
  */
-export class Hooks extends Effect.Service<Hooks>()("@effect-auth/Hooks", {
-  succeed: makeNoopHooks(),
-}) {
+export class Hooks extends Context.Service<Hooks, HookDefs>()("@effect-auth/Hooks") {
+  /** No-op base layer: identity for every hook point. */
+  static readonly Default = Layer.succeed(Hooks, makeNoopHooks());
+
   /**
    * Adapt a `void`-returning observer into a canonical {@link Tap} that threads
    * the observed value through unchanged. Use this for `after*` hook points.
@@ -228,7 +229,7 @@ const wrapHooks = (inner: HookDefs, impls: PluginImpls, options: MakePluginOptio
             return ran;
           }
           return ran.pipe(
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.logError(`[effect-auth/hooks] '${String(key)}' failed (isolated)`, error).pipe(
                 Effect.as(innerOut),
               ),
@@ -292,7 +293,7 @@ export function makePlugin(
     Effect.gen(function* () {
       const inner = yield* Hooks;
       const impls = Effect.isEffect(source) ? yield* source : source;
-      return Hooks.make(wrapHooks(inner, impls, options));
+      return wrapHooks(inner, impls, options);
     }),
   );
 }
@@ -320,7 +321,12 @@ export const composePlugins = <RIn = never>(
 ): Layer.Layer<Hooks, never, RIn | Hooks> => {
   if (plugins.length === 0) {
     // Identity passthrough: requires Hooks, provides Hooks unchanged.
-    return Layer.effect(Hooks, Hooks);
+    return Layer.effect(
+      Hooks,
+      Effect.gen(function* () {
+        return yield* Hooks;
+      }),
+    );
   }
   return plugins.reduce((acc, plugin) => plugin.pipe(Layer.provide(acc))) as Layer.Layer<
     Hooks,

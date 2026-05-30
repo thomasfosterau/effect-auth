@@ -98,7 +98,7 @@ describe("Hooks - tap error handling", () => {
         afterSignIn: Hooks.tap(() =>
           Effect.sync(() => {
             calls.push("a");
-          }).pipe(Effect.zipRight(Effect.fail(new Errors.AuthError({ message: "boom" })))),
+          }).pipe(Effect.andThen(Effect.fail(new Errors.AuthError({ message: "boom" })))),
         ),
       },
       { isolateTaps: true },
@@ -138,13 +138,13 @@ describe("Hooks - tap error handling", () => {
       [strictTap],
       Effect.gen(function* () {
         const hooks = yield* Hooks;
-        return yield* Effect.either(hooks.afterSignIn(authResult));
+        return yield* Effect.result(hooks.afterSignIn(authResult));
       }),
     );
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("AuthError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("AuthError");
     }
   });
 });
@@ -160,13 +160,13 @@ describe("Hooks - transform short-circuit", () => {
       [deny],
       Effect.gen(function* () {
         const hooks = yield* Hooks;
-        return yield* Effect.either(hooks.beforeSignIn(signIn("x")));
+        return yield* Effect.result(hooks.beforeSignIn(signIn("x")));
       }),
     );
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("RateLimitError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("RateLimitError");
     }
   });
 
@@ -190,11 +190,11 @@ describe("Hooks - transform short-circuit", () => {
       [deny, later],
       Effect.gen(function* () {
         const hooks = yield* Hooks;
-        return yield* Effect.either(hooks.beforeSignIn(signIn("x")));
+        return yield* Effect.result(hooks.beforeSignIn(signIn("x")));
       }),
     );
 
-    expect(result._tag).toBe("Left");
+    expect(result._tag).toBe("Failure");
     expect(laterRan).toBe(false);
   });
 });
@@ -237,8 +237,8 @@ describe("RateLimitPlugin - dependency composition + short-circuit", () => {
       const outcomes: Array<string> = [];
       // login preset allows 5 requests per window.
       for (let i = 0; i < 6; i++) {
-        const result = yield* Effect.either(hooks.beforeSignIn(signIn("rate@example.com")));
-        outcomes.push(result._tag === "Right" ? "ok" : result.left._tag);
+        const result = yield* Effect.result(hooks.beforeSignIn(signIn("rate@example.com")));
+        outcomes.push(result._tag === "Success" ? "ok" : result.failure._tag);
       }
       return outcomes;
     });
