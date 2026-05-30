@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.js";
+import { formatPermission, permissionMatches, type PermissionRef } from "./Permission.js";
 
 /**
  * Authorization policy interface
@@ -73,8 +74,8 @@ export const makeRoleBasedPolicy = (): Effect.Effect<AuthorizationPolicy, never,
           for (const role of roles) {
             const permissions = yield* roleStore.getRolePermissions(role);
 
-            const hasPermission = permissions.some(
-              (p) => p.resource === resource && p.action === action,
+            const hasPermission = permissions.some((p) =>
+              permissionMatches(p, { resource, action }),
             );
 
             if (hasPermission) {
@@ -112,4 +113,142 @@ export const requirePermission = (
         }),
       );
     }
+  });
+
+// ---------------------------------------------------------------------------
+// Policy combinators
+// ---------------------------------------------------------------------------
+
+/**
+ * A policy that grants every permission.
+ */
+export const allowAll: AuthorizationPolicy = {
+  checkPermission: () => Effect.succeed(true),
+};
+
+/**
+ * A policy that denies every permission.
+ */
+export const denyAll: AuthorizationPolicy = {
+  checkPermission: () => Effect.succeed(false),
+};
+
+/**
+ * Build a policy from an arbitrary predicate.
+ *
+ * This is the building block for attribute-based (ABAC) rules: the predicate can
+ * close over any data needed to make a decision. Note the predicate operates on
+ * `(userId, resource, action)` with no extra context — per-instance/ownership
+ * checks that need to load a specific record are best done at the call site and
+ * composed here with {@link allOf} / {@link anyOf}.
+ */
+export const fromPredicate = (
+  check: (userId: string, resource: string, action: string) => Effect.Effect<boolean, never>,
+): AuthorizationPolicy => ({
+  checkPermission: check,
+});
+
+/**
+ * Combine policies with logical OR: permission is granted if *any* policy grants
+ * it. Evaluation short-circuits on the first grant. With no policies, denies.
+ */
+export const anyOf = (...policies: readonly AuthorizationPolicy[]): AuthorizationPolicy => ({
+  checkPermission: (userId, resource, action) =>
+    Effect.gen(function* () {
+      for (const policy of policies) {
+        if (yield* policy.checkPermission(userId, resource, action)) {
+          return true;
+        }
+      }
+      return false;
+    }),
+});
+
+/**
+ * Combine policies with logical AND: permission is granted only if *every*
+ * policy grants it. Evaluation short-circuits on the first denial. With no
+ * policies, grants (vacuously true).
+ */
+export const allOf = (...policies: readonly AuthorizationPolicy[]): AuthorizationPolicy => ({
+  checkPermission: (userId, resource, action) =>
+    Effect.gen(function* () {
+      for (const policy of policies) {
+        if (!(yield* policy.checkPermission(userId, resource, action))) {
+          return false;
+        }
+      }
+      return true;
+    }),
+});
+
+/**
+ * Negate a policy: grants what the wrapped policy denies and vice versa.
+ */
+export const not = (policy: AuthorizationPolicy): AuthorizationPolicy => ({
+  checkPermission: (userId, resource, action) =>
+    Effect.map(policy.checkPermission(userId, resource, action), (granted) => !granted),
+});
+
+// ---------------------------------------------------------------------------
+// Ergonomic guards (read the policy from context)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check a permission against the {@link AuthorizationPolicy} in context,
+ * returning a boolean instead of failing.
+ */
+export const can = (
+  userId: string,
+  resource: string,
+  action: string,
+): Effect.Effect<boolean, never, AuthorizationPolicyTag> =>
+  Effect.flatMap(AuthorizationPolicyTag, (policy) =>
+    policy.checkPermission(userId, resource, action),
+  );
+
+/**
+ * Require that the user has *all* of the given permissions. Fails with
+ * `PermissionDeniedError` for the first permission that is not granted.
+ */
+export const requireAllPermissions = (
+  userId: string,
+  permissions: readonly PermissionRef[],
+): Effect.Effect<void, Errors.PermissionDeniedError, AuthorizationPolicyTag> =>
+  Effect.forEach(
+    permissions,
+    ({ resource, action }) => requirePermission(userId, resource, action),
+    {
+      discard: true,
+    },
+  );
+
+/**
+ * Require that the user has *at least one* of the given permissions. Fails with
+ * `PermissionDeniedError` only if none are granted.
+ */
+export const requireAnyPermission = (
+  userId: string,
+  permissions: readonly PermissionRef[],
+): Effect.Effect<void, Errors.PermissionDeniedError, AuthorizationPolicyTag> =>
+  Effect.gen(function* () {
+    const policy = yield* AuthorizationPolicyTag;
+
+    for (const { resource, action } of permissions) {
+      if (yield* policy.checkPermission(userId, resource, action)) {
+        return;
+      }
+    }
+
+    const first = permissions[0];
+    const summary = permissions.map(formatPermission).join(", ");
+    return yield* Effect.fail(
+      new Errors.PermissionDeniedError({
+        message:
+          permissions.length === 0
+            ? "Permission denied: no permissions provided"
+            : `Permission denied: requires any of [${summary}]`,
+        resource: first?.resource ?? "*",
+        action: first?.action ?? "*",
+      }),
+    );
   });

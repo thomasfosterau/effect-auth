@@ -27,6 +27,15 @@ export * from "./Resolvers.js";
 /** Authorization primitives. */
 export * from "./Authorization.js";
 
+/** Permission value helpers (parse/format/wildcard matching). */
+export * from "./Permission.js";
+
+/** In-memory role store with hierarchy (RBAC). */
+export * from "./Rbac.js";
+
+/** OAuth-style scope helpers. */
+export * from "./Scope.js";
+
 /** OTP utilities (TOTP and HOTP, following Oslo patterns). */
 export * from "./Otp.js";
 

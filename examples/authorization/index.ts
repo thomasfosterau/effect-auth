@@ -2,76 +2,49 @@
  * Authorization example with role-based access control
  *
  * This example demonstrates:
- * - Implementing a role store
- * - Setting up role-based authorization
- * - Checking permissions
- * - Using requirePermission helper
+ * - Building a RoleStore with `makeInMemoryRoleStore` (no hand-rolled Maps)
+ * - Role inheritance (editor inherits viewer) and wildcard permissions (admin → *:*)
+ * - Checking and requiring permissions
+ * - Composing policies with combinators (allOf / anyOf)
+ * - Batch guards (requireAllPermissions)
+ * - OAuth-style scope checks (hasScope / requireScope)
  */
 
 import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
-// Define roles and permissions
-const rolePermissions = new Map([
-  [
-    "admin",
-    [
-      { resource: "posts", action: "create" },
-      { resource: "posts", action: "read" },
-      { resource: "posts", action: "update" },
-      { resource: "posts", action: "delete" },
-      { resource: "users", action: "create" },
-      { resource: "users", action: "read" },
-      { resource: "users", action: "update" },
-      { resource: "users", action: "delete" },
-    ],
+// Permissions granted directly by each role. `admin` uses a "*:*" wildcard to
+// grant everything; `editor` inherits `viewer` via the role hierarchy below.
+const rolePermissions = {
+  admin: [{ resource: "*", action: "*" }],
+  editor: [
+    { resource: "posts", action: "create" },
+    { resource: "posts", action: "update" },
+    { resource: "posts", action: "delete" },
   ],
-  [
-    "editor",
-    [
-      { resource: "posts", action: "create" },
-      { resource: "posts", action: "read" },
-      { resource: "posts", action: "update" },
-      { resource: "posts", action: "delete" },
-    ],
+  viewer: [
+    { resource: "posts", action: "read" },
+    { resource: "users", action: "read" },
   ],
-  [
-    "viewer",
-    [
-      { resource: "posts", action: "read" },
-      { resource: "users", action: "read" },
-    ],
-  ],
-]);
+};
 
-// User role assignments
-const userRoles = new Map([
-  ["user-1", ["admin"]],
-  ["user-2", ["editor"]],
-  ["user-3", ["viewer"]],
-  ["user-4", ["editor", "viewer"]],
-]);
+// editor inherits all of viewer's permissions.
+const roleHierarchy = {
+  editor: ["viewer"],
+};
 
-/**
- * Implement RoleStore
- */
-const roleStore: Auth.RoleStore = {
-  getUserRoles: (userId) =>
-    Effect.sync(() => {
-      const roles = userRoles.get(userId);
-      return roles || [];
-    }),
-
-  getRolePermissions: (role) =>
-    Effect.sync(() => {
-      const permissions = rolePermissions.get(role);
-      return permissions || [];
-    }),
+// User role assignments.
+const userRoles = {
+  "user-1": ["admin"],
+  "user-2": ["editor"],
+  "user-3": ["viewer"],
 };
 
 /**
- * Provides both the RoleStore and a role-based AuthorizationPolicy built from it.
+ * Build an in-memory RoleStore and a role-based AuthorizationPolicy from it.
  */
+const roleStore = Auth.makeInMemoryRoleStore({ userRoles, rolePermissions, roleHierarchy });
+
 const RoleStoreLayer = Layer.succeed(Auth.RoleStore, roleStore);
 const AppLayer = Layer.merge(
   RoleStoreLayer,
@@ -86,120 +59,94 @@ const AppLayer = Layer.merge(
 const authorizationFlow = Effect.gen(function* () {
   console.log("🔐 Starting authorization example...\n");
 
-  // Create role-based policy
   const policy = yield* Auth.makeRoleBasedPolicy();
 
-  // Test 1: Admin permissions
-  console.log("1️⃣ Testing admin permissions...");
+  // Test 1: Admin has wildcard permissions
+  console.log("1️⃣ Admin (wildcard *:*) permissions...");
   const adminCanDelete = yield* policy.checkPermission("user-1", "users", "delete");
-  console.log(`   Admin can delete users: ${adminCanDelete}\n`);
+  const adminCanDoAnything = yield* policy.checkPermission("user-1", "anything", "destroy");
+  console.log(`   Admin can delete users: ${adminCanDelete}`);
+  console.log(`   Admin can destroy anything: ${adminCanDoAnything}\n`);
 
-  // Test 2: Editor permissions
-  console.log("2️⃣ Testing editor permissions...");
-  const editorCanCreatePost = yield* policy.checkPermission("user-2", "posts", "create");
+  // Test 2: Editor inherits viewer's read permission
+  console.log("2️⃣ Editor (inherits viewer) permissions...");
+  const editorCanCreate = yield* policy.checkPermission("user-2", "posts", "create");
+  const editorCanRead = yield* policy.checkPermission("user-2", "posts", "read"); // inherited
   const editorCanDeleteUser = yield* policy.checkPermission("user-2", "users", "delete");
-  console.log(`   Editor can create posts: ${editorCanCreatePost}`);
+  console.log(`   Editor can create posts: ${editorCanCreate}`);
+  console.log(`   Editor can read posts (inherited): ${editorCanRead}`);
   console.log(`   Editor can delete users: ${editorCanDeleteUser}\n`);
 
-  // Test 3: Viewer permissions
-  console.log("3️⃣ Testing viewer permissions...");
-  const viewerCanRead = yield* policy.checkPermission("user-3", "posts", "read");
-  const viewerCanUpdate = yield* policy.checkPermission("user-3", "posts", "update");
-  console.log(`   Viewer can read posts: ${viewerCanRead}`);
-  console.log(`   Viewer can update posts: ${viewerCanUpdate}\n`);
+  // Test 3: requireAllPermissions guard
+  console.log("3️⃣ Requiring multiple permissions at once...");
+  yield* Auth.requireAllPermissions("user-2", [
+    { resource: "posts", action: "create" },
+    { resource: "posts", action: "read" },
+  ]);
+  console.log("   ✅ Editor has both create and read on posts\n");
 
-  // Test 4: Using requirePermission (will succeed)
-  console.log("4️⃣ Using requirePermission for valid permission...");
-  yield* Auth.requirePermission("user-1", "posts", "create");
-  console.log("   ✅ Admin has permission to create posts\n");
-
-  // Test 5: Using requirePermission (will fail)
-  console.log("5️⃣ Using requirePermission for invalid permission...");
-  const result = yield* Effect.either(Auth.requirePermission("user-3", "posts", "delete"));
-  if (result._tag === "Left") {
-    console.log(`   ❌ Permission denied: ${result.left.message}\n`);
+  // Test 4: requirePermission failure
+  console.log("4️⃣ Requiring a permission the viewer lacks...");
+  const denied = yield* Effect.either(Auth.requirePermission("user-3", "posts", "delete"));
+  if (denied._tag === "Left") {
+    console.log(`   ❌ Permission denied: ${denied.left.message}\n`);
   }
 
-  // Test 6: User with multiple roles
-  console.log("6️⃣ Testing user with multiple roles...");
-  const multiRoleCanCreate = yield* policy.checkPermission("user-4", "posts", "create");
-  const multiRoleCanRead = yield* policy.checkPermission("user-4", "posts", "read");
-  console.log(`   User-4 can create posts: ${multiRoleCanCreate}`);
-  console.log(`   User-4 can read posts: ${multiRoleCanRead}\n`);
-
-  console.log("✨ Authorization example completed successfully!");
-
-  return {
-    tests: {
-      adminCanDelete,
-      editorCanCreatePost,
-      editorCanDeleteUser,
-      viewerCanRead,
-      viewerCanUpdate,
-      multiRoleCanCreate,
-      multiRoleCanRead,
-    },
-  };
+  return { adminCanDelete, adminCanDoAnything, editorCanCreate, editorCanRead };
 });
 
 /**
- * Simulate a protected operation
+ * Policy combinator example: a post can be edited if the user has the editor
+ * permission OR is the author of the post (an ABAC-style ownership rule).
  */
-const createPost = (userId: string, title: string, content: string) =>
-  Effect.gen(function* () {
-    // Check permission first
-    yield* Auth.requirePermission(userId, "posts", "create");
-
-    // If we get here, permission was granted
-    const post = {
-      id: Math.random().toString(36).substring(7),
-      title,
-      content,
-      authorId: userId,
-      createdAt: new Date(),
-    };
-
-    console.log(`📝 Post created by ${userId}:`);
-    console.log(`   Title: ${title}`);
-    console.log(`   ID: ${post.id}`);
-
-    return post;
-  });
-
-/**
- * Example of protecting operations
- */
-const protectedOperationsExample = Effect.gen(function* () {
-  console.log("\n" + "=".repeat(50));
-  console.log("🛡️  Protected Operations Example");
+const combinatorExample = Effect.gen(function* () {
+  console.log("=".repeat(50));
+  console.log("🧩 Policy Combinators (RBAC + ABAC)");
   console.log("=".repeat(50) + "\n");
 
-  // Admin creates a post (should succeed)
-  console.log("1️⃣ Admin creating post...");
-  const adminPost = yield* createPost("user-1", "Admin Post", "Content by admin");
-  console.log("   ✅ Success!\n");
+  const rbac = yield* Auth.makeRoleBasedPolicy();
 
-  // Editor creates a post (should succeed)
-  console.log("2️⃣ Editor creating post...");
-  const editorPost = yield* createPost("user-2", "Editor Post", "Content by editor");
-  console.log("   ✅ Success!\n");
-
-  // Viewer tries to create a post (should fail)
-  console.log("3️⃣ Viewer attempting to create post...");
-  const viewerResult = yield* Effect.either(
-    createPost("user-3", "Viewer Post", "This should fail"),
+  // Ownership rule: user-3 happens to own the post they are editing.
+  const isAuthor = Auth.fromPredicate((userId, resource) =>
+    Effect.succeed(resource === "posts" && userId === "user-3"),
   );
-  if (viewerResult._tag === "Left") {
-    console.log(`   ❌ Denied: ${viewerResult.left.message}\n`);
+
+  const canEditPost = Auth.anyOf(rbac, isAuthor);
+
+  const editorAllowed = yield* canEditPost.checkPermission("user-2", "posts", "update");
+  const authorAllowed = yield* canEditPost.checkPermission("user-3", "posts", "update");
+  const strangerAllowed = yield* canEditPost.checkPermission("user-99", "posts", "update");
+
+  console.log(`   Editor can update via role:  ${editorAllowed}`);
+  console.log(`   Author can update via ownership: ${authorAllowed}`);
+  console.log(`   Stranger can update: ${strangerAllowed}\n`);
+
+  return { editorAllowed, authorAllowed, strangerAllowed };
+});
+
+/**
+ * OAuth-style scope example.
+ */
+const scopeExample = Effect.gen(function* () {
+  console.log("=".repeat(50));
+  console.log("🎫 OAuth Scope Checks");
+  console.log("=".repeat(50) + "\n");
+
+  const token = "read:user write:repo";
+
+  console.log(`   Granted scopes: "${token}"`);
+  console.log(`   hasScope write:repo -> ${Auth.hasScope(token, "write:repo")}`);
+  console.log(`   hasScope delete:repo -> ${Auth.hasScope(token, "delete:repo")}`);
+
+  yield* Auth.requireScope(token, "read:user");
+  console.log("   ✅ requireScope read:user passed");
+
+  const denied = yield* Effect.either(Auth.requireScope(token, "admin:org"));
+  if (denied._tag === "Left") {
+    console.log(`   ❌ ${denied.left.message}\n`);
   }
 
-  console.log("✨ Protected operations example completed!");
-
-  return {
-    adminPost,
-    editorPost,
-    viewerDenied: viewerResult._tag === "Left",
-  };
+  return { ok: true };
 });
 
 /**
@@ -207,17 +154,17 @@ const protectedOperationsExample = Effect.gen(function* () {
  */
 const runExamples = async () => {
   try {
-    // Run authorization flow
     const authResult = await Effect.runPromise(Effect.provide(authorizationFlow, AppLayer));
+    console.log("📊 Authorization Test Results:");
+    console.log(JSON.stringify(authResult, null, 2) + "\n");
 
-    console.log("\n📊 Authorization Test Results:");
-    console.log(JSON.stringify(authResult, null, 2));
+    const comboResult = await Effect.runPromise(Effect.provide(combinatorExample, AppLayer));
+    console.log("📊 Combinator Results:");
+    console.log(JSON.stringify(comboResult, null, 2) + "\n");
 
-    // Run protected operations example
-    const opsResult = await Effect.runPromise(Effect.provide(protectedOperationsExample, AppLayer));
+    await Effect.runPromise(scopeExample);
 
-    console.log("\n📊 Protected Operations Results:");
-    console.log(JSON.stringify(opsResult, null, 2));
+    console.log("\n✨ Authorization example completed successfully!");
   } catch (error) {
     console.error("❌ Error:", error);
     process.exit(1);
@@ -229,4 +176,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   runExamples();
 }
 
-export { authorizationFlow, protectedOperationsExample, roleStore };
+export { authorizationFlow, combinatorExample, scopeExample, roleStore };
