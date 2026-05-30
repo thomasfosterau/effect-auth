@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import * as Auth from "effect-auth";
 import { migrate, schemaStatements } from "./Schema.js";
 import {
@@ -126,12 +126,12 @@ suite("@effect-auth/alchemy stores", () => {
     const updated = await Effect.runPromise(store.get("s1"));
     expect(updated.attributes).toEqual({ ip: "10.0.0.1" });
 
-    const missing = await Effect.runPromise(Effect.either(store.get("nope")));
-    expect(Either.isLeft(missing) && missing.left._tag).toBe("SessionNotFoundError");
+    const missing = await Effect.runPromise(Effect.result(store.get("nope")));
+    expect(Result.isFailure(missing) && missing.failure._tag).toBe("SessionNotFoundError");
 
     await Effect.runPromise(store.deleteByUserId("u1"));
-    const gone = await Effect.runPromise(Effect.either(store.get("s1")));
-    expect(Either.isLeft(gone)).toBe(true);
+    const gone = await Effect.runPromise(Effect.result(store.get("s1")));
+    expect(Result.isFailure(gone)).toBe(true);
   });
 
   it("user + email-password stores share auth_users", async () => {
@@ -158,8 +158,8 @@ suite("@effect-auth/alchemy stores", () => {
     const user = await Effect.runPromise(users.get(created.id));
     expect(user.attributes["email"]).toBe("a@b.com");
 
-    const missing = await Effect.runPromise(Effect.either(users.get("nope")));
-    expect(Either.isLeft(missing) && missing.left._tag).toBe("UserNotFoundError");
+    const missing = await Effect.runPromise(Effect.result(users.get("nope")));
+    expect(Result.isFailure(missing) && missing.failure._tag).toBe("UserNotFoundError");
   });
 
   it("user service store: getByEmail / update / delete", async () => {
@@ -178,7 +178,9 @@ suite("@effect-auth/alchemy stores", () => {
     expect(await Effect.runPromise(service.getByEmail("new@d.com"))).not.toBe(null);
 
     await Effect.runPromise(service.delete(user.id));
-    expect(Either.isLeft(await Effect.runPromise(Effect.either(service.get(user.id))))).toBe(true);
+    expect(Result.isFailure(await Effect.runPromise(Effect.result(service.get(user.id))))).toBe(
+      true,
+    );
   });
 
   it("rate limit store: increment, set, get, delete", async () => {
@@ -231,8 +233,8 @@ suite("@effect-auth/alchemy stores", () => {
     expect(fetched.userId).toBe("u1");
 
     await Effect.runPromise(challenges.delete(challengeBytes));
-    const missing = await Effect.runPromise(Effect.either(challenges.get(challengeBytes)));
-    expect(Either.isLeft(missing) && missing.left._tag).toBe("ChallengeNotFoundError");
+    const missing = await Effect.runPromise(Effect.result(challenges.get(challengeBytes)));
+    expect(Result.isFailure(missing) && missing.failure._tag).toBe("ChallengeNotFoundError");
 
     const credential: Auth.WebAuthnCredential = {
       id: "c1",
@@ -292,8 +294,8 @@ suite("@effect-auth/alchemy stores", () => {
     await Effect.runPromise(store.create(state));
     expect((await Effect.runPromise(store.get("st1"))).codeVerifier).toBe("v");
 
-    const missing = await Effect.runPromise(Effect.either(store.get("nope")));
-    expect(Either.isLeft(missing) && missing.left._tag).toBe("AuthError");
+    const missing = await Effect.runPromise(Effect.result(store.get("nope")));
+    expect(Result.isFailure(missing) && missing.failure._tag).toBe("AuthError");
   });
 
   it("password reset store: create / get / deleteByUserId", async () => {

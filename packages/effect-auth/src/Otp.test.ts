@@ -65,9 +65,9 @@ describe("Base32 Encoding/Decoding", () => {
   });
 
   it("should fail on invalid base32 characters", async () => {
-    const result = await Effect.runPromise(Effect.either(OTP.decodeBase32("INVALID@CHARS")));
+    const result = await Effect.runPromise(Effect.result(OTP.decodeBase32("INVALID@CHARS")));
 
-    expect(result._tag).toBe("Left");
+    expect(result._tag).toBe("Failure");
   });
 });
 
@@ -365,95 +365,95 @@ describe("Input Validation and Edge Cases", () => {
 
   describe("generateSecret validation", () => {
     it("should reject length less than 16 bytes", async () => {
-      const result = await Effect.runPromise(Effect.either(OTP.generateSecret(15)));
+      const result = await Effect.runPromise(Effect.result(OTP.generateSecret(15)));
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("HashingError");
-        expect(result.left.message).toContain("at least 16 bytes");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
+        expect(result.failure.message).toContain("at least 16 bytes");
       }
     });
 
     it("should reject negative length", async () => {
-      const result = await Effect.runPromise(Effect.either(OTP.generateSecret(-1)));
+      const result = await Effect.runPromise(Effect.result(OTP.generateSecret(-1)));
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("HashingError");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
       }
     });
 
     it("should reject non-integer length", async () => {
-      const result = await Effect.runPromise(Effect.either(OTP.generateSecret(20.5)));
+      const result = await Effect.runPromise(Effect.result(OTP.generateSecret(20.5)));
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("HashingError");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
       }
     });
   });
 
   describe("generateHOTP validation", () => {
     it("should reject negative counter", async () => {
-      const result = await Effect.runPromise(Effect.either(OTP.generateHOTP(validSecret, -1)));
+      const result = await Effect.runPromise(Effect.result(OTP.generateHOTP(validSecret, -1)));
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("HashingError");
-        expect(result.left.message).toContain("non-negative");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
+        expect(result.failure.message).toContain("non-negative");
       }
     });
 
     it("should reject non-integer counter", async () => {
-      const result = await Effect.runPromise(Effect.either(OTP.generateHOTP(validSecret, 1.5)));
+      const result = await Effect.runPromise(Effect.result(OTP.generateHOTP(validSecret, 1.5)));
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("HashingError");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
       }
     });
 
     it("should reject digits less than 6", async () => {
       const result = await Effect.runPromise(
-        Effect.either(OTP.generateHOTP(validSecret, 0, { digits: 5 })),
+        Effect.result(OTP.generateHOTP(validSecret, 0, { digits: 5 })),
       );
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("HashingError");
-        expect(result.left.message).toContain("between 6 and 8");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
+        expect(result.failure.message).toContain("between 6 and 8");
       }
     });
 
     it("should reject digits greater than 8", async () => {
       const result = await Effect.runPromise(
-        Effect.either(OTP.generateHOTP(validSecret, 0, { digits: 9 })),
+        Effect.result(OTP.generateHOTP(validSecret, 0, { digits: 9 })),
       );
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("HashingError");
-        expect(result.left.message).toContain("between 6 and 8");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
+        expect(result.failure.message).toContain("between 6 and 8");
       }
     });
 
     it("should reject empty string secret", async () => {
-      const result = await Effect.runPromise(Effect.either(OTP.generateHOTP("", 0)));
+      const result = await Effect.runPromise(Effect.result(OTP.generateHOTP("", 0)));
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("HashingError");
-        expect(result.left.message).toContain("non-empty");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
+        expect(result.failure.message).toContain("non-empty");
       }
     });
 
     it("should reject empty buffer secret", async () => {
-      const result = await Effect.runPromise(Effect.either(OTP.generateHOTP(Buffer.from([]), 0)));
+      const result = await Effect.runPromise(Effect.result(OTP.generateHOTP(Buffer.from([]), 0)));
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("HashingError");
-        expect(result.left.message).toContain("cannot be empty");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
+        expect(result.failure.message).toContain("cannot be empty");
       }
     });
   });

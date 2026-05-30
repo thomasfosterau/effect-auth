@@ -49,10 +49,9 @@ export interface MultiAlgorithmVerifier {
 /**
  * Tag for PasswordHasher service
  */
-export class PasswordHasherTag extends Context.Tag("@effect-auth/PasswordHasher")<
-  PasswordHasherTag,
-  PasswordHasher
->() {}
+export class PasswordHasherTag extends Context.Service<PasswordHasherTag, PasswordHasher>()(
+  "@effect-auth/PasswordHasher",
+) {}
 
 // Public ergonomic alias
 export const PasswordHasher = PasswordHasherTag;
@@ -60,10 +59,10 @@ export const PasswordHasher = PasswordHasherTag;
 /**
  * Tag for MultiAlgorithmVerifier service
  */
-export class MultiAlgorithmVerifierTag extends Context.Tag("@effect-auth/MultiAlgorithmVerifier")<
+export class MultiAlgorithmVerifierTag extends Context.Service<
   MultiAlgorithmVerifierTag,
   MultiAlgorithmVerifier
->() {}
+>()("@effect-auth/MultiAlgorithmVerifier") {}
 
 // Public ergonomic alias
 export const MultiAlgorithmVerifier = MultiAlgorithmVerifierTag;

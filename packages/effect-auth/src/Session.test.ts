@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Context } from "effect";
 import { makeSessionManager, SessionStore, UserStore } from "./Session.js";
-import { Hooks } from "./Hooks.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
 
@@ -91,9 +90,7 @@ describe("SessionManager", () => {
     });
 
     const session = await Effect.runPromise(
-      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
-        Effect.provide(Hooks.Default),
-      ),
+      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)),
     );
 
     expect(session.id).toBeDefined();
@@ -113,9 +110,7 @@ describe("SessionManager", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
-        Effect.provide(Hooks.Default),
-      ),
+      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)),
     );
 
     expect(result.session.userId).toBe("user1");
@@ -138,16 +133,12 @@ describe("SessionManager", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.either(
-        Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
-          Effect.provide(Hooks.Default),
-        ),
-      ),
+      Effect.result(Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest))),
     );
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("SessionExpiredError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("SessionExpiredError");
     }
   });
 
@@ -162,16 +153,12 @@ describe("SessionManager", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.either(
-        Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
-          Effect.provide(Hooks.Default),
-        ),
-      ),
+      Effect.result(Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest))),
     );
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("SessionNotFoundError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("SessionNotFoundError");
     }
   });
 
@@ -186,22 +173,20 @@ describe("SessionManager", () => {
 
       yield* manager.invalidateUserSessions("user1");
 
-      const result1 = yield* Effect.either(manager.validateSession(session1.id));
-      const result2 = yield* Effect.either(manager.validateSession(session2.id));
+      const result1 = yield* Effect.result(manager.validateSession(session1.id));
+      const result2 = yield* Effect.result(manager.validateSession(session2.id));
       const result3 = yield* manager.validateSession(session3.id);
 
       return { result1, result2, result3 };
     });
 
     const results = await Effect.runPromise(
-      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
-        Effect.provide(Hooks.Default),
-      ),
+      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)),
     );
 
     // User1 sessions should be invalidated
-    expect(results.result1._tag).toBe("Left");
-    expect(results.result2._tag).toBe("Left");
+    expect(results.result1._tag).toBe("Failure");
+    expect(results.result2._tag).toBe("Failure");
     // User2 session should still be valid
     expect(results.result3.user.id).toBe("user2");
   });

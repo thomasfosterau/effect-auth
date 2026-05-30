@@ -44,7 +44,7 @@ export async function getCurrentUser(
   if (!sid) sid = await getSessionId();
   if (!sid) return { user: null, sessionId: null };
   const r = await validateSession(sid);
-  if (r._tag === "Left") return { user: null, sessionId: null };
-  const user = getUserById(r.right.session.userId);
+  if (r._tag === "Failure") return { user: null, sessionId: null };
+  const user = getUserById(r.success.session.userId);
   return { user, sessionId: sid };
 }

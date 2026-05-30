@@ -66,12 +66,12 @@ describe("PasswordHasher", () => {
 
   it("should fail on invalid hash format", async () => {
     const result = await Effect.runPromise(
-      Effect.either(Effect.provide(hasher.verify("password", "invalid-hash"), PasswordHasherLive)),
+      Effect.result(Effect.provide(hasher.verify("password", "invalid-hash"), PasswordHasherLive)),
     );
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("HashingError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("HashingError");
     }
   });
 });

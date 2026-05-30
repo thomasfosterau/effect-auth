@@ -1,6 +1,5 @@
 import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.js";
-import { Hooks, type HookError } from "./Hooks.js";
 import {
   EmailPasswordStoreTag,
   type SignInInput,
@@ -39,14 +38,12 @@ export interface AuthLifecycleService {
     | Errors.AuthError
     | Errors.HashingError
     | Errors.EmailVerificationError
-    | Errors.EmailNotVerifiedError
-    | HookError,
+    | Errors.EmailNotVerifiedError,
     | EmailPasswordStoreTag
     | PasswordHasherTag
     | SessionManagerTag
     | EmailVerificationServiceTag
     | EmailVerificationStoreTag
-    | Hooks
   >;
 
   readonly signIn: (
@@ -56,34 +53,31 @@ export interface AuthLifecycleService {
     | Errors.AuthError
     | Errors.HashingError
     | Errors.InvalidCredentialsError
-    | Errors.EmailVerificationError
-    | HookError,
+    | Errors.EmailVerificationError,
     | EmailPasswordStoreTag
     | PasswordHasherTag
     | SessionManagerTag
     | EmailVerificationServiceTag
     | EmailVerificationStoreTag
-    | Hooks
   >;
 
   readonly verifyEmail: (
     input: VerifyEmailInput,
   ) => Effect.Effect<
     AuthLifecycleResult,
-    Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError | HookError,
+    Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError,
     | UserServiceTag
     | UserServiceStoreTag
     | SessionManagerTag
     | EmailVerificationServiceTag
     | EmailVerificationStoreTag
-    | Hooks
   >;
 }
 
-export class AuthLifecycleServiceTag extends Context.Tag("@effect-auth/AuthLifecycleService")<
+export class AuthLifecycleServiceTag extends Context.Service<
   AuthLifecycleServiceTag,
   AuthLifecycleService
->() {}
+>()("@effect-auth/AuthLifecycleService") {}
 
 export const AuthLifecycleService = AuthLifecycleServiceTag;
 

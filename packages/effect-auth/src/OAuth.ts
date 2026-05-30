@@ -159,10 +159,9 @@ import * as crypto from "node:crypto";
 /**
  * OAuth state store context tag
  */
-export class OAuthStateStoreTag extends Context.Tag("@effect-auth/OAuthStateStore")<
-  OAuthStateStoreTag,
-  OAuthStateStore
->() {}
+export class OAuthStateStoreTag extends Context.Service<OAuthStateStoreTag, OAuthStateStore>()(
+  "@effect-auth/OAuthStateStore",
+) {}
 
 // Public ergonomic alias
 export const OAuthStateStore = OAuthStateStoreTag;
@@ -170,10 +169,10 @@ export const OAuthStateStore = OAuthStateStoreTag;
 /**
  * OAuth account store context tag
  */
-export class OAuthAccountStoreTag extends Context.Tag("@effect-auth/OAuthAccountStore")<
+export class OAuthAccountStoreTag extends Context.Service<
   OAuthAccountStoreTag,
   OAuthAccountStore
->() {}
+>()("@effect-auth/OAuthAccountStore") {}
 
 // Public ergonomic alias
 export const OAuthAccountStore = OAuthAccountStoreTag;
@@ -382,10 +381,9 @@ export interface OAuthService {
   ) => Effect.Effect<string, AuthError | OAuthProviderError, OAuthAccountStoreTag>;
 }
 
-export class OAuthServiceTag extends Context.Tag("@effect-auth/OAuthService")<
-  OAuthServiceTag,
-  OAuthService
->() {}
+export class OAuthServiceTag extends Context.Service<OAuthServiceTag, OAuthService>()(
+  "@effect-auth/OAuthService",
+) {}
 
 // Public ergonomic alias
 export const OAuthService = OAuthServiceTag;

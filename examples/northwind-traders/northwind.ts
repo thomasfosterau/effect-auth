@@ -71,10 +71,9 @@ export interface NorthwindService {
   ) => Effect.Effect<SalesReport, Auth.PermissionDeniedError, Auth.AuthorizationPolicyTag>;
 }
 
-export class NorthwindServiceTag extends Context.Tag("@northwind/Service")<
-  NorthwindServiceTag,
-  NorthwindService
->() {}
+export class NorthwindServiceTag extends Context.Service<NorthwindServiceTag, NorthwindService>()(
+  "@northwind/Service",
+) {}
 
 const makeNorthwind = (): NorthwindService => ({
   listProducts: (userId) =>

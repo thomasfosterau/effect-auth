@@ -25,9 +25,8 @@ const globalForAuth = globalThis as unknown as {
 const sharedContext = globalForAuth.__conduitAuthContext ?? AppContext;
 if (process.env.NODE_ENV !== "production") globalForAuth.__conduitAuthContext = sharedContext;
 
-export const runAuth = <A, E>(eff: Effect.Effect<A, E, AppServices | Auth.Hooks>) =>
-  // No-op hooks base; swap for `composePlugins([...]).pipe(Layer.provide(Auth.Hooks.Default))`.
-  Effect.runPromise(Effect.provide(eff, sharedContext).pipe(Effect.provide(Auth.Hooks.Default)));
+export const runAuth = <A, E>(eff: Effect.Effect<A, E, AppServices>) =>
+  Effect.runPromise(Effect.provide(eff, sharedContext));
 
 export const hashPassword = (plaintext: string) =>
   runAuth(
@@ -59,7 +58,7 @@ export const validateSession = (sessionId: string) =>
     Effect.gen(function* () {
       const m = yield* Auth.makeSessionManager(sessionConfig);
       return yield* m.validateSession(sessionId);
-    }).pipe(Effect.either),
+    }).pipe(Effect.result),
   );
 
 export const invalidateSession = (sessionId: string) =>

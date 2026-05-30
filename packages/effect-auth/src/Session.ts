@@ -2,7 +2,6 @@ import { Context, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import type * as Types from "./Types.js";
 import * as Errors from "./Errors.js";
-import { Hooks, type HookError } from "./Hooks.js";
 
 /**
  * Session store interface for managing session persistence
@@ -39,10 +38,9 @@ export interface SessionStore {
 /**
  * Tag for SessionStore service
  */
-export class SessionStoreTag extends Context.Tag("@effect-auth/SessionStore")<
-  SessionStoreTag,
-  SessionStore
->() {}
+export class SessionStoreTag extends Context.Service<SessionStoreTag, SessionStore>()(
+  "@effect-auth/SessionStore",
+) {}
 
 // Public ergonomic alias
 export const SessionStore = SessionStoreTag;
@@ -66,10 +64,9 @@ export interface UserStore {
 /**
  * Tag for UserStore service
  */
-export class UserStoreTag extends Context.Tag("@effect-auth/UserStore")<
-  UserStoreTag,
-  UserStore
->() {}
+export class UserStoreTag extends Context.Service<UserStoreTag, UserStore>()(
+  "@effect-auth/UserStore",
+) {}
 
 // Public ergonomic alias
 export const UserStore = UserStoreTag;
@@ -84,7 +81,7 @@ export interface SessionManager {
   readonly createSession: (
     userId: string,
     attributes?: Record<string, unknown>,
-  ) => Effect.Effect<Types.Session, Errors.AuthError | HookError, Hooks>;
+  ) => Effect.Effect<Types.Session, Errors.AuthError>;
 
   /**
    * Validate a session and return it with the user
@@ -93,16 +90,13 @@ export interface SessionManager {
     sessionId: string,
   ) => Effect.Effect<
     Types.SessionWithUser,
-    Errors.SessionNotFoundError | Errors.SessionExpiredError | Errors.UserNotFoundError | HookError,
-    Hooks
+    Errors.SessionNotFoundError | Errors.SessionExpiredError | Errors.UserNotFoundError
   >;
 
   /**
    * Invalidate a session
    */
-  readonly invalidateSession: (
-    sessionId: string,
-  ) => Effect.Effect<void, Errors.AuthError | HookError, Hooks>;
+  readonly invalidateSession: (sessionId: string) => Effect.Effect<void, Errors.AuthError>;
 
   /**
    * Invalidate all sessions for a user
@@ -113,10 +107,9 @@ export interface SessionManager {
 /**
  * Tag for SessionManager service
  */
-export class SessionManagerTag extends Context.Tag("@effect-auth/SessionManager")<
-  SessionManagerTag,
-  SessionManager
->() {}
+export class SessionManagerTag extends Context.Service<SessionManagerTag, SessionManager>()(
+  "@effect-auth/SessionManager",
+) {}
 
 // Public ergonomic alias
 export const SessionManager = SessionManagerTag;
@@ -142,36 +135,26 @@ export const makeSessionManager = (
     const userStore = yield* UserStoreTag;
 
     return {
-      createSession: (rawUserId, rawAttributes = {}) =>
+      createSession: (userId, attributes = {}) =>
         Effect.gen(function* () {
-          const hooks = yield* Hooks;
-          const args = yield* hooks.beforeCreateSession({
-            userId: rawUserId,
-            attributes: rawAttributes,
-          });
-
           const sessionId = generateSessionId();
           const now = new Date();
           const expiresAt = new Date(now.getTime() + config.sessionExpiresIn.activePeriod);
 
           const session: Types.Session = {
             id: sessionId,
-            userId: args.userId,
+            userId,
             expiresAt,
             createdAt: now,
             lastActivityAt: now,
-            attributes: args.attributes ?? {},
+            attributes,
           };
 
-          const created = yield* sessionStore.create(session);
-          return yield* hooks.afterCreateSession(created);
+          return yield* sessionStore.create(session);
         }),
 
-      validateSession: (rawSessionId) =>
+      validateSession: (sessionId) =>
         Effect.gen(function* () {
-          const hooks = yield* Hooks;
-          const { sessionId } = yield* hooks.beforeValidateSession({ sessionId: rawSessionId });
-
           const session = yield* sessionStore.get(sessionId);
 
           // Check if session is expired
@@ -233,19 +216,13 @@ export const makeSessionManager = (
           // Get user
           const user = yield* userStore.get(session.userId);
 
-          return yield* hooks.afterValidateSession({
+          return {
             session: updatedSession,
             user,
-          });
+          };
         }),
 
-      invalidateSession: (rawSessionId) =>
-        Effect.gen(function* () {
-          const hooks = yield* Hooks;
-          const { sessionId } = yield* hooks.beforeSignOut({ sessionId: rawSessionId });
-          yield* sessionStore.delete(sessionId);
-          yield* hooks.afterSignOut({ sessionId });
-        }),
+      invalidateSession: (sessionId) => sessionStore.delete(sessionId),
 
       invalidateUserSessions: (userId) => sessionStore.deleteByUserId(userId),
     };

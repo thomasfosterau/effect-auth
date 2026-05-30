@@ -13,7 +13,7 @@
   "dependencies": {
     "better-sqlite3": "^11.7.0",
     "drizzle-orm": "^0.36.4",
-    "effect": "^3.19.15",
+    "effect": "4.0.0-beta.59",
     "effect-auth": "workspace:*"
   },
   "devDependencies": {

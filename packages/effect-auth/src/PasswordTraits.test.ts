@@ -98,16 +98,16 @@ describe("Multi-Algorithm Password Hashing", () => {
 
       // Try to verify a hash from an unsupported algorithm
       const result = await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           Effect.provide(verifier.verify("password", "argon2$someParams$hash"), PasswordHasherLive),
         ),
       );
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("HashingError");
-        expect(result.left.message).toContain("Unsupported algorithm");
-        expect(result.left.message).toContain("argon2");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
+        expect(result.failure.message).toContain("Unsupported algorithm");
+        expect(result.failure.message).toContain("argon2");
       }
     });
 
@@ -143,14 +143,14 @@ describe("Multi-Algorithm Password Hashing", () => {
       const verifier = makeMultiAlgorithmVerifier([pbkdf2Hasher]);
 
       const result = await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           Effect.provide(verifier.verify("password", "invalidhash"), PasswordHasherLive),
         ),
       );
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("HashingError");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
       }
     });
   });

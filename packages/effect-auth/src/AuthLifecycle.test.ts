@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { Context, Effect } from "effect";
 import { makeAuthLifecycleService } from "./AuthLifecycle.js";
 import { EmailPasswordStore } from "./EmailPassword.js";
-import { Hooks } from "./Hooks.js";
 import {
   type EmailVerification,
   EmailVerificationService,
@@ -266,9 +265,7 @@ describe("AuthLifecycleService", () => {
       });
     });
 
-    const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    const result = await Effect.runPromise(Effect.provide(program, testContext));
 
     expect(result.needsEmailVerification).toBe(true);
     expect(result.session).toBeUndefined();
@@ -306,9 +303,7 @@ describe("AuthLifecycleService", () => {
       });
     });
 
-    const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    const result = await Effect.runPromise(Effect.provide(program, testContext));
 
     expect(result.needsEmailVerification).toBe(true);
     expect(result.session).toBeUndefined();
@@ -339,7 +334,7 @@ describe("AuthLifecycleService", () => {
           return created.token;
         }),
         testContext,
-      ).pipe(Effect.provide(Hooks.Default)),
+      ),
     );
 
     const program = Effect.gen(function* () {
@@ -349,9 +344,7 @@ describe("AuthLifecycleService", () => {
       return yield* service.verifyEmail({ token });
     });
 
-    const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    const result = await Effect.runPromise(Effect.provide(program, testContext));
 
     expect(result.user.id).toBe(user.id);
     expect(result.session).toBeDefined();
@@ -388,9 +381,7 @@ describe("AuthLifecycleService", () => {
       });
     });
 
-    const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    const result = await Effect.runPromise(Effect.provide(program, testContext));
 
     expect(result.needsEmailVerification).toBe(false);
     expect(result.session).toBeDefined();

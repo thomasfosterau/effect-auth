@@ -1,17 +1,13 @@
 import * as Request from "effect/Request";
 import type * as Types from "./Types.js";
 import type * as Errors from "./Errors.js";
-import type { HookError } from "./Hooks.js";
 import type * as AuthLifecycle from "./AuthLifecycle.js";
 import type * as PasswordReset from "./PasswordReset.js";
 
 /**
  * Request to create a new session for a user
  */
-export interface CreateSessionRequest extends Request.Request<
-  Types.Session,
-  Errors.AuthError | HookError
-> {
+export interface CreateSessionRequest extends Request.Request<Types.Session, Errors.AuthError> {
   readonly _tag: "CreateSessionRequest";
   readonly userId: string;
   readonly attributes?: Record<string, unknown>;
@@ -24,7 +20,7 @@ export const CreateSessionRequest = Request.tagged<CreateSessionRequest>("Create
  */
 export interface ValidateSessionRequest extends Request.Request<
   Types.SessionWithUser,
-  Errors.SessionNotFoundError | Errors.SessionExpiredError | Errors.UserNotFoundError | HookError
+  Errors.SessionNotFoundError | Errors.SessionExpiredError | Errors.UserNotFoundError
 > {
   readonly _tag: "ValidateSessionRequest";
   readonly sessionId: string;
@@ -36,10 +32,7 @@ export const ValidateSessionRequest =
 /**
  * Request to invalidate/delete a session
  */
-export interface InvalidateSessionRequest extends Request.Request<
-  void,
-  Errors.AuthError | HookError
-> {
+export interface InvalidateSessionRequest extends Request.Request<void, Errors.AuthError> {
   readonly _tag: "InvalidateSessionRequest";
   readonly sessionId: string;
 }
@@ -125,7 +118,6 @@ export interface SignUpEmailRequest extends Request.Request<
   | Errors.HashingError
   | Errors.EmailVerificationError
   | Errors.EmailNotVerifiedError
-  | HookError
 > {
   readonly _tag: "SignUpEmailRequest";
   readonly input: {
@@ -148,7 +140,6 @@ export interface SignInEmailRequest extends Request.Request<
   | Errors.HashingError
   | Errors.InvalidCredentialsError
   | Errors.EmailVerificationError
-  | HookError
 > {
   readonly _tag: "SignInEmailRequest";
   readonly input: {
@@ -165,7 +156,7 @@ export const SignInEmailRequest = Request.tagged<SignInEmailRequest>("SignInEmai
  */
 export interface VerifyEmailRequest extends Request.Request<
   AuthLifecycle.AuthLifecycleResult,
-  Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError | HookError
+  Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError
 > {
   readonly _tag: "VerifyEmailRequest";
   readonly input: {
@@ -181,7 +172,7 @@ export const VerifyEmailRequest = Request.tagged<VerifyEmailRequest>("VerifyEmai
  */
 export interface RequestPasswordResetRequest extends Request.Request<
   void,
-  Errors.AuthError | Errors.PasswordResetError | HookError
+  Errors.AuthError | Errors.PasswordResetError
 > {
   readonly _tag: "RequestPasswordResetRequest";
   readonly email: string;
@@ -196,7 +187,7 @@ export const RequestPasswordResetRequest = Request.tagged<RequestPasswordResetRe
  */
 export interface ResetPasswordRequest extends Request.Request<
   PasswordReset.PasswordResetResult,
-  Errors.AuthError | Errors.PasswordResetError | Errors.HashingError | HookError
+  Errors.AuthError | Errors.PasswordResetError | Errors.HashingError
 > {
   readonly _tag: "ResetPasswordRequest";
   readonly token: string;
