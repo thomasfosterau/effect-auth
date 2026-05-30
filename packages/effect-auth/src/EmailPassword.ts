@@ -20,10 +20,10 @@ export interface EmailPasswordStore {
   readonly setPasswordHash: (userId: string, hash: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class EmailPasswordStoreTag extends Context.Tag("@effect-auth/EmailPasswordStore")<
+export class EmailPasswordStoreTag extends Context.Service<
   EmailPasswordStoreTag,
   EmailPasswordStore
->() {}
+>()("@effect-auth/EmailPasswordStore") {}
 
 export const EmailPasswordStore = EmailPasswordStoreTag;
 
@@ -75,10 +75,10 @@ export interface EmailPasswordService {
   >;
 }
 
-export class EmailPasswordServiceTag extends Context.Tag("@effect-auth/EmailPasswordService")<
+export class EmailPasswordServiceTag extends Context.Service<
   EmailPasswordServiceTag,
   EmailPasswordService
->() {}
+>()("@effect-auth/EmailPasswordService") {}
 
 export const EmailPasswordService = EmailPasswordServiceTag;
 

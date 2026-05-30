@@ -19,10 +19,10 @@ export interface AuthorizationPolicy {
 /**
  * Tag for AuthorizationPolicy service
  */
-export class AuthorizationPolicyTag extends Context.Tag("@effect-auth/AuthorizationPolicy")<
+export class AuthorizationPolicyTag extends Context.Service<
   AuthorizationPolicyTag,
   AuthorizationPolicy
->() {}
+>()("@effect-auth/AuthorizationPolicy") {}
 
 // Public ergonomic alias
 export const AuthorizationPolicy = AuthorizationPolicyTag;
@@ -48,10 +48,9 @@ export interface RoleStore {
 /**
  * Tag for RoleStore service
  */
-export class RoleStoreTag extends Context.Tag("@effect-auth/RoleStore")<
-  RoleStoreTag,
-  RoleStore
->() {}
+export class RoleStoreTag extends Context.Service<RoleStoreTag, RoleStore>()(
+  "@effect-auth/RoleStore",
+) {}
 
 // Public ergonomic alias
 export const RoleStore = RoleStoreTag;

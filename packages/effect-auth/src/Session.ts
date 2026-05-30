@@ -38,10 +38,9 @@ export interface SessionStore {
 /**
  * Tag for SessionStore service
  */
-export class SessionStoreTag extends Context.Tag("@effect-auth/SessionStore")<
-  SessionStoreTag,
-  SessionStore
->() {}
+export class SessionStoreTag extends Context.Service<SessionStoreTag, SessionStore>()(
+  "@effect-auth/SessionStore",
+) {}
 
 // Public ergonomic alias
 export const SessionStore = SessionStoreTag;
@@ -65,10 +64,9 @@ export interface UserStore {
 /**
  * Tag for UserStore service
  */
-export class UserStoreTag extends Context.Tag("@effect-auth/UserStore")<
-  UserStoreTag,
-  UserStore
->() {}
+export class UserStoreTag extends Context.Service<UserStoreTag, UserStore>()(
+  "@effect-auth/UserStore",
+) {}
 
 // Public ergonomic alias
 export const UserStore = UserStoreTag;
@@ -109,10 +107,9 @@ export interface SessionManager {
 /**
  * Tag for SessionManager service
  */
-export class SessionManagerTag extends Context.Tag("@effect-auth/SessionManager")<
-  SessionManagerTag,
-  SessionManager
->() {}
+export class SessionManagerTag extends Context.Service<SessionManagerTag, SessionManager>()(
+  "@effect-auth/SessionManager",
+) {}
 
 // Public ergonomic alias
 export const SessionManager = SessionManagerTag;

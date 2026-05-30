@@ -12,10 +12,9 @@ export interface UserServiceStore {
   readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class UserServiceStoreTag extends Context.Tag("@effect-auth/UserServiceStore")<
-  UserServiceStoreTag,
-  UserServiceStore
->() {}
+export class UserServiceStoreTag extends Context.Service<UserServiceStoreTag, UserServiceStore>()(
+  "@effect-auth/UserServiceStore",
+) {}
 
 export const UserServiceStore = UserServiceStoreTag;
 
@@ -42,10 +41,9 @@ export interface UserService {
   ) => Effect.Effect<void, Errors.AuthError, UserServiceStoreTag>;
 }
 
-export class UserServiceTag extends Context.Tag("@effect-auth/UserService")<
-  UserServiceTag,
-  UserService
->() {}
+export class UserServiceTag extends Context.Service<UserServiceTag, UserService>()(
+  "@effect-auth/UserService",
+) {}
 
 export const UserService = UserServiceTag;
 

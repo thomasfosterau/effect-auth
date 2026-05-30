@@ -133,12 +133,12 @@ describe("SessionManager", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.either(Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest))),
+      Effect.result(Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest))),
     );
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("SessionExpiredError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("SessionExpiredError");
     }
   });
 
@@ -153,12 +153,12 @@ describe("SessionManager", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.either(Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest))),
+      Effect.result(Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest))),
     );
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("SessionNotFoundError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("SessionNotFoundError");
     }
   });
 
@@ -173,8 +173,8 @@ describe("SessionManager", () => {
 
       yield* manager.invalidateUserSessions("user1");
 
-      const result1 = yield* Effect.either(manager.validateSession(session1.id));
-      const result2 = yield* Effect.either(manager.validateSession(session2.id));
+      const result1 = yield* Effect.result(manager.validateSession(session1.id));
+      const result2 = yield* Effect.result(manager.validateSession(session2.id));
       const result3 = yield* manager.validateSession(session3.id);
 
       return { result1, result2, result3 };
@@ -185,8 +185,8 @@ describe("SessionManager", () => {
     );
 
     // User1 sessions should be invalidated
-    expect(results.result1._tag).toBe("Left");
-    expect(results.result2._tag).toBe("Left");
+    expect(results.result1._tag).toBe("Failure");
+    expect(results.result2._tag).toBe("Failure");
     // User2 session should still be valid
     expect(results.result3.user.id).toBe("user2");
   });

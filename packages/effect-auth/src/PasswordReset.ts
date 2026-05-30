@@ -27,17 +27,17 @@ export interface PasswordResetUserStore {
   readonly setPasswordHash: (userId: string, hash: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class PasswordResetStoreTag extends Context.Tag("@effect-auth/PasswordResetStore")<
+export class PasswordResetStoreTag extends Context.Service<
   PasswordResetStoreTag,
   PasswordResetStore
->() {}
+>()("@effect-auth/PasswordResetStore") {}
 
 export const PasswordResetStore = PasswordResetStoreTag;
 
-export class PasswordResetUserStoreTag extends Context.Tag("@effect-auth/PasswordResetUserStore")<
+export class PasswordResetUserStoreTag extends Context.Service<
   PasswordResetUserStoreTag,
   PasswordResetUserStore
->() {}
+>()("@effect-auth/PasswordResetUserStore") {}
 
 export const PasswordResetUserStore = PasswordResetUserStoreTag;
 
@@ -77,10 +77,10 @@ export interface PasswordResetService {
   >;
 }
 
-export class PasswordResetServiceTag extends Context.Tag("@effect-auth/PasswordResetService")<
+export class PasswordResetServiceTag extends Context.Service<
   PasswordResetServiceTag,
   PasswordResetService
->() {}
+>()("@effect-auth/PasswordResetService") {}
 
 export const PasswordResetService = PasswordResetServiceTag;
 
@@ -152,7 +152,7 @@ export const makePasswordResetService = (
 
           yield* resetStore.create(reset);
 
-          yield* Effect.catchAll(config.sendResetPassword(normalizedEmail, token), (error) =>
+          yield* Effect.catch(config.sendResetPassword(normalizedEmail, token), (error) =>
             Effect.fail(
               new Errors.PasswordResetError({
                 message: `Failed to send reset password email to ${normalizedEmail}`,

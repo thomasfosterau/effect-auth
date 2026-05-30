@@ -54,6 +54,12 @@ export * from "./User.js";
 /** High-level auth lifecycle orchestration. */
 export * from "./AuthLifecycle.js";
 
+/**
+ * HTTP protocol (optional; requires the `effect/unstable/httpapi` modules).
+ * Exposed under the `Http` namespace, e.g. `Auth.Http.makeAuthWebHandler`.
+ */
+export * as Http from "./Http.js";
+
 export {
   /** Re-export of `Effect` from `effect`. */
   Effect,

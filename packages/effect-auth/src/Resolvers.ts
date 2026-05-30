@@ -7,58 +7,73 @@ import { AuthLifecycleServiceTag } from "./AuthLifecycle.js";
 import { PasswordResetServiceTag } from "./PasswordReset.js";
 import { UserServiceTag } from "./User.js";
 
+/*
+ * Effect v4 notes:
+ *
+ * - A resolver that depends on services is expressed as an
+ *   `Effect<RequestResolver<...>, never, Services>`. `Effect.request` accepts this
+ *   form directly and threads the required services into its own context, so call
+ *   sites stay `Effect.request(request, makeXResolver)`.
+ * - `RequestResolver.fromEffect` requires the per-entry effect to have `R = never`.
+ *   Leaf services (SessionManager, PasswordHasher) already expose `R = never`
+ *   methods, so their resolvers call the method directly. Orchestration services
+ *   (AuthLifecycle, PasswordReset, User) declare their store dependencies in the
+ *   method's `R` channel; for those we capture the ambient context in the builder
+ *   and `Effect.provide` it to the per-entry effect. The captured services surface
+ *   on the builder's own requirements and flow through to `Effect.request` callers,
+ *   so the runtime behaviour is unchanged.
+ */
+
 /**
  * Create a resolver for session creation
  */
-export const makeCreateSessionResolver = RequestResolver.fromEffect(
-  (request: Requests.CreateSessionRequest) =>
-    Effect.gen(function* () {
-      const sessionManager = yield* SessionManagerTag;
-      return yield* sessionManager.createSession(request.userId, request.attributes);
-    }),
-);
+export const makeCreateSessionResolver = Effect.gen(function* () {
+  const sessionManager = yield* SessionManagerTag;
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.CreateSessionRequest>) =>
+    sessionManager.createSession(entry.request.userId, entry.request.attributes),
+  );
+});
 
 /**
  * Create a resolver for session validation
  */
-export const makeValidateSessionResolver = RequestResolver.fromEffect(
-  (request: Requests.ValidateSessionRequest) =>
-    Effect.gen(function* () {
-      const sessionManager = yield* SessionManagerTag;
-      return yield* sessionManager.validateSession(request.sessionId);
-    }),
-);
+export const makeValidateSessionResolver = Effect.gen(function* () {
+  const sessionManager = yield* SessionManagerTag;
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.ValidateSessionRequest>) =>
+    sessionManager.validateSession(entry.request.sessionId),
+  );
+});
 
 /**
  * Create a resolver for session invalidation
  */
-export const makeInvalidateSessionResolver = RequestResolver.fromEffect(
-  (request: Requests.InvalidateSessionRequest) =>
-    Effect.gen(function* () {
-      const sessionManager = yield* SessionManagerTag;
-      return yield* sessionManager.invalidateSession(request.sessionId);
-    }),
-);
+export const makeInvalidateSessionResolver = Effect.gen(function* () {
+  const sessionManager = yield* SessionManagerTag;
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.InvalidateSessionRequest>) =>
+    sessionManager.invalidateSession(entry.request.sessionId),
+  );
+});
 
 /**
  * Create a resolver for invalidating all user sessions
  */
-export const makeInvalidateUserSessionsResolver = RequestResolver.fromEffect(
-  (request: Requests.InvalidateUserSessionsRequest) =>
-    Effect.gen(function* () {
-      const sessionManager = yield* SessionManagerTag;
-      return yield* sessionManager.invalidateUserSessions(request.userId);
-    }),
-);
+export const makeInvalidateUserSessionsResolver = Effect.gen(function* () {
+  const sessionManager = yield* SessionManagerTag;
+  return RequestResolver.fromEffect(
+    (entry: Request.Entry<Requests.InvalidateUserSessionsRequest>) =>
+      sessionManager.invalidateUserSessions(entry.request.userId),
+  );
+});
 
 /**
  * Create a resolver for credential verification
  */
-export const makeVerifyCredentialsResolver = RequestResolver.fromEffect(
-  (request: Requests.VerifyCredentialsRequest) =>
+export const makeVerifyCredentialsResolver = Effect.gen(function* () {
+  const userStore = yield* UserStoreTag;
+  const passwordHasher = yield* PasswordHasherTag;
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.VerifyCredentialsRequest>) =>
     Effect.gen(function* () {
-      const userStore = yield* UserStoreTag;
-      const passwordHasher = yield* PasswordHasherTag;
+      const request = entry.request;
 
       // Get user and their hashed password
       const user = yield* userStore.get(request.userId);
@@ -68,168 +83,155 @@ export const makeVerifyCredentialsResolver = RequestResolver.fromEffect(
       const isValid = yield* passwordHasher.verify(request.password, hashedPassword);
 
       if (!isValid) {
-        return yield* Effect.fail(
-          new Errors.InvalidCredentialsError({
-            message: "Invalid credentials",
-          }),
-        );
+        return yield* new Errors.InvalidCredentialsError({
+          message: "Invalid credentials",
+        });
       }
 
       return user;
     }),
-);
+  );
+});
 
 /**
  * Create a resolver for password hashing
  */
-export const makeHashPasswordResolver = RequestResolver.fromEffect(
-  (request: Requests.HashPasswordRequest) =>
-    Effect.gen(function* () {
-      const passwordHasher = yield* PasswordHasherTag;
-      return yield* passwordHasher.hash(request.password);
-    }),
-);
+export const makeHashPasswordResolver = Effect.gen(function* () {
+  const passwordHasher = yield* PasswordHasherTag;
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.HashPasswordRequest>) =>
+    passwordHasher.hash(entry.request.password),
+  );
+});
 
 /**
  * Create a resolver for password verification
  */
-export const makeVerifyPasswordResolver = RequestResolver.fromEffect(
-  (request: Requests.VerifyPasswordRequest) =>
-    Effect.gen(function* () {
-      const passwordHasher = yield* PasswordHasherTag;
-      return yield* passwordHasher.verify(request.password, request.hash);
-    }),
-);
+export const makeVerifyPasswordResolver = Effect.gen(function* () {
+  const passwordHasher = yield* PasswordHasherTag;
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.VerifyPasswordRequest>) =>
+    passwordHasher.verify(entry.request.password, entry.request.hash),
+  );
+});
 
 /**
  * Resolver for SignUpEmailRequest
  */
-export const signUpEmailResolver = RequestResolver.makeBatched(
-  (requests: Array<Requests.SignUpEmailRequest>) =>
-    Effect.forEach(
-      requests,
-      (request) =>
-        Request.completeEffect(
-          request,
-          Effect.gen(function* () {
-            const authLifecycle = yield* AuthLifecycleServiceTag;
-            return yield* authLifecycle.signUp(request.input);
-          }),
-        ),
-      { discard: true },
-    ),
-);
+export const signUpEmailResolver = Effect.gen(function* () {
+  const authLifecycle = yield* AuthLifecycleServiceTag;
+  const context = yield* Effect.context<Effect.Services<ReturnType<typeof authLifecycle.signUp>>>();
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.SignUpEmailRequest>) =>
+    Effect.provide(authLifecycle.signUp(entry.request.input), context),
+  );
+});
 
 /**
  * Resolver for SignInEmailRequest
  */
-export const signInEmailResolver = RequestResolver.makeBatched(
-  (requests: Array<Requests.SignInEmailRequest>) =>
-    Effect.forEach(
-      requests,
-      (request) =>
-        Request.completeEffect(
-          request,
-          Effect.gen(function* () {
-            const authLifecycle = yield* AuthLifecycleServiceTag;
-            return yield* authLifecycle.signIn(request.input);
-          }),
-        ),
-      { discard: true },
-    ),
-);
+export const signInEmailResolver = Effect.gen(function* () {
+  const authLifecycle = yield* AuthLifecycleServiceTag;
+  const context = yield* Effect.context<Effect.Services<ReturnType<typeof authLifecycle.signIn>>>();
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.SignInEmailRequest>) =>
+    Effect.provide(authLifecycle.signIn(entry.request.input), context),
+  );
+});
 
 /**
  * Resolver for VerifyEmailRequest
  */
-export const verifyEmailResolver = RequestResolver.makeBatched(
-  (requests: Array<Requests.VerifyEmailRequest>) =>
-    Effect.forEach(
-      requests,
-      (request) =>
-        Request.completeEffect(
-          request,
-          Effect.gen(function* () {
-            const authLifecycle = yield* AuthLifecycleServiceTag;
-            return yield* authLifecycle.verifyEmail(request.input);
-          }),
-        ),
-      { discard: true },
-    ),
-);
+export const verifyEmailResolver = Effect.gen(function* () {
+  const authLifecycle = yield* AuthLifecycleServiceTag;
+  const context =
+    yield* Effect.context<Effect.Services<ReturnType<typeof authLifecycle.verifyEmail>>>();
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.VerifyEmailRequest>) =>
+    Effect.provide(authLifecycle.verifyEmail(entry.request.input), context),
+  );
+});
 
 /**
  * Resolver for RequestPasswordResetRequest
  */
-export const makeRequestPasswordResetResolver = RequestResolver.fromEffect(
-  (request: Requests.RequestPasswordResetRequest) =>
-    Effect.gen(function* () {
-      const passwordReset = yield* PasswordResetServiceTag;
-      return yield* passwordReset.requestPasswordReset(request.email);
-    }),
-);
+export const makeRequestPasswordResetResolver = Effect.gen(function* () {
+  const passwordReset = yield* PasswordResetServiceTag;
+  const context =
+    yield* Effect.context<Effect.Services<ReturnType<typeof passwordReset.requestPasswordReset>>>();
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.RequestPasswordResetRequest>) =>
+    Effect.provide(passwordReset.requestPasswordReset(entry.request.email), context),
+  );
+});
 
 /**
  * Resolver for ResetPasswordRequest
  */
-export const makeResetPasswordResolver = RequestResolver.fromEffect(
-  (request: Requests.ResetPasswordRequest) =>
-    Effect.gen(function* () {
-      const passwordReset = yield* PasswordResetServiceTag;
-      return yield* passwordReset.resetPassword(request.token, request.newPassword);
-    }),
-);
+export const makeResetPasswordResolver = Effect.gen(function* () {
+  const passwordReset = yield* PasswordResetServiceTag;
+  const context =
+    yield* Effect.context<Effect.Services<ReturnType<typeof passwordReset.resetPassword>>>();
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.ResetPasswordRequest>) =>
+    Effect.provide(
+      passwordReset.resetPassword(entry.request.token, entry.request.newPassword),
+      context,
+    ),
+  );
+});
 
 /**
  * Resolver for GetUserRequest
  */
-export const makeGetUserResolver = RequestResolver.fromEffect((request: Requests.GetUserRequest) =>
-  Effect.gen(function* () {
-    const userService = yield* UserServiceTag;
-    return yield* userService.getUser(request.userId);
-  }),
-);
+export const makeGetUserResolver = Effect.gen(function* () {
+  const userService = yield* UserServiceTag;
+  const context = yield* Effect.context<Effect.Services<ReturnType<typeof userService.getUser>>>();
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.GetUserRequest>) =>
+    Effect.provide(userService.getUser(entry.request.userId), context),
+  );
+});
 
 /**
  * Resolver for GetUserByEmailRequest
  */
-export const makeGetUserByEmailResolver = RequestResolver.fromEffect(
-  (request: Requests.GetUserByEmailRequest) =>
-    Effect.gen(function* () {
-      const userService = yield* UserServiceTag;
-      return yield* userService.getUserByEmail(request.email);
-    }),
-);
+export const makeGetUserByEmailResolver = Effect.gen(function* () {
+  const userService = yield* UserServiceTag;
+  const context =
+    yield* Effect.context<Effect.Services<ReturnType<typeof userService.getUserByEmail>>>();
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.GetUserByEmailRequest>) =>
+    Effect.provide(userService.getUserByEmail(entry.request.email), context),
+  );
+});
 
 /**
  * Resolver for UpdateUserAttributesRequest
  */
-export const makeUpdateUserAttributesResolver = RequestResolver.fromEffect(
-  (request: Requests.UpdateUserAttributesRequest) =>
-    Effect.gen(function* () {
-      const userService = yield* UserServiceTag;
-      return yield* userService.updateUserAttributes(request.userId, request.attributes);
-    }),
-);
+export const makeUpdateUserAttributesResolver = Effect.gen(function* () {
+  const userService = yield* UserServiceTag;
+  const context =
+    yield* Effect.context<Effect.Services<ReturnType<typeof userService.updateUserAttributes>>>();
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.UpdateUserAttributesRequest>) =>
+    Effect.provide(
+      userService.updateUserAttributes(entry.request.userId, entry.request.attributes),
+      context,
+    ),
+  );
+});
 
 /**
  * Resolver for MarkEmailVerifiedRequest
  */
-export const makeMarkEmailVerifiedResolver = RequestResolver.fromEffect(
-  (request: Requests.MarkEmailVerifiedRequest) =>
-    Effect.gen(function* () {
-      const userService = yield* UserServiceTag;
-      return yield* userService.markEmailVerified(request.userId);
-    }),
-);
+export const makeMarkEmailVerifiedResolver = Effect.gen(function* () {
+  const userService = yield* UserServiceTag;
+  const context =
+    yield* Effect.context<Effect.Services<ReturnType<typeof userService.markEmailVerified>>>();
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.MarkEmailVerifiedRequest>) =>
+    Effect.provide(userService.markEmailVerified(entry.request.userId), context),
+  );
+});
 
 /**
  * Resolver for DeleteUserRequest
  */
-export const makeDeleteUserResolver = RequestResolver.fromEffect(
-  (request: Requests.DeleteUserRequest) =>
-    Effect.gen(function* () {
-      const userService = yield* UserServiceTag;
-      return yield* userService.deleteUser(request.userId);
-    }),
-);
+export const makeDeleteUserResolver = Effect.gen(function* () {
+  const userService = yield* UserServiceTag;
+  const context =
+    yield* Effect.context<Effect.Services<ReturnType<typeof userService.deleteUser>>>();
+  return RequestResolver.fromEffect((entry: Request.Entry<Requests.DeleteUserRequest>) =>
+    Effect.provide(userService.deleteUser(entry.request.userId), context),
+  );
+});
