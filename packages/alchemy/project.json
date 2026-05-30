@@ -15,6 +15,7 @@
     },
     "test": {
       "executor": "nx:run-commands",
+      "dependsOn": ["effect-auth:build"],
       "options": {
         "cwd": "packages/alchemy",
         "command": "vp test run"
@@ -27,6 +28,7 @@
     },
     "typecheck": {
       "executor": "nx:run-commands",
+      "dependsOn": ["effect-auth:build"],
       "options": {
         "cwd": "packages/alchemy",
         "command": "vp exec tsc --noEmit && vp test --typecheck --run"
