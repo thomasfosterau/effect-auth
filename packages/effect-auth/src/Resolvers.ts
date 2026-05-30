@@ -1,5 +1,4 @@
-import { Effect, RequestResolver } from "effect";
-import * as Request from "effect/Request";
+import { Effect, Request, RequestResolver } from "effect";
 import * as Requests from "./Requests.js";
 import * as Errors from "./Errors.js";
 import { SessionManagerTag, UserStoreTag } from "./Session.js";

@@ -38,7 +38,10 @@ async function toggleFollow() {
 }
 
 async function deleteArticle() {
-  await $fetch(`/api/articles/${slug}`, { method: "DELETE" });
+  // Cast to string to bypass typed-route narrowing: a dynamic `/api/articles/${slug}`
+  // also matches the static /api/articles/feed route, so Nuxt intersects the allowed
+  // methods down to GET even though /api/articles/[slug] has a DELETE handler.
+  await $fetch(`/api/articles/${slug}` as string, { method: "DELETE" });
   await router.push("/");
 }
 

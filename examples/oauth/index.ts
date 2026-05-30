@@ -25,9 +25,8 @@ const oauthStateStore: Auth.OAuthStateStore = {
     const state = oauthStates.get(stateStr);
     if (!state) {
       return Effect.fail(
-        new Auth.OAuthStateNotFoundError({
-          message: "OAuth state not found",
-          state: stateStr,
+        new Auth.AuthError({
+          message: `OAuth state not found: ${stateStr}`,
         }),
       );
     }
