@@ -10,6 +10,7 @@ import {
 import { AuthApi } from "./HttpApi.js";
 import * as S from "./HttpApiSchemas.js";
 import { AuthLifecycleServiceTag } from "./AuthLifecycle.js";
+import { Hooks } from "./Hooks.js";
 import { SessionManagerTag } from "./Session.js";
 import { EmailPasswordStoreTag } from "./EmailPassword.js";
 import { PasswordHasherTag } from "./Password.js";
@@ -19,7 +20,8 @@ import type * as Types from "./Types.js";
 /**
  * The services the auth handlers require. Your `services` layer must provide
  * all of these (a superset is fine). They are the existing core services plus
- * the stores the orchestration services depend on.
+ * the stores the orchestration services depend on, plus the `Hooks` service
+ * (provide `Hooks.Default` for no-op hooks, or a `composePlugins([...])` stack).
  */
 export type AuthServices =
   | AuthLifecycleServiceTag
@@ -27,7 +29,8 @@ export type AuthServices =
   | EmailPasswordStoreTag
   | PasswordHasherTag
   | EmailVerificationServiceTag
-  | EmailVerificationStoreTag;
+  | EmailVerificationStoreTag
+  | Hooks;
 
 /**
  * Server implementation for the auth HTTP contract.
@@ -124,6 +127,7 @@ export const authGroupLayer = (config?: CookieConfig) => {
               HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
               EmailVerificationError: (e) =>
                 Effect.fail(new S.InternalServerError({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
             }),
           );
           const body: S.AuthSuccess = {
@@ -146,6 +150,7 @@ export const authGroupLayer = (config?: CookieConfig) => {
                 HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 EmailVerificationError: (e) =>
                   Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
               }),
             );
           const body: S.AuthSuccess = {

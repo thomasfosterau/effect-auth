@@ -59,6 +59,8 @@ const StoresLayer = Layer.mergeAll(
 );
 
 const ServicesLayer = Layer.mergeAll(
+  // No-op hooks base; swap for a `composePlugins([...])` stack to install plugins.
+  Auth.Hooks.Default,
   Auth.PasswordHasherLayer,
   Auth.SessionManagerLayer(sessionConfig),
   Auth.UserServiceLayer(),

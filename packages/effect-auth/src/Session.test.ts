@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Context } from "effect";
+import { Hooks } from "./Hooks.js";
 import { makeSessionManager, SessionStore, UserStore } from "./Session.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
@@ -90,7 +91,9 @@ describe("SessionManager", () => {
     });
 
     const session = await Effect.runPromise(
-      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)),
+      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
+        Effect.provide(Hooks.Default),
+      ),
     );
 
     expect(session.id).toBeDefined();
@@ -110,7 +113,9 @@ describe("SessionManager", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)),
+      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
+        Effect.provide(Hooks.Default),
+      ),
     );
 
     expect(result.session.userId).toBe("user1");
@@ -133,7 +138,11 @@ describe("SessionManager", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.result(Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest))),
+      Effect.result(
+        Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
+          Effect.provide(Hooks.Default),
+        ),
+      ),
     );
 
     expect(result._tag).toBe("Failure");
@@ -153,7 +162,11 @@ describe("SessionManager", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.result(Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest))),
+      Effect.result(
+        Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
+          Effect.provide(Hooks.Default),
+        ),
+      ),
     );
 
     expect(result._tag).toBe("Failure");
@@ -181,7 +194,9 @@ describe("SessionManager", () => {
     });
 
     const results = await Effect.runPromise(
-      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)),
+      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
+        Effect.provide(Hooks.Default),
+      ),
     );
 
     // User1 sessions should be invalidated

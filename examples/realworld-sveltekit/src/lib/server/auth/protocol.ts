@@ -88,6 +88,8 @@ const ServicesLayer: Layer.Layer<Auth.Http.AuthServices> = Layer.mergeAll(
   Auth.SessionManagerLayer(sessionConfig),
   Auth.AuthLifecycleServiceLayer({ requireEmailVerification: false }),
   Auth.EmailVerificationServiceLayer({ sendEmail: () => Effect.void }),
+  // No-op hooks base; swap for a `composePlugins([...])` stack to install plugins.
+  Auth.Hooks.Default,
 ).pipe(Layer.provide(InternalStores), Layer.provideMerge(AuthStores));
 
 export const { handler: authHandler } = Auth.Http.makeAuthWebHandler({

@@ -8,6 +8,7 @@ import { AuthLifecycleServiceTag } from "./AuthLifecycle.js";
 import { EmailPasswordStoreTag } from "./EmailPassword.js";
 import { PasswordHasherTag } from "./Password.js";
 import { EmailVerificationServiceTag, EmailVerificationStoreTag } from "./EmailVerification.js";
+import { Hooks } from "./Hooks.js";
 import {
   AuthError,
   InvalidCredentialsError,
@@ -110,6 +111,7 @@ const makeTestServices = (): Layer.Layer<AuthServices> => {
     Layer.succeed(PasswordHasherTag)(undefined as never),
     Layer.succeed(EmailVerificationServiceTag)(undefined as never),
     Layer.succeed(EmailVerificationStoreTag)(undefined as never),
+    Hooks.Default,
   );
 };
 
