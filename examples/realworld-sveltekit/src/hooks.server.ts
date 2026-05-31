@@ -10,8 +10,8 @@ export const handle: Handle = async ({ event, resolve }) => {
   const sid = getSessionId(event.cookies);
   if (sid) {
     const result = await validateSession(sid);
-    if (result._tag === "Right") {
-      const { session } = result.right;
+    if (result._tag === "Success") {
+      const { session } = result.success;
       event.locals.sessionId = session.id;
       const profile = getUserById(session.userId);
       if (profile) {

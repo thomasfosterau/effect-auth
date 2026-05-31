@@ -125,14 +125,14 @@ describe("UserService", () => {
     const program = Effect.gen(function* () {
       const service = yield* makeUserService();
       yield* service.deleteUser("user-1");
-      return yield* Effect.either(service.getUser("user-1"));
+      return yield* Effect.result(service.getUser("user-1"));
     });
 
     const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("UserNotFoundError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("UserNotFoundError");
     }
   });
 });

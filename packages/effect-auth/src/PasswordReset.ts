@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
+import { Hooks, type HookError } from "./Hooks.js";
 import { PasswordHasherTag } from "./Password.js";
 import type * as Types from "./Types.js";
 import { SessionManagerTag } from "./Session.js";
@@ -27,17 +28,17 @@ export interface PasswordResetUserStore {
   readonly setPasswordHash: (userId: string, hash: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class PasswordResetStoreTag extends Context.Tag("@effect-auth/PasswordResetStore")<
+export class PasswordResetStoreTag extends Context.Service<
   PasswordResetStoreTag,
   PasswordResetStore
->() {}
+>()("@effect-auth/PasswordResetStore") {}
 
 export const PasswordResetStore = PasswordResetStoreTag;
 
-export class PasswordResetUserStoreTag extends Context.Tag("@effect-auth/PasswordResetUserStore")<
+export class PasswordResetUserStoreTag extends Context.Service<
   PasswordResetUserStoreTag,
   PasswordResetUserStore
->() {}
+>()("@effect-auth/PasswordResetUserStore") {}
 
 export const PasswordResetUserStore = PasswordResetUserStoreTag;
 
@@ -63,8 +64,8 @@ export interface PasswordResetService {
     email: string,
   ) => Effect.Effect<
     void,
-    Errors.AuthError | Errors.PasswordResetError,
-    PasswordResetStoreTag | PasswordResetUserStoreTag
+    Errors.AuthError | Errors.PasswordResetError | HookError,
+    PasswordResetStoreTag | PasswordResetUserStoreTag | Hooks
   >;
 
   readonly resetPassword: (
@@ -72,15 +73,19 @@ export interface PasswordResetService {
     newPassword: string,
   ) => Effect.Effect<
     PasswordResetResult,
-    Errors.AuthError | Errors.PasswordResetError | Errors.HashingError,
-    PasswordResetStoreTag | PasswordResetUserStoreTag | PasswordHasherTag | SessionManagerTag
+    Errors.AuthError | Errors.PasswordResetError | Errors.HashingError | HookError,
+    | PasswordResetStoreTag
+    | PasswordResetUserStoreTag
+    | PasswordHasherTag
+    | SessionManagerTag
+    | Hooks
   >;
 }
 
-export class PasswordResetServiceTag extends Context.Tag("@effect-auth/PasswordResetService")<
+export class PasswordResetServiceTag extends Context.Service<
   PasswordResetServiceTag,
   PasswordResetService
->() {}
+>()("@effect-auth/PasswordResetService") {}
 
 export const PasswordResetService = PasswordResetServiceTag;
 
@@ -122,8 +127,11 @@ export const makePasswordResetService = (
 
   return Effect.sync(
     (): PasswordResetService => ({
-      requestPasswordReset: (email: string) =>
+      requestPasswordReset: (rawEmail: string) =>
         Effect.gen(function* () {
+          const hooks = yield* Hooks;
+          const { email } = yield* hooks.beforeRequestPasswordReset({ email: rawEmail });
+
           const resetStore = yield* PasswordResetStoreTag;
           const userStore = yield* PasswordResetUserStoreTag;
           const normalizedEmail = normalizeEmail(email);
@@ -135,7 +143,9 @@ export const makePasswordResetService = (
           const user = yield* userStore.getUserByEmail(normalizedEmail);
 
           // Do not reveal whether the user exists to reduce email enumeration risk.
+          // The after-hook fires uniformly (existence is not signalled to plugins).
           if (!user) {
+            yield* hooks.afterRequestPasswordReset({ email: normalizedEmail });
             return;
           }
 
@@ -152,7 +162,7 @@ export const makePasswordResetService = (
 
           yield* resetStore.create(reset);
 
-          yield* Effect.catchAll(config.sendResetPassword(normalizedEmail, token), (error) =>
+          yield* Effect.catch(config.sendResetPassword(normalizedEmail, token), (error) =>
             Effect.fail(
               new Errors.PasswordResetError({
                 message: `Failed to send reset password email to ${normalizedEmail}`,
@@ -160,10 +170,18 @@ export const makePasswordResetService = (
               }),
             ),
           );
+
+          yield* hooks.afterRequestPasswordReset({ email: normalizedEmail });
         }),
 
-      resetPassword: (token: string, newPassword: string) =>
+      resetPassword: (rawToken: string, rawNewPassword: string) =>
         Effect.gen(function* () {
+          const hooks = yield* Hooks;
+          const { token, newPassword } = yield* hooks.beforeResetPassword({
+            token: rawToken,
+            newPassword: rawNewPassword,
+          });
+
           const resetStore = yield* PasswordResetStoreTag;
           const userStore = yield* PasswordResetUserStoreTag;
           const passwordHasher = yield* PasswordHasherTag;
@@ -206,11 +224,13 @@ export const makePasswordResetService = (
             yield* sessionManager.invalidateUserSessions(reset.userId);
           }
 
-          return {
+          const result = {
             userId: reset.userId,
             email: reset.email,
             reset: true,
           } satisfies PasswordResetResult;
+
+          return yield* hooks.afterResetPassword(result);
         }),
     }),
   );

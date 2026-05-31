@@ -55,14 +55,14 @@ describe("Scope", () => {
 
     it("fails with InsufficientScopeError when missing", async () => {
       const result = await Effect.runPromise(
-        Effect.either(requireScope("read:user", "write:repo")),
+        Effect.result(requireScope("read:user", "write:repo")),
       );
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("InsufficientScopeError");
-        expect(result.left.requiredScope).toBe("write:repo");
-        expect(result.left.grantedScopes).toEqual(["read:user"]);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("InsufficientScopeError");
+        expect(result.failure.requiredScope).toBe("write:repo");
+        expect(result.failure.grantedScopes).toEqual(["read:user"]);
       }
     });
   });
@@ -73,12 +73,12 @@ describe("Scope", () => {
     });
 
     it("reports missing scopes", async () => {
-      const result = await Effect.runPromise(Effect.either(requireAllScopes("a", ["a", "b", "c"])));
+      const result = await Effect.runPromise(Effect.result(requireAllScopes("a", ["a", "b", "c"])));
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("InsufficientScopeError");
-        expect(result.left.requiredScope).toBe("b c");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("InsufficientScopeError");
+        expect(result.failure.requiredScope).toBe("b c");
       }
     });
   });

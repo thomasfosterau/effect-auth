@@ -93,12 +93,12 @@ const multiAlgorithmExample = Effect.gen(function* () {
 
   // Demonstrate error handling for unsupported algorithm
   console.log("6️⃣ Testing unsupported algorithm...");
-  const unsupportedResult = yield* Effect.either(
+  const unsupportedResult = yield* Effect.result(
     verifier.verify("password", "argon2$someParams$hash"),
   );
-  if (unsupportedResult._tag === "Left") {
+  if (unsupportedResult._tag === "Failure") {
     console.log(`   ✅ Unsupported algorithm correctly rejected:`);
-    console.log(`      ${unsupportedResult.left.message}\n`);
+    console.log(`      ${unsupportedResult.failure.message}\n`);
   }
 
   console.log("✨ Multi-algorithm verification example completed!\n");

@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.js";
+import { Hooks, type HookError } from "./Hooks.js";
 import { PasswordHasherTag } from "./Password.js";
 import type * as Types from "./Types.js";
 import { SessionManagerTag } from "./Session.js";
@@ -20,10 +21,10 @@ export interface EmailPasswordStore {
   readonly setPasswordHash: (userId: string, hash: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class EmailPasswordStoreTag extends Context.Tag("@effect-auth/EmailPasswordStore")<
+export class EmailPasswordStoreTag extends Context.Service<
   EmailPasswordStoreTag,
   EmailPasswordStore
->() {}
+>()("@effect-auth/EmailPasswordStore") {}
 
 export const EmailPasswordStore = EmailPasswordStoreTag;
 
@@ -59,8 +60,8 @@ export interface EmailPasswordService {
     input: SignUpInput,
   ) => Effect.Effect<
     AuthResult,
-    Errors.AuthError | Errors.HashingError | Errors.EmailNotVerifiedError,
-    EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag
+    Errors.AuthError | Errors.HashingError | Errors.EmailNotVerifiedError | HookError,
+    EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag | Hooks
   >;
 
   readonly signIn: (
@@ -70,15 +71,16 @@ export interface EmailPasswordService {
     | Errors.InvalidCredentialsError
     | Errors.HashingError
     | Errors.AuthError
-    | Errors.EmailNotVerifiedError,
-    EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag
+    | Errors.EmailNotVerifiedError
+    | HookError,
+    EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag | Hooks
   >;
 }
 
-export class EmailPasswordServiceTag extends Context.Tag("@effect-auth/EmailPasswordService")<
+export class EmailPasswordServiceTag extends Context.Service<
   EmailPasswordServiceTag,
   EmailPasswordService
->() {}
+>()("@effect-auth/EmailPasswordService") {}
 
 export const EmailPasswordService = EmailPasswordServiceTag;
 
@@ -121,8 +123,11 @@ export const makeEmailPasswordService = (
 
   return Effect.sync(
     (): EmailPasswordService => ({
-      signUp: (input) =>
+      signUp: (rawInput) =>
         Effect.gen(function* () {
+          const hooks = yield* Hooks;
+          const input = yield* hooks.beforeSignUp(rawInput);
+
           if (resolved.disableSignUp) {
             return yield* Effect.fail(
               new Errors.AuthError({
@@ -172,20 +177,23 @@ export const makeEmailPasswordService = (
           yield* store.setPasswordHash(user.id, hashedPassword.hash);
 
           if (!resolved.autoSignIn) {
-            return { user };
+            return yield* hooks.afterSignUp({ user });
           }
 
           if (resolved.requireEmailVerification && !isEmailVerified(user)) {
-            return { user };
+            return yield* hooks.afterSignUp({ user });
           }
 
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
 
-          return { user, session };
+          return yield* hooks.afterSignUp({ user, session });
         }),
 
-      signIn: (input) =>
+      signIn: (rawInput) =>
         Effect.gen(function* () {
+          const hooks = yield* Hooks;
+          const input = yield* hooks.beforeSignIn(rawInput);
+
           const store = yield* EmailPasswordStoreTag;
           const passwordHasher = yield* PasswordHasherTag;
           const sessionManager = yield* SessionManagerTag;
@@ -237,7 +245,7 @@ export const makeEmailPasswordService = (
 
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
 
-          return { user, session };
+          return yield* hooks.afterSignIn({ user, session });
         }),
     }),
   );

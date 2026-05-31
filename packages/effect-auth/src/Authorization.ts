@@ -20,10 +20,10 @@ export interface AuthorizationPolicy {
 /**
  * Tag for AuthorizationPolicy service
  */
-export class AuthorizationPolicyTag extends Context.Tag("@effect-auth/AuthorizationPolicy")<
+export class AuthorizationPolicyTag extends Context.Service<
   AuthorizationPolicyTag,
   AuthorizationPolicy
->() {}
+>()("@effect-auth/AuthorizationPolicy") {}
 
 // Public ergonomic alias
 export const AuthorizationPolicy = AuthorizationPolicyTag;
@@ -49,10 +49,9 @@ export interface RoleStore {
 /**
  * Tag for RoleStore service
  */
-export class RoleStoreTag extends Context.Tag("@effect-auth/RoleStore")<
-  RoleStoreTag,
-  RoleStore
->() {}
+export class RoleStoreTag extends Context.Service<RoleStoreTag, RoleStore>()(
+  "@effect-auth/RoleStore",
+) {}
 
 // Public ergonomic alias
 export const RoleStore = RoleStoreTag;
@@ -202,9 +201,10 @@ export const can = (
   resource: string,
   action: string,
 ): Effect.Effect<boolean, never, AuthorizationPolicyTag> =>
-  Effect.flatMap(AuthorizationPolicyTag, (policy) =>
-    policy.checkPermission(userId, resource, action),
-  );
+  Effect.gen(function* () {
+    const policy = yield* AuthorizationPolicyTag;
+    return yield* policy.checkPermission(userId, resource, action);
+  });
 
 /**
  * Require that the user has *all* of the given permissions. Fails with

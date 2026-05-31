@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect } from "effect";
+import { Hooks } from "./Hooks.js";
 import { makeEmailPasswordService, EmailPasswordStore } from "./EmailPassword.js";
 import { makeSessionManager, SessionStore, SessionManager, UserStore } from "./Session.js";
 import { PasswordHasherLive, makePasswordHasher } from "./Password.js";
@@ -175,7 +176,9 @@ describe("EmailPasswordService", () => {
       return result;
     });
 
-    const result = await Effect.runPromise(Effect.provide(program, testContext));
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
 
     expect(result.session?.userId).toBe(result.user.id);
   });
@@ -208,7 +211,9 @@ describe("EmailPasswordService", () => {
       });
     });
 
-    const result = await Effect.runPromise(Effect.provide(program, testContext));
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
 
     expect(result.user.id).toBe(user.id);
     expect(result.session).toBeDefined();
@@ -234,7 +239,7 @@ describe("EmailPasswordService", () => {
 
     const program = Effect.gen(function* () {
       const service = yield* makeEmailPasswordService();
-      return yield* Effect.either(
+      return yield* Effect.result(
         service.signIn({
           email: "invalid@example.com",
           password: "wrong-password",
@@ -242,11 +247,13 @@ describe("EmailPasswordService", () => {
       );
     });
 
-    const result = await Effect.runPromise(Effect.provide(program, testContext));
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("InvalidCredentialsError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("InvalidCredentialsError");
     }
   });
 
@@ -272,7 +279,7 @@ describe("EmailPasswordService", () => {
       const service = yield* makeEmailPasswordService({
         requireEmailVerification: true,
       });
-      return yield* Effect.either(
+      return yield* Effect.result(
         service.signIn({
           email: "unverified@example.com",
           password: "password-123",
@@ -280,11 +287,13 @@ describe("EmailPasswordService", () => {
       );
     });
 
-    const result = await Effect.runPromise(Effect.provide(program, testContext));
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("EmailNotVerifiedError");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("EmailNotVerifiedError");
     }
   });
 });

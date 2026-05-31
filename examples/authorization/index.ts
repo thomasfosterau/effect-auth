@@ -87,9 +87,9 @@ const authorizationFlow = Effect.gen(function* () {
 
   // Test 4: requirePermission failure
   console.log("4️⃣ Requiring a permission the viewer lacks...");
-  const denied = yield* Effect.either(Auth.requirePermission("user-3", "posts", "delete"));
-  if (denied._tag === "Left") {
-    console.log(`   ❌ Permission denied: ${denied.left.message}\n`);
+  const denied = yield* Effect.result(Auth.requirePermission("user-3", "posts", "delete"));
+  if (denied._tag === "Failure") {
+    console.log(`   ❌ Permission denied: ${denied.failure.message}\n`);
   }
 
   return { adminCanDelete, adminCanDoAnything, editorCanCreate, editorCanRead };
@@ -141,9 +141,9 @@ const scopeExample = Effect.gen(function* () {
   yield* Auth.requireScope(token, "read:user");
   console.log("   ✅ requireScope read:user passed");
 
-  const denied = yield* Effect.either(Auth.requireScope(token, "admin:org"));
-  if (denied._tag === "Left") {
-    console.log(`   ❌ ${denied.left.message}\n`);
+  const denied = yield* Effect.result(Auth.requireScope(token, "admin:org"));
+  if (denied._tag === "Failure") {
+    console.log(`   ❌ ${denied.failure.message}\n`);
   }
 
   return { ok: true };

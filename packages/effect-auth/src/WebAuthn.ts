@@ -160,10 +160,9 @@ export interface CredentialStore {
 /**
  * Context tag for ChallengeStore
  */
-export class ChallengeStoreTag extends Context.Tag("@effect-auth/ChallengeStore")<
-  ChallengeStoreTag,
-  ChallengeStore
->() {}
+export class ChallengeStoreTag extends Context.Service<ChallengeStoreTag, ChallengeStore>()(
+  "@effect-auth/ChallengeStore",
+) {}
 
 // Public ergonomic alias
 export const ChallengeStore = ChallengeStoreTag;
@@ -171,10 +170,9 @@ export const ChallengeStore = ChallengeStoreTag;
 /**
  * Context tag for CredentialStore
  */
-export class CredentialStoreTag extends Context.Tag("@effect-auth/CredentialStore")<
-  CredentialStoreTag,
-  CredentialStore
->() {}
+export class CredentialStoreTag extends Context.Service<CredentialStoreTag, CredentialStore>()(
+  "@effect-auth/CredentialStore",
+) {}
 
 // Public ergonomic alias
 export const CredentialStore = CredentialStoreTag;
@@ -227,10 +225,9 @@ export interface WebAuthnService {
   >;
 }
 
-export class WebAuthnServiceTag extends Context.Tag("@effect-auth/WebAuthnService")<
-  WebAuthnServiceTag,
-  WebAuthnService
->() {}
+export class WebAuthnServiceTag extends Context.Service<WebAuthnServiceTag, WebAuthnService>()(
+  "@effect-auth/WebAuthnService",
+) {}
 
 // Public ergonomic alias
 export const WebAuthnService = WebAuthnServiceTag;

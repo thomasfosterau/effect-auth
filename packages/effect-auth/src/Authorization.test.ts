@@ -162,26 +162,26 @@ describe("Authorization", () => {
     it("should fail with PermissionDeniedError when permission is denied", async () => {
       const program = requirePermission("viewer-user", "posts", "create");
 
-      const result = await Effect.runPromise(Effect.either(Effect.provide(program, PolicyTest)));
+      const result = await Effect.runPromise(Effect.result(Effect.provide(program, PolicyTest)));
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("PermissionDeniedError");
-        expect(result.left.resource).toBe("posts");
-        expect(result.left.action).toBe("create");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("PermissionDeniedError");
+        expect(result.failure.resource).toBe("posts");
+        expect(result.failure.action).toBe("create");
       }
     });
 
     it("should include descriptive error message", async () => {
       const program = requirePermission("viewer-user", "users", "delete");
 
-      const result = await Effect.runPromise(Effect.either(Effect.provide(program, PolicyTest)));
+      const result = await Effect.runPromise(Effect.result(Effect.provide(program, PolicyTest)));
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left.message).toContain("Permission denied");
-        expect(result.left.message).toContain("delete");
-        expect(result.left.message).toContain("users");
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("Permission denied");
+        expect(result.failure.message).toContain("delete");
+        expect(result.failure.message).toContain("users");
       }
     });
   });
@@ -255,11 +255,11 @@ describe("Authorization", () => {
         { resource: "posts", action: "read" },
         { resource: "posts", action: "delete" },
       ]);
-      const result = await Effect.runPromise(Effect.either(Effect.provide(program, PolicyTest)));
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("PermissionDeniedError");
-        expect(result.left.action).toBe("delete");
+      const result = await Effect.runPromise(Effect.result(Effect.provide(program, PolicyTest)));
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("PermissionDeniedError");
+        expect(result.failure.action).toBe("delete");
       }
     });
 
@@ -276,11 +276,11 @@ describe("Authorization", () => {
         { resource: "users", action: "delete" },
         { resource: "posts", action: "delete" },
       ]);
-      const result = await Effect.runPromise(Effect.either(Effect.provide(program, PolicyTest)));
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left._tag).toBe("PermissionDeniedError");
-        expect(result.left.message).toContain("any of");
+      const result = await Effect.runPromise(Effect.result(Effect.provide(program, PolicyTest)));
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("PermissionDeniedError");
+        expect(result.failure.message).toContain("any of");
       }
     });
   });
