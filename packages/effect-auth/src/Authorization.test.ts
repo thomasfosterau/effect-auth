@@ -3,6 +3,15 @@ import { Effect, Context } from "effect";
 import {
   makeRoleBasedPolicy,
   requirePermission,
+  requireAllPermissions,
+  requireAnyPermission,
+  can,
+  allowAll,
+  denyAll,
+  anyOf,
+  allOf,
+  not,
+  fromPredicate,
   RoleStore,
   AuthorizationPolicy,
 } from "./Authorization.js";
@@ -173,6 +182,105 @@ describe("Authorization", () => {
         expect(result.failure.message).toContain("Permission denied");
         expect(result.failure.message).toContain("delete");
         expect(result.failure.message).toContain("users");
+      }
+    });
+  });
+
+  describe("combinators", () => {
+    const run = (policy: AuthorizationPolicy) =>
+      Effect.runPromise(policy.checkPermission("user", "posts", "read"));
+
+    it("allowAll grants everything", async () => {
+      expect(await run(allowAll)).toBe(true);
+    });
+
+    it("denyAll denies everything", async () => {
+      expect(await run(denyAll)).toBe(false);
+    });
+
+    it("not negates a policy", async () => {
+      expect(await run(not(denyAll))).toBe(true);
+      expect(await run(not(allowAll))).toBe(false);
+    });
+
+    it("anyOf grants if any policy grants", async () => {
+      expect(await run(anyOf(denyAll, allowAll))).toBe(true);
+      expect(await run(anyOf(denyAll, denyAll))).toBe(false);
+      expect(await run(anyOf())).toBe(false);
+    });
+
+    it("allOf grants only if every policy grants", async () => {
+      expect(await run(allOf(allowAll, allowAll))).toBe(true);
+      expect(await run(allOf(allowAll, denyAll))).toBe(false);
+      expect(await run(allOf())).toBe(true);
+    });
+
+    it("fromPredicate builds a policy from a rule", async () => {
+      const ownPosts = fromPredicate((userId, resource) =>
+        Effect.succeed(userId === "owner" && resource === "posts"),
+      );
+      expect(await Effect.runPromise(ownPosts.checkPermission("owner", "posts", "read"))).toBe(
+        true,
+      );
+      expect(await Effect.runPromise(ownPosts.checkPermission("other", "posts", "read"))).toBe(
+        false,
+      );
+    });
+  });
+
+  describe("guards", () => {
+    const mockPolicy: AuthorizationPolicy = {
+      checkPermission: (_userId, resource, action) =>
+        Effect.succeed(resource === "posts" && (action === "read" || action === "update")),
+    };
+    const PolicyTest = Context.make(AuthorizationPolicy, mockPolicy);
+
+    it("can returns a boolean", async () => {
+      const yes = await Effect.runPromise(Effect.provide(can("u", "posts", "read"), PolicyTest));
+      const no = await Effect.runPromise(Effect.provide(can("u", "posts", "delete"), PolicyTest));
+      expect(yes).toBe(true);
+      expect(no).toBe(false);
+    });
+
+    it("requireAllPermissions succeeds when all granted", async () => {
+      const program = requireAllPermissions("u", [
+        { resource: "posts", action: "read" },
+        { resource: "posts", action: "update" },
+      ]);
+      await Effect.runPromise(Effect.provide(program, PolicyTest));
+    });
+
+    it("requireAllPermissions fails on the first missing", async () => {
+      const program = requireAllPermissions("u", [
+        { resource: "posts", action: "read" },
+        { resource: "posts", action: "delete" },
+      ]);
+      const result = await Effect.runPromise(Effect.result(Effect.provide(program, PolicyTest)));
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("PermissionDeniedError");
+        expect(result.failure.action).toBe("delete");
+      }
+    });
+
+    it("requireAnyPermission succeeds when at least one granted", async () => {
+      const program = requireAnyPermission("u", [
+        { resource: "posts", action: "delete" },
+        { resource: "posts", action: "read" },
+      ]);
+      await Effect.runPromise(Effect.provide(program, PolicyTest));
+    });
+
+    it("requireAnyPermission fails when none granted", async () => {
+      const program = requireAnyPermission("u", [
+        { resource: "users", action: "delete" },
+        { resource: "posts", action: "delete" },
+      ]);
+      const result = await Effect.runPromise(Effect.result(Effect.provide(program, PolicyTest)));
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("PermissionDeniedError");
+        expect(result.failure.message).toContain("any of");
       }
     });
   });

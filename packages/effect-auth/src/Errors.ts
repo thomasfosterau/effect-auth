@@ -64,6 +64,15 @@ export class HashingError extends Data.TaggedError("HashingError")<{
 }> {}
 
 /**
+ * Insufficient scope error (OAuth-style scope authorization)
+ */
+export class InsufficientScopeError extends Data.TaggedError("InsufficientScopeError")<{
+  readonly message: string;
+  readonly requiredScope: string;
+  readonly grantedScopes: readonly string[];
+}> {}
+
+/**
  * WebAuthn challenge not found error
  */
 export class ChallengeNotFoundError extends Data.TaggedError("ChallengeNotFoundError")<{
