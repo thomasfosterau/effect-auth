@@ -1,0 +1,16 @@
+{
+  "name": "workos-example",
+  "projectType": "application",
+  "root": "examples/workos",
+  "sourceRoot": "examples/workos",
+  "targets": {
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["effect-auth-workos:build"],
+      "options": {
+        "cwd": "examples/workos",
+        "command": "bunx tsc --noEmit"
+      }
+    }
+  }
+}
