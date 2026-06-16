@@ -1,0 +1,63 @@
+{
+  "name": "@effect-auth/alchemy-resources",
+  "version": "0.1.0",
+  "description": "Alchemy v2 resources that provision and manage the infrastructure effect-auth needs — starting with a managed Cloudflare D1 schema migration.",
+  "keywords": [
+    "alchemy",
+    "auth",
+    "authentication",
+    "cloudflare",
+    "d1",
+    "effect",
+    "effect-auth",
+    "iac",
+    "infrastructure",
+    "migration"
+  ],
+  "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
+  "bugs": {
+    "url": "https://github.com/thomasfosterau/effect-auth/issues"
+  },
+  "license": "ISC",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thomasfosterau/effect-auth.git"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vp test run",
+    "typecheck": "tsc --noEmit && vp test --typecheck --run"
+  },
+  "dependencies": {
+    "@effect-auth/alchemy": "workspace:*",
+    "effect": "4.0.0-beta.59",
+    "effect-auth": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "better-sqlite3": "^11.7.0"
+  },
+  "peerDependencies": {
+    "alchemy": "^2.0.0-beta.55"
+  },
+  "peerDependenciesMeta": {
+    "alchemy": {
+      "optional": true
+    }
+  }
+}
