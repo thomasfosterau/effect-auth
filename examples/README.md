@@ -38,6 +38,7 @@ cd examples/basic-auth && bun run index.ts
 | `@effect-auth-examples/basic-auth`        | `basic-auth/`        | Password hashing, session create/validate/invalidate.                                             |
 | `@effect-auth-examples/authorization`     | `authorization/`     | Role-based access control, `requirePermission`.                                                   |
 | `@effect-auth-examples/oauth`             | `oauth/`             | OAuth 2.0 social-login flows.                                                                     |
+| `@effect-auth-examples/workos`            | `workos/`            | WorkOS integration: AuthKit/SSO URLs, User Management, Directory Sync, webhooks (full SDK).       |
 | `@effect-auth-examples/webauthn`          | `webauthn/`          | Passkey / WebAuthn flow.                                                                          |
 | `@effect-auth-examples/multi-algorithm`   | `multi-algorithm/`   | Multi-algorithm password verification.                                                            |
 | `@effect-auth-examples/northwind-traders` | `northwind-traders/` | End-to-end app: sign-up, email verification, sessions, RBAC, rate-limiting, OAuth URL generation. |

@@ -184,6 +184,15 @@
         "effect-auth": "workspace:*",
       },
     },
+    "examples/workos": {
+      "name": "@effect-auth-examples/workos",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect-auth/workos": "workspace:*",
+        "@workos-inc/node": "^10.2.0",
+        "effect": "4.0.0-beta.59",
+      },
+    },
     "packages/alchemy": {
       "name": "@effect-auth/alchemy",
       "version": "0.1.0",
@@ -376,6 +385,8 @@
     "@effect-auth-examples/oauth": ["@effect-auth-examples/oauth@workspace:examples/oauth"],
 
     "@effect-auth-examples/webauthn": ["@effect-auth-examples/webauthn@workspace:examples/webauthn"],
+
+    "@effect-auth-examples/workos": ["@effect-auth-examples/workos@workspace:examples/workos"],
 
     "@effect-auth/alchemy": ["@effect-auth/alchemy@workspace:packages/alchemy"],
 
