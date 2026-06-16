@@ -2,14 +2,15 @@
  * Helpers for inspecting and tearing down the effect-auth schema in a
  * Cloudflare D1 database.
  *
- * The canonical table list is derived from the `schemaStatements` exported by
- * `@effect-auth/alchemy`, so it stays in lock-step with the schema the sibling
- * package actually creates — there is no second copy to drift.
+ * The canonical table list is derived from the `schemaStatements` defined in
+ * `./Schema.ts`, so it stays in lock-step with the schema this package actually
+ * creates — there is no second copy to drift.
  */
 
 import { Effect } from "effect";
 import type * as Auth from "effect-auth";
-import { schemaStatements, d1All, d1Run, type D1Database } from "@effect-auth/alchemy";
+import { d1All, d1Run, type D1Database } from "./D1.js";
+import { schemaStatements } from "./Schema.js";
 
 const CREATE_TABLE = /create\s+table\s+if\s+not\s+exists\s+(\w+)/i;
 

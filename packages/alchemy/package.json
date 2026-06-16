@@ -1,7 +1,7 @@
 {
   "name": "@effect-auth/alchemy",
   "version": "0.1.0",
-  "description": "Cloudflare D1-backed storage layers for effect-auth, designed to be provisioned and bound with Alchemy v2.",
+  "description": "Alchemy v2 infrastructure resources and Cloudflare D1-backed storage layers for effect-auth.",
   "keywords": [
     "alchemy",
     "auth",
@@ -10,6 +10,9 @@
     "d1",
     "effect",
     "effect-auth",
+    "iac",
+    "infrastructure",
+    "migration",
     "session"
   ],
   "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
@@ -48,5 +51,13 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "better-sqlite3": "^11.7.0"
+  },
+  "peerDependencies": {
+    "alchemy": "^2.0.0-beta.55"
+  },
+  "peerDependenciesMeta": {
+    "alchemy": {
+      "optional": true
+    }
   }
 }

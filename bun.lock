@@ -195,19 +195,6 @@
         "@types/better-sqlite3": "^7.6.12",
         "better-sqlite3": "^11.7.0",
       },
-    },
-    "packages/alchemy-resources": {
-      "name": "@effect-auth/alchemy-resources",
-      "version": "0.1.0",
-      "dependencies": {
-        "@effect-auth/alchemy": "workspace:*",
-        "effect": "4.0.0-beta.59",
-        "effect-auth": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/better-sqlite3": "^7.6.12",
-        "better-sqlite3": "^11.7.0",
-      },
       "peerDependencies": {
         "alchemy": "^2.0.0-beta.55",
       },
@@ -389,8 +376,6 @@
     "@effect-auth-examples/webauthn": ["@effect-auth-examples/webauthn@workspace:examples/webauthn"],
 
     "@effect-auth/alchemy": ["@effect-auth/alchemy@workspace:packages/alchemy"],
-
-    "@effect-auth/alchemy-resources": ["@effect-auth/alchemy-resources@workspace:packages/alchemy-resources"],
 
     "@effect-auth/example-realworld-hono": ["@effect-auth/example-realworld-hono@workspace:examples/realworld-hono"],
 

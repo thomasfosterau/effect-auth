@@ -16,7 +16,8 @@
 
 import { Clock, Effect } from "effect";
 import type * as Auth from "effect-auth";
-import { migrate, schemaStatements, type D1Database } from "@effect-auth/alchemy";
+import { type D1Database } from "./D1.js";
+import { migrate, schemaStatements } from "./Schema.js";
 import { type Provider, Resource } from "./Alchemy.js";
 import { dropAuthTables, listAuthTables } from "./Tables.js";
 

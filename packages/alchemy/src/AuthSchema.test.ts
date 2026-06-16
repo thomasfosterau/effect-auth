@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect } from "effect";
-import type { D1Database, D1PreparedStatement, D1Result } from "@effect-auth/alchemy";
+import type { D1Database, D1PreparedStatement, D1Result } from "./D1.js";
 import { AuthSchema, AuthSchemaProvider, type AuthSchemaProps } from "./AuthSchema.js";
 import { authTableNames, listAuthTables } from "./Tables.js";
 import { deprovision, provision, type ResourceId } from "./Alchemy.js";
@@ -70,7 +70,7 @@ const makeTestDb = (): D1Database => {
 
 const id: ResourceId = { logicalId: "auth-schema" };
 
-describe("@effect-auth/alchemy-resources", () => {
+describe("@effect-auth/alchemy resources", () => {
   it("derives the auth table list from the shared schema statements", () => {
     expect(authTableNames).toContain("auth_users");
     expect(authTableNames).toContain("auth_sessions");

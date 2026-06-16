@@ -19,12 +19,12 @@
  * - {@link Provider.delete} — remove the resource; it must be idempotent, so
  *   "already gone" counts as success.
  *
- * This module does **not** import `alchemy`. Mirroring the sibling
- * `@effect-auth/alchemy` package — which models the Cloudflare D1 client with a
- * small structural interface rather than depending on `@cloudflare/workers-types`
- * — these types capture the lifecycle *contract* so the providers stay
- * dependency-free and fully testable. In a real Alchemy v2 program you mount a
- * provider with `Layer.effect(Provider, ...)`; see the package README. The
+ * This module does **not** import `alchemy`. Just as this package models the
+ * Cloudflare D1 client with a small structural interface (see `./D1.ts`) rather
+ * than depending on `@cloudflare/workers-types`, these types capture the
+ * lifecycle *contract* so the providers stay dependency-free and fully
+ * testable. In a real Alchemy v2 program you mount a provider with
+ * `Layer.effect(Provider, ...)`; see the package README. The
  * {@link provision} / {@link deprovision} helpers run the same contract outside
  * the engine, which is handy for tests and one-off migrations.
  */
