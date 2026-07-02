@@ -3,6 +3,7 @@ import * as Errors from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
 import {
   EmailPasswordStoreTag,
+  type SecondFactorChallenge,
   type SignInInput,
   type SignUpInput,
   makeEmailPasswordService,
@@ -24,6 +25,8 @@ export interface AuthLifecycleResult {
   readonly user: Types.User;
   readonly session?: Types.Session;
   readonly needsEmailVerification: boolean;
+  /** Present when a second factor is required to complete sign-in. */
+  readonly secondFactor?: SecondFactorChallenge;
 }
 
 export interface VerifyEmailInput {
@@ -89,12 +92,10 @@ export const AuthLifecycleService = AuthLifecycleServiceTag;
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
-const getEmailFromUser = (user: Types.User): string | undefined => {
-  const raw = user.attributes.email;
-  return typeof raw === "string" && raw.length > 0 ? normalizeEmail(raw) : undefined;
-};
+const getEmailFromUser = (user: Types.User): string | undefined =>
+  user.email.length > 0 ? normalizeEmail(user.email) : undefined;
 
-const isEmailVerified = (user: Types.User): boolean => user.attributes.emailVerified === true;
+const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
 
 export const makeAuthLifecycleService = (
   config: AuthLifecycleConfig = {},
@@ -171,6 +172,9 @@ export const makeAuthLifecycleService = (
           return {
             user: signInResult.user,
             ...(signInResult.session !== undefined && { session: signInResult.session }),
+            ...(signInResult.secondFactor !== undefined && {
+              secondFactor: signInResult.secondFactor,
+            }),
             needsEmailVerification: false,
           } satisfies AuthLifecycleResult;
         }),

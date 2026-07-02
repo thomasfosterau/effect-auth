@@ -54,6 +54,27 @@ export * from "./RateLimit.js";
 /** Email and password authentication flows. */
 export * from "./EmailPassword.js";
 
+/** Magic link (passwordless email) sign-in. */
+export * from "./MagicLink.js";
+
+/** Email OTP sign-in and verification codes. */
+export * from "./EmailOtp.js";
+
+/** Two-factor authentication (TOTP + backup codes). */
+export * from "./TwoFactor.js";
+
+/** Organizations: members, invitations, and role-based org permissions. */
+export * from "./Organization.js";
+
+/** Admin tooling: user management, bans, impersonation. */
+export * from "./Admin.js";
+
+/** API keys (hashed at rest, permissions, quotas, rate limits). */
+export * from "./ApiKey.js";
+
+/** JWT issuance and verification (ES256/EdDSA) with JWKS. */
+export * from "./Jwt.js";
+
 /** Password reset flows. */
 export * from "./PasswordReset.js";
 
@@ -68,6 +89,14 @@ export * from "./Hooks.js";
 
 /** Example plugins built on the hooks system. */
 export * from "./plugins/index.js";
+
+/**
+ * KeyValueStore-backed layers for the ephemeral stores (OAuth state,
+ * WebAuthn challenges, rate limits, tokens/OTPs, pending two-factor).
+ * Back them with `effect/unstable/persistence` KeyValueStore layers
+ * (in-memory, file system, Redis, ...).
+ */
+export * from "./KeyValueStores.js";
 
 /**
  * HTTP protocol (optional; requires the `effect/unstable/httpapi` modules).

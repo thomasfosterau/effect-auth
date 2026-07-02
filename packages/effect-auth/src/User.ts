@@ -18,6 +18,12 @@ export class UserServiceStoreTag extends Context.Service<UserServiceStoreTag, Us
 
 export const UserServiceStore = UserServiceStoreTag;
 
+/** Partial update of a user's first-class profile fields. */
+export interface UpdateUserInput {
+  readonly name?: string;
+  readonly image?: string;
+}
+
 export interface UserService {
   readonly getUser: (
     userId: string,
@@ -30,6 +36,11 @@ export interface UserService {
   readonly updateUserAttributes: (
     userId: string,
     attributes: Record<string, unknown>,
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
+
+  readonly updateUser: (
+    userId: string,
+    updates: UpdateUserInput,
   ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
 
   readonly markEmailVerified: (
@@ -92,10 +103,26 @@ export const makeUserService = (): Effect.Effect<UserService, never> =>
 
           const updated: Types.User = {
             ...existing,
+            updatedAt: new Date(),
             attributes: {
               ...existing.attributes,
               ...attributes,
             },
+          };
+
+          return yield* store.update(updated);
+        }),
+
+      updateUser: (userId: string, updates: UpdateUserInput) =>
+        Effect.gen(function* () {
+          const store = yield* UserServiceStoreTag;
+          const existing = yield* store.get(userId);
+
+          const updated: Types.User = {
+            ...existing,
+            ...(updates.name !== undefined && { name: updates.name }),
+            ...(updates.image !== undefined && { image: updates.image }),
+            updatedAt: new Date(),
           };
 
           return yield* store.update(updated);
@@ -108,10 +135,8 @@ export const makeUserService = (): Effect.Effect<UserService, never> =>
 
           const updated: Types.User = {
             ...existing,
-            attributes: {
-              ...existing.attributes,
-              emailVerified: true,
-            },
+            emailVerified: true,
+            updatedAt: new Date(),
           };
 
           return yield* store.update(updated);

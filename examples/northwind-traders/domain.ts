@@ -14,9 +14,12 @@ import type * as Auth from "effect-auth";
 export interface Employee {
   readonly id: string;
   readonly email: string;
+  readonly emailVerified: boolean;
   readonly firstName: string;
   readonly lastName: string;
   readonly title: string;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
   readonly attributes: Record<string, unknown>;
 }
 
@@ -135,14 +138,13 @@ export const seedNorthwind = (): void => {
   employees.set(ADMIN_EMPLOYEE_ID, {
     id: ADMIN_EMPLOYEE_ID,
     email: "andrew.fuller@northwind.example",
+    emailVerified: true,
     firstName: "Andrew",
     lastName: "Fuller",
     title: "Vice President, Sales",
-    attributes: {
-      email: "andrew.fuller@northwind.example",
-      name: "Andrew Fuller",
-      emailVerified: true,
-    },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    attributes: {},
   });
   userRoles.set(ADMIN_EMPLOYEE_ID, ["Admin"]);
 

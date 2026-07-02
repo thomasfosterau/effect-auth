@@ -10,6 +10,7 @@ import {
   makeEmailVerificationStore,
   makeOAuthAccountStore,
   makeOAuthStateStore,
+  makeOAuthUserStore,
   makePasswordResetStore,
   makeRateLimitStore,
   makeRoleStore,
@@ -126,12 +127,17 @@ suite("@effect-auth/alchemy stores", () => {
     const updated = await Effect.runPromise(store.get("s1"));
     expect(updated.attributes).toEqual({ ip: "10.0.0.1" });
 
+    const listed = await Effect.runPromise(store.listByUserId("u1"));
+    expect(listed.map((entry) => entry.id)).toEqual(["s1"]);
+    expect(await Effect.runPromise(store.listByUserId("nobody"))).toEqual([]);
+
     const missing = await Effect.runPromise(Effect.result(store.get("nope")));
     expect(Result.isFailure(missing) && missing.failure._tag).toBe("SessionNotFoundError");
 
     await Effect.runPromise(store.deleteByUserId("u1"));
     const gone = await Effect.runPromise(Effect.result(store.get("s1")));
     expect(Result.isFailure(gone)).toBe(true);
+    expect(await Effect.runPromise(store.listByUserId("u1"))).toEqual([]);
   });
 
   it("user + email-password stores share auth_users", async () => {
@@ -140,10 +146,12 @@ suite("@effect-auth/alchemy stores", () => {
     const users = makeUserStore(db);
 
     const created = await Effect.runPromise(
-      emailPassword.createUser({ email: "a@b.com", name: "Ada" }),
+      emailPassword.createUser({ email: "a@b.com", name: "Ada", attributes: { plan: "pro" } }),
     );
-    expect(created.attributes["email"]).toBe("a@b.com");
-    expect(created.attributes["name"]).toBe("Ada");
+    expect(created.email).toBe("a@b.com");
+    expect(created.emailVerified).toBe(false);
+    expect(created.name).toBe("Ada");
+    expect(created.attributes).toEqual({ plan: "pro" });
 
     const byEmail = await Effect.runPromise(emailPassword.getUserByEmail("a@b.com"));
     expect(byEmail?.id).toBe(created.id);
@@ -156,7 +164,11 @@ suite("@effect-auth/alchemy stores", () => {
     expect(await Effect.runPromise(users.getCredentials(created.id))).toBe("hash:123");
 
     const user = await Effect.runPromise(users.get(created.id));
-    expect(user.attributes["email"]).toBe("a@b.com");
+    expect(user.email).toBe("a@b.com");
+    expect(user.name).toBe("Ada");
+    expect(user.attributes).toEqual({ plan: "pro" });
+    expect(user.createdAt.getTime()).toBe(created.createdAt.getTime());
+    expect(user.updatedAt.getTime()).toBe(created.updatedAt.getTime());
 
     const missing = await Effect.runPromise(Effect.result(users.get("nope")));
     expect(Result.isFailure(missing) && missing.failure._tag).toBe("UserNotFoundError");
@@ -171,9 +183,16 @@ suite("@effect-auth/alchemy stores", () => {
     expect((await Effect.runPromise(service.getByEmail("c@d.com")))?.id).toBe(user.id);
 
     await Effect.runPromise(
-      service.update({ id: user.id, attributes: { email: "new@d.com", role: "x" } }),
+      service.update({
+        ...user,
+        email: "new@d.com",
+        emailVerified: true,
+        attributes: { role: "x" },
+      }),
     );
     const updated = await Effect.runPromise(service.get(user.id));
+    expect(updated.email).toBe("new@d.com");
+    expect(updated.emailVerified).toBe(true);
     expect(updated.attributes["role"]).toBe("x");
     expect(await Effect.runPromise(service.getByEmail("new@d.com"))).not.toBe(null);
 
@@ -280,6 +299,36 @@ suite("@effect-auth/alchemy stores", () => {
     expect(await Effect.runPromise(store.get("github", "gh-1"))).toBe(null);
   });
 
+  it("oauth user store: createUser / getUser / getUserByEmail", async () => {
+    const { db } = await setup();
+    const store = makeOAuthUserStore(db);
+
+    const created = await Effect.runPromise(
+      store.createUser({
+        email: "o@o.com",
+        emailVerified: true,
+        name: "Oda",
+        image: "https://img.example/o.png",
+      }),
+    );
+    expect(created.email).toBe("o@o.com");
+    expect(created.emailVerified).toBe(true);
+    expect(created.name).toBe("Oda");
+    expect(created.image).toBe("https://img.example/o.png");
+    expect(created.attributes).toEqual({});
+
+    const fetched = await Effect.runPromise(store.getUser(created.id));
+    expect(fetched.email).toBe("o@o.com");
+    expect(fetched.emailVerified).toBe(true);
+    expect(fetched.createdAt.getTime()).toBe(created.createdAt.getTime());
+
+    expect((await Effect.runPromise(store.getUserByEmail("o@o.com")))?.id).toBe(created.id);
+    expect(await Effect.runPromise(store.getUserByEmail("nobody@o.com"))).toBe(null);
+
+    const missing = await Effect.runPromise(Effect.result(store.getUser("nope")));
+    expect(Result.isFailure(missing) && missing.failure._tag).toBe("UserNotFoundError");
+  });
+
   it("oauth state store: create / get / not-found", async () => {
     const { db } = await setup();
     const store = makeOAuthStateStore(db);
@@ -345,11 +394,14 @@ suite("@effect-auth/alchemy stores", () => {
       const session = yield* sessions.get("s9");
       const rateLimit = yield* Auth.RateLimitStore;
       const count = yield* rateLimit.increment("layer-key", 60);
-      return { session, count };
+      const oauthUsers = yield* Auth.OAuthUserStore;
+      const user = yield* oauthUsers.createUser({ email: "layer@l.com", emailVerified: false });
+      return { session, count, user };
     });
 
     const result = await Effect.runPromise(program.pipe(Effect.provide(layer(db))));
     expect(result.session.userId).toBe("u9");
     expect(result.count).toBe(1);
+    expect(result.user.email).toBe("layer@l.com");
   });
 });

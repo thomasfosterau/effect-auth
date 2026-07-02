@@ -10,11 +10,15 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🧩 **Composable**: Use Effect's powerful composition capabilities
 - 🔄 **Bring Your Own Storage**: Implement storage adapters for any database or backend
 - 📦 **Zero Lock-in**: No vendor lock-in, works with any storage backend
-- 🔑 **Two-Factor Authentication**: TOTP and HOTP support following RFC 6238 and RFC 4226
-- 🌐 **OAuth 2.0 / Social Login**: Pre-built providers for Google, GitHub, Discord, Microsoft with PKCE support
-- ✉️ **Email Verification**: Secure token-based email verification flows
+- 🔑 **Two-Factor Authentication**: TOTP enrollment with backup codes, integrated into sign-in (RFC 6238/4226 primitives included)
+- 🌐 **OAuth 2.0 / Social Login**: Pre-built providers for Google, GitHub, Discord, Microsoft with PKCE and a complete sign-in flow (user creation, verified-email account linking, sessions)
+- ✉️ **Email Verification & Password Reset**: Secure token-based flows with anti-enumeration behavior
+- 🪄 **Magic Link & Email OTP**: Passwordless sign-in via one-time links or numeric codes
 - 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets for all auth operations
 - 🔓 **WebAuthn / Passkeys**: Passwordless authentication with FIDO2 compliance
+- 🏢 **Organizations & Admin**: Multi-tenant organizations (members, invitations, roles) and admin tooling (ban, impersonate)
+- 🗝️ **API Keys & JWT**: Hashed API keys with permissions/quotas; ES256/EdDSA JWTs with JWKS
+- 🌍 **HTTP Protocol**: A typed `effect/unstable/httpapi` contract serving the whole surface as a mountable Web handler with a derived typed client, session cookies, and trusted-origin CSRF protection
 
 ## Installation
 
@@ -53,9 +57,12 @@ const sessionStore: Auth.SessionStore = {
   update: (session) => Effect.succeed(session),
   delete: (sessionId) => Effect.void,
   deleteByUserId: (userId) => Effect.void,
+  listByUserId: (userId) => Effect.succeed([]),
 };
 
-// Implement user storage
+// Implement user storage. Users carry first-class identity fields
+// (email, emailVerified, name, image, createdAt, updatedAt) plus an
+// `attributes` bag for app-specific data.
 const userStore: Auth.UserStore = {
   get: (userId) => Effect.fail(new Auth.UserNotFoundError({ message: "Not found", userId })),
   getCredentials: (userId) => Effect.succeed("hashed-password"),

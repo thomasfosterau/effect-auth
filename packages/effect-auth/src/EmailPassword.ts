@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import * as Errors from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
 import { PasswordHasherTag } from "./Password.js";
@@ -8,6 +8,7 @@ import { SessionManagerTag } from "./Session.js";
 export interface CreateUserInput {
   readonly email: string;
   readonly name?: string;
+  readonly image?: string;
   readonly attributes?: Record<string, unknown>;
 }
 
@@ -50,9 +51,48 @@ export interface SignInInput {
   readonly sessionAttributes?: Record<string, unknown>;
 }
 
+/**
+ * A pending second-factor challenge issued during sign-in. The client must
+ * redeem the token with the second factor (e.g. a TOTP code) to obtain a
+ * session.
+ */
+export interface SecondFactorChallenge {
+  readonly token: string;
+  readonly expiresAt: number;
+}
+
+/**
+ * Optional seam consulted by password sign-in after the first factor
+ * succeeds. When present in context (see `TwoFactorGateLayer` in the
+ * TwoFactor module) and `required` reports true, sign-in returns a
+ * {@link SecondFactorChallenge} instead of a session.
+ */
+export interface SecondFactorGate {
+  readonly required: (user: Types.User) => Effect.Effect<boolean, Errors.AuthError>;
+  readonly begin: (user: Types.User) => Effect.Effect<SecondFactorChallenge, Errors.AuthError>;
+}
+
+export class SecondFactorGateTag extends Context.Service<SecondFactorGateTag, SecondFactorGate>()(
+  "@effect-auth/SecondFactorGate",
+) {}
+
+export const SecondFactorGate = SecondFactorGateTag;
+
 export interface AuthResult {
   readonly user: Types.User;
   readonly session?: Types.Session;
+  /** Present when a second factor is required to complete sign-in. */
+  readonly secondFactor?: SecondFactorChallenge;
+}
+
+export interface ChangePasswordInput {
+  readonly userId: string;
+  readonly currentPassword: string;
+  readonly newPassword: string;
+  /** Revoke the user's other sessions after the change (keeps `currentSessionId`). */
+  readonly revokeOtherSessions?: boolean;
+  /** The session to keep when `revokeOtherSessions` is set; omit to revoke all. */
+  readonly currentSessionId?: string;
 }
 
 export interface EmailPasswordService {
@@ -75,6 +115,31 @@ export interface EmailPasswordService {
     | HookError,
     EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag | Hooks
   >;
+
+  /**
+   * Change the password of a user that already has one, verifying the current
+   * password first. Optionally revokes the user's other sessions.
+   */
+  readonly changePassword: (
+    input: ChangePasswordInput,
+  ) => Effect.Effect<
+    void,
+    Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
+    EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag
+  >;
+
+  /**
+   * Set a password for a user that does not have one yet (e.g. an account
+   * created via OAuth). Fails if a password is already set.
+   */
+  readonly setPassword: (
+    userId: string,
+    newPassword: string,
+  ) => Effect.Effect<
+    void,
+    Errors.HashingError | Errors.AuthError,
+    EmailPasswordStoreTag | PasswordHasherTag
+  >;
 }
 
 export class EmailPasswordServiceTag extends Context.Service<
@@ -84,7 +149,7 @@ export class EmailPasswordServiceTag extends Context.Service<
 
 export const EmailPasswordService = EmailPasswordServiceTag;
 
-const isEmailVerified = (user: Types.User): boolean => user.attributes.emailVerified === true;
+const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
@@ -166,11 +231,7 @@ export const makeEmailPasswordService = (
           const user = yield* store.createUser({
             email,
             ...(input.name !== undefined && { name: input.name }),
-            attributes: {
-              email,
-              ...(input.name !== undefined && { name: input.name }),
-              ...input.attributes,
-            },
+            ...(input.attributes !== undefined && { attributes: input.attributes }),
           });
 
           const hashedPassword = yield* passwordHasher.hash(input.password);
@@ -243,9 +304,75 @@ export const makeEmailPasswordService = (
             );
           }
 
+          // Second factor: when a gate is present and required for this user,
+          // return a challenge instead of a session.
+          const gate = yield* Effect.serviceOption(SecondFactorGateTag);
+          if (Option.isSome(gate) && (yield* gate.value.required(user))) {
+            const secondFactor = yield* gate.value.begin(user);
+            return yield* hooks.afterSignIn({ user, secondFactor });
+          }
+
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
 
           return yield* hooks.afterSignIn({ user, session });
+        }),
+
+      changePassword: (input) =>
+        Effect.gen(function* () {
+          const store = yield* EmailPasswordStoreTag;
+          const passwordHasher = yield* PasswordHasherTag;
+          const sessionManager = yield* SessionManagerTag;
+
+          yield* validatePasswordLength(input.newPassword, {
+            minPasswordLength: resolved.minPasswordLength,
+            maxPasswordLength: resolved.maxPasswordLength,
+          });
+
+          const currentHash = yield* store.getPasswordHash(input.userId);
+          if (!currentHash) {
+            return yield* new Errors.InvalidCredentialsError({
+              message: "Invalid password",
+            });
+          }
+
+          const isValid = yield* passwordHasher.verify(input.currentPassword, currentHash);
+          if (!isValid) {
+            return yield* new Errors.InvalidCredentialsError({
+              message: "Invalid password",
+            });
+          }
+
+          const hashedPassword = yield* passwordHasher.hash(input.newPassword);
+          yield* store.setPasswordHash(input.userId, hashedPassword.hash);
+
+          if (input.revokeOtherSessions) {
+            if (input.currentSessionId !== undefined) {
+              yield* sessionManager.revokeOtherSessions(input.userId, input.currentSessionId);
+            } else {
+              yield* sessionManager.invalidateUserSessions(input.userId);
+            }
+          }
+        }),
+
+      setPassword: (userId, newPassword) =>
+        Effect.gen(function* () {
+          const store = yield* EmailPasswordStoreTag;
+          const passwordHasher = yield* PasswordHasherTag;
+
+          yield* validatePasswordLength(newPassword, {
+            minPasswordLength: resolved.minPasswordLength,
+            maxPasswordLength: resolved.maxPasswordLength,
+          });
+
+          const currentHash = yield* store.getPasswordHash(userId);
+          if (currentHash) {
+            return yield* new Errors.AuthError({
+              message: "User already has a password; use changePassword instead",
+            });
+          }
+
+          const hashedPassword = yield* passwordHasher.hash(newPassword);
+          yield* store.setPasswordHash(userId, hashedPassword.hash);
         }),
     }),
   );

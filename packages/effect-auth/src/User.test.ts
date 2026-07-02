@@ -31,10 +31,7 @@ const userStore = {
   update: (user: User) =>
     Effect.sync(() => {
       users.set(user.id, user);
-      const rawEmail = user.attributes.email;
-      if (typeof rawEmail === "string" && rawEmail.length > 0) {
-        usersByEmail.set(rawEmail.toLowerCase(), user.id);
-      }
+      usersByEmail.set(user.email.toLowerCase(), user.id);
       return user;
     }),
 
@@ -42,10 +39,7 @@ const userStore = {
     Effect.sync(() => {
       const existing = users.get(userId);
       if (existing) {
-        const rawEmail = existing.attributes.email;
-        if (typeof rawEmail === "string" && rawEmail.length > 0) {
-          usersByEmail.delete(rawEmail.toLowerCase());
-        }
+        usersByEmail.delete(existing.email.toLowerCase());
       }
       users.delete(userId);
     }),
@@ -60,9 +54,12 @@ describe("UserService", () => {
 
     const seeded: User = {
       id: "user-1",
+      email: "user@example.com",
+      emailVerified: false,
+      name: "User One",
+      createdAt: new Date(),
+      updatedAt: new Date(),
       attributes: {
-        email: "user@example.com",
-        name: "User One",
         role: "member",
       },
     };
@@ -80,7 +77,7 @@ describe("UserService", () => {
     const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
 
     expect(result.id).toBe("user-1");
-    expect(result.attributes.email).toBe("user@example.com");
+    expect(result.email).toBe("user@example.com");
   });
 
   it("should get user by normalized email", async () => {
@@ -105,7 +102,7 @@ describe("UserService", () => {
 
     const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
 
-    expect(result.attributes.email).toBe("user@example.com");
+    expect(result.email).toBe("user@example.com");
     expect(result.attributes.role).toBe("admin");
     expect(result.attributes.displayName).toBe("Updated User");
   });
@@ -118,7 +115,7 @@ describe("UserService", () => {
 
     const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
 
-    expect(result.attributes.emailVerified).toBe(true);
+    expect(result.emailVerified).toBe(true);
   });
 
   it("should delete user", async () => {

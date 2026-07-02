@@ -18,11 +18,16 @@ import { d1Run, type D1Database } from "./D1.js";
 export const schemaStatements: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS auth_users (
     id TEXT PRIMARY KEY,
-    email TEXT UNIQUE,
+    email TEXT NOT NULL UNIQUE,
+    email_verified INTEGER NOT NULL DEFAULT 0,
+    name TEXT,
+    image TEXT,
     password_hash TEXT,
     attributes TEXT,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS auth_users_email_idx ON auth_users (email)`,
   `CREATE TABLE IF NOT EXISTS auth_sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,

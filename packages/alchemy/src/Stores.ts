@@ -49,21 +49,41 @@ const msToDate = (ms: number): Date => new Date(ms);
 
 interface UserRow {
   readonly id: string;
-  readonly email: string | null;
+  readonly email: string;
+  readonly email_verified: number;
+  readonly name: string | null;
+  readonly image: string | null;
   readonly password_hash: string | null;
   readonly attributes: string | null;
   readonly created_at: number;
+  readonly updated_at: number;
 }
 
 const rowToUser = (row: UserRow): Auth.User => ({
   id: row.id,
+  email: row.email,
+  emailVerified: row.email_verified !== 0,
+  createdAt: msToDate(row.created_at),
+  updatedAt: msToDate(row.updated_at),
   attributes: decodeAttributes(row.attributes),
+  ...(row.name != null ? { name: row.name } : {}),
+  ...(row.image != null ? { image: row.image } : {}),
 });
 
-const emailFromAttributes = (attributes: Record<string, unknown>): string | null => {
-  const email = attributes["email"];
-  return typeof email === "string" ? email : null;
-};
+const insertUser = `INSERT INTO auth_users (id, email, email_verified, name, image, password_hash, attributes, created_at, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+const insertUserParams = (user: Auth.User): readonly unknown[] => [
+  user.id,
+  user.email,
+  user.emailVerified ? 1 : 0,
+  user.name ?? null,
+  user.image ?? null,
+  null,
+  encodeAttributes(user.attributes),
+  dateToMs(user.createdAt),
+  dateToMs(user.updatedAt),
+];
 
 // ---------------------------------------------------------------------------
 // SessionStore + UserStore
@@ -140,6 +160,13 @@ export const makeSessionStore = (db: D1Database): Auth.SessionStore => ({
       [userId],
       "session.deleteByUserId",
     ).pipe(Effect.asVoid),
+  listByUserId: (userId) =>
+    d1All<SessionRow>(
+      db,
+      `SELECT * FROM auth_sessions WHERE user_id = ?`,
+      [userId],
+      "session.listByUserId",
+    ).pipe(Effect.map((rows) => rows.map(rowToSession))),
 });
 
 export const makeUserStore = (db: D1Database): Auth.UserStore => ({
@@ -192,8 +219,16 @@ export const makeUserServiceStore = (db: D1Database): Auth.UserServiceStore => (
   update: (user) =>
     d1Run(
       db,
-      `UPDATE auth_users SET attributes = ?, email = ? WHERE id = ?`,
-      [encodeAttributes(user.attributes), emailFromAttributes(user.attributes), user.id],
+      `UPDATE auth_users SET email = ?, email_verified = ?, name = ?, image = ?, attributes = ?, updated_at = ? WHERE id = ?`,
+      [
+        user.email,
+        user.emailVerified ? 1 : 0,
+        user.name ?? null,
+        user.image ?? null,
+        encodeAttributes(user.attributes),
+        dateToMs(user.updatedAt),
+        user.id,
+      ],
       "userService.update",
     ).pipe(Effect.as(user)),
   delete: (userId) =>
@@ -216,21 +251,19 @@ export const makeEmailPasswordStore = (db: D1Database): Auth.EmailPasswordStore 
     ).pipe(Effect.map((row) => (row ? rowToUser(row) : null))),
   createUser: (input) =>
     Effect.gen(function* () {
-      const id = randomUUID();
-      const attributes: Record<string, unknown> = {
-        ...input.attributes,
+      const now = new Date();
+      const user: Auth.User = {
+        id: randomUUID(),
         email: input.email,
+        emailVerified: false,
+        createdAt: now,
+        updatedAt: now,
+        attributes: input.attributes ?? {},
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.image !== undefined ? { image: input.image } : {}),
       };
-      if (input.name !== undefined) {
-        attributes["name"] = input.name;
-      }
-      yield* d1Run(
-        db,
-        `INSERT INTO auth_users (id, email, password_hash, attributes, created_at) VALUES (?, ?, ?, ?, ?)`,
-        [id, input.email, null, encodeAttributes(attributes), Date.now()],
-        "emailPassword.createUser",
-      );
-      return { id, attributes };
+      yield* d1Run(db, insertUser, insertUserParams(user), "emailPassword.createUser");
+      return user;
     }),
   getPasswordHash: (userId) =>
     d1First<UserRow>(
@@ -726,6 +759,50 @@ export const makeOAuthAccountStore = (db: D1Database): Auth.OAuthAccountStore =>
 });
 
 // ---------------------------------------------------------------------------
+// OAuthUserStore (auth_users)
+// ---------------------------------------------------------------------------
+
+export const makeOAuthUserStore = (db: D1Database): Auth.OAuthUserStore => ({
+  getUser: (userId) =>
+    d1First<UserRow>(
+      db,
+      `SELECT * FROM auth_users WHERE id = ?`,
+      [userId],
+      "oauthUser.getUser",
+    ).pipe(
+      Effect.orDie,
+      Effect.flatMap((row) =>
+        row
+          ? Effect.succeed(rowToUser(row))
+          : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
+      ),
+    ),
+  getUserByEmail: (email) =>
+    d1First<UserRow>(
+      db,
+      `SELECT * FROM auth_users WHERE email = ?`,
+      [email],
+      "oauthUser.getUserByEmail",
+    ).pipe(Effect.map((row) => (row ? rowToUser(row) : null))),
+  createUser: (input) =>
+    Effect.gen(function* () {
+      const now = new Date();
+      const user: Auth.User = {
+        id: randomUUID(),
+        email: input.email,
+        emailVerified: input.emailVerified,
+        createdAt: now,
+        updatedAt: now,
+        attributes: {},
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.image !== undefined ? { image: input.image } : {}),
+      };
+      yield* d1Run(db, insertUser, insertUserParams(user), "oauthUser.createUser");
+      return user;
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // PasswordResetStore
 // ---------------------------------------------------------------------------
 
@@ -802,6 +879,8 @@ export const OAuthStateStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.OAuthStateStore, makeOAuthStateStore(db));
 export const OAuthAccountStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.OAuthAccountStore, makeOAuthAccountStore(db));
+export const OAuthUserStoreLayer = (db: D1Database) =>
+  Layer.succeed(Auth.OAuthUserStore, makeOAuthUserStore(db));
 export const PasswordResetStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.PasswordResetStore, makePasswordResetStore(db));
 
@@ -824,5 +903,6 @@ export const layer = (db: D1Database) =>
     CredentialStoreLayer(db),
     OAuthStateStoreLayer(db),
     OAuthAccountStoreLayer(db),
+    OAuthUserStoreLayer(db),
     PasswordResetStoreLayer(db),
   );

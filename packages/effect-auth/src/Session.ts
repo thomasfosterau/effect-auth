@@ -34,6 +34,13 @@ export interface SessionStore {
    * Delete all sessions for a user
    */
   readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+
+  /**
+   * List all sessions for a user
+   */
+  readonly listByUserId: (
+    userId: string,
+  ) => Effect.Effect<ReadonlyArray<Types.Session>, Errors.AuthError>;
 }
 
 /**
@@ -106,6 +113,22 @@ export interface SessionManager {
    * Invalidate all sessions for a user
    */
   readonly invalidateUserSessions: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+
+  /**
+   * List a user's sessions that have not yet expired.
+   */
+  readonly listSessions: (
+    userId: string,
+  ) => Effect.Effect<ReadonlyArray<Types.Session>, Errors.AuthError>;
+
+  /**
+   * Invalidate every session for a user except the given one (e.g. keep the
+   * current device signed in while revoking all others).
+   */
+  readonly revokeOtherSessions: (
+    userId: string,
+    currentSessionId: string,
+  ) => Effect.Effect<void, Errors.AuthError>;
 }
 
 /**
@@ -245,6 +268,23 @@ export const makeSessionManager = (
         }),
 
       invalidateUserSessions: (userId) => sessionStore.deleteByUserId(userId),
+
+      listSessions: (userId) =>
+        Effect.gen(function* () {
+          const sessions = yield* sessionStore.listByUserId(userId);
+          const now = Date.now();
+          return sessions.filter((session) => session.expiresAt.getTime() >= now);
+        }),
+
+      revokeOtherSessions: (userId, currentSessionId) =>
+        Effect.gen(function* () {
+          const sessions = yield* sessionStore.listByUserId(userId);
+          yield* Effect.forEach(
+            sessions.filter((session) => session.id !== currentSessionId),
+            (session) => sessionStore.delete(session.id),
+            { discard: true },
+          );
+        }),
     };
   });
 

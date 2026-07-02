@@ -61,6 +61,15 @@ export const sessionStore: Auth.SessionStore = {
     Effect.sync(() => {
       db.delete(schema.sessions).where(eq(schema.sessions.userId, userId)).run();
     }),
+  listByUserId: (userId) =>
+    Effect.sync(() =>
+      db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.userId, userId))
+        .all()
+        .map(rowToSession),
+    ),
 };
 
 export const userStore: Auth.UserStore = {
@@ -74,8 +83,12 @@ export const userStore: Auth.UserStore = {
       }
       return {
         id: row.id,
+        email: row.email,
+        emailVerified: false,
+        ...(row.image !== null && { image: row.image }),
+        createdAt: row.createdAt,
+        updatedAt: row.createdAt,
         attributes: {
-          email: row.email,
           username: row.username,
           bio: row.bio,
           image: row.image,

@@ -1,0 +1,436 @@
+import { describe, it, expect, beforeEach } from "vite-plus/test";
+import { Context, Effect } from "effect";
+import { Hooks } from "./Hooks.js";
+import {
+  makeMagicLinkService,
+  MagicLinkStore,
+  MagicLinkUserStore,
+  type MagicLinkCreateUserInput,
+  type MagicLinkToken,
+} from "./MagicLink.js";
+import { makeSessionManager, SessionStore, SessionManager, UserStore } from "./Session.js";
+import type { Session, User, SessionConfig } from "./Types.js";
+import * as Errors from "./Errors.js";
+
+const users = new Map<string, User>();
+const usersByEmail = new Map<string, string>();
+const magicLinkTokens = new Map<string, MagicLinkToken>();
+const sessions = new Map<string, Session>();
+const sentLinks: Array<{ email: string; token: string }> = [];
+
+const sessionStore = {
+  create: (session: Session) =>
+    Effect.sync(() => {
+      sessions.set(session.id, session);
+      return session;
+    }),
+
+  get: (sessionId: string) =>
+    Effect.gen(function* () {
+      const session = sessions.get(sessionId);
+      if (!session) {
+        return yield* Effect.fail(
+          new Errors.SessionNotFoundError({
+            message: "Session not found",
+            sessionId,
+          }),
+        );
+      }
+      return session;
+    }),
+
+  update: (session: Session) =>
+    Effect.sync(() => {
+      sessions.set(session.id, session);
+      return session;
+    }),
+
+  delete: (sessionId: string) =>
+    Effect.sync(() => {
+      sessions.delete(sessionId);
+    }),
+
+  deleteByUserId: (userId: string) =>
+    Effect.sync(() => {
+      for (const [id, session] of sessions.entries()) {
+        if (session.userId === userId) {
+          sessions.delete(id);
+        }
+      }
+    }),
+
+  listByUserId: (userId: string) =>
+    Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
+};
+
+const userStore = {
+  get: (userId: string) =>
+    Effect.gen(function* () {
+      const user = users.get(userId);
+      if (!user) {
+        return yield* Effect.fail(
+          new Errors.UserNotFoundError({
+            message: "User not found",
+            userId,
+          }),
+        );
+      }
+      return user;
+    }),
+
+  getCredentials: (userId: string) =>
+    Effect.fail(
+      new Errors.UserNotFoundError({
+        message: "User credentials not found",
+        userId,
+      }),
+    ),
+};
+
+const addUser = (user: User) => {
+  users.set(user.id, user);
+  usersByEmail.set(user.email, user.id);
+};
+
+const magicLinkUserStore = {
+  getUserByEmail: (email: string) =>
+    Effect.sync(() => {
+      const userId = usersByEmail.get(email);
+      return userId ? (users.get(userId) ?? null) : null;
+    }),
+
+  createUser: (input: MagicLinkCreateUserInput) =>
+    Effect.sync(() => {
+      const user: User = {
+        id: `user-${users.size + 1}`,
+        email: input.email,
+        emailVerified: input.emailVerified,
+        ...(input.name !== undefined && { name: input.name }),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        attributes: {},
+      };
+      addUser(user);
+      return user;
+    }),
+};
+
+const magicLinkStore = {
+  create: (token: MagicLinkToken) =>
+    Effect.sync(() => {
+      magicLinkTokens.set(token.token, token);
+      return token;
+    }),
+
+  get: (token: string) => Effect.sync(() => magicLinkTokens.get(token) ?? null),
+
+  delete: (token: string) =>
+    Effect.sync(() => {
+      magicLinkTokens.delete(token);
+    }),
+
+  deleteByEmail: (email: string) =>
+    Effect.sync(() => {
+      for (const [token, magicLink] of magicLinkTokens.entries()) {
+        if (magicLink.email === email) {
+          magicLinkTokens.delete(token);
+        }
+      }
+    }),
+};
+
+const sessionConfig: SessionConfig = {
+  sessionExpiresIn: {
+    activePeriod: 1000 * 60 * 60 * 24,
+    idlePeriod: 1000 * 60 * 60 * 12,
+  },
+};
+
+const makeTestContext = async () => {
+  const sessionManager = await Effect.runPromise(
+    Effect.provide(
+      makeSessionManager(sessionConfig),
+      Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+    ),
+  );
+
+  return Context.merge(
+    Context.make(SessionManager, sessionManager),
+    Context.merge(
+      Context.make(MagicLinkStore, magicLinkStore),
+      Context.make(MagicLinkUserStore, magicLinkUserStore),
+    ),
+  );
+};
+
+const recordingSend = (email: string, token: string) =>
+  Effect.sync(() => {
+    sentLinks.push({ email, token });
+  });
+
+describe("MagicLinkService", () => {
+  beforeEach(() => {
+    users.clear();
+    usersByEmail.clear();
+    magicLinkTokens.clear();
+    sessions.clear();
+    sentLinks.splice(0, sentLinks.length);
+  });
+
+  it("should store a token and send a magic link for a new email", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      yield* service.send("new@example.com");
+    });
+
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(sentLinks.length).toBe(1);
+    expect(sentLinks[0]?.email).toBe("new@example.com");
+    expect(magicLinkTokens.size).toBe(1);
+
+    const stored = magicLinkTokens.get(sentLinks[0]!.token);
+    expect(stored).toBeDefined();
+    expect(stored?.email).toBe("new@example.com");
+    expect(stored?.expiresAt).toBeGreaterThan(Date.now());
+  });
+
+  it("should normalize the email before sending", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      yield* service.send("  Person@Example.COM  ");
+    });
+
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(sentLinks.length).toBe(1);
+    expect(sentLinks[0]?.email).toBe("person@example.com");
+  });
+
+  it("should invalidate outstanding tokens when a new link is requested", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      yield* service.send("repeat@example.com");
+      yield* service.send("repeat@example.com");
+    });
+
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(sentLinks.length).toBe(2);
+    // Only the latest token remains usable.
+    expect(magicLinkTokens.size).toBe(1);
+    expect(magicLinkTokens.has(sentLinks[1]!.token)).toBe(true);
+    expect(magicLinkTokens.has(sentLinks[0]!.token)).toBe(false);
+  });
+
+  it("should not send or store anything for unknown emails when sign-up is disabled", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({
+        disableSignUp: true,
+        sendMagicLink: recordingSend,
+      });
+      yield* service.send("stranger@example.com");
+    });
+
+    // Anti-enumeration: succeeds silently.
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(sentLinks.length).toBe(0);
+    expect(magicLinkTokens.size).toBe(0);
+  });
+
+  it("should send to existing users when sign-up is disabled", async () => {
+    const testContext = await makeTestContext();
+
+    addUser({
+      id: "user-existing",
+      email: "member@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    });
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({
+        disableSignUp: true,
+        sendMagicLink: recordingSend,
+      });
+      yield* service.send("member@example.com");
+    });
+
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(sentLinks.length).toBe(1);
+    expect(magicLinkTokens.size).toBe(1);
+  });
+
+  it("should verify a token, create a verified user and a session", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      yield* service.send("fresh@example.com");
+      return yield* service.verify(sentLinks[0]!.token, {
+        sessionAttributes: { device: "test" },
+      });
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    // Magic link proves email ownership, so the new user is verified.
+    expect(result.user.email).toBe("fresh@example.com");
+    expect(result.user.emailVerified).toBe(true);
+    expect(result.session.userId).toBe(result.user.id);
+    expect(result.session.attributes).toEqual({ device: "test" });
+    expect(sessions.size).toBe(1);
+    // One-time use: token consumed.
+    expect(magicLinkTokens.size).toBe(0);
+  });
+
+  it("should sign in an existing user without creating a new one", async () => {
+    const testContext = await makeTestContext();
+
+    const existing: User = {
+      id: "user-known",
+      email: "known@example.com",
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    addUser(existing);
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      yield* service.send("known@example.com");
+      return yield* service.verify(sentLinks[0]!.token);
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result.user.id).toBe("user-known");
+    expect(users.size).toBe(1);
+    expect(result.session.userId).toBe("user-known");
+  });
+
+  it("should reject expired tokens and delete them", async () => {
+    const testContext = await makeTestContext();
+
+    magicLinkTokens.set("expired-token", {
+      token: "expired-token",
+      email: "late@example.com",
+      createdAt: Date.now() - 10 * 60 * 1000,
+      expiresAt: Date.now() - 60 * 1000,
+    });
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      return yield* Effect.result(service.verify("expired-token"));
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("MagicLinkError");
+    }
+    expect(magicLinkTokens.size).toBe(0);
+    expect(sessions.size).toBe(0);
+  });
+
+  it("should reject replayed tokens (one-time use)", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      yield* service.send("once@example.com");
+      const token = sentLinks[0]!.token;
+      yield* service.verify(token);
+      return yield* Effect.result(service.verify(token));
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("MagicLinkError");
+    }
+    // Only the first verification created a session.
+    expect(sessions.size).toBe(1);
+  });
+
+  it("should fail for unknown tokens", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      return yield* Effect.result(service.verify("missing-token"));
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("MagicLinkError");
+    }
+  });
+
+  it("should not create users at verification when sign-up is disabled", async () => {
+    const testContext = await makeTestContext();
+
+    magicLinkTokens.set("orphan-token", {
+      token: "orphan-token",
+      email: "orphan@example.com",
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60 * 1000,
+    });
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({
+        disableSignUp: true,
+        sendMagicLink: recordingSend,
+      });
+      return yield* Effect.result(service.verify("orphan-token"));
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("MagicLinkError");
+    }
+    expect(users.size).toBe(0);
+    expect(sessions.size).toBe(0);
+  });
+});

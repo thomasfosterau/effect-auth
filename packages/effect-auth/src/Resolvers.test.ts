@@ -11,7 +11,18 @@ import { makeUserService, UserService, UserServiceStore } from "./User.js";
 
 // Mock stores for testing
 const users = new Map<string, User>([
-  ["user1", { id: "user1", attributes: { name: "Test User" } }],
+  [
+    "user1",
+    {
+      id: "user1",
+      email: "user1@example.com",
+      emailVerified: false,
+      name: "Test User",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    },
+  ],
 ]);
 const credentials = new Map<string, string>();
 
@@ -169,10 +180,7 @@ describe("Resolvers", () => {
       update: (user: User) =>
         Effect.sync(() => {
           userRecords.set(user.id, user);
-          const email = user.attributes.email;
-          if (typeof email === "string") {
-            usersByEmail.set(email.toLowerCase(), user.id);
-          }
+          usersByEmail.set(user.email.toLowerCase(), user.id);
           return user;
         }),
 
@@ -180,10 +188,7 @@ describe("Resolvers", () => {
         Effect.sync(() => {
           const existing = userRecords.get(userId);
           if (existing) {
-            const email = existing.attributes.email;
-            if (typeof email === "string") {
-              usersByEmail.delete(email.toLowerCase());
-            }
+            usersByEmail.delete(existing.email.toLowerCase());
           }
           userRecords.delete(userId);
         }),
@@ -192,11 +197,12 @@ describe("Resolvers", () => {
     beforeEach(() => {
       const seeded: User = {
         id: "resolver-user-1",
-        attributes: {
-          email: "resolver@example.com",
-          name: "Resolver User",
-          emailVerified: false,
-        },
+        email: "resolver@example.com",
+        emailVerified: false,
+        name: "Resolver User",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        attributes: {},
       };
 
       userRecords.clear();
@@ -241,7 +247,7 @@ describe("Resolvers", () => {
       const result = await Effect.runPromise(Effect.provide(program, await makeUserTestContext()));
 
       expect(result.attributes.role).toBe("admin");
-      expect(result.attributes.email).toBe("resolver@example.com");
+      expect(result.email).toBe("resolver@example.com");
     });
 
     it("should mark email verified via resolver", async () => {
@@ -250,7 +256,7 @@ describe("Resolvers", () => {
 
       const result = await Effect.runPromise(Effect.provide(program, await makeUserTestContext()));
 
-      expect(result.attributes.emailVerified).toBe(true);
+      expect(result.emailVerified).toBe(true);
     });
 
     it("should delete user via resolver", async () => {

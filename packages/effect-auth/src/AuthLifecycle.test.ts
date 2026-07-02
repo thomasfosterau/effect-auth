@@ -62,6 +62,9 @@ const sessionStore = {
         }
       }
     }),
+
+  listByUserId: (userId: string) =>
+    Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
 };
 
 const userStore = {
@@ -114,12 +117,12 @@ const emailPasswordStore = {
       const id = `user-${users.size + 1}`;
       const user: User = {
         id,
-        attributes: {
-          email,
-          emailVerified: false,
-          ...(name !== undefined && { name }),
-          ...attributes,
-        },
+        email,
+        emailVerified: false,
+        ...(name !== undefined && { name }),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        attributes: attributes ?? {},
       };
       users.set(id, user);
       usersByEmail.set(email, id);
@@ -284,10 +287,11 @@ describe("AuthLifecycleService", () => {
 
     const user: User = {
       id: "user-sign-in-unverified",
-      attributes: {
-        email: "signin@example.com",
-        emailVerified: false,
-      },
+      email: "signin@example.com",
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
     };
 
     users.set(user.id, user);
@@ -322,10 +326,11 @@ describe("AuthLifecycleService", () => {
 
     const user: User = {
       id: "user-verify",
-      attributes: {
-        email: "verify@example.com",
-        emailVerified: false,
-      },
+      email: "verify@example.com",
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
     };
 
     users.set(user.id, user);
@@ -356,7 +361,7 @@ describe("AuthLifecycleService", () => {
     expect(result.user.id).toBe(user.id);
     expect(result.session).toBeDefined();
     expect(result.needsEmailVerification).toBe(false);
-    expect(users.get(user.id)?.attributes.emailVerified).toBe(true);
+    expect(users.get(user.id)?.emailVerified).toBe(true);
   });
 
   it("should sign in verified users normally", async () => {
@@ -367,10 +372,11 @@ describe("AuthLifecycleService", () => {
 
     const user: User = {
       id: "user-verified",
-      attributes: {
-        email: "verified@example.com",
-        emailVerified: true,
-      },
+      email: "verified@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
     };
 
     users.set(user.id, user);
