@@ -49,6 +49,49 @@ export interface WebAuthnConfig {
   expectedOrigin: string | readonly string[];
   /** Challenge expiration time in milliseconds (default: 5 minutes) */
   challengeExpiresIn?: number;
+  /**
+   * Discoverable-credential (passkey) requirement advertised during
+   * registration. `"required"` requests a resident key; omit to leave it to
+   * the authenticator.
+   */
+  residentKey?: "required" | "preferred" | "discouraged";
+  /** User-verification requirement (default `"preferred"`). */
+  userVerification?: "required" | "preferred" | "discouraged";
+}
+
+/** A `PublicKeyCredentialParameters` entry advertised to the authenticator. */
+export interface PublicKeyCredentialParameter {
+  readonly type: "public-key";
+  readonly alg: number;
+}
+
+/** A credential the authenticator should exclude (registration) or allow. */
+export interface PublicKeyCredentialDescriptor {
+  readonly type: "public-key";
+  /** Credential ID, base64url-encoded. */
+  readonly id: string;
+  readonly transports?: readonly string[];
+}
+
+/** Authenticator-selection criteria advertised during registration. */
+export interface AuthenticatorSelectionCriteria {
+  readonly residentKey?: "required" | "preferred" | "discouraged";
+  readonly requireResidentKey?: boolean;
+  readonly userVerification: "required" | "preferred" | "discouraged";
+}
+
+/**
+ * Registration challenge plus the options a client passes to
+ * `navigator.credentials.create()`.
+ */
+export interface RegistrationChallenge {
+  readonly challenge: Uint8Array;
+  readonly expiresAt: number;
+  /** Algorithms the RP accepts, most-preferred first. */
+  readonly pubKeyCredParams: readonly PublicKeyCredentialParameter[];
+  /** The user's existing credentials, to prevent duplicate registration. */
+  readonly excludeCredentials: readonly PublicKeyCredentialDescriptor[];
+  readonly authenticatorSelection: AuthenticatorSelectionCriteria;
 }
 
 /**
@@ -120,12 +163,26 @@ import {
   parseClientDataJSON,
   parseAuthenticatorData,
   coseAlgorithmES256,
+  coseAlgorithmRS256,
+  coseAlgorithmEdDSA,
+  COSEPublicKey,
   ClientDataType,
   type ClientData,
   type AuthenticatorData,
 } from "@oslojs/webauthn";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
+
+/**
+ * COSE algorithm identifiers this service can register and verify:
+ * ES256 (-7, ECDSA P-256), RS256 (-257, RSASSA-PKCS1-v1_5), and EdDSA (-8,
+ * Ed25519). Advertised to authenticators via `pubKeyCredParams`.
+ */
+export const SUPPORTED_COSE_ALGORITHMS = [
+  coseAlgorithmES256,
+  coseAlgorithmRS256,
+  coseAlgorithmEdDSA,
+] as const;
 
 /**
  * WebAuthn challenge store interface
@@ -182,13 +239,9 @@ export const CredentialStore = CredentialStoreTag;
  */
 export interface WebAuthnService {
   /** Generate a challenge for registration */
-  generateRegistrationChallenge: (user: WebAuthnUser) => Effect.Effect<
-    {
-      challenge: Uint8Array;
-      expiresAt: number;
-    },
-    Errors.AuthError
-  >;
+  generateRegistrationChallenge: (
+    user: WebAuthnUser,
+  ) => Effect.Effect<RegistrationChallenge, Errors.AuthError>;
 
   /** Verify registration response from client */
   verifyRegistration: (
@@ -259,7 +312,34 @@ export const makeWebAuthnService = (
 
           yield* challengeStore.create(challengeData);
 
-          return { challenge, expiresAt };
+          // Exclude the user's existing credentials to prevent re-registering
+          // the same authenticator.
+          const existing = yield* credentialStore.getByUserId(user.id);
+          const excludeCredentials = existing.map(
+            (c): PublicKeyCredentialDescriptor => ({
+              type: "public-key",
+              id: c.id,
+              ...(c.transports && { transports: c.transports }),
+            }),
+          );
+
+          const authenticatorSelection: AuthenticatorSelectionCriteria = {
+            ...(config.residentKey && {
+              residentKey: config.residentKey,
+              requireResidentKey: config.residentKey === "required",
+            }),
+            userVerification: config.userVerification ?? "preferred",
+          };
+
+          return {
+            challenge,
+            expiresAt,
+            pubKeyCredParams: SUPPORTED_COSE_ALGORITHMS.map(
+              (alg): PublicKeyCredentialParameter => ({ type: "public-key", alg }),
+            ),
+            excludeCredentials,
+            authenticatorSelection,
+          };
         }),
 
       verifyRegistration: (challenge: Uint8Array, response: RegistrationResponse) =>
@@ -361,15 +441,14 @@ export const makeWebAuthnService = (
             );
           }
 
-          // Verify algorithm - only ES256 is currently supported
+          // Verify algorithm — ES256, RS256, and EdDSA are supported.
           const publicKey = authenticatorData.credential.publicKey;
           const algorithm = publicKey.algorithm();
 
-          // Support ES256 only for now
-          if (algorithm !== coseAlgorithmES256) {
+          if (!(SUPPORTED_COSE_ALGORITHMS as readonly number[]).includes(algorithm)) {
             return yield* Effect.fail(
               new Errors.WebAuthnVerificationError({
-                message: `Unsupported algorithm: ${algorithm}. Only ES256 is currently supported.`,
+                message: `Unsupported algorithm: ${algorithm}. Supported: ES256 (-7), RS256 (-257), EdDSA (-8).`,
               }),
             );
           }
@@ -571,24 +650,38 @@ export const makeWebAuthnService = (
 export const WebAuthnServiceLayer = (config: WebAuthnConfig) =>
   Layer.effect(WebAuthnServiceTag, makeWebAuthnService(config));
 
+const b64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
+
 /**
- * Helper to serialize public key for storage
+ * Serialize a COSE public key to SPKI DER for storage. Using a single
+ * key-independent encoding (rather than a raw EC point) lets ES256, RS256, and
+ * EdDSA credentials share one storage format and one verification path.
  */
-function serializePublicKey(publicKey: any, algorithm: number): Uint8Array {
+function serializePublicKey(publicKey: COSEPublicKey, algorithm: number): Uint8Array {
+  let jwk: crypto.JsonWebKeyInput["key"];
   if (algorithm === coseAlgorithmES256) {
-    // ES256 - extract EC2 key
-    const ec2Key = publicKey.ec2();
-    // Convert bigints to bytes (32 bytes each for P-256)
-    const xBytes = bigintToBytes(ec2Key.x, 32);
-    const yBytes = bigintToBytes(ec2Key.y, 32);
-    // Concatenate: 0x04 (uncompressed) + x + y
-    const result = new Uint8Array(65);
-    result[0] = 0x04;
-    result.set(xBytes, 1);
-    result.set(yBytes, 33);
-    return result;
+    const ec2 = publicKey.ec2();
+    jwk = {
+      kty: "EC",
+      crv: "P-256",
+      x: b64url(bigintToBytes(ec2.x, 32)),
+      y: b64url(bigintToBytes(ec2.y, 32)),
+    };
+  } else if (algorithm === coseAlgorithmRS256) {
+    const rsa = publicKey.rsa();
+    jwk = {
+      kty: "RSA",
+      n: b64url(bigintToBytes(rsa.n, 256)),
+      e: b64url(bigintToBytes(rsa.e)),
+    };
+  } else if (algorithm === coseAlgorithmEdDSA) {
+    const okp = publicKey.okp();
+    jwk = { kty: "OKP", crv: "Ed25519", x: b64url(okp.x) };
+  } else {
+    throw new Error(`Unsupported algorithm: ${algorithm}`);
   }
-  throw new Error(`Unsupported algorithm: ${algorithm}`);
+  const key = crypto.createPublicKey({ key: jwk, format: "jwk" });
+  return new Uint8Array(key.export({ type: "spki", format: "der" }));
 }
 
 /**
@@ -606,89 +699,45 @@ function bigintToBytes(value: bigint, minLength?: number): Uint8Array {
 }
 
 /**
- * Helper function to verify signature
+ * Verify an assertion signature over `authenticatorData || SHA-256(clientDataJSON)`.
+ *
+ * Uses `node:crypto` (not WebCrypto) so the algorithm-native signature
+ * encodings authenticators produce verify directly: ES256 (DER-encoded ECDSA),
+ * RS256 (RSASSA-PKCS1-v1_5), and EdDSA (Ed25519). The stored public key is the
+ * SPKI DER produced by {@link serializePublicKey}.
  */
 function verifySignature(
-  publicKeyBytes: Uint8Array,
+  publicKeyDer: Uint8Array,
   algorithm: number,
   authenticatorData: Uint8Array,
   clientDataJSON: Uint8Array,
   signature: Uint8Array,
 ): Effect.Effect<boolean, Errors.WebAuthnVerificationError> {
-  return Effect.gen(function* () {
-    try {
-      // Hash client data JSON
+  return Effect.try({
+    try: () => {
       const clientDataHash = crypto.createHash("sha256").update(clientDataJSON).digest();
-
-      // Concatenate authenticator data and client data hash
-      const signedData = new Uint8Array(authenticatorData.length + clientDataHash.length);
-      signedData.set(authenticatorData, 0);
-      signedData.set(clientDataHash, authenticatorData.length);
-
-      // Import public key and verify signature
-      const publicKey = yield* Effect.tryPromise({
-        try: async () => {
-          if (algorithm === coseAlgorithmES256) {
-            // ES256 (ECDSA with P-256 and SHA-256)
-            // publicKeyBytes format: 0x04 || x (32 bytes) || y (32 bytes)
-            // Create a properly sized ArrayBuffer
-            const keyBuffer = new ArrayBuffer(publicKeyBytes.length);
-            const keyView = new Uint8Array(keyBuffer);
-            keyView.set(publicKeyBytes);
-            return await crypto.subtle.importKey(
-              "raw",
-              keyBuffer,
-              { name: "ECDSA", namedCurve: "P-256" },
-              false,
-              ["verify"],
-            );
-          }
-          throw new Error(`Unsupported algorithm: ${algorithm}`);
-        },
-        catch: (error) =>
-          new Errors.WebAuthnVerificationError({
-            message: "Failed to import public key",
-            cause: error,
-          }),
+      const message = Buffer.concat([Buffer.from(authenticatorData), clientDataHash]);
+      const key = crypto.createPublicKey({
+        key: Buffer.from(publicKeyDer),
+        format: "der",
+        type: "spki",
       });
+      const sig = Buffer.from(signature);
 
-      const verified = yield* Effect.tryPromise({
-        try: async () => {
-          // Create properly sized ArrayBuffers
-          const signatureBuffer = new ArrayBuffer(signature.length);
-          const signatureView = new Uint8Array(signatureBuffer);
-          signatureView.set(signature);
-
-          const signedDataBuffer = new ArrayBuffer(signedData.length);
-          const signedDataView = new Uint8Array(signedDataBuffer);
-          signedDataView.set(signedData);
-
-          if (algorithm === coseAlgorithmES256) {
-            return await crypto.subtle.verify(
-              { name: "ECDSA", hash: "SHA-256" },
-              publicKey,
-              signatureBuffer,
-              signedDataBuffer,
-            );
-          }
-          throw new Error(`Unsupported algorithm: ${algorithm}`);
-        },
-        catch: (error) =>
-          new Errors.WebAuthnVerificationError({
-            message: "Failed to verify signature",
-            cause: error,
-          }),
-      });
-
-      return verified;
-    } catch (error) {
-      return yield* Effect.fail(
-        new Errors.WebAuthnVerificationError({
-          message: "Failed to verify signature",
-          cause: error,
-        }),
-      );
-    }
+      if (algorithm === coseAlgorithmES256 || algorithm === coseAlgorithmRS256) {
+        return crypto.verify("sha256", message, key, sig);
+      }
+      if (algorithm === coseAlgorithmEdDSA) {
+        // Ed25519 hashes internally; the digest algorithm must be null.
+        return crypto.verify(null, message, key, sig);
+      }
+      throw new Error(`Unsupported algorithm: ${algorithm}`);
+    },
+    catch: (error) =>
+      new Errors.WebAuthnVerificationError({
+        message: "Failed to verify signature",
+        cause: error,
+      }),
   });
 }
 
