@@ -51,6 +51,9 @@ export * from "./EmailVerification.js";
 /** Rate limiting (inspired by BetterAuth). */
 export * from "./RateLimit.js";
 
+/** RateLimiter facade backed by `effect/unstable/persistence` (+ Redis path). */
+export * from "./RateLimitPersistence.js";
+
 /** Email and password authentication flows. */
 export * from "./EmailPassword.js";
 
