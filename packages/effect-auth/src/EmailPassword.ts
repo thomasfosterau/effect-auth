@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import * as Errors from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
 import { PasswordHasherTag } from "./Password.js";
@@ -51,9 +51,38 @@ export interface SignInInput {
   readonly sessionAttributes?: Record<string, unknown>;
 }
 
+/**
+ * A pending second-factor challenge issued during sign-in. The client must
+ * redeem the token with the second factor (e.g. a TOTP code) to obtain a
+ * session.
+ */
+export interface SecondFactorChallenge {
+  readonly token: string;
+  readonly expiresAt: number;
+}
+
+/**
+ * Optional seam consulted by password sign-in after the first factor
+ * succeeds. When present in context (see `TwoFactorGateLayer` in the
+ * TwoFactor module) and `required` reports true, sign-in returns a
+ * {@link SecondFactorChallenge} instead of a session.
+ */
+export interface SecondFactorGate {
+  readonly required: (user: Types.User) => Effect.Effect<boolean, Errors.AuthError>;
+  readonly begin: (user: Types.User) => Effect.Effect<SecondFactorChallenge, Errors.AuthError>;
+}
+
+export class SecondFactorGateTag extends Context.Service<SecondFactorGateTag, SecondFactorGate>()(
+  "@effect-auth/SecondFactorGate",
+) {}
+
+export const SecondFactorGate = SecondFactorGateTag;
+
 export interface AuthResult {
   readonly user: Types.User;
   readonly session?: Types.Session;
+  /** Present when a second factor is required to complete sign-in. */
+  readonly secondFactor?: SecondFactorChallenge;
 }
 
 export interface ChangePasswordInput {
@@ -273,6 +302,14 @@ export const makeEmailPasswordService = (
                 email,
               }),
             );
+          }
+
+          // Second factor: when a gate is present and required for this user,
+          // return a challenge instead of a session.
+          const gate = yield* Effect.serviceOption(SecondFactorGateTag);
+          if (Option.isSome(gate) && (yield* gate.value.required(user))) {
+            const secondFactor = yield* gate.value.begin(user);
+            return yield* hooks.afterSignIn({ user, secondFactor });
           }
 
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);

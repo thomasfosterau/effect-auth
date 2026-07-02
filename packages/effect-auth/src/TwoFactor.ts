@@ -15,7 +15,11 @@
 import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
-import { EmailPasswordStoreTag } from "./EmailPassword.js";
+import {
+  EmailPasswordStoreTag,
+  SecondFactorGateTag,
+  type SecondFactorGate,
+} from "./EmailPassword.js";
 import { Hooks, type HookError } from "./Hooks.js";
 import { generateBase32Secret, generateOTPURI, verifyTOTP, type TOTPConfig } from "./Otp.js";
 import { PasswordHasherTag } from "./Password.js";
@@ -606,3 +610,44 @@ export const makeTwoFactorService = (
 
 export const TwoFactorServiceLayer = (config: TwoFactorConfig) =>
   Layer.effect(TwoFactorServiceTag, makeTwoFactorService(config));
+
+/**
+ * Provides the {@link SecondFactorGateTag} seam so password sign-in returns a
+ * two-factor challenge (instead of a session) for enrolled users.
+ *
+ * The gate's methods are self-contained (`R = never`), so the two-factor
+ * stores are captured from context when the layer is built:
+ *
+ * ```ts
+ * const services = Layer.mergeAll(
+ *   EmailPasswordServiceLayer(),
+ *   TwoFactorGateLayer.pipe(
+ *     Layer.provide(TwoFactorServiceLayer({ issuer: "MyApp" })),
+ *     Layer.provide(twoFactorStores),
+ *   ),
+ * )
+ * ```
+ */
+export const TwoFactorGateLayer: Layer.Layer<
+  SecondFactorGateTag,
+  never,
+  TwoFactorServiceTag | TwoFactorStoreTag | PendingTwoFactorStoreTag
+> = Layer.effect(
+  SecondFactorGateTag,
+  Effect.gen(function* () {
+    const twoFactor = yield* TwoFactorServiceTag;
+    const stores = yield* Effect.context<TwoFactorStoreTag | PendingTwoFactorStoreTag>();
+
+    const gate: SecondFactorGate = {
+      required: (user) => twoFactor.isEnabled(user.id).pipe(Effect.provide(stores)),
+      begin: (user) =>
+        twoFactor.beginChallenge(user.id).pipe(
+          Effect.provide(stores),
+          Effect.catchTag("TwoFactorError", (error) =>
+            Effect.fail(new Errors.AuthError({ message: error.message })),
+          ),
+        ),
+    };
+    return gate;
+  }),
+);

@@ -302,3 +302,97 @@ describe("EmailPasswordService", () => {
     }
   });
 });
+
+describe("EmailPasswordService second-factor gate", () => {
+  beforeEach(() => {
+    users.clear();
+    usersByEmail.clear();
+    passwordHashes.clear();
+    sessions.clear();
+  });
+
+  it("returns a second-factor challenge instead of a session when the gate requires it", async () => {
+    const { SecondFactorGate } = await import("./EmailPassword.js");
+    const testContext = await makeTestContext();
+
+    const hasher = makePasswordHasher();
+    const hashResult = await Effect.runPromise(hasher.hash("gate-password"));
+
+    const user: User = {
+      id: "user-gated",
+      email: "gated@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(user.id, user);
+    usersByEmail.set(user.email, user.id);
+    passwordHashes.set(user.id, hashResult.hash);
+
+    const gate = {
+      required: (candidate: User) => Effect.succeed(candidate.id === user.id),
+      begin: () => Effect.succeed({ token: "pending-token", expiresAt: Date.now() + 60_000 }),
+    };
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeEmailPasswordService();
+      return yield* service.signIn({ email: user.email, password: "gate-password" });
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        program,
+        Context.merge(testContext, Context.make(SecondFactorGate, gate)),
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result.session).toBeUndefined();
+    expect(result.secondFactor).toEqual({
+      token: "pending-token",
+      expiresAt: expect.any(Number),
+    });
+    // No session may be created until the second factor is redeemed.
+    expect(sessions.size).toBe(0);
+  });
+
+  it("creates a session normally when the gate does not require a second factor", async () => {
+    const { SecondFactorGate } = await import("./EmailPassword.js");
+    const testContext = await makeTestContext();
+
+    const hasher = makePasswordHasher();
+    const hashResult = await Effect.runPromise(hasher.hash("no-gate-password"));
+
+    const user: User = {
+      id: "user-ungated",
+      email: "ungated@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(user.id, user);
+    usersByEmail.set(user.email, user.id);
+    passwordHashes.set(user.id, hashResult.hash);
+
+    const gate = {
+      required: () => Effect.succeed(false),
+      begin: () => Effect.succeed({ token: "unused", expiresAt: Date.now() + 60_000 }),
+    };
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeEmailPasswordService();
+      return yield* service.signIn({ email: user.email, password: "no-gate-password" });
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        program,
+        Context.merge(testContext, Context.make(SecondFactorGate, gate)),
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result.secondFactor).toBeUndefined();
+    expect(result.session).toBeDefined();
+  });
+});
