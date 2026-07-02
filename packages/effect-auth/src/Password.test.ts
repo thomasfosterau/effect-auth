@@ -135,4 +135,19 @@ describe("ScryptHasher", () => {
     const result = await Effect.runPromise(Effect.result(scrypt.verify("password", "scrypt$bad")));
     expect(result._tag).toBe("Failure");
   });
+
+  it("routes PHC-format (leading `$`) hashes by their second segment", async () => {
+    const { makeMultiAlgorithmVerifier } = await import("./Password.js");
+    // A stand-in PHC hasher (e.g. Argon2) whose hashes begin with `$argon2id$`.
+    const phcHasher = {
+      algorithm: "argon2id",
+      hash: () =>
+        Effect.succeed({ hash: "$argon2id$v=19$m=1,t=1,p=1$abc$def", algorithm: "argon2id" }),
+      verify: (password: string) => Effect.succeed(password === "right"),
+    };
+    const verifier = makeMultiAlgorithmVerifier([phcHasher]);
+    const phc = "$argon2id$v=19$m=1,t=1,p=1$abc$def";
+    expect(await Effect.runPromise(verifier.verify("right", phc))).toBe(true);
+    expect(await Effect.runPromise(verifier.verify("wrong", phc))).toBe(false);
+  });
 });

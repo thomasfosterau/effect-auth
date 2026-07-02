@@ -80,7 +80,10 @@ const parseAlgorithm = (hash: string): Effect.Effect<string, Errors.HashingError
         }),
       );
     }
-    return Effect.succeed(parts[0]);
+    // PHC-string hashes (e.g. Argon2's `$argon2id$v=19$...`) begin with `$`,
+    // so the algorithm id is the second segment; the library's own
+    // `algo$...` format (pbkdf2/scrypt) carries it in the first.
+    return Effect.succeed(parts[0] === "" ? parts[1]! : parts[0]!);
   }).pipe(Effect.flatten);
 
 /**
