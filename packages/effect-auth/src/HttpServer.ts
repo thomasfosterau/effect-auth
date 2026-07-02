@@ -16,6 +16,7 @@ import { EmailPasswordStoreTag, makeEmailPasswordService } from "./EmailPassword
 import { MagicLinkServiceTag, MagicLinkStoreTag, MagicLinkUserStoreTag } from "./MagicLink.js";
 import { AccountManagementServiceTag, AccountManagementStoreTag } from "./AccountManagement.js";
 import { AnonymousServiceTag, AnonymousUserStoreTag } from "./Anonymous.js";
+import { PhoneOtpServiceTag, PhoneOtpStoreTag, PhoneOtpUserStoreTag } from "./PhoneOtp.js";
 import { EmailOtpServiceTag, EmailOtpStoreTag, EmailOtpUserStoreTag } from "./EmailOtp.js";
 import { PendingTwoFactorStoreTag, TwoFactorServiceTag, TwoFactorStoreTag } from "./TwoFactor.js";
 import { PasswordHasherTag } from "./Password.js";
@@ -195,6 +196,22 @@ const resolveAccountManagement = Effect.gen(function* () {
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.provideService(AccountManagementStoreTag, store.value));
+  return { service: service.value, provideStores };
+});
+
+/** Resolve the phone OTP service + stores, or fail with 404. */
+const resolvePhoneOtp = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(PhoneOtpServiceTag);
+  const store = yield* Effect.serviceOption(PhoneOtpStoreTag);
+  const userStore = yield* Effect.serviceOption(PhoneOtpUserStoreTag);
+  if (Option.isNone(service) || Option.isNone(store) || Option.isNone(userStore)) {
+    return yield* new S.NotFound({ message: "Phone OTP is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.provideService(PhoneOtpStoreTag, store.value),
+      Effect.provideService(PhoneOtpUserStoreTag, userStore.value),
+    );
   return { service: service.value, provideStores };
 });
 
@@ -570,6 +587,41 @@ export const authGroupLayer = (config?: CookieConfig) => {
               RateLimitError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
             }),
           );
+          const body: S.AuthSuccess = {
+            user: S.encodeUser(result.user),
+            needsEmailVerification: false,
+          };
+          return yield* withSessionCookie(body, result.session, cfg);
+        }),
+      )
+      .handle("phoneOtpSend", ({ payload }) =>
+        Effect.gen(function* () {
+          const phoneOtp = yield* resolvePhoneOtp;
+          yield* phoneOtp
+            .provideStores(phoneOtp.service.send(payload.phoneNumber, payload.purpose))
+            .pipe(
+              Effect.catchTags({
+                // Anti-enumeration: send never signals whether the number exists.
+                PhoneOtpError: (e) =>
+                  Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return { status: true };
+        }),
+      )
+      .handle("signInPhoneOtp", ({ payload }) =>
+        Effect.gen(function* () {
+          const phoneOtp = yield* resolvePhoneOtp;
+          const result = yield* phoneOtp
+            .provideStores(phoneOtp.service.signIn(payload.phoneNumber, payload.otp))
+            .pipe(
+              Effect.catchTags({
+                PhoneOtpError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              }),
+            );
           const body: S.AuthSuccess = {
             user: S.encodeUser(result.user),
             needsEmailVerification: false,

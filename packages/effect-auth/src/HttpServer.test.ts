@@ -67,6 +67,15 @@ import {
   AnonymousUserStoreTag,
   type AnonymousUserStore,
 } from "./Anonymous.js";
+import {
+  PhoneOtpServiceLayer,
+  PhoneOtpStoreTag,
+  PhoneOtpUserStoreTag,
+  type PhoneOtpPurpose,
+  type PhoneOtpRecord,
+  type PhoneOtpStore,
+  type PhoneOtpUserStore,
+} from "./PhoneOtp.js";
 import { generateTOTP } from "./Otp.js";
 import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
@@ -94,6 +103,7 @@ interface Fixture {
   readonly sentChangeEmail: Array<{ newEmail: string; token: string }>;
   readonly sentDeleteTokens: string[];
   readonly beforeDeleteCalls: string[];
+  readonly sentPhoneOtps: Array<{ phoneNumber: string; otp: string; purpose: PhoneOtpPurpose }>;
 }
 
 /**
@@ -118,6 +128,7 @@ const makeFixture = (): Fixture => {
   const sentChangeEmail: Array<{ newEmail: string; token: string }> = [];
   const sentDeleteTokens: string[] = [];
   const beforeDeleteCalls: string[] = [];
+  const sentPhoneOtps: Array<{ phoneNumber: string; otp: string; purpose: PhoneOtpPurpose }> = [];
 
   const createUser = (input: {
     readonly email: string;
@@ -365,6 +376,62 @@ const makeFixture = (): Fixture => {
       }),
   };
 
+  const phoneRecords = new Map<string, PhoneOtpRecord>();
+  const phoneToUserId = new Map<string, string>();
+  const phoneKey = (phone: string, purpose: PhoneOtpPurpose) => `${phone}:${purpose}`;
+  const phoneOtpStore: PhoneOtpStore = {
+    upsert: (record) =>
+      Effect.sync(() => {
+        phoneRecords.set(phoneKey(record.phoneNumber, record.purpose), record);
+        return record;
+      }),
+    get: (phone, purpose) => Effect.sync(() => phoneRecords.get(phoneKey(phone, purpose)) ?? null),
+    delete: (phone, purpose) =>
+      Effect.sync(() => void phoneRecords.delete(phoneKey(phone, purpose))),
+    incrementAttempts: (phone, purpose) =>
+      Effect.sync(() => {
+        const record = phoneRecords.get(phoneKey(phone, purpose));
+        if (!record) return 0;
+        const updated = { ...record, attempts: record.attempts + 1 };
+        phoneRecords.set(phoneKey(phone, purpose), updated);
+        return updated.attempts;
+      }),
+  };
+  const phoneOtpUserStore: PhoneOtpUserStore = {
+    getUserByPhoneNumber: (phone) =>
+      Effect.sync(() => {
+        const id = phoneToUserId.get(phone);
+        return id === undefined ? null : (usersById.get(id) ?? null);
+      }),
+    createUser: (input) =>
+      Effect.sync(() => {
+        const user = createUser({
+          email: `${input.phoneNumber}@phone.local`,
+          attributes: {
+            phoneNumber: input.phoneNumber,
+            phoneNumberVerified: input.phoneNumberVerified,
+          },
+        });
+        phoneToUserId.set(input.phoneNumber, user.id);
+        return user;
+      }),
+    setPhoneNumberVerified: (userId, phone) =>
+      Effect.suspend(() => {
+        const user = usersById.get(userId);
+        if (user === undefined) {
+          return Effect.fail(new UserNotFoundError({ message: "not found", userId }));
+        }
+        const updated: Types.User = {
+          ...user,
+          updatedAt: new Date(),
+          attributes: { ...user.attributes, phoneNumber: phone, phoneNumberVerified: true },
+        };
+        usersById.set(userId, updated);
+        phoneToUserId.set(phone, userId);
+        return Effect.succeed(updated);
+      }),
+  };
+
   let anonSeq = 0;
   const anonymousUserStore: AnonymousUserStore = {
     createAnonymousUser: () =>
@@ -388,6 +455,12 @@ const makeFixture = (): Fixture => {
     services,
     AnonymousServiceLayer(),
     Layer.succeed(AnonymousUserStoreTag)(anonymousUserStore),
+    PhoneOtpServiceLayer({
+      sendOtp: (phoneNumber, otp, purpose) =>
+        Effect.sync(() => void sentPhoneOtps.push({ phoneNumber, otp, purpose })),
+    }),
+    Layer.succeed(PhoneOtpStoreTag)(phoneOtpStore),
+    Layer.succeed(PhoneOtpUserStoreTag)(phoneOtpUserStore),
     AccountManagementServiceLayer({
       sendChangeEmailVerification: ({ newEmail, token }) =>
         Effect.sync(() => void sentChangeEmail.push({ newEmail, token })),
@@ -422,6 +495,7 @@ const makeFixture = (): Fixture => {
     sentChangeEmail,
     sentDeleteTokens,
     beforeDeleteCalls,
+    sentPhoneOtps,
   };
 };
 
@@ -1123,6 +1197,51 @@ describe("two-factor", () => {
     );
     expect(after.status).toBe(200);
     expect(after.headers.get("set-cookie")).toContain("conduit_session=");
+  });
+});
+
+describe("HTTP phone OTP", () => {
+  it("sends an OTP and signs in a new phone user end to end", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true });
+
+    const send = await handler(
+      jsonRequest("/phone-otp/send", { phoneNumber: "+15551234567", purpose: "sign-in" }),
+    );
+    expect(send.status).toBe(200);
+    expect(await send.json()).toEqual({ status: true });
+    expect(fixture.sentPhoneOtps).toHaveLength(1);
+    const otp = fixture.sentPhoneOtps[0]!.otp;
+
+    const signIn = await handler(
+      jsonRequest("/sign-in/phone-otp", { phoneNumber: "+15551234567", otp }),
+    );
+    expect(signIn.status).toBe(200);
+    const sid = sessionIdFromSetCookie(signIn.headers.get("set-cookie"));
+
+    const sess = await handler(getRequest("/session", asCookie(sid)));
+    const body = (await sess.json()) as { user: { attributes: Record<string, unknown> } };
+    expect(body.user.attributes["phoneNumber"]).toBe("+15551234567");
+    expect(body.user.attributes["phoneNumberVerified"]).toBe(true);
+  });
+
+  it("rejects a wrong OTP with 400", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    await handler(
+      jsonRequest("/phone-otp/send", { phoneNumber: "+15550000000", purpose: "sign-in" }),
+    );
+    const res = await handler(
+      jsonRequest("/sign-in/phone-otp", { phoneNumber: "+15550000000", otp: "000000" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 when phone OTP is not configured", async () => {
+    const handler = handlerFor(makeFixture(), { features: false });
+    const res = await handler(
+      jsonRequest("/phone-otp/send", { phoneNumber: "+15551234567", purpose: "sign-in" }),
+    );
+    expect(res.status).toBe(404);
   });
 });
 
