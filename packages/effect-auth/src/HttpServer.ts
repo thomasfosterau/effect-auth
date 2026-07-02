@@ -12,9 +12,15 @@ import * as S from "./HttpApiSchemas.js";
 import { AuthLifecycleServiceTag } from "./AuthLifecycle.js";
 import { Hooks } from "./Hooks.js";
 import { SessionManagerTag } from "./Session.js";
-import { EmailPasswordStoreTag } from "./EmailPassword.js";
+import { EmailPasswordStoreTag, makeEmailPasswordService } from "./EmailPassword.js";
 import { PasswordHasherTag } from "./Password.js";
 import { EmailVerificationServiceTag, EmailVerificationStoreTag } from "./EmailVerification.js";
+import {
+  PasswordResetServiceTag,
+  PasswordResetStoreTag,
+  PasswordResetUserStoreTag,
+} from "./PasswordReset.js";
+import { UserServiceStoreTag, UserServiceTag } from "./User.js";
 import type * as Types from "./Types.js";
 
 /**
@@ -30,6 +36,11 @@ export type AuthServices =
   | PasswordHasherTag
   | EmailVerificationServiceTag
   | EmailVerificationStoreTag
+  | PasswordResetServiceTag
+  | PasswordResetStoreTag
+  | PasswordResetUserStoreTag
+  | UserServiceTag
+  | UserServiceStoreTag
   | Hooks;
 
 /**
@@ -177,21 +188,182 @@ export const authGroupLayer = (config?: CookieConfig) => {
       )
       .handle("getSession", ({ request }) =>
         Effect.gen(function* () {
-          const sessionId = sessionIdFromRequest(request, cfg);
-          if (sessionId === undefined) {
-            return yield* new S.Unauthorized({ message: "Not authenticated" });
-          }
-          const sessionManager = yield* SessionManagerTag;
-          const resolved = yield* sessionManager
-            .validateSession(sessionId)
-            .pipe(
-              Effect.mapError(() => new S.Unauthorized({ message: "Invalid or expired session" })),
-            );
+          const resolved = yield* requireSession(request, cfg);
           return S.encodeSessionWithUser(resolved);
+        }),
+      )
+      .handle("sendVerificationEmail", ({ payload }) =>
+        Effect.gen(function* () {
+          const store = yield* EmailPasswordStoreTag;
+          const verification = yield* EmailVerificationServiceTag;
+          const email = payload.email.trim().toLowerCase();
+
+          const user = yield* store
+            .getUserByEmail(email)
+            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+
+          // Anti-enumeration: succeed uniformly whether or not the user exists
+          // (or is already verified).
+          if (user !== null && !user.emailVerified) {
+            yield* verification.resendVerification(user.id, email).pipe(
+              Effect.catchTags({
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                EmailVerificationError: (e) =>
+                  Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              }),
+            );
+          }
+
+          return { status: true };
+        }),
+      )
+      .handle("verifyEmail", ({ payload }) =>
+        Effect.gen(function* () {
+          const lifecycle = yield* AuthLifecycleServiceTag;
+          const result = yield* lifecycle.verifyEmail({ token: payload.token }).pipe(
+            Effect.catchTags({
+              EmailVerificationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+            }),
+          );
+          const body: S.AuthSuccess = {
+            user: S.encodeUser(result.user),
+            needsEmailVerification: result.needsEmailVerification,
+          };
+          return yield* withSessionCookie(body, result.session, cfg);
+        }),
+      )
+      .handle("requestPasswordReset", ({ payload }) =>
+        Effect.gen(function* () {
+          const passwordReset = yield* PasswordResetServiceTag;
+          yield* passwordReset.requestPasswordReset(payload.email).pipe(
+            Effect.catchTags({
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              PasswordResetError: (e) =>
+                Effect.fail(new S.InternalServerError({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+            }),
+          );
+          return { status: true };
+        }),
+      )
+      .handle("resetPassword", ({ payload }) =>
+        Effect.gen(function* () {
+          const passwordReset = yield* PasswordResetServiceTag;
+          yield* passwordReset.resetPassword(payload.token, payload.newPassword).pipe(
+            Effect.catchTags({
+              PasswordResetError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+            }),
+          );
+          return { status: true };
+        }),
+      )
+      .handle("changePassword", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const emailPassword = yield* makeEmailPasswordService();
+          yield* emailPassword
+            .changePassword({
+              userId: resolved.user.id,
+              currentPassword: payload.currentPassword,
+              newPassword: payload.newPassword,
+              ...(payload.revokeOtherSessions !== undefined && {
+                revokeOtherSessions: payload.revokeOtherSessions,
+              }),
+              currentSessionId: resolved.session.id,
+            })
+            .pipe(
+              Effect.catchTags({
+                InvalidCredentialsError: (e) =>
+                  Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+        }),
+      )
+      .handle("updateUser", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const userService = yield* UserServiceTag;
+          const updated = yield* userService
+            .updateUser(resolved.user.id, {
+              ...(payload.name !== undefined && { name: payload.name }),
+              ...(payload.image !== undefined && { image: payload.image }),
+            })
+            .pipe(
+              Effect.catchTags({
+                UserNotFoundError: () =>
+                  Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return S.encodeUser(updated);
+        }),
+      )
+      .handle("listSessions", ({ request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const sessionManager = yield* SessionManagerTag;
+          const sessions = yield* sessionManager
+            .listSessions(resolved.user.id)
+            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+          return sessions.map(S.encodeSession);
+        }),
+      )
+      .handle("revokeSession", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const sessionManager = yield* SessionManagerTag;
+
+          const sessions = yield* sessionManager
+            .listSessions(resolved.user.id)
+            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+
+          // Only the owner may revoke a session, and only their own sessions.
+          const target = sessions.find((session) => session.id === params.sessionId);
+          if (target === undefined) {
+            return yield* new S.BadRequest({ message: "Session not found" });
+          }
+
+          yield* sessionManager
+            .invalidateSession(target.id)
+            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+        }),
+      )
+      .handle("revokeOtherSessions", ({ request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const sessionManager = yield* SessionManagerTag;
+          yield* sessionManager
+            .revokeOtherSessions(resolved.user.id, resolved.session.id)
+            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
         }),
       ),
   );
 };
+
+/** Resolve and validate the request's session or fail with 401. */
+const requireSession = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+): Effect.Effect<Types.SessionWithUser, S.Unauthorized, SessionManagerTag | Hooks> =>
+  Effect.gen(function* () {
+    const sessionId = sessionIdFromRequest(request, cfg);
+    if (sessionId === undefined) {
+      return yield* new S.Unauthorized({ message: "Not authenticated" });
+    }
+    const sessionManager = yield* SessionManagerTag;
+    return yield* sessionManager
+      .validateSession(sessionId)
+      .pipe(Effect.mapError(() => new S.Unauthorized({ message: "Invalid or expired session" })));
+  });
 
 /** Attach the session cookie to a JSON `AuthSuccess` response when a session is present. */
 const withSessionCookie = (
@@ -234,7 +406,33 @@ export interface AuthWebHandlerOptions {
    * request to `/api/auth/sign-in` is routed to the `/sign-in` endpoint.
    */
   readonly prefix?: string;
+  /**
+   * Origins (e.g. `"https://app.example.com"`) allowed to make state-changing
+   * (non-GET/HEAD/OPTIONS) requests, in addition to the request's own origin.
+   *
+   * Browsers attach an `Origin` header to cross-origin (and most same-origin)
+   * mutating requests; when the header is present and matches neither the
+   * request URL's origin nor this list, the request is rejected with `403`
+   * before it reaches a handler (CSRF protection). Requests without an
+   * `Origin` header (curl, server-to-server) are allowed through.
+   */
+  readonly trustedOrigins?: ReadonlyArray<string>;
 }
+
+/** CSRF check shared by the web handler. Returns `true` when allowed. */
+const isTrustedRequest = (request: Request, trustedOrigins: ReadonlyArray<string>): boolean => {
+  const method = request.method.toUpperCase();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return true;
+
+  const origin = request.headers.get("origin");
+  // No Origin header: non-browser client (curl, server-to-server) - allow.
+  // An opaque "null" origin (sandboxed iframe, some redirects) is NOT trusted
+  // unless explicitly listed.
+  if (origin === null) return true;
+
+  const requestOrigin = new URL(request.url).origin;
+  return origin === requestOrigin || trustedOrigins.includes(origin);
+};
 
 /**
  * Build a standard Web `Request => Response` handler for the auth API.
@@ -259,10 +457,16 @@ export const makeAuthWebHandler = (
   const appLayer = apiLayer.pipe(Layer.provideMerge(options.services));
   const web = HttpRouter.toWebHandler(appLayer);
 
+  const trustedOrigins = options.trustedOrigins ?? [];
   const prefix = options.prefix;
-  if (prefix === undefined || prefix === "") return web;
 
   const handler = (request: Request, context?: Context.Context<never>): Promise<Response> => {
+    if (!isTrustedRequest(request, trustedOrigins)) {
+      return Promise.resolve(Response.json({ message: "Origin not allowed" }, { status: 403 }));
+    }
+    if (prefix === undefined || prefix === "") {
+      return web.handler(request, context);
+    }
     const url = new URL(request.url);
     if (url.pathname === prefix || url.pathname.startsWith(`${prefix}/`)) {
       url.pathname = url.pathname.slice(prefix.length) || "/";

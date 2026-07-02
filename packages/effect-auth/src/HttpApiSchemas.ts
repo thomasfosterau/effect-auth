@@ -73,6 +73,59 @@ export const AuthSuccess = Schema.Struct({
 });
 export type AuthSuccess = typeof AuthSuccess.Type;
 
+/**
+ * Generic acknowledgement for operations that intentionally do not reveal
+ * outcome details (e.g. anti-enumeration email flows).
+ */
+export const StatusResponse = Schema.Struct({
+  status: Schema.Boolean,
+});
+export type StatusResponse = typeof StatusResponse.Type;
+
+/** Request body for sending/resending an email verification. */
+export const SendVerificationEmailPayload = Schema.Struct({
+  email: Schema.String,
+});
+export type SendVerificationEmailPayload = typeof SendVerificationEmailPayload.Type;
+
+/** Request body for verifying an email with a token. */
+export const VerifyEmailPayload = Schema.Struct({
+  token: Schema.String,
+});
+export type VerifyEmailPayload = typeof VerifyEmailPayload.Type;
+
+/** Request body for requesting a password reset email. */
+export const RequestPasswordResetPayload = Schema.Struct({
+  email: Schema.String,
+});
+export type RequestPasswordResetPayload = typeof RequestPasswordResetPayload.Type;
+
+/** Request body for completing a password reset. */
+export const ResetPasswordPayload = Schema.Struct({
+  token: Schema.String,
+  newPassword: Schema.String,
+});
+export type ResetPasswordPayload = typeof ResetPasswordPayload.Type;
+
+/** Request body for changing the authenticated user's password. */
+export const ChangePasswordPayload = Schema.Struct({
+  currentPassword: Schema.String,
+  newPassword: Schema.String,
+  revokeOtherSessions: Schema.optional(Schema.Boolean),
+});
+export type ChangePasswordPayload = typeof ChangePasswordPayload.Type;
+
+/** Request body for updating the authenticated user's profile. */
+export const UpdateUserPayload = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  image: Schema.optional(Schema.String),
+});
+export type UpdateUserPayload = typeof UpdateUserPayload.Type;
+
+/** List of the authenticated user's active sessions. */
+export const SessionListView = Schema.Array(SessionView);
+export type SessionListView = typeof SessionListView.Type;
+
 // -----------------------------------------------------------------------------
 // Error schemas (mapped to HTTP status codes via HttpApiSchema.status)
 // -----------------------------------------------------------------------------

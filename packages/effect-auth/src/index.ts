@@ -54,6 +54,15 @@ export * from "./RateLimit.js";
 /** Email and password authentication flows. */
 export * from "./EmailPassword.js";
 
+/** Magic link (passwordless email) sign-in. */
+export * from "./MagicLink.js";
+
+/** Email OTP sign-in and verification codes. */
+export * from "./EmailOtp.js";
+
+/** Two-factor authentication (TOTP + backup codes). */
+export * from "./TwoFactor.js";
+
 /** Password reset flows. */
 export * from "./PasswordReset.js";
 
