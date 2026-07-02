@@ -91,6 +91,14 @@ export * from "./Hooks.js";
 export * from "./plugins/index.js";
 
 /**
+ * KeyValueStore-backed layers for the ephemeral stores (OAuth state,
+ * WebAuthn challenges, rate limits, tokens/OTPs, pending two-factor).
+ * Back them with `effect/unstable/persistence` KeyValueStore layers
+ * (in-memory, file system, Redis, ...).
+ */
+export * from "./KeyValueStores.js";
+
+/**
  * HTTP protocol (optional; requires the `effect/unstable/httpapi` modules).
  * Exposed under the `Http` namespace, e.g. `Auth.Http.makeAuthWebHandler`.
  */

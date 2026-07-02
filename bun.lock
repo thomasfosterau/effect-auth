@@ -223,6 +223,18 @@
         "tsx": "^4.19.0",
       },
     },
+    "packages/sql": {
+      "name": "@effect-auth/sql",
+      "version": "0.1.0",
+      "dependencies": {
+        "effect": "4.0.0-beta.59",
+        "effect-auth": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/better-sqlite3": "^7.6.12",
+        "better-sqlite3": "^11.7.0",
+      },
+    },
     "packages/workos": {
       "name": "@effect-auth/workos",
       "version": "0.1.0",
@@ -407,6 +419,8 @@
     "@effect-auth/example-realworld-sveltekit": ["@effect-auth/example-realworld-sveltekit@workspace:examples/realworld-sveltekit"],
 
     "@effect-auth/example-realworld-tanstack-start": ["@effect-auth/example-realworld-tanstack-start@workspace:examples/realworld-tanstack-start"],
+
+    "@effect-auth/sql": ["@effect-auth/sql@workspace:packages/sql"],
 
     "@effect-auth/workos": ["@effect-auth/workos@workspace:packages/workos"],
 
