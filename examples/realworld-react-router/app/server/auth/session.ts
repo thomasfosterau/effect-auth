@@ -1,27 +1,36 @@
-import { createCookie, redirect } from "react-router";
+import { redirect } from "react-router";
 import { validateSession } from "./runtime";
 import { getUserById } from "../services/users";
 import type { ConduitProfile } from "../types";
 
-export const sessionCookie = createCookie("conduit_session", {
-  httpOnly: true,
-  sameSite: "lax",
-  secure: process.env.NODE_ENV === "production",
-  path: "/",
-  maxAge: 60 * 60 * 24 * 30,
-});
+// The cookie stores the RAW session id (no JSON/base64 encoding) so the
+// effect-auth web handler mounted at /api/auth (see webHandler.ts) reads the
+// same session as these server helpers.
+const COOKIE_NAME = "conduit_session";
+const MAX_AGE = 60 * 60 * 24 * 30;
+const secure = process.env.NODE_ENV === "production";
+
+const cookieAttributes = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
 
 export async function setSessionHeader(sessionId: string): Promise<HeadersInit> {
-  return { "Set-Cookie": await sessionCookie.serialize(sessionId) };
+  return { "Set-Cookie": `${COOKIE_NAME}=${sessionId}; ${cookieAttributes}; Max-Age=${MAX_AGE}` };
 }
 
 export async function clearSessionHeader(): Promise<HeadersInit> {
-  return { "Set-Cookie": await sessionCookie.serialize("", { maxAge: 0 }) };
+  return { "Set-Cookie": `${COOKIE_NAME}=; ${cookieAttributes}; Max-Age=0` };
 }
 
 export async function getSessionId(request: Request): Promise<string | null> {
-  const sid = (await sessionCookie.parse(request.headers.get("Cookie"))) as string | null;
-  return sid ?? null;
+  const header = request.headers.get("Cookie") ?? "";
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() === COOKIE_NAME) {
+      const value = part.slice(eq + 1).trim();
+      return value === "" ? null : value;
+    }
+  }
+  return null;
 }
 
 export async function getCurrentUser(

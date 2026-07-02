@@ -11,6 +11,9 @@ export default [
   route("article/:slug", "routes/article.$slug.tsx"),
   route("profile/:username", "routes/profile.$username.tsx"),
 
+  // effect-auth HTTP handler (used by @effect-auth/client's session store).
+  route("api/auth/*", "routes/api.auth.$.tsx"),
+
   route("api/users", "routes/api.users.tsx"),
   route("api/users/login", "routes/api.users.login.tsx"),
   route("api/user", "routes/api.user.tsx"),
