@@ -59,10 +59,17 @@ export const sessionStore: Auth.SessionStore = {
         if (session.userId === userId) sessions.delete(id);
       }
     }),
+  listByUserId: (userId) =>
+    Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
 };
 
 const employeeToUser = (employee: Employee): Auth.User => ({
   id: employee.id,
+  email: employee.email,
+  emailVerified: employee.emailVerified,
+  name: `${employee.firstName} ${employee.lastName}`.trim(),
+  createdAt: employee.createdAt,
+  updatedAt: employee.updatedAt,
   attributes: { ...employee.attributes },
 });
 
@@ -92,19 +99,20 @@ const updateEmployeeFromUser = (user: Auth.User): Employee => {
   if (!existing) {
     throw new Error(`Cannot update missing employee ${user.id}`);
   }
-  const emailAttr = user.attributes.email;
-  const nameAttr = user.attributes.name;
+  const name = user.name;
   const updated: Employee = {
     ...existing,
-    email: typeof emailAttr === "string" && emailAttr.length > 0 ? emailAttr : existing.email,
+    email: user.email.length > 0 ? user.email : existing.email,
+    emailVerified: user.emailVerified,
     firstName:
-      typeof nameAttr === "string" && nameAttr.length > 0
-        ? (nameAttr.split(" ")[0] ?? existing.firstName)
+      typeof name === "string" && name.length > 0
+        ? (name.split(" ")[0] ?? existing.firstName)
         : existing.firstName,
     lastName:
-      typeof nameAttr === "string" && nameAttr.split(" ").length > 1
-        ? nameAttr.split(" ").slice(1).join(" ")
+      typeof name === "string" && name.split(" ").length > 1
+        ? name.split(" ").slice(1).join(" ")
         : existing.lastName,
+    updatedAt: user.updatedAt,
     attributes: { ...user.attributes },
   };
   employees.set(updated.id, updated);
@@ -150,18 +158,19 @@ export const emailPasswordStore: Auth.EmailPasswordStore = {
   createUser: (input) =>
     Effect.sync(() => {
       const id = nextId("emp");
-      const name =
-        typeof input.attributes?.["name"] === "string"
-          ? (input.attributes["name"] as string)
-          : (input.name ?? input.email);
+      const name = input.name ?? input.email;
       const [firstName, ...rest] = name.split(" ");
+      const now = new Date();
       const employee: Employee = {
         id,
         email: input.email,
+        emailVerified: false,
         firstName: firstName ?? input.email,
         lastName: rest.join(" "),
         title: "Sales Representative",
-        attributes: { ...input.attributes, email: input.email },
+        createdAt: now,
+        updatedAt: now,
+        attributes: { ...input.attributes },
       };
       employees.set(id, employee);
       // New sign-ups land in the SalesRep role by default; admins can promote.

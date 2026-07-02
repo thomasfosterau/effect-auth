@@ -20,10 +20,12 @@ const passwords = new Map<string, string>();
 // Initialize with a test user
 users.set("user-1", {
   id: "user-1",
-  attributes: {
-    email: "test@example.com",
-    name: "Test User",
-  },
+  email: "test@example.com",
+  emailVerified: false,
+  name: "Test User",
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  attributes: {},
 });
 
 /**
@@ -69,6 +71,9 @@ const sessionStore: Auth.SessionStore = {
         }
       }
     }),
+
+  listByUserId: (userId) =>
+    Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
 };
 
 /**
@@ -157,7 +162,7 @@ const authenticationFlow = Effect.gen(function* () {
   console.log("4️⃣ Validating session...");
   const { session: validSession, user } = yield* sessionManager.validateSession(session.id);
   console.log("   ✅ Session validated successfully");
-  console.log(`   User: ${user.attributes.name} (${user.attributes.email})`);
+  console.log(`   User: ${user.name} (${user.email})`);
   console.log(`   Session ID: ${validSession.id}\n`);
 
   // 5. Test invalid password
@@ -184,7 +189,7 @@ const authenticationFlow = Effect.gen(function* () {
   const newSession = yield* sessionManager.createSession("user-1");
   const { user: newUser } = yield* sessionManager.validateSession(newSession.id);
   console.log(`   ✅ New session created: ${newSession.id}`);
-  console.log(`   User: ${newUser.attributes.name}\n`);
+  console.log(`   User: ${newUser.name}\n`);
 
   console.log("✨ Authentication flow completed successfully!");
 

@@ -57,7 +57,7 @@ const scenario = Effect.gen(function* () {
     name: "Nancy Davolio",
   });
   const salesRep = signUpResult.user;
-  console.log(`Created user ${salesRep.id} (${salesRep.attributes["email"]})`);
+  console.log(`Created user ${salesRep.id} (${salesRep.email})`);
   console.log(`Needs email verification: ${signUpResult.needsEmailVerification}`);
   console.log(`Roles: ${userRoles.get(salesRep.id)?.join(", ")}`);
 
@@ -71,15 +71,13 @@ const scenario = Effect.gen(function* () {
     });
   }
   const session = verifyResult.session;
-  console.log(
-    `Verified. Session ${session.id.slice(0, 8)}… issued for ${verifyResult.user.attributes["email"]}`,
-  );
+  console.log(`Verified. Session ${session.id.slice(0, 8)}… issued for ${verifyResult.user.email}`);
 
   banner("Step 4 — Validate session");
   const sessionManager = yield* Auth.SessionManagerTag;
   const validated = yield* sessionManager.validateSession(session.id);
   console.log(
-    `Session valid for ${validated.user.attributes["name"]}, expires at ${validated.session.expiresAt.toISOString()}`,
+    `Session valid for ${validated.user.name}, expires at ${validated.session.expiresAt.toISOString()}`,
   );
 
   banner("Step 5 — Trip the login rate limiter");

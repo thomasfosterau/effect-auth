@@ -37,7 +37,7 @@ const program = Effect.gen(function* () {
   });
 
   const { session: valid, user } = yield* sessions.validateSession(session.id);
-  yield* Effect.log(`signed in as ${user.attributes.email}`);
+  yield* Effect.log(`signed in as ${user.email}`);
   return valid;
 });
 ```
