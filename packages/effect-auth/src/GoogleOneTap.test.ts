@@ -1,0 +1,341 @@
+import { describe, it, expect } from "vite-plus/test";
+import { Effect, Layer } from "effect";
+import * as crypto from "node:crypto";
+import { UserNotFoundError, SessionNotFoundError } from "./Errors.js";
+import { Hooks } from "./Hooks.js";
+import {
+  SessionManagerLayer,
+  SessionManagerTag,
+  SessionStoreTag,
+  UserStoreTag,
+  type SessionManager,
+} from "./Session.js";
+import { UserServiceLayer, UserServiceStoreTag } from "./User.js";
+import { AuthLifecycleServiceTag } from "./AuthLifecycle.js";
+import { EmailPasswordStoreTag } from "./EmailPassword.js";
+import { PasswordHasherTag } from "./Password.js";
+import { EmailVerificationServiceTag, EmailVerificationStoreTag } from "./EmailVerification.js";
+import {
+  PasswordResetServiceTag,
+  PasswordResetStoreTag,
+  PasswordResetUserStoreTag,
+} from "./PasswordReset.js";
+import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
+import { OAuthUserStoreTag, type OAuthUserStore } from "./OAuth.js";
+import {
+  makeGoogleOneTapService,
+  GoogleOneTapServiceLayer,
+  GoogleOneTapError,
+} from "./GoogleOneTap.js";
+import type * as Types from "./Types.js";
+
+const CLIENT_ID = "client-123.apps.googleusercontent.com";
+const JWKS_ENDPOINT = "https://fake-google.test/certs";
+
+// --- A fake Google: an ES256 key + JWT signer + JWKS document -----------------
+
+const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+const KID = "test-key-1";
+const JWKS = {
+  keys: [{ ...(publicKey.export({ format: "jwk" }) as object), kid: KID, alg: "ES256" }],
+};
+
+const b64 = (value: unknown): string =>
+  Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+
+const signCredential = (claims: Record<string, unknown>): string => {
+  const header = { alg: "ES256", kid: KID, typ: "JWT" };
+  const signingInput = `${b64(header)}.${b64(claims)}`;
+  const signature = crypto.sign("sha256", Buffer.from(signingInput, "utf8"), {
+    key: privateKey,
+    dsaEncoding: "ieee-p1363",
+  });
+  return `${signingInput}.${signature.toString("base64url")}`;
+};
+
+const validClaims = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  iss: "https://accounts.google.com",
+  aud: CLIENT_ID,
+  sub: "google-user-1",
+  email: "alice@gmail.test",
+  email_verified: true,
+  name: "Alice",
+  picture: "https://img.test/alice.png",
+  exp: Math.floor(Date.now() / 1000) + 300,
+  iat: Math.floor(Date.now() / 1000),
+  ...overrides,
+});
+
+/** Swap `globalThis.fetch` for a canned JWKS response while `thunk` runs. */
+const withJwks = async <A>(thunk: () => Promise<A>): Promise<A> => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (() =>
+    Promise.resolve(
+      new Response(JSON.stringify(JWKS), { headers: { "content-type": "application/json" } }),
+    )) as typeof fetch;
+  try {
+    return await thunk();
+  } finally {
+    globalThis.fetch = original;
+  }
+};
+
+// --- Service-level tests --------------------------------------------------------
+
+const makeStores = () => {
+  const users = new Map<string, Types.User>();
+  const usersByEmail = new Map<string, Types.User>();
+  let userSeq = 0;
+
+  const userStore: OAuthUserStore = {
+    getUser: (userId) => {
+      const u = users.get(userId);
+      return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
+    },
+    getUserByEmail: (email) => Effect.succeed(usersByEmail.get(email) ?? null),
+    createUser: (input) =>
+      Effect.sync(() => {
+        const now = new Date();
+        const user: Types.User = {
+          id: `u${++userSeq}`,
+          email: input.email,
+          emailVerified: input.emailVerified,
+          ...(input.name !== undefined && { name: input.name }),
+          ...(input.image !== undefined && { image: input.image }),
+          createdAt: now,
+          updatedAt: now,
+          attributes: {},
+        };
+        users.set(user.id, user);
+        usersByEmail.set(user.email, user);
+        return user;
+      }),
+  };
+  const sessionManager: SessionManager = {
+    createSession: (userId) =>
+      Effect.succeed({
+        id: `s-${userId}`,
+        userId,
+        expiresAt: new Date(Date.now() + 3600_000),
+        createdAt: new Date(),
+        lastActivityAt: new Date(),
+        attributes: {},
+      }),
+    validateSession: () => Effect.die("unused"),
+    invalidateSession: () => Effect.die("unused"),
+    invalidateUserSessions: () => Effect.void,
+    listSessions: () => Effect.succeed([]),
+    revokeOtherSessions: () => Effect.void,
+    setSessionAttributes: () => Effect.die("unused"),
+  };
+
+  const layer = Layer.mergeAll(
+    Layer.succeed(OAuthUserStoreTag)(userStore),
+    Layer.succeed(SessionManagerTag)(sessionManager),
+    Hooks.Default,
+  );
+  return { layer, users };
+};
+
+describe("GoogleOneTapService", () => {
+  const config = { clientId: CLIENT_ID, jwksEndpoint: JWKS_ENDPOINT };
+
+  it("verifies a credential and provisions the user once", async () => {
+    const { layer, users } = makeStores();
+    const service = await Effect.runPromise(makeGoogleOneTapService(config));
+
+    const { first, second } = await withJwks(() =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const first = yield* service.signIn(signCredential(validClaims()));
+          const second = yield* service.signIn(signCredential(validClaims()));
+          return { first, second };
+        }).pipe(Effect.provide(layer)),
+      ),
+    );
+
+    expect(first.isNewUser).toBe(true);
+    expect(first.user.email).toBe("alice@gmail.test");
+    expect(first.user.emailVerified).toBe(true);
+    expect(first.user.name).toBe("Alice");
+    expect(first.session.userId).toBe(first.user.id);
+    expect(first.claims["sub"]).toBe("google-user-1");
+    expect(second.isNewUser).toBe(false);
+    expect(second.user.id).toBe(first.user.id);
+    expect(users.size).toBe(1);
+  });
+
+  it("accepts the bare `accounts.google.com` issuer", async () => {
+    const { layer } = makeStores();
+    const service = await Effect.runPromise(makeGoogleOneTapService(config));
+    const result = await withJwks(() =>
+      Effect.runPromise(
+        service
+          .signIn(signCredential(validClaims({ iss: "accounts.google.com" })))
+          .pipe(Effect.provide(layer)),
+      ),
+    );
+    expect(result.user.email).toBe("alice@gmail.test");
+  });
+
+  it("rejects wrong audience, wrong issuer, expiry, unverified email, and bad signatures", async () => {
+    const { layer } = makeStores();
+    const service = await Effect.runPromise(makeGoogleOneTapService(config));
+
+    const credentials = [
+      signCredential(validClaims({ aud: "someone-else" })),
+      signCredential(validClaims({ iss: "https://evil.test" })),
+      signCredential(validClaims({ exp: Math.floor(Date.now() / 1000) - 10 })),
+      signCredential(validClaims({ email_verified: false })),
+      `${signCredential(validClaims()).slice(0, -8)}AAAAAAAA`,
+    ];
+
+    for (const credential of credentials) {
+      const err = await withJwks(() =>
+        Effect.runPromise(Effect.flip(service.signIn(credential)).pipe(Effect.provide(layer))),
+      );
+      expect(err).toBeInstanceOf(GoogleOneTapError);
+    }
+  });
+});
+
+// --- HTTP layer ------------------------------------------------------------------
+
+const makeHttpFixture = () => {
+  const usersById = new Map<string, Types.User>();
+  const usersByEmail = new Map<string, Types.User>();
+  const sessions = new Map<string, Types.Session>();
+  let userSeq = 0;
+
+  const oauthUserStore: OAuthUserStore = {
+    getUser: (userId) => {
+      const u = usersById.get(userId);
+      return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
+    },
+    getUserByEmail: (email) => Effect.succeed(usersByEmail.get(email) ?? null),
+    createUser: (input) =>
+      Effect.sync(() => {
+        const now = new Date();
+        const user: Types.User = {
+          id: `u${++userSeq}`,
+          email: input.email,
+          emailVerified: input.emailVerified,
+          ...(input.name !== undefined && { name: input.name }),
+          ...(input.image !== undefined && { image: input.image }),
+          createdAt: now,
+          updatedAt: now,
+          attributes: {},
+        };
+        usersById.set(user.id, user);
+        usersByEmail.set(user.email, user);
+        return user;
+      }),
+  };
+  const userStore = {
+    get: (userId: string) => {
+      const u = usersById.get(userId);
+      return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
+    },
+    getCredentials: (userId: string) =>
+      Effect.fail(new UserNotFoundError({ message: "nc", userId })),
+  };
+  const userServiceStore = {
+    get: userStore.get,
+    getByEmail: (email: string) => Effect.succeed(usersByEmail.get(email) ?? null),
+    update: (user: Types.User) => Effect.sync(() => (usersById.set(user.id, user), user)),
+    delete: () => Effect.void,
+  };
+  const sessionStore = {
+    create: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
+    get: (id: string) => {
+      const s = sessions.get(id);
+      return s
+        ? Effect.succeed(s)
+        : Effect.fail(new SessionNotFoundError({ message: "nf", sessionId: id }));
+    },
+    update: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
+    delete: (id: string) => Effect.sync(() => void sessions.delete(id)),
+    deleteByUserId: () => Effect.void,
+    listByUserId: () => Effect.succeed([]),
+  };
+
+  const base = Layer.mergeAll(
+    SessionManagerLayer({
+      sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
+    }).pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(SessionStoreTag)(sessionStore as never),
+          Layer.succeed(UserStoreTag)(userStore),
+        ),
+      ),
+    ),
+    UserServiceLayer().pipe(Layer.provide(Layer.succeed(UserServiceStoreTag)(userServiceStore))),
+    Layer.succeed(UserServiceStoreTag)(userServiceStore),
+    Hooks.Default,
+    Layer.succeed(AuthLifecycleServiceTag)(undefined as never),
+    Layer.succeed(EmailPasswordStoreTag)(undefined as never),
+    Layer.succeed(PasswordHasherTag)(undefined as never),
+    Layer.succeed(EmailVerificationServiceTag)(undefined as never),
+    Layer.succeed(EmailVerificationStoreTag)(undefined as never),
+    Layer.succeed(PasswordResetServiceTag)(undefined as never),
+    Layer.succeed(PasswordResetStoreTag)(undefined as never),
+    Layer.succeed(PasswordResetUserStoreTag)(undefined as never),
+  );
+
+  const oneTapLayer = Layer.mergeAll(
+    GoogleOneTapServiceLayer({ clientId: CLIENT_ID, jwksEndpoint: JWKS_ENDPOINT }),
+    Layer.succeed(OAuthUserStoreTag)(oauthUserStore),
+  );
+
+  return {
+    handler: makeAuthWebHandler({
+      services: Layer.mergeAll(base, oneTapLayer) as Layer.Layer<AuthServices>,
+      cookie: { secure: false, lastLoginMethod: true },
+    }).handler,
+    handlerWithoutOneTap: makeAuthWebHandler({
+      services: base as Layer.Layer<AuthServices>,
+      cookie: { secure: false },
+    }).handler,
+  };
+};
+
+const post = (path: string, body: unknown): Request =>
+  new Request(`http://test${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+describe("HTTP Google One Tap endpoint", () => {
+  it("signs in with a valid credential and sets cookies", async () => {
+    const fx = makeHttpFixture();
+    const res = await withJwks(() =>
+      fx.handler(post("/sign-in/google-one-tap", { credential: signCredential(validClaims()) })),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { user: { email: string } };
+    expect(body.user.email).toBe("alice@gmail.test");
+    const cookies = res.headers.getSetCookie();
+    expect(cookies.some((c) => c.startsWith("conduit_session="))).toBe(true);
+    expect(cookies.some((c) => c.startsWith("conduit_session_last_method=google"))).toBe(true);
+  });
+
+  it("answers 401 for an invalid credential", async () => {
+    const fx = makeHttpFixture();
+    const res = await withJwks(() =>
+      fx.handler(
+        post("/sign-in/google-one-tap", {
+          credential: signCredential(validClaims({ aud: "someone-else" })),
+        }),
+      ),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 404 when One Tap is not configured", async () => {
+    const fx = makeHttpFixture();
+    const res = await fx.handlerWithoutOneTap(post("/sign-in/google-one-tap", { credential: "x" }));
+    expect(res.status).toBe(404);
+  });
+});
