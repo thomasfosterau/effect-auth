@@ -223,6 +223,224 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.AuthSuccess,
     error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
   }),
+  // --- Organization (session-authenticated). 404 when the module is absent;
+  // --- 403 when the actor's role lacks the required permission.
+  HttpApiEndpoint.post("orgCreate", "/organization/create", {
+    payload: S.CreateOrganizationPayload,
+    success: S.OrganizationView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.get("orgList", "/organizations", {
+    success: S.OrganizationListView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
+  }),
+  HttpApiEndpoint.get("orgGet", "/organization/:organizationId", {
+    params: { organizationId: Schema.String },
+    success: S.FullOrganizationView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  HttpApiEndpoint.patch("orgUpdate", "/organization/:organizationId", {
+    params: { organizationId: Schema.String },
+    payload: S.UpdateOrganizationPayload,
+    success: S.OrganizationView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.delete("orgDelete", "/organization/:organizationId", {
+    params: { organizationId: Schema.String },
+    success: HttpApiSchema.NoContent,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.post("orgSetActive", "/organization/set-active", {
+    payload: S.SetActiveOrganizationPayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("orgInvite", "/organization/:organizationId/invitations", {
+    params: { organizationId: Schema.String },
+    payload: S.InviteMemberPayload,
+    success: S.InvitationView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.get("orgListInvitations", "/organization/:organizationId/invitations", {
+    params: { organizationId: Schema.String },
+    success: S.InvitationListView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("orgAcceptInvitation", "/invitations/:invitationId/accept", {
+    params: { invitationId: Schema.String },
+    success: S.MemberView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("orgRejectInvitation", "/invitations/:invitationId/reject", {
+    params: { invitationId: Schema.String },
+    success: S.InvitationView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("orgCancelInvitation", "/invitations/:invitationId/cancel", {
+    params: { invitationId: Schema.String },
+    success: S.InvitationView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.post("orgAddMember", "/organization/:organizationId/members", {
+    params: { organizationId: Schema.String },
+    payload: S.AddMemberPayload,
+    success: S.MemberView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.patch("orgUpdateMemberRole", "/organization/:organizationId/members", {
+    params: { organizationId: Schema.String },
+    payload: S.UpdateMemberRolePayload,
+    success: S.MemberView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.delete("orgRemoveMember", "/organization/:organizationId/members/:userId", {
+    params: { organizationId: Schema.String, userId: Schema.String },
+    success: HttpApiSchema.NoContent,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  // --- Admin (session-authenticated; the actor must satisfy `isAdmin`).
+  // --- Authorization failures answer 403.
+  HttpApiEndpoint.post("adminListUsers", "/admin/users/list", {
+    payload: S.AdminListUsersPayload,
+    success: S.AdminUserListView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.ForbiddenError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("adminSetRole", "/admin/users/set-role", {
+    payload: S.AdminSetRolePayload,
+    success: S.UserView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.post("adminBanUser", "/admin/users/ban", {
+    payload: S.AdminBanUserPayload,
+    success: S.UserView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.post("adminUnbanUser", "/admin/users/unban", {
+    payload: S.AdminUserActionPayload,
+    success: S.UserView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.post("adminRemoveUser", "/admin/users/remove", {
+    payload: S.AdminUserActionPayload,
+    success: HttpApiSchema.NoContent,
+    error: [S.NotFoundError, S.UnauthorizedError, S.ForbiddenError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("adminRevokeSessions", "/admin/users/revoke-sessions", {
+    payload: S.AdminUserActionPayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.UnauthorizedError, S.ForbiddenError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("adminImpersonate", "/admin/impersonate", {
+    payload: S.AdminUserActionPayload,
+    success: S.AuthSuccess,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.post("adminStopImpersonating", "/admin/stop-impersonating", {
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
+  }),
+  // --- API keys (session-authenticated management).
+  HttpApiEndpoint.post("apiKeyCreate", "/api-keys", {
+    payload: S.ApiKeyCreatePayload,
+    success: S.ApiKeyCreatedView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  HttpApiEndpoint.get("apiKeyList", "/api-keys", {
+    success: S.ApiKeyListView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
+  }),
+  HttpApiEndpoint.patch("apiKeyUpdate", "/api-keys/:keyId", {
+    params: { keyId: Schema.String },
+    payload: S.ApiKeyUpdatePayload,
+    success: S.ApiKeyView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  HttpApiEndpoint.delete("apiKeyDelete", "/api-keys/:keyId", {
+    params: { keyId: Schema.String },
+    success: HttpApiSchema.NoContent,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  // --- JWT: issue a token for the session (`/token`) and serve the JWKS.
+  HttpApiEndpoint.get("jwtToken", "/token", {
+    success: S.JwtTokenView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
+  }),
+  HttpApiEndpoint.get("jwtJwks", "/jwks", {
+    success: S.JwksView,
+    error: [S.NotFoundError, S.InternalError],
+  }),
 );
 
 /** The complete auth API, annotated with OpenAPI document metadata. */
