@@ -127,6 +127,11 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.AuthSuccess,
     error: [S.NotFoundError, S.BadRequestError, S.InternalError],
   }),
+  // Guest sign-in: creates an anonymous user + session. 404 when unconfigured.
+  HttpApiEndpoint.post("signInAnonymous", "/sign-in/anonymous", {
+    success: S.AuthSuccess,
+    error: [S.NotFoundError, S.InternalError],
+  }),
   // Authenticated; wrong password -> 400 BadRequest (mirrors change-password).
   HttpApiEndpoint.post("twoFactorEnable", "/two-factor/enable", {
     payload: S.TwoFactorPasswordPayload,

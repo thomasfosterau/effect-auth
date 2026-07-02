@@ -15,6 +15,7 @@ import { SessionManagerTag, UserStoreTag } from "./Session.js";
 import { EmailPasswordStoreTag, makeEmailPasswordService } from "./EmailPassword.js";
 import { MagicLinkServiceTag, MagicLinkStoreTag, MagicLinkUserStoreTag } from "./MagicLink.js";
 import { AccountManagementServiceTag, AccountManagementStoreTag } from "./AccountManagement.js";
+import { AnonymousServiceTag, AnonymousUserStoreTag } from "./Anonymous.js";
 import { EmailOtpServiceTag, EmailOtpStoreTag, EmailOtpUserStoreTag } from "./EmailOtp.js";
 import { PendingTwoFactorStoreTag, TwoFactorServiceTag, TwoFactorStoreTag } from "./TwoFactor.js";
 import { PasswordHasherTag } from "./Password.js";
@@ -194,6 +195,18 @@ const resolveAccountManagement = Effect.gen(function* () {
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.provideService(AccountManagementStoreTag, store.value));
+  return { service: service.value, provideStores };
+});
+
+/** Resolve the anonymous service + store, or fail with 404. */
+const resolveAnonymous = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(AnonymousServiceTag);
+  const store = yield* Effect.serviceOption(AnonymousUserStoreTag);
+  if (Option.isNone(service) || Option.isNone(store)) {
+    return yield* new S.NotFound({ message: "Anonymous sign-in is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(Effect.provideService(AnonymousUserStoreTag, store.value));
   return { service: service.value, provideStores };
 });
 
@@ -541,6 +554,22 @@ export const authGroupLayer = (config?: CookieConfig) => {
                 RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               }),
             );
+          const body: S.AuthSuccess = {
+            user: S.encodeUser(result.user),
+            needsEmailVerification: false,
+          };
+          return yield* withSessionCookie(body, result.session, cfg);
+        }),
+      )
+      .handle("signInAnonymous", () =>
+        Effect.gen(function* () {
+          const anonymous = yield* resolveAnonymous;
+          const result = yield* anonymous.provideStores(anonymous.service.signInAnonymous()).pipe(
+            Effect.catchTags({
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
           const body: S.AuthSuccess = {
             user: S.encodeUser(result.user),
             needsEmailVerification: false,

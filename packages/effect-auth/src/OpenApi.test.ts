@@ -58,6 +58,7 @@ const EXPECTED_PATHS = [
   "/delete-user/confirm",
   "/email-otp/send",
   "/sign-in/email-otp",
+  "/sign-in/anonymous",
   "/two-factor/enable",
   "/two-factor/confirm",
   "/two-factor/disable",
