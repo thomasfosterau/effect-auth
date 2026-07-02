@@ -1,0 +1,54 @@
+{
+  "name": "@effect-auth/sql",
+  "version": "0.1.0",
+  "description": "Driver-agnostic SQL storage layers for effect-auth, built on effect/unstable/sql's SqlClient.",
+  "keywords": [
+    "auth",
+    "authentication",
+    "database",
+    "effect",
+    "effect-auth",
+    "migration",
+    "postgres",
+    "session",
+    "sql",
+    "sqlite"
+  ],
+  "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
+  "bugs": {
+    "url": "https://github.com/thomasfosterau/effect-auth/issues"
+  },
+  "license": "ISC",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thomasfosterau/effect-auth.git"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vp test run",
+    "typecheck": "tsc --noEmit && vp test --typecheck --run"
+  },
+  "dependencies": {
+    "effect": "4.0.0-beta.59",
+    "effect-auth": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "better-sqlite3": "^11.7.0"
+  }
+}
