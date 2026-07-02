@@ -18,6 +18,10 @@ import { AccountManagementServiceTag, AccountManagementStoreTag } from "./Accoun
 import { AnonymousServiceTag, AnonymousUserStoreTag } from "./Anonymous.js";
 import { PhoneOtpServiceTag, PhoneOtpStoreTag, PhoneOtpUserStoreTag } from "./PhoneOtp.js";
 import { UsernameServiceTag, UsernameStoreTag } from "./Username.js";
+import {
+  DeviceAuthorizationServiceTag,
+  DeviceAuthorizationStoreTag,
+} from "./DeviceAuthorization.js";
 import { EmailOtpServiceTag, EmailOtpStoreTag, EmailOtpUserStoreTag } from "./EmailOtp.js";
 import { PendingTwoFactorStoreTag, TwoFactorServiceTag, TwoFactorStoreTag } from "./TwoFactor.js";
 import { PasswordHasherTag } from "./Password.js";
@@ -197,6 +201,18 @@ const resolveAccountManagement = Effect.gen(function* () {
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.provideService(AccountManagementStoreTag, store.value));
+  return { service: service.value, provideStores };
+});
+
+/** Resolve the device-authorization service + store, or fail with 404. */
+const resolveDevice = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(DeviceAuthorizationServiceTag);
+  const store = yield* Effect.serviceOption(DeviceAuthorizationStoreTag);
+  if (Option.isNone(service) || Option.isNone(store)) {
+    return yield* new S.NotFound({ message: "Device authorization is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(Effect.provideService(DeviceAuthorizationStoreTag, store.value));
   return { service: service.value, provideStores };
 });
 
@@ -630,6 +646,74 @@ export const authGroupLayer = (config?: CookieConfig) => {
             ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
           };
           return yield* withSessionCookie(body, result.session, cfg);
+        }),
+      )
+      .handle("deviceCode", ({ payload }) =>
+        Effect.gen(function* () {
+          const device = yield* resolveDevice;
+          return yield* device
+            .provideStores(
+              device.service.begin({
+                ...(payload.clientId !== undefined && { clientId: payload.clientId }),
+                ...(payload.scopes !== undefined && { scopes: payload.scopes }),
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+        }),
+      )
+      .handle("deviceToken", ({ payload }) =>
+        Effect.gen(function* () {
+          const device = yield* resolveDevice;
+          const result = yield* device.provideStores(device.service.poll(payload.deviceCode)).pipe(
+            Effect.catchTags({
+              // RFC 8628 poll errors -> 400 with the error code as message.
+              DevicePollError: (e) => Effect.fail(new S.BadRequest({ message: e.error })),
+              SessionNotFoundError: (e) =>
+                Effect.fail(new S.InternalServerError({ message: e.message })),
+              SessionExpiredError: (e) =>
+                Effect.fail(new S.InternalServerError({ message: e.message })),
+              UserNotFoundError: (e) =>
+                Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+            }),
+          );
+          const body: S.AuthSuccess = {
+            user: S.encodeUser(result.user),
+            needsEmailVerification: false,
+          };
+          return yield* withSessionCookie(body, result.session, cfg);
+        }),
+      )
+      .handle("deviceApprove", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const device = yield* resolveDevice;
+          yield* device
+            .provideStores(device.service.approve(payload.userCode, resolved.user.id))
+            .pipe(
+              Effect.catchTags({
+                DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return { status: true };
+        }),
+      )
+      .handle("deviceDeny", ({ payload }) =>
+        Effect.gen(function* () {
+          const device = yield* resolveDevice;
+          yield* device.provideStores(device.service.deny(payload.userCode)).pipe(
+            Effect.catchTags({
+              DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return { status: true };
         }),
       )
       .handle("phoneOtpSend", ({ payload }) =>
