@@ -13,6 +13,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🔑 **Two-Factor Authentication**: TOTP enrollment with backup codes, integrated into sign-in (RFC 6238/4226 primitives included)
 - 🌐 **OAuth 2.0 / Social Login**: Pre-built providers for Google, GitHub, Discord, Microsoft with PKCE and a complete sign-in flow (user creation, verified-email account linking, sessions)
 - ✉️ **Email Verification & Password Reset**: Secure token-based flows with anti-enumeration behavior
+- 🧾 **Account Management**: Verification-gated email change and self-service account deletion (single-use tokens, session revocation, `beforeDelete` cleanup hook)
 - 🪄 **Magic Link & Email OTP**: Passwordless sign-in via one-time links or numeric codes
 - 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets for all auth operations
 - 🔓 **WebAuthn / Passkeys**: Passwordless authentication with FIDO2 compliance

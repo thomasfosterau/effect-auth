@@ -81,6 +81,9 @@ export * from "./PasswordReset.js";
 /** User service primitive. */
 export * from "./User.js";
 
+/** Verification-gated email change and self-service account deletion. */
+export * from "./AccountManagement.js";
+
 /** High-level auth lifecycle orchestration. */
 export * from "./AuthLifecycle.js";
 

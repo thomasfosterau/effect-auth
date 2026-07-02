@@ -93,6 +93,28 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.AuthSuccess,
     error: [S.NotFoundError, S.BadRequestError, S.InternalError],
   }),
+  // Account management: verification-gated email change & self-service deletion.
+  // Request endpoints are session-authenticated; confirm endpoints are by token.
+  // Anti-enumeration: request endpoints always answer `{ status: true }`.
+  HttpApiEndpoint.post("changeEmailRequest", "/change-email/request", {
+    payload: S.ChangeEmailRequestPayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("changeEmailConfirm", "/change-email/confirm", {
+    payload: S.ChangeEmailConfirmPayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("deleteUserRequest", "/delete-user/request", {
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("deleteUserConfirm", "/delete-user/confirm", {
+    payload: S.DeleteUserConfirmPayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+  }),
   // Anti-enumeration: always `{ status: true }`; 500 only on store/delivery failure.
   HttpApiEndpoint.post("emailOtpSend", "/email-otp/send", {
     payload: S.EmailOtpSendPayload,

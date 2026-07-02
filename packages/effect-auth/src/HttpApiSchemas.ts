@@ -147,6 +147,24 @@ export const MagicLinkVerifyPayload = Schema.Struct({
 });
 export type MagicLinkVerifyPayload = typeof MagicLinkVerifyPayload.Type;
 
+/** Request body for requesting an email change (authenticated). */
+export const ChangeEmailRequestPayload = Schema.Struct({
+  newEmail: Schema.String,
+});
+export type ChangeEmailRequestPayload = typeof ChangeEmailRequestPayload.Type;
+
+/** Request body for confirming an email change by token. */
+export const ChangeEmailConfirmPayload = Schema.Struct({
+  token: Schema.String,
+});
+export type ChangeEmailConfirmPayload = typeof ChangeEmailConfirmPayload.Type;
+
+/** Request body for confirming account deletion by token. */
+export const DeleteUserConfirmPayload = Schema.Struct({
+  token: Schema.String,
+});
+export type DeleteUserConfirmPayload = typeof DeleteUserConfirmPayload.Type;
+
 /** The purposes an email OTP can be issued for. */
 export const EmailOtpPurpose = Schema.Literals([
   "sign-in",
