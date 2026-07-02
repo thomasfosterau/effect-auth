@@ -297,6 +297,10 @@ describe("Hooks - integration with EmailPasswordService", () => {
             if (session.userId === userId) sessions.delete(id);
           }
         }),
+      listByUserId: (userId: string) =>
+        Effect.sync(() =>
+          Array.from(sessions.values()).filter((session) => session.userId === userId),
+        ),
     };
 
     const userStore = {

@@ -62,6 +62,9 @@ const sessionStore = {
         }
       }
     }),
+
+  listByUserId: (userId: string) =>
+    Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
 };
 
 const userStore = {

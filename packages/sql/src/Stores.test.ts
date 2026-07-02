@@ -89,7 +89,7 @@ const sqlClientLayer = (): Layer.Layer<SqlClient.SqlClient> =>
     }),
   ).pipe(Layer.provide(Reactivity.layer));
 
-type StoreServices = Layer.Layer.Success<typeof layer> | SqlClient.SqlClient;
+type StoreServices = Layer.Success<typeof layer> | SqlClient.SqlClient;
 
 /** Run an effect against a fresh migrated database with every store layer. */
 const run = <A, E>(effect: Effect.Effect<A, E, StoreServices>): Promise<A> =>

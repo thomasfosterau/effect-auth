@@ -364,13 +364,9 @@ describe("KeyValueStores", () => {
         EmailVerificationStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
         Hooks.Default,
       );
-      const outcome = await Effect.runPromise(
-        program.pipe(Effect.provide(layer)) as Effect.Effect<{
-          staleResult: { _tag: string };
-          result: { userId: string; email: string; verified: boolean };
-          reused: { _tag: string };
-        }>,
-      );
+      // The flipped verifications leave failure types in the error channel;
+      // any unexpected failure should crash the test, so treat them as defects.
+      const outcome = await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.orDie));
 
       expect(sent).toHaveLength(2);
       expect(outcome.staleResult._tag).toBe("EmailVerificationError");

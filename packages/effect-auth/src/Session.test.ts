@@ -48,6 +48,11 @@ const mockSessionStore = {
         }
       }
     }),
+
+  listByUserId: (userId: string) =>
+    Effect.sync(() =>
+      Array.from(mockSessionStore.sessions.values()).filter((session) => session.userId === userId),
+    ),
 };
 
 const mockUserStore = {
