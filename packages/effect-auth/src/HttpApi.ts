@@ -432,6 +432,31 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: HttpApiSchema.NoContent,
     error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
   }),
+  // --- Enterprise SSO (OIDC relying party). 404 when the module is absent.
+  // Register is admin-gated (403 for non-admins).
+  HttpApiEndpoint.post("ssoRegister", "/sso/register", {
+    payload: S.SsoRegisterPayload,
+    success: S.SsoProviderView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  // Returns the IdP authorization URL; unknown domain/provider -> 400.
+  HttpApiEndpoint.post("ssoSignIn", "/sign-in/sso", {
+    payload: S.SsoSignInPayload,
+    success: S.SsoUrlView,
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+  }),
+  // Completes the OIDC callback and issues a session (cookie).
+  HttpApiEndpoint.post("ssoCallback", "/sso/callback", {
+    payload: S.SsoCallbackPayload,
+    success: S.AuthSuccess,
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+  }),
   // --- JWT: issue a token for the session (`/token`) and serve the JWKS.
   HttpApiEndpoint.get("jwtToken", "/token", {
     success: S.JwtTokenView,

@@ -95,6 +95,9 @@ const EXPECTED_PATHS = [
   "/admin/stop-impersonating",
   "/api-keys",
   "/api-keys/{keyId}",
+  "/sso/register",
+  "/sign-in/sso",
+  "/sso/callback",
   "/token",
   "/jwks",
 ];

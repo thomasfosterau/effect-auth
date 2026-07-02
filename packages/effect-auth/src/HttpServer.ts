@@ -40,9 +40,11 @@ import {
   type Invitation,
   type FullOrganization,
 } from "./Organization.js";
-import { AdminServiceTag, AdminUserStoreTag } from "./Admin.js";
+import { AdminServiceTag, AdminUserStoreTag, isAdmin } from "./Admin.js";
 import { ApiKeyServiceTag, ApiKeyStoreTag, type ApiKey } from "./ApiKey.js";
 import { JwtServiceTag, JwtKeyStoreTag } from "./Jwt.js";
+import { SsoServiceTag, SsoProviderStoreTag, type SsoProvider } from "./Sso.js";
+import { OAuthStateStoreTag, OAuthUserStoreTag } from "./OAuth.js";
 import {
   decodeSessionCacheCookie,
   encodeSessionCacheCookie,
@@ -371,6 +373,29 @@ const resolveJwt = Effect.gen(function* () {
   return { service: service.value, provideStores };
 });
 
+/** Resolve the SSO service + its stores, or fail with 404. */
+const resolveSso = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(SsoServiceTag);
+  const providerStore = yield* Effect.serviceOption(SsoProviderStoreTag);
+  const stateStore = yield* Effect.serviceOption(OAuthStateStoreTag);
+  const userStore = yield* Effect.serviceOption(OAuthUserStoreTag);
+  if (
+    Option.isNone(service) ||
+    Option.isNone(providerStore) ||
+    Option.isNone(stateStore) ||
+    Option.isNone(userStore)
+  ) {
+    return yield* new S.NotFound({ message: "SSO is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.provideService(SsoProviderStoreTag, providerStore.value),
+      Effect.provideService(OAuthStateStoreTag, stateStore.value),
+      Effect.provideService(OAuthUserStoreTag, userStore.value),
+    );
+  return { service: service.value, provideStores };
+});
+
 // --- Encoders for the organization / API-key domain types --------------------
 
 const encodeOrganization = (o: Organization): S.OrganizationView => ({
@@ -404,6 +429,22 @@ const encodeInvitation = (i: Invitation): S.InvitationView => ({
 const encodeFullOrganization = (f: FullOrganization): S.FullOrganizationView => ({
   organization: encodeOrganization(f.organization),
   members: f.members.map(encodeMember),
+});
+
+const encodeSsoProvider = (p: SsoProvider): S.SsoProviderView => ({
+  id: p.id,
+  issuer: p.issuer,
+  domain: p.domain,
+  protocol: p.protocol,
+  clientId: p.clientId,
+  redirectUri: p.redirectUri,
+  authorizationEndpoint: p.authorizationEndpoint,
+  tokenEndpoint: p.tokenEndpoint,
+  ...(p.userInfoEndpoint !== undefined && { userInfoEndpoint: p.userInfoEndpoint }),
+  ...(p.jwksEndpoint !== undefined && { jwksEndpoint: p.jwksEndpoint }),
+  scopes: p.scopes,
+  ...(p.organizationId !== undefined && { organizationId: p.organizationId }),
+  createdAt: p.createdAt,
 });
 
 const encodeApiKey = (k: ApiKey): S.ApiKeyView => ({
@@ -1615,6 +1656,89 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
             }),
           );
+        }),
+      )
+      // --- Enterprise SSO ---------------------------------------------------
+      .handle("ssoRegister", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          if (!isAdmin(resolved.user)) {
+            return yield* new S.Forbidden({ message: "Admin privileges required" });
+          }
+          const sso = yield* resolveSso;
+          const provider = yield* sso
+            .provideStores(
+              sso.service.registerProvider(resolved.user.id, {
+                issuer: payload.issuer,
+                domain: payload.domain,
+                clientId: payload.clientId,
+                clientSecret: payload.clientSecret,
+                redirectUri: payload.redirectUri,
+                ...(payload.discover !== undefined && { discover: payload.discover }),
+                ...(payload.authorizationEndpoint !== undefined && {
+                  authorizationEndpoint: payload.authorizationEndpoint,
+                }),
+                ...(payload.tokenEndpoint !== undefined && {
+                  tokenEndpoint: payload.tokenEndpoint,
+                }),
+                ...(payload.userInfoEndpoint !== undefined && {
+                  userInfoEndpoint: payload.userInfoEndpoint,
+                }),
+                ...(payload.jwksEndpoint !== undefined && { jwksEndpoint: payload.jwksEndpoint }),
+                ...(payload.scopes !== undefined && { scopes: payload.scopes }),
+                ...(payload.usePKCE !== undefined && { usePKCE: payload.usePKCE }),
+                ...(payload.organizationId !== undefined && {
+                  organizationId: payload.organizationId,
+                }),
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return encodeSsoProvider(provider);
+        }),
+      )
+      .handle("ssoSignIn", ({ payload }) =>
+        Effect.gen(function* () {
+          const sso = yield* resolveSso;
+          const result = yield* sso
+            .provideStores(
+              sso.service.signIn({
+                ...(payload.email !== undefined && { email: payload.email }),
+                ...(payload.domain !== undefined && { domain: payload.domain }),
+                ...(payload.providerId !== undefined && { providerId: payload.providerId }),
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return { url: result.url, state: result.state };
+        }),
+      )
+      .handle("ssoCallback", ({ payload }) =>
+        Effect.gen(function* () {
+          const sso = yield* resolveSso;
+          const result = yield* sso
+            .provideStores(sso.service.handleCallback(payload.state, payload.code))
+            .pipe(
+              Effect.catchTags({
+                SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) =>
+                  Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          const body: S.AuthSuccess = {
+            user: S.encodeUser(result.user),
+            needsEmailVerification: false,
+          };
+          return yield* withSessionCookie(body, result.session, cfg);
         }),
       )
       // --- JWT --------------------------------------------------------------
