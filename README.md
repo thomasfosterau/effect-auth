@@ -15,6 +15,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - ✉️ **Email Verification & Password Reset**: Secure token-based flows with anti-enumeration behavior
 - 🧾 **Account Management**: Verification-gated email change and self-service account deletion (single-use tokens, session revocation, `beforeDelete` cleanup hook)
 - 🪄 **Magic Link & Email OTP**: Passwordless sign-in via one-time links or numeric codes
+- 👤 **Anonymous Auth**: Guest sessions (`POST /sign-in/anonymous`) with account linking on sign-up (`isAnonymousUser` helper, `linkAccount` migration callback)
 - 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets, an optional `effect/unstable/persistence` backend (in-memory or Redis) via `RateLimiterPersistenceLayer`, and an `AccountLockoutPlugin` (OWASP-style lockout after N failed sign-ins)
 - 🔓 **WebAuthn / Passkeys**: Passwordless authentication with FIDO2 compliance
 - 🏢 **Organizations & Admin**: Multi-tenant organizations (members, invitations, roles) and admin tooling (ban, impersonate)

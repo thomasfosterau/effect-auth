@@ -62,6 +62,11 @@ import {
   type AccountManagementStore,
   type AccountToken,
 } from "./AccountManagement.js";
+import {
+  AnonymousServiceLayer,
+  AnonymousUserStoreTag,
+  type AnonymousUserStore,
+} from "./Anonymous.js";
 import { generateTOTP } from "./Otp.js";
 import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
@@ -360,8 +365,29 @@ const makeFixture = (): Fixture => {
       }),
   };
 
+  let anonSeq = 0;
+  const anonymousUserStore: AnonymousUserStore = {
+    createAnonymousUser: () =>
+      Effect.sync(() =>
+        createUser({
+          email: `anon-${++anonSeq}@anonymous.local`,
+          attributes: { isAnonymous: true },
+        }),
+      ),
+    deleteUser: (userId) =>
+      Effect.sync(() => {
+        const user = usersById.get(userId);
+        if (user !== undefined) {
+          userIdByEmail.delete(user.email);
+          usersById.delete(userId);
+        }
+      }),
+  };
+
   const featureServices: Layer.Layer<AuthServices> = Layer.mergeAll(
     services,
+    AnonymousServiceLayer(),
+    Layer.succeed(AnonymousUserStoreTag)(anonymousUserStore),
     AccountManagementServiceLayer({
       sendChangeEmailVerification: ({ newEmail, token }) =>
         Effect.sync(() => void sentChangeEmail.push({ newEmail, token })),
@@ -1097,6 +1123,29 @@ describe("two-factor", () => {
     );
     expect(after.status).toBe(200);
     expect(after.headers.get("set-cookie")).toContain("conduit_session=");
+  });
+});
+
+describe("HTTP anonymous sign-in", () => {
+  it("creates a guest user + session and returns 404 when unconfigured", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    const res = await handler(jsonRequest("/sign-in/anonymous", undefined));
+    expect(res.status).toBe(200);
+    const sid = sessionIdFromSetCookie(res.headers.get("set-cookie"));
+
+    const sess = await handler(getRequest("/session", asCookie(sid)));
+    expect(sess.status).toBe(200);
+    const body = (await sess.json()) as {
+      user: { email: string; attributes: Record<string, unknown> };
+    };
+    expect(body.user.email).toMatch(/@anonymous\.local$/);
+    expect(body.user.attributes["isAnonymous"]).toBe(true);
+  });
+
+  it("returns 404 when anonymous sign-in is not configured", async () => {
+    const handler = handlerFor(makeFixture(), { features: false });
+    const res = await handler(jsonRequest("/sign-in/anonymous", undefined));
+    expect(res.status).toBe(404);
   });
 });
 

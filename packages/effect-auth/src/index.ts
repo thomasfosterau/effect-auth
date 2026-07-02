@@ -63,6 +63,9 @@ export * from "./MagicLink.js";
 /** Email OTP sign-in and verification codes. */
 export * from "./EmailOtp.js";
 
+/** Anonymous (guest) sign-in with account linking. */
+export * from "./Anonymous.js";
+
 /** Two-factor authentication (TOTP + backup codes). */
 export * from "./TwoFactor.js";
 
