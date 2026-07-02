@@ -202,6 +202,16 @@ export const PhoneOtpSignInPayload = Schema.Struct({
 });
 export type PhoneOtpSignInPayload = typeof PhoneOtpSignInPayload.Type;
 
+/** List of a device's valid sessions (multi-session). */
+export const MultiSessionListView = Schema.Array(SessionWithUserView);
+export type MultiSessionListView = typeof MultiSessionListView.Type;
+
+/** Request body for multi-session set-active / revoke. */
+export const MultiSessionActionPayload = Schema.Struct({
+  sessionId: Schema.String,
+});
+export type MultiSessionActionPayload = typeof MultiSessionActionPayload.Type;
+
 /** Request body for starting a device authorization request. */
 export const DeviceCodePayload = Schema.Struct({
   clientId: Schema.optional(Schema.String),

@@ -138,6 +138,21 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.AuthSuccess,
     error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
   }),
+  // Multi-session (several accounts per device). 404 when not enabled.
+  HttpApiEndpoint.get("multiSessionList", "/multi-session/list", {
+    success: S.MultiSessionListView,
+    error: [S.NotFoundError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("multiSessionSetActive", "/multi-session/set-active", {
+    payload: S.MultiSessionActionPayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("multiSessionRevoke", "/multi-session/revoke", {
+    payload: S.MultiSessionActionPayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.InternalError],
+  }),
   // Device authorization grant (RFC 8628). 404 when unconfigured.
   HttpApiEndpoint.post("deviceCode", "/device/code", {
     payload: S.DeviceCodePayload,

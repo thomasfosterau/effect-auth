@@ -90,19 +90,46 @@ export interface CookieConfig {
   readonly cache?: SessionCacheConfig;
 }
 
+/** Multiple concurrent accounts per client (device-scoped session list). */
+export interface MultiSessionConfig {
+  /** Maximum concurrent sessions retained per device. Default 5. */
+  readonly maximumSessions?: number;
+}
+
 interface ResolvedCookieConfig {
   readonly name: string;
   readonly secure: boolean;
   readonly path: string;
   readonly cache: ResolvedSessionCache | undefined;
+  readonly multiSession: { readonly maximumSessions: number } | undefined;
 }
 
-const resolveCookieConfig = (config?: CookieConfig): ResolvedCookieConfig => ({
+const resolveCookieConfig = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+): ResolvedCookieConfig => ({
   name: config?.name ?? "conduit_session",
   secure: config?.secure ?? true,
   path: config?.path ?? "/",
   cache: resolveSessionCache(config?.cache),
+  multiSession:
+    multiSession === undefined ? undefined : { maximumSessions: multiSession.maximumSessions ?? 5 },
 });
+
+/** Name of the device session-list cookie. */
+const multiCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_multi`;
+
+/** Parse the comma-separated device session-id list from the request. */
+const readDeviceSessionIds = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+): string[] => {
+  const raw = request.cookies[multiCookieName(cfg)];
+  if (raw === undefined || raw === "") return [];
+  // "." separates ids: safe inside a cookie value (session ids are hex /
+  // base64url) and, unlike ",", it doesn't confuse Set-Cookie parsing.
+  return raw.split(".").filter((id) => id.length > 0);
+};
 
 /** Name of the companion cache cookie. */
 const dataCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_data`;
@@ -286,8 +313,8 @@ const resolveAnonymous = Effect.gen(function* () {
 });
 
 /** Layer implementing the `auth` group handlers. */
-export const authGroupLayer = (config?: CookieConfig) => {
-  const cfg = resolveCookieConfig(config);
+export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+  const cfg = resolveCookieConfig(config, multiSession);
 
   return HttpApiBuilder.group(AuthApi, "auth", (handlers) =>
     handlers
@@ -359,6 +386,17 @@ export const authGroupLayer = (config?: CookieConfig) => {
               dataCookieName(cfg),
               "",
               clearCookieOptions(cfg),
+            );
+          }
+          // Multi-session: sign out only the active account; drop it from the
+          // device list and keep the others (switch via /multi-session/set-active).
+          if (cfg.multiSession !== undefined) {
+            const remaining = readDeviceSessionIds(request, cfg).filter((id) => id !== sessionId);
+            response = yield* HttpServerResponse.setCookie(
+              response,
+              multiCookieName(cfg),
+              remaining.join("."),
+              sessionCookieOptions(cfg, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
             );
           }
           return response;
@@ -709,6 +747,88 @@ export const authGroupLayer = (config?: CookieConfig) => {
           return yield* withSessionCookie(body, result.session, cfg);
         }),
       )
+      .handle("multiSessionList", ({ request }) =>
+        Effect.gen(function* () {
+          if (cfg.multiSession === undefined) {
+            return yield* new S.NotFound({ message: "Multi-session is not enabled" });
+          }
+          const sessionManager = yield* SessionManagerTag;
+          const active = sessionIdFromRequest(request, cfg);
+          const ids = new Set(readDeviceSessionIds(request, cfg));
+          if (active !== undefined) ids.add(active);
+
+          const views: S.SessionWithUserView[] = [];
+          for (const id of ids) {
+            const resolved = yield* sessionManager
+              .validateSession(id)
+              .pipe(Effect.catch(() => Effect.succeed(null)));
+            if (resolved !== null) views.push(S.encodeSessionWithUser(resolved));
+          }
+          return views;
+        }),
+      )
+      .handle("multiSessionSetActive", ({ payload, request }) =>
+        Effect.gen(function* () {
+          if (cfg.multiSession === undefined) {
+            return yield* new S.NotFound({ message: "Multi-session is not enabled" });
+          }
+          if (!readDeviceSessionIds(request, cfg).includes(payload.sessionId)) {
+            return yield* new S.BadRequest({ message: "Session is not on this device" });
+          }
+          const sessionManager = yield* SessionManagerTag;
+          const resolved = yield* sessionManager
+            .validateSession(payload.sessionId)
+            .pipe(
+              Effect.mapError(() => new S.BadRequest({ message: "Invalid or expired session" })),
+            );
+          return yield* HttpServerResponse.json({ status: true }).pipe(
+            Effect.flatMap((response) =>
+              HttpServerResponse.setCookie(
+                response,
+                cfg.name,
+                resolved.session.id,
+                sessionCookieOptions(cfg, resolved.session.expiresAt),
+              ),
+            ),
+            Effect.orDie,
+          );
+        }),
+      )
+      .handle("multiSessionRevoke", ({ payload, request }) =>
+        Effect.gen(function* () {
+          if (cfg.multiSession === undefined) {
+            return yield* new S.NotFound({ message: "Multi-session is not enabled" });
+          }
+          const sessionManager = yield* SessionManagerTag;
+          yield* sessionManager
+            .invalidateSession(payload.sessionId)
+            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+
+          const remaining = readDeviceSessionIds(request, cfg).filter(
+            (id) => id !== payload.sessionId,
+          );
+          const farFuture = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+          const wasActive = sessionIdFromRequest(request, cfg) === payload.sessionId;
+          return yield* Effect.gen(function* () {
+            let response = yield* HttpServerResponse.json({ status: true });
+            response = yield* HttpServerResponse.setCookie(
+              response,
+              multiCookieName(cfg),
+              remaining.join("."),
+              sessionCookieOptions(cfg, farFuture),
+            );
+            if (wasActive) {
+              response = yield* HttpServerResponse.setCookie(
+                response,
+                cfg.name,
+                "",
+                clearCookieOptions(cfg),
+              );
+            }
+            return response;
+          }).pipe(Effect.orDie);
+        }),
+      )
       .handle("deviceCode", ({ payload }) =>
         Effect.gen(function* () {
           const device = yield* resolveDevice;
@@ -995,14 +1115,28 @@ const withSessionCookie = (
   cfg: ResolvedCookieConfig,
 ) =>
   Effect.gen(function* () {
-    const response = yield* HttpServerResponse.json(body);
-    if (session === undefined) return response;
-    return yield* HttpServerResponse.setCookie(
-      response,
+    const json = yield* HttpServerResponse.json(body);
+    if (session === undefined) return json;
+    let response = yield* HttpServerResponse.setCookie(
+      json,
       cfg.name,
       session.id,
       sessionCookieOptions(cfg, session.expiresAt),
     );
+    // Multi-session: append the new session to the device's session list (the
+    // primary cookie remains the active session), capped to `maximumSessions`.
+    if (cfg.multiSession !== undefined) {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const existing = readDeviceSessionIds(request, cfg).filter((id) => id !== session.id);
+      const ids = [...existing, session.id].slice(-cfg.multiSession.maximumSessions);
+      response = yield* HttpServerResponse.setCookie(
+        response,
+        multiCookieName(cfg),
+        ids.join("."),
+        sessionCookieOptions(cfg, session.expiresAt),
+      );
+    }
+    return response;
   }).pipe(Effect.orDie);
 
 // -----------------------------------------------------------------------------
@@ -1024,6 +1158,12 @@ export interface AuthWebHandlerOptions {
   readonly services: Layer.Layer<AuthServices>;
   /** Cookie configuration. */
   readonly cookie?: CookieConfig;
+  /**
+   * Enable multi-session: one browser can hold several signed-in accounts and
+   * switch between them. Each sign-in appends to a device session list; the
+   * active session is the primary cookie. See the `/multi-session/*` endpoints.
+   */
+  readonly multiSession?: MultiSessionConfig;
   /**
    * Mount path prefix to strip before routing, e.g. `"/api/auth"`. When set, a
    * request to `/api/auth/sign-in` is routed to the `/sign-in` endpoint.
@@ -1104,7 +1244,7 @@ export const makeAuthWebHandler = (
   readonly dispose: () => Promise<void>;
 } => {
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
-    Layer.provide(authGroupLayer(options.cookie)),
+    Layer.provide(authGroupLayer(options.cookie, options.multiSession)),
     Layer.provide(PlatformLayer),
   );
   // The handlers' service requirements are tracked as phantom
