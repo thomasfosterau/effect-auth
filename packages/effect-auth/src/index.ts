@@ -63,6 +63,12 @@ export * from "./EmailOtp.js";
 /** Two-factor authentication (TOTP + backup codes). */
 export * from "./TwoFactor.js";
 
+/** API keys (hashed at rest, permissions, quotas, rate limits). */
+export * from "./ApiKey.js";
+
+/** JWT issuance and verification (ES256/EdDSA) with JWKS. */
+export * from "./Jwt.js";
+
 /** Password reset flows. */
 export * from "./PasswordReset.js";
 
