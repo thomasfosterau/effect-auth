@@ -129,6 +129,16 @@ export interface SessionManager {
     userId: string,
     currentSessionId: string,
   ) => Effect.Effect<void, Errors.AuthError>;
+
+  /**
+   * Merge `attributes` into a session's stored attributes (e.g. record the
+   * `activeOrganizationId`). Existing keys are overwritten; others are kept.
+   * Returns the updated session.
+   */
+  readonly setSessionAttributes: (
+    sessionId: string,
+    attributes: Record<string, unknown>,
+  ) => Effect.Effect<Types.Session, Errors.SessionNotFoundError | Errors.AuthError>;
 }
 
 /**
@@ -284,6 +294,16 @@ export const makeSessionManager = (
             (session) => sessionStore.delete(session.id),
             { discard: true },
           );
+        }),
+
+      setSessionAttributes: (sessionId, attributes) =>
+        Effect.gen(function* () {
+          const session = yield* sessionStore.get(sessionId);
+          const updated: Types.Session = {
+            ...session,
+            attributes: { ...session.attributes, ...attributes },
+          };
+          return yield* sessionStore.update(updated);
         }),
     };
   });

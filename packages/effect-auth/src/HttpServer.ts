@@ -33,6 +33,17 @@ import {
 } from "./PasswordReset.js";
 import { UserServiceStoreTag, UserServiceTag } from "./User.js";
 import {
+  OrganizationServiceTag,
+  OrganizationStoreTag,
+  type Organization,
+  type Member,
+  type Invitation,
+  type FullOrganization,
+} from "./Organization.js";
+import { AdminServiceTag, AdminUserStoreTag } from "./Admin.js";
+import { ApiKeyServiceTag, ApiKeyStoreTag, type ApiKey } from "./ApiKey.js";
+import { JwtServiceTag, JwtKeyStoreTag } from "./Jwt.js";
+import {
   decodeSessionCacheCookie,
   encodeSessionCacheCookie,
   resolveSessionCache,
@@ -310,6 +321,106 @@ const resolveAnonymous = Effect.gen(function* () {
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.provideService(AnonymousUserStoreTag, store.value));
   return { service: service.value, provideStores };
+});
+
+/** Resolve the organization service + store, or fail with 404. */
+const resolveOrganization = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(OrganizationServiceTag);
+  const store = yield* Effect.serviceOption(OrganizationStoreTag);
+  if (Option.isNone(service) || Option.isNone(store)) {
+    return yield* new S.NotFound({ message: "Organizations are not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(Effect.provideService(OrganizationStoreTag, store.value));
+  return { service: service.value, provideStores };
+});
+
+/** Resolve the admin service + user store, or fail with 404. */
+const resolveAdmin = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(AdminServiceTag);
+  const store = yield* Effect.serviceOption(AdminUserStoreTag);
+  if (Option.isNone(service) || Option.isNone(store)) {
+    return yield* new S.NotFound({ message: "Admin is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(Effect.provideService(AdminUserStoreTag, store.value));
+  return { service: service.value, provideStores };
+});
+
+/** Resolve the API-key service + store, or fail with 404. */
+const resolveApiKey = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(ApiKeyServiceTag);
+  const store = yield* Effect.serviceOption(ApiKeyStoreTag);
+  if (Option.isNone(service) || Option.isNone(store)) {
+    return yield* new S.NotFound({ message: "API keys are not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(Effect.provideService(ApiKeyStoreTag, store.value));
+  return { service: service.value, provideStores };
+});
+
+/** Resolve the JWT service + key store, or fail with 404. */
+const resolveJwt = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(JwtServiceTag);
+  const store = yield* Effect.serviceOption(JwtKeyStoreTag);
+  if (Option.isNone(service) || Option.isNone(store)) {
+    return yield* new S.NotFound({ message: "JWT is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(Effect.provideService(JwtKeyStoreTag, store.value));
+  return { service: service.value, provideStores };
+});
+
+// --- Encoders for the organization / API-key domain types --------------------
+
+const encodeOrganization = (o: Organization): S.OrganizationView => ({
+  id: o.id,
+  name: o.name,
+  slug: o.slug,
+  ...(o.logo !== undefined && { logo: o.logo }),
+  metadata: o.metadata,
+  createdAt: o.createdAt,
+});
+
+const encodeMember = (m: Member): S.MemberView => ({
+  id: m.id,
+  organizationId: m.organizationId,
+  userId: m.userId,
+  role: m.role,
+  createdAt: m.createdAt,
+});
+
+const encodeInvitation = (i: Invitation): S.InvitationView => ({
+  id: i.id,
+  organizationId: i.organizationId,
+  email: i.email,
+  role: i.role,
+  status: i.status,
+  inviterId: i.inviterId,
+  expiresAt: i.expiresAt,
+  createdAt: i.createdAt,
+});
+
+const encodeFullOrganization = (f: FullOrganization): S.FullOrganizationView => ({
+  organization: encodeOrganization(f.organization),
+  members: f.members.map(encodeMember),
+});
+
+const encodeApiKey = (k: ApiKey): S.ApiKeyView => ({
+  id: k.id,
+  ...(k.name !== undefined && { name: k.name }),
+  ...(k.prefix !== undefined && { prefix: k.prefix }),
+  start: k.start,
+  userId: k.userId,
+  enabled: k.enabled,
+  ...(k.expiresAt !== undefined && { expiresAt: k.expiresAt }),
+  ...(k.lastUsedAt !== undefined && { lastUsedAt: k.lastUsedAt }),
+  ...(k.permissions !== undefined && { permissions: k.permissions }),
+  metadata: k.metadata,
+  ...(k.remaining !== undefined && { remaining: k.remaining }),
+  ...(k.rateLimit !== undefined && { rateLimit: k.rateLimit }),
+  createdAt: k.createdAt,
+  updatedAt: k.updatedAt,
 });
 
 /** Layer implementing the `auth` group handlers. */
@@ -1042,6 +1153,493 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               }),
             );
           return yield* secondFactorSuccess(result, cfg);
+        }),
+      )
+      // --- Organization -----------------------------------------------------
+      .handle("orgCreate", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const created = yield* org
+            .provideStores(
+              org.service.createOrganization(resolved.user.id, {
+                name: payload.name,
+                slug: payload.slug,
+                ...(payload.logo !== undefined && { logo: payload.logo }),
+                ...(payload.metadata !== undefined && { metadata: payload.metadata }),
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return encodeOrganization(created);
+        }),
+      )
+      .handle("orgList", ({ request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const orgs = yield* org
+            .provideStores(org.service.listOrganizations(resolved.user.id))
+            .pipe(
+              Effect.catchTags({
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return orgs.map(encodeOrganization);
+        }),
+      )
+      .handle("orgGet", ({ params, request }) =>
+        Effect.gen(function* () {
+          yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const full = yield* org
+            .provideStores(org.service.getFullOrganization(params.organizationId))
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return encodeFullOrganization(full);
+        }),
+      )
+      .handle("orgUpdate", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const updated = yield* org
+            .provideStores(
+              org.service.updateOrganization(resolved.user.id, params.organizationId, {
+                ...(payload.name !== undefined && { name: payload.name }),
+                ...(payload.slug !== undefined && { slug: payload.slug }),
+                ...(payload.logo !== undefined && { logo: payload.logo }),
+                ...(payload.metadata !== undefined && { metadata: payload.metadata }),
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return encodeOrganization(updated);
+        }),
+      )
+      .handle("orgDelete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          yield* org
+            .provideStores(org.service.deleteOrganization(resolved.user.id, params.organizationId))
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+        }),
+      )
+      .handle("orgSetActive", ({ payload, request }) =>
+        Effect.gen(function* () {
+          yield* resolveOrganization; // 404 when organizations are not enabled
+          const resolved = yield* requireSession(request, cfg);
+          const sessionManager = yield* SessionManagerTag;
+          yield* sessionManager
+            .setSessionAttributes(resolved.session.id, {
+              activeOrganizationId: payload.organizationId,
+            })
+            .pipe(
+              Effect.catchTags({
+                SessionNotFoundError: (e) =>
+                  Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return { status: true };
+        }),
+      )
+      .handle("orgInvite", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const invitation = yield* org
+            .provideStores(
+              org.service.inviteMember(resolved.user.id, params.organizationId, {
+                email: payload.email,
+                role: payload.role,
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return encodeInvitation(invitation);
+        }),
+      )
+      .handle("orgListInvitations", ({ params, request }) =>
+        Effect.gen(function* () {
+          yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const invitations = yield* org
+            .provideStores(org.service.listInvitations(params.organizationId))
+            .pipe(
+              Effect.catchTags({
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return invitations.map(encodeInvitation);
+        }),
+      )
+      .handle("orgAcceptInvitation", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const member = yield* org
+            .provideStores(
+              org.service.acceptInvitation(
+                resolved.user.id,
+                params.invitationId,
+                resolved.user.email,
+              ),
+            )
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return encodeMember(member);
+        }),
+      )
+      .handle("orgRejectInvitation", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const invitation = yield* org
+            .provideStores(org.service.rejectInvitation(params.invitationId, resolved.user.email))
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return encodeInvitation(invitation);
+        }),
+      )
+      .handle("orgCancelInvitation", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const invitation = yield* org
+            .provideStores(org.service.cancelInvitation(resolved.user.id, params.invitationId))
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return encodeInvitation(invitation);
+        }),
+      )
+      .handle("orgAddMember", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const member = yield* org
+            .provideStores(
+              org.service.addMember(
+                resolved.user.id,
+                params.organizationId,
+                payload.userId,
+                payload.role,
+              ),
+            )
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return encodeMember(member);
+        }),
+      )
+      .handle("orgUpdateMemberRole", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const member = yield* org
+            .provideStores(
+              org.service.updateMemberRole(
+                resolved.user.id,
+                params.organizationId,
+                payload.userId,
+                payload.role,
+              ),
+            )
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return encodeMember(member);
+        }),
+      )
+      .handle("orgRemoveMember", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          yield* org
+            .provideStores(
+              org.service.removeMember(resolved.user.id, params.organizationId, params.userId),
+            )
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+        }),
+      )
+      // --- Admin ------------------------------------------------------------
+      .handle("adminListUsers", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const admin = yield* resolveAdmin;
+          const result = yield* admin
+            .provideStores(
+              admin.service.listUsers(resolved.user, {
+                ...(payload.limit !== undefined && { limit: payload.limit }),
+                ...(payload.offset !== undefined && { offset: payload.offset }),
+                ...(payload.searchEmail !== undefined && { searchEmail: payload.searchEmail }),
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return { users: result.users.map(S.encodeUser), total: result.total };
+        }),
+      )
+      .handle("adminSetRole", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const admin = yield* resolveAdmin;
+          const user = yield* admin.service
+            .setRole(resolved.user, payload.userId, payload.role)
+            .pipe(
+              Effect.catchTags({
+                AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return S.encodeUser(user);
+        }),
+      )
+      .handle("adminBanUser", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const admin = yield* resolveAdmin;
+          const user = yield* admin.service
+            .banUser(resolved.user, payload.userId, {
+              ...(payload.reason !== undefined && { reason: payload.reason }),
+              ...(payload.expiresIn !== undefined && { expiresIn: payload.expiresIn }),
+            })
+            .pipe(
+              Effect.catchTags({
+                AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return S.encodeUser(user);
+        }),
+      )
+      .handle("adminUnbanUser", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const admin = yield* resolveAdmin;
+          const user = yield* admin.service.unbanUser(resolved.user, payload.userId).pipe(
+            Effect.catchTags({
+              AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return S.encodeUser(user);
+        }),
+      )
+      .handle("adminRemoveUser", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const admin = yield* resolveAdmin;
+          yield* admin.service.removeUser(resolved.user, payload.userId).pipe(
+            Effect.catchTags({
+              AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+        }),
+      )
+      .handle("adminRevokeSessions", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const admin = yield* resolveAdmin;
+          yield* admin.service.revokeUserSessions(resolved.user, payload.userId).pipe(
+            Effect.catchTags({
+              AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return { status: true };
+        }),
+      )
+      .handle("adminImpersonate", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const admin = yield* resolveAdmin;
+          const userService = yield* UserServiceTag;
+          const session = yield* admin.service.impersonateUser(resolved.user, payload.userId).pipe(
+            Effect.catchTags({
+              AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          const user = yield* userService
+            .getUser(session.userId)
+            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+          const body: S.AuthSuccess = {
+            user: S.encodeUser(user),
+            needsEmailVerification: false,
+          };
+          return yield* withSessionCookie(body, session, cfg);
+        }),
+      )
+      .handle("adminStopImpersonating", ({ request }) =>
+        Effect.gen(function* () {
+          yield* resolveAdmin; // 404 when admin is not enabled
+          const resolved = yield* requireSession(request, cfg);
+          const sessionManager = yield* SessionManagerTag;
+          yield* sessionManager
+            .invalidateSession(resolved.session.id)
+            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+          return yield* HttpServerResponse.json({ status: true }).pipe(
+            Effect.flatMap((response) =>
+              HttpServerResponse.setCookie(response, cfg.name, "", clearCookieOptions(cfg)),
+            ),
+            Effect.orDie,
+          );
+        }),
+      )
+      // --- API keys ---------------------------------------------------------
+      .handle("apiKeyCreate", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const apiKey = yield* resolveApiKey;
+          const result = yield* apiKey
+            .provideStores(
+              apiKey.service.create(resolved.user.id, {
+                ...(payload.name !== undefined && { name: payload.name }),
+                ...(payload.prefix !== undefined && { prefix: payload.prefix }),
+                ...(payload.expiresIn !== undefined && { expiresIn: payload.expiresIn }),
+                ...(payload.permissions !== undefined && { permissions: payload.permissions }),
+                ...(payload.metadata !== undefined && { metadata: payload.metadata }),
+                ...(payload.remaining !== undefined && { remaining: payload.remaining }),
+                ...(payload.rateLimit !== undefined && { rateLimit: payload.rateLimit }),
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return { key: result.key, apiKey: encodeApiKey(result.apiKey) };
+        }),
+      )
+      .handle("apiKeyList", ({ request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const apiKey = yield* resolveApiKey;
+          const keys = yield* apiKey.provideStores(apiKey.service.list(resolved.user.id)).pipe(
+            Effect.catchTags({
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return keys.map(encodeApiKey);
+        }),
+      )
+      .handle("apiKeyUpdate", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const apiKey = yield* resolveApiKey;
+          const updated = yield* apiKey
+            .provideStores(
+              apiKey.service.update(resolved.user.id, params.keyId, {
+                ...(payload.name !== undefined && { name: payload.name }),
+                ...(payload.enabled !== undefined && { enabled: payload.enabled }),
+                ...(payload.expiresAt !== undefined && { expiresAt: payload.expiresAt }),
+                ...(payload.permissions !== undefined && { permissions: payload.permissions }),
+                ...(payload.metadata !== undefined && { metadata: payload.metadata }),
+                ...(payload.remaining !== undefined && { remaining: payload.remaining }),
+                ...(payload.rateLimit !== undefined && { rateLimit: payload.rateLimit }),
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return encodeApiKey(updated);
+        }),
+      )
+      .handle("apiKeyDelete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const apiKey = yield* resolveApiKey;
+          yield* apiKey.provideStores(apiKey.service.delete(resolved.user.id, params.keyId)).pipe(
+            Effect.catchTags({
+              ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+        }),
+      )
+      // --- JWT --------------------------------------------------------------
+      .handle("jwtToken", ({ request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const jwt = yield* resolveJwt;
+          const result = yield* jwt.provideStores(jwt.service.sign(resolved.user)).pipe(
+            Effect.catchTags({
+              JwtError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return { token: result.token, expiresAt: result.expiresAt };
+        }),
+      )
+      .handle("jwtJwks", () =>
+        Effect.gen(function* () {
+          const jwt = yield* resolveJwt;
+          const jwks = yield* jwt.provideStores(jwt.service.getJwks()).pipe(
+            Effect.catchTags({
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return { keys: jwks.keys.map((k) => ({ ...k })) };
         }),
       ),
   );

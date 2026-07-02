@@ -113,6 +113,7 @@ const makeHarness = (): Harness => {
     invalidateUserSessions: (userId) => Effect.sync(() => void revoked.push(userId)),
     listSessions: () => Effect.succeed([]),
     revokeOtherSessions: () => Effect.void,
+    setSessionAttributes: () => Effect.die("unused"),
   };
 
   const layer = AccountManagementServiceLayer({

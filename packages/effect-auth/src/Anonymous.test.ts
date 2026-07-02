@@ -67,6 +67,7 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
     invalidateUserSessions: () => Effect.void,
     listSessions: () => Effect.succeed([]),
     revokeOtherSessions: () => Effect.void,
+    setSessionAttributes: () => Effect.die("unused"),
   };
 
   const linkConfig: AnonymousConfig = {

@@ -298,6 +298,222 @@ export const BackupCodesView = Schema.Struct({
 export type BackupCodesView = typeof BackupCodesView.Type;
 
 // -----------------------------------------------------------------------------
+// Organization
+// -----------------------------------------------------------------------------
+
+/** Public view of an organization. */
+export const OrganizationView = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  slug: Schema.String,
+  logo: Schema.optional(Schema.String),
+  metadata: Attributes,
+  createdAt: Schema.Number,
+});
+export type OrganizationView = typeof OrganizationView.Type;
+
+/** Public view of an organization membership. */
+export const MemberView = Schema.Struct({
+  id: Schema.String,
+  organizationId: Schema.String,
+  userId: Schema.String,
+  role: Schema.String,
+  createdAt: Schema.Number,
+});
+export type MemberView = typeof MemberView.Type;
+
+/** Public view of an invitation. */
+export const InvitationView = Schema.Struct({
+  id: Schema.String,
+  organizationId: Schema.String,
+  email: Schema.String,
+  role: Schema.String,
+  status: Schema.Literals(["pending", "accepted", "rejected", "canceled"]),
+  inviterId: Schema.String,
+  expiresAt: Schema.Number,
+  createdAt: Schema.Number,
+});
+export type InvitationView = typeof InvitationView.Type;
+
+/** An organization together with its members. */
+export const FullOrganizationView = Schema.Struct({
+  organization: OrganizationView,
+  members: Schema.Array(MemberView),
+});
+export type FullOrganizationView = typeof FullOrganizationView.Type;
+
+export const OrganizationListView = Schema.Array(OrganizationView);
+export type OrganizationListView = typeof OrganizationListView.Type;
+
+export const InvitationListView = Schema.Array(InvitationView);
+export type InvitationListView = typeof InvitationListView.Type;
+
+/** Request body for creating an organization. */
+export const CreateOrganizationPayload = Schema.Struct({
+  name: Schema.String,
+  slug: Schema.String,
+  logo: Schema.optional(Schema.String),
+  metadata: Schema.optional(Attributes),
+});
+export type CreateOrganizationPayload = typeof CreateOrganizationPayload.Type;
+
+/** Request body for updating an organization. */
+export const UpdateOrganizationPayload = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  slug: Schema.optional(Schema.String),
+  logo: Schema.optional(Schema.String),
+  metadata: Schema.optional(Attributes),
+});
+export type UpdateOrganizationPayload = typeof UpdateOrganizationPayload.Type;
+
+/** Request body for inviting a member. */
+export const InviteMemberPayload = Schema.Struct({
+  email: Schema.String,
+  role: Schema.String,
+});
+export type InviteMemberPayload = typeof InviteMemberPayload.Type;
+
+/** Request body for adding a member directly. */
+export const AddMemberPayload = Schema.Struct({
+  userId: Schema.String,
+  role: Schema.String,
+});
+export type AddMemberPayload = typeof AddMemberPayload.Type;
+
+/** Request body for updating a member's role. */
+export const UpdateMemberRolePayload = Schema.Struct({
+  userId: Schema.String,
+  role: Schema.String,
+});
+export type UpdateMemberRolePayload = typeof UpdateMemberRolePayload.Type;
+
+/** Request body for setting the session's active organization (null clears it). */
+export const SetActiveOrganizationPayload = Schema.Struct({
+  organizationId: Schema.NullOr(Schema.String),
+});
+export type SetActiveOrganizationPayload = typeof SetActiveOrganizationPayload.Type;
+
+// -----------------------------------------------------------------------------
+// Admin
+// -----------------------------------------------------------------------------
+
+/** Paginated user listing (admin). */
+export const AdminUserListView = Schema.Struct({
+  users: Schema.Array(UserView),
+  total: Schema.Number,
+});
+export type AdminUserListView = typeof AdminUserListView.Type;
+
+/** Request body for listing users (admin). */
+export const AdminListUsersPayload = Schema.Struct({
+  limit: Schema.optional(Schema.Number),
+  offset: Schema.optional(Schema.Number),
+  searchEmail: Schema.optional(Schema.String),
+});
+export type AdminListUsersPayload = typeof AdminListUsersPayload.Type;
+
+/** Request body for setting a user's role (admin). */
+export const AdminSetRolePayload = Schema.Struct({
+  userId: Schema.String,
+  role: Schema.String,
+});
+export type AdminSetRolePayload = typeof AdminSetRolePayload.Type;
+
+/** Request body for banning a user (admin). */
+export const AdminBanUserPayload = Schema.Struct({
+  userId: Schema.String,
+  reason: Schema.optional(Schema.String),
+  expiresIn: Schema.optional(Schema.Number),
+});
+export type AdminBanUserPayload = typeof AdminBanUserPayload.Type;
+
+/** Request body identifying a target user (admin). */
+export const AdminUserActionPayload = Schema.Struct({
+  userId: Schema.String,
+});
+export type AdminUserActionPayload = typeof AdminUserActionPayload.Type;
+
+// -----------------------------------------------------------------------------
+// API keys
+// -----------------------------------------------------------------------------
+
+/** Per-key rate-limit configuration. */
+export const ApiKeyRateLimit = Schema.Struct({
+  maxRequests: Schema.Number,
+  windowMs: Schema.Number,
+});
+
+/** Public view of an API key (never includes the plaintext or hash). */
+export const ApiKeyView = Schema.Struct({
+  id: Schema.String,
+  name: Schema.optional(Schema.String),
+  prefix: Schema.optional(Schema.String),
+  start: Schema.String,
+  userId: Schema.String,
+  enabled: Schema.Boolean,
+  expiresAt: Schema.optional(Schema.Number),
+  lastUsedAt: Schema.optional(Schema.Number),
+  permissions: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  metadata: Attributes,
+  remaining: Schema.optional(Schema.Number),
+  rateLimit: Schema.optional(ApiKeyRateLimit),
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+});
+export type ApiKeyView = typeof ApiKeyView.Type;
+
+/** Result of creating an API key: the plaintext key (shown once) + its record. */
+export const ApiKeyCreatedView = Schema.Struct({
+  key: Schema.String,
+  apiKey: ApiKeyView,
+});
+export type ApiKeyCreatedView = typeof ApiKeyCreatedView.Type;
+
+export const ApiKeyListView = Schema.Array(ApiKeyView);
+export type ApiKeyListView = typeof ApiKeyListView.Type;
+
+/** Request body for creating an API key. */
+export const ApiKeyCreatePayload = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  prefix: Schema.optional(Schema.String),
+  expiresIn: Schema.optional(Schema.Number),
+  permissions: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  metadata: Schema.optional(Attributes),
+  remaining: Schema.optional(Schema.Number),
+  rateLimit: Schema.optional(ApiKeyRateLimit),
+});
+export type ApiKeyCreatePayload = typeof ApiKeyCreatePayload.Type;
+
+/** Request body for updating an API key. */
+export const ApiKeyUpdatePayload = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  enabled: Schema.optional(Schema.Boolean),
+  expiresAt: Schema.optional(Schema.Number),
+  permissions: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  metadata: Schema.optional(Attributes),
+  remaining: Schema.optional(Schema.Number),
+  rateLimit: Schema.optional(ApiKeyRateLimit),
+});
+export type ApiKeyUpdatePayload = typeof ApiKeyUpdatePayload.Type;
+
+// -----------------------------------------------------------------------------
+// JWT
+// -----------------------------------------------------------------------------
+
+/** A minted JWT plus its expiry (epoch millis). */
+export const JwtTokenView = Schema.Struct({
+  token: Schema.String,
+  expiresAt: Schema.Number,
+});
+export type JwtTokenView = typeof JwtTokenView.Type;
+
+/** A JWKS document (opaque key objects). */
+export const JwksView = Schema.Struct({
+  keys: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+});
+export type JwksView = typeof JwksView.Type;
+
+// -----------------------------------------------------------------------------
 // Error schemas (mapped to HTTP status codes via HttpApiSchema.status)
 // -----------------------------------------------------------------------------
 
