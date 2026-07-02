@@ -29,10 +29,12 @@ Inspired by Rust's password_hash crate, this module provides:
   - [PasswordHasherLayer](#passwordhasherlayer)
   - [PasswordHasherLive](#passwordhasherlive)
   - [PasswordHasherTag (class)](#passwordhashertag-class)
+  - [ScryptHasherLayer](#scrypthasherlayer)
   - [makeMultiAlgorithmVerifier](#makemultialgorithmverifier)
   - [makeMultiAlgorithmVerifierLayer](#makemultialgorithmverifierlayer)
   - [makePBKDF2Hasher](#makepbkdf2hasher)
   - [makePasswordHasher](#makepasswordhasher)
+  - [makeScryptHasher](#makescrypthasher)
 
 ---
 
@@ -158,6 +160,16 @@ Tag for PasswordHasher service
 export declare class PasswordHasherTag
 ```
 
+## ScryptHasherLayer
+
+Layer that provides the scrypt password hasher
+
+**Signature**
+
+```ts
+export declare const ScryptHasherLayer: Layer.Layer<PasswordHasherTag, never, never>;
+```
+
 ## makeMultiAlgorithmVerifier
 
 Create a multi-algorithm verifier that supports multiple password hashers
@@ -219,4 +231,25 @@ Backward compatibility: Default password hasher is PBKDF2
 
 ```ts
 export declare const makePasswordHasher: () => PasswordHasher;
+```
+
+## makeScryptHasher
+
+scrypt Password Hasher implementing the PasswordHasher trait.
+
+Uses Node's built-in `crypto.scrypt` (dependency-free) with OWASP-recommended
+parameters (N=2^17, r=8, p=1). scrypt is memory-hard, making it more
+resistant to GPU/ASIC attacks than PBKDF2.
+
+PHC-style format: `scrypt$N$r$p$salt$hash` (N/r/p are stored so parameters
+can be tuned without breaking existing hashes).
+
+**Signature**
+
+```ts
+export declare const makeScryptHasher: (options?: {
+  readonly cost?: number;
+  readonly blockSize?: number;
+  readonly parallelization?: number;
+}) => PasswordHasher;
 ```

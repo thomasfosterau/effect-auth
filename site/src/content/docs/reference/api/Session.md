@@ -48,7 +48,7 @@ export interface SessionManager {
   readonly createSession: (
     userId: string,
     attributes?: Record<string, unknown>,
-  ) => Effect.Effect<Types.Session, Errors.AuthError>;
+  ) => Effect.Effect<Types.Session, Errors.AuthError | HookError, Hooks>;
 
   /**
    * Validate a session and return it with the user
@@ -57,18 +57,47 @@ export interface SessionManager {
     sessionId: string,
   ) => Effect.Effect<
     Types.SessionWithUser,
-    Errors.SessionNotFoundError | Errors.SessionExpiredError | Errors.UserNotFoundError
+    Errors.SessionNotFoundError | Errors.SessionExpiredError | Errors.UserNotFoundError | HookError,
+    Hooks
   >;
 
   /**
    * Invalidate a session
    */
-  readonly invalidateSession: (sessionId: string) => Effect.Effect<void, Errors.AuthError>;
+  readonly invalidateSession: (
+    sessionId: string,
+  ) => Effect.Effect<void, Errors.AuthError | HookError, Hooks>;
 
   /**
    * Invalidate all sessions for a user
    */
   readonly invalidateUserSessions: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+
+  /**
+   * List a user's sessions that have not yet expired.
+   */
+  readonly listSessions: (
+    userId: string,
+  ) => Effect.Effect<ReadonlyArray<Types.Session>, Errors.AuthError>;
+
+  /**
+   * Invalidate every session for a user except the given one (e.g. keep the
+   * current device signed in while revoking all others).
+   */
+  readonly revokeOtherSessions: (
+    userId: string,
+    currentSessionId: string,
+  ) => Effect.Effect<void, Errors.AuthError>;
+
+  /**
+   * Merge `attributes` into a session's stored attributes (e.g. record the
+   * `activeOrganizationId`). Existing keys are overwritten; others are kept.
+   * Returns the updated session.
+   */
+  readonly setSessionAttributes: (
+    sessionId: string,
+    attributes: Record<string, unknown>,
+  ) => Effect.Effect<Types.Session, Errors.SessionNotFoundError | Errors.AuthError>;
 }
 ```
 
@@ -134,6 +163,13 @@ export interface SessionStore {
    * Delete all sessions for a user
    */
   readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+
+  /**
+   * List all sessions for a user
+   */
+  readonly listByUserId: (
+    userId: string,
+  ) => Effect.Effect<ReadonlyArray<Types.Session>, Errors.AuthError>;
 }
 ```
 

@@ -76,8 +76,8 @@ export interface PasswordResetService {
     email: string,
   ) => Effect.Effect<
     void,
-    Errors.AuthError | Errors.PasswordResetError,
-    PasswordResetStoreTag | PasswordResetUserStoreTag
+    Errors.AuthError | Errors.PasswordResetError | HookError,
+    PasswordResetStoreTag | PasswordResetUserStoreTag | Hooks
   >;
 
   readonly resetPassword: (
@@ -85,8 +85,12 @@ export interface PasswordResetService {
     newPassword: string,
   ) => Effect.Effect<
     PasswordResetResult,
-    Errors.AuthError | Errors.PasswordResetError | Errors.HashingError,
-    PasswordResetStoreTag | PasswordResetUserStoreTag | PasswordHasherTag | SessionManagerTag
+    Errors.AuthError | Errors.PasswordResetError | Errors.HashingError | HookError,
+    | PasswordResetStoreTag
+    | PasswordResetUserStoreTag
+    | PasswordHasherTag
+    | SessionManagerTag
+    | Hooks
   >;
 }
 ```

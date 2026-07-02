@@ -1,0 +1,102 @@
+---
+title: Coming from better-auth
+description: Concept mapping and migration notes for better-auth users.
+---
+
+effect-auth covers most of better-auth's surface, re-expressed in Effect's
+vocabulary. The biggest difference is architectural: better-auth is a
+framework you configure with one options object; effect-auth is a set of
+services you compose with `Layer`s, so every seam (storage, hashing, email
+delivery, hooks) is an explicit, typed dependency.
+
+## Concept mapping
+
+| better-auth                                                               | effect-auth                                                                                                                                       |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `betterAuth({ ... })` options object                                      | `Layer`s composed per feature (`SessionManagerLayer`, `AuthLifecycleServiceLayer`, ...)                                                           |
+| Plugins (`twoFactor()`, `organization()`, ...)                            | Feature modules — provide the module's service + store layers to enable; HTTP endpoints answer 404 until you do                                   |
+| Database adapters (Kysely/Prisma/Drizzle)                                 | Store interfaces (`SessionStore`, `EmailPasswordStore`, ...) — implement against anything; `@effect-auth/sql` ships SQL-backed layers             |
+| `hooks` / middleware                                                      | The typed `Hooks` service: `makePlugin` + `composePlugins` decorator layers with transform (short-circuiting) and tap (observing) hook points     |
+| `auth.handler` (framework route)                                          | `Http.makeAuthWebHandler({ services })` → a standard `Request => Response` handler for any framework                                              |
+| `createAuthClient()`                                                      | `@effect-auth/client` (`createAuthClient` + React/Svelte/Vue bindings), or the Effect-native `Http.makeAuthClient` derived from the same contract |
+| `useSession()`                                                            | `useSession(client)` from `@effect-auth/client/react` (Svelte stores and Vue composables included)                                                |
+| Session cookie cache                                                      | `cookie.cache` (HMAC-signed session-data cookie)                                                                                                  |
+| `secondaryStorage`                                                        | KV-backed layers from `KeyValueStores` over `effect/unstable/persistence` (in-memory, file system, Redis)                                         |
+| `jwt()` plugin                                                            | `JwtServiceLayer` (ES256/EdDSA, JWKS at `GET /jwks`)                                                                                              |
+| `oidcProvider()` plugin                                                   | `OidcProviderServiceLayer` (authorization-code + PKCE, consent, discovery, shared JWKS)                                                           |
+| `organization()` plugin                                                   | `OrganizationServiceLayer` (members, invitations, roles)                                                                                          |
+| `admin()` plugin                                                          | `AdminServiceLayer` (list/ban/impersonate)                                                                                                        |
+| `apiKey()` plugin                                                         | `ApiKeyServiceLayer` (sha256 at rest, permissions, quotas, rate limits)                                                                           |
+| `magicLink()`, `emailOTP()`, `phoneNumber()`, `anonymous()`, `username()` | `MagicLink`, `EmailOtp`, `PhoneOtp`, `Anonymous`, `Username` modules                                                                              |
+| `siwe()`, `oneTap()`, `lastLoginMethod()`                                 | `Siwe` module + `@effect-auth/siwe` verifier; `GoogleOneTap` module; `makeLastLoginMethodPlugin` + `cookie.lastLoginMethod`                       |
+| `sso()` plugin                                                            | `SsoServiceLayer` (OIDC relying party with email-domain routing)                                                                                  |
+| `captcha()`, `haveIBeenPwned()`                                           | `CaptchaPlugin`, `HibpPlugin` hooks plugins                                                                                                       |
+
+## What a migration looks like
+
+better-auth:
+
+```ts
+export const auth = betterAuth({
+  database: drizzleAdapter(db),
+  emailAndPassword: { enabled: true },
+  plugins: [twoFactor(), organization()],
+});
+```
+
+effect-auth — each capability is a layer, storage is a set of interfaces you
+implement once against your schema:
+
+```ts
+import { Layer } from "effect";
+import * as Auth from "effect-auth";
+
+const stores = Layer.mergeAll(
+  Layer.succeed(Auth.SessionStoreTag)(sessionStore),
+  Layer.succeed(Auth.UserStoreTag)(userStore),
+  Layer.succeed(Auth.EmailPasswordStoreTag)(emailPasswordStore),
+  // ... the stores for the features you enable
+);
+
+const services = Layer.mergeAll(
+  stores,
+  Auth.SessionManagerLayer(sessionConfig).pipe(Layer.provide(stores)),
+  Auth.AuthLifecycleServiceLayer(),
+  Auth.UserServiceLayer(),
+  Auth.Hooks.Default,
+  // Optional features — merge their layers to switch the endpoints on:
+  // Auth.TwoFactorServiceLayer(...), Auth.OrganizationServiceLayer(), ...
+);
+
+const { handler } = Auth.Http.makeAuthWebHandler({
+  services,
+  prefix: "/api/auth",
+});
+```
+
+Mount `handler` in any framework — the same `Request => Response` function
+works in Next.js route handlers, SvelteKit, Hono, Bun.serve, and Node.
+
+## The endpoint surface
+
+The HTTP contract intentionally mirrors better-auth's REST shape
+(`/sign-up`, `/sign-in`, `/session`, `/magic-link/verify`,
+`/two-factor/verify-totp`, `/organization/...`, `/oauth2/...`), so most
+client-side code ports with a base-URL change. Endpoints for features you
+haven't provided layers for answer `404` with a descriptive message rather
+than disappearing from the router.
+
+## Client code
+
+```ts
+import { createAuthClient } from "@effect-auth/client";
+
+const client = createAuthClient({ baseUrl: "/api/auth" });
+await client.signIn({ email, password });
+```
+
+React/Svelte/Vue bindings subscribe to the same observable session store
+(`useSession`, `sessionStore`, Vue `useSession`). If your app is itself
+written in Effect, prefer `Auth.Http.makeAuthClient(baseUrl)` — a fully
+typed `HttpApiClient` derived from the contract, with tagged errors in the
+Effect error channel.

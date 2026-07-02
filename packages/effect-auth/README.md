@@ -4,17 +4,18 @@ A generic authentication and authorization library for [Effect](https://effect.w
 
 ## Features
 
-- 🔐 **Generic and Flexible**: Built with Effect's Request/Resolver pattern for maximum customization
-- 🔒 **Secure by Default**: Following industry best practices for password hashing and session management
-- 🎯 **Type-Safe**: Full TypeScript support with comprehensive type inference
-- 🧩 **Composable**: Use Effect's powerful composition capabilities
-- 🔄 **Bring Your Own Storage**: Implement storage adapters for any database or backend
-- 📦 **Zero Lock-in**: No vendor lock-in, works with any storage backend
-- 🔑 **Two-Factor Authentication**: TOTP and HOTP support following RFC 6238 and RFC 4226
-- 🌐 **OAuth 2.0 / Social Login**: Pre-built providers for Google, GitHub, Discord, Microsoft with PKCE support
-- ✉️ **Email Verification**: Secure token-based email verification flows
-- 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets for all auth operations
-- 🔓 **WebAuthn / Passkeys**: Passwordless authentication with FIDO2 compliance
+- 🔐 **Generic and Flexible**: Services and layers over small store interfaces — every seam is an explicit, typed dependency
+- 🔒 **Secure by Default**: Hashed secrets at rest, timing-safe comparisons, anti-enumeration flows, trusted-origin CSRF protection
+- 🎯 **Type-Safe**: Full TypeScript support with comprehensive type inference; tagged errors in the Effect error channel
+- 🔄 **Bring Your Own Storage**: Implement the store interfaces against any backend, use the KV-backed layers, or drop in `@effect-auth/sql`
+- 🪄 **Every sign-in method**: Email/password, username, magic link, email & phone OTP, anonymous guests, WebAuthn/passkeys, OAuth social login, device authorization (RFC 8628), Sign-In With Ethereum, and Google One Tap
+- 🔑 **Two-Factor Authentication**: TOTP enrollment with backup codes, integrated into sign-in via the `SecondFactorGate`
+- 🏢 **Organizations & Admin**: Multi-tenant organizations (members, invitations, roles) and admin tooling (bans, impersonation)
+- 🗝️ **API Keys & JWT**: Hashed API keys with permissions/quotas/rate limits; ES256/EdDSA JWTs with a published JWKS
+- 🏛️ **Enterprise SSO & OIDC Provider**: Act as an OIDC relying party (email-domain routing) or as a full OpenID Connect identity provider (authorization-code + PKCE, consent, discovery)
+- 🌍 **HTTP Protocol**: A typed `effect/unstable/httpapi` contract served as a mountable Web handler, with a derived typed client, OpenAPI document, session cookie cache, multi-session, and last-login-method hints
+- 🧩 **Hooks & Plugins**: A typed, composable hooks system with ready-made plugins (audit, rate limit, account lockout, captcha, HIBP, last-login-method)
+- 📱 **Framework Clients**: `@effect-auth/client` — a dependency-free browser client with React/Svelte/Vue bindings
 
 ## Installation
 
@@ -53,9 +54,12 @@ const sessionStore: Auth.SessionStore = {
   update: (session) => Effect.succeed(session),
   delete: (sessionId) => Effect.void,
   deleteByUserId: (userId) => Effect.void,
+  listByUserId: (userId) => Effect.succeed([]),
 };
 
-// Implement user storage
+// Implement user storage. Users carry first-class identity fields
+// (email, emailVerified, name, image, createdAt, updatedAt) plus an
+// `attributes` bag for app-specific data.
 const userStore: Auth.UserStore = {
   get: (userId) => Effect.fail(new Auth.UserNotFoundError({ message: "Not found", userId })),
   getCredentials: (userId) => Effect.succeed("hashed-password"),

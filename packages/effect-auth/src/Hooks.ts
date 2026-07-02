@@ -20,10 +20,10 @@
  *
  * @example
  * ```ts
- * import { Hooks, composePlugins } from "effect-auth"
+ * import { Layer } from "effect"
+ * import { AuditPlugin, composePlugins, Hooks, NormalizeEmailPlugin } from "effect-auth"
  *
  * const layer = composePlugins([
- *   RateLimitPlugin,      // beforeSignIn: short-circuits with RateLimitError
  *   NormalizeEmailPlugin, // beforeSignUp/beforeSignIn: lowercases email
  *   AuditPlugin,          // afterSignIn/afterSignUp/afterSignOut: logs
  * ]).pipe(Layer.provide(Hooks.Default))
@@ -168,8 +168,11 @@ export class Hooks extends Context.Service<Hooks, HookDefs>()("@effect-auth/Hook
    *
    * @example
    * ```ts
-   * afterSignIn: Hooks.tap((result: AuthResult) =>
-   *   Effect.logInfo("signed in", { userId: result.user.id })
+   * import { Effect } from "effect"
+   * import { Hooks, type AuthResult } from "effect-auth"
+   *
+   * const afterSignIn = Hooks.tap((result: AuthResult) =>
+   *   Effect.logInfo("signed in", { userId: result.user.id }),
    * )
    * ```
    */
@@ -259,20 +262,25 @@ const wrapHooks = (inner: HookDefs, impls: PluginImpls, options: MakePluginOptio
  *   dependencies surface in the Layer's requirements:
  *   `Layer<Hooks, never, Hooks | SomeService>`.
  *
- * @example Zero-dependency
+ * @example
  * ```ts
+ * import { Effect } from "effect"
+ * import { makePlugin, type PluginImpls, type SignInInput } from "effect-auth"
+ *
+ * // Zero-dependency: pass the hook implementations directly.
  * const NormalizeEmail = makePlugin({
  *   beforeSignUp: (input) => Effect.succeed({ ...input, email: input.email.toLowerCase() }),
  * })
- * ```
  *
- * @example With dependencies
- * ```ts
- * const RateLimit = makePlugin(
+ * // Effectful: acquire the plugin's own services first (they surface in the
+ * // Layer's requirements).
+ * const Logged = makePlugin(
  *   Effect.gen(function* () {
- *     const limiter = yield* RateLimiter
- *     return { beforeSignIn: (input) => limiter.consumeToken(...).pipe(Effect.as(input)) }
- *   })
+ *     yield* Effect.logInfo("plugin initialized")
+ *     return {
+ *       beforeSignIn: (input: SignInInput) => Effect.succeed(input),
+ *     } satisfies PluginImpls
+ *   }),
  * )
  * ```
  */
@@ -311,7 +319,10 @@ export function makePlugin(
  *
  * @example
  * ```ts
- * const layer = composePlugins([RateLimit, NormalizeEmail, Audit]).pipe(
+ * import { Layer } from "effect"
+ * import { AuditPlugin, composePlugins, Hooks, NormalizeEmailPlugin } from "effect-auth"
+ *
+ * const layer = composePlugins([NormalizeEmailPlugin, AuditPlugin]).pipe(
  *   Layer.provide(Hooks.Default),
  * )
  * ```

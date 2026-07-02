@@ -17,6 +17,7 @@ description: "API reference for the Errors module."
   - [EmailNotVerifiedError (class)](#emailnotverifiederror-class)
   - [EmailVerificationError (class)](#emailverificationerror-class)
   - [HashingError (class)](#hashingerror-class)
+  - [InsufficientScopeError (class)](#insufficientscopeerror-class)
   - [InvalidCredentialsError (class)](#invalidcredentialserror-class)
   - [MagicLinkError (class)](#magiclinkerror-class)
   - [OAuthProviderError (class)](#oauthprovidererror-class)
@@ -102,6 +103,16 @@ Hashing error
 
 ```ts
 export declare class HashingError
+```
+
+## InsufficientScopeError (class)
+
+Insufficient scope error (OAuth-style scope authorization)
+
+**Signature**
+
+```ts
+export declare class InsufficientScopeError
 ```
 
 ## InvalidCredentialsError (class)

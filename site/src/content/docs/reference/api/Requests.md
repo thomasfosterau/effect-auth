@@ -56,10 +56,7 @@ description: "API reference for the Requests module."
 **Signature**
 
 ```ts
-export declare const CheckPermissionRequest: Request.Request.Constructor<
-  CheckPermissionRequest,
-  "_tag"
->;
+export declare const CheckPermissionRequest: Request.Constructor<CheckPermissionRequest, "_tag">;
 ```
 
 ## CheckPermissionRequest (interface)
@@ -85,10 +82,7 @@ export interface CheckPermissionRequest extends Request.Request<
 **Signature**
 
 ```ts
-export declare const CreateSessionRequest: Request.Request.Constructor<
-  CreateSessionRequest,
-  "_tag"
->;
+export declare const CreateSessionRequest: Request.Constructor<CreateSessionRequest, "_tag">;
 ```
 
 ## CreateSessionRequest (interface)
@@ -98,7 +92,10 @@ Request to create a new session for a user
 **Signature**
 
 ```ts
-export interface CreateSessionRequest extends Request.Request<Types.Session, Errors.AuthError> {
+export interface CreateSessionRequest extends Request.Request<
+  Types.Session,
+  Errors.AuthError | HookError
+> {
   readonly _tag: "CreateSessionRequest";
   readonly userId: string;
   readonly attributes?: Record<string, unknown>;
@@ -110,7 +107,7 @@ export interface CreateSessionRequest extends Request.Request<Types.Session, Err
 **Signature**
 
 ```ts
-export declare const DeleteUserRequest: Request.Request.Constructor<DeleteUserRequest, "_tag">;
+export declare const DeleteUserRequest: Request.Constructor<DeleteUserRequest, "_tag">;
 ```
 
 ## DeleteUserRequest (interface)
@@ -131,10 +128,7 @@ export interface DeleteUserRequest extends Request.Request<void, Errors.AuthErro
 **Signature**
 
 ```ts
-export declare const GetUserByEmailRequest: Request.Request.Constructor<
-  GetUserByEmailRequest,
-  "_tag"
->;
+export declare const GetUserByEmailRequest: Request.Constructor<GetUserByEmailRequest, "_tag">;
 ```
 
 ## GetUserByEmailRequest (interface)
@@ -158,7 +152,7 @@ export interface GetUserByEmailRequest extends Request.Request<
 **Signature**
 
 ```ts
-export declare const GetUserRequest: Request.Request.Constructor<GetUserRequest, "_tag">;
+export declare const GetUserRequest: Request.Constructor<GetUserRequest, "_tag">;
 ```
 
 ## GetUserRequest (interface)
@@ -179,7 +173,7 @@ export interface GetUserRequest extends Request.Request<Types.User, Errors.UserN
 **Signature**
 
 ```ts
-export declare const HashPasswordRequest: Request.Request.Constructor<HashPasswordRequest, "_tag">;
+export declare const HashPasswordRequest: Request.Constructor<HashPasswordRequest, "_tag">;
 ```
 
 ## HashPasswordRequest (interface)
@@ -203,7 +197,7 @@ export interface HashPasswordRequest extends Request.Request<
 **Signature**
 
 ```ts
-export declare const InvalidateSessionRequest: Request.Request.Constructor<
+export declare const InvalidateSessionRequest: Request.Constructor<
   InvalidateSessionRequest,
   "_tag"
 >;
@@ -216,7 +210,10 @@ Request to invalidate/delete a session
 **Signature**
 
 ```ts
-export interface InvalidateSessionRequest extends Request.Request<void, Errors.AuthError> {
+export interface InvalidateSessionRequest extends Request.Request<
+  void,
+  Errors.AuthError | HookError
+> {
   readonly _tag: "InvalidateSessionRequest";
   readonly sessionId: string;
 }
@@ -227,7 +224,7 @@ export interface InvalidateSessionRequest extends Request.Request<void, Errors.A
 **Signature**
 
 ```ts
-export declare const InvalidateUserSessionsRequest: Request.Request.Constructor<
+export declare const InvalidateUserSessionsRequest: Request.Constructor<
   InvalidateUserSessionsRequest,
   "_tag"
 >;
@@ -251,7 +248,7 @@ export interface InvalidateUserSessionsRequest extends Request.Request<void, Err
 **Signature**
 
 ```ts
-export declare const MarkEmailVerifiedRequest: Request.Request.Constructor<
+export declare const MarkEmailVerifiedRequest: Request.Constructor<
   MarkEmailVerifiedRequest,
   "_tag"
 >;
@@ -278,7 +275,7 @@ export interface MarkEmailVerifiedRequest extends Request.Request<
 **Signature**
 
 ```ts
-export declare const RequestPasswordResetRequest: Request.Request.Constructor<
+export declare const RequestPasswordResetRequest: Request.Constructor<
   RequestPasswordResetRequest,
   "_tag"
 >;
@@ -293,7 +290,7 @@ Request to initiate password reset for an email
 ```ts
 export interface RequestPasswordResetRequest extends Request.Request<
   void,
-  Errors.AuthError | Errors.PasswordResetError
+  Errors.AuthError | Errors.PasswordResetError | HookError
 > {
   readonly _tag: "RequestPasswordResetRequest";
   readonly email: string;
@@ -305,10 +302,7 @@ export interface RequestPasswordResetRequest extends Request.Request<
 **Signature**
 
 ```ts
-export declare const ResetPasswordRequest: Request.Request.Constructor<
-  ResetPasswordRequest,
-  "_tag"
->;
+export declare const ResetPasswordRequest: Request.Constructor<ResetPasswordRequest, "_tag">;
 ```
 
 ## ResetPasswordRequest (interface)
@@ -320,7 +314,7 @@ Request to reset password with a token
 ```ts
 export interface ResetPasswordRequest extends Request.Request<
   PasswordReset.PasswordResetResult,
-  Errors.AuthError | Errors.PasswordResetError | Errors.HashingError
+  Errors.AuthError | Errors.PasswordResetError | Errors.HashingError | HookError
 > {
   readonly _tag: "ResetPasswordRequest";
   readonly token: string;
@@ -333,7 +327,7 @@ export interface ResetPasswordRequest extends Request.Request<
 **Signature**
 
 ```ts
-export declare const SignInEmailRequest: Request.Request.Constructor<SignInEmailRequest, "_tag">;
+export declare const SignInEmailRequest: Request.Constructor<SignInEmailRequest, "_tag">;
 ```
 
 ## SignInEmailRequest (interface)
@@ -349,6 +343,7 @@ export interface SignInEmailRequest extends Request.Request<
   | Errors.HashingError
   | Errors.InvalidCredentialsError
   | Errors.EmailVerificationError
+  | HookError
 > {
   readonly _tag: "SignInEmailRequest";
   readonly input: {
@@ -364,7 +359,7 @@ export interface SignInEmailRequest extends Request.Request<
 **Signature**
 
 ```ts
-export declare const SignUpEmailRequest: Request.Request.Constructor<SignUpEmailRequest, "_tag">;
+export declare const SignUpEmailRequest: Request.Constructor<SignUpEmailRequest, "_tag">;
 ```
 
 ## SignUpEmailRequest (interface)
@@ -376,7 +371,11 @@ Request to sign up with email and password through lifecycle service
 ```ts
 export interface SignUpEmailRequest extends Request.Request<
   AuthLifecycle.AuthLifecycleResult,
-  Errors.AuthError | Errors.HashingError | Errors.EmailVerificationError
+  | Errors.AuthError
+  | Errors.HashingError
+  | Errors.EmailVerificationError
+  | Errors.EmailNotVerifiedError
+  | HookError
 > {
   readonly _tag: "SignUpEmailRequest";
   readonly input: {
@@ -394,7 +393,7 @@ export interface SignUpEmailRequest extends Request.Request<
 **Signature**
 
 ```ts
-export declare const UpdateUserAttributesRequest: Request.Request.Constructor<
+export declare const UpdateUserAttributesRequest: Request.Constructor<
   UpdateUserAttributesRequest,
   "_tag"
 >;
@@ -422,10 +421,7 @@ export interface UpdateUserAttributesRequest extends Request.Request<
 **Signature**
 
 ```ts
-export declare const ValidateSessionRequest: Request.Request.Constructor<
-  ValidateSessionRequest,
-  "_tag"
->;
+export declare const ValidateSessionRequest: Request.Constructor<ValidateSessionRequest, "_tag">;
 ```
 
 ## ValidateSessionRequest (interface)
@@ -437,7 +433,7 @@ Request to validate and retrieve a session
 ```ts
 export interface ValidateSessionRequest extends Request.Request<
   Types.SessionWithUser,
-  Errors.SessionNotFoundError | Errors.SessionExpiredError | Errors.UserNotFoundError
+  Errors.SessionNotFoundError | Errors.SessionExpiredError | Errors.UserNotFoundError | HookError
 > {
   readonly _tag: "ValidateSessionRequest";
   readonly sessionId: string;
@@ -449,7 +445,7 @@ export interface ValidateSessionRequest extends Request.Request<
 **Signature**
 
 ```ts
-export declare const VerifyCredentialsRequest: Request.Request.Constructor<
+export declare const VerifyCredentialsRequest: Request.Constructor<
   VerifyCredentialsRequest,
   "_tag"
 >;
@@ -477,7 +473,7 @@ export interface VerifyCredentialsRequest extends Request.Request<
 **Signature**
 
 ```ts
-export declare const VerifyEmailRequest: Request.Request.Constructor<VerifyEmailRequest, "_tag">;
+export declare const VerifyEmailRequest: Request.Constructor<VerifyEmailRequest, "_tag">;
 ```
 
 ## VerifyEmailRequest (interface)
@@ -489,7 +485,7 @@ Request to verify email token through lifecycle service
 ```ts
 export interface VerifyEmailRequest extends Request.Request<
   AuthLifecycle.AuthLifecycleResult,
-  Errors.AuthError | Errors.EmailVerificationError
+  Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError | HookError
 > {
   readonly _tag: "VerifyEmailRequest";
   readonly input: {
@@ -504,10 +500,7 @@ export interface VerifyEmailRequest extends Request.Request<
 **Signature**
 
 ```ts
-export declare const VerifyPasswordRequest: Request.Request.Constructor<
-  VerifyPasswordRequest,
-  "_tag"
->;
+export declare const VerifyPasswordRequest: Request.Constructor<VerifyPasswordRequest, "_tag">;
 ```
 
 ## VerifyPasswordRequest (interface)

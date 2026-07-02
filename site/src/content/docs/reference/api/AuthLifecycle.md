@@ -45,6 +45,8 @@ export interface AuthLifecycleResult {
   readonly user: Types.User;
   readonly session?: Types.Session;
   readonly needsEmailVerification: boolean;
+  /** Present when a second factor is required to complete sign-in. */
+  readonly secondFactor?: SecondFactorChallenge;
 }
 ```
 
@@ -69,12 +71,14 @@ export interface AuthLifecycleService {
     | Errors.AuthError
     | Errors.HashingError
     | Errors.EmailVerificationError
-    | Errors.EmailNotVerifiedError,
+    | Errors.EmailNotVerifiedError
+    | HookError,
     | EmailPasswordStoreTag
     | PasswordHasherTag
     | SessionManagerTag
     | EmailVerificationServiceTag
     | EmailVerificationStoreTag
+    | Hooks
   >;
 
   readonly signIn: (
@@ -84,24 +88,27 @@ export interface AuthLifecycleService {
     | Errors.AuthError
     | Errors.HashingError
     | Errors.InvalidCredentialsError
-    | Errors.EmailVerificationError,
+    | Errors.EmailVerificationError
+    | HookError,
     | EmailPasswordStoreTag
     | PasswordHasherTag
     | SessionManagerTag
     | EmailVerificationServiceTag
     | EmailVerificationStoreTag
+    | Hooks
   >;
 
   readonly verifyEmail: (
     input: VerifyEmailInput,
   ) => Effect.Effect<
     AuthLifecycleResult,
-    Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError,
+    Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError | HookError,
     | UserServiceTag
     | UserServiceStoreTag
     | SessionManagerTag
     | EmailVerificationServiceTag
     | EmailVerificationStoreTag
+    | Hooks
   >;
 }
 ```

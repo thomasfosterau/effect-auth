@@ -39,9 +39,10 @@ Create a resolver for session creation
 **Signature**
 
 ```ts
-export declare const makeCreateSessionResolver: RequestResolver.RequestResolver<
-  Requests.CreateSessionRequest,
-  SessionManagerTag
+export declare const makeCreateSessionResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.CreateSessionRequest>,
+  never,
+  SessionManagerTag | Hooks
 >;
 ```
 
@@ -52,8 +53,9 @@ Resolver for DeleteUserRequest
 **Signature**
 
 ```ts
-export declare const makeDeleteUserResolver: RequestResolver.RequestResolver<
-  Requests.DeleteUserRequest,
+export declare const makeDeleteUserResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.DeleteUserRequest>,
+  never,
   UserServiceTag | UserServiceStoreTag
 >;
 ```
@@ -65,8 +67,9 @@ Resolver for GetUserByEmailRequest
 **Signature**
 
 ```ts
-export declare const makeGetUserByEmailResolver: RequestResolver.RequestResolver<
-  Requests.GetUserByEmailRequest,
+export declare const makeGetUserByEmailResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.GetUserByEmailRequest>,
+  never,
   UserServiceTag | UserServiceStoreTag
 >;
 ```
@@ -78,8 +81,9 @@ Resolver for GetUserRequest
 **Signature**
 
 ```ts
-export declare const makeGetUserResolver: RequestResolver.RequestResolver<
-  Requests.GetUserRequest,
+export declare const makeGetUserResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.GetUserRequest>,
+  never,
   UserServiceTag | UserServiceStoreTag
 >;
 ```
@@ -91,8 +95,9 @@ Create a resolver for password hashing
 **Signature**
 
 ```ts
-export declare const makeHashPasswordResolver: RequestResolver.RequestResolver<
-  Requests.HashPasswordRequest,
+export declare const makeHashPasswordResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.HashPasswordRequest>,
+  never,
   PasswordHasherTag
 >;
 ```
@@ -104,9 +109,10 @@ Create a resolver for session invalidation
 **Signature**
 
 ```ts
-export declare const makeInvalidateSessionResolver: RequestResolver.RequestResolver<
-  Requests.InvalidateSessionRequest,
-  SessionManagerTag
+export declare const makeInvalidateSessionResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.InvalidateSessionRequest>,
+  never,
+  SessionManagerTag | Hooks
 >;
 ```
 
@@ -117,8 +123,9 @@ Create a resolver for invalidating all user sessions
 **Signature**
 
 ```ts
-export declare const makeInvalidateUserSessionsResolver: RequestResolver.RequestResolver<
-  Requests.InvalidateUserSessionsRequest,
+export declare const makeInvalidateUserSessionsResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.InvalidateUserSessionsRequest>,
+  never,
   SessionManagerTag
 >;
 ```
@@ -130,8 +137,9 @@ Resolver for MarkEmailVerifiedRequest
 **Signature**
 
 ```ts
-export declare const makeMarkEmailVerifiedResolver: RequestResolver.RequestResolver<
-  Requests.MarkEmailVerifiedRequest,
+export declare const makeMarkEmailVerifiedResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.MarkEmailVerifiedRequest>,
+  never,
   UserServiceTag | UserServiceStoreTag
 >;
 ```
@@ -143,9 +151,10 @@ Resolver for RequestPasswordResetRequest
 **Signature**
 
 ```ts
-export declare const makeRequestPasswordResetResolver: RequestResolver.RequestResolver<
-  Requests.RequestPasswordResetRequest,
-  PasswordResetServiceTag | PasswordResetStoreTag | PasswordResetUserStoreTag
+export declare const makeRequestPasswordResetResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.RequestPasswordResetRequest>,
+  never,
+  Hooks | PasswordResetServiceTag | PasswordResetStoreTag | PasswordResetUserStoreTag
 >;
 ```
 
@@ -156,9 +165,11 @@ Resolver for ResetPasswordRequest
 **Signature**
 
 ```ts
-export declare const makeResetPasswordResolver: RequestResolver.RequestResolver<
-  Requests.ResetPasswordRequest,
+export declare const makeResetPasswordResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.ResetPasswordRequest>,
+  never,
   | SessionManagerTag
+  | Hooks
   | PasswordHasherTag
   | PasswordResetServiceTag
   | PasswordResetStoreTag
@@ -173,8 +184,9 @@ Resolver for UpdateUserAttributesRequest
 **Signature**
 
 ```ts
-export declare const makeUpdateUserAttributesResolver: RequestResolver.RequestResolver<
-  Requests.UpdateUserAttributesRequest,
+export declare const makeUpdateUserAttributesResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.UpdateUserAttributesRequest>,
+  never,
   UserServiceTag | UserServiceStoreTag
 >;
 ```
@@ -186,9 +198,10 @@ Create a resolver for session validation
 **Signature**
 
 ```ts
-export declare const makeValidateSessionResolver: RequestResolver.RequestResolver<
-  Requests.ValidateSessionRequest,
-  SessionManagerTag
+export declare const makeValidateSessionResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.ValidateSessionRequest>,
+  never,
+  SessionManagerTag | Hooks
 >;
 ```
 
@@ -199,8 +212,9 @@ Create a resolver for credential verification
 **Signature**
 
 ```ts
-export declare const makeVerifyCredentialsResolver: RequestResolver.RequestResolver<
-  Requests.VerifyCredentialsRequest,
+export declare const makeVerifyCredentialsResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.VerifyCredentialsRequest>,
+  never,
   UserStoreTag | PasswordHasherTag
 >;
 ```
@@ -212,8 +226,9 @@ Create a resolver for password verification
 **Signature**
 
 ```ts
-export declare const makeVerifyPasswordResolver: RequestResolver.RequestResolver<
-  Requests.VerifyPasswordRequest,
+export declare const makeVerifyPasswordResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.VerifyPasswordRequest>,
+  never,
   PasswordHasherTag
 >;
 ```
@@ -225,9 +240,11 @@ Resolver for SignInEmailRequest
 **Signature**
 
 ```ts
-export declare const signInEmailResolver: RequestResolver.RequestResolver<
-  Requests.SignInEmailRequest,
+export declare const signInEmailResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.SignInEmailRequest>,
+  never,
   | SessionManagerTag
+  | Hooks
   | PasswordHasherTag
   | AuthLifecycleServiceTag
   | EmailPasswordStoreTag
@@ -243,9 +260,11 @@ Resolver for SignUpEmailRequest
 **Signature**
 
 ```ts
-export declare const signUpEmailResolver: RequestResolver.RequestResolver<
-  Requests.SignUpEmailRequest,
+export declare const signUpEmailResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.SignUpEmailRequest>,
+  never,
   | SessionManagerTag
+  | Hooks
   | PasswordHasherTag
   | AuthLifecycleServiceTag
   | EmailPasswordStoreTag
@@ -261,11 +280,13 @@ Resolver for VerifyEmailRequest
 **Signature**
 
 ```ts
-export declare const verifyEmailResolver: RequestResolver.RequestResolver<
-  Requests.VerifyEmailRequest,
+export declare const verifyEmailResolver: Effect.Effect<
+  RequestResolver.RequestResolver<Requests.VerifyEmailRequest>,
+  never,
   | UserServiceTag
   | UserServiceStoreTag
   | SessionManagerTag
+  | Hooks
   | AuthLifecycleServiceTag
   | EmailVerificationServiceTag
   | EmailVerificationStoreTag
