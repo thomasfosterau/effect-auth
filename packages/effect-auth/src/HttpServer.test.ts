@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Redacted } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
 import { makeAuthClient } from "./HttpClient.js";
@@ -113,6 +113,8 @@ interface Fixture {
   readonly sentPhoneOtps: Array<{ phoneNumber: string; otp: string; purpose: PhoneOtpPurpose }>;
   /** Register a username -> userId mapping for the username sign-in tests. */
   readonly registerUsername: (userId: string, username: string) => void;
+  /** Number of session-store `get` reads so far (for the cookie-cache tests). */
+  readonly sessionStoreReads: () => number;
 }
 
 /**
@@ -129,6 +131,7 @@ const makeFixture = (): Fixture => {
   const verifications = new Map<string, EmailVerification>();
   const resets = new Map<string, PasswordResetToken>();
   let userSeq = 0;
+  let sessionStoreReads = 0;
 
   const sentVerificationTokens: string[] = [];
   const sentResetTokens: string[] = [];
@@ -184,6 +187,7 @@ const makeFixture = (): Fixture => {
       }),
     get: (sessionId) =>
       Effect.suspend(() => {
+        sessionStoreReads++;
         const session = sessions.get(sessionId);
         return session === undefined
           ? Effect.fail(new SessionNotFoundError({ message: "Session not found", sessionId }))
@@ -547,6 +551,7 @@ const makeFixture = (): Fixture => {
     beforeDeleteCalls,
     sentPhoneOtps,
     registerUsername: (userId, username) => void usernameToId.set(username, userId),
+    sessionStoreReads: () => sessionStoreReads,
   };
 };
 
@@ -560,11 +565,21 @@ const handlerFor = (
     readonly features?: boolean;
     readonly prefix?: string;
     readonly trustedOrigins?: ReadonlyArray<string>;
+    readonly cache?: { readonly secret: string; readonly maxAge?: number };
   },
 ): Handler =>
   makeAuthWebHandler({
     services: options?.features ? fixture.featureServices : fixture.services,
-    cookie: { secure: false },
+    cookie: {
+      secure: false,
+      ...(options?.cache !== undefined && {
+        cache: {
+          enabled: true,
+          secret: Redacted.make(options.cache.secret),
+          ...(options.cache.maxAge !== undefined && { maxAge: options.cache.maxAge }),
+        },
+      }),
+    },
     ...(options?.prefix !== undefined && { prefix: options.prefix }),
     ...(options?.trustedOrigins !== undefined && { trustedOrigins: options.trustedOrigins }),
   }).handler;
@@ -1475,5 +1490,81 @@ describe("HTTP account management (change email / delete user)", () => {
     const handler = handlerFor(makeFixture(), { features: false });
     const res = await handler(jsonRequest("/change-email/confirm", { token: "whatever" }));
     expect(res.status).toBe(404);
+  });
+});
+
+const dataCookieFromSetCookie = (setCookie: string | null): string | null => {
+  const match = /conduit_session_data=([^;]+)/.exec(setCookie ?? "");
+  return match === null ? null : match[1]!;
+};
+
+const bothCookies = (sid: string, data: string) => ({
+  cookie: `conduit_session=${sid}; conduit_session_data=${data}`,
+});
+
+describe("HTTP session cookie cache", () => {
+  const SECRET = "cache-secret-cache-secret-1234567";
+
+  it("serves /session from the cache cookie, avoiding a store read", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { cache: { secret: SECRET } });
+    const sid = await signUp(handler, "cache@example.com");
+
+    // First /session: cache miss -> store read + issues the data cookie.
+    const before = fixture.sessionStoreReads();
+    const first = await handler(getRequest("/session", asCookie(sid)));
+    expect(first.status).toBe(200);
+    const data = dataCookieFromSetCookie(first.headers.get("set-cookie"));
+    expect(data).not.toBeNull();
+    const afterFirst = fixture.sessionStoreReads();
+    expect(afterFirst).toBeGreaterThan(before);
+
+    // Second /session with the data cookie: cache hit -> no store read.
+    const second = await handler(getRequest("/session", bothCookies(sid, data!)));
+    expect(second.status).toBe(200);
+    const body = (await second.json()) as { user: { email: string } };
+    expect(body.user.email).toBe("cache@example.com");
+    expect(fixture.sessionStoreReads()).toBe(afterFirst);
+  });
+
+  it("falls back to store validation when the signature is tampered", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { cache: { secret: SECRET } });
+    const sid = await signUp(handler, "tamper@example.com");
+    const first = await handler(getRequest("/session", asCookie(sid)));
+    const data = dataCookieFromSetCookie(first.headers.get("set-cookie"))!;
+
+    const before = fixture.sessionStoreReads();
+    const tampered = data.slice(0, -1) + (data.endsWith("A") ? "B" : "A");
+    const res = await handler(getRequest("/session", bothCookies(sid, tampered)));
+    expect(res.status).toBe(200);
+    expect(fixture.sessionStoreReads()).toBeGreaterThan(before);
+  });
+
+  it("falls back to store validation once the cache window has elapsed", async () => {
+    const fixture = makeFixture();
+    // maxAge 0 -> the cache cookie is already expired on the next request.
+    const handler = handlerFor(fixture, { cache: { secret: SECRET, maxAge: 0 } });
+    const sid = await signUp(handler, "expire@example.com");
+    const first = await handler(getRequest("/session", asCookie(sid)));
+    const data = dataCookieFromSetCookie(first.headers.get("set-cookie"))!;
+
+    const before = fixture.sessionStoreReads();
+    const res = await handler(getRequest("/session", bothCookies(sid, data)));
+    expect(res.status).toBe(200);
+    expect(fixture.sessionStoreReads()).toBeGreaterThan(before);
+  });
+
+  it("clears both the session and cache cookies on sign-out", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { cache: { secret: SECRET } });
+    const sid = await signUp(handler, "out@example.com");
+    await handler(getRequest("/session", asCookie(sid))); // seed the data cookie
+
+    const out = await handler(jsonRequest("/sign-out", undefined, asCookie(sid)));
+    expect(out.status).toBe(204);
+    const setCookie = out.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain("conduit_session=");
+    expect(setCookie).toContain("conduit_session_data=");
   });
 });

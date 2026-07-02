@@ -14,5 +14,8 @@ export * from "./HttpApi.js";
 /** Server: handler layers and the mountable web handler. */
 export * from "./HttpServer.js";
 
+/** Signed session-data cookie cache (config + codec). */
+export * from "./SessionCookieCache.js";
+
 /** Typed, Effect-native client. */
 export * from "./HttpClient.js";

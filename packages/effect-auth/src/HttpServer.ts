@@ -32,6 +32,13 @@ import {
   PasswordResetUserStoreTag,
 } from "./PasswordReset.js";
 import { UserServiceStoreTag, UserServiceTag } from "./User.js";
+import {
+  decodeSessionCacheCookie,
+  encodeSessionCacheCookie,
+  resolveSessionCache,
+  type ResolvedSessionCache,
+  type SessionCacheConfig,
+} from "./SessionCookieCache.js";
 import type * as Types from "./Types.js";
 
 /**
@@ -74,19 +81,40 @@ export interface CookieConfig {
   readonly secure?: boolean;
   /** Cookie path. Default `/`. */
   readonly path?: string;
+  /**
+   * Signed session-data cookie cache. When enabled, a short-lived HMAC-signed
+   * copy of the session + user is stored in a `${name}_data` cookie so
+   * authenticated requests can be served without a session-store read (up to
+   * `maxAge`). See {@link SessionCacheConfig}.
+   */
+  readonly cache?: SessionCacheConfig;
 }
 
 interface ResolvedCookieConfig {
   readonly name: string;
   readonly secure: boolean;
   readonly path: string;
+  readonly cache: ResolvedSessionCache | undefined;
 }
 
 const resolveCookieConfig = (config?: CookieConfig): ResolvedCookieConfig => ({
   name: config?.name ?? "conduit_session",
   secure: config?.secure ?? true,
   path: config?.path ?? "/",
+  cache: resolveSessionCache(config?.cache),
 });
+
+/** Name of the companion cache cookie. */
+const dataCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_data`;
+
+const dataCookieOptions = (cfg: ResolvedCookieConfig, cache: ResolvedSessionCache) =>
+  ({
+    httpOnly: true,
+    sameSite: "lax",
+    secure: cfg.secure,
+    path: cfg.path,
+    maxAge: Math.floor(cache.maxAge / 1000),
+  }) as const;
 
 const sessionCookieOptions = (cfg: ResolvedCookieConfig, expiresAt: Date) =>
   ({
@@ -318,18 +346,46 @@ export const authGroupLayer = (config?: CookieConfig) => {
             const sessionManager = yield* SessionManagerTag;
             yield* Effect.ignore(sessionManager.invalidateSession(sessionId));
           }
-          return yield* HttpServerResponse.setCookie(
+          let response = yield* HttpServerResponse.setCookie(
             HttpServerResponse.empty({ status: 204 }),
             cfg.name,
             "",
             clearCookieOptions(cfg),
-          ).pipe(Effect.orDie);
-        }),
+          );
+          // Also clear the session-data cache cookie (if in use).
+          if (cfg.cache !== undefined) {
+            response = yield* HttpServerResponse.setCookie(
+              response,
+              dataCookieName(cfg),
+              "",
+              clearCookieOptions(cfg),
+            );
+          }
+          return response;
+        }).pipe(Effect.orDie),
       )
       .handle("getSession", ({ request }) =>
         Effect.gen(function* () {
-          const resolved = yield* requireSession(request, cfg);
-          return S.encodeSessionWithUser(resolved);
+          const { resolved, cacheHit } = yield* resolveSession(request, cfg);
+          const body = S.encodeSessionWithUser(resolved);
+          // On a store validation (cache miss) refresh the signed cache cookie
+          // so subsequent reads within `maxAge` skip the store.
+          if (cfg.cache !== undefined && !cacheHit) {
+            const cache = cfg.cache;
+            const value = encodeSessionCacheCookie(resolved, cache, Date.now());
+            return yield* HttpServerResponse.json(body).pipe(
+              Effect.flatMap((response) =>
+                HttpServerResponse.setCookie(
+                  response,
+                  dataCookieName(cfg),
+                  value,
+                  dataCookieOptions(cfg, cache),
+                ),
+              ),
+              Effect.orDie,
+            );
+          }
+          return body;
         }),
       )
       .handle("sendVerificationEmail", ({ payload }) =>
@@ -893,20 +949,44 @@ const secondFactorSuccess = (
   });
 
 /** Resolve and validate the request's session or fail with 401. */
-const requireSession = (
+/**
+ * Resolve the authenticated session, preferring the signed cache cookie (no
+ * store read) when the cache is enabled and the cookie is valid; otherwise
+ * validating against the session store. `cacheHit` lets callers decide whether
+ * to (re)issue the cache cookie.
+ */
+const resolveSession = (
   request: HttpServerRequest.HttpServerRequest,
   cfg: ResolvedCookieConfig,
-): Effect.Effect<Types.SessionWithUser, S.Unauthorized, SessionManagerTag | Hooks> =>
+): Effect.Effect<
+  { readonly resolved: Types.SessionWithUser; readonly cacheHit: boolean },
+  S.Unauthorized,
+  SessionManagerTag | Hooks
+> =>
   Effect.gen(function* () {
+    if (cfg.cache !== undefined) {
+      const cached = request.cookies[dataCookieName(cfg)];
+      if (cached !== undefined) {
+        const resolved = decodeSessionCacheCookie(cached, cfg.cache, Date.now());
+        if (resolved !== null) return { resolved, cacheHit: true };
+      }
+    }
     const sessionId = sessionIdFromRequest(request, cfg);
     if (sessionId === undefined) {
       return yield* new S.Unauthorized({ message: "Not authenticated" });
     }
     const sessionManager = yield* SessionManagerTag;
-    return yield* sessionManager
+    const resolved = yield* sessionManager
       .validateSession(sessionId)
       .pipe(Effect.mapError(() => new S.Unauthorized({ message: "Invalid or expired session" })));
+    return { resolved, cacheHit: false };
   });
+
+const requireSession = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+): Effect.Effect<Types.SessionWithUser, S.Unauthorized, SessionManagerTag | Hooks> =>
+  resolveSession(request, cfg).pipe(Effect.map((r) => r.resolved));
 
 /** Attach the session cookie to a JSON `AuthSuccess` response when a session is present. */
 const withSessionCookie = (
