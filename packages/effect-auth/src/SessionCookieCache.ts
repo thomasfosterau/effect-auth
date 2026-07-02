@@ -111,7 +111,7 @@ export const decodeSessionCacheCookie = (
   if (
     payload.v !== PAYLOAD_VERSION ||
     typeof payload.exp !== "number" ||
-    now > payload.exp ||
+    now >= payload.exp ||
     payload.session === undefined ||
     payload.user === undefined
   ) {

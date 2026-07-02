@@ -566,10 +566,12 @@ const handlerFor = (
     readonly prefix?: string;
     readonly trustedOrigins?: ReadonlyArray<string>;
     readonly cache?: { readonly secret: string; readonly maxAge?: number };
+    readonly multiSession?: { readonly maximumSessions?: number };
   },
 ): Handler =>
   makeAuthWebHandler({
     services: options?.features ? fixture.featureServices : fixture.services,
+    ...(options?.multiSession !== undefined && { multiSession: options.multiSession }),
     cookie: {
       secure: false,
       ...(options?.cache !== undefined && {
@@ -1566,5 +1568,95 @@ describe("HTTP session cookie cache", () => {
     const setCookie = out.headers.get("set-cookie") ?? "";
     expect(setCookie).toContain("conduit_session=");
     expect(setCookie).toContain("conduit_session_data=");
+  });
+});
+
+const setCookieValue = (res: Response, name: string): string | null => {
+  for (const c of res.headers.getSetCookie()) {
+    const m = new RegExp(`^${name}=([^;]*)`).exec(c);
+    if (m) return m[1]!;
+  }
+  return null;
+};
+
+describe("HTTP multi-session", () => {
+  it("accumulates sessions, lists, switches active, and revokes", async () => {
+    const handler = handlerFor(makeFixture(), { multiSession: { maximumSessions: 5 } });
+
+    // Sign in account A.
+    const a = await handler(jsonRequest("/sign-up", { email: "a@example.com", password: PW }));
+    const sidA = setCookieValue(a, "conduit_session")!;
+    const multiA = setCookieValue(a, "conduit_session_multi")!;
+    expect(multiA).toBe(sidA);
+
+    // Sign in account B, carrying account A's device list.
+    const b = await handler(
+      jsonRequest(
+        "/sign-up",
+        { email: "b@example.com", password: PW },
+        { cookie: `conduit_session_multi=${multiA}` },
+      ),
+    );
+    const sidB = setCookieValue(b, "conduit_session")!;
+    const multiB = setCookieValue(b, "conduit_session_multi")!;
+    expect(multiB.split(".").sort()).toEqual([sidA, sidB].sort());
+
+    const deviceCookie = `conduit_session=${sidB}; conduit_session_multi=${multiB}`;
+
+    // List returns both accounts.
+    const list = await handler(getRequest("/multi-session/list", { cookie: deviceCookie }));
+    expect(list.status).toBe(200);
+    const emails = ((await list.json()) as Array<{ user: { email: string } }>)
+      .map((s) => s.user.email)
+      .sort();
+    expect(emails).toEqual(["a@example.com", "b@example.com"]);
+
+    // Set active -> A: primary cookie swaps to A.
+    const setActive = await handler(
+      jsonRequest("/multi-session/set-active", { sessionId: sidA }, { cookie: deviceCookie }),
+    );
+    expect(setActive.status).toBe(200);
+    expect(setCookieValue(setActive, "conduit_session")).toBe(sidA);
+
+    // Revoke B: it drops from the list; A remains valid.
+    const revoke = await handler(
+      jsonRequest("/multi-session/revoke", { sessionId: sidB }, { cookie: deviceCookie }),
+    );
+    expect(revoke.status).toBe(200);
+    const newMulti = setCookieValue(revoke, "conduit_session_multi")!;
+    expect(newMulti.split(".").filter(Boolean)).toEqual([sidA]);
+    // B's session is now invalid, A still works.
+    expect(
+      (await handler(getRequest("/session", { cookie: `conduit_session=${sidB}` }))).status,
+    ).toBe(401);
+    expect(
+      (await handler(getRequest("/session", { cookie: `conduit_session=${sidA}` }))).status,
+    ).toBe(200);
+  });
+
+  it("caps the device list at maximumSessions", async () => {
+    const handler = handlerFor(makeFixture(), { multiSession: { maximumSessions: 2 } });
+    let multi = "";
+    let last = "";
+    for (const email of ["1@e.com", "2@e.com", "3@e.com"]) {
+      const res = await handler(
+        jsonRequest(
+          "/sign-up",
+          { email, password: PW },
+          { cookie: `conduit_session_multi=${multi}` },
+        ),
+      );
+      multi = setCookieValue(res, "conduit_session_multi")!;
+      last = setCookieValue(res, "conduit_session")!;
+    }
+    const ids = multi.split(".").filter(Boolean);
+    expect(ids).toHaveLength(2);
+    expect(ids).toContain(last); // newest retained
+  });
+
+  it("returns 404 for multi-session endpoints when not enabled", async () => {
+    const handler = handlerFor(makeFixture());
+    const res = await handler(getRequest("/multi-session/list"));
+    expect(res.status).toBe(404);
   });
 });
