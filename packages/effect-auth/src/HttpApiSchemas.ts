@@ -198,6 +198,35 @@ export const PhoneOtpSignInPayload = Schema.Struct({
 });
 export type PhoneOtpSignInPayload = typeof PhoneOtpSignInPayload.Type;
 
+/** Request body for starting a device authorization request. */
+export const DeviceCodePayload = Schema.Struct({
+  clientId: Schema.optional(Schema.String),
+  scopes: Schema.optional(Schema.Array(Schema.String)),
+});
+export type DeviceCodePayload = typeof DeviceCodePayload.Type;
+
+/** Response for a started device authorization request. */
+export const DeviceCodeView = Schema.Struct({
+  deviceCode: Schema.String,
+  userCode: Schema.String,
+  verificationUri: Schema.String,
+  expiresIn: Schema.Number,
+  interval: Schema.Number,
+});
+export type DeviceCodeView = typeof DeviceCodeView.Type;
+
+/** Request body for polling the device token endpoint. */
+export const DeviceTokenPayload = Schema.Struct({
+  deviceCode: Schema.String,
+});
+export type DeviceTokenPayload = typeof DeviceTokenPayload.Type;
+
+/** Request body for approving/denying a device user code. */
+export const DeviceUserCodePayload = Schema.Struct({
+  userCode: Schema.String,
+});
+export type DeviceUserCodePayload = typeof DeviceUserCodePayload.Type;
+
 /** Request body for signing in with a username + password. */
 export const UsernameSignInPayload = Schema.Struct({
   username: Schema.String,

@@ -138,6 +138,28 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.AuthSuccess,
     error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
   }),
+  // Device authorization grant (RFC 8628). 404 when unconfigured.
+  HttpApiEndpoint.post("deviceCode", "/device/code", {
+    payload: S.DeviceCodePayload,
+    success: S.DeviceCodeView,
+    error: [S.NotFoundError, S.InternalError],
+  }),
+  // Poll: RFC error codes (authorization_pending/slow_down/...) -> 400.
+  HttpApiEndpoint.post("deviceToken", "/device/token", {
+    payload: S.DeviceTokenPayload,
+    success: S.AuthSuccess,
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("deviceApprove", "/device/approve", {
+    payload: S.DeviceUserCodePayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("deviceDeny", "/device/deny", {
+    payload: S.DeviceUserCodePayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+  }),
   // Phone (SMS) OTP. Anti-enumeration: send always answers `{ status: true }`.
   HttpApiEndpoint.post("phoneOtpSend", "/phone-otp/send", {
     payload: S.PhoneOtpSendPayload,

@@ -77,6 +77,12 @@ import {
   type PhoneOtpUserStore,
 } from "./PhoneOtp.js";
 import { UsernameServiceLayer, UsernameStoreTag, type UsernameStore } from "./Username.js";
+import {
+  DeviceAuthorizationServiceLayer,
+  DeviceAuthorizationStoreTag,
+  type DeviceAuthorizationRecord,
+  type DeviceAuthorizationStore,
+} from "./DeviceAuthorization.js";
 import { generateTOTP } from "./Otp.js";
 import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
@@ -435,6 +441,24 @@ const makeFixture = (): Fixture => {
       }),
   };
 
+  const deviceRecords = new Map<string, DeviceAuthorizationRecord>();
+  const deviceStore: DeviceAuthorizationStore = {
+    create: (record) =>
+      Effect.sync(() => {
+        deviceRecords.set(record.deviceCode, record);
+        return record;
+      }),
+    getByDeviceCode: (deviceCode) => Effect.sync(() => deviceRecords.get(deviceCode) ?? null),
+    getByUserCode: (userCode) =>
+      Effect.sync(() => [...deviceRecords.values()].find((r) => r.userCode === userCode) ?? null),
+    update: (record) =>
+      Effect.sync(() => {
+        deviceRecords.set(record.deviceCode, record);
+        return record;
+      }),
+    delete: (deviceCode) => Effect.sync(() => void deviceRecords.delete(deviceCode)),
+  };
+
   const usernameToId = new Map<string, string>();
   const usernameStore: UsernameStore = {
     getUserByUsername: (username) =>
@@ -475,6 +499,12 @@ const makeFixture = (): Fixture => {
     Layer.succeed(AnonymousUserStoreTag)(anonymousUserStore),
     UsernameServiceLayer(),
     Layer.succeed(UsernameStoreTag)(usernameStore),
+    DeviceAuthorizationServiceLayer({
+      verificationUri: "https://example.com/device",
+      // interval 0 so back-to-back polls in a single test don't hit slow_down.
+      interval: 0,
+    }),
+    Layer.succeed(DeviceAuthorizationStoreTag)(deviceStore),
     PhoneOtpServiceLayer({
       sendOtp: (phoneNumber, otp, purpose) =>
         Effect.sync(() => void sentPhoneOtps.push({ phoneNumber, otp, purpose })),
@@ -1218,6 +1248,47 @@ describe("two-factor", () => {
     );
     expect(after.status).toBe(200);
     expect(after.headers.get("set-cookie")).toContain("conduit_session=");
+  });
+});
+
+describe("HTTP device authorization (RFC 8628)", () => {
+  it("runs the full device flow: code -> approve -> token", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+
+    const codeRes = await handler(jsonRequest("/device/code", {}));
+    expect(codeRes.status).toBe(200);
+    const code = (await codeRes.json()) as { deviceCode: string; userCode: string };
+
+    // Polling before approval yields authorization_pending (400).
+    const pending = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
+    expect(pending.status).toBe(400);
+    expect(((await pending.json()) as { message: string }).message).toBe("authorization_pending");
+
+    // Approve from an authenticated verification page.
+    const sid = await signUp(handler, "device-user@example.com");
+    const approve = await handler(
+      jsonRequest("/device/approve", { userCode: code.userCode }, asCookie(sid)),
+    );
+    expect(approve.status).toBe(200);
+
+    // Now the device gets a session.
+    const token = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
+    expect(token.status).toBe(200);
+    expect(token.headers.get("set-cookie")).toContain("conduit_session=");
+  });
+
+  it("requires authentication to approve a code", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    const codeRes = await handler(jsonRequest("/device/code", {}));
+    const code = (await codeRes.json()) as { userCode: string };
+    const res = await handler(jsonRequest("/device/approve", { userCode: code.userCode }));
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 404 when device authorization is not configured", async () => {
+    const handler = handlerFor(makeFixture(), { features: false });
+    const res = await handler(jsonRequest("/device/code", {}));
+    expect(res.status).toBe(404);
   });
 });
 

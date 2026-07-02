@@ -72,6 +72,9 @@ export * from "./PhoneOtp.js";
 /** Username (username + password) sign-in. */
 export * from "./Username.js";
 
+/** Device authorization grant (RFC 8628) for input-constrained devices. */
+export * from "./DeviceAuthorization.js";
+
 /** Two-factor authentication (TOTP + backup codes). */
 export * from "./TwoFactor.js";
 
