@@ -298,6 +298,68 @@ export const BackupCodesView = Schema.Struct({
 export type BackupCodesView = typeof BackupCodesView.Type;
 
 // -----------------------------------------------------------------------------
+// Enterprise SSO
+// -----------------------------------------------------------------------------
+
+/** Public view of an SSO connection (never exposes the client secret). */
+export const SsoProviderView = Schema.Struct({
+  id: Schema.String,
+  issuer: Schema.String,
+  domain: Schema.String,
+  protocol: Schema.Literals(["oidc"]),
+  clientId: Schema.String,
+  redirectUri: Schema.String,
+  authorizationEndpoint: Schema.String,
+  tokenEndpoint: Schema.String,
+  userInfoEndpoint: Schema.optional(Schema.String),
+  jwksEndpoint: Schema.optional(Schema.String),
+  scopes: Schema.Array(Schema.String),
+  organizationId: Schema.optional(Schema.String),
+  createdAt: Schema.Number,
+});
+export type SsoProviderView = typeof SsoProviderView.Type;
+
+/** Request body for registering an SSO connection (admin-gated). */
+export const SsoRegisterPayload = Schema.Struct({
+  issuer: Schema.String,
+  domain: Schema.String,
+  clientId: Schema.String,
+  clientSecret: Schema.String,
+  redirectUri: Schema.String,
+  discover: Schema.optional(Schema.Boolean),
+  authorizationEndpoint: Schema.optional(Schema.String),
+  tokenEndpoint: Schema.optional(Schema.String),
+  userInfoEndpoint: Schema.optional(Schema.String),
+  jwksEndpoint: Schema.optional(Schema.String),
+  scopes: Schema.optional(Schema.Array(Schema.String)),
+  usePKCE: Schema.optional(Schema.Boolean),
+  organizationId: Schema.optional(Schema.String),
+});
+export type SsoRegisterPayload = typeof SsoRegisterPayload.Type;
+
+/** Request body for starting an SSO sign-in (any one of the fields). */
+export const SsoSignInPayload = Schema.Struct({
+  email: Schema.optional(Schema.String),
+  domain: Schema.optional(Schema.String),
+  providerId: Schema.optional(Schema.String),
+});
+export type SsoSignInPayload = typeof SsoSignInPayload.Type;
+
+/** The IdP authorization URL to redirect the user to, with its CSRF state. */
+export const SsoUrlView = Schema.Struct({
+  url: Schema.String,
+  state: Schema.String,
+});
+export type SsoUrlView = typeof SsoUrlView.Type;
+
+/** Request body for completing an SSO callback. */
+export const SsoCallbackPayload = Schema.Struct({
+  state: Schema.String,
+  code: Schema.String,
+});
+export type SsoCallbackPayload = typeof SsoCallbackPayload.Type;
+
+// -----------------------------------------------------------------------------
 // Organization
 // -----------------------------------------------------------------------------
 

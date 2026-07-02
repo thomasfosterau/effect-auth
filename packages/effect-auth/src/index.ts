@@ -45,6 +45,9 @@ export * from "./WebAuthn.js";
 /** OAuth 2.0 / OIDC (inspired by BetterAuth). */
 export * from "./OAuth.js";
 
+/** Enterprise SSO: OIDC relying party with email-domain routing. */
+export * from "./Sso.js";
+
 /** Email verification (inspired by BetterAuth). */
 export * from "./EmailVerification.js";
 
