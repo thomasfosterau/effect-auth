@@ -455,6 +455,25 @@ const providers = {
   }),
 };
 
+// Twenty prebuilt providers ship out of the box: Google, GitHub, Discord,
+// Microsoft, Apple, Facebook, X/Twitter, LinkedIn, Twitch, Spotify, GitLab,
+// Reddit, Dropbox, Notion, Slack, Zoom, TikTok, Roblox, Kick, and Hugging Face
+// (all `Auth.<Name>Provider({ clientId, clientSecret, redirectUri })`).
+//
+// For any other OpenID Connect provider, discover its endpoints and build a
+// generic provider:
+//
+//   const endpoints = yield* Auth.discoverOAuthEndpoints("https://issuer.example");
+//   const custom = Auth.makeOAuthProvider("custom", {
+//     ...endpoints, clientId, clientSecret, redirectUri, scopes: ["openid", "email"],
+//   });
+//
+// Providers that expose identity only through the OIDC `id_token` (e.g. Apple)
+// set `getUserInfoFromIdToken: true`; the token's signature is verified against
+// the provider's JWKS (RS256/ES256/EdDSA) and its `iss`/`aud`/`exp`/`nonce`
+// checked before the profile is trusted. Apple's signed client secret is built
+// with `Auth.makeAppleClientSecret({ teamId, clientId, keyId, privateKey })`.
+
 // Create OAuth service
 const oauthService = Effect.gen(function* () {
   return yield* Auth.makeOAuthService(providers);

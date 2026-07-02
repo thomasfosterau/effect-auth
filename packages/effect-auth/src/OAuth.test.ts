@@ -1,0 +1,641 @@
+import { describe, it, expect } from "vite-plus/test";
+import { Effect, Layer } from "effect";
+import * as crypto from "node:crypto";
+import { AuthError } from "./Errors.js";
+import {
+  makeOAuthProvider,
+  verifyIdToken,
+  discoverOAuthEndpoints,
+  makeAppleClientSecret,
+  OAuthStateStoreTag,
+  type OAuthState,
+  type OAuthProvider,
+  type OAuthTokenResponse,
+  AppleProvider,
+  FacebookProvider,
+  TwitterProvider,
+  LinkedInProvider,
+  TwitchProvider,
+  SpotifyProvider,
+  GitLabProvider,
+  RedditProvider,
+  DropboxProvider,
+  NotionProvider,
+  SlackProvider,
+  ZoomProvider,
+  TikTokProvider,
+  RobloxProvider,
+  KickProvider,
+  HuggingFaceProvider,
+} from "./OAuth.js";
+
+/** In-memory OAuth state store for authorization-URL tests. */
+const StateStoreLive = () => {
+  const map = new Map<string, OAuthState>();
+  return Layer.succeed(OAuthStateStoreTag, {
+    create: (s: OAuthState) =>
+      Effect.sync(() => {
+        map.set(s.state, s);
+        return s;
+      }),
+    get: (state: string) => {
+      const v = map.get(state);
+      return v ? Effect.succeed(v) : Effect.fail(new AuthError({ message: "not found" }));
+    },
+    delete: (state: string) =>
+      Effect.sync(() => {
+        map.delete(state);
+      }),
+  });
+};
+
+const runWithState = <A, E>(eff: Effect.Effect<A, E, OAuthStateStoreTag>): Promise<A> =>
+  Effect.runPromise(eff.pipe(Effect.provide(StateStoreLive())));
+
+/** A single captured fetch call. */
+interface Captured {
+  url: string;
+  method: string;
+  headers: Headers;
+  body: string | null;
+}
+
+/**
+ * Swap `globalThis.fetch` for `handler`, run `thunk`, and restore. Records
+ * every request into the returned array.
+ */
+const withFetch = async <A>(
+  handler: (url: string, init: RequestInit | undefined) => Response,
+  thunk: (calls: Captured[]) => Promise<A>,
+): Promise<A> => {
+  const calls: Captured[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    calls.push({
+      url,
+      method: init?.method ?? "GET",
+      headers: new Headers(init?.headers),
+      body: typeof init?.body === "string" ? init.body : null,
+    });
+    return Promise.resolve(handler(url, init));
+  }) as typeof fetch;
+  try {
+    return await thunk(calls);
+  } finally {
+    globalThis.fetch = original;
+  }
+};
+
+const json = (value: unknown): Response =>
+  new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+
+const CLIENT = {
+  clientId: "client-123",
+  clientSecret: "secret-xyz",
+  redirectUri: "https://app/cb",
+};
+
+// --- Provider catalogue ------------------------------------------------------
+
+const CATALOGUE: ReadonlyArray<{
+  name: string;
+  provider: OAuthProvider;
+  authorizationHost: string;
+  clientParam: string;
+}> = [
+  {
+    name: "apple",
+    provider: AppleProvider(CLIENT),
+    authorizationHost: "appleid.apple.com",
+    clientParam: "client_id",
+  },
+  {
+    name: "facebook",
+    provider: FacebookProvider(CLIENT),
+    authorizationHost: "facebook.com",
+    clientParam: "client_id",
+  },
+  {
+    name: "twitter",
+    provider: TwitterProvider(CLIENT),
+    authorizationHost: "twitter.com",
+    clientParam: "client_id",
+  },
+  {
+    name: "linkedin",
+    provider: LinkedInProvider(CLIENT),
+    authorizationHost: "linkedin.com",
+    clientParam: "client_id",
+  },
+  {
+    name: "twitch",
+    provider: TwitchProvider(CLIENT),
+    authorizationHost: "id.twitch.tv",
+    clientParam: "client_id",
+  },
+  {
+    name: "spotify",
+    provider: SpotifyProvider(CLIENT),
+    authorizationHost: "accounts.spotify.com",
+    clientParam: "client_id",
+  },
+  {
+    name: "gitlab",
+    provider: GitLabProvider(CLIENT),
+    authorizationHost: "gitlab.com",
+    clientParam: "client_id",
+  },
+  {
+    name: "reddit",
+    provider: RedditProvider(CLIENT),
+    authorizationHost: "reddit.com",
+    clientParam: "client_id",
+  },
+  {
+    name: "dropbox",
+    provider: DropboxProvider(CLIENT),
+    authorizationHost: "dropbox.com",
+    clientParam: "client_id",
+  },
+  {
+    name: "notion",
+    provider: NotionProvider(CLIENT),
+    authorizationHost: "api.notion.com",
+    clientParam: "client_id",
+  },
+  {
+    name: "slack",
+    provider: SlackProvider(CLIENT),
+    authorizationHost: "slack.com",
+    clientParam: "client_id",
+  },
+  {
+    name: "zoom",
+    provider: ZoomProvider(CLIENT),
+    authorizationHost: "zoom.us",
+    clientParam: "client_id",
+  },
+  {
+    name: "tiktok",
+    provider: TikTokProvider(CLIENT),
+    authorizationHost: "tiktok.com",
+    clientParam: "client_key",
+  },
+  {
+    name: "roblox",
+    provider: RobloxProvider(CLIENT),
+    authorizationHost: "apis.roblox.com",
+    clientParam: "client_id",
+  },
+  {
+    name: "kick",
+    provider: KickProvider(CLIENT),
+    authorizationHost: "id.kick.com",
+    clientParam: "client_id",
+  },
+  {
+    name: "huggingface",
+    provider: HuggingFaceProvider(CLIENT),
+    authorizationHost: "huggingface.co",
+    clientParam: "client_id",
+  },
+];
+
+describe("OAuth provider catalogue", () => {
+  for (const entry of CATALOGUE) {
+    it(`${entry.name}: builds an authorization URL with state and client id`, async () => {
+      const result = await runWithState(entry.provider.generateAuthorizationUrl());
+      const url = new URL(result.url);
+      expect(url.host).toContain(entry.authorizationHost);
+      expect(url.searchParams.get(entry.clientParam)).toBe(CLIENT.clientId);
+      expect(url.searchParams.get("redirect_uri")).toBe(CLIENT.redirectUri);
+      expect(url.searchParams.get("state")).toBe(result.state);
+      expect(url.searchParams.get("response_type")).toBe("code");
+    });
+  }
+
+  it("apple: requests form_post response mode and carries an OIDC nonce", async () => {
+    const result = await runWithState(AppleProvider(CLIENT).generateAuthorizationUrl());
+    const url = new URL(result.url);
+    expect(url.searchParams.get("response_mode")).toBe("form_post");
+    expect(url.searchParams.get("nonce")).toBeTruthy();
+  });
+
+  it("reddit: appends duration=permanent", async () => {
+    const result = await runWithState(RedditProvider(CLIENT).generateAuthorizationUrl());
+    expect(new URL(result.url).searchParams.get("duration")).toBe("permanent");
+  });
+
+  it("twitter: emits a PKCE challenge", async () => {
+    const result = await runWithState(TwitterProvider(CLIENT).generateAuthorizationUrl());
+    expect(new URL(result.url).searchParams.get("code_challenge")).toBeTruthy();
+    expect(result.codeVerifier).toBeTruthy();
+  });
+});
+
+// --- Token exchange auth methods --------------------------------------------
+
+describe("OAuth token exchange", () => {
+  it("basic auth: sends HTTP Basic and omits client_secret from the body", async () => {
+    const token: OAuthTokenResponse = { access_token: "at", token_type: "bearer" };
+    await withFetch(
+      () => json(token),
+      async (calls) => {
+        const result = await Effect.runPromise(SpotifyProvider(CLIENT).exchangeCode("the-code"));
+        expect(result.access_token).toBe("at");
+        const call = calls[0]!;
+        const expected = `Basic ${Buffer.from(`${CLIENT.clientId}:${CLIENT.clientSecret}`).toString("base64")}`;
+        expect(call.headers.get("authorization")).toBe(expected);
+        expect(call.body).not.toContain("client_secret");
+        expect(call.body).toContain("client_id=client-123");
+      },
+    );
+  });
+
+  it("body auth (default): sends client_secret in the form body", async () => {
+    const token: OAuthTokenResponse = { access_token: "at", token_type: "bearer" };
+    await withFetch(
+      () => json(token),
+      async (calls) => {
+        await Effect.runPromise(GitLabProvider(CLIENT).exchangeCode("the-code", "verifier"));
+        const call = calls[0]!;
+        expect(call.headers.get("authorization")).toBeNull();
+        expect(call.body).toContain("client_secret=secret-xyz");
+        expect(call.body).toContain("code_verifier=verifier");
+      },
+    );
+  });
+});
+
+// --- Provider-specific profile mapping --------------------------------------
+
+describe("OAuth profile mapping", () => {
+  const getProfile = (provider: OAuthProvider, body: unknown, method = "GET") =>
+    withFetch(
+      () => json(body),
+      async (calls) => {
+        const info = await Effect.runPromise(
+          provider.getProfile({ access_token: "at", token_type: "bearer" }),
+        );
+        expect(calls[0]!.method).toBe(method);
+        return info;
+      },
+    );
+
+  it("facebook: flattens picture.data.url", async () => {
+    const info = await getProfile(FacebookProvider(CLIENT), {
+      id: "fb-1",
+      name: "Zed",
+      email: "z@e.com",
+      picture: { data: { url: "https://img/z.jpg" } },
+    });
+    expect(info).toMatchObject({
+      id: "fb-1",
+      name: "Zed",
+      email: "z@e.com",
+      picture: "https://img/z.jpg",
+    });
+  });
+
+  it("twitter: unwraps the data envelope and has no email", async () => {
+    const info = await getProfile(TwitterProvider(CLIENT), {
+      data: { id: "tw-1", name: "Bird", profile_image_url: "https://img/b.jpg" },
+    });
+    expect(info).toMatchObject({ id: "tw-1", name: "Bird", picture: "https://img/b.jpg" });
+    expect(info.email).toBeUndefined();
+  });
+
+  it("spotify: maps display_name and images[0].url", async () => {
+    const info = await getProfile(SpotifyProvider(CLIENT), {
+      id: "sp-1",
+      display_name: "DJ",
+      email: "dj@e.com",
+      images: [{ url: "https://img/dj.jpg" }],
+    });
+    expect(info).toMatchObject({
+      id: "sp-1",
+      name: "DJ",
+      email: "dj@e.com",
+      picture: "https://img/dj.jpg",
+    });
+  });
+
+  it("dropbox: uses a POST userinfo request and account_id", async () => {
+    const info = await getProfile(
+      DropboxProvider(CLIENT),
+      { account_id: "db-1", email: "d@e.com", name: { display_name: "Drop" } },
+      "POST",
+    );
+    expect(info).toMatchObject({ id: "db-1", email: "d@e.com", name: "Drop" });
+  });
+
+  it("kick: pulls the first element of data[]", async () => {
+    const info = await getProfile(KickProvider(CLIENT), {
+      data: [
+        {
+          user_id: "k-1",
+          name: "Streamer",
+          email: "k@e.com",
+          profile_picture: "https://img/k.jpg",
+        },
+      ],
+    });
+    expect(info).toMatchObject({
+      id: "k-1",
+      name: "Streamer",
+      email: "k@e.com",
+      picture: "https://img/k.jpg",
+    });
+  });
+
+  it("tiktok: reads data.user and open_id", async () => {
+    const info = await getProfile(TikTokProvider(CLIENT), {
+      data: { user: { open_id: "tt-1", display_name: "Toker", avatar_url: "https://img/t.jpg" } },
+    });
+    expect(info).toMatchObject({ id: "tt-1", name: "Toker", picture: "https://img/t.jpg" });
+  });
+
+  it("zoom: joins first_name and last_name", async () => {
+    const info = await getProfile(ZoomProvider(CLIENT), {
+      id: "z-1",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "a@e.com",
+    });
+    expect(info).toMatchObject({ id: "z-1", name: "Ada Lovelace", email: "a@e.com" });
+  });
+});
+
+// --- OIDC id_token verification ---------------------------------------------
+
+interface SigningKey {
+  privateKey: crypto.KeyObject;
+  jwks: { keys: unknown[] };
+}
+
+const makeSigningKey = (alg: "RS256" | "ES256" | "EdDSA", kid = "test-kid"): SigningKey => {
+  const { publicKey, privateKey } =
+    alg === "RS256"
+      ? crypto.generateKeyPairSync("rsa", { modulusLength: 2048 })
+      : alg === "ES256"
+        ? crypto.generateKeyPairSync("ec", { namedCurve: "P-256" })
+        : crypto.generateKeyPairSync("ed25519");
+  const jwk = publicKey.export({ format: "jwk" }) as Record<string, unknown>;
+  return { privateKey, jwks: { keys: [{ ...jwk, kid, alg, use: "sig" }] } };
+};
+
+const b64u = (obj: unknown): string =>
+  Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
+
+const signIdToken = (
+  alg: "RS256" | "ES256" | "EdDSA",
+  key: crypto.KeyObject,
+  claims: Record<string, unknown>,
+  kid = "test-kid",
+): string => {
+  const signingInput = `${b64u({ alg, kid, typ: "JWT" })}.${b64u(claims)}`;
+  const data = Buffer.from(signingInput);
+  const signature =
+    alg === "RS256"
+      ? crypto.sign("sha256", data, key)
+      : alg === "ES256"
+        ? crypto.sign("sha256", data, { key, dsaEncoding: "ieee-p1363" })
+        : crypto.sign(null, data, key);
+  return `${signingInput}.${signature.toString("base64url")}`;
+};
+
+const JWKS_URL = "https://idp/jwks";
+const baseClaims = (now: number) => ({
+  iss: "https://idp",
+  aud: "client-123",
+  sub: "user-1",
+  email: "u@idp.com",
+  email_verified: true,
+  name: "Ida",
+  exp: Math.floor(now / 1000) + 600,
+  iat: Math.floor(now / 1000),
+});
+
+describe("verifyIdToken", () => {
+  const now = 1_700_000_000_000;
+
+  for (const alg of ["RS256", "ES256", "EdDSA"] as const) {
+    it(`verifies a valid ${alg} id_token`, async () => {
+      const key = makeSigningKey(alg);
+      const token = signIdToken(alg, key.privateKey, baseClaims(now));
+      const claims = await withFetch(
+        () => json(key.jwks),
+        () =>
+          Effect.runPromise(
+            verifyIdToken(token, {
+              provider: "idp",
+              jwksEndpoint: JWKS_URL,
+              issuer: "https://idp",
+              audience: "client-123",
+              now,
+            }),
+          ),
+      );
+      expect(claims["sub"]).toBe("user-1");
+      expect(claims["email"]).toBe("u@idp.com");
+    });
+  }
+
+  const expectFailure = async (
+    token: string,
+    jwks: { keys: unknown[] },
+    params: Parameters<typeof verifyIdToken>[1],
+  ) =>
+    withFetch(
+      () => json(jwks),
+      () => Effect.runPromise(Effect.flip(verifyIdToken(token, params))),
+    );
+
+  it("rejects a tampered signature", async () => {
+    const key = makeSigningKey("ES256");
+    const token = signIdToken("ES256", key.privateKey, baseClaims(now));
+    const tampered = `${token.slice(0, -4)}AAAA`;
+    const err = await expectFailure(tampered, key.jwks, {
+      provider: "idp",
+      jwksEndpoint: JWKS_URL,
+      issuer: "https://idp",
+      audience: "client-123",
+      now,
+    });
+    expect(err.message).toMatch(/signature/i);
+  });
+
+  it("rejects an issuer mismatch", async () => {
+    const key = makeSigningKey("ES256");
+    const token = signIdToken("ES256", key.privateKey, baseClaims(now));
+    const err = await expectFailure(token, key.jwks, {
+      provider: "idp",
+      jwksEndpoint: JWKS_URL,
+      issuer: "https://evil",
+      audience: "client-123",
+      now,
+    });
+    expect(err.message).toMatch(/issuer/i);
+  });
+
+  it("rejects an audience mismatch", async () => {
+    const key = makeSigningKey("ES256");
+    const token = signIdToken("ES256", key.privateKey, baseClaims(now));
+    const err = await expectFailure(token, key.jwks, {
+      provider: "idp",
+      jwksEndpoint: JWKS_URL,
+      issuer: "https://idp",
+      audience: "other-client",
+      now,
+    });
+    expect(err.message).toMatch(/audience/i);
+  });
+
+  it("rejects an expired token", async () => {
+    const key = makeSigningKey("ES256");
+    const token = signIdToken("ES256", key.privateKey, {
+      ...baseClaims(now),
+      exp: Math.floor(now / 1000) - 10,
+    });
+    const err = await expectFailure(token, key.jwks, {
+      provider: "idp",
+      jwksEndpoint: JWKS_URL,
+      issuer: "https://idp",
+      audience: "client-123",
+      now,
+    });
+    expect(err.message).toMatch(/expired/i);
+  });
+
+  it("rejects a nonce mismatch", async () => {
+    const key = makeSigningKey("ES256");
+    const token = signIdToken("ES256", key.privateKey, { ...baseClaims(now), nonce: "real" });
+    const err = await expectFailure(token, key.jwks, {
+      provider: "idp",
+      jwksEndpoint: JWKS_URL,
+      issuer: "https://idp",
+      audience: "client-123",
+      nonce: "expected",
+      now,
+    });
+    expect(err.message).toMatch(/nonce/i);
+  });
+});
+
+describe("getProfile via id_token", () => {
+  it("resolves the profile from a verified id_token instead of userinfo", async () => {
+    const now = 1_700_000_000_000;
+    const key = makeSigningKey("ES256");
+    // getProfile validates against the real clock, so use a far-future exp.
+    const token = signIdToken("ES256", key.privateKey, { ...baseClaims(now), exp: 4_102_444_800 });
+    const provider = makeOAuthProvider("idp", {
+      clientId: "client-123",
+      clientSecret: "s",
+      redirectUri: "https://app/cb",
+      authorizationEndpoint: "https://idp/authorize",
+      tokenEndpoint: "https://idp/token",
+      jwksEndpoint: JWKS_URL,
+      issuer: "https://idp",
+      getUserInfoFromIdToken: true,
+      scopes: ["openid", "email"],
+    });
+
+    const info = await withFetch(
+      () => json(key.jwks),
+      (calls) =>
+        Effect.runPromise(
+          provider.getProfile({ access_token: "at", token_type: "bearer", id_token: token }),
+        ).then((result) => {
+          // Only the JWKS was fetched — no userinfo call.
+          expect(calls.every((c) => c.url === JWKS_URL)).toBe(true);
+          return result;
+        }),
+    );
+    expect(info).toMatchObject({ id: "user-1", email: "u@idp.com", name: "Ida" });
+  });
+});
+
+// --- Generic OIDC discovery --------------------------------------------------
+
+describe("discoverOAuthEndpoints", () => {
+  it("populates endpoints from an openid-configuration document", async () => {
+    const doc = {
+      issuer: "https://idp",
+      authorization_endpoint: "https://idp/authorize",
+      token_endpoint: "https://idp/token",
+      userinfo_endpoint: "https://idp/userinfo",
+      jwks_uri: "https://idp/jwks",
+    };
+    const endpoints = await withFetch(
+      (url) => {
+        expect(url).toBe("https://idp/.well-known/openid-configuration");
+        return json(doc);
+      },
+      () => Effect.runPromise(discoverOAuthEndpoints("https://idp/")),
+    );
+    expect(endpoints).toEqual({
+      issuer: "https://idp",
+      authorizationEndpoint: "https://idp/authorize",
+      tokenEndpoint: "https://idp/token",
+      userInfoEndpoint: "https://idp/userinfo",
+      jwksEndpoint: "https://idp/jwks",
+    });
+
+    // The discovered endpoints slot straight into a generic provider.
+    const provider = makeOAuthProvider("generic", {
+      ...endpoints,
+      clientId: "c",
+      clientSecret: "s",
+      redirectUri: "https://app/cb",
+      scopes: ["openid"],
+    });
+    expect(provider.config.authorizationEndpoint).toBe("https://idp/authorize");
+  });
+
+  it("fails when the document lacks required endpoints", async () => {
+    const err = await withFetch(
+      () => json({ issuer: "https://idp" }),
+      () => Effect.runPromise(Effect.flip(discoverOAuthEndpoints("https://idp"))),
+    );
+    expect(err.message).toMatch(/missing/i);
+  });
+});
+
+// --- Apple client secret -----------------------------------------------------
+
+describe("makeAppleClientSecret", () => {
+  it("produces a verifiable ES256 JWT with Apple's claims", async () => {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const pem = privateKey.export({ format: "pem", type: "pkcs8" }) as string;
+    const now = 1_700_000_000_000;
+    const secret = await Effect.runPromise(
+      makeAppleClientSecret({
+        teamId: "TEAM123",
+        clientId: "com.example.app",
+        keyId: "KEY123",
+        privateKey: pem,
+        now,
+      }),
+    );
+
+    const [headerSeg, payloadSeg, signatureSeg] = secret.split(".") as [string, string, string];
+    const header = JSON.parse(Buffer.from(headerSeg, "base64url").toString("utf8"));
+    const payload = JSON.parse(Buffer.from(payloadSeg, "base64url").toString("utf8"));
+    expect(header).toMatchObject({ alg: "ES256", kid: "KEY123" });
+    expect(payload).toMatchObject({
+      iss: "TEAM123",
+      sub: "com.example.app",
+      aud: "https://appleid.apple.com",
+    });
+    expect(payload.exp).toBeGreaterThan(payload.iat);
+
+    const valid = crypto.verify(
+      "sha256",
+      Buffer.from(`${headerSeg}.${payloadSeg}`),
+      { key: publicKey, dsaEncoding: "ieee-p1363" },
+      Buffer.from(signatureSeg, "base64url"),
+    );
+    expect(valid).toBe(true);
+  });
+});
