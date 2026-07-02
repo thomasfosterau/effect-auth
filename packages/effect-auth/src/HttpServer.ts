@@ -17,6 +17,7 @@ import { MagicLinkServiceTag, MagicLinkStoreTag, MagicLinkUserStoreTag } from ".
 import { AccountManagementServiceTag, AccountManagementStoreTag } from "./AccountManagement.js";
 import { AnonymousServiceTag, AnonymousUserStoreTag } from "./Anonymous.js";
 import { PhoneOtpServiceTag, PhoneOtpStoreTag, PhoneOtpUserStoreTag } from "./PhoneOtp.js";
+import { UsernameServiceTag, UsernameStoreTag } from "./Username.js";
 import { EmailOtpServiceTag, EmailOtpStoreTag, EmailOtpUserStoreTag } from "./EmailOtp.js";
 import { PendingTwoFactorStoreTag, TwoFactorServiceTag, TwoFactorStoreTag } from "./TwoFactor.js";
 import { PasswordHasherTag } from "./Password.js";
@@ -196,6 +197,18 @@ const resolveAccountManagement = Effect.gen(function* () {
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.provideService(AccountManagementStoreTag, store.value));
+  return { service: service.value, provideStores };
+});
+
+/** Resolve the username service + store, or fail with 404. */
+const resolveUsername = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(UsernameServiceTag);
+  const store = yield* Effect.serviceOption(UsernameStoreTag);
+  if (Option.isNone(service) || Option.isNone(store)) {
+    return yield* new S.NotFound({ message: "Username sign-in is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(Effect.provideService(UsernameStoreTag, store.value));
   return { service: service.value, provideStores };
 });
 
@@ -590,6 +603,31 @@ export const authGroupLayer = (config?: CookieConfig) => {
           const body: S.AuthSuccess = {
             user: S.encodeUser(result.user),
             needsEmailVerification: false,
+          };
+          return yield* withSessionCookie(body, result.session, cfg);
+        }),
+      )
+      .handle("signInUsername", ({ payload }) =>
+        Effect.gen(function* () {
+          const username = yield* resolveUsername;
+          const result = yield* username
+            .provideStores(
+              username.service.signIn({ username: payload.username, password: payload.password }),
+            )
+            .pipe(
+              Effect.catchTags({
+                UsernameError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+                InvalidCredentialsError: (e) =>
+                  Effect.fail(new S.Unauthorized({ message: e.message })),
+                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+              }),
+            );
+          const body: S.AuthSuccess = {
+            user: S.encodeUser(result.user),
+            needsEmailVerification: false,
+            ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
           };
           return yield* withSessionCookie(body, result.session, cfg);
         }),

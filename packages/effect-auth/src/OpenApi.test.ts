@@ -59,6 +59,7 @@ const EXPECTED_PATHS = [
   "/email-otp/send",
   "/sign-in/email-otp",
   "/sign-in/anonymous",
+  "/sign-in/username",
   "/phone-otp/send",
   "/sign-in/phone-otp",
   "/two-factor/enable",
