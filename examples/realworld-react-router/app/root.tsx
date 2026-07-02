@@ -1,6 +1,26 @@
 import { Links, Meta, NavLink, Outlet, Scripts, ScrollRestoration } from "react-router";
 import type { LinksFunction, LoaderFunctionArgs } from "react-router";
+import { useSession } from "@effect-auth/client/react";
+import { authClient } from "~/lib/authClient";
 import { getCurrentUser } from "~/server/auth/session";
+
+/**
+ * Live session badge driven by `@effect-auth/client`: subscribes to the
+ * client-side session store (backed by the /api/auth handler) instead of the
+ * server loader, so it reflects the session without a navigation.
+ */
+function SessionBadge() {
+  const { data, isPending } = useSession(authClient);
+  if (isPending || data === null) return null;
+  return (
+    <li className="nav-item">
+      <span className="nav-link" title="Session via @effect-auth/client">
+        <i className="ion-locked" />
+        &nbsp;{String(data.user.attributes["username"] ?? data.user.email)}
+      </span>
+    </li>
+  );
+}
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: "//demo.productionready.io/main.css" },
@@ -35,6 +55,7 @@ export default function App({ loaderData }: { loaderData: Awaited<ReturnType<typ
                   Home
                 </NavLink>
               </li>
+              <SessionBadge />
               {user ? (
                 <>
                   <li className="nav-item">

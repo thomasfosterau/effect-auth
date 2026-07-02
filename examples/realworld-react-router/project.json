@@ -6,17 +6,26 @@
   "targets": {
     "dev": {
       "executor": "nx:run-commands",
-      "options": { "cwd": "examples/realworld-react-router", "command": "bun run dev" }
+      "options": {
+        "cwd": "examples/realworld-react-router",
+        "command": "bun run dev"
+      }
     },
     "build": {
       "executor": "nx:run-commands",
-      "dependsOn": ["effect-auth:build"],
-      "options": { "cwd": "examples/realworld-react-router", "command": "bun run build" }
+      "dependsOn": ["effect-auth:build", "effect-auth-client:build"],
+      "options": {
+        "cwd": "examples/realworld-react-router",
+        "command": "bun run build"
+      }
     },
     "typecheck": {
       "executor": "nx:run-commands",
-      "dependsOn": ["effect-auth:build"],
-      "options": { "cwd": "examples/realworld-react-router", "command": "bun run typecheck" }
+      "dependsOn": ["effect-auth:build", "effect-auth-client:build"],
+      "options": {
+        "cwd": "examples/realworld-react-router",
+        "command": "bun run typecheck"
+      }
     }
   }
 }
