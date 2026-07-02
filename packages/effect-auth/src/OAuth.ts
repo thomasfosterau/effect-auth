@@ -28,6 +28,37 @@ export interface OAuthProviderConfig {
   readonly tokenEndpoint: string;
   readonly userInfoEndpoint?: string;
   readonly scopes: readonly string[];
+  /**
+   * Resolve the user profile from the OIDC `id_token` returned by the token
+   * endpoint instead of calling {@link userInfoEndpoint}. Required for
+   * providers that only expose identity via the id_token (e.g. Apple).
+   * Needs {@link jwksEndpoint} and {@link issuer} for verification.
+   */
+  readonly getUserInfoFromIdToken?: boolean;
+  /** JWKS URL used to verify the OIDC `id_token` signature. */
+  readonly jwksEndpoint?: string;
+  /** Expected `iss` claim when verifying an OIDC `id_token`. */
+  readonly issuer?: string;
+  /**
+   * How to authenticate at the token endpoint. `"body"` (default) sends
+   * `client_id`/`client_secret` in the form body; `"basic"` uses HTTP Basic
+   * (required by Reddit, X/Twitter confidential clients, Dropbox, ...).
+   */
+  readonly tokenAuthMethod?: "body" | "basic";
+  /** HTTP method for the userinfo request (default `"GET"`; Dropbox uses POST). */
+  readonly userInfoMethod?: "GET" | "POST";
+  /** Extra headers for the userinfo request (e.g. Twitch's `Client-Id`). */
+  readonly userInfoHeaders?: Readonly<Record<string, string>>;
+  /** Extra static query parameters appended to the authorization URL. */
+  readonly authorizationParams?: Readonly<Record<string, string>>;
+  /** Name of the client-id parameter (default `"client_id"`; TikTok uses `"client_key"`). */
+  readonly clientIdParam?: string;
+  /**
+   * Normalize a provider-specific profile payload into {@link OAuthUserInfo}
+   * (maps nested shapes such as Facebook's `picture.data.url` or Twitter's
+   * `data` envelope). Applied to both userinfo and id_token profiles.
+   */
+  readonly mapProfile?: (raw: Record<string, unknown>) => OAuthUserInfo;
 }
 
 /**
@@ -37,6 +68,7 @@ export interface OAuthState {
   readonly state: string;
   readonly provider: string;
   readonly codeVerifier?: string; // For PKCE
+  readonly nonce?: string; // For OIDC id_token replay protection
   readonly returnTo?: string;
   readonly createdAt: number;
   readonly expiresAt: number;
@@ -180,6 +212,17 @@ export interface OAuthProvider {
     codeVerifier?: string,
   ) => Effect.Effect<OAuthTokenResponse, OAuthProviderError>;
   readonly getUserInfo: (accessToken: string) => Effect.Effect<OAuthUserInfo, OAuthProviderError>;
+  /**
+   * Resolve the user profile from a token response. Dispatches on
+   * {@link OAuthProviderConfig.getUserInfoFromIdToken}: verifies + decodes the
+   * OIDC `id_token` (honouring `expectedNonce`) when set, otherwise calls the
+   * userinfo endpoint with the access token. Prefer this over
+   * {@link getUserInfo} in callback handling.
+   */
+  readonly getProfile: (
+    tokens: OAuthTokenResponse,
+    options?: { readonly expectedNonce?: string },
+  ) => Effect.Effect<OAuthUserInfo, OAuthProviderError>;
 }
 
 /**
@@ -243,107 +286,165 @@ export const generatePKCE = (): Effect.Effect<
   });
 
 /**
+ * Generate a cryptographically secure random nonce for OIDC id_token replay
+ * protection.
+ */
+export const generateNonce = (): Effect.Effect<string, never> =>
+  Effect.sync(() => crypto.randomBytes(16).toString("base64url"));
+
+const decodeJwtSegment = (segment: string): Record<string, unknown> =>
+  JSON.parse(Buffer.from(segment, "base64url").toString("utf8")) as Record<string, unknown>;
+
+/** A single JSON Web Key from a provider's JWKS document. */
+interface ProviderJwk {
+  readonly kid?: string;
+  readonly alg?: string;
+  readonly kty?: string;
+  readonly [key: string]: unknown;
+}
+
+/**
+ * Verify and decode an OIDC `id_token` (compact JWS) against a provider's
+ * JWKS. Validates the signature (RS256, ES256, or EdDSA), then `iss`, `aud`,
+ * `exp`, and — when supplied — `nonce`. Returns the decoded claims.
+ */
+export const verifyIdToken = (
+  idToken: string,
+  params: {
+    readonly provider: string;
+    readonly jwksEndpoint: string;
+    readonly issuer?: string;
+    readonly audience?: string;
+    readonly nonce?: string;
+    readonly now?: number;
+  },
+): Effect.Effect<Record<string, unknown>, OAuthProviderError> =>
+  Effect.gen(function* () {
+    const fail = (message: string) =>
+      new OAuthProviderError({ message, provider: params.provider });
+
+    const parts = idToken.split(".");
+    if (parts.length !== 3) {
+      return yield* fail("Malformed id_token");
+    }
+    const [headerSeg, payloadSeg, signatureSeg] = parts as [string, string, string];
+
+    let header: Record<string, unknown>;
+    let payload: Record<string, unknown>;
+    try {
+      header = decodeJwtSegment(headerSeg);
+      payload = decodeJwtSegment(payloadSeg);
+    } catch (cause) {
+      return yield* new OAuthProviderError({
+        message: "Failed to decode id_token",
+        provider: params.provider,
+        cause,
+      });
+    }
+
+    const alg = header["alg"];
+    if (alg !== "RS256" && alg !== "ES256" && alg !== "EdDSA") {
+      return yield* fail(`Unsupported id_token algorithm: ${String(alg)}`);
+    }
+
+    const response = yield* Effect.tryPromise({
+      try: () => fetch(params.jwksEndpoint, { headers: { Accept: "application/json" } }),
+      catch: (cause) =>
+        new OAuthProviderError({
+          message: `Failed to fetch JWKS for ${params.provider}`,
+          provider: params.provider,
+          cause,
+        }),
+    });
+    if (!response.ok) {
+      return yield* fail(`JWKS request failed with status ${response.status}`);
+    }
+    const jwks = (yield* Effect.promise(() => response.json())) as {
+      keys?: readonly ProviderJwk[];
+    };
+    const keys = jwks.keys ?? [];
+    const kid = header["kid"];
+    const jwk = keys.find((k) => k.kid === kid) ?? (keys.length === 1 ? keys[0] : undefined);
+    if (!jwk) {
+      return yield* fail("No matching JWKS key for id_token");
+    }
+
+    const verified = yield* Effect.try({
+      try: () => {
+        const key = crypto.createPublicKey({
+          key: jwk as crypto.JsonWebKeyInput["key"],
+          format: "jwk",
+        });
+        const signingInput = Buffer.from(`${headerSeg}.${payloadSeg}`);
+        const signature = Buffer.from(signatureSeg, "base64url");
+        if (alg === "RS256") {
+          return crypto.verify("sha256", signingInput, key, signature);
+        }
+        if (alg === "ES256") {
+          return crypto.verify(
+            "sha256",
+            signingInput,
+            { key, dsaEncoding: "ieee-p1363" },
+            signature,
+          );
+        }
+        return crypto.verify(null, signingInput, key, signature);
+      },
+      catch: (cause) =>
+        new OAuthProviderError({
+          message: "id_token signature verification failed",
+          provider: params.provider,
+          cause,
+        }),
+    });
+    if (!verified) {
+      return yield* fail("Invalid id_token signature");
+    }
+
+    if (params.issuer !== undefined && payload["iss"] !== params.issuer) {
+      return yield* fail("id_token issuer mismatch");
+    }
+    if (params.audience !== undefined) {
+      const aud = payload["aud"];
+      const ok = aud === params.audience || (Array.isArray(aud) && aud.includes(params.audience));
+      if (!ok) {
+        return yield* fail("id_token audience mismatch");
+      }
+    }
+    const nowSec = (params.now ?? Date.now()) / 1000;
+    if (typeof payload["exp"] === "number" && nowSec > payload["exp"]) {
+      return yield* fail("id_token expired");
+    }
+    if (params.nonce !== undefined && payload["nonce"] !== params.nonce) {
+      return yield* fail("id_token nonce mismatch");
+    }
+
+    return payload;
+  });
+
+/** Map OIDC id_token / userinfo claims to {@link OAuthUserInfo}. */
+const claimsToUserInfo = (claims: Record<string, unknown>): OAuthUserInfo => ({
+  ...claims,
+  id: String(claims["sub"] ?? claims["id"] ?? ""),
+  ...(typeof claims["email"] === "string" && { email: claims["email"] }),
+  ...(typeof claims["email_verified"] === "boolean" && {
+    email_verified: claims["email_verified"],
+  }),
+  ...(typeof claims["name"] === "string" && { name: claims["name"] }),
+  ...(typeof claims["picture"] === "string" && { picture: claims["picture"] }),
+});
+
+/**
  * Create an OAuth provider
  */
 export const makeOAuthProvider = (
   name: string,
   config: OAuthProviderConfig,
   usePKCE = true,
-): OAuthProvider => ({
-  name,
-  config,
+): OAuthProvider => {
+  const mapProfile = config.mapProfile ?? claimsToUserInfo;
 
-  generateAuthorizationUrl: (customScopes?: readonly string[]) =>
-    Effect.gen(function* () {
-      const stateStore = yield* OAuthStateStoreTag;
-      const state = yield* generateState();
-
-      // Generate PKCE if enabled
-      const pkce = usePKCE ? yield* generatePKCE() : undefined;
-
-      // Create state entry
-      const stateEntry: OAuthState = {
-        state,
-        provider: name,
-        ...(pkce?.codeVerifier && { codeVerifier: pkce.codeVerifier }),
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
-      };
-
-      yield* stateStore.create(stateEntry);
-
-      // Build authorization URL
-      const scopes = customScopes ?? config.scopes;
-      const params = new URLSearchParams({
-        client_id: config.clientId,
-        redirect_uri: config.redirectUri,
-        response_type: "code",
-        scope: scopes.join(" "),
-        state,
-      });
-
-      if (pkce) {
-        params.set("code_challenge", pkce.codeChallenge);
-        params.set("code_challenge_method", "S256");
-      }
-
-      const url = `${config.authorizationEndpoint}?${params.toString()}`;
-
-      return {
-        url,
-        state,
-        ...(pkce?.codeVerifier && { codeVerifier: pkce.codeVerifier }),
-      } satisfies AuthorizationUrlResult;
-    }),
-
-  exchangeCode: (code: string, codeVerifier?: string) =>
-    Effect.gen(function* () {
-      const params = new URLSearchParams({
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-        code,
-        grant_type: "authorization_code",
-        redirect_uri: config.redirectUri,
-      });
-
-      if (codeVerifier) {
-        params.set("code_verifier", codeVerifier);
-      }
-
-      const response = yield* Effect.tryPromise({
-        try: () =>
-          fetch(config.tokenEndpoint, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded",
-              Accept: "application/json",
-            },
-            body: params.toString(),
-          }),
-        catch: (cause) =>
-          new OAuthProviderError({
-            message: `Failed to exchange code with ${name}`,
-            provider: name,
-            cause,
-          }),
-      });
-
-      if (!response.ok) {
-        const errorText = yield* Effect.promise(() => response.text());
-        return yield* Effect.fail(
-          new OAuthProviderError({
-            message: `Token exchange failed: ${errorText}`,
-            provider: name,
-          }),
-        );
-      }
-
-      const data = (yield* Effect.promise(() => response.json())) as OAuthTokenResponse;
-
-      return data;
-    }),
-
-  getUserInfo: (accessToken: string) =>
+  const getUserInfo = (accessToken: string): Effect.Effect<OAuthUserInfo, OAuthProviderError> =>
     Effect.gen(function* () {
       if (!config.userInfoEndpoint) {
         return yield* Effect.fail(
@@ -357,9 +458,11 @@ export const makeOAuthProvider = (
       const response = yield* Effect.tryPromise({
         try: () =>
           fetch(config.userInfoEndpoint!, {
+            method: config.userInfoMethod ?? "GET",
             headers: {
               Authorization: `Bearer ${accessToken}`,
               Accept: "application/json",
+              ...config.userInfoHeaders,
             },
           }),
         catch: (cause) =>
@@ -380,11 +483,158 @@ export const makeOAuthProvider = (
         );
       }
 
-      const data = (yield* Effect.promise(() => response.json())) as OAuthUserInfo;
+      const data = (yield* Effect.promise(() => response.json())) as Record<string, unknown>;
 
-      return data;
-    }),
-});
+      return mapProfile(data);
+    });
+
+  return {
+    name,
+    config,
+
+    generateAuthorizationUrl: (customScopes?: readonly string[]) =>
+      Effect.gen(function* () {
+        const stateStore = yield* OAuthStateStoreTag;
+        const state = yield* generateState();
+
+        // Generate PKCE if enabled
+        const pkce = usePKCE ? yield* generatePKCE() : undefined;
+        // OIDC id_token flows carry a nonce for replay protection.
+        const nonce = config.getUserInfoFromIdToken ? yield* generateNonce() : undefined;
+
+        // Create state entry
+        const stateEntry: OAuthState = {
+          state,
+          provider: name,
+          ...(pkce?.codeVerifier && { codeVerifier: pkce.codeVerifier }),
+          ...(nonce && { nonce }),
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+        };
+
+        yield* stateStore.create(stateEntry);
+
+        // Build authorization URL
+        const clientIdParam = config.clientIdParam ?? "client_id";
+        const scopes = customScopes ?? config.scopes;
+        const params = new URLSearchParams({
+          [clientIdParam]: config.clientId,
+          redirect_uri: config.redirectUri,
+          response_type: "code",
+          scope: scopes.join(" "),
+          state,
+        });
+
+        if (pkce) {
+          params.set("code_challenge", pkce.codeChallenge);
+          params.set("code_challenge_method", "S256");
+        }
+        if (nonce) {
+          params.set("nonce", nonce);
+        }
+        for (const [key, value] of Object.entries(config.authorizationParams ?? {})) {
+          params.set(key, value);
+        }
+
+        const url = `${config.authorizationEndpoint}?${params.toString()}`;
+
+        return {
+          url,
+          state,
+          ...(pkce?.codeVerifier && { codeVerifier: pkce.codeVerifier }),
+        } satisfies AuthorizationUrlResult;
+      }),
+
+    exchangeCode: (code: string, codeVerifier?: string) =>
+      Effect.gen(function* () {
+        const useBasic = config.tokenAuthMethod === "basic";
+        const params = new URLSearchParams({
+          [config.clientIdParam ?? "client_id"]: config.clientId,
+          code,
+          grant_type: "authorization_code",
+          redirect_uri: config.redirectUri,
+        });
+        if (!useBasic) {
+          params.set("client_secret", config.clientSecret);
+        }
+
+        if (codeVerifier) {
+          params.set("code_verifier", codeVerifier);
+        }
+
+        const response = yield* Effect.tryPromise({
+          try: () =>
+            fetch(config.tokenEndpoint, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                Accept: "application/json",
+                ...(useBasic && {
+                  Authorization: `Basic ${Buffer.from(
+                    `${config.clientId}:${config.clientSecret}`,
+                  ).toString("base64")}`,
+                }),
+              },
+              body: params.toString(),
+            }),
+          catch: (cause) =>
+            new OAuthProviderError({
+              message: `Failed to exchange code with ${name}`,
+              provider: name,
+              cause,
+            }),
+        });
+
+        if (!response.ok) {
+          const errorText = yield* Effect.promise(() => response.text());
+          return yield* Effect.fail(
+            new OAuthProviderError({
+              message: `Token exchange failed: ${errorText}`,
+              provider: name,
+            }),
+          );
+        }
+
+        const data = (yield* Effect.promise(() => response.json())) as OAuthTokenResponse;
+
+        return data;
+      }),
+
+    getUserInfo,
+
+    getProfile: (tokens, options) =>
+      Effect.gen(function* () {
+        if (config.getUserInfoFromIdToken) {
+          if (!tokens.id_token) {
+            return yield* Effect.fail(
+              new OAuthProviderError({
+                message: `Provider ${name} did not return an id_token`,
+                provider: name,
+              }),
+            );
+          }
+          if (!config.jwksEndpoint) {
+            return yield* Effect.fail(
+              new OAuthProviderError({
+                message: `Provider ${name} is missing a jwksEndpoint for id_token verification`,
+                provider: name,
+              }),
+            );
+          }
+          const claims = yield* verifyIdToken(tokens.id_token, {
+            provider: name,
+            jwksEndpoint: config.jwksEndpoint,
+            ...(config.issuer !== undefined && { issuer: config.issuer }),
+            audience: config.clientId,
+            ...(options?.expectedNonce !== undefined && { nonce: options.expectedNonce }),
+          });
+          return mapProfile(claims);
+        }
+
+        return yield* getUserInfo(tokens.access_token);
+      }),
+  };
+};
 
 /**
  * OAuth service for managing OAuth flows
@@ -514,7 +764,9 @@ export const makeOAuthService = (
       }
 
       const tokens = yield* providerInstance.exchangeCode(code, stateEntry.codeVerifier);
-      const userInfo = yield* providerInstance.getUserInfo(tokens.access_token);
+      const userInfo = yield* providerInstance.getProfile(tokens, {
+        ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
+      });
 
       yield* stateStore.delete(state);
 
@@ -591,8 +843,10 @@ export const makeOAuthService = (
           // Exchange code for tokens
           const tokens = yield* providerInstance.exchangeCode(code, stateEntry.codeVerifier);
 
-          // Get user info
-          const userInfo = yield* providerInstance.getUserInfo(tokens.access_token);
+          // Get user info (userinfo endpoint or verified OIDC id_token)
+          const userInfo = yield* providerInstance.getProfile(tokens, {
+            ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
+          });
 
           // Clean up state
           yield* stateStore.delete(state);
@@ -802,8 +1056,10 @@ export const makeOAuthService = (
           // Exchange code for tokens
           const tokens = yield* providerInstance.exchangeCode(code, stateEntry.codeVerifier);
 
-          // Get user info
-          const userInfo = yield* providerInstance.getUserInfo(tokens.access_token);
+          // Get user info (userinfo endpoint or verified OIDC id_token)
+          const userInfo = yield* providerInstance.getProfile(tokens, {
+            ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
+          });
 
           // Clean up state
           yield* stateStore.delete(state);
@@ -888,19 +1144,28 @@ export const makeOAuthService = (
           }
 
           // Exchange refresh token for new access token
+          const rConfig = providerInstance.config;
+          const rUseBasic = rConfig.tokenAuthMethod === "basic";
           const params = new URLSearchParams({
-            client_id: providerInstance.config.clientId,
-            client_secret: providerInstance.config.clientSecret,
+            [rConfig.clientIdParam ?? "client_id"]: rConfig.clientId,
             grant_type: "refresh_token",
             refresh_token: account.refreshToken,
           });
+          if (!rUseBasic) {
+            params.set("client_secret", rConfig.clientSecret);
+          }
 
           const response = yield* Effect.tryPromise({
             try: () =>
-              fetch(providerInstance.config.tokenEndpoint, {
+              fetch(rConfig.tokenEndpoint, {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/x-www-form-urlencoded",
+                  ...(rUseBasic && {
+                    Authorization: `Basic ${Buffer.from(
+                      `${rConfig.clientId}:${rConfig.clientSecret}`,
+                    ).toString("base64")}`,
+                  }),
                 },
                 body: params.toString(),
               }),
@@ -1020,3 +1285,477 @@ export const MicrosoftProvider = (config: {
     },
     true, // Use PKCE
   );
+
+/** The `{ clientId, clientSecret, redirectUri }` triple every provider needs. */
+export interface OAuthClientConfig {
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly redirectUri: string;
+}
+
+const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+const nested = (v: unknown, ...path: string[]): unknown =>
+  path.reduce<unknown>(
+    (acc, key) =>
+      acc && typeof acc === "object" ? (acc as Record<string, unknown>)[key] : undefined,
+    v,
+  );
+
+/**
+ * Build an {@link OAuthUserInfo} from a base record plus normalized identity
+ * fields, omitting any that are `undefined` (satisfies
+ * `exactOptionalPropertyTypes`).
+ */
+const profile = (
+  base: Record<string, unknown>,
+  fields: {
+    readonly id: unknown;
+    readonly email?: string | undefined;
+    readonly name?: string | undefined;
+    readonly picture?: string | undefined;
+    readonly email_verified?: boolean | undefined;
+  },
+): OAuthUserInfo => ({
+  ...base,
+  id: String(fields.id ?? ""),
+  ...(fields.email !== undefined && { email: fields.email }),
+  ...(fields.name !== undefined && { name: fields.name }),
+  ...(fields.picture !== undefined && { picture: fields.picture }),
+  ...(fields.email_verified !== undefined && { email_verified: fields.email_verified }),
+});
+
+/**
+ * Sign-in with Apple. Apple returns identity only via the OIDC `id_token`
+ * (`response_mode=form_post`, `name`/`email` scopes). `clientSecret` must be a
+ * signed ES256 JWT — generate it with {@link makeAppleClientSecret}.
+ */
+export const AppleProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "apple",
+    {
+      ...config,
+      authorizationEndpoint: "https://appleid.apple.com/auth/authorize",
+      tokenEndpoint: "https://appleid.apple.com/auth/token",
+      jwksEndpoint: "https://appleid.apple.com/auth/keys",
+      issuer: "https://appleid.apple.com",
+      getUserInfoFromIdToken: true,
+      scopes: ["name", "email"],
+      authorizationParams: { response_mode: "form_post" },
+    },
+    true,
+  );
+
+/**
+ * Build the ES256-signed client-secret JWT Apple requires (valid up to 6
+ * months; Apple caps `exp` at 15777000s). Pass the result as `clientSecret`
+ * to {@link AppleProvider}.
+ */
+export const makeAppleClientSecret = (params: {
+  readonly teamId: string;
+  readonly clientId: string;
+  readonly keyId: string;
+  /** PKCS#8 PEM of the private key downloaded from Apple. */
+  readonly privateKey: string;
+  /** Lifetime in seconds (default 6 months, Apple's maximum). */
+  readonly expiresIn?: number;
+  readonly now?: number;
+}): Effect.Effect<string, OAuthProviderError> =>
+  Effect.try({
+    try: () => {
+      const iat = Math.floor((params.now ?? Date.now()) / 1000);
+      const exp = iat + (params.expiresIn ?? 15777000);
+      const header = { alg: "ES256", kid: params.keyId, typ: "JWT" };
+      const payload = {
+        iss: params.teamId,
+        iat,
+        exp,
+        aud: "https://appleid.apple.com",
+        sub: params.clientId,
+      };
+      const encode = (obj: unknown): string =>
+        Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
+      const signingInput = `${encode(header)}.${encode(payload)}`;
+      const key = crypto.createPrivateKey(params.privateKey);
+      const signature = crypto
+        .sign("sha256", Buffer.from(signingInput), { key, dsaEncoding: "ieee-p1363" })
+        .toString("base64url");
+      return `${signingInput}.${signature}`;
+    },
+    catch: (cause) =>
+      new OAuthProviderError({
+        message: "Failed to sign Apple client secret",
+        provider: "apple",
+        cause,
+      }),
+  });
+
+/** Facebook Login (Graph API userinfo; `picture` is nested under `data.url`). */
+export const FacebookProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "facebook",
+    {
+      ...config,
+      authorizationEndpoint: "https://www.facebook.com/v18.0/dialog/oauth",
+      tokenEndpoint: "https://graph.facebook.com/v18.0/oauth/access_token",
+      userInfoEndpoint: "https://graph.facebook.com/me?fields=id,name,email,picture",
+      scopes: ["email", "public_profile"],
+      mapProfile: (raw) =>
+        profile(raw, {
+          id: raw["id"],
+          email: str(raw["email"]),
+          name: str(raw["name"]),
+          picture: str(nested(raw["picture"], "data", "url")),
+        }),
+    },
+    false,
+  );
+
+/** X/Twitter OAuth2 (PKCE + Basic auth required; email needs elevated access). */
+export const TwitterProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "twitter",
+    {
+      ...config,
+      authorizationEndpoint: "https://twitter.com/i/oauth2/authorize",
+      tokenEndpoint: "https://api.twitter.com/2/oauth2/token",
+      userInfoEndpoint: "https://api.twitter.com/2/users/me?user.fields=profile_image_url",
+      scopes: ["users.read", "tweet.read"],
+      tokenAuthMethod: "basic",
+      mapProfile: (raw) => {
+        const data = (raw["data"] ?? raw) as Record<string, unknown>;
+        return profile(data, {
+          id: data["id"],
+          name: str(data["name"]),
+          picture: str(data["profile_image_url"]),
+        });
+      },
+    },
+    true,
+  );
+
+/** LinkedIn (OpenID Connect userinfo). */
+export const LinkedInProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "linkedin",
+    {
+      ...config,
+      authorizationEndpoint: "https://www.linkedin.com/oauth/v2/authorization",
+      tokenEndpoint: "https://www.linkedin.com/oauth/v2/accessToken",
+      userInfoEndpoint: "https://api.linkedin.com/v2/userinfo",
+      scopes: ["openid", "profile", "email"],
+    },
+    false,
+  );
+
+/** Twitch (OpenID Connect userinfo). */
+export const TwitchProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "twitch",
+    {
+      ...config,
+      authorizationEndpoint: "https://id.twitch.tv/oauth2/authorize",
+      tokenEndpoint: "https://id.twitch.tv/oauth2/token",
+      userInfoEndpoint: "https://id.twitch.tv/oauth2/userinfo",
+      scopes: ["openid", "user:read:email"],
+    },
+    false,
+  );
+
+/** Spotify (Basic auth token exchange; `images[0].url`, `display_name`). */
+export const SpotifyProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "spotify",
+    {
+      ...config,
+      authorizationEndpoint: "https://accounts.spotify.com/authorize",
+      tokenEndpoint: "https://accounts.spotify.com/api/token",
+      userInfoEndpoint: "https://api.spotify.com/v1/me",
+      scopes: ["user-read-email", "user-read-private"],
+      tokenAuthMethod: "basic",
+      mapProfile: (raw) => {
+        const images = raw["images"];
+        const picture = Array.isArray(images) ? str(nested(images[0], "url")) : undefined;
+        return profile(raw, {
+          id: raw["id"],
+          email: str(raw["email"]),
+          name: str(raw["display_name"]),
+          picture,
+        });
+      },
+    },
+    false,
+  );
+
+/** GitLab (`gitlab.com` by default; pass `baseUrl` for self-hosted). */
+export const GitLabProvider = (
+  config: OAuthClientConfig & { readonly baseUrl?: string },
+): OAuthProvider => {
+  const base = (config.baseUrl ?? "https://gitlab.com").replace(/\/$/, "");
+  return makeOAuthProvider(
+    "gitlab",
+    {
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      redirectUri: config.redirectUri,
+      authorizationEndpoint: `${base}/oauth/authorize`,
+      tokenEndpoint: `${base}/oauth/token`,
+      userInfoEndpoint: `${base}/api/v4/user`,
+      scopes: ["read_user"],
+      mapProfile: (raw) =>
+        profile(raw, {
+          id: raw["id"],
+          email: str(raw["email"]),
+          name: str(raw["name"]),
+          picture: str(raw["avatar_url"]),
+        }),
+    },
+    true,
+  );
+};
+
+/** Reddit (Basic auth; `identity` scope; no email; `duration=permanent`). */
+export const RedditProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "reddit",
+    {
+      ...config,
+      authorizationEndpoint: "https://www.reddit.com/api/v1/authorize",
+      tokenEndpoint: "https://www.reddit.com/api/v1/access_token",
+      userInfoEndpoint: "https://oauth.reddit.com/api/v1/me",
+      scopes: ["identity"],
+      tokenAuthMethod: "basic",
+      authorizationParams: { duration: "permanent" },
+      mapProfile: (raw) =>
+        profile(raw, {
+          id: raw["id"],
+          name: str(raw["name"]),
+          picture: str(raw["icon_img"]),
+        }),
+    },
+    false,
+  );
+
+/** Dropbox (POST userinfo; `token_access_type=offline` for refresh tokens). */
+export const DropboxProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "dropbox",
+    {
+      ...config,
+      authorizationEndpoint: "https://www.dropbox.com/oauth2/authorize",
+      tokenEndpoint: "https://api.dropboxapi.com/oauth2/token",
+      userInfoEndpoint: "https://api.dropboxapi.com/2/users/get_current_account",
+      userInfoMethod: "POST",
+      scopes: ["account_info.read"],
+      authorizationParams: { token_access_type: "offline" },
+      mapProfile: (raw) =>
+        profile(raw, {
+          id: raw["account_id"],
+          email: str(raw["email"]),
+          name: str(nested(raw["name"], "display_name")),
+          picture: str(raw["profile_photo_url"]),
+        }),
+    },
+    true,
+  );
+
+/** Notion (Basic auth; profile via `/v1/users/me` bot owner). */
+export const NotionProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "notion",
+    {
+      ...config,
+      authorizationEndpoint: "https://api.notion.com/v1/oauth/authorize",
+      tokenEndpoint: "https://api.notion.com/v1/oauth/token",
+      userInfoEndpoint: "https://api.notion.com/v1/users/me",
+      userInfoHeaders: { "Notion-Version": "2022-06-28" },
+      scopes: [],
+      tokenAuthMethod: "basic",
+      authorizationParams: { owner: "user" },
+      mapProfile: (raw) => {
+        const user = (nested(raw, "bot", "owner", "user") ?? raw) as Record<string, unknown>;
+        return profile(raw, {
+          id: user["id"] ?? raw["id"],
+          email: str(nested(user, "person", "email")),
+          name: str(user["name"]),
+          picture: str(user["avatar_url"]),
+        });
+      },
+    },
+    false,
+  );
+
+/** Slack (Sign in with Slack / OpenID Connect). */
+export const SlackProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "slack",
+    {
+      ...config,
+      authorizationEndpoint: "https://slack.com/openid/connect/authorize",
+      tokenEndpoint: "https://slack.com/api/openid.connect.token",
+      userInfoEndpoint: "https://slack.com/api/openid.connect.userInfo",
+      scopes: ["openid", "email", "profile"],
+    },
+    false,
+  );
+
+/** Zoom (Basic auth; `first_name`/`last_name`, `pic_url`). */
+export const ZoomProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "zoom",
+    {
+      ...config,
+      authorizationEndpoint: "https://zoom.us/oauth/authorize",
+      tokenEndpoint: "https://zoom.us/oauth/token",
+      userInfoEndpoint: "https://api.zoom.us/v2/users/me",
+      scopes: ["user:read"],
+      tokenAuthMethod: "basic",
+      mapProfile: (raw) => {
+        const name = [str(raw["first_name"]), str(raw["last_name"])].filter(Boolean).join(" ");
+        return profile(raw, {
+          id: raw["id"],
+          email: str(raw["email"]),
+          name: name === "" ? undefined : name,
+          picture: str(raw["pic_url"]),
+        });
+      },
+    },
+    true,
+  );
+
+/** TikTok (uses `client_key`; PKCE; profile under `data.user`). */
+export const TikTokProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "tiktok",
+    {
+      ...config,
+      clientIdParam: "client_key",
+      authorizationEndpoint: "https://www.tiktok.com/v2/auth/authorize/",
+      tokenEndpoint: "https://open.tiktokapis.com/v2/oauth/token/",
+      userInfoEndpoint:
+        "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url",
+      scopes: ["user.info.basic"],
+      mapProfile: (raw) => {
+        const user = (nested(raw, "data", "user") ?? raw) as Record<string, unknown>;
+        return profile(user, {
+          id: user["open_id"] ?? user["id"],
+          name: str(user["display_name"]),
+          picture: str(user["avatar_url"]),
+        });
+      },
+    },
+    true,
+  );
+
+/** Roblox (OpenID Connect; PKCE required). */
+export const RobloxProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "roblox",
+    {
+      ...config,
+      authorizationEndpoint: "https://apis.roblox.com/oauth/v1/authorize",
+      tokenEndpoint: "https://apis.roblox.com/oauth/v1/token",
+      userInfoEndpoint: "https://apis.roblox.com/oauth/v1/userinfo",
+      scopes: ["openid", "profile"],
+    },
+    true,
+  );
+
+/** Kick (PKCE required; profile under `data[0]`). */
+export const KickProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "kick",
+    {
+      ...config,
+      authorizationEndpoint: "https://id.kick.com/oauth/authorize",
+      tokenEndpoint: "https://id.kick.com/oauth/token",
+      userInfoEndpoint: "https://api.kick.com/public/v1/users",
+      scopes: ["user:read"],
+      mapProfile: (raw) => {
+        const data = raw["data"];
+        const user = (Array.isArray(data) ? data[0] : raw) as Record<string, unknown>;
+        return profile(user, {
+          id: user["user_id"] ?? user["id"],
+          email: str(user["email"]),
+          name: str(user["name"]),
+          picture: str(user["profile_picture"]),
+        });
+      },
+    },
+    true,
+  );
+
+/** Hugging Face (OpenID Connect; PKCE). */
+export const HuggingFaceProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "huggingface",
+    {
+      ...config,
+      authorizationEndpoint: "https://huggingface.co/oauth/authorize",
+      tokenEndpoint: "https://huggingface.co/oauth/token",
+      userInfoEndpoint: "https://huggingface.co/oauth/userinfo",
+      scopes: ["openid", "profile", "email"],
+    },
+    true,
+  );
+
+/**
+ * Endpoint set resolved from an OpenID Connect discovery document, in the
+ * shape {@link OAuthProviderConfig} expects.
+ */
+export interface DiscoveredEndpoints {
+  readonly issuer: string;
+  readonly authorizationEndpoint: string;
+  readonly tokenEndpoint: string;
+  readonly userInfoEndpoint?: string;
+  readonly jwksEndpoint?: string;
+}
+
+/**
+ * Populate a provider's endpoints from an issuer's
+ * `/.well-known/openid-configuration`. Spread the result into a
+ * {@link makeOAuthProvider} config to build a generic OIDC provider.
+ */
+export const discoverOAuthEndpoints = (
+  issuerUrl: string,
+): Effect.Effect<DiscoveredEndpoints, OAuthProviderError> =>
+  Effect.gen(function* () {
+    const base = issuerUrl.replace(/\/$/, "");
+    const url = `${base}/.well-known/openid-configuration`;
+    const response = yield* Effect.tryPromise({
+      try: () => fetch(url, { headers: { Accept: "application/json" } }),
+      catch: (cause) =>
+        new OAuthProviderError({
+          message: `Failed to fetch OIDC discovery document from ${url}`,
+          provider: issuerUrl,
+          cause,
+        }),
+    });
+    if (!response.ok) {
+      return yield* Effect.fail(
+        new OAuthProviderError({
+          message: `OIDC discovery request failed with status ${response.status}`,
+          provider: issuerUrl,
+        }),
+      );
+    }
+    const doc = (yield* Effect.promise(() => response.json())) as Record<string, unknown>;
+    const authorization = str(doc["authorization_endpoint"]);
+    const token = str(doc["token_endpoint"]);
+    if (!authorization || !token) {
+      return yield* Effect.fail(
+        new OAuthProviderError({
+          message: "OIDC discovery document is missing authorization_endpoint or token_endpoint",
+          provider: issuerUrl,
+        }),
+      );
+    }
+    const userInfo = str(doc["userinfo_endpoint"]);
+    const jwks = str(doc["jwks_uri"]);
+    return {
+      issuer: str(doc["issuer"]) ?? base,
+      authorizationEndpoint: authorization,
+      tokenEndpoint: token,
+      ...(userInfo !== undefined && { userInfoEndpoint: userInfo }),
+      ...(jwks !== undefined && { jwksEndpoint: jwks }),
+    } satisfies DiscoveredEndpoints;
+  });
