@@ -52,6 +52,8 @@ export const SignUpPayload = Schema.Struct({
   password: Schema.String,
   name: Schema.optional(Schema.String),
   attributes: Schema.optional(Attributes),
+  /** Optional captcha token consumed by the `CaptchaPlugin`. */
+  captchaToken: Schema.optional(Schema.String),
 });
 export type SignUpPayload = typeof SignUpPayload.Type;
 
@@ -59,6 +61,8 @@ export type SignUpPayload = typeof SignUpPayload.Type;
 export const SignInPayload = Schema.Struct({
   email: Schema.String,
   password: Schema.String,
+  /** Optional captcha token consumed by the `CaptchaPlugin`. */
+  captchaToken: Schema.optional(Schema.String),
 });
 export type SignInPayload = typeof SignInPayload.Type;
 

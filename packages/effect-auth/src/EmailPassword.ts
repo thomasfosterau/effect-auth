@@ -43,12 +43,16 @@ export interface SignUpInput {
   readonly name?: string;
   readonly attributes?: Record<string, unknown>;
   readonly sessionAttributes?: Record<string, unknown>;
+  /** Optional captcha token, consumed by the `CaptchaPlugin` `beforeSignUp` hook. */
+  readonly captchaToken?: string;
 }
 
 export interface SignInInput {
   readonly email: string;
   readonly password: string;
   readonly sessionAttributes?: Record<string, unknown>;
+  /** Optional captcha token, consumed by the `CaptchaPlugin` `beforeSignIn` hook. */
+  readonly captchaToken?: string;
 }
 
 /**
