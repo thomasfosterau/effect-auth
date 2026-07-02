@@ -62,14 +62,23 @@ export const SignInPayload = Schema.Struct({
 });
 export type SignInPayload = typeof SignInPayload.Type;
 
+/** A pending second-factor challenge returned instead of a session. */
+export const SecondFactorChallengeView = Schema.Struct({
+  token: Schema.String,
+  expiresAt: Schema.Number,
+});
+export type SecondFactorChallengeView = typeof SecondFactorChallengeView.Type;
+
 /**
  * Successful authentication result. The session itself is conveyed via the
  * session cookie (`Set-Cookie`); `needsEmailVerification` lets a client branch
- * when verification is still required.
+ * when verification is still required, and `secondFactor` is present when the
+ * user must redeem a two-factor challenge to obtain a session.
  */
 export const AuthSuccess = Schema.Struct({
   user: UserView,
   needsEmailVerification: Schema.Boolean,
+  secondFactor: Schema.optional(SecondFactorChallengeView),
 });
 export type AuthSuccess = typeof AuthSuccess.Type;
 
@@ -126,6 +135,82 @@ export type UpdateUserPayload = typeof UpdateUserPayload.Type;
 export const SessionListView = Schema.Array(SessionView);
 export type SessionListView = typeof SessionListView.Type;
 
+/** Request body for requesting a magic link email. */
+export const MagicLinkSendPayload = Schema.Struct({
+  email: Schema.String,
+});
+export type MagicLinkSendPayload = typeof MagicLinkSendPayload.Type;
+
+/** Request body for redeeming a magic link token. */
+export const MagicLinkVerifyPayload = Schema.Struct({
+  token: Schema.String,
+});
+export type MagicLinkVerifyPayload = typeof MagicLinkVerifyPayload.Type;
+
+/** The purposes an email OTP can be issued for. */
+export const EmailOtpPurpose = Schema.Literals([
+  "sign-in",
+  "email-verification",
+  "forget-password",
+]);
+export type EmailOtpPurpose = typeof EmailOtpPurpose.Type;
+
+/** Request body for sending an email OTP. */
+export const EmailOtpSendPayload = Schema.Struct({
+  email: Schema.String,
+  purpose: EmailOtpPurpose,
+});
+export type EmailOtpSendPayload = typeof EmailOtpSendPayload.Type;
+
+/** Request body for signing in with an email OTP. */
+export const EmailOtpSignInPayload = Schema.Struct({
+  email: Schema.String,
+  otp: Schema.String,
+});
+export type EmailOtpSignInPayload = typeof EmailOtpSignInPayload.Type;
+
+/**
+ * Request body for two-factor operations that re-verify the user's password
+ * (enable, disable, regenerate backup codes).
+ */
+export const TwoFactorPasswordPayload = Schema.Struct({
+  password: Schema.String,
+});
+export type TwoFactorPasswordPayload = typeof TwoFactorPasswordPayload.Type;
+
+/** Request body for confirming two-factor enrollment with a TOTP code. */
+export const TwoFactorConfirmPayload = Schema.Struct({
+  code: Schema.String,
+});
+export type TwoFactorConfirmPayload = typeof TwoFactorConfirmPayload.Type;
+
+/**
+ * Request body for redeeming a pending second-factor challenge: the challenge
+ * `token` (from sign-in's `secondFactor`) plus a TOTP or backup `code`.
+ */
+export const TwoFactorVerifyPayload = Schema.Struct({
+  token: Schema.String,
+  code: Schema.String,
+});
+export type TwoFactorVerifyPayload = typeof TwoFactorVerifyPayload.Type;
+
+/**
+ * Result of enabling two-factor. The secret and backup codes are returned in
+ * plaintext exactly once - show them to the user, then discard.
+ */
+export const TwoFactorEnableView = Schema.Struct({
+  secret: Schema.String,
+  totpUri: Schema.String,
+  backupCodes: Schema.Array(Schema.String),
+});
+export type TwoFactorEnableView = typeof TwoFactorEnableView.Type;
+
+/** Freshly regenerated plaintext backup codes (shown once). */
+export const BackupCodesView = Schema.Struct({
+  backupCodes: Schema.Array(Schema.String),
+});
+export type BackupCodesView = typeof BackupCodesView.Type;
+
 // -----------------------------------------------------------------------------
 // Error schemas (mapped to HTTP status codes via HttpApiSchema.status)
 // -----------------------------------------------------------------------------
@@ -150,6 +235,11 @@ export class BadRequest extends Schema.TaggedErrorClass<BadRequest>()("BadReques
   message: Schema.String,
 }) {}
 
+/** 404 — resource or optional feature not available (e.g. plugin not enabled). */
+export class NotFound extends Schema.TaggedErrorClass<NotFound>()("NotFound", {
+  message: Schema.String,
+}) {}
+
 /** 500 — unexpected server error. */
 export class InternalServerError extends Schema.TaggedErrorClass<InternalServerError>()(
   "InternalServerError",
@@ -161,6 +251,7 @@ export const UnauthorizedError = Unauthorized.pipe(HttpApiSchema.status(401));
 export const ForbiddenError = Forbidden.pipe(HttpApiSchema.status(403));
 export const ConflictError = Conflict.pipe(HttpApiSchema.status(409));
 export const BadRequestError = BadRequest.pipe(HttpApiSchema.status(400));
+export const NotFoundError = NotFound.pipe(HttpApiSchema.status(404));
 export const InternalError = InternalServerError.pipe(HttpApiSchema.status(500));
 
 // -----------------------------------------------------------------------------

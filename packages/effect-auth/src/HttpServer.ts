@@ -1,4 +1,4 @@
-import { Context, Effect, FileSystem, Layer, Path } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Path } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import {
   Etag,
@@ -11,8 +11,11 @@ import { AuthApi } from "./HttpApi.js";
 import * as S from "./HttpApiSchemas.js";
 import { AuthLifecycleServiceTag } from "./AuthLifecycle.js";
 import { Hooks } from "./Hooks.js";
-import { SessionManagerTag } from "./Session.js";
+import { SessionManagerTag, UserStoreTag } from "./Session.js";
 import { EmailPasswordStoreTag, makeEmailPasswordService } from "./EmailPassword.js";
+import { MagicLinkServiceTag, MagicLinkStoreTag, MagicLinkUserStoreTag } from "./MagicLink.js";
+import { EmailOtpServiceTag, EmailOtpStoreTag, EmailOtpUserStoreTag } from "./EmailOtp.js";
+import { PendingTwoFactorStoreTag, TwoFactorServiceTag, TwoFactorStoreTag } from "./TwoFactor.js";
 import { PasswordHasherTag } from "./Password.js";
 import { EmailVerificationServiceTag, EmailVerificationStoreTag } from "./EmailVerification.js";
 import {
@@ -122,6 +125,65 @@ const signUpInput = (payload: S.SignUpPayload) => ({
   ...(payload.attributes !== undefined && { attributes: payload.attributes }),
 });
 
+// -----------------------------------------------------------------------------
+// Optional feature resolution
+//
+// Magic link, email OTP and two-factor are optional plugins: their services
+// are NOT part of `AuthServices`. Handlers resolve them with
+// `Effect.serviceOption` and answer 404 when absent. Because the service
+// METHODS declare their store requirements in `R`, the store tags are
+// resolved optionally too and provided into each method call, keeping the
+// handlers' `R` inside `AuthServices`.
+// -----------------------------------------------------------------------------
+
+/** Resolve the magic link service + stores, or fail with 404. */
+const resolveMagicLink = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(MagicLinkServiceTag);
+  const store = yield* Effect.serviceOption(MagicLinkStoreTag);
+  const userStore = yield* Effect.serviceOption(MagicLinkUserStoreTag);
+  if (Option.isNone(service) || Option.isNone(store) || Option.isNone(userStore)) {
+    return yield* new S.NotFound({ message: "Magic link is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.provideService(MagicLinkStoreTag, store.value),
+      Effect.provideService(MagicLinkUserStoreTag, userStore.value),
+    );
+  return { service: service.value, provideStores };
+});
+
+/** Resolve the email OTP service + stores, or fail with 404. */
+const resolveEmailOtp = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(EmailOtpServiceTag);
+  const store = yield* Effect.serviceOption(EmailOtpStoreTag);
+  const userStore = yield* Effect.serviceOption(EmailOtpUserStoreTag);
+  if (Option.isNone(service) || Option.isNone(store) || Option.isNone(userStore)) {
+    return yield* new S.NotFound({ message: "Email OTP is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.provideService(EmailOtpStoreTag, store.value),
+      Effect.provideService(EmailOtpUserStoreTag, userStore.value),
+    );
+  return { service: service.value, provideStores };
+});
+
+/** Resolve the two-factor service + stores, or fail with 404. */
+const resolveTwoFactor = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(TwoFactorServiceTag);
+  const store = yield* Effect.serviceOption(TwoFactorStoreTag);
+  const pendingStore = yield* Effect.serviceOption(PendingTwoFactorStoreTag);
+  if (Option.isNone(service) || Option.isNone(store) || Option.isNone(pendingStore)) {
+    return yield* new S.NotFound({ message: "Two-factor authentication is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.provideService(TwoFactorStoreTag, store.value),
+      Effect.provideService(PendingTwoFactorStoreTag, pendingStore.value),
+    );
+  return { service: service.value, provideStores };
+});
+
 /** Layer implementing the `auth` group handlers. */
 export const authGroupLayer = (config?: CookieConfig) => {
   const cfg = resolveCookieConfig(config);
@@ -167,6 +229,7 @@ export const authGroupLayer = (config?: CookieConfig) => {
           const body: S.AuthSuccess = {
             user: S.encodeUser(result.user),
             needsEmailVerification: result.needsEmailVerification,
+            ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
           };
           return yield* withSessionCookie(body, result.session, cfg);
         }),
@@ -345,9 +408,208 @@ export const authGroupLayer = (config?: CookieConfig) => {
             .revokeOtherSessions(resolved.user.id, resolved.session.id)
             .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
         }),
+      )
+      .handle("magicLinkSend", ({ payload }) =>
+        Effect.gen(function* () {
+          const magicLink = yield* resolveMagicLink;
+          // Anti-enumeration: the service succeeds silently for unknown
+          // accounts; only store/delivery failures surface (as 500).
+          yield* magicLink.provideStores(magicLink.service.send(payload.email)).pipe(
+            Effect.catchTags({
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              MagicLinkError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return { status: true };
+        }),
+      )
+      .handle("magicLinkVerify", ({ payload }) =>
+        Effect.gen(function* () {
+          const magicLink = yield* resolveMagicLink;
+          const result = yield* magicLink
+            .provideStores(magicLink.service.verify(payload.token))
+            .pipe(
+              Effect.catchTags({
+                MagicLinkError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              }),
+            );
+          const body: S.AuthSuccess = {
+            user: S.encodeUser(result.user),
+            needsEmailVerification: false,
+          };
+          return yield* withSessionCookie(body, result.session, cfg);
+        }),
+      )
+      .handle("emailOtpSend", ({ payload }) =>
+        Effect.gen(function* () {
+          const emailOtp = yield* resolveEmailOtp;
+          // Anti-enumeration: the service succeeds silently for unknown
+          // accounts; only store/delivery failures surface (as 500).
+          yield* emailOtp.provideStores(emailOtp.service.send(payload.email, payload.purpose)).pipe(
+            Effect.catchTags({
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              EmailOtpError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return { status: true };
+        }),
+      )
+      .handle("signInEmailOtp", ({ payload }) =>
+        Effect.gen(function* () {
+          const emailOtp = yield* resolveEmailOtp;
+          const result = yield* emailOtp
+            .provideStores(emailOtp.service.signIn(payload.email, payload.otp))
+            .pipe(
+              Effect.catchTags({
+                EmailOtpError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              }),
+            );
+          const body: S.AuthSuccess = {
+            user: S.encodeUser(result.user),
+            needsEmailVerification: false,
+          };
+          return yield* withSessionCookie(body, result.session, cfg);
+        }),
+      )
+      .handle("twoFactorEnable", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const twoFactor = yield* resolveTwoFactor;
+          // `enable` labels the otpauth:// URI with the user's email via the
+          // core UserStore, which is not part of `AuthServices` - resolve it
+          // optionally alongside the feature.
+          const userStore = yield* Effect.serviceOption(UserStoreTag);
+          if (Option.isNone(userStore)) {
+            return yield* new S.NotFound({ message: "Two-factor authentication is not enabled" });
+          }
+          return yield* twoFactor
+            .provideStores(twoFactor.service.enable(resolved.user.id, payload.password))
+            .pipe(
+              Effect.provideService(UserStoreTag, userStore.value),
+              Effect.catchTags({
+                InvalidCredentialsError: (e) =>
+                  Effect.fail(new S.BadRequest({ message: e.message })),
+                TwoFactorError: (e) =>
+                  Effect.fail(new S.InternalServerError({ message: e.message })),
+                UserNotFoundError: (e) =>
+                  Effect.fail(new S.InternalServerError({ message: e.message })),
+                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+        }),
+      )
+      .handle("twoFactorConfirm", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const twoFactor = yield* resolveTwoFactor;
+          yield* twoFactor
+            .provideStores(twoFactor.service.confirmEnable(resolved.user.id, payload.code))
+            .pipe(
+              Effect.catchTags({
+                TwoFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return { status: true };
+        }),
+      )
+      .handle("twoFactorDisable", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const twoFactor = yield* resolveTwoFactor;
+          yield* twoFactor
+            .provideStores(twoFactor.service.disable(resolved.user.id, payload.password))
+            .pipe(
+              Effect.catchTags({
+                InvalidCredentialsError: (e) =>
+                  Effect.fail(new S.BadRequest({ message: e.message })),
+                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return { status: true };
+        }),
+      )
+      .handle("twoFactorRegenerateBackupCodes", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const twoFactor = yield* resolveTwoFactor;
+          const backupCodes = yield* twoFactor
+            .provideStores(
+              twoFactor.service.regenerateBackupCodes(resolved.user.id, payload.password),
+            )
+            .pipe(
+              Effect.catchTags({
+                TwoFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                InvalidCredentialsError: (e) =>
+                  Effect.fail(new S.BadRequest({ message: e.message })),
+                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return { backupCodes };
+        }),
+      )
+      .handle("twoFactorVerifyTotp", ({ payload }) =>
+        Effect.gen(function* () {
+          const twoFactor = yield* resolveTwoFactor;
+          const result = yield* twoFactor
+            .provideStores(twoFactor.service.verifyTotp(payload.token, payload.code))
+            .pipe(
+              Effect.catchTags({
+                TwoFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              }),
+            );
+          return yield* secondFactorSuccess(result, cfg);
+        }),
+      )
+      .handle("twoFactorVerifyBackupCode", ({ payload }) =>
+        Effect.gen(function* () {
+          const twoFactor = yield* resolveTwoFactor;
+          const result = yield* twoFactor
+            .provideStores(twoFactor.service.verifyBackupCode(payload.token, payload.code))
+            .pipe(
+              Effect.catchTags({
+                TwoFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              }),
+            );
+          return yield* secondFactorSuccess(result, cfg);
+        }),
       ),
   );
 };
+
+/**
+ * Build the `AuthSuccess` response (with session cookie) for a redeemed
+ * second-factor challenge. The two-factor service returns only `userId` +
+ * `session`, so the full user is fetched through the core `UserService`.
+ */
+const secondFactorSuccess = (
+  result: { readonly userId: string; readonly session: Types.Session },
+  cfg: ResolvedCookieConfig,
+) =>
+  Effect.gen(function* () {
+    const userService = yield* UserServiceTag;
+    const user = yield* userService
+      .getUser(result.userId)
+      .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+    const body: S.AuthSuccess = {
+      user: S.encodeUser(user),
+      needsEmailVerification: false,
+    };
+    return yield* withSessionCookie(body, result.session, cfg);
+  });
 
 /** Resolve and validate the request's session or fail with 401. */
 const requireSession = (

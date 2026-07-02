@@ -73,6 +73,69 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: HttpApiSchema.NoContent,
     error: [S.UnauthorizedError, S.InternalError],
   }),
+  // --- Optional features (magic link / email OTP / two-factor). Each fails
+  // --- with 404 NotFound when the corresponding service layer is absent.
+  // Anti-enumeration: always `{ status: true }`; 500 only on store/delivery failure.
+  HttpApiEndpoint.post("magicLinkSend", "/magic-link/send", {
+    payload: S.MagicLinkSendPayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.InternalError],
+  }),
+  // Invalid/expired/replayed magic link tokens -> 400 BadRequest.
+  HttpApiEndpoint.post("magicLinkVerify", "/magic-link/verify", {
+    payload: S.MagicLinkVerifyPayload,
+    success: S.AuthSuccess,
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+  }),
+  // Anti-enumeration: always `{ status: true }`; 500 only on store/delivery failure.
+  HttpApiEndpoint.post("emailOtpSend", "/email-otp/send", {
+    payload: S.EmailOtpSendPayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.InternalError],
+  }),
+  // Invalid/expired OTPs and exhausted attempts -> 400 BadRequest.
+  HttpApiEndpoint.post("signInEmailOtp", "/sign-in/email-otp", {
+    payload: S.EmailOtpSignInPayload,
+    success: S.AuthSuccess,
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+  }),
+  // Authenticated; wrong password -> 400 BadRequest (mirrors change-password).
+  HttpApiEndpoint.post("twoFactorEnable", "/two-factor/enable", {
+    payload: S.TwoFactorPasswordPayload,
+    success: S.TwoFactorEnableView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  // Authenticated; invalid TOTP code or no pending enrollment -> 400 BadRequest.
+  HttpApiEndpoint.post("twoFactorConfirm", "/two-factor/confirm", {
+    payload: S.TwoFactorConfirmPayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  // Authenticated; wrong password -> 400 BadRequest.
+  HttpApiEndpoint.post("twoFactorDisable", "/two-factor/disable", {
+    payload: S.TwoFactorPasswordPayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  // Authenticated; wrong password or two-factor not enabled -> 400 BadRequest.
+  HttpApiEndpoint.post("twoFactorRegenerateBackupCodes", "/two-factor/regenerate-backup-codes", {
+    payload: S.TwoFactorPasswordPayload,
+    success: S.BackupCodesView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  // Failed second factor (bad/expired challenge token or wrong code) -> 401
+  // Unauthorized: redeeming a challenge is an authentication attempt.
+  HttpApiEndpoint.post("twoFactorVerifyTotp", "/two-factor/verify-totp", {
+    payload: S.TwoFactorVerifyPayload,
+    success: S.AuthSuccess,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  // Same convention as verify-totp; backup codes are single-use.
+  HttpApiEndpoint.post("twoFactorVerifyBackupCode", "/two-factor/verify-backup-code", {
+    payload: S.TwoFactorVerifyPayload,
+    success: S.AuthSuccess,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
 );
 
 /** The complete auth API. */
