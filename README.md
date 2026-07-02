@@ -20,6 +20,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 👤 **Anonymous Auth**: Guest sessions (`POST /sign-in/anonymous`) with account linking on sign-up (`isAnonymousUser` helper, `linkAccount` migration callback)
 - 🪪 **Username Auth**: Sign in with a username + password (`POST /sign-in/username`), case-insensitive uniqueness, honouring the two-factor gate
 - 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets, an optional `effect/unstable/persistence` backend (in-memory or Redis) via `RateLimiterPersistenceLayer`, and an `AccountLockoutPlugin` (OWASP-style lockout after N failed sign-ins)
+- 🚫 **Abuse Protection**: Captcha verification (Turnstile/reCAPTCHA/hCaptcha) and Have-I-Been-Pwned compromised-password checks as composable hooks plugins
 - 🔓 **WebAuthn / Passkeys**: Passwordless authentication with FIDO2 compliance
 - 🏢 **Organizations & Admin**: Multi-tenant organizations (members, invitations, roles) and admin tooling (ban, impersonate)
 - 🗝️ **API Keys & JWT**: Hashed API keys with permissions/quotas; ES256/EdDSA JWTs with JWKS
@@ -685,6 +686,36 @@ await Effect.runPromise(
   Effect.provide(login("user@example.com", "password", "192.168.1.1"), rateLimitDependencies),
 );
 ```
+
+## Abuse Protection (captcha + Have I Been Pwned)
+
+`CaptchaPlugin` and `HaveIBeenPwnedPlugin` are hooks plugins (`before*`
+transforms) composed with `composePlugins`. Both use `effect/unstable/http`'s
+`HttpClient`, so provide `FetchHttpClient.layer` (or a stub in tests).
+
+```typescript
+import { Effect, Layer, Redacted } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
+import * as Auth from "effect-auth";
+
+// Reject compromised passwords (k-anonymity range query) and require a captcha
+// token on sign-up/sign-in. Array order is execution order.
+const plugins = Auth.composePlugins([
+  Auth.HaveIBeenPwnedPlugin({ threshold: 1 }),
+  Auth.CaptchaPlugin({
+    provider: "cloudflare-turnstile",
+    secretKey: Redacted.make(process.env.TURNSTILE_SECRET!),
+    endpoints: ["signUp", "signIn"],
+  }),
+]);
+
+// The plugin stack requires `Hooks.Default` and an `HttpClient`.
+const Hooks = plugins.pipe(Layer.provide(Auth.Hooks.Default), Layer.provide(FetchHttpClient.layer));
+```
+
+The captcha token is read from the optional `captchaToken` field on the
+sign-up/sign-in inputs (wired through the `SignUpPayload`/`SignInPayload` HTTP
+schemas). HIBP fails open on API errors by default (`failClosed: false`).
 
 ## API Reference
 

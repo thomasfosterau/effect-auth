@@ -131,6 +131,7 @@ const signUpInput = (payload: S.SignUpPayload) => ({
   password: payload.password,
   ...(payload.name !== undefined && { name: payload.name }),
   ...(payload.attributes !== undefined && { attributes: payload.attributes }),
+  ...(payload.captchaToken !== undefined && { captchaToken: payload.captchaToken }),
 });
 
 // -----------------------------------------------------------------------------
@@ -286,7 +287,11 @@ export const authGroupLayer = (config?: CookieConfig) => {
         Effect.gen(function* () {
           const lifecycle = yield* AuthLifecycleServiceTag;
           const result = yield* lifecycle
-            .signIn({ email: payload.email, password: payload.password })
+            .signIn({
+              email: payload.email,
+              password: payload.password,
+              ...(payload.captchaToken !== undefined && { captchaToken: payload.captchaToken }),
+            })
             .pipe(
               Effect.catchTags({
                 InvalidCredentialsError: (e) =>
