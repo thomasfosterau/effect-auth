@@ -28,10 +28,18 @@
     },
     "typecheck": {
       "executor": "nx:run-commands",
-      "dependsOn": ["effect-auth:build"],
+      "dependsOn": ["effect-auth:build", "typecheck:tests"],
       "options": {
         "cwd": "packages/alchemy",
         "command": "vp exec tsc --noEmit && vp test --typecheck --run"
+      }
+    },
+    "typecheck:tests": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["effect-auth:build"],
+      "options": {
+        "cwd": "packages/alchemy",
+        "command": "vp exec tsc -p tsconfig.test.json --noEmit"
       }
     }
   }
