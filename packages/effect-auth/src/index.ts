@@ -63,6 +63,12 @@ export * from "./EmailOtp.js";
 /** Two-factor authentication (TOTP + backup codes). */
 export * from "./TwoFactor.js";
 
+/** Organizations: members, invitations, and role-based org permissions. */
+export * from "./Organization.js";
+
+/** Admin tooling: user management, bans, impersonation. */
+export * from "./Admin.js";
+
 /** API keys (hashed at rest, permissions, quotas, rate limits). */
 export * from "./ApiKey.js";
 
