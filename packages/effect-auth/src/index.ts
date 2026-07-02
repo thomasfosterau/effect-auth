@@ -93,6 +93,9 @@ export * from "./ApiKey.js";
 /** JWT issuance and verification (ES256/EdDSA) with JWKS. */
 export * from "./Jwt.js";
 
+/** OIDC provider: act as an OpenID Connect identity provider. */
+export * from "./OidcProvider.js";
+
 /** Password reset flows. */
 export * from "./PasswordReset.js";
 

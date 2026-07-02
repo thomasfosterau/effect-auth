@@ -100,6 +100,15 @@ const EXPECTED_PATHS = [
   "/sso/callback",
   "/token",
   "/jwks",
+  "/oauth2/register",
+  "/oauth2/clients",
+  "/oauth2/clients/{clientId}",
+  "/oauth2/authorize",
+  "/oauth2/consent",
+  "/oauth2/token",
+  "/oauth2/userinfo",
+  "/.well-known/openid-configuration",
+  "/.well-known/jwks.json",
 ];
 
 describe("getOpenApiSpec", () => {
