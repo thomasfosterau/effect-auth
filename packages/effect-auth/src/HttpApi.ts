@@ -1,5 +1,11 @@
 import { Schema } from "effect";
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
+import {
+  HttpApi,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiSchema,
+  OpenApi,
+} from "effect/unstable/httpapi";
 import * as S from "./HttpApiSchemas.js";
 
 /**
@@ -138,5 +144,25 @@ export const authGroup = HttpApiGroup.make("auth").add(
   }),
 );
 
-/** The complete auth API. */
-export const AuthApi = HttpApi.make("AuthApi").add(authGroup);
+/** The complete auth API, annotated with OpenAPI document metadata. */
+export const AuthApi = HttpApi.make("AuthApi")
+  .add(authGroup)
+  .annotateMerge(
+    OpenApi.annotations({
+      title: "effect-auth",
+      version: "1.0.0",
+      description:
+        "HTTP protocol for effect-auth: email/password, sessions, email verification and " +
+        "password reset, magic link, email OTP, and two-factor authentication.",
+    }),
+  );
+
+/**
+ * Derive the OpenAPI 3.1 document for the auth API from the {@link AuthApi}
+ * contract. The document describes every endpoint path together with its
+ * request/response and error schemas (each carrying its HTTP status code).
+ *
+ * Served at `GET {prefix}/openapi.json` when `makeAuthWebHandler` is created
+ * with `{ docs: true }`, and consumable by any OpenAPI tooling.
+ */
+export const getOpenApiSpec = (): OpenApi.OpenAPISpec => OpenApi.fromApi(AuthApi);
