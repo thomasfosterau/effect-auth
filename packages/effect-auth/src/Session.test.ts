@@ -92,7 +92,7 @@ const mockUserStore = {
       return user;
     }),
 
-  getCredentials: (userId: string) => Effect.succeed("hashed-password"),
+  getCredentials: (_userId: string) => Effect.succeed("hashed-password"),
 };
 
 const SessionStoreTest = Context.make(SessionStore, mockSessionStore);

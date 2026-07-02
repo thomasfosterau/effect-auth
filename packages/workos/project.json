@@ -26,9 +26,17 @@
     },
     "typecheck": {
       "executor": "nx:run-commands",
+      "dependsOn": ["typecheck:tests"],
       "options": {
         "cwd": "packages/workos",
         "command": "vp exec tsc --noEmit && vp test --typecheck --run"
+      }
+    },
+    "typecheck:tests": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "packages/workos",
+        "command": "vp exec tsc -p tsconfig.test.json --noEmit"
       }
     }
   }
