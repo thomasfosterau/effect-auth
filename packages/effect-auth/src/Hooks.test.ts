@@ -11,7 +11,16 @@ import { RateLimitPlugin } from "./plugins/RateLimitPlugin.js";
 import type { Session, SessionConfig, User } from "./Types.js";
 
 const signIn = (email: string): SignInInput => ({ email, password: "secret" });
-const authResult: AuthResult = { user: { id: "user-1", attributes: {} } };
+const authResult: AuthResult = {
+  user: {
+    id: "user-1",
+    email: "user-1@example.com",
+    emailVerified: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    attributes: {},
+  },
+};
 
 /** Run a program against a Hooks stack composed of the given plugin layers. */
 const runWithPlugins = <A, E>(
@@ -325,7 +334,14 @@ describe("Hooks - integration with EmailPasswordService", () => {
       }) =>
         Effect.sync(() => {
           const id = `user-${users.size + 1}`;
-          const user: User = { id, attributes: { email, ...attributes } };
+          const user: User = {
+            id,
+            email,
+            emailVerified: false,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            attributes: attributes ?? {},
+          };
           users.set(id, user);
           usersByEmail.set(email, id);
           return user;

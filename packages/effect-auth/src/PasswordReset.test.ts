@@ -176,9 +176,11 @@ describe("PasswordResetService", () => {
 
     const user: User = {
       id: "user-reset-1",
-      attributes: {
-        email: "reset@example.com",
-      },
+      email: "reset@example.com",
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
     };
     users.set(user.id, user);
     usersByEmail.set("reset@example.com", user.id);
@@ -230,9 +232,11 @@ describe("PasswordResetService", () => {
 
     const user: User = {
       id: "user-reset-2",
-      attributes: {
-        email: "session-reset@example.com",
-      },
+      email: "session-reset@example.com",
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
     };
 
     users.set(user.id, user);

@@ -15,9 +15,15 @@ import type * as Types from "./Types.js";
 /** Arbitrary JSON attributes bag. */
 export const Attributes = Schema.Record(Schema.String, Schema.Unknown);
 
-/** Public view of a user. */
+/** Public view of a user (timestamps as epoch millis). */
 export const UserView = Schema.Struct({
   id: Schema.String,
+  email: Schema.String,
+  emailVerified: Schema.Boolean,
+  name: Schema.optional(Schema.String),
+  image: Schema.optional(Schema.String),
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
   attributes: Attributes,
 });
 export type UserView = typeof UserView.Type;
@@ -110,6 +116,12 @@ export const InternalError = InternalServerError.pipe(HttpApiSchema.status(500))
 
 export const encodeUser = (user: Types.User): UserView => ({
   id: user.id,
+  email: user.email,
+  emailVerified: user.emailVerified,
+  ...(user.name !== undefined && { name: user.name }),
+  ...(user.image !== undefined && { image: user.image }),
+  createdAt: user.createdAt.getTime(),
+  updatedAt: user.updatedAt.getTime(),
   attributes: user.attributes,
 });
 

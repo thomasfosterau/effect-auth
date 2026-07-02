@@ -52,8 +52,30 @@ const mockSessionStore = {
 
 const mockUserStore = {
   users: new Map<string, User>([
-    ["user1", { id: "user1", attributes: { name: "Test User" } }],
-    ["user2", { id: "user2", attributes: { name: "Another User" } }],
+    [
+      "user1",
+      {
+        id: "user1",
+        email: "user1@example.com",
+        emailVerified: false,
+        name: "Test User",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        attributes: {},
+      },
+    ],
+    [
+      "user2",
+      {
+        id: "user2",
+        email: "user2@example.com",
+        emailVerified: false,
+        name: "Another User",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        attributes: {},
+      },
+    ],
   ]),
 
   get: (userId: string) =>
@@ -120,7 +142,7 @@ describe("SessionManager", () => {
 
     expect(result.session.userId).toBe("user1");
     expect(result.user.id).toBe("user1");
-    expect(result.user.attributes.name).toBe("Test User");
+    expect(result.user.name).toBe("Test User");
   });
 
   it("should fail to validate expired session", async () => {

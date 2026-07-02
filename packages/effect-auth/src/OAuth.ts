@@ -11,7 +11,11 @@ import {
   OAuthProviderError,
   OAuthStateNotFoundError,
   OAuthStateExpiredError,
+  UserNotFoundError,
 } from "./Errors.js";
+import { Hooks, type HookError } from "./Hooks.js";
+import { SessionManagerTag } from "./Session.js";
+import type * as Types from "./Types.js";
 
 /**
  * OAuth2 provider configuration
@@ -131,6 +135,38 @@ export interface OAuthAccountStore {
 }
 
 /**
+ * Input for creating a user from an OAuth provider profile.
+ */
+export interface OAuthCreateUserInput {
+  readonly email: string;
+  readonly emailVerified: boolean;
+  readonly name?: string;
+  readonly image?: string;
+}
+
+/**
+ * Minimal user store the OAuth sign-in flow needs to create or look up users
+ * from provider profiles. Implement alongside {@link OAuthAccountStore}.
+ */
+export interface OAuthUserStore {
+  readonly getUser: (userId: string) => Effect.Effect<Types.User, UserNotFoundError>;
+  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, AuthError>;
+  readonly createUser: (input: OAuthCreateUserInput) => Effect.Effect<Types.User, AuthError>;
+}
+
+/**
+ * Result of a complete OAuth sign-in (callback handled, user resolved or
+ * created, account linked, session issued).
+ */
+export interface OAuthSignInResult {
+  readonly user: Types.User;
+  readonly account: OAuthAccount;
+  readonly session: Types.Session;
+  readonly isNewUser: boolean;
+  readonly returnTo?: string;
+}
+
+/**
  * OAuth provider interface
  */
 export interface OAuthProvider {
@@ -176,6 +212,16 @@ export class OAuthAccountStoreTag extends Context.Service<
 
 // Public ergonomic alias
 export const OAuthAccountStore = OAuthAccountStoreTag;
+
+/**
+ * OAuth user store context tag
+ */
+export class OAuthUserStoreTag extends Context.Service<OAuthUserStoreTag, OAuthUserStore>()(
+  "@effect-auth/OAuthUserStore",
+) {}
+
+// Public ergonomic alias
+export const OAuthUserStore = OAuthUserStoreTag;
 
 /**
  * Generate a cryptographically secure random state parameter
@@ -359,6 +405,28 @@ export interface OAuthService {
     OAuthStateStoreTag | OAuthAccountStoreTag
   >;
 
+  /**
+   * Complete OAuth sign-in: verifies the callback, resolves or creates the
+   * user (auto-linking to an existing user when the provider reports a
+   * verified email, unless disabled), links the account, and issues a session.
+   *
+   * This is the recommended high-level entrypoint; use {@link handleCallback}
+   * only when managing users yourself.
+   */
+  readonly signInWithCallback: (
+    state: string,
+    code: string,
+  ) => Effect.Effect<
+    OAuthSignInResult,
+    | AuthError
+    | OAuthProviderError
+    | OAuthStateNotFoundError
+    | OAuthStateExpiredError
+    | UserNotFoundError
+    | HookError,
+    OAuthStateStoreTag | OAuthAccountStoreTag | OAuthUserStoreTag | SessionManagerTag | Hooks
+  >;
+
   readonly linkAccount: (
     userId: string,
     provider: string,
@@ -389,12 +457,71 @@ export class OAuthServiceTag extends Context.Service<OAuthServiceTag, OAuthServi
 export const OAuthService = OAuthServiceTag;
 
 /**
+ * Options controlling {@link OAuthService} behaviour.
+ */
+export interface OAuthServiceOptions {
+  /**
+   * When a new OAuth account arrives with a provider-verified email that
+   * matches an existing user, link the account to that user instead of
+   * creating a new one. Defaults to `true`. Only ever applies when the
+   * provider reports `email_verified: true`.
+   */
+  readonly autoLinkByVerifiedEmail?: boolean;
+}
+
+const normalizeEmail = (email: string): string => email.trim().toLowerCase();
+
+/**
  * Create an OAuth service with configured providers
  */
 export const makeOAuthService = (
   providers: Record<string, OAuthProvider>,
-): Effect.Effect<OAuthService, never> =>
-  Effect.sync(
+  options: OAuthServiceOptions = {},
+): Effect.Effect<OAuthService, never> => {
+  const autoLinkByVerifiedEmail = options.autoLinkByVerifiedEmail ?? true;
+
+  /**
+   * Shared callback plumbing: verify + consume state, exchange the code and
+   * fetch the provider profile.
+   */
+  const resolveCallback = (state: string, code: string) =>
+    Effect.gen(function* () {
+      const stateStore = yield* OAuthStateStoreTag;
+
+      const stateEntry = yield* Effect.catchTag(stateStore.get(state), "AuthError", () =>
+        Effect.fail(
+          new OAuthStateNotFoundError({
+            message: "OAuth state not found or expired",
+            state,
+          }),
+        ),
+      );
+
+      if (Date.now() > stateEntry.expiresAt) {
+        yield* stateStore.delete(state);
+        return yield* new OAuthStateExpiredError({
+          message: "OAuth state expired",
+          state,
+        });
+      }
+
+      const providerInstance = providers[stateEntry.provider];
+      if (!providerInstance) {
+        return yield* new OAuthProviderError({
+          message: `Provider ${stateEntry.provider} not found`,
+          provider: stateEntry.provider,
+        });
+      }
+
+      const tokens = yield* providerInstance.exchangeCode(code, stateEntry.codeVerifier);
+      const userInfo = yield* providerInstance.getUserInfo(tokens.access_token);
+
+      yield* stateStore.delete(state);
+
+      return { stateEntry, tokens, userInfo };
+    });
+
+  return Effect.sync(
     (): OAuthService => ({
       generateAuthorizationUrl: (provider, options) =>
         Effect.gen(function* () {
@@ -530,6 +657,99 @@ export const makeOAuthService = (
                 }
               : {}),
           } satisfies OAuthCallbackResult;
+        }),
+
+      signInWithCallback: (state, code) =>
+        Effect.gen(function* () {
+          const accountStore = yield* OAuthAccountStoreTag;
+          const userStore = yield* OAuthUserStoreTag;
+          const sessionManager = yield* SessionManagerTag;
+
+          const { stateEntry, tokens, userInfo } = yield* resolveCallback(state, code);
+          const now = Date.now();
+
+          const tokenFields = {
+            accessToken: tokens.access_token,
+            ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
+            ...(tokens.expires_in && { expiresAt: now + tokens.expires_in * 1000 }),
+          };
+
+          const existingAccount = yield* accountStore.get(stateEntry.provider, userInfo.id);
+
+          if (existingAccount) {
+            if (existingAccount.userId === "") {
+              return yield* new AuthError({
+                message: `This ${stateEntry.provider} account is not linked to a user`,
+              });
+            }
+
+            const updatedAccount: OAuthAccount = {
+              ...existingAccount,
+              ...tokenFields,
+              updatedAt: now,
+            };
+            yield* accountStore.update(updatedAccount);
+
+            const user = yield* userStore.getUser(updatedAccount.userId);
+            const session = yield* sessionManager.createSession(user.id);
+
+            return {
+              user,
+              account: updatedAccount,
+              session,
+              isNewUser: false,
+              ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
+            } satisfies OAuthSignInResult;
+          }
+
+          // New account: resolve the user by verified email, or create one.
+          const email = userInfo.email ? normalizeEmail(userInfo.email) : undefined;
+          const emailVerified = userInfo.email_verified === true;
+
+          if (email === undefined) {
+            return yield* new AuthError({
+              message: `${stateEntry.provider} did not return an email address for this account`,
+            });
+          }
+
+          let user: Types.User | null = null;
+          if (autoLinkByVerifiedEmail && emailVerified) {
+            user = yield* userStore.getUserByEmail(email);
+          }
+
+          const isNewUser = user === null;
+          if (user === null) {
+            user = yield* userStore.createUser({
+              email,
+              emailVerified,
+              ...(userInfo.name !== undefined && { name: userInfo.name }),
+              ...(userInfo.picture !== undefined && { image: userInfo.picture }),
+            });
+          }
+
+          const account: OAuthAccount = {
+            id: crypto.randomBytes(16).toString("hex"),
+            userId: user.id,
+            provider: stateEntry.provider,
+            providerId: userInfo.id,
+            ...(userInfo.email && { email }),
+            ...(userInfo.name && { name: userInfo.name }),
+            ...(userInfo.picture && { picture: userInfo.picture }),
+            ...tokenFields,
+            createdAt: now,
+            updatedAt: now,
+          };
+          yield* accountStore.create(account);
+
+          const session = yield* sessionManager.createSession(user.id);
+
+          return {
+            user,
+            account,
+            session,
+            isNewUser,
+            ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
+          } satisfies OAuthSignInResult;
         }),
 
       linkAccount: (userId, provider, code, state) =>
@@ -721,9 +941,12 @@ export const makeOAuthService = (
         }),
     }),
   );
+};
 
-export const OAuthServiceLayer = (providers: Record<string, OAuthProvider>) =>
-  Layer.effect(OAuthServiceTag, makeOAuthService(providers));
+export const OAuthServiceLayer = (
+  providers: Record<string, OAuthProvider>,
+  options: OAuthServiceOptions = {},
+) => Layer.effect(OAuthServiceTag, makeOAuthService(providers, options));
 
 /**
  * Pre-built OAuth providers

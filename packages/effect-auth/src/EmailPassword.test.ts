@@ -104,11 +104,12 @@ const emailPasswordStore = {
       const id = `user-${users.size + 1}`;
       const user: User = {
         id,
-        attributes: {
-          email,
-          ...(name !== undefined && { name }),
-          ...attributes,
-        },
+        email,
+        emailVerified: false,
+        ...(name !== undefined && { name }),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        attributes: attributes ?? {},
       };
       users.set(id, user);
       usersByEmail.set(email, id);
@@ -170,7 +171,8 @@ describe("EmailPasswordService", () => {
         name: "Tester",
       });
 
-      expect(result.user.attributes.email).toBe("test@example.com");
+      expect(result.user.email).toBe("test@example.com");
+      expect(result.user.emailVerified).toBe(false);
       expect(result.session).toBeDefined();
 
       return result;
@@ -191,10 +193,11 @@ describe("EmailPasswordService", () => {
 
     const user: User = {
       id: "user-existing",
-      attributes: {
-        email: "existing@example.com",
-        emailVerified: true,
-      },
+      email: "existing@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
     };
 
     users.set(user.id, user);
@@ -227,10 +230,11 @@ describe("EmailPasswordService", () => {
 
     const user: User = {
       id: "user-invalid-cred",
-      attributes: {
-        email: "invalid@example.com",
-        emailVerified: true,
-      },
+      email: "invalid@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
     };
 
     users.set(user.id, user);
@@ -265,10 +269,11 @@ describe("EmailPasswordService", () => {
 
     const user: User = {
       id: "user-unverified",
-      attributes: {
-        email: "unverified@example.com",
-        emailVerified: false,
-      },
+      email: "unverified@example.com",
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
     };
 
     users.set(user.id, user);

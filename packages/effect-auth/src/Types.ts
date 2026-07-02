@@ -1,34 +1,62 @@
 /**
- * Core types for the Effect Auth library
+ * Core types for the Effect Auth library.
+ *
+ * The central domain records (`User`, `Session`, `SessionWithUser`) are
+ * defined as `Schema` structs so a single definition provides the TypeScript
+ * type, runtime validation, and JSON serialization used by stores and the
+ * HTTP protocol layer. Configuration shapes remain plain interfaces.
  */
+import { Schema } from "effect";
 
 /**
- * Represents a user in the authentication system
+ * Arbitrary attribute bag for custom fields on users and sessions.
+ * Core fields (email, name, ...) are first-class; anything app-specific
+ * lives here.
  */
-export interface User {
-  readonly id: string;
-  readonly attributes: Record<string, unknown>;
-}
+export const Attributes = Schema.Record(Schema.String, Schema.Unknown);
+export type Attributes = typeof Attributes.Type;
 
 /**
- * Represents an active session
+ * Represents a user in the authentication system.
+ *
+ * Core identity fields are first-class (mirroring the common auth data
+ * model): `email` (unique, normalized lowercase), `emailVerified`, optional
+ * `name` and `image`, plus `createdAt`/`updatedAt` timestamps. App-specific
+ * fields go in `attributes`.
  */
-export interface Session {
-  readonly id: string;
-  readonly userId: string;
-  readonly expiresAt: Date;
-  readonly createdAt: Date;
-  readonly lastActivityAt: Date;
-  readonly attributes: Record<string, unknown>;
-}
+export const User = Schema.Struct({
+  id: Schema.String,
+  email: Schema.String,
+  emailVerified: Schema.Boolean,
+  name: Schema.optional(Schema.String),
+  image: Schema.optional(Schema.String),
+  createdAt: Schema.Date,
+  updatedAt: Schema.Date,
+  attributes: Attributes,
+});
+export type User = typeof User.Type;
 
 /**
- * Represents a session with its associated user
+ * Represents an active session.
  */
-export interface SessionWithUser {
-  readonly session: Session;
-  readonly user: User;
-}
+export const Session = Schema.Struct({
+  id: Schema.String,
+  userId: Schema.String,
+  expiresAt: Schema.Date,
+  createdAt: Schema.Date,
+  lastActivityAt: Schema.Date,
+  attributes: Attributes,
+});
+export type Session = typeof Session.Type;
+
+/**
+ * Represents a session with its associated user.
+ */
+export const SessionWithUser = Schema.Struct({
+  session: Session,
+  user: User,
+});
+export type SessionWithUser = typeof SessionWithUser.Type;
 
 /**
  * Configuration for session management

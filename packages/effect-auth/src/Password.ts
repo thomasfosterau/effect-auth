@@ -252,6 +252,149 @@ export const makePBKDF2Hasher = (): PasswordHasher => {
 };
 
 /**
+ * scrypt Password Hasher implementing the PasswordHasher trait.
+ *
+ * Uses Node's built-in `crypto.scrypt` (dependency-free) with OWASP-recommended
+ * parameters (N=2^17, r=8, p=1). scrypt is memory-hard, making it more
+ * resistant to GPU/ASIC attacks than PBKDF2.
+ *
+ * PHC-style format: `scrypt$N$r$p$salt$hash` (N/r/p are stored so parameters
+ * can be tuned without breaking existing hashes).
+ */
+export const makeScryptHasher = (options?: {
+  readonly cost?: number;
+  readonly blockSize?: number;
+  readonly parallelization?: number;
+}): PasswordHasher => {
+  const ALGORITHM = "scrypt";
+  const COST = options?.cost ?? 131072; // 2^17, OWASP recommended
+  const BLOCK_SIZE = options?.blockSize ?? 8;
+  const PARALLELIZATION = options?.parallelization ?? 1;
+  const KEY_LENGTH = 64;
+  const SALT_LENGTH = 16;
+
+  const scrypt = (
+    password: string,
+    salt: Buffer,
+    N: number,
+    r: number,
+    p: number,
+  ): Effect.Effect<Buffer, Errors.HashingError> =>
+    Effect.callback((resume) => {
+      crypto.scrypt(
+        password,
+        salt,
+        KEY_LENGTH,
+        // maxmem must exceed 128 * N * r
+        { N, r, p, maxmem: 128 * N * r * 2 },
+        (error, derivedKey) => {
+          if (error) {
+            resume(
+              Effect.fail(
+                new Errors.HashingError({
+                  message: "Failed to derive scrypt key",
+                  cause: error,
+                }),
+              ),
+            );
+          } else {
+            resume(Effect.succeed(derivedKey));
+          }
+        },
+      );
+    });
+
+  return {
+    algorithm: ALGORITHM,
+    hash: (password: string) =>
+      Effect.gen(function* () {
+        if (!password || typeof password !== "string") {
+          return yield* Effect.fail(
+            new Errors.HashingError({
+              message: "Password must be a non-empty string",
+            }),
+          );
+        }
+
+        const salt = crypto.randomBytes(SALT_LENGTH);
+        const derivedKey = yield* scrypt(password, salt, COST, BLOCK_SIZE, PARALLELIZATION);
+
+        const hash = `${ALGORITHM}$${COST}$${BLOCK_SIZE}$${PARALLELIZATION}$${salt.toString("hex")}$${derivedKey.toString("hex")}`;
+
+        return {
+          hash,
+          algorithm: ALGORITHM,
+        };
+      }),
+
+    verify: (password: string, hash: string) =>
+      Effect.gen(function* () {
+        if (!password || typeof password !== "string") {
+          return yield* Effect.fail(
+            new Errors.HashingError({
+              message: "Password must be a non-empty string",
+            }),
+          );
+        }
+
+        if (!hash || typeof hash !== "string") {
+          return yield* Effect.fail(
+            new Errors.HashingError({
+              message: "Hash must be a non-empty string",
+            }),
+          );
+        }
+
+        const parts = hash.split("$");
+        if (parts.length !== 6) {
+          return yield* Effect.fail(
+            new Errors.HashingError({
+              message: "Invalid hash format",
+            }),
+          );
+        }
+
+        const [algorithm, costStr, blockSizeStr, parallelizationStr, saltHex, hashHex] = parts;
+
+        if (algorithm !== ALGORITHM) {
+          return yield* Effect.fail(
+            new Errors.HashingError({
+              message: `Unsupported algorithm: ${algorithm}`,
+            }),
+          );
+        }
+
+        const N = parseInt(costStr, 10);
+        const r = parseInt(blockSizeStr, 10);
+        const p = parseInt(parallelizationStr, 10);
+        if (!Number.isFinite(N) || !Number.isFinite(r) || !Number.isFinite(p)) {
+          return yield* Effect.fail(
+            new Errors.HashingError({
+              message: "Invalid hash parameters",
+            }),
+          );
+        }
+
+        const salt = Buffer.from(saltHex, "hex");
+        const expectedHash = Buffer.from(hashHex, "hex");
+        const derivedKey = yield* scrypt(password, salt, N, r, p);
+
+        if (derivedKey.length !== expectedHash.length) {
+          return false;
+        }
+
+        // Use timing-safe comparison
+        return crypto.timingSafeEqual(derivedKey, expectedHash);
+      }),
+  };
+};
+
+/**
+ * Layer that provides the scrypt password hasher
+ */
+export const ScryptHasherLayer = Layer.succeed(PasswordHasherTag, makeScryptHasher());
+
+/**
  * Backward compatibility: Default password hasher is PBKDF2
  */
 export const makePasswordHasher = makePBKDF2Hasher;

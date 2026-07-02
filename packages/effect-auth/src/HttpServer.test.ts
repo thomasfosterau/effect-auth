@@ -81,9 +81,15 @@ const makeTestServices = (): Layer.Layer<AuthServices> => {
           return yield* new AuthError({ message: "User already exists" });
         }
         const id = `user-${++seq}`;
+        const now = new Date();
         const user: Types.User = {
           id,
-          attributes: { email: input.email, ...input.attributes },
+          email: input.email,
+          emailVerified: false,
+          ...(input.name !== undefined && { name: input.name }),
+          createdAt: now,
+          updatedAt: now,
+          attributes: input.attributes ?? {},
         };
         usersById.set(id, user);
         credsByEmail.set(input.email, { id, password: input.password });
@@ -139,10 +145,11 @@ describe("HTTP auth protocol", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("set-cookie")).toContain("conduit_session=");
     const body = (await res.json()) as {
-      user: { attributes: { email: string } };
+      user: { email: string; emailVerified: boolean };
       needsEmailVerification: boolean;
     };
-    expect(body.user.attributes.email).toBe("a@b.com");
+    expect(body.user.email).toBe("a@b.com");
+    expect(body.user.emailVerified).toBe(false);
     expect(body.needsEmailVerification).toBe(false);
   });
 
@@ -155,8 +162,8 @@ describe("HTTP auth protocol", () => {
       new Request("http://test/session", { headers: { cookie: `conduit_session=${sid}` } }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { user: { attributes: { email: string } } };
-    expect(body.user.attributes.email).toBe("a@b.com");
+    const body = (await res.json()) as { user: { email: string } };
+    expect(body.user.email).toBe("a@b.com");
   });
 
   it("resolves the current session from an Authorization header", async () => {
@@ -240,7 +247,7 @@ describe("HTTP auth protocol", () => {
     }).pipe(Effect.provide(ClientLayer));
 
     const result = await Effect.runPromise(program);
-    expect(result.user.attributes.email).toBe("c@d.com");
+    expect(result.user.email).toBe("c@d.com");
     expect(result.needsEmailVerification).toBe(false);
   });
 });

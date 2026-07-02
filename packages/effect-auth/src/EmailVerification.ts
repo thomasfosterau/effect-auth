@@ -65,12 +65,18 @@ export interface EmailVerificationService {
     EmailVerificationStoreTag | Hooks
   >;
 
+  /**
+   * Invalidate any outstanding verification tokens for the user and send a
+   * fresh one. Combine with the rate-limiter (e.g.
+   * `RateLimitPresets.emailVerification`) to prevent abuse.
+   */
   readonly resendVerification: (
     userId: string,
+    email: string,
   ) => Effect.Effect<
-    void,
-    AuthError | RateLimitError | EmailVerificationError,
-    EmailVerificationStoreTag
+    { token: string; expiresAt: number },
+    AuthError | RateLimitError | EmailVerificationError | HookError,
+    EmailVerificationStoreTag | Hooks
   >;
 }
 
@@ -117,46 +123,48 @@ export const makeEmailVerificationService = (
 ): Effect.Effect<EmailVerificationService, never> => {
   const expiresIn = config.expiresIn ?? 24 * 60 * 60 * 1000; // 24 hours default
 
+  const createVerification = (rawUserId: string, rawEmail: string) =>
+    Effect.gen(function* () {
+      const hooks = yield* Hooks;
+      const { userId, email } = yield* hooks.beforeCreateVerification({
+        userId: rawUserId,
+        email: rawEmail,
+      });
+
+      const store = yield* EmailVerificationStoreTag;
+      const token = yield* generateVerificationToken();
+
+      const verification: EmailVerification = {
+        token,
+        userId,
+        email,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + expiresIn,
+      };
+
+      yield* store.create(verification);
+
+      // Send verification email
+      yield* Effect.catch(config.sendEmail(email, token), (error) =>
+        Effect.fail(
+          new EmailVerificationError({
+            message: `Failed to send verification email to ${email}`,
+            cause: error,
+          }),
+        ),
+      );
+
+      yield* hooks.afterCreateVerification({ userId, email });
+
+      return {
+        token,
+        expiresAt: verification.expiresAt,
+      };
+    });
+
   return Effect.sync(
     (): EmailVerificationService => ({
-      createVerification: (rawUserId: string, rawEmail: string) =>
-        Effect.gen(function* () {
-          const hooks = yield* Hooks;
-          const { userId, email } = yield* hooks.beforeCreateVerification({
-            userId: rawUserId,
-            email: rawEmail,
-          });
-
-          const store = yield* EmailVerificationStoreTag;
-          const token = yield* generateVerificationToken();
-
-          const verification: EmailVerification = {
-            token,
-            userId,
-            email,
-            createdAt: Date.now(),
-            expiresAt: Date.now() + expiresIn,
-          };
-
-          yield* store.create(verification);
-
-          // Send verification email
-          yield* Effect.catch(config.sendEmail(email, token), (error) =>
-            Effect.fail(
-              new EmailVerificationError({
-                message: `Failed to send verification email to ${email}`,
-                cause: error,
-              }),
-            ),
-          );
-
-          yield* hooks.afterCreateVerification({ userId, email });
-
-          return {
-            token,
-            expiresAt: verification.expiresAt,
-          };
-        }),
+      createVerification,
 
       verifyToken: (rawToken: string) =>
         Effect.gen(function* () {
@@ -197,13 +205,13 @@ export const makeEmailVerificationService = (
           return yield* hooks.afterVerifyEmail(result);
         }),
 
-      resendVerification: (_userId: string) =>
-        Effect.fail(
-          new EmailVerificationError({
-            message:
-              "resendVerification is not fully implemented: please use createVerification with the user's email address instead",
-          }),
-        ),
+      resendVerification: (userId: string, email: string) =>
+        Effect.gen(function* () {
+          const store = yield* EmailVerificationStoreTag;
+          // Invalidate outstanding tokens so only the latest one is usable.
+          yield* store.deleteByUserId(userId);
+          return yield* createVerification(userId, email);
+        }),
     }),
   );
 };
