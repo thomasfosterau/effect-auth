@@ -7,3 +7,4 @@
 export * from "./AuditPlugin.js";
 export * from "./NormalizeEmailPlugin.js";
 export * from "./RateLimitPlugin.js";
+export * from "./AccountLockoutPlugin.js";
