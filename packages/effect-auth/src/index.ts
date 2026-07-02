@@ -66,6 +66,9 @@ export * from "./EmailOtp.js";
 /** Anonymous (guest) sign-in with account linking. */
 export * from "./Anonymous.js";
 
+/** Phone number (SMS OTP) sign-in and phone verification. */
+export * from "./PhoneOtp.js";
+
 /** Two-factor authentication (TOTP + backup codes). */
 export * from "./TwoFactor.js";
 

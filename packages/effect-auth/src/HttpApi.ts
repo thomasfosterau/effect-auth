@@ -132,6 +132,17 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.AuthSuccess,
     error: [S.NotFoundError, S.InternalError],
   }),
+  // Phone (SMS) OTP. Anti-enumeration: send always answers `{ status: true }`.
+  HttpApiEndpoint.post("phoneOtpSend", "/phone-otp/send", {
+    payload: S.PhoneOtpSendPayload,
+    success: S.StatusResponse,
+    error: [S.NotFoundError, S.InternalError],
+  }),
+  HttpApiEndpoint.post("signInPhoneOtp", "/sign-in/phone-otp", {
+    payload: S.PhoneOtpSignInPayload,
+    success: S.AuthSuccess,
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+  }),
   // Authenticated; wrong password -> 400 BadRequest (mirrors change-password).
   HttpApiEndpoint.post("twoFactorEnable", "/two-factor/enable", {
     payload: S.TwoFactorPasswordPayload,

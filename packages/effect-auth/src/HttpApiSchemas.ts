@@ -180,6 +180,24 @@ export const EmailOtpSendPayload = Schema.Struct({
 });
 export type EmailOtpSendPayload = typeof EmailOtpSendPayload.Type;
 
+/** The purposes a phone OTP can be issued for. */
+export const PhoneOtpPurpose = Schema.Literals(["sign-in", "phone-verification"]);
+export type PhoneOtpPurpose = typeof PhoneOtpPurpose.Type;
+
+/** Request body for sending a phone (SMS) OTP. */
+export const PhoneOtpSendPayload = Schema.Struct({
+  phoneNumber: Schema.String,
+  purpose: PhoneOtpPurpose,
+});
+export type PhoneOtpSendPayload = typeof PhoneOtpSendPayload.Type;
+
+/** Request body for signing in with a phone OTP. */
+export const PhoneOtpSignInPayload = Schema.Struct({
+  phoneNumber: Schema.String,
+  otp: Schema.String,
+});
+export type PhoneOtpSignInPayload = typeof PhoneOtpSignInPayload.Type;
+
 /** Request body for signing in with an email OTP. */
 export const EmailOtpSignInPayload = Schema.Struct({
   email: Schema.String,
