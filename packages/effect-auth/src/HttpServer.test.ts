@@ -76,6 +76,7 @@ import {
   type PhoneOtpStore,
   type PhoneOtpUserStore,
 } from "./PhoneOtp.js";
+import { UsernameServiceLayer, UsernameStoreTag, type UsernameStore } from "./Username.js";
 import { generateTOTP } from "./Otp.js";
 import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
@@ -104,6 +105,8 @@ interface Fixture {
   readonly sentDeleteTokens: string[];
   readonly beforeDeleteCalls: string[];
   readonly sentPhoneOtps: Array<{ phoneNumber: string; otp: string; purpose: PhoneOtpPurpose }>;
+  /** Register a username -> userId mapping for the username sign-in tests. */
+  readonly registerUsername: (userId: string, username: string) => void;
 }
 
 /**
@@ -432,6 +435,21 @@ const makeFixture = (): Fixture => {
       }),
   };
 
+  const usernameToId = new Map<string, string>();
+  const usernameStore: UsernameStore = {
+    getUserByUsername: (username) =>
+      Effect.sync(() => {
+        const id = usernameToId.get(username);
+        return id === undefined ? null : (usersById.get(id) ?? null);
+      }),
+    isUsernameTaken: (username) => Effect.sync(() => usernameToId.has(username)),
+    setUsername: (userId, username) =>
+      Effect.sync(() => {
+        for (const [name, id] of usernameToId) if (id === userId) usernameToId.delete(name);
+        usernameToId.set(username, userId);
+      }),
+  };
+
   let anonSeq = 0;
   const anonymousUserStore: AnonymousUserStore = {
     createAnonymousUser: () =>
@@ -455,6 +473,8 @@ const makeFixture = (): Fixture => {
     services,
     AnonymousServiceLayer(),
     Layer.succeed(AnonymousUserStoreTag)(anonymousUserStore),
+    UsernameServiceLayer(),
+    Layer.succeed(UsernameStoreTag)(usernameStore),
     PhoneOtpServiceLayer({
       sendOtp: (phoneNumber, otp, purpose) =>
         Effect.sync(() => void sentPhoneOtps.push({ phoneNumber, otp, purpose })),
@@ -496,6 +516,7 @@ const makeFixture = (): Fixture => {
     sentDeleteTokens,
     beforeDeleteCalls,
     sentPhoneOtps,
+    registerUsername: (userId, username) => void usernameToId.set(username, userId),
   };
 };
 
@@ -1197,6 +1218,46 @@ describe("two-factor", () => {
     );
     expect(after.status).toBe(200);
     expect(after.headers.get("set-cookie")).toContain("conduit_session=");
+  });
+});
+
+describe("HTTP username sign-in", () => {
+  it("signs in with a username + password", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true });
+    // Create the account (email/password) and register a username for it.
+    const up = await handler(jsonRequest("/sign-up", { email: "u@example.com", password: PW }));
+    const user = ((await up.json()) as { user: { id: string } }).user;
+    fixture.registerUsername(user.id, "cooluser");
+
+    const res = await handler(
+      jsonRequest("/sign-in/username", { username: "cooluser", password: PW }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toContain("conduit_session=");
+  });
+
+  it("returns 401 for a wrong password or unknown username", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true });
+    const up = await handler(jsonRequest("/sign-up", { email: "u2@example.com", password: PW }));
+    const user = ((await up.json()) as { user: { id: string } }).user;
+    fixture.registerUsername(user.id, "someone");
+
+    const wrong = await handler(
+      jsonRequest("/sign-in/username", { username: "someone", password: "nope" }),
+    );
+    expect(wrong.status).toBe(401);
+    const unknown = await handler(
+      jsonRequest("/sign-in/username", { username: "ghost", password: PW }),
+    );
+    expect(unknown.status).toBe(401);
+  });
+
+  it("returns 404 when username sign-in is not configured", async () => {
+    const handler = handlerFor(makeFixture(), { features: false });
+    const res = await handler(jsonRequest("/sign-in/username", { username: "x", password: PW }));
+    expect(res.status).toBe(404);
   });
 });
 

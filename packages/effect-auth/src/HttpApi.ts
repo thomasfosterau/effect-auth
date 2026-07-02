@@ -132,6 +132,12 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.AuthSuccess,
     error: [S.NotFoundError, S.InternalError],
   }),
+  // Username + password sign-in. Invalid credentials -> 401 (uniform message).
+  HttpApiEndpoint.post("signInUsername", "/sign-in/username", {
+    payload: S.UsernameSignInPayload,
+    success: S.AuthSuccess,
+    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
+  }),
   // Phone (SMS) OTP. Anti-enumeration: send always answers `{ status: true }`.
   HttpApiEndpoint.post("phoneOtpSend", "/phone-otp/send", {
     payload: S.PhoneOtpSendPayload,

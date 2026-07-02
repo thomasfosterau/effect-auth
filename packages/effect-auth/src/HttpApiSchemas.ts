@@ -198,6 +198,13 @@ export const PhoneOtpSignInPayload = Schema.Struct({
 });
 export type PhoneOtpSignInPayload = typeof PhoneOtpSignInPayload.Type;
 
+/** Request body for signing in with a username + password. */
+export const UsernameSignInPayload = Schema.Struct({
+  username: Schema.String,
+  password: Schema.String,
+});
+export type UsernameSignInPayload = typeof UsernameSignInPayload.Type;
+
 /** Request body for signing in with an email OTP. */
 export const EmailOtpSignInPayload = Schema.Struct({
   email: Schema.String,

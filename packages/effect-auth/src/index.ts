@@ -69,6 +69,9 @@ export * from "./Anonymous.js";
 /** Phone number (SMS OTP) sign-in and phone verification. */
 export * from "./PhoneOtp.js";
 
+/** Username (username + password) sign-in. */
+export * from "./Username.js";
+
 /** Two-factor authentication (TOTP + backup codes). */
 export * from "./TwoFactor.js";
 

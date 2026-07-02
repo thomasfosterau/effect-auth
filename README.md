@@ -17,6 +17,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🪄 **Magic Link & Email OTP**: Passwordless sign-in via one-time links or numeric codes
 - 📱 **Phone (SMS) OTP**: Sign-in and phone-number verification via SMS one-time codes (`attributes.phoneNumber`, pluggable E.164 normalizer)
 - 👤 **Anonymous Auth**: Guest sessions (`POST /sign-in/anonymous`) with account linking on sign-up (`isAnonymousUser` helper, `linkAccount` migration callback)
+- 🪪 **Username Auth**: Sign in with a username + password (`POST /sign-in/username`), case-insensitive uniqueness, honouring the two-factor gate
 - 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets, an optional `effect/unstable/persistence` backend (in-memory or Redis) via `RateLimiterPersistenceLayer`, and an `AccountLockoutPlugin` (OWASP-style lockout after N failed sign-ins)
 - 🔓 **WebAuthn / Passkeys**: Passwordless authentication with FIDO2 compliance
 - 🏢 **Organizations & Admin**: Multi-tenant organizations (members, invitations, roles) and admin tooling (ban, impersonate)
