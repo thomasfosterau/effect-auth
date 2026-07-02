@@ -10,3 +10,4 @@ export * from "./RateLimitPlugin.js";
 export * from "./AccountLockoutPlugin.js";
 export * from "./CaptchaPlugin.js";
 export * from "./HibpPlugin.js";
+export * from "./LastLoginMethodPlugin.js";

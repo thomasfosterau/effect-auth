@@ -216,11 +216,11 @@ export const makeUsernameService = (
           const gate = yield* Effect.serviceOption(SecondFactorGateTag);
           if (Option.isSome(gate) && (yield* gate.value.required(user))) {
             const secondFactor = yield* gate.value.begin(user);
-            return yield* hooks.afterSignIn({ user, secondFactor });
+            return yield* hooks.afterSignIn({ user, secondFactor, method: "username" });
           }
 
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
-          return yield* hooks.afterSignIn({ user, session });
+          return yield* hooks.afterSignIn({ user, session, method: "username" });
         }),
 
       updateUsername: (userId, rawUsername) =>

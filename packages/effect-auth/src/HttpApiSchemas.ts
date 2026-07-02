@@ -559,6 +559,33 @@ export const ApiKeyUpdatePayload = Schema.Struct({
 export type ApiKeyUpdatePayload = typeof ApiKeyUpdatePayload.Type;
 
 // -----------------------------------------------------------------------------
+// SIWE (Sign-In With Ethereum) + Google One Tap
+// -----------------------------------------------------------------------------
+
+/** A single-use SIWE nonce and its expiry (epoch millis). */
+export const SiweNonceView = Schema.Struct({
+  nonce: Schema.String,
+  expiresAt: Schema.Number,
+});
+export type SiweNonceView = typeof SiweNonceView.Type;
+
+/** Request body for completing a SIWE sign-in. */
+export const SiweVerifyPayload = Schema.Struct({
+  /** The signed EIP-4361 plaintext message. */
+  message: Schema.String,
+  /** 65-byte `r || s || v` signature, `0x`-prefixed hex. */
+  signature: Schema.String,
+});
+export type SiweVerifyPayload = typeof SiweVerifyPayload.Type;
+
+/** Request body for a Google One Tap sign-in. */
+export const GoogleOneTapPayload = Schema.Struct({
+  /** The One Tap `credential` (a Google-signed id_token). */
+  credential: Schema.String,
+});
+export type GoogleOneTapPayload = typeof GoogleOneTapPayload.Type;
+
+// -----------------------------------------------------------------------------
 // OIDC provider (this server acting as an OpenID Connect IdP)
 // -----------------------------------------------------------------------------
 

@@ -87,6 +87,11 @@ export interface AuthResult {
   readonly session?: Types.Session;
   /** Present when a second factor is required to complete sign-in. */
   readonly secondFactor?: SecondFactorChallenge;
+  /**
+   * Sign-in method discriminator (`"email-password"`, `"username"`,
+   * `"magic-link"`, ...) for hooks like the last-login-method plugin.
+   */
+  readonly method?: string;
 }
 
 export interface ChangePasswordInput {
@@ -242,16 +247,16 @@ export const makeEmailPasswordService = (
           yield* store.setPasswordHash(user.id, hashedPassword.hash);
 
           if (!resolved.autoSignIn) {
-            return yield* hooks.afterSignUp({ user });
+            return yield* hooks.afterSignUp({ user, method: "email-password" });
           }
 
           if (resolved.requireEmailVerification && !isEmailVerified(user)) {
-            return yield* hooks.afterSignUp({ user });
+            return yield* hooks.afterSignUp({ user, method: "email-password" });
           }
 
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
 
-          return yield* hooks.afterSignUp({ user, session });
+          return yield* hooks.afterSignUp({ user, session, method: "email-password" });
         }),
 
       signIn: (rawInput) =>
@@ -313,12 +318,12 @@ export const makeEmailPasswordService = (
           const gate = yield* Effect.serviceOption(SecondFactorGateTag);
           if (Option.isSome(gate) && (yield* gate.value.required(user))) {
             const secondFactor = yield* gate.value.begin(user);
-            return yield* hooks.afterSignIn({ user, secondFactor });
+            return yield* hooks.afterSignIn({ user, secondFactor, method: "email-password" });
           }
 
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
 
-          return yield* hooks.afterSignIn({ user, session });
+          return yield* hooks.afterSignIn({ user, session, method: "email-password" });
         }),
 
       changePassword: (input) =>

@@ -1,0 +1,51 @@
+{
+  "name": "@effect-auth/siwe",
+  "version": "0.1.0",
+  "description": "Sign-In With Ethereum (EIP-4361) signature verifier for effect-auth, backed by @noble/curves secp256k1 recovery.",
+  "keywords": [
+    "auth",
+    "authentication",
+    "effect",
+    "effect-auth",
+    "eip-4361",
+    "ethereum",
+    "secp256k1",
+    "siwe",
+    "web3"
+  ],
+  "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
+  "bugs": {
+    "url": "https://github.com/thomasfosterau/effect-auth/issues"
+  },
+  "license": "ISC",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thomasfosterau/effect-auth.git"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vp test run",
+    "typecheck": "tsc --noEmit && vp test --typecheck --run"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.8.1",
+    "@noble/hashes": "^1.7.1",
+    "effect": "4.0.0-beta.59",
+    "effect-auth": "workspace:*"
+  }
+}

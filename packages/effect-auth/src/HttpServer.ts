@@ -53,6 +53,8 @@ import {
 } from "./OidcProvider.js";
 import { SsoServiceTag, SsoProviderStoreTag, type SsoProvider } from "./Sso.js";
 import { OAuthStateStoreTag, OAuthUserStoreTag } from "./OAuth.js";
+import { SiweServiceTag, SiweNonceStoreTag, SiweUserStoreTag, SiweVerifierTag } from "./Siwe.js";
+import { GoogleOneTapServiceTag } from "./GoogleOneTap.js";
 import {
   decodeSessionCacheCookie,
   encodeSessionCacheCookie,
@@ -109,6 +111,15 @@ export interface CookieConfig {
    * `maxAge`). See {@link SessionCacheConfig}.
    */
   readonly cache?: SessionCacheConfig;
+  /**
+   * Record the sign-in method in a NON-httpOnly `${name}_last_method` cookie
+   * whenever a sign-in endpoint issues a session, so login pages can
+   * highlight the user's previous method (`"email-password"`,
+   * `"magic-link"`, `"sso"`, ...). Pass `true` for a 30-day cookie or an
+   * object to tune the lifetime. Pair with `makeLastLoginMethodPlugin` to
+   * also record the method into `session.attributes.method` server-side.
+   */
+  readonly lastLoginMethod?: boolean | { readonly maxAge?: number };
 }
 
 /** Multiple concurrent accounts per client (device-scoped session list). */
@@ -123,6 +134,7 @@ interface ResolvedCookieConfig {
   readonly path: string;
   readonly cache: ResolvedSessionCache | undefined;
   readonly multiSession: { readonly maximumSessions: number } | undefined;
+  readonly lastLoginMethod: { readonly maxAge: number } | undefined;
 }
 
 const resolveCookieConfig = (
@@ -135,7 +147,28 @@ const resolveCookieConfig = (
   cache: resolveSessionCache(config?.cache),
   multiSession:
     multiSession === undefined ? undefined : { maximumSessions: multiSession.maximumSessions ?? 5 },
+  lastLoginMethod:
+    config?.lastLoginMethod === undefined || config.lastLoginMethod === false
+      ? undefined
+      : {
+          maxAge:
+            (config.lastLoginMethod === true ? undefined : config.lastLoginMethod.maxAge) ??
+            30 * 24 * 60 * 60 * 1000,
+        },
 });
+
+/** Name of the non-httpOnly last-login-method hint cookie. */
+const lastMethodCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_last_method`;
+
+/** Options for the last-login-method hint cookie: readable by page scripts. */
+const lastMethodCookieOptions = (cfg: ResolvedCookieConfig, maxAge: number) =>
+  ({
+    httpOnly: false,
+    sameSite: "lax",
+    secure: cfg.secure,
+    path: cfg.path,
+    maxAge: Math.floor(maxAge / 1000),
+  }) as const;
 
 /** Name of the device session-list cookie. */
 const multiCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_multi`;
@@ -404,6 +437,41 @@ const resolveSso = Effect.gen(function* () {
   return { service: service.value, provideStores };
 });
 
+/** Resolve the SIWE service, its stores, and the signature verifier, or 404. */
+const resolveSiwe = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(SiweServiceTag);
+  const nonceStore = yield* Effect.serviceOption(SiweNonceStoreTag);
+  const userStore = yield* Effect.serviceOption(SiweUserStoreTag);
+  const verifier = yield* Effect.serviceOption(SiweVerifierTag);
+  if (
+    Option.isNone(service) ||
+    Option.isNone(nonceStore) ||
+    Option.isNone(userStore) ||
+    Option.isNone(verifier)
+  ) {
+    return yield* new S.NotFound({ message: "Sign-In With Ethereum is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.provideService(SiweNonceStoreTag, nonceStore.value),
+      Effect.provideService(SiweUserStoreTag, userStore.value),
+      Effect.provideService(SiweVerifierTag, verifier.value),
+    );
+  return { service: service.value, provideStores };
+});
+
+/** Resolve the Google One Tap service + user store, or fail with 404. */
+const resolveGoogleOneTap = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(GoogleOneTapServiceTag);
+  const userStore = yield* Effect.serviceOption(OAuthUserStoreTag);
+  if (Option.isNone(service) || Option.isNone(userStore)) {
+    return yield* new S.NotFound({ message: "Google One Tap is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(Effect.provideService(OAuthUserStoreTag, userStore.value));
+  return { service: service.value, provideStores };
+});
+
 /**
  * Resolve the OIDC provider service + its stores, or fail with 404. The
  * module signs `id_token`s with the JWT module's keys, so the JWT service +
@@ -547,7 +615,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: S.encodeUser(result.user),
             needsEmailVerification: result.needsEmailVerification,
           };
-          return yield* withSessionCookie(body, result.session, cfg);
+          return yield* withSessionCookie(body, result.session, cfg, "email-password");
         }),
       )
       .handle("signIn", ({ payload }) =>
@@ -575,7 +643,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             needsEmailVerification: result.needsEmailVerification,
             ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
           };
-          return yield* withSessionCookie(body, result.session, cfg);
+          return yield* withSessionCookie(body, result.session, cfg, "email-password");
         }),
       )
       .handle("signOut", ({ request }) =>
@@ -679,7 +747,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: S.encodeUser(result.user),
             needsEmailVerification: result.needsEmailVerification,
           };
-          return yield* withSessionCookie(body, result.session, cfg);
+          return yield* withSessionCookie(body, result.session, cfg, "email-password");
         }),
       )
       .handle("requestPasswordReset", ({ payload }) =>
@@ -882,7 +950,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: S.encodeUser(result.user),
             needsEmailVerification: false,
           };
-          return yield* withSessionCookie(body, result.session, cfg);
+          return yield* withSessionCookie(body, result.session, cfg, "magic-link");
         }),
       )
       .handle("emailOtpSend", ({ payload }) =>
@@ -915,7 +983,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: S.encodeUser(result.user),
             needsEmailVerification: false,
           };
-          return yield* withSessionCookie(body, result.session, cfg);
+          return yield* withSessionCookie(body, result.session, cfg, "email-otp");
         }),
       )
       .handle("signInAnonymous", () =>
@@ -931,7 +999,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: S.encodeUser(result.user),
             needsEmailVerification: false,
           };
-          return yield* withSessionCookie(body, result.session, cfg);
+          return yield* withSessionCookie(body, result.session, cfg, "anonymous");
         }),
       )
       .handle("signInUsername", ({ payload }) =>
@@ -956,7 +1024,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             needsEmailVerification: false,
             ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
           };
-          return yield* withSessionCookie(body, result.session, cfg);
+          return yield* withSessionCookie(body, result.session, cfg, "username");
         }),
       )
       .handle("multiSessionList", ({ request }) =>
@@ -1079,7 +1147,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: S.encodeUser(result.user),
             needsEmailVerification: false,
           };
-          return yield* withSessionCookie(body, result.session, cfg);
+          return yield* withSessionCookie(body, result.session, cfg, "device");
         }),
       )
       .handle("deviceApprove", ({ payload, request }) =>
@@ -1141,7 +1209,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: S.encodeUser(result.user),
             needsEmailVerification: false,
           };
-          return yield* withSessionCookie(body, result.session, cfg);
+          return yield* withSessionCookie(body, result.session, cfg, "phone-otp");
         }),
       )
       .handle("twoFactorEnable", ({ payload, request }) =>
@@ -1238,7 +1306,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               }),
             );
-          return yield* secondFactorSuccess(result, cfg);
+          return yield* secondFactorSuccess(result, cfg, "two-factor");
         }),
       )
       .handle("twoFactorVerifyBackupCode", ({ payload }) =>
@@ -1253,7 +1321,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               }),
             );
-          return yield* secondFactorSuccess(result, cfg);
+          return yield* secondFactorSuccess(result, cfg, "two-factor");
         }),
       )
       // --- Organization -----------------------------------------------------
@@ -1798,7 +1866,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             user: S.encodeUser(result.user),
             needsEmailVerification: false,
           };
-          return yield* withSessionCookie(body, result.session, cfg);
+          return yield* withSessionCookie(body, result.session, cfg, "sso");
         }),
       )
       // --- JWT --------------------------------------------------------------
@@ -2071,6 +2139,61 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           );
           return { keys: jwks.keys.map((k) => ({ ...k })) };
         }),
+      )
+      // --- Sign-In With Ethereum ----------------------------------------------
+      .handle("siweNonce", () =>
+        Effect.gen(function* () {
+          const siwe = yield* resolveSiwe;
+          return yield* siwe.provideStores(siwe.service.generateNonce()).pipe(
+            Effect.catchTags({
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+        }),
+      )
+      .handle("signInSiwe", ({ payload }) =>
+        Effect.gen(function* () {
+          const siwe = yield* resolveSiwe;
+          const result = yield* siwe
+            .provideStores(
+              siwe.service.verify({ message: payload.message, signature: payload.signature }),
+            )
+            .pipe(
+              Effect.catchTags({
+                // A failed verification is a failed authentication attempt.
+                SiweError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) =>
+                  Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          const body: S.AuthSuccess = {
+            user: S.encodeUser(result.user),
+            needsEmailVerification: false,
+          };
+          return yield* withSessionCookie(body, result.session, cfg, "siwe");
+        }),
+      )
+      // --- Google One Tap -------------------------------------------------------
+      .handle("signInGoogleOneTap", ({ payload }) =>
+        Effect.gen(function* () {
+          const oneTap = yield* resolveGoogleOneTap;
+          const result = yield* oneTap
+            .provideStores(oneTap.service.signIn(payload.credential))
+            .pipe(
+              Effect.catchTags({
+                GoogleOneTapError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) =>
+                  Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          const body: S.AuthSuccess = {
+            user: S.encodeUser(result.user),
+            needsEmailVerification: false,
+          };
+          return yield* withSessionCookie(body, result.session, cfg, "google");
+        }),
       ),
   );
 };
@@ -2083,6 +2206,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
 const secondFactorSuccess = (
   result: { readonly userId: string; readonly session: Types.Session },
   cfg: ResolvedCookieConfig,
+  method?: string,
 ) =>
   Effect.gen(function* () {
     const userService = yield* UserServiceTag;
@@ -2093,7 +2217,7 @@ const secondFactorSuccess = (
       user: S.encodeUser(user),
       needsEmailVerification: false,
     };
-    return yield* withSessionCookie(body, result.session, cfg);
+    return yield* withSessionCookie(body, result.session, cfg, method);
   });
 
 /** Resolve and validate the request's session or fail with 401. */
@@ -2136,11 +2260,16 @@ const requireSession = (
 ): Effect.Effect<Types.SessionWithUser, S.Unauthorized, SessionManagerTag | Hooks> =>
   resolveSession(request, cfg).pipe(Effect.map((r) => r.resolved));
 
-/** Attach the session cookie to a JSON `AuthSuccess` response when a session is present. */
+/**
+ * Attach the session cookie to a JSON `AuthSuccess` response when a session is
+ * present. When the last-login-method hint is enabled and `method` is given,
+ * also (re)writes the non-httpOnly `${name}_last_method` cookie.
+ */
 const withSessionCookie = (
   body: S.AuthSuccess,
   session: Types.Session | undefined,
   cfg: ResolvedCookieConfig,
+  method?: string,
 ) =>
   Effect.gen(function* () {
     const json = yield* HttpServerResponse.json(body);
@@ -2162,6 +2291,16 @@ const withSessionCookie = (
         multiCookieName(cfg),
         ids.join("."),
         sessionCookieOptions(cfg, session.expiresAt),
+      );
+    }
+    // Last-login-method hint: a page-readable cookie login UIs use to
+    // highlight the user's previous sign-in method.
+    if (cfg.lastLoginMethod !== undefined && method !== undefined) {
+      response = yield* HttpServerResponse.setCookie(
+        response,
+        lastMethodCookieName(cfg),
+        method,
+        lastMethodCookieOptions(cfg, cfg.lastLoginMethod.maxAge),
       );
     }
     return response;

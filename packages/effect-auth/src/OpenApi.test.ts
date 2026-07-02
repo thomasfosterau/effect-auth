@@ -109,6 +109,9 @@ const EXPECTED_PATHS = [
   "/oauth2/userinfo",
   "/.well-known/openid-configuration",
   "/.well-known/jwks.json",
+  "/siwe/nonce",
+  "/sign-in/siwe",
+  "/sign-in/google-one-tap",
 ];
 
 describe("getOpenApiSpec", () => {
