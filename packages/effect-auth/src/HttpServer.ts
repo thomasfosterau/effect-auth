@@ -43,6 +43,14 @@ import {
 import { AdminServiceTag, AdminUserStoreTag, isAdmin } from "./Admin.js";
 import { ApiKeyServiceTag, ApiKeyStoreTag, type ApiKey } from "./ApiKey.js";
 import { JwtServiceTag, JwtKeyStoreTag } from "./Jwt.js";
+import {
+  OidcProviderServiceTag,
+  OidcClientStoreTag,
+  OidcCodeStoreTag,
+  OidcTokenStoreTag,
+  OidcConsentStoreTag,
+  type OidcClient,
+} from "./OidcProvider.js";
 import { SsoServiceTag, SsoProviderStoreTag, type SsoProvider } from "./Sso.js";
 import { OAuthStateStoreTag, OAuthUserStoreTag } from "./OAuth.js";
 import {
@@ -396,6 +404,46 @@ const resolveSso = Effect.gen(function* () {
   return { service: service.value, provideStores };
 });
 
+/**
+ * Resolve the OIDC provider service + its stores, or fail with 404. The
+ * module signs `id_token`s with the JWT module's keys, so the JWT service +
+ * key store (and the core user store, for claims) are required alongside the
+ * OIDC stores.
+ */
+const resolveOidcProvider = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(OidcProviderServiceTag);
+  const clientStore = yield* Effect.serviceOption(OidcClientStoreTag);
+  const codeStore = yield* Effect.serviceOption(OidcCodeStoreTag);
+  const tokenStore = yield* Effect.serviceOption(OidcTokenStoreTag);
+  const consentStore = yield* Effect.serviceOption(OidcConsentStoreTag);
+  const jwtService = yield* Effect.serviceOption(JwtServiceTag);
+  const jwtKeyStore = yield* Effect.serviceOption(JwtKeyStoreTag);
+  const userStore = yield* Effect.serviceOption(UserStoreTag);
+  if (
+    Option.isNone(service) ||
+    Option.isNone(clientStore) ||
+    Option.isNone(codeStore) ||
+    Option.isNone(tokenStore) ||
+    Option.isNone(consentStore) ||
+    Option.isNone(jwtService) ||
+    Option.isNone(jwtKeyStore) ||
+    Option.isNone(userStore)
+  ) {
+    return yield* new S.NotFound({ message: "OIDC provider is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.provideService(OidcClientStoreTag, clientStore.value),
+      Effect.provideService(OidcCodeStoreTag, codeStore.value),
+      Effect.provideService(OidcTokenStoreTag, tokenStore.value),
+      Effect.provideService(OidcConsentStoreTag, consentStore.value),
+      Effect.provideService(JwtServiceTag, jwtService.value),
+      Effect.provideService(JwtKeyStoreTag, jwtKeyStore.value),
+      Effect.provideService(UserStoreTag, userStore.value),
+    );
+  return { service: service.value, provideStores };
+});
+
 // --- Encoders for the organization / API-key domain types --------------------
 
 const encodeOrganization = (o: Organization): S.OrganizationView => ({
@@ -445,6 +493,18 @@ const encodeSsoProvider = (p: SsoProvider): S.SsoProviderView => ({
   scopes: p.scopes,
   ...(p.organizationId !== undefined && { organizationId: p.organizationId }),
   createdAt: p.createdAt,
+});
+
+const encodeOidcClient = (c: OidcClient): S.OidcClientView => ({
+  clientId: c.clientId,
+  name: c.name,
+  redirectUris: c.redirectUris,
+  type: c.type,
+  skipConsent: c.skipConsent,
+  disabled: c.disabled,
+  metadata: c.metadata,
+  createdAt: c.createdAt,
+  updatedAt: c.updatedAt,
 });
 
 const encodeApiKey = (k: ApiKey): S.ApiKeyView => ({
@@ -1757,6 +1817,252 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("jwtJwks", () =>
         Effect.gen(function* () {
+          const jwt = yield* resolveJwt;
+          const jwks = yield* jwt.provideStores(jwt.service.getJwks()).pipe(
+            Effect.catchTags({
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return { keys: jwks.keys.map((k) => ({ ...k })) };
+        }),
+      )
+      // --- OIDC provider ------------------------------------------------------
+      .handle("oidcRegisterClient", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          if (!isAdmin(resolved.user)) {
+            return yield* new S.Forbidden({ message: "Admin privileges required" });
+          }
+          const oidc = yield* resolveOidcProvider;
+          const result = yield* oidc
+            .provideStores(
+              oidc.service.registerClient(
+                {
+                  name: payload.name,
+                  redirectUris: payload.redirectUris,
+                  ...(payload.type !== undefined && { type: payload.type }),
+                  ...(payload.skipConsent !== undefined && { skipConsent: payload.skipConsent }),
+                  ...(payload.metadata !== undefined && { metadata: payload.metadata }),
+                },
+                resolved.user.id,
+              ),
+            )
+            .pipe(
+              Effect.catchTags({
+                OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return {
+            client: encodeOidcClient(result.client),
+            ...(result.clientSecret !== undefined && { clientSecret: result.clientSecret }),
+          };
+        }),
+      )
+      .handle("oidcListClients", ({ request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          if (!isAdmin(resolved.user)) {
+            return yield* new S.Forbidden({ message: "Admin privileges required" });
+          }
+          const oidc = yield* resolveOidcProvider;
+          const clients = yield* oidc.provideStores(oidc.service.listClients()).pipe(
+            Effect.catchTags({
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return clients.map(encodeOidcClient);
+        }),
+      )
+      .handle("oidcUpdateClient", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          if (!isAdmin(resolved.user)) {
+            return yield* new S.Forbidden({ message: "Admin privileges required" });
+          }
+          const oidc = yield* resolveOidcProvider;
+          const updated = yield* oidc
+            .provideStores(
+              oidc.service.updateClient(params.clientId, {
+                ...(payload.name !== undefined && { name: payload.name }),
+                ...(payload.redirectUris !== undefined && {
+                  redirectUris: payload.redirectUris,
+                }),
+                ...(payload.skipConsent !== undefined && { skipConsent: payload.skipConsent }),
+                ...(payload.disabled !== undefined && { disabled: payload.disabled }),
+                ...(payload.metadata !== undefined && { metadata: payload.metadata }),
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return encodeOidcClient(updated);
+        }),
+      )
+      .handle("oidcDeleteClient", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          if (!isAdmin(resolved.user)) {
+            return yield* new S.Forbidden({ message: "Admin privileges required" });
+          }
+          const oidc = yield* resolveOidcProvider;
+          yield* oidc.provideStores(oidc.service.deleteClient(params.clientId)).pipe(
+            Effect.catchTags({
+              OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+        }),
+      )
+      .handle("oidcAuthorize", ({ query, request }) =>
+        Effect.gen(function* () {
+          const oidc = yield* resolveOidcProvider;
+          // Unauthenticated: redirect to the login page carrying the original
+          // authorize URL so the app can resume the flow after sign-in.
+          const session = yield* resolveSession(request, cfg).pipe(
+            Effect.catch(() => Effect.succeed(null)),
+          );
+          if (session === null) {
+            return HttpServerResponse.redirect(oidc.service.loginRedirect(request.url), {
+              status: 302,
+            });
+          }
+          // Missing client/redirect_uri cannot be answered with a redirect
+          // (there is nowhere trustworthy to send the user) -> 400.
+          if (query.client_id === undefined || query.redirect_uri === undefined) {
+            return yield* new S.BadRequest({
+              message: "client_id and redirect_uri are required",
+            });
+          }
+          const result = yield* oidc
+            .provideStores(
+              oidc.service.authorize(session.resolved.user, {
+                responseType: query.response_type ?? "",
+                clientId: query.client_id,
+                redirectUri: query.redirect_uri,
+                ...(query.scope !== undefined && { scope: query.scope }),
+                ...(query.state !== undefined && { state: query.state }),
+                ...(query.code_challenge !== undefined && {
+                  codeChallenge: query.code_challenge,
+                }),
+                ...(query.code_challenge_method !== undefined && {
+                  codeChallengeMethod: query.code_challenge_method,
+                }),
+                ...(query.nonce !== undefined && { nonce: query.nonce }),
+                ...(query.prompt !== undefined && { prompt: query.prompt }),
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return HttpServerResponse.redirect(result.redirectTo, { status: 302 });
+        }),
+      )
+      .handle("oidcConsent", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const oidc = yield* resolveOidcProvider;
+          const resolved = yield* requireSession(request, cfg);
+          const result = yield* oidc
+            .provideStores(
+              oidc.service.consent(resolved.user.id, payload.consentCode, payload.accept),
+            )
+            .pipe(
+              Effect.catchTags({
+                OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return { redirectTo: result.redirectTo };
+        }),
+      )
+      .handle("oidcToken", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const oidc = yield* resolveOidcProvider;
+          // Client authentication: a Basic Authorization header takes
+          // precedence over body credentials (RFC 6749 §2.3.1).
+          let clientId = payload.client_id;
+          let clientSecret = payload.client_secret;
+          const auth = request.headers["authorization"];
+          if (auth !== undefined && auth.startsWith("Basic ")) {
+            const decoded = Buffer.from(auth.slice(6), "base64").toString("utf8");
+            const sep = decoded.indexOf(":");
+            if (sep >= 0) {
+              clientId = decodeURIComponent(decoded.slice(0, sep));
+              clientSecret = decodeURIComponent(decoded.slice(sep + 1));
+            }
+          }
+          const result = yield* oidc
+            .provideStores(
+              oidc.service.token({
+                grantType: payload.grant_type,
+                ...(payload.code !== undefined && { code: payload.code }),
+                ...(payload.redirect_uri !== undefined && {
+                  redirectUri: payload.redirect_uri,
+                }),
+                ...(payload.code_verifier !== undefined && {
+                  codeVerifier: payload.code_verifier,
+                }),
+                ...(payload.refresh_token !== undefined && {
+                  refreshToken: payload.refresh_token,
+                }),
+                ...(clientId !== undefined && { clientId }),
+                ...(clientSecret !== undefined && { clientSecret }),
+              }),
+            )
+            .pipe(
+              Effect.catchTags({
+                // RFC 6749 error codes: invalid_client -> 401, the rest -> 400.
+                OidcTokenError: (e) =>
+                  Effect.fail(
+                    e.error === "invalid_client"
+                      ? new S.Unauthorized({ message: e.error })
+                      : new S.BadRequest({ message: e.error }),
+                  ),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return {
+            access_token: result.accessToken,
+            token_type: result.tokenType,
+            expires_in: result.expiresIn,
+            ...(result.refreshToken !== undefined && { refresh_token: result.refreshToken }),
+            ...(result.idToken !== undefined && { id_token: result.idToken }),
+            scope: result.scope,
+          };
+        }),
+      )
+      .handle("oidcUserInfo", ({ request }) =>
+        Effect.gen(function* () {
+          const oidc = yield* resolveOidcProvider;
+          const auth = request.headers["authorization"];
+          const token =
+            auth !== undefined && auth.startsWith("Bearer ") ? auth.slice(7) : undefined;
+          if (token === undefined) {
+            return yield* new S.Unauthorized({ message: "Missing bearer token" });
+          }
+          return yield* oidc.provideStores(oidc.service.userinfo(token)).pipe(
+            Effect.catchTags({
+              OidcProviderError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+        }),
+      )
+      .handle("oidcDiscovery", () =>
+        Effect.gen(function* () {
+          const oidc = yield* resolveOidcProvider;
+          return oidc.service.getMetadata();
+        }),
+      )
+      .handle("oidcJwks", () =>
+        Effect.gen(function* () {
+          yield* resolveOidcProvider; // 404 when the OIDC provider is disabled
           const jwt = yield* resolveJwt;
           const jwks = yield* jwt.provideStores(jwt.service.getJwks()).pipe(
             Effect.catchTags({

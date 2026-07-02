@@ -466,6 +466,91 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.JwksView,
     error: [S.NotFoundError, S.InternalError],
   }),
+  // --- OIDC provider (this server as an OpenID Connect IdP). 404 when the
+  // --- module is absent. Client management is admin-gated.
+  HttpApiEndpoint.post("oidcRegisterClient", "/oauth2/register", {
+    payload: S.OidcRegisterClientPayload,
+    success: S.OidcClientCreatedView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.get("oidcListClients", "/oauth2/clients", {
+    success: S.OidcClientListView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.ForbiddenError, S.InternalError],
+  }),
+  HttpApiEndpoint.patch("oidcUpdateClient", "/oauth2/clients/:clientId", {
+    params: { clientId: Schema.String },
+    payload: S.OidcClientUpdatePayload,
+    success: S.OidcClientView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.delete("oidcDeleteClient", "/oauth2/clients/:clientId", {
+    params: { clientId: Schema.String },
+    success: HttpApiSchema.NoContent,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  // Authorization endpoint: answers 302 (to the client's redirect_uri, the
+  // login page, or the consent page). Declared NoContent — handlers return
+  // raw redirect responses.
+  HttpApiEndpoint.get("oidcAuthorize", "/oauth2/authorize", {
+    query: {
+      response_type: Schema.optional(Schema.String),
+      client_id: Schema.optional(Schema.String),
+      redirect_uri: Schema.optional(Schema.String),
+      scope: Schema.optional(Schema.String),
+      state: Schema.optional(Schema.String),
+      code_challenge: Schema.optional(Schema.String),
+      code_challenge_method: Schema.optional(Schema.String),
+      nonce: Schema.optional(Schema.String),
+      prompt: Schema.optional(Schema.String),
+    },
+    success: HttpApiSchema.NoContent,
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+  }),
+  // Consent decision (session-authenticated; posted by the consent page).
+  HttpApiEndpoint.post("oidcConsent", "/oauth2/consent", {
+    payload: S.OidcConsentPayload,
+    success: S.OidcRedirectView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  // Token endpoint: authorization_code + refresh_token grants. Accepts JSON
+  // or form encoding; errors carry the RFC 6749 error code as the message.
+  HttpApiEndpoint.post("oidcToken", "/oauth2/token", {
+    payload: [S.OidcTokenPayload, S.OidcTokenPayload.pipe(HttpApiSchema.asFormUrlEncoded())],
+    success: S.OidcTokenView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
+  // UserInfo endpoint: bearer access token -> standard claims.
+  HttpApiEndpoint.get("oidcUserInfo", "/oauth2/userinfo", {
+    success: S.ClaimsView,
+    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
+  }),
+  // OIDC discovery + JWKS (shared with the JWT module's signing keys).
+  HttpApiEndpoint.get("oidcDiscovery", "/.well-known/openid-configuration", {
+    success: S.ClaimsView,
+    error: [S.NotFoundError, S.InternalError],
+  }),
+  HttpApiEndpoint.get("oidcJwks", "/.well-known/jwks.json", {
+    success: S.JwksView,
+    error: [S.NotFoundError, S.InternalError],
+  }),
 );
 
 /** The complete auth API, annotated with OpenAPI document metadata. */

@@ -559,6 +559,99 @@ export const ApiKeyUpdatePayload = Schema.Struct({
 export type ApiKeyUpdatePayload = typeof ApiKeyUpdatePayload.Type;
 
 // -----------------------------------------------------------------------------
+// OIDC provider (this server acting as an OpenID Connect IdP)
+// -----------------------------------------------------------------------------
+
+/** Public view of a registered OIDC client (never exposes the secret hash). */
+export const OidcClientView = Schema.Struct({
+  clientId: Schema.String,
+  name: Schema.String,
+  redirectUris: Schema.Array(Schema.String),
+  type: Schema.Literals(["web", "native"]),
+  skipConsent: Schema.Boolean,
+  disabled: Schema.Boolean,
+  metadata: Attributes,
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+});
+export type OidcClientView = typeof OidcClientView.Type;
+
+/** Result of registering a client: the plaintext secret is shown exactly once. */
+export const OidcClientCreatedView = Schema.Struct({
+  client: OidcClientView,
+  clientSecret: Schema.optional(Schema.String),
+});
+export type OidcClientCreatedView = typeof OidcClientCreatedView.Type;
+
+export const OidcClientListView = Schema.Array(OidcClientView);
+export type OidcClientListView = typeof OidcClientListView.Type;
+
+/** Request body for registering an OIDC client (admin-gated). */
+export const OidcRegisterClientPayload = Schema.Struct({
+  name: Schema.String,
+  redirectUris: Schema.Array(Schema.String),
+  type: Schema.optional(Schema.Literals(["web", "native"])),
+  skipConsent: Schema.optional(Schema.Boolean),
+  metadata: Schema.optional(Attributes),
+});
+export type OidcRegisterClientPayload = typeof OidcRegisterClientPayload.Type;
+
+/** Request body for updating an OIDC client (admin-gated). */
+export const OidcClientUpdatePayload = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  redirectUris: Schema.optional(Schema.Array(Schema.String)),
+  skipConsent: Schema.optional(Schema.Boolean),
+  disabled: Schema.optional(Schema.Boolean),
+  metadata: Schema.optional(Attributes),
+});
+export type OidcClientUpdatePayload = typeof OidcClientUpdatePayload.Type;
+
+/** Request body for resolving a pending consent request. */
+export const OidcConsentPayload = Schema.Struct({
+  consentCode: Schema.String,
+  accept: Schema.Boolean,
+});
+export type OidcConsentPayload = typeof OidcConsentPayload.Type;
+
+/** Where to send the user after a consent decision. */
+export const OidcRedirectView = Schema.Struct({
+  redirectTo: Schema.String,
+});
+export type OidcRedirectView = typeof OidcRedirectView.Type;
+
+/**
+ * Token endpoint request (RFC 6749 snake_case). Accepted as JSON or
+ * `application/x-www-form-urlencoded`; client credentials may instead come
+ * from a Basic Authorization header.
+ */
+export const OidcTokenPayload = Schema.Struct({
+  grant_type: Schema.String,
+  code: Schema.optional(Schema.String),
+  redirect_uri: Schema.optional(Schema.String),
+  code_verifier: Schema.optional(Schema.String),
+  refresh_token: Schema.optional(Schema.String),
+  client_id: Schema.optional(Schema.String),
+  client_secret: Schema.optional(Schema.String),
+  scope: Schema.optional(Schema.String),
+});
+export type OidcTokenPayload = typeof OidcTokenPayload.Type;
+
+/** Token endpoint success response (RFC 6749 snake_case). */
+export const OidcTokenView = Schema.Struct({
+  access_token: Schema.String,
+  token_type: Schema.String,
+  expires_in: Schema.Number,
+  refresh_token: Schema.optional(Schema.String),
+  id_token: Schema.optional(Schema.String),
+  scope: Schema.String,
+});
+export type OidcTokenView = typeof OidcTokenView.Type;
+
+/** UserInfo response / OpenID Provider Metadata: open-ended claim records. */
+export const ClaimsView = Schema.Record(Schema.String, Schema.Unknown);
+export type ClaimsView = typeof ClaimsView.Type;
+
+// -----------------------------------------------------------------------------
 // JWT
 // -----------------------------------------------------------------------------
 
