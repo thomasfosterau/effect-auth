@@ -2,52 +2,18 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Context } from "effect";
 import * as Requests from "./Requests.js";
 import * as Resolvers from "./Resolvers.js";
-import { type SessionStore, type UserStore } from "./Session.js";
-import { SessionStore as SessionStoreTag, UserStore as UserStoreTag } from "./Session.js";
+import { type UserStore } from "./Session.js";
+import { UserStore as UserStoreTag } from "./Session.js";
 import { PasswordHasherLive, makePasswordHasher } from "./Password.js";
-import type { Session, User, SessionConfig } from "./Types.js";
-import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
+import type { User } from "./Types.js";
+import { UserNotFoundError } from "./Errors.js";
 import { makeUserService, UserService, UserServiceStore } from "./User.js";
 
 // Mock stores for testing
-const sessions = new Map<string, Session>();
 const users = new Map<string, User>([
   ["user1", { id: "user1", attributes: { name: "Test User" } }],
 ]);
 const credentials = new Map<string, string>();
-
-const mockSessionStore: SessionStore = {
-  create: (session) =>
-    Effect.sync(() => {
-      sessions.set(session.id, session);
-      return session;
-    }),
-  get: (sessionId) =>
-    Effect.gen(function* () {
-      const session = sessions.get(sessionId);
-      if (!session) {
-        return yield* Effect.fail(new SessionNotFoundError({ message: "Not found", sessionId }));
-      }
-      return session;
-    }),
-  update: (session) =>
-    Effect.sync(() => {
-      sessions.set(session.id, session);
-      return session;
-    }),
-  delete: (sessionId) =>
-    Effect.sync(() => {
-      sessions.delete(sessionId);
-    }),
-  deleteByUserId: (userId) =>
-    Effect.sync(() => {
-      for (const [id, session] of sessions.entries()) {
-        if (session.userId === userId) {
-          sessions.delete(id);
-        }
-      }
-    }),
-};
 
 const mockUserStore: UserStore = {
   get: (userId) =>
@@ -68,21 +34,10 @@ const mockUserStore: UserStore = {
     }),
 };
 
-const sessionConfig: SessionConfig = {
-  sessionExpiresIn: {
-    activePeriod: 1000 * 60 * 60 * 24 * 30,
-    idlePeriod: 1000 * 60 * 60 * 24 * 14,
-  },
-};
-
 describe("Resolvers", () => {
   beforeEach(() => {
-    sessions.clear();
     credentials.clear();
   });
-
-  const SessionStoreTest = Context.make(SessionStoreTag, mockSessionStore);
-  const UserStoreTest = Context.make(UserStoreTag, mockUserStore);
 
   it("should hash a password using the resolver", async () => {
     const request = Requests.HashPasswordRequest({ password: "testPassword123" });

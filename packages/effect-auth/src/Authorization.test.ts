@@ -15,7 +15,6 @@ import {
   RoleStore,
   AuthorizationPolicy,
 } from "./Authorization.js";
-import { PermissionDeniedError } from "./Errors.js";
 
 // Mock role store for testing
 const mockRoleStore: RoleStore = {
@@ -143,7 +142,7 @@ describe("Authorization", () => {
   describe("requirePermission", () => {
     // Create a mock authorization policy for testing requirePermission
     const mockPolicy: AuthorizationPolicy = {
-      checkPermission: (userId, resource, action) =>
+      checkPermission: (userId, _resource, _action) =>
         Effect.sync(() => {
           // Simple mock: only admin-user can do everything
           return userId === "admin-user";

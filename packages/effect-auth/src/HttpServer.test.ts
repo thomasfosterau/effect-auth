@@ -122,7 +122,7 @@ const jsonRequest = (path: string, body: unknown, headers: Record<string, string
   new Request(`http://test${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
 const sessionIdFromSetCookie = (setCookie: string | null): string => {
