@@ -19,6 +19,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🏢 **Organizations & Admin**: Multi-tenant organizations (members, invitations, roles) and admin tooling (ban, impersonate)
 - 🗝️ **API Keys & JWT**: Hashed API keys with permissions/quotas; ES256/EdDSA JWTs with JWKS
 - 🌍 **HTTP Protocol**: A typed `effect/unstable/httpapi` contract serving the whole surface as a mountable Web handler with a derived typed client, session cookies, and trusted-origin CSRF protection
+- 📖 **OpenAPI Document + Reference UI**: Derive an OpenAPI 3.1 spec from the HTTP contract (`Http.getOpenApiSpec()`) and optionally serve it plus a Scalar reference page via `makeAuthWebHandler({ docs: true })`
 
 ## Installation
 

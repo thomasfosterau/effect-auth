@@ -7,7 +7,7 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "effect/unstable/http";
-import { AuthApi } from "./HttpApi.js";
+import { AuthApi, getOpenApiSpec } from "./HttpApi.js";
 import * as S from "./HttpApiSchemas.js";
 import { AuthLifecycleServiceTag } from "./AuthLifecycle.js";
 import { Hooks } from "./Hooks.js";
@@ -679,7 +679,41 @@ export interface AuthWebHandlerOptions {
    * `Origin` header (curl, server-to-server) are allowed through.
    */
   readonly trustedOrigins?: ReadonlyArray<string>;
+  /**
+   * Serve the generated OpenAPI document and an API reference UI. When `true`,
+   * `GET {prefix}/openapi.json` returns the OpenAPI 3.1 document and
+   * `GET {prefix}/reference` returns a Scalar reference page. Default `false`
+   * (keep off in production unless you intend to expose the docs publicly).
+   */
+  readonly docs?: boolean;
 }
+
+/** Minimal Scalar API reference shell pointing at the sibling `openapi.json`. */
+const scalarReferenceHtml = `<!doctype html>
+<html>
+  <head>
+    <title>effect-auth API reference</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <script id="api-reference" data-url="openapi.json"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+  </body>
+</html>
+`;
+
+const openApiJsonResponse = (): Response =>
+  new Response(JSON.stringify(getOpenApiSpec()), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+
+const referenceResponse = (): Response =>
+  new Response(scalarReferenceHtml, {
+    status: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
 
 /** CSRF check shared by the web handler. Returns `true` when allowed. */
 const isTrustedRequest = (request: Request, trustedOrigins: ReadonlyArray<string>): boolean => {
@@ -720,18 +754,31 @@ export const makeAuthWebHandler = (
   const web = HttpRouter.toWebHandler(appLayer);
 
   const trustedOrigins = options.trustedOrigins ?? [];
-  const prefix = options.prefix;
+  const prefix = options.prefix ?? "";
+  const docs = options.docs ?? false;
+
+  /** Path relative to the mount `prefix`, or `null` when outside the prefix. */
+  const innerPath = (pathname: string): string | null => {
+    if (prefix === "") return pathname;
+    if (pathname === prefix) return "/";
+    if (pathname.startsWith(`${prefix}/`)) return pathname.slice(prefix.length);
+    return null;
+  };
 
   const handler = (request: Request, context?: Context.Context<never>): Promise<Response> => {
     if (!isTrustedRequest(request, trustedOrigins)) {
       return Promise.resolve(Response.json({ message: "Origin not allowed" }, { status: 403 }));
     }
-    if (prefix === undefined || prefix === "") {
-      return web.handler(request, context);
-    }
     const url = new URL(request.url);
-    if (url.pathname === prefix || url.pathname.startsWith(`${prefix}/`)) {
-      url.pathname = url.pathname.slice(prefix.length) || "/";
+    const inner = innerPath(url.pathname);
+
+    if (docs && inner !== null && request.method === "GET") {
+      if (inner === "/openapi.json") return Promise.resolve(openApiJsonResponse());
+      if (inner === "/reference") return Promise.resolve(referenceResponse());
+    }
+
+    if (inner !== null && prefix !== "") {
+      url.pathname = inner || "/";
       return web.handler(new Request(url, request), context);
     }
     return web.handler(request, context);
