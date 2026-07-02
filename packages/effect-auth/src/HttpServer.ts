@@ -14,6 +14,7 @@ import { Hooks } from "./Hooks.js";
 import { SessionManagerTag, UserStoreTag } from "./Session.js";
 import { EmailPasswordStoreTag, makeEmailPasswordService } from "./EmailPassword.js";
 import { MagicLinkServiceTag, MagicLinkStoreTag, MagicLinkUserStoreTag } from "./MagicLink.js";
+import { AccountManagementServiceTag, AccountManagementStoreTag } from "./AccountManagement.js";
 import { EmailOtpServiceTag, EmailOtpStoreTag, EmailOtpUserStoreTag } from "./EmailOtp.js";
 import { PendingTwoFactorStoreTag, TwoFactorServiceTag, TwoFactorStoreTag } from "./TwoFactor.js";
 import { PasswordHasherTag } from "./Password.js";
@@ -181,6 +182,18 @@ const resolveTwoFactor = Effect.gen(function* () {
       Effect.provideService(TwoFactorStoreTag, store.value),
       Effect.provideService(PendingTwoFactorStoreTag, pendingStore.value),
     );
+  return { service: service.value, provideStores };
+});
+
+/** Resolve the account-management service + store, or fail with 404. */
+const resolveAccountManagement = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(AccountManagementServiceTag);
+  const store = yield* Effect.serviceOption(AccountManagementStoreTag);
+  if (Option.isNone(service) || Option.isNone(store)) {
+    return yield* new S.NotFound({ message: "Account management is not enabled" });
+  }
+  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(Effect.provideService(AccountManagementStoreTag, store.value));
   return { service: service.value, provideStores };
 });
 
@@ -368,6 +381,66 @@ export const authGroupLayer = (config?: CookieConfig) => {
               }),
             );
           return S.encodeUser(updated);
+        }),
+      )
+      .handle("changeEmailRequest", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const account = yield* resolveAccountManagement;
+          yield* account
+            .provideStores(account.service.requestEmailChange(resolved.user.id, payload.newEmail))
+            .pipe(
+              Effect.catchTags({
+                // Anti-enumeration: never reveal whether the target email exists.
+                EmailInUseError: () => Effect.void,
+                UserNotFoundError: () =>
+                  Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return { status: true };
+        }),
+      )
+      .handle("changeEmailConfirm", ({ payload }) =>
+        Effect.gen(function* () {
+          const account = yield* resolveAccountManagement;
+          yield* account.provideStores(account.service.confirmEmailChange(payload.token)).pipe(
+            Effect.catchTags({
+              AccountTokenError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return { status: true };
+        }),
+      )
+      .handle("deleteUserRequest", ({ request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const account = yield* resolveAccountManagement;
+          yield* account
+            .provideStores(account.service.requestAccountDeletion(resolved.user.id))
+            .pipe(
+              Effect.catchTags({
+                UserNotFoundError: () =>
+                  Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              }),
+            );
+          return { status: true };
+        }),
+      )
+      .handle("deleteUserConfirm", ({ payload }) =>
+        Effect.gen(function* () {
+          const account = yield* resolveAccountManagement;
+          yield* account.provideStores(account.service.confirmAccountDeletion(payload.token)).pipe(
+            Effect.catchTags({
+              AccountTokenError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return { status: true };
         }),
       )
       .handle("listSessions", ({ request }) =>

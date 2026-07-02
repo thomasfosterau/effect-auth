@@ -56,6 +56,12 @@ import {
   type TwoFactorRecord,
   type TwoFactorStore,
 } from "./TwoFactor.js";
+import {
+  AccountManagementServiceLayer,
+  AccountManagementStoreTag,
+  type AccountManagementStore,
+  type AccountToken,
+} from "./AccountManagement.js";
 import { generateTOTP } from "./Otp.js";
 import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
@@ -80,6 +86,9 @@ interface Fixture {
   readonly sentResetTokens: string[];
   readonly sentMagicLinkTokens: string[];
   readonly sentOtps: Array<{ email: string; otp: string; purpose: EmailOtpPurpose }>;
+  readonly sentChangeEmail: Array<{ newEmail: string; token: string }>;
+  readonly sentDeleteTokens: string[];
+  readonly beforeDeleteCalls: string[];
 }
 
 /**
@@ -101,6 +110,9 @@ const makeFixture = (): Fixture => {
   const sentResetTokens: string[] = [];
   const sentMagicLinkTokens: string[] = [];
   const sentOtps: Array<{ email: string; otp: string; purpose: EmailOtpPurpose }> = [];
+  const sentChangeEmail: Array<{ newEmail: string; token: string }> = [];
+  const sentDeleteTokens: string[] = [];
+  const beforeDeleteCalls: string[] = [];
 
   const createUser = (input: {
     readonly email: string;
@@ -333,8 +345,31 @@ const makeFixture = (): Fixture => {
     Layer.succeed(PendingTwoFactorStoreTag)(pendingTwoFactorStore),
   );
 
+  const accountTokens = new Map<string, AccountToken>();
+  const accountStore: AccountManagementStore = {
+    create: (token) =>
+      Effect.sync(() => {
+        accountTokens.set(token.token, token);
+        return token;
+      }),
+    get: (token) => Effect.sync(() => accountTokens.get(token) ?? null),
+    delete: (token) => Effect.sync(() => void accountTokens.delete(token)),
+    deleteByUserId: (userId) =>
+      Effect.sync(() => {
+        for (const [t, rec] of accountTokens) if (rec.userId === userId) accountTokens.delete(t);
+      }),
+  };
+
   const featureServices: Layer.Layer<AuthServices> = Layer.mergeAll(
     services,
+    AccountManagementServiceLayer({
+      sendChangeEmailVerification: ({ newEmail, token }) =>
+        Effect.sync(() => void sentChangeEmail.push({ newEmail, token })),
+      sendDeleteAccountVerification: ({ token }) =>
+        Effect.sync(() => void sentDeleteTokens.push(token)),
+      beforeDelete: (user) => Effect.sync(() => void beforeDeleteCalls.push(user.id)),
+    }),
+    Layer.succeed(AccountManagementStoreTag)(accountStore),
     MagicLinkServiceLayer({
       sendMagicLink: (_email, token) => Effect.sync(() => void sentMagicLinkTokens.push(token)),
     }),
@@ -358,6 +393,9 @@ const makeFixture = (): Fixture => {
     sentResetTokens,
     sentMagicLinkTokens,
     sentOtps,
+    sentChangeEmail,
+    sentDeleteTokens,
+    beforeDeleteCalls,
   };
 };
 
@@ -1059,5 +1097,83 @@ describe("two-factor", () => {
     );
     expect(after.status).toBe(200);
     expect(after.headers.get("set-cookie")).toContain("conduit_session=");
+  });
+});
+
+describe("HTTP account management (change email / delete user)", () => {
+  it("changes a user's email end to end", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true });
+    const sid = await signUp(handler, "alice@example.com");
+
+    const reqRes = await handler(
+      jsonRequest("/change-email/request", { newEmail: "alice2@example.com" }, asCookie(sid)),
+    );
+    expect(reqRes.status).toBe(200);
+    expect(await reqRes.json()).toEqual({ status: true });
+    expect(fixture.sentChangeEmail).toHaveLength(1);
+    const token = fixture.sentChangeEmail[0]!.token;
+
+    const confRes = await handler(jsonRequest("/change-email/confirm", { token }));
+    expect(confRes.status).toBe(200);
+
+    // Email change revoked the old session; sign in with the new address.
+    const newSid = await signIn(handler, "alice2@example.com");
+    const sess = await handler(getRequest("/session", asCookie(newSid)));
+    expect(sess.status).toBe(200);
+    const body = (await sess.json()) as { user: { email: string; emailVerified: boolean } };
+    expect(body.user.email).toBe("alice2@example.com");
+    expect(body.user.emailVerified).toBe(true);
+  });
+
+  it("answers { status: true } without sending when the target email is taken", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true });
+    await signUp(handler, "bob@example.com");
+    const sid = await signUp(handler, "alice@example.com");
+
+    const res = await handler(
+      jsonRequest("/change-email/request", { newEmail: "bob@example.com" }, asCookie(sid)),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: true });
+    expect(fixture.sentChangeEmail).toHaveLength(0);
+  });
+
+  it("requires authentication for change-email/request", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    const res = await handler(jsonRequest("/change-email/request", { newEmail: "x@example.com" }));
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects an invalid change-email confirm token with 400", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    const res = await handler(jsonRequest("/change-email/confirm", { token: "nope" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("deletes the account end to end (cleanup callback + session revocation)", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true });
+    const sid = await signUp(handler, "carol@example.com");
+
+    const reqRes = await handler(jsonRequest("/delete-user/request", undefined, asCookie(sid)));
+    expect(reqRes.status).toBe(200);
+    expect(fixture.sentDeleteTokens).toHaveLength(1);
+    const token = fixture.sentDeleteTokens[0]!;
+
+    const confRes = await handler(jsonRequest("/delete-user/confirm", { token }));
+    expect(confRes.status).toBe(200);
+    expect(fixture.beforeDeleteCalls).toHaveLength(1);
+
+    // Sessions were invalidated and the user is gone.
+    const sess = await handler(getRequest("/session", asCookie(sid)));
+    expect(sess.status).toBe(401);
+  });
+
+  it("returns 404 when account management is not configured", async () => {
+    const handler = handlerFor(makeFixture(), { features: false });
+    const res = await handler(jsonRequest("/change-email/confirm", { token: "whatever" }));
+    expect(res.status).toBe(404);
   });
 });
