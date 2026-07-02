@@ -1,0 +1,65 @@
+---
+title: API Keys
+description: Long-lived API keys hashed at rest, with permissions, quotas, and per-key rate limits.
+---
+
+Users create API keys shown in plaintext exactly once; only the sha256
+digest is persisted, and verification is a timing-safe digest lookup. Keys
+support expiry, enable/disable, per-resource permissions, remaining-use
+quotas, arbitrary metadata, and an optional per-key rate limit.
+
+## Enable
+
+```ts
+import { Layer } from "effect";
+import * as Auth from "effect-auth";
+
+declare const apiKeyStore: Auth.ApiKeyStore;
+
+const apiKeys = Layer.mergeAll(
+  Auth.ApiKeyServiceLayer({
+    defaultPrefix: "ak_", // default
+    maxKeysPerUser: 10, // default
+  }),
+  Layer.succeed(Auth.ApiKeyStoreTag)(apiKeyStore),
+);
+```
+
+## Endpoints
+
+Session-authenticated key management:
+
+- `POST /api-keys` → `{ key, apiKey }` — the plaintext `key` appears here
+  and never again
+- `GET /api-keys` → the user's keys (metadata only)
+- `PATCH /api-keys/:keyId` — rename, enable/disable, expiry, permissions,
+  quota, rate limit
+- `DELETE /api-keys/:keyId`
+
+## Verifying keys in your API
+
+Verification is a service call — run it in whatever route authenticates
+programmatic clients:
+
+```ts
+import { Effect } from "effect";
+import * as Auth from "effect-auth";
+
+declare const service: Auth.ApiKeyService;
+
+const authenticate = (plaintextKey: string) =>
+  Effect.gen(function* () {
+    const result = yield* service.verify(plaintextKey, {
+      posts: ["read"], // required permissions: resource -> actions
+    });
+    if (!result.valid || result.apiKey === undefined) {
+      return yield* new Auth.ApiKeyError({ message: "Invalid API key" });
+    }
+    return result.apiKey.userId;
+  });
+```
+
+On success, `remaining` is decremented (when a quota is set) and
+`lastUsedAt` updates. Use `verifyWithRateLimit` instead of `verify` to also
+count the request against the key's `rateLimit` through the `RateLimiter`
+service.

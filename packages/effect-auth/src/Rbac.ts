@@ -45,6 +45,9 @@ const lookup = <V>(source: StringKeyed<V>, key: string): V | undefined =>
  * roles, de-duplicated by `"resource:action"`.
  *
  * @example
+ * ```ts
+ * import { makeInMemoryRoleStore } from "effect-auth"
+ *
  * const store = makeInMemoryRoleStore({
  *   userRoles: { "user-1": ["editor"] },
  *   rolePermissions: {
@@ -52,7 +55,8 @@ const lookup = <V>(source: StringKeyed<V>, key: string): V | undefined =>
  *     editor: [{ resource: "posts", action: "update" }],
  *   },
  *   roleHierarchy: { editor: ["viewer"] }, // editor also gets viewer's permissions
- * });
+ * })
+ * ```
  */
 export const makeInMemoryRoleStore = (config: InMemoryRoleStoreConfig): RoleStore => {
   const { userRoles, rolePermissions, roleHierarchy } = config;

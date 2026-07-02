@@ -37,9 +37,13 @@ export const makePermission = (resource: string, action: string): PermissionRef 
  * whitespace is trimmed.
  *
  * @example
- * parsePermission("posts:read")  // { resource: "posts", action: "read" }
- * parsePermission("posts:*")     // { resource: "posts", action: "*" }
- * parsePermission("posts")       // { resource: "posts", action: "*" }
+ * ```ts
+ * import { parsePermission } from "effect-auth"
+ *
+ * parsePermission("posts:read") // { resource: "posts", action: "read" }
+ * parsePermission("posts:*") // { resource: "posts", action: "*" }
+ * parsePermission("posts") // { resource: "posts", action: "*" }
+ * ```
  */
 export const parsePermission = (input: string): PermissionRef => {
   const trimmed = input.trim();
@@ -68,9 +72,13 @@ export const formatPermission = (permission: PermissionRef): string =>
  * requested permission is matched literally — wildcards there are not expanded.
  *
  * @example
+ * ```ts
+ * import { permissionMatches } from "effect-auth"
+ *
  * permissionMatches({ resource: "posts", action: "*" }, { resource: "posts", action: "read" }) // true
- * permissionMatches({ resource: "*", action: "*" }, { resource: "users", action: "delete" })   // true
+ * permissionMatches({ resource: "*", action: "*" }, { resource: "users", action: "delete" }) // true
  * permissionMatches({ resource: "posts", action: "read" }, { resource: "posts", action: "delete" }) // false
+ * ```
  */
 export const permissionMatches = (granted: PermissionRef, requested: PermissionRef): boolean => {
   const resourceMatches = granted.resource === "*" || granted.resource === requested.resource;

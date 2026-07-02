@@ -38,8 +38,29 @@ export default defineConfig({
           items: [
             { label: "Getting Started", slug: "guides/getting-started" },
             { label: "Sessions", slug: "guides/sessions" },
+            { label: "HTTP & Framework Mounting", slug: "guides/http" },
+            { label: "Storage Backends", slug: "guides/storage" },
             { label: "Multi-Algorithm Hashing", slug: "guides/multi-algorithm" },
-            { label: "BetterAuth Integration", slug: "guides/betterauth-integration" },
+          ],
+        },
+        {
+          label: "Features",
+          items: [
+            { label: "Magic Link", slug: "guides/magic-link" },
+            { label: "Email OTP", slug: "guides/email-otp" },
+            { label: "Two-Factor Auth", slug: "guides/two-factor" },
+            { label: "Organizations", slug: "guides/organizations" },
+            { label: "Admin", slug: "guides/admin" },
+            { label: "API Keys", slug: "guides/api-keys" },
+            { label: "JWT & JWKS", slug: "guides/jwt" },
+            { label: "OIDC Provider", slug: "guides/oidc-provider" },
+          ],
+        },
+        {
+          label: "Migration",
+          items: [
+            { label: "User Model v2", slug: "guides/migration-v2" },
+            { label: "Coming from better-auth", slug: "guides/better-auth" },
           ],
         },
         { label: "Playground", slug: "playground" },

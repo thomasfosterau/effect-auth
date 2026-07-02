@@ -1,0 +1,48 @@
+---
+title: Email OTP
+description: Sign in or verify email addresses with numeric one-time codes.
+---
+
+Email OTP mails a short numeric code instead of a link — friendlier on
+mobile, where copying a code between apps beats deep-linking. Codes are
+purpose-scoped (`"sign-in"`, `"email-verification"`, `"forget-password"`),
+expire quickly, and allow a bounded number of attempts.
+
+## Enable
+
+```ts
+import { Effect, Layer } from "effect";
+import * as Auth from "effect-auth";
+
+declare const emailOtpStore: Auth.EmailOtpStore;
+declare const emailOtpUserStore: Auth.EmailOtpUserStore;
+declare const sendEmail: (email: string, body: string) => Effect.Effect<void, Auth.AuthError>;
+
+const emailOtp = Layer.mergeAll(
+  Auth.EmailOtpServiceLayer({
+    otpLength: 6, // default
+    expiresIn: 5 * 60 * 1000, // default 5 minutes
+    maxAttempts: 3, // default
+    sendVerificationOtp: (email, otp, purpose) => sendEmail(email, `Your ${purpose} code: ${otp}`),
+  }),
+  Layer.succeed(Auth.EmailOtpStoreTag)(emailOtpStore),
+  Layer.succeed(Auth.EmailOtpUserStoreTag)(emailOtpUserStore),
+);
+```
+
+Endpoints (once the layers are merged into your handler services):
+
+- `POST /email-otp/send { email, purpose }` → always `{ status: true }`
+  (anti-enumeration)
+- `POST /sign-in/email-otp { email, otp }` → `AuthSuccess` + session cookie;
+  wrong/expired codes and exhausted attempts answer `400`
+
+## Notes
+
+- Codes are compared server-side against the stored record for the
+  email+purpose pair; each failed attempt increments a counter until
+  `maxAttempts` burns the code.
+- Sign-in creates the user on first use (verified email) unless
+  `disableSignUp` is set.
+- The `EmailOtpStoreKV` layer (see [Storage backends](/guides/storage/))
+  backs the ephemeral store with any `KeyValueStore`.

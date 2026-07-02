@@ -1,0 +1,63 @@
+---
+title: Two-Factor Authentication
+description: TOTP enrollment with backup codes, integrated into password sign-in via the SecondFactorGate.
+---
+
+The two-factor module implements TOTP (RFC 6238) enrollment with single-use
+backup codes, and plugs into password sign-in through the `SecondFactorGate`
+seam: when a user with 2FA enabled signs in, they receive a short-lived
+challenge token instead of a session, and redeem it with a code.
+
+## Enable
+
+```ts
+import { Layer } from "effect";
+import * as Auth from "effect-auth";
+
+declare const twoFactorStore: Auth.TwoFactorStore;
+declare const pendingStore: Auth.PendingTwoFactorStore;
+
+const twoFactor = Layer.mergeAll(
+  Auth.TwoFactorServiceLayer({
+    issuer: "My App", // shown in authenticator apps
+    backupCodeCount: 10, // default
+    pendingExpiresIn: 5 * 60 * 1000, // challenge lifetime, default 5 minutes
+  }),
+  Layer.succeed(Auth.TwoFactorStoreTag)(twoFactorStore),
+  Layer.succeed(Auth.PendingTwoFactorStoreTag)(pendingStore),
+  // Makes password sign-in return a challenge for enrolled users:
+  Auth.TwoFactorGateLayer,
+);
+```
+
+`TwoFactorGateLayer` provides the `SecondFactorGate` consulted by
+email/password and username sign-in after the first factor succeeds.
+
+## The flow over HTTP
+
+Enrollment (session-authenticated; password re-verified):
+
+1. `POST /two-factor/enable { password }` → `{ secret, totpUri, backupCodes }`
+   — show the QR (`totpUri`) and the backup codes exactly once.
+2. `POST /two-factor/confirm { code }` — proves the authenticator works;
+   enrollment is pending until confirmed.
+
+Sign-in for an enrolled user:
+
+1. `POST /sign-in` returns `{ user, secondFactor: { token, expiresAt } }` —
+   no session yet.
+2. `POST /two-factor/verify-totp { token, code }` (or
+   `/two-factor/verify-backup-code`) → `AuthSuccess` + session cookie.
+   Failures answer `401` — redeeming a challenge is an authentication
+   attempt.
+
+Management: `POST /two-factor/disable { password }` and
+`POST /two-factor/regenerate-backup-codes { password }`.
+
+## Notes
+
+- TOTP secrets and backup codes are stored hashed; backup codes are single
+  use.
+- The lower-level TOTP/HOTP primitives (`generateTOTP`, `verifyTOTP`,
+  `generateOTPAuthURI`, ...) are exported from the `Otp` module if you need
+  custom flows.

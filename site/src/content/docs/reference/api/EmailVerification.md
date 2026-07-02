@@ -93,24 +93,30 @@ export interface EmailVerificationService {
     email: string,
   ) => Effect.Effect<
     { token: string; expiresAt: number },
-    AuthError | EmailVerificationError,
-    EmailVerificationStoreTag
+    AuthError | EmailVerificationError | HookError,
+    EmailVerificationStoreTag | Hooks
   >;
 
   readonly verifyToken: (
     token: string,
   ) => Effect.Effect<
     EmailVerificationResult,
-    EmailVerificationError | AuthError,
-    EmailVerificationStoreTag
+    EmailVerificationError | AuthError | HookError,
+    EmailVerificationStoreTag | Hooks
   >;
 
+  /**
+   * Invalidate any outstanding verification tokens for the user and send a
+   * fresh one. Combine with the rate-limiter (e.g.
+   * `RateLimitPresets.emailVerification`) to prevent abuse.
+   */
   readonly resendVerification: (
     userId: string,
+    email: string,
   ) => Effect.Effect<
-    void,
-    AuthError | RateLimitError | EmailVerificationError,
-    EmailVerificationStoreTag
+    { token: string; expiresAt: number },
+    AuthError | RateLimitError | EmailVerificationError | HookError,
+    EmailVerificationStoreTag | Hooks
   >;
 }
 ```

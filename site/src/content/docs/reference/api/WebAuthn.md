@@ -15,14 +15,19 @@ Following Copenhagen/Oslo guidelines for WebAuthn implementation
 - [utils](#utils)
   - [AuthenticationResponse (interface)](#authenticationresponse-interface)
   - [AuthenticationResult (interface)](#authenticationresult-interface)
+  - [AuthenticatorSelectionCriteria (interface)](#authenticatorselectioncriteria-interface)
   - [ChallengeStore](#challengestore)
   - [ChallengeStore (interface)](#challengestore-interface)
   - [ChallengeStoreTag (class)](#challengestoretag-class)
   - [CredentialStore](#credentialstore)
   - [CredentialStore (interface)](#credentialstore-interface)
   - [CredentialStoreTag (class)](#credentialstoretag-class)
+  - [PublicKeyCredentialDescriptor (interface)](#publickeycredentialdescriptor-interface)
+  - [PublicKeyCredentialParameter (interface)](#publickeycredentialparameter-interface)
+  - [RegistrationChallenge (interface)](#registrationchallenge-interface)
   - [RegistrationResponse (interface)](#registrationresponse-interface)
   - [RegistrationResult (interface)](#registrationresult-interface)
+  - [SUPPORTED_COSE_ALGORITHMS](#supported_cose_algorithms)
   - [WebAuthnChallenge (interface)](#webauthnchallenge-interface)
   - [WebAuthnConfig (interface)](#webauthnconfig-interface)
   - [WebAuthnCredential (interface)](#webauthncredential-interface)
@@ -69,6 +74,20 @@ export interface AuthenticationResult {
   credential: WebAuthnCredential;
   /** Updated counter value */
   newCounter: number;
+}
+```
+
+## AuthenticatorSelectionCriteria (interface)
+
+Authenticator-selection criteria advertised during registration.
+
+**Signature**
+
+```ts
+export interface AuthenticatorSelectionCriteria {
+  readonly residentKey?: "required" | "preferred" | "discouraged";
+  readonly requireResidentKey?: boolean;
+  readonly userVerification: "required" | "preferred" | "discouraged";
 }
 ```
 
@@ -148,6 +167,53 @@ Context tag for CredentialStore
 export declare class CredentialStoreTag
 ```
 
+## PublicKeyCredentialDescriptor (interface)
+
+A credential the authenticator should exclude (registration) or allow.
+
+**Signature**
+
+```ts
+export interface PublicKeyCredentialDescriptor {
+  readonly type: "public-key";
+  /** Credential ID, base64url-encoded. */
+  readonly id: string;
+  readonly transports?: readonly string[];
+}
+```
+
+## PublicKeyCredentialParameter (interface)
+
+A `PublicKeyCredentialParameters` entry advertised to the authenticator.
+
+**Signature**
+
+```ts
+export interface PublicKeyCredentialParameter {
+  readonly type: "public-key";
+  readonly alg: number;
+}
+```
+
+## RegistrationChallenge (interface)
+
+Registration challenge plus the options a client passes to
+`navigator.credentials.create()`.
+
+**Signature**
+
+```ts
+export interface RegistrationChallenge {
+  readonly challenge: Uint8Array;
+  readonly expiresAt: number;
+  /** Algorithms the RP accepts, most-preferred first. */
+  readonly pubKeyCredParams: readonly PublicKeyCredentialParameter[];
+  /** The user's existing credentials, to prevent duplicate registration. */
+  readonly excludeCredentials: readonly PublicKeyCredentialDescriptor[];
+  readonly authenticatorSelection: AuthenticatorSelectionCriteria;
+}
+```
+
 ## RegistrationResponse (interface)
 
 Registration response from client
@@ -178,6 +244,18 @@ export interface RegistrationResult {
   /** Whether the authenticator was verified */
   verified: boolean;
 }
+```
+
+## SUPPORTED_COSE_ALGORITHMS
+
+COSE algorithm identifiers this service can register and verify:
+ES256 (-7, ECDSA P-256), RS256 (-257, RSASSA-PKCS1-v1_5), and EdDSA (-8,
+Ed25519). Advertised to authenticators via `pubKeyCredParams`.
+
+**Signature**
+
+```ts
+export declare const SUPPORTED_COSE_ALGORITHMS: readonly [-7, -257, -8];
 ```
 
 ## WebAuthnChallenge (interface)
@@ -213,6 +291,14 @@ export interface WebAuthnConfig {
   expectedOrigin: string | readonly string[];
   /** Challenge expiration time in milliseconds (default: 5 minutes) */
   challengeExpiresIn?: number;
+  /**
+   * Discoverable-credential (passkey) requirement advertised during
+   * registration. `"required"` requests a resident key; omit to leave it to
+   * the authenticator.
+   */
+  residentKey?: "required" | "preferred" | "discouraged";
+  /** User-verification requirement (default `"preferred"`). */
+  userVerification?: "required" | "preferred" | "discouraged";
 }
 ```
 
@@ -260,13 +346,9 @@ WebAuthn service for managing passkey registration and authentication
 ```ts
 export interface WebAuthnService {
   /** Generate a challenge for registration */
-  generateRegistrationChallenge: (user: WebAuthnUser) => Effect.Effect<
-    {
-      challenge: Uint8Array;
-      expiresAt: number;
-    },
-    Errors.AuthError
-  >;
+  generateRegistrationChallenge: (
+    user: WebAuthnUser,
+  ) => Effect.Effect<RegistrationChallenge, Errors.AuthError>;
 
   /** Verify registration response from client */
   verifyRegistration: (

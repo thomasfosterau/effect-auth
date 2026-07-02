@@ -10,6 +10,7 @@ description: "API reference for the User module."
 <h2 class="text-delta">Table of contents</h2>
 
 - [utils](#utils)
+  - [UpdateUserInput (interface)](#updateuserinput-interface)
   - [UserService](#userservice)
   - [UserService (interface)](#userservice-interface)
   - [UserServiceLayer](#userservicelayer)
@@ -22,6 +23,19 @@ description: "API reference for the User module."
 ---
 
 # utils
+
+## UpdateUserInput (interface)
+
+Partial update of a user's first-class profile fields.
+
+**Signature**
+
+```ts
+export interface UpdateUserInput {
+  readonly name?: string;
+  readonly image?: string;
+}
+```
 
 ## UserService
 
@@ -48,6 +62,11 @@ export interface UserService {
   readonly updateUserAttributes: (
     userId: string,
     attributes: Record<string, unknown>,
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
+
+  readonly updateUser: (
+    userId: string,
+    updates: UpdateUserInput,
   ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
 
   readonly markEmailVerified: (

@@ -1,0 +1,81 @@
+---
+title: OIDC Provider
+description: Act as an OpenID Connect identity provider — client registry, authorization-code flow with PKCE, consent, and discovery.
+---
+
+The OIDC provider module turns your app into an identity provider: register
+client applications, run the authorization-code flow (PKCE, S256 only),
+handle consent, and issue opaque access/refresh tokens plus signed
+`id_token`s. Client secrets, authorization codes, and tokens are stored only
+as sha256 digests.
+
+## Enable
+
+The provider signs `id_token`s with the [JWT module](/guides/jwt/), so
+provide its layers too:
+
+```ts
+import { Layer } from "effect";
+import * as Auth from "effect-auth";
+
+declare const clientStore: Auth.OidcClientStore;
+declare const codeStore: Auth.OidcCodeStore;
+declare const tokenStore: Auth.OidcTokenStore;
+declare const consentStore: Auth.OidcConsentStore;
+declare const jwtKeyStore: Auth.JwtKeyStore;
+
+const oidcProvider = Layer.mergeAll(
+  Auth.OidcProviderServiceLayer({
+    issuer: "https://app.example.com/api/auth",
+    loginPage: "https://app.example.com/login",
+    consentPage: "https://app.example.com/consent",
+  }),
+  Auth.JwtServiceLayer({ issuer: "https://app.example.com/api/auth" }),
+  Layer.succeed(Auth.OidcClientStoreTag)(clientStore),
+  Layer.succeed(Auth.OidcCodeStoreTag)(codeStore),
+  Layer.succeed(Auth.OidcTokenStoreTag)(tokenStore),
+  Layer.succeed(Auth.OidcConsentStoreTag)(consentStore),
+  Layer.succeed(Auth.JwtKeyStoreTag)(jwtKeyStore),
+);
+```
+
+## Endpoints
+
+| Endpoint                                                            | Purpose                                                                 |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `POST /oauth2/register` (admin)                                     | Register a client — the secret is returned once                         |
+| `GET /oauth2/clients`, `PATCH`/`DELETE /oauth2/clients/:id` (admin) | Client CRUD                                                             |
+| `GET /oauth2/authorize`                                             | Authorization endpoint (302 to the client, login page, or consent page) |
+| `POST /oauth2/consent`                                              | Resolve a pending consent (accept/deny)                                 |
+| `POST /oauth2/token`                                                | `authorization_code` + `refresh_token` grants (JSON or form-encoded)    |
+| `GET /oauth2/userinfo`                                              | Bearer access token → standard claims                                   |
+| `GET /.well-known/openid-configuration`                             | Provider metadata                                                       |
+| `GET /.well-known/jwks.json`                                        | Signing keys (shared with the JWT module)                               |
+
+## The flow
+
+1. The client app redirects the user to
+   `/oauth2/authorize?response_type=code&client_id=...&redirect_uri=...&scope=openid email&code_challenge=...&code_challenge_method=S256&state=...`.
+2. Signed out → 302 to your `loginPage` with the original URL as
+   `redirect_to`. Signed in → consent is auto-approved for `skipConsent` /
+   trusted clients or previously granted scopes; otherwise 302 to your
+   `consentPage` with a single-use `consent_code` (the page posts the
+   decision to `/oauth2/consent`).
+3. The client exchanges the code at `/oauth2/token` (client secret via Basic
+   header or body; PKCE verifier for public clients) and receives
+   `access_token`, `expires_in`, `scope`, an `id_token` (with `openid`
+   scope), and a rotating `refresh_token` (with `offline_access`).
+4. `GET /oauth2/userinfo` with the bearer token returns claims filtered by
+   the granted scopes (`sub` always; `email`/`email_verified` with `email`;
+   `name`/`picture` with `profile`).
+
+## Clients
+
+- **web** (confidential) clients get a generated secret; **native** (public)
+  clients have no secret and must use PKCE.
+- Redirect URIs are exact-match — no wildcards.
+- First-party apps can be configured statically via `trustedClients`
+  (consent skipped by default).
+
+Scopes default to `openid profile email offline_access`; only `S256` PKCE is
+accepted (`plain` defeats the point).
