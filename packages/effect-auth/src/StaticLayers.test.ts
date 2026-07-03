@@ -27,7 +27,6 @@ describe("static service layers", () => {
       ["JwtService", Auth.JwtService],
       ["OAuthService", Auth.OAuthService],
       ["SsoService", Auth.SsoService],
-      ["SiweService", Auth.SiweService],
       ["GoogleOneTapService", Auth.GoogleOneTapService],
       ["AnonymousService", Auth.AnonymousService],
       ["AdminService", Auth.AdminService],

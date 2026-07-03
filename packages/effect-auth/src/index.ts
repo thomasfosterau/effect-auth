@@ -50,9 +50,6 @@ export * from "./OAuth.js";
 /** Enterprise SSO: OIDC relying party with email-domain routing. */
 export * from "./Sso.js";
 
-/** Sign-In With Ethereum (EIP-4361); verifier implemented by @effect-auth/siwe. */
-export * from "./Siwe.js";
-
 /** Google One Tap sign-in (verifies the credential id_token against Google's JWKS). */
 export * from "./GoogleOneTap.js";
 

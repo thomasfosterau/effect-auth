@@ -8,7 +8,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🔒 **Secure by Default**: Hashed secrets at rest, timing-safe comparisons, anti-enumeration flows, trusted-origin CSRF protection
 - 🎯 **Type-Safe**: Full TypeScript support with comprehensive type inference; tagged errors in the Effect error channel
 - 🔄 **Bring Your Own Storage**: Implement the store interfaces against any backend, use the KV-backed layers, or drop in `@effect-auth/sql`
-- 🪄 **Every sign-in method**: Email/password, username, magic link, email & phone OTP, anonymous guests, WebAuthn/passkeys, OAuth social login, device authorization (RFC 8628), Sign-In With Ethereum, and Google One Tap
+- 🪄 **Every sign-in method**: Email/password, username, magic link, email & phone OTP, anonymous guests, WebAuthn/passkeys, OAuth social login, device authorization (RFC 8628), and Google One Tap
 - 🔑 **Two-Factor Authentication**: TOTP enrollment with backup codes, integrated into sign-in via the `SecondFactorGate`
 - 🏢 **Organizations & Admin**: Multi-tenant organizations (members, invitations, roles) and admin tooling (bans, impersonation)
 - 🗝️ **API Keys & JWT**: Hashed API keys with permissions/quotas/rate limits; ES256/EdDSA JWTs with a published JWKS

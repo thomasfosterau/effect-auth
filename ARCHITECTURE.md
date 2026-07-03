@@ -7,7 +7,7 @@ Effect Auth is a generic, type-safe authentication and authorization library for
 Copenhagen Book, Oslo, and BetterAuth. It is a Bun-workspaces monorepo: the core
 library (`effect-auth`, ~44 modules) plus focused companion packages
 (`@effect-auth/client`, `@effect-auth/sql`, `@effect-auth/argon2`,
-`@effect-auth/alchemy`, `@effect-auth/workos`, `@effect-auth/siwe`).
+`@effect-auth/alchemy`, `@effect-auth/workos`).
 
 The settled API conventions — naming, export shapes, store contracts, error
 taxonomy — are recorded with rationale in [DESIGN.md](./DESIGN.md). This
@@ -96,7 +96,6 @@ spelling (DESIGN.md D1 proposes retiring the legacy names at 1.0).
 - **Sign-in methods**: `EmailPassword.ts`, `Username.ts`, `MagicLink.ts`,
   `EmailOtp.ts`, `PhoneOtp.ts`, `Anonymous.ts`, `WebAuthn.ts` (passkeys),
   `OAuth.ts` (social providers + PKCE), `Sso.ts` (OIDC relying party),
-  `Siwe.ts` (Sign-In With Ethereum; verifier in `@effect-auth/siwe`),
   `GoogleOneTap.ts`, `DeviceAuthorization.ts` (RFC 8628).
 - **Account lifecycle**: `AuthLifecycle.ts` (sign-up/sign-in orchestration),
   `EmailVerification.ts`, `PasswordReset.ts`, `AccountManagement.ts`
@@ -213,8 +212,7 @@ CSRF/trusted-origin checks, or replay protection is rejected by policy
 ## Dependencies
 
 - **Core**: `effect` (only runtime dependency), `node:crypto` only.
-- **Packages** isolate everything else: `@node-rs/argon2`, `@noble/curves`
-  (siwe), `@workos-inc/node`, SQL drivers (dev-only), framework peer deps
+- **Packages** isolate everything else: `@node-rs/argon2`, `@workos-inc/node`, SQL drivers (dev-only), framework peer deps
   (client).
 
 ## References
@@ -225,5 +223,4 @@ CSRF/trusted-origin checks, or replay protection is rejected by policy
 - [BetterAuth](https://www.better-auth.com/) — feature-surface inspiration
 - [Effect](https://effect.website/)
 - [OWASP Password Storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
-- RFC 6238 (TOTP), RFC 4226 (HOTP), RFC 8628 (Device Authorization Grant),
-  EIP-4361 (SIWE)
+- RFC 6238 (TOTP), RFC 4226 (HOTP), RFC 8628 (Device Authorization Grant)
