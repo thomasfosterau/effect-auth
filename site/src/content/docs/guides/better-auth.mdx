@@ -28,7 +28,7 @@ delivery, hooks) is an explicit, typed dependency.
 | `admin()` plugin                                                          | `AdminServiceLayer` (list/ban/impersonate)                                                                                                        |
 | `apiKey()` plugin                                                         | `ApiKeyServiceLayer` (sha256 at rest, permissions, quotas, rate limits)                                                                           |
 | `magicLink()`, `emailOTP()`, `phoneNumber()`, `anonymous()`, `username()` | `MagicLink`, `EmailOtp`, `PhoneOtp`, `Anonymous`, `Username` modules                                                                              |
-| `siwe()`, `oneTap()`, `lastLoginMethod()`                                 | `Siwe` module + `@effect-auth/siwe` verifier; `GoogleOneTap` module; `makeLastLoginMethodPlugin` + `cookie.lastLoginMethod`                       |
+| `oneTap()`, `lastLoginMethod()`                                           | `GoogleOneTap` module; `makeLastLoginMethodPlugin` + `cookie.lastLoginMethod`                                                                     |
 | `sso()` plugin                                                            | `SsoServiceLayer` (OIDC relying party with email-domain routing)                                                                                  |
 | `captcha()`, `haveIBeenPwned()`                                           | `CaptchaPlugin`, `HibpPlugin` hooks plugins                                                                                                       |
 

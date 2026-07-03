@@ -1974,61 +1974,6 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | never
         | ([Mode] extends ["response-only"] ? never : never | never)
       >;
-      readonly siweNonce: <Mode>(
-        request: void | { readonly responseMode?: Mode | undefined },
-      ) => Effect<
-        HttpApiClient.Client.Response<{ readonly expiresAt: number; readonly nonce: string }, Mode>,
-        | Error<never>
-        | ClientError<never>
-        | never
-        | HttpClientError
-        | ([Mode] extends ["response-only"]
-            ? never
-            : (InternalServerError | NotFound) | SchemaError),
-        | never
-        | never
-        | never
-        | never
-        | never
-        | ([Mode] extends ["response-only"] ? never : never | never)
-      >;
-      readonly signInSiwe: <Mode>(request: {
-        readonly payload: { readonly message: string; readonly signature: string };
-        readonly responseMode?: Mode | undefined;
-      }) => Effect<
-        HttpApiClient.Client.Response<
-          {
-            readonly user: {
-              readonly id: string;
-              readonly email: string;
-              readonly emailVerified: boolean;
-              readonly createdAt: number;
-              readonly updatedAt: number;
-              readonly attributes: { readonly [x: string]: unknown };
-              readonly name?: string | undefined;
-              readonly image?: string | undefined;
-            };
-            readonly needsEmailVerification: boolean;
-            readonly secondFactor?:
-              | { readonly expiresAt: number; readonly token: string }
-              | undefined;
-          },
-          Mode
-        >,
-        | Error<never>
-        | ClientError<never>
-        | never
-        | HttpClientError
-        | ([Mode] extends ["response-only"]
-            ? never
-            : (InternalServerError | Unauthorized | NotFound) | SchemaError),
-        | never
-        | never
-        | never
-        | never
-        | never
-        | ([Mode] extends ["response-only"] ? never : never | never)
-      >;
       readonly signInGoogleOneTap: <Mode>(request: {
         readonly payload: { readonly credential: string };
         readonly responseMode?: Mode | undefined;

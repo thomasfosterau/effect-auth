@@ -457,18 +457,6 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.AuthSuccess,
     error: [S.NotFoundError, S.BadRequestError, S.InternalError],
   }),
-  // --- Sign-In With Ethereum (EIP-4361). 404 until a verifier layer (from
-  // --- @effect-auth/siwe) and the SIWE stores are provided.
-  HttpApiEndpoint.post("siweNonce", "/siwe/nonce", {
-    success: S.SiweNonceView,
-    error: [S.NotFoundError, S.InternalError],
-  }),
-  // Invalid message/nonce/signature -> 401 (an authentication attempt).
-  HttpApiEndpoint.post("signInSiwe", "/sign-in/siwe", {
-    payload: S.SiweVerifyPayload,
-    success: S.AuthSuccess,
-    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
-  }),
   // --- Google One Tap: verify the credential (a Google-signed id_token) and
   // --- sign in by verified email. 404 when unconfigured.
   HttpApiEndpoint.post("signInGoogleOneTap", "/sign-in/google-one-tap", {
