@@ -415,7 +415,7 @@ harms (skew + docs pollution).
 | `sql`     | 20 `XStoreLayer` values + lowercase aggregate `layer`                                                         | Keep; `layer` as the aggregate name matches Effect convention for a package's primary layer                              |
 | `alchemy` | `XStoreLayer(db)` functions + `layer(db)`                                                                     | Keep shape (D1 binding is a required argument); document that `XStoreLayer` may be value _or_ function per package needs |
 | `argon2`  | `makeArgon2Hasher(opts?)` plain + `Argon2HasherLayer(opts?)` function                                         | Keep; matches hasher family style                                                                                        |
-| `siwe`    | curried `Layer.succeed(Tag)(value)`                                                                           | **Applied now:** normalize to two-arg `Layer.succeed(Tag, value)` (style-only)                                           |
+| `siwe`    | curried `Layer.succeed(Tag)(value)`                                                                           | Keep — the curried form is also used throughout core tests; both `Layer.succeed` call forms are acceptable               |
 | `workos`  | `Context.Service` class + `static layer/layerOptions/layerClient`, own `WorkOSError`, effect `Config` for env | **This is the reference implementation** of the settled idiom                                                            |
 | `client`  | `createAuthClient` factory, plain `AuthClientError extends Error`                                             | Keep — deliberately Effect-free for the browser bundle; the plain Error is intentional and documented                    |
 
@@ -463,9 +463,10 @@ any formatter churn investigated separately.
 3. `@deprecated` markers: `Requests.ts`/`Resolvers.ts` exports, barrel `effect`
    re-exports — D6/D9.
 4. Svelte/Vue `listSessions` parity in `@effect-auth/client` — D8.
-5. siwe curried→two-arg `Layer.succeed` — D10.
-6. Docs reconciliation: `ARCHITECTURE.md` rewrite, README package
-   table + framing, `CONTRIBUTING.md` paths, `HOOKS_DESIGN.md` status — D11.
+5. Docs reconciliation: `ARCHITECTURE.md` rewrite, README package
+   table + framing + quick-start (the old §2 example never provided `Hooks`
+   and would not have type-checked), `CONTRIBUTING.md` structure/paths,
+   `HOOKS_DESIGN.md` status header — D11.
 
 Changesets accompany 1 (minor: effect-auth), 3 (patch: effect-auth), 4 (minor:
 @effect-auth/client).

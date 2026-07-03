@@ -33,7 +33,7 @@ This library follows best practices from multiple authentication frameworks:
 - **OAuth 2.0**: Social login with major providers (BetterAuth-inspired)
 - **Email Verification**: Secure verification flows with rate limiting (BetterAuth-inspired)
 - **Rate Limiting**: Protection against brute force attacks (BetterAuth-inspired)
-- **Request/Resolver Pattern**: Use Effect's Request/Resolver pattern for custom implementations
+- **Services & Layers**: Every feature is an Effect `Context.Service` provided via `X.layer(config)` — swap or extend any part
 - **Authorization**: Flexible permission checking and role-based access control
 
 ## Quick Start
@@ -68,8 +68,10 @@ const userStore: Auth.UserStore = {
 
 ### 2. Create Session Manager
 
+Every service class exposes a static `layer` — the canonical way to provide it:
+
 ```typescript
-import { Effect, Context } from "effect";
+import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
 const sessionConfig: Auth.SessionConfig = {
@@ -79,31 +81,31 @@ const sessionConfig: Auth.SessionConfig = {
   },
 };
 
+const layer = Auth.SessionManager.layer(sessionConfig).pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(
+      Layer.succeed(Auth.SessionStore)(sessionStore),
+      Layer.succeed(Auth.UserStore)(userStore),
+      Auth.Hooks.Default, // no-op hooks; register plugins here instead as needed
+    ),
+  ),
+);
+
 const program = Effect.gen(function* () {
-  // Create session manager
-  const manager = yield* Auth.makeSessionManager(sessionConfig);
+  const sessions = yield* Auth.SessionManager;
 
   // Create a session
-  const session = yield* manager.createSession("user-123", {
+  const session = yield* sessions.createSession("user-123", {
     ip: "127.0.0.1",
   });
 
   // Validate session
-  const { session: validSession, user } = yield* manager.validateSession(session.id);
+  const { session: validSession, user } = yield* sessions.validateSession(session.id);
 
   return { session: validSession, user };
 });
 
-// Provide dependencies and run
-const result = await Effect.runPromise(
-  Effect.provide(
-    program,
-    Context.merge(
-      Context.make(Auth.SessionStore, sessionStore),
-      Context.make(Auth.UserStore, userStore),
-    ),
-  ),
-);
+const result = await Effect.runPromise(Effect.provide(program, layer));
 ```
 
 ### 3. Use Password Hashing
@@ -128,31 +130,27 @@ const program = Effect.gen(function* () {
 const isValid = await Effect.runPromise(Effect.provide(program, Auth.PasswordHasherLive));
 ```
 
-### 4. Use Request/Resolver Pattern
+### 4. Compose custom layers with the low-level constructors
 
-For more advanced use cases, use the Request/Resolver pattern:
+Each service's `makeX(config)` constructor is exported for embedding in your
+own layers when the static `X.layer(config)` isn't flexible enough:
 
 ```typescript
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
-// Create a session using a request
-const createSession = Effect.request(
-  Auth.CreateSessionRequest({ userId: "user-123" }),
-  Auth.makeCreateSessionResolver,
+const customSessionLayer = Layer.effect(
+  Auth.SessionManager,
+  Effect.gen(function* () {
+    // ...acquire resources, read config, etc.
+    return yield* Auth.makeSessionManager(sessionConfig);
+  }),
 );
-
-// Validate a session using a request
-const validateSession = (sessionId: string) =>
-  Effect.request(Auth.ValidateSessionRequest({ sessionId }), Auth.makeValidateSessionResolver);
-
-// Compose multiple requests
-const program = Effect.gen(function* () {
-  const session = yield* createSession;
-  const { user } = yield* validateSession(session.id);
-  return user;
-});
 ```
+
+> **Note**: the `Request`/`Resolver` exports (`CreateSessionRequest`,
+> `makeCreateSessionResolver`, ...) are deprecated and scheduled for removal
+> in 1.0 — call the services directly (see `DESIGN.md`, D6).
 
 ## Authorization
 
@@ -784,6 +782,9 @@ All OTP functions return Effect types for composability:
 - `generateOTPURI(params)`: Generate OTP URI for QR codes
 
 ### Requests
+
+> **Deprecated** — the Request/Resolver surface is scheduled for removal in
+> 1.0 (see `DESIGN.md`, D6). Call the service APIs directly.
 
 All requests follow the Effect Request/Resolver pattern:
 

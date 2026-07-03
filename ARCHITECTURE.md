@@ -2,392 +2,228 @@
 
 ## Overview
 
-Effect Auth is a generic, type-safe authentication and authorization library for Effect, following best practices from Lucia, Copenhagen, and Oslo projects.
+Effect Auth is a generic, type-safe authentication and authorization library for
+[Effect](https://effect.website/) v4, following best practices from Lucia, the
+Copenhagen Book, Oslo, and BetterAuth. It is a Bun-workspaces monorepo: the core
+library (`effect-auth`, ~44 modules) plus focused companion packages
+(`@effect-auth/client`, `@effect-auth/sql`, `@effect-auth/argon2`,
+`@effect-auth/alchemy`, `@effect-auth/workos`, `@effect-auth/siwe`).
+
+The settled API conventions — naming, export shapes, store contracts, error
+taxonomy — are recorded with rationale in [DESIGN.md](./DESIGN.md). This
+document describes how the pieces fit together.
 
 ## Core Principles
 
-1. **Generic & Flexible**: Use Effect's Request/Resolver pattern for maximum customization
-2. **Type-Safe**: Full TypeScript support with comprehensive error types
-3. **Composable**: Leverage Effect's composition capabilities
-4. **Storage-Agnostic**: Bring your own database/storage backend
-5. **Secure by Default**: Following industry best practices
+1. **Services & Layers**: every feature is an Effect `Context.Service` provided
+   by a Layer — access with `yield* Auth.X`, provide with `Auth.X.layer(config)`.
+2. **Type-Safe**: schema'd domain models and precise tagged-error unions.
+3. **Composable**: features are independent layers; provide only what you use.
+4. **Storage-Agnostic**: bring your own store implementations (or use
+   `@effect-auth/sql`, `@effect-auth/alchemy`, or the built-in KeyValueStore
+   layers).
+5. **Secure by Default**: timing-safe comparisons, high-entropy tokens,
+   HttpOnly/Secure cookies, trusted-origin CSRF checks, anti-enumeration
+   responses.
+6. **Minimal dependencies**: the core library depends on `effect` only and uses
+   `node:crypto` exclusively for cryptography. Native or third-party
+   dependencies live in companion packages.
 
-## Architecture
+## The service pattern
 
-### 1. Core Types (`src/types.ts`)
+Each core module ships the same quartet (see DESIGN.md D1):
 
-Defines fundamental data structures:
+```ts
+// 1. The service shape — an interface users can reference
+export interface SessionManager { readonly createSession: (...) => Effect<...>; ... }
 
-- `User`: User representation with ID and attributes
-- `Session`: Active session with expiration
-- `SessionWithUser`: Combined session and user data
-- `SessionConfig`: Session management configuration
-- `HashedPassword`: Hashed password with algorithm info
-- `Permission`: Permission check result
-
-### 2. Error Types (`src/errors.ts`)
-
-Type-safe errors using Effect's Data.TaggedError:
-
-- `AuthError`: Base authentication error
-- `InvalidCredentialsError`: Invalid credentials
-- `SessionNotFoundError`: Session not found
-- `SessionExpiredError`: Session expired
-- `UserNotFoundError`: User not found
-- `PermissionDeniedError`: Permission denied
-- `HashingError`: Password hashing error
-
-### 3. Request Types (`src/requests.ts`)
-
-Effect Request types for all operations:
-
-- `CreateSessionRequest`: Create new session
-- `ValidateSessionRequest`: Validate existing session
-- `InvalidateSessionRequest`: Invalidate session
-- `InvalidateUserSessionsRequest`: Invalidate all user sessions
-- `VerifyCredentialsRequest`: Verify user credentials
-- `HashPasswordRequest`: Hash a password
-- `VerifyPasswordRequest`: Verify password against hash
-- `CheckPermissionRequest`: Check user permissions
-
-### 4. Password Hashing (`src/password.ts`)
-
-Secure password hashing following Oslo guidelines:
-
-- **Algorithm**: PBKDF2-SHA256
-- **Iterations**: 210,000 (OWASP recommended)
-- **Key Length**: 64 bytes
-- **Salt Length**: 16 bytes (128 bits)
-- **Timing-Safe Comparison**: Uses `crypto.timingSafeEqual`
-
-**Service Interface:**
-
-```typescript
-interface PasswordHasher {
-  hash: (password: string) => Effect<HashedPassword, HashingError>;
-  verify: (password: string, hash: string) => Effect<boolean, HashingError>;
+// 2. The service class (Context.Service tag) with its canonical layer
+export class SessionManagerTag extends Context.Service<SessionManagerTag, SessionManager>()(
+  "@effect-auth/SessionManager",
+) {
+  static readonly layer = (config: SessionConfig) => SessionManagerLayer(config);
 }
+
+// 3. The bare-name export — the canonical way to reference the service
+export const SessionManager = SessionManagerTag;
+
+// 4. The low-level constructor, for embedding in custom layers
+export const makeSessionManager = (config) => Effect.gen(...);
 ```
 
-### 5. Session Management (`src/session.ts`)
+Canonical usage:
 
-Following Lucia/Copenhagen guidelines:
+```ts
+import { Effect, Layer } from "effect";
+import * as Auth from "effect-auth";
 
-**Key Features:**
+const program = Effect.gen(function* () {
+  const sessions = yield* Auth.SessionManager;
+  const session = yield* sessions.createSession(userId);
+  return yield* sessions.validateSession(session.id);
+});
 
-- Secure random session IDs (160 bits entropy)
-- Active period timeout (e.g., 30 days max lifetime)
-- Idle period timeout (e.g., 14 days of inactivity)
-- Automatic session renewal
-- Session validation with expiration checks
-
-**Service Interfaces:**
-
-```typescript
-interface SessionStore {
-  create: (session: Session) => Effect<Session, AuthError>;
-  get: (sessionId: string) => Effect<Session, SessionNotFoundError>;
-  update: (session: Session) => Effect<Session, AuthError>;
-  delete: (sessionId: string) => Effect<void, AuthError>;
-  deleteByUserId: (userId: string) => Effect<void, AuthError>;
-}
-
-interface UserStore {
-  get: (userId: string) => Effect<User, UserNotFoundError>;
-  getCredentials: (userId: string) => Effect<string, UserNotFoundError>;
-}
-
-interface SessionManager {
-  createSession: (
-    userId: string,
-    attributes?: Record<string, unknown>,
-  ) => Effect<Session, AuthError>;
-  validateSession: (
-    sessionId: string,
-  ) => Effect<SessionWithUser, SessionNotFoundError | SessionExpiredError | UserNotFoundError>;
-  invalidateSession: (sessionId: string) => Effect<void, AuthError>;
-  invalidateUserSessions: (userId: string) => Effect<void, AuthError>;
-}
-```
-
-### 6. Resolvers (`src/resolvers.ts`)
-
-Effect RequestResolvers for all Request types:
-
-- Connects Requests to their implementations
-- Uses Effect's `RequestResolver.fromEffect`
-- Integrates with SessionManager, PasswordHasher, and stores
-
-### 7. Authorization (`src/authorization.ts`)
-
-Role-Based Access Control (RBAC):
-
-**Service Interfaces:**
-
-```typescript
-interface AuthorizationPolicy {
-  checkPermission: (
-    userId: string,
-    resource: string,
-    action: string,
-  ) => Effect<boolean, PermissionDeniedError>;
-}
-
-interface RoleStore {
-  getUserRoles: (userId: string) => Effect<readonly string[], never>;
-  getRolePermissions: (
-    role: string,
-  ) => Effect<readonly { resource: string; action: string }[], never>;
-}
-```
-
-**Utility Functions:**
-
-- `makeRoleBasedPolicy()`: Create role-based authorization policy
-- `requirePermission()`: Helper to enforce permissions (throws if denied)
-
-### 8. OTP Utilities (`src/otp.ts`)
-
-One-Time Password (OTP) support for Two-Factor Authentication:
-
-**Supported Algorithms:**
-
-- **TOTP (Time-Based OTP)**: RFC 6238 compliant
-- **HOTP (HMAC-Based OTP)**: RFC 4226 compliant
-
-**Key Features:**
-
-- Cryptographically secure secret generation
-- Base32 encoding/decoding for secrets
-- Support for SHA-1, SHA-256, and SHA-512 algorithms
-- Configurable code length (default: 6 digits)
-- Configurable time periods for TOTP (default: 30 seconds)
-- Time window support for TOTP verification (default: ±1 step)
-- OTP URI generation for QR codes (otpauth:// protocol)
-- Timing-safe token comparison
-
-**Core Functions:**
-
-```typescript
-// Secret generation
-generateSecret(length?: number): Effect<Buffer, HashingError>
-generateBase32Secret(length?: number): Effect<string, HashingError>
-
-// HOTP (counter-based)
-generateHOTP(secret, counter, config?): Effect<string, HashingError>
-verifyHOTP(token, secret, counter, config?): Effect<boolean, HashingError>
-
-// TOTP (time-based)
-generateTOTP(secret, config?): Effect<string, HashingError>
-verifyTOTP(token, secret, config?): Effect<boolean, HashingError>
-
-// URI generation for QR codes
-generateOTPURI(params: OTPURIParams): string
-```
-
-**Security Properties:**
-
-- Uses Node.js crypto module for HMAC and random generation
-- Implements dynamic truncation per RFC 4226 Section 5.3
-- Timing-safe comparison using `crypto.timingSafeEqual`
-- Compatible with Google Authenticator and other standard authenticator apps
-
-### 8. WebAuthn (`src/webauthn.ts`, `src/webauthn-types.ts`)
-
-Passwordless authentication using passkeys following FIDO2/WebAuthn standards:
-
-**Key Features:**
-
-- Passkey registration and authentication
-- Challenge-based security (256 bits entropy)
-- Counter-based replay protection
-- Support for ES256 (ECDSA with P-256) algorithm
-- Origin and relying party ID verification
-- Multiple credentials per user
-
-**Service Interfaces:**
-
-```typescript
-interface ChallengeStore {
-  create: (challenge: WebAuthnChallenge) => Effect<WebAuthnChallenge, AuthError>;
-  get: (challenge: Uint8Array) => Effect<WebAuthnChallenge, ChallengeNotFoundError>;
-  delete: (challenge: Uint8Array) => Effect<void, AuthError>;
-}
-
-interface CredentialStore {
-  create: (credential: WebAuthnCredential) => Effect<WebAuthnCredential, AuthError>;
-  get: (credentialId: string) => Effect<WebAuthnCredential, CredentialNotFoundError>;
-  update: (credential: WebAuthnCredential) => Effect<WebAuthnCredential, AuthError>;
-  delete: (credentialId: string) => Effect<void, AuthError>;
-  getByUserId: (userId: string) => Effect<readonly WebAuthnCredential[], AuthError>;
-}
-
-interface WebAuthnService {
-  generateRegistrationChallenge: (
-    user: WebAuthnUser,
-  ) => Effect<{ challenge: Uint8Array; expiresAt: number }, AuthError>;
-  verifyRegistration: (
-    challenge: Uint8Array,
-    response: RegistrationResponse,
-  ) => Effect<
-    RegistrationResult,
-    WebAuthnVerificationError | ChallengeNotFoundError | ChallengeExpiredError | AuthError
-  >;
-  generateAuthenticationChallenge: (
-    userId: string,
-  ) => Effect<{ challenge: Uint8Array; expiresAt: number }, AuthError>;
-  verifyAuthentication: (
-    challenge: Uint8Array,
-    response: AuthenticationResponse,
-  ) => Effect<
-    AuthenticationResult,
-    | WebAuthnVerificationError
-    | CredentialNotFoundError
-    | ChallengeNotFoundError
-    | ChallengeExpiredError
-    | AuthError
-  >;
-}
-```
-
-**Implementation powered by [@oslojs/webauthn](https://github.com/oslo-project/webauthn):**
-
-- Runtime-agnostic implementation
-- No third-party dependencies
-- Full TypeScript support
-- Standards-compliant FIDO2/WebAuthn
-
-## Request/Resolver Pattern
-
-The library uses Effect's Request/Resolver pattern for flexibility:
-
-```typescript
-// Define a request
-const validateSession = Effect.request(
-  ValidateSessionRequest({ sessionId: "abc123" }),
-  makeValidateSessionResolver,
+const layer = Auth.SessionManager.layer(sessionConfig).pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(
+      Layer.succeed(Auth.SessionStore)(sessionStore),
+      Layer.succeed(Auth.UserStore)(userStore),
+      Auth.Hooks.Default,
+    ),
+  ),
 );
 
-// Execute the request
-const result = await Effect.runPromise(Effect.provide(validateSession, dependencies));
+await Effect.runPromise(Effect.provide(program, layer));
 ```
 
-This pattern allows:
+The `XServiceTag` class names and standalone `XServiceLayer(config)` constructors
+remain exported for compatibility; `X` + `X.layer(config)` is the canonical
+spelling (DESIGN.md D1 proposes retiring the legacy names at 1.0).
 
-- **Batching**: Multiple requests can be batched together
-- **Caching**: Requests can be cached automatically
-- **Testability**: Easy to mock resolvers in tests
-- **Composability**: Requests compose naturally with Effect
+> **Note**: `Requests.ts`/`Resolvers.ts` (Effect `Request`/`RequestResolver`
+> wrappers) are **deprecated**. They were an early experiment; nothing in the
+> library, the examples, or the HTTP layer uses them. The service pattern above
+> is the public API (DESIGN.md D6).
+
+## Module map (`packages/effect-auth/src`)
+
+- **Foundations**: `Types.ts` (schema'd `User`, `Session`, `SessionConfig`, …),
+  `Errors.ts` (shared tagged errors), `Password.ts` (PBKDF2/scrypt hashers,
+  multi-algorithm verifier), `Session.ts` (`SessionStore`, `UserStore`,
+  `SessionManager`), `User.ts`, `Authorization.ts`/`Rbac.ts`/`Permission.ts`/
+  `Scope.ts` (RBAC, permission values, OAuth-style scopes), `Otp.ts`
+  (RFC 6238/4226 TOTP/HOTP primitives).
+- **Sign-in methods**: `EmailPassword.ts`, `Username.ts`, `MagicLink.ts`,
+  `EmailOtp.ts`, `PhoneOtp.ts`, `Anonymous.ts`, `WebAuthn.ts` (passkeys),
+  `OAuth.ts` (social providers + PKCE), `Sso.ts` (OIDC relying party),
+  `Siwe.ts` (Sign-In With Ethereum; verifier in `@effect-auth/siwe`),
+  `GoogleOneTap.ts`, `DeviceAuthorization.ts` (RFC 8628).
+- **Account lifecycle**: `AuthLifecycle.ts` (sign-up/sign-in orchestration),
+  `EmailVerification.ts`, `PasswordReset.ts`, `AccountManagement.ts`
+  (email change / account deletion), `TwoFactor.ts` (TOTP + backup codes,
+  integrating into password sign-in via the `SecondFactorGate` seam).
+- **Platform features**: `Organization.ts`, `Admin.ts`, `ApiKey.ts`, `Jwt.ts`
+  (ES256/EdDSA + JWKS), `OidcProvider.ts` (act as an OIDC identity provider),
+  `RateLimit.ts`/`RateLimitPersistence.ts`.
+- **Extension**: `Hooks.ts` (typed hooks/plugin system; see
+  [HOOKS_DESIGN.md](./HOOKS_DESIGN.md) for the original design rationale) and
+  `plugins/` (audit, email normalization, rate limiting, account lockout,
+  captcha, Have-I-Been-Pwned, last-login-method).
+- **Storage helpers**: `KeyValueStores.ts` — layers implementing the ephemeral
+  stores (OAuth state, WebAuthn challenges, rate limits, tokens/OTPs, pending
+  two-factor) over `effect/unstable/persistence` `KeyValueStore` (in-memory,
+  file system, Redis, …).
+- **HTTP** (exported as the `Auth.Http` namespace): `HttpApiSchemas.ts` (wire
+  schemas + HTTP error types), `HttpApi.ts` (the typed `AuthApi` contract),
+  `HttpServer.ts` (handlers + mountable web handler), `SessionCookieCache.ts`
+  (signed session-data cookie), `HttpClient.ts` (typed Effect client derived
+  from the contract).
+
+## Stores
+
+Users persist state by implementing plain store interfaces (DESIGN.md D3):
+
+- Stores are **dumb persistence**: lookups return `X | null` when a row may
+  legitimately be absent; services convert misses into typed domain errors.
+  (A few older stores — `SessionStore.get`, `UserStore.get`, the WebAuthn
+  stores — still fail typed not-found errors; normalizing them is proposed for
+  1.0.)
+- The store error channel is `AuthError` (infrastructure failure only).
+- Vocabulary: `create`, `get`, `getBy<Key>`, `list()`/`listBy<Key>` (arrays),
+  `update`, `upsert`, `delete`, `deleteBy<Key>`.
+
+First-party implementations: `@effect-auth/sql` (driver-agnostic, via
+`effect/unstable/sql`), `@effect-auth/alchemy` (Cloudflare D1 + Alchemy v2
+infra resources), and the KeyValueStore layers in core for ephemeral state.
+
+## Errors
+
+Two mechanisms, by boundary (DESIGN.md D4):
+
+- **Domain errors** are `Data.TaggedError` classes — shared ones in `Errors.ts`
+  (`AuthError`, `InvalidCredentialsError`, `SessionExpiredError`, …),
+  module-local ones (`TwoFactorError`, `OrganizationError`, …) where only one
+  module raises them. `AuthError` means _infrastructure/unexpected_ failure;
+  flow outcomes get specific tags. Nothing subclasses `AuthError` — errors
+  compose in unions, keeping method signatures honest.
+- **HTTP boundary errors** are `Schema.TaggedErrorClass` classes in
+  `HttpApiSchemas.ts` with fixed status codes (401/403/400/404/409/500).
+  Handlers in `HttpServer.ts` map domain errors to these per endpoint.
+
+## HTTP protocol
+
+- `HttpApi.ts` defines the full contract with `effect/unstable/httpapi` — one
+  `auth` group, kebab-case paths (`/sign-in/email-otp`, `/two-factor/enable`),
+  camelCase operationIds. OpenAPI 3.1 and a Scalar reference UI can be served
+  from the same contract (`makeAuthWebHandler({ docs: true })`).
+- **404-until-configured**: optional features resolve their service with
+  `Effect.serviceOption`; when the layer isn't provided the endpoint fails
+  `NotFound` — a server only exposes what it configures.
+- **Cookies**: HttpOnly, SameSite, `Secure` by default; optional HMAC-signed
+  session-data cache cookie to skip store reads; multi-session and
+  last-login-method helper cookies.
+- **CSRF**: a trusted-origin gate runs before any handler — requests with an
+  `Origin` header must match the request origin or the configured
+  `trustedOrigins`; requests without one (curl, server-to-server) pass.
+- **Clients**: `HttpClient.ts` derives a full-parity Effect client from the
+  contract (`client.auth.<operationId>`); `@effect-auth/client` is a
+  hand-written, dependency-free browser client covering the
+  cookie-authenticated end-user flows, with an observable session store and
+  React/Svelte/Vue bindings (DESIGN.md D8).
 
 ## Security Considerations
 
 ### Password Security
 
-- ✅ PBKDF2-SHA256 with 210,000 iterations (OWASP recommended)
-- ✅ Random salt per password (16 bytes)
-- ✅ Timing-safe comparison to prevent timing attacks
-- ✅ Never store plaintext passwords
+- PBKDF2-SHA256 with 210,000 iterations (OWASP) by default; scrypt in core;
+  Argon2id via `@effect-auth/argon2`; a multi-algorithm verifier supports
+  migration between algorithms.
+- Random salt per password; timing-safe comparison; plaintext never stored.
 
 ### Session Security
 
-- ✅ Cryptographically secure random IDs (160 bits entropy)
-- ✅ Both active and idle timeout periods
-- ✅ Automatic session expiration
-- ✅ Session renewal on activity
-- ✅ Ability to invalidate all user sessions
+- 160-bit cryptographically secure session IDs; active + idle timeouts;
+  automatic renewal; whole-user invalidation; optional signed session-data
+  cookie with a short TTL.
+
+### Token & Challenge Security
+
+- Verification tokens, OTPs, magic links, API keys, and OIDC codes/tokens are
+  hashed at rest and compared timing-safely; single-use with expiry;
+  anti-enumeration responses on send/request endpoints.
+- WebAuthn: 256-bit challenges with expiry, origin + RP ID verification,
+  counter-based replay protection (ES256/RS256/EdDSA).
 
 ### Authorization Security
 
-- ✅ Explicit permission checks
-- ✅ Type-safe permission errors
-- ✅ Principle of least privilege support
-- ✅ Role-based access control
+- Explicit permission checks, role-based access control with hierarchy,
+  OAuth-style scopes; policies fail closed.
 
-### WebAuthn Security
-
-- ✅ Cryptographically secure random challenges (256 bits)
-- ✅ Challenge expiration (5 minutes default)
-- ✅ Origin verification on every request
-- ✅ Relying party ID verification
-- ✅ Counter-based replay protection
-- ✅ Public key cryptography (ES256)
-- ✅ No password storage or transmission
-
-## Usage Patterns
-
-### 1. Basic Authentication Flow
-
-```typescript
-// Hash password
-const hasher = yield * PasswordHasher;
-const hashed = yield * hasher.hash("password");
-
-// Create session after successful auth
-const manager = yield * makeSessionManager(config);
-const session = yield * manager.createSession("user-id");
-
-// Validate session on subsequent requests
-const { session, user } = yield * manager.validateSession(session.id);
-```
-
-### 2. Permission Checking
-
-```typescript
-// Check permission
-const policy = yield * makeRoleBasedPolicy();
-const canCreate = yield * policy.checkPermission("user-id", "posts", "create");
-
-// Require permission (throws if denied)
-yield * requirePermission("user-id", "posts", "create");
-```
-
-### 3. Custom Storage Implementation
-
-Users implement storage interfaces for their database:
-
-```typescript
-const sessionStore: SessionStore = {
-  create: (session) =>
-    // Your database implementation
-    Effect.tryPromise(() => db.sessions.insert(session)),
-  // ... other methods
-};
-```
+Any design change that would weaken timing-safety, entropy, cookie flags,
+CSRF/trusted-origin checks, or replay protection is rejected by policy
+(DESIGN.md ground rules).
 
 ## Testing
 
-The library includes comprehensive tests:
-
-- **Password hashing tests**: Verify security properties
-- **Session management tests**: Test creation, validation, expiration
-- **Mock implementations**: Easy-to-use mocks for testing
+- 490+ core tests plus package suites (SQL storage, client adapters, hashers)
+  run with `vp test`; test files typecheck via per-package `tsconfig.test.json`.
+- The Effect language service enforces idioms at typecheck time
+  (yieldable errors, single-provide layering, requirement leakage).
 
 ## Dependencies
 
-- **effect**: Core Effect library (only runtime dependency)
-- **typescript**: Development dependency
-- **vitest**: Testing framework
-
-## Future Enhancements
-
-Possible future additions:
-
-- ~~Two-factor authentication (TOTP, HOTP)~~ ✅ Implemented
-- WebAuthn support
-- Two-factor authentication (TOTP)
-- OAuth 2.0 / OIDC integration
-- Token-based authentication (JWT)
-- Rate limiting utilities
-- IP-based session validation
-- User agent fingerprinting
-- Session refresh tokens
+- **Core**: `effect` (only runtime dependency), `node:crypto` only.
+- **Packages** isolate everything else: `@node-rs/argon2`, `@noble/curves`
+  (siwe), `@workos-inc/node`, SQL drivers (dev-only), framework peer deps
+  (client).
 
 ## References
 
-- [Lucia](https://lucia-auth.com/) - Authentication library and patterns
-- [Copenhagen Book](https://lucia-auth.com/copenhagen) - Authentication best practices
-- [Oslo](https://github.com/pilcrowonpaper/oslo) - Authentication primitives
-- [Effect](https://effect.website/) - TypeScript effect system
+- [DESIGN.md](./DESIGN.md) — the settled API decision record
+- [Lucia](https://lucia-auth.com/) / [Copenhagen Book](https://lucia-auth.com/copenhagen)
+- [Oslo](https://github.com/pilcrowonpaper/oslo)
+- [BetterAuth](https://www.better-auth.com/) — feature-surface inspiration
+- [Effect](https://effect.website/)
 - [OWASP Password Storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
-- [RFC 6238](https://www.rfc-editor.org/rfc/rfc6238) - TOTP: Time-Based One-Time Password Algorithm
-- [RFC 4226](https://www.rfc-editor.org/rfc/rfc4226) - HOTP: An HMAC-Based One-Time Password Algorithm
+- RFC 6238 (TOTP), RFC 4226 (HOTP), RFC 8628 (Device Authorization Grant),
+  EIP-4361 (SIWE)

@@ -24,7 +24,8 @@ Before contributing, please:
 1. **Read the documentation**:
    - [README.md](./README.md) - Project overview and usage
    - [ARCHITECTURE.md](./ARCHITECTURE.md) - Architectural design
-   - [AGENT_GUIDELINES.md](./AGENT_GUIDELINES.md) - Coding standards and patterns
+   - [DESIGN.md](./DESIGN.md) - Settled API conventions and decision record
+   - [AGENTS.md](./AGENTS.md) - Tooling and Effect-pattern guidelines
    - [SECURITY.md](./SECURITY.md) - Security requirements
 
 2. **Understand the project**:
@@ -69,24 +70,34 @@ Before contributing, please:
 ### Project Structure
 
 ```
-effect-auth/
-├── src/                     # Source code
-│   ├── types.ts            # Core type definitions
-│   ├── errors.ts           # Tagged error definitions
-│   ├── password.ts         # Password hashing
-│   ├── session.ts          # Session management
-│   ├── authorization.ts    # Authorization/permissions
-│   ├── requests.ts         # Request definitions
-│   ├── resolvers.ts        # RequestResolver implementations
-│   ├── index.ts            # Public API exports
-│   └── *.test.ts           # Tests alongside source
-├── examples/               # Usage examples
-├── docs/                   # Additional documentation
-├── README.md              # Project overview
-├── ARCHITECTURE.md        # Architecture documentation
-├── AGENT_GUIDELINES.md    # Development guidelines
-├── SECURITY.md            # Security policy
-└── CONTRIBUTING.md        # This file
+effect-auth/                       # Bun workspaces monorepo (Nx task runner, Vite+ toolchain)
+├── packages/
+│   ├── effect-auth/               # Core library
+│   │   └── src/
+│   │       ├── Types.ts           # Core domain types (schema'd User, Session, ...)
+│   │       ├── Errors.ts          # Shared tagged error definitions
+│   │       ├── Password.ts        # Password hashing (PBKDF2, scrypt, multi-algorithm)
+│   │       ├── Session.ts         # Session stores + SessionManager
+│   │       ├── Authorization.ts   # Authorization/permissions (+ Rbac, Permission, Scope)
+│   │       ├── <Feature>.ts       # One module per feature (EmailPassword, WebAuthn, ...)
+│   │       ├── Hooks.ts           # Hooks/plugin system
+│   │       ├── plugins/           # First-party hooks plugins
+│   │       ├── Http*.ts           # HTTP contract, server handlers, typed client
+│   │       ├── index.ts           # Public API barrel (the only entry point)
+│   │       └── *.test.ts          # Tests alongside source
+│   ├── client/                    # @effect-auth/client (browser + React/Svelte/Vue)
+│   ├── sql/                       # @effect-auth/sql storage layers
+│   ├── argon2/                    # @effect-auth/argon2 hasher
+│   ├── alchemy/                   # @effect-auth/alchemy (Cloudflare D1 + IaC)
+│   ├── workos/                    # @effect-auth/workos SDK bindings
+│   └── siwe/                      # @effect-auth/siwe verifier
+├── examples/                      # Example apps
+├── site/                          # Starlight docs site (generated API reference)
+├── README.md                      # Project overview
+├── ARCHITECTURE.md                # Architecture documentation
+├── DESIGN.md                      # Settled API conventions & decision record
+├── SECURITY.md                    # Security policy
+└── CONTRIBUTING.md                # This file
 ```
 
 ## Making Changes
@@ -95,11 +106,10 @@ effect-auth/
 
 1. **Create an issue** if one doesn't exist
 2. **Discuss the approach** with maintainers
-3. **Review [AGENT_GUIDELINES.md](./AGENT_GUIDELINES.md)** for:
+3. **Review [DESIGN.md](./DESIGN.md) and [AGENTS.md](./AGENTS.md)** for:
+   - The settled API conventions (naming, layers, stores, errors)
    - Security requirements
-   - Code patterns
-   - Testing requirements
-   - Effect patterns
+   - Effect patterns and tooling
 
 ### Development Workflow
 
@@ -110,8 +120,8 @@ effect-auth/
    ```
 
 2. **Make your changes**:
-   - Follow existing code style
-   - Use Effect patterns (see AGENT_GUIDELINES.md)
+   - Follow existing code style and the conventions in DESIGN.md
+   - Use Effect patterns (see AGENTS.md — consult `effect-solutions`)
    - Add tests for new functionality
    - Update documentation as needed
 
@@ -134,9 +144,9 @@ effect-auth/
 
 - **TypeScript**: Use strict mode
 - **Effect**: Use Effect.gen for composition
-- **Naming**: Follow conventions in AGENT_GUIDELINES.md
+- **Naming**: Follow the conventions settled in DESIGN.md
 - **Comments**: Add comments for complex logic or security decisions
-- **Formatting**: Follow existing code style
+- **Formatting**: Follow existing code style (`vp check --fix`)
 
 ### Security Requirements
 
@@ -152,19 +162,22 @@ See [SECURITY.md](./SECURITY.md) for detailed security requirements.
 
 ### Adding New Features
 
-1. **Define types** in `src/types.ts`
-2. **Define errors** in `src/errors.ts`
-3. **Implement functionality** in appropriate file
-4. **Add tests** in `*.test.ts` file
-5. **Export from** `src/index.ts`
-6. **Document** in README.md
+Follow the module conventions in DESIGN.md (service class + `static layer`,
+store interfaces with nullable lookups, tagged errors):
+
+1. **Define shared types** in `packages/effect-auth/src/Types.ts` (module-specific types live in the module)
+2. **Define errors** in `packages/effect-auth/src/Errors.ts` if shared, or module-local if only that module raises them
+3. **Implement the module** in `packages/effect-auth/src/<Feature>.ts`
+4. **Add tests** in the sibling `<Feature>.test.ts` file
+5. **Export from** `packages/effect-auth/src/index.ts` (with a one-line doc comment)
+6. **Document** in README.md and the site guides
 
 Example: Adding a new password algorithm
 
-1. Read `docs/MULTI_ALGORITHM.md`
-2. Implement hasher in `src/password.ts`
-3. Add tests in `src/password.test.ts`
-4. Document in README.md and MULTI_ALGORITHM.md
+1. Read the multi-algorithm guide (`site/src/content/docs/guides/multi-algorithm.md`)
+2. Implement the hasher in `packages/effect-auth/src/Password.ts` (or a dedicated package for native deps)
+3. Add tests in `Password.test.ts`
+4. Document in README.md and the guide
 
 ## Testing
 
@@ -327,18 +340,19 @@ See [SECURITY.md](./SECURITY.md) for:
 
 All changes to security-sensitive code require:
 
-1. **Security checklist** completion (see AGENT_GUIDELINES.md)
+1. **Security review** against SECURITY.md
 2. **Maintainer review**
 3. **Test coverage** for security properties
 4. **Documentation** of security decisions
 
 Security-sensitive areas:
 
-- Password hashing (`src/password.ts`)
-- Session management (`src/session.ts`)
-- Cryptographic operations
+- Password hashing (`packages/effect-auth/src/Password.ts`)
+- Session management (`packages/effect-auth/src/Session.ts`, `SessionCookieCache.ts`)
+- Cookie flags, CSRF/trusted-origin checks (`packages/effect-auth/src/HttpServer.ts`)
+- Cryptographic operations (token generation, timing-safe comparison)
 - Input validation
-- Error handling (avoid information leakage)
+- Error handling (avoid information leakage / user enumeration)
 
 ## Resources
 
