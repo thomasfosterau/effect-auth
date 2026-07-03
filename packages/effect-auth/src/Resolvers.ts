@@ -26,6 +26,7 @@ import { UserServiceTag } from "./User.js";
 
 /**
  * Create a resolver for session creation
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeCreateSessionResolver = Effect.gen(function* () {
   const sessionManager = yield* SessionManagerTag;
@@ -43,6 +44,7 @@ export const makeCreateSessionResolver = Effect.gen(function* () {
 
 /**
  * Create a resolver for session validation
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeValidateSessionResolver = Effect.gen(function* () {
   const sessionManager = yield* SessionManagerTag;
@@ -55,6 +57,7 @@ export const makeValidateSessionResolver = Effect.gen(function* () {
 
 /**
  * Create a resolver for session invalidation
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeInvalidateSessionResolver = Effect.gen(function* () {
   const sessionManager = yield* SessionManagerTag;
@@ -67,6 +70,7 @@ export const makeInvalidateSessionResolver = Effect.gen(function* () {
 
 /**
  * Create a resolver for invalidating all user sessions
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeInvalidateUserSessionsResolver = Effect.gen(function* () {
   const sessionManager = yield* SessionManagerTag;
@@ -78,6 +82,7 @@ export const makeInvalidateUserSessionsResolver = Effect.gen(function* () {
 
 /**
  * Create a resolver for credential verification
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeVerifyCredentialsResolver = Effect.gen(function* () {
   const userStore = yield* UserStoreTag;
@@ -106,6 +111,7 @@ export const makeVerifyCredentialsResolver = Effect.gen(function* () {
 
 /**
  * Create a resolver for password hashing
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeHashPasswordResolver = Effect.gen(function* () {
   const passwordHasher = yield* PasswordHasherTag;
@@ -116,6 +122,7 @@ export const makeHashPasswordResolver = Effect.gen(function* () {
 
 /**
  * Create a resolver for password verification
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeVerifyPasswordResolver = Effect.gen(function* () {
   const passwordHasher = yield* PasswordHasherTag;
@@ -126,6 +133,7 @@ export const makeVerifyPasswordResolver = Effect.gen(function* () {
 
 /**
  * Resolver for SignUpEmailRequest
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const signUpEmailResolver = Effect.gen(function* () {
   const authLifecycle = yield* AuthLifecycleServiceTag;
@@ -137,6 +145,7 @@ export const signUpEmailResolver = Effect.gen(function* () {
 
 /**
  * Resolver for SignInEmailRequest
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const signInEmailResolver = Effect.gen(function* () {
   const authLifecycle = yield* AuthLifecycleServiceTag;
@@ -148,6 +157,7 @@ export const signInEmailResolver = Effect.gen(function* () {
 
 /**
  * Resolver for VerifyEmailRequest
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const verifyEmailResolver = Effect.gen(function* () {
   const authLifecycle = yield* AuthLifecycleServiceTag;
@@ -160,6 +170,7 @@ export const verifyEmailResolver = Effect.gen(function* () {
 
 /**
  * Resolver for RequestPasswordResetRequest
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeRequestPasswordResetResolver = Effect.gen(function* () {
   const passwordReset = yield* PasswordResetServiceTag;
@@ -172,6 +183,7 @@ export const makeRequestPasswordResetResolver = Effect.gen(function* () {
 
 /**
  * Resolver for ResetPasswordRequest
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeResetPasswordResolver = Effect.gen(function* () {
   const passwordReset = yield* PasswordResetServiceTag;
@@ -187,6 +199,7 @@ export const makeResetPasswordResolver = Effect.gen(function* () {
 
 /**
  * Resolver for GetUserRequest
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeGetUserResolver = Effect.gen(function* () {
   const userService = yield* UserServiceTag;
@@ -198,6 +211,7 @@ export const makeGetUserResolver = Effect.gen(function* () {
 
 /**
  * Resolver for GetUserByEmailRequest
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeGetUserByEmailResolver = Effect.gen(function* () {
   const userService = yield* UserServiceTag;
@@ -210,6 +224,7 @@ export const makeGetUserByEmailResolver = Effect.gen(function* () {
 
 /**
  * Resolver for UpdateUserAttributesRequest
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeUpdateUserAttributesResolver = Effect.gen(function* () {
   const userService = yield* UserServiceTag;
@@ -225,6 +240,7 @@ export const makeUpdateUserAttributesResolver = Effect.gen(function* () {
 
 /**
  * Resolver for MarkEmailVerifiedRequest
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeMarkEmailVerifiedResolver = Effect.gen(function* () {
   const userService = yield* UserServiceTag;
@@ -237,6 +253,7 @@ export const makeMarkEmailVerifiedResolver = Effect.gen(function* () {
 
 /**
  * Resolver for DeleteUserRequest
+ * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
 export const makeDeleteUserResolver = Effect.gen(function* () {
   const userService = yield* UserServiceTag;
