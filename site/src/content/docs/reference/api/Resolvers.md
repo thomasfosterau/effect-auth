@@ -10,29 +10,29 @@ description: "API reference for the Resolvers module."
 <h2 class="text-delta">Table of contents</h2>
 
 - [utils](#utils)
-  - [makeCreateSessionResolver](#makecreatesessionresolver)
-  - [makeDeleteUserResolver](#makedeleteuserresolver)
-  - [makeGetUserByEmailResolver](#makegetuserbyemailresolver)
-  - [makeGetUserResolver](#makegetuserresolver)
-  - [makeHashPasswordResolver](#makehashpasswordresolver)
-  - [makeInvalidateSessionResolver](#makeinvalidatesessionresolver)
-  - [makeInvalidateUserSessionsResolver](#makeinvalidateusersessionsresolver)
-  - [makeMarkEmailVerifiedResolver](#makemarkemailverifiedresolver)
-  - [makeRequestPasswordResetResolver](#makerequestpasswordresetresolver)
-  - [makeResetPasswordResolver](#makeresetpasswordresolver)
-  - [makeUpdateUserAttributesResolver](#makeupdateuserattributesresolver)
-  - [makeValidateSessionResolver](#makevalidatesessionresolver)
-  - [makeVerifyCredentialsResolver](#makeverifycredentialsresolver)
-  - [makeVerifyPasswordResolver](#makeverifypasswordresolver)
-  - [signInEmailResolver](#signinemailresolver)
-  - [signUpEmailResolver](#signupemailresolver)
-  - [verifyEmailResolver](#verifyemailresolver)
+  - [~~makeCreateSessionResolver~~](#makecreatesessionresolver)
+  - [~~makeDeleteUserResolver~~](#makedeleteuserresolver)
+  - [~~makeGetUserByEmailResolver~~](#makegetuserbyemailresolver)
+  - [~~makeGetUserResolver~~](#makegetuserresolver)
+  - [~~makeHashPasswordResolver~~](#makehashpasswordresolver)
+  - [~~makeInvalidateSessionResolver~~](#makeinvalidatesessionresolver)
+  - [~~makeInvalidateUserSessionsResolver~~](#makeinvalidateusersessionsresolver)
+  - [~~makeMarkEmailVerifiedResolver~~](#makemarkemailverifiedresolver)
+  - [~~makeRequestPasswordResetResolver~~](#makerequestpasswordresetresolver)
+  - [~~makeResetPasswordResolver~~](#makeresetpasswordresolver)
+  - [~~makeUpdateUserAttributesResolver~~](#makeupdateuserattributesresolver)
+  - [~~makeValidateSessionResolver~~](#makevalidatesessionresolver)
+  - [~~makeVerifyCredentialsResolver~~](#makeverifycredentialsresolver)
+  - [~~makeVerifyPasswordResolver~~](#makeverifypasswordresolver)
+  - [~~signInEmailResolver~~](#signinemailresolver)
+  - [~~signUpEmailResolver~~](#signupemailresolver)
+  - [~~verifyEmailResolver~~](#verifyemailresolver)
 
 ---
 
 # utils
 
-## makeCreateSessionResolver
+## ~~makeCreateSessionResolver~~
 
 Create a resolver for session creation
 
@@ -46,7 +46,7 @@ export declare const makeCreateSessionResolver: Effect.Effect<
 >;
 ```
 
-## makeDeleteUserResolver
+## ~~makeDeleteUserResolver~~
 
 Resolver for DeleteUserRequest
 
@@ -60,7 +60,7 @@ export declare const makeDeleteUserResolver: Effect.Effect<
 >;
 ```
 
-## makeGetUserByEmailResolver
+## ~~makeGetUserByEmailResolver~~
 
 Resolver for GetUserByEmailRequest
 
@@ -74,7 +74,7 @@ export declare const makeGetUserByEmailResolver: Effect.Effect<
 >;
 ```
 
-## makeGetUserResolver
+## ~~makeGetUserResolver~~
 
 Resolver for GetUserRequest
 
@@ -88,7 +88,7 @@ export declare const makeGetUserResolver: Effect.Effect<
 >;
 ```
 
-## makeHashPasswordResolver
+## ~~makeHashPasswordResolver~~
 
 Create a resolver for password hashing
 
@@ -102,7 +102,7 @@ export declare const makeHashPasswordResolver: Effect.Effect<
 >;
 ```
 
-## makeInvalidateSessionResolver
+## ~~makeInvalidateSessionResolver~~
 
 Create a resolver for session invalidation
 
@@ -116,7 +116,7 @@ export declare const makeInvalidateSessionResolver: Effect.Effect<
 >;
 ```
 
-## makeInvalidateUserSessionsResolver
+## ~~makeInvalidateUserSessionsResolver~~
 
 Create a resolver for invalidating all user sessions
 
@@ -130,7 +130,7 @@ export declare const makeInvalidateUserSessionsResolver: Effect.Effect<
 >;
 ```
 
-## makeMarkEmailVerifiedResolver
+## ~~makeMarkEmailVerifiedResolver~~
 
 Resolver for MarkEmailVerifiedRequest
 
@@ -144,7 +144,7 @@ export declare const makeMarkEmailVerifiedResolver: Effect.Effect<
 >;
 ```
 
-## makeRequestPasswordResetResolver
+## ~~makeRequestPasswordResetResolver~~
 
 Resolver for RequestPasswordResetRequest
 
@@ -158,7 +158,7 @@ export declare const makeRequestPasswordResetResolver: Effect.Effect<
 >;
 ```
 
-## makeResetPasswordResolver
+## ~~makeResetPasswordResolver~~
 
 Resolver for ResetPasswordRequest
 
@@ -177,7 +177,7 @@ export declare const makeResetPasswordResolver: Effect.Effect<
 >;
 ```
 
-## makeUpdateUserAttributesResolver
+## ~~makeUpdateUserAttributesResolver~~
 
 Resolver for UpdateUserAttributesRequest
 
@@ -191,7 +191,7 @@ export declare const makeUpdateUserAttributesResolver: Effect.Effect<
 >;
 ```
 
-## makeValidateSessionResolver
+## ~~makeValidateSessionResolver~~
 
 Create a resolver for session validation
 
@@ -205,7 +205,7 @@ export declare const makeValidateSessionResolver: Effect.Effect<
 >;
 ```
 
-## makeVerifyCredentialsResolver
+## ~~makeVerifyCredentialsResolver~~
 
 Create a resolver for credential verification
 
@@ -219,7 +219,7 @@ export declare const makeVerifyCredentialsResolver: Effect.Effect<
 >;
 ```
 
-## makeVerifyPasswordResolver
+## ~~makeVerifyPasswordResolver~~
 
 Create a resolver for password verification
 
@@ -233,7 +233,7 @@ export declare const makeVerifyPasswordResolver: Effect.Effect<
 >;
 ```
 
-## signInEmailResolver
+## ~~signInEmailResolver~~
 
 Resolver for SignInEmailRequest
 
@@ -253,7 +253,7 @@ export declare const signInEmailResolver: Effect.Effect<
 >;
 ```
 
-## signUpEmailResolver
+## ~~signUpEmailResolver~~
 
 Resolver for SignUpEmailRequest
 
@@ -273,7 +273,7 @@ export declare const signUpEmailResolver: Effect.Effect<
 >;
 ```
 
-## verifyEmailResolver
+## ~~verifyEmailResolver~~
 
 Resolver for VerifyEmailRequest
 

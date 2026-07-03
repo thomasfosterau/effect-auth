@@ -437,8 +437,14 @@ design (services/layers/hooks/stores/HTTP, security invariants, this
 document as the decision record). README package table completed and
 Request/Resolver framing replaced with the service idiom. `CONTRIBUTING.md`
 structure/paths corrected. `HOOKS_DESIGN.md` gets a status header marking it
-historical (implemented; kept as design rationale). `docs:api` regenerated;
-any formatter churn investigated separately.
+historical (implemented; kept as design rationale).
+
+**Generated-reference churn, diagnosed:** `@effect/docgen` emits unformatted
+signatures while the checked-in reference had been reformatted by the
+pre-commit `vp check --fix` hook, so every regeneration appeared to churn all
+~45 pages. Fix applied: `docs:api` now runs
+`vp check --fix site/src/content/docs/reference/api` after syncing, making
+regeneration idempotent (verified: a full regen produces zero spurious diffs).
 
 ---
 

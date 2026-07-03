@@ -8,8 +8,10 @@ description: "API reference for the index module."
 Effect Auth - Authentication and Authorization library for Effect
 
 A generic authentication and authorization library following guidelines from
-Lucia, Copenhagen, and Oslo projects. Uses Effect's Request/Resolver pattern
-for flexible, composable authentication flows.
+Lucia, Copenhagen, and Oslo projects. Built on Effect's `Context.Service` +
+`Layer` pattern: access a feature with `yield* Auth.X`, provide it with
+`Auth.X.layer(config)`, and bring your own stores. See DESIGN.md for the
+settled API conventions.
 
 ---
 
@@ -352,7 +354,7 @@ export * from "./Rbac.js";
 
 ## From "./Requests.js"
 
-Effect `Request` definitions for auth operations.
+Effect `Request` definitions for auth operations. @deprecated Removal planned for 1.0 (DESIGN.md D6).
 
 **Signature**
 
@@ -362,7 +364,7 @@ export * from "./Requests.js";
 
 ## From "./Resolvers.js"
 
-Request resolvers wiring stores to requests.
+Request resolvers wiring stores to requests. @deprecated Removal planned for 1.0 (DESIGN.md D6).
 
 **Signature**
 
@@ -425,8 +427,10 @@ export * from "./TwoFactor.js";
 Effect Auth - Authentication and Authorization library for Effect
 
 A generic authentication and authorization library following guidelines from
-Lucia, Copenhagen, and Oslo projects. Uses Effect's Request/Resolver pattern
-for flexible, composable authentication flows.
+Lucia, Copenhagen, and Oslo projects. Built on Effect's `Context.Service` +
+`Layer` pattern: access a feature with `yield* Auth.X`, provide it with
+`Auth.X.layer(config)`, and bring your own stores. See DESIGN.md for the
+settled API conventions.
 
 **Signature**
 
@@ -478,7 +482,7 @@ export * from "./plugins/index.js";
 
 ## Context
 
-Re-export of `Context` from `effect`.
+Re-export of `Context` from `effect`. @deprecated Import from `effect` directly; removal planned for 1.0 (DESIGN.md D9).
 
 **Signature**
 
@@ -488,7 +492,7 @@ export declare const Context: typeof import("effect/dist/Context");
 
 ## Effect
 
-Re-export of `Effect` from `effect`.
+Re-export of `Effect` from `effect`. @deprecated Import from `effect` directly; removal planned for 1.0 (DESIGN.md D9).
 
 **Signature**
 
@@ -498,7 +502,7 @@ export declare const Effect: typeof import("effect/dist/Effect");
 
 ## Layer
 
-Re-export of `Layer` from `effect`.
+Re-export of `Layer` from `effect`. @deprecated Import from `effect` directly; removal planned for 1.0 (DESIGN.md D9).
 
 **Signature**
 
@@ -508,7 +512,7 @@ export declare const Layer: typeof import("effect/dist/Layer");
 
 ## RequestResolver
 
-Re-export of `RequestResolver` from `effect`.
+Re-export of `RequestResolver` from `effect`. @deprecated Import from `effect` directly; removal planned for 1.0 (DESIGN.md D9).
 
 **Signature**
 

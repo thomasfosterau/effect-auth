@@ -10,48 +10,48 @@ description: "API reference for the Requests module."
 <h2 class="text-delta">Table of contents</h2>
 
 - [utils](#utils)
-  - [CheckPermissionRequest](#checkpermissionrequest)
-  - [CheckPermissionRequest (interface)](#checkpermissionrequest-interface)
-  - [CreateSessionRequest](#createsessionrequest)
-  - [CreateSessionRequest (interface)](#createsessionrequest-interface)
-  - [DeleteUserRequest](#deleteuserrequest)
-  - [DeleteUserRequest (interface)](#deleteuserrequest-interface)
-  - [GetUserByEmailRequest](#getuserbyemailrequest)
-  - [GetUserByEmailRequest (interface)](#getuserbyemailrequest-interface)
-  - [GetUserRequest](#getuserrequest)
-  - [GetUserRequest (interface)](#getuserrequest-interface)
-  - [HashPasswordRequest](#hashpasswordrequest)
-  - [HashPasswordRequest (interface)](#hashpasswordrequest-interface)
-  - [InvalidateSessionRequest](#invalidatesessionrequest)
-  - [InvalidateSessionRequest (interface)](#invalidatesessionrequest-interface)
-  - [InvalidateUserSessionsRequest](#invalidateusersessionsrequest)
-  - [InvalidateUserSessionsRequest (interface)](#invalidateusersessionsrequest-interface)
-  - [MarkEmailVerifiedRequest](#markemailverifiedrequest)
-  - [MarkEmailVerifiedRequest (interface)](#markemailverifiedrequest-interface)
-  - [RequestPasswordResetRequest](#requestpasswordresetrequest)
-  - [RequestPasswordResetRequest (interface)](#requestpasswordresetrequest-interface)
-  - [ResetPasswordRequest](#resetpasswordrequest)
-  - [ResetPasswordRequest (interface)](#resetpasswordrequest-interface)
-  - [SignInEmailRequest](#signinemailrequest)
-  - [SignInEmailRequest (interface)](#signinemailrequest-interface)
-  - [SignUpEmailRequest](#signupemailrequest)
-  - [SignUpEmailRequest (interface)](#signupemailrequest-interface)
-  - [UpdateUserAttributesRequest](#updateuserattributesrequest)
-  - [UpdateUserAttributesRequest (interface)](#updateuserattributesrequest-interface)
-  - [ValidateSessionRequest](#validatesessionrequest)
-  - [ValidateSessionRequest (interface)](#validatesessionrequest-interface)
-  - [VerifyCredentialsRequest](#verifycredentialsrequest)
-  - [VerifyCredentialsRequest (interface)](#verifycredentialsrequest-interface)
-  - [VerifyEmailRequest](#verifyemailrequest)
-  - [VerifyEmailRequest (interface)](#verifyemailrequest-interface)
-  - [VerifyPasswordRequest](#verifypasswordrequest)
-  - [VerifyPasswordRequest (interface)](#verifypasswordrequest-interface)
+  - [~~CheckPermissionRequest~~](#checkpermissionrequest)
+  - [~~CheckPermissionRequest~~ (interface)](#checkpermissionrequest-interface)
+  - [~~CreateSessionRequest~~](#createsessionrequest)
+  - [~~CreateSessionRequest~~ (interface)](#createsessionrequest-interface)
+  - [~~DeleteUserRequest~~](#deleteuserrequest)
+  - [~~DeleteUserRequest~~ (interface)](#deleteuserrequest-interface)
+  - [~~GetUserByEmailRequest~~](#getuserbyemailrequest)
+  - [~~GetUserByEmailRequest~~ (interface)](#getuserbyemailrequest-interface)
+  - [~~GetUserRequest~~](#getuserrequest)
+  - [~~GetUserRequest~~ (interface)](#getuserrequest-interface)
+  - [~~HashPasswordRequest~~](#hashpasswordrequest)
+  - [~~HashPasswordRequest~~ (interface)](#hashpasswordrequest-interface)
+  - [~~InvalidateSessionRequest~~](#invalidatesessionrequest)
+  - [~~InvalidateSessionRequest~~ (interface)](#invalidatesessionrequest-interface)
+  - [~~InvalidateUserSessionsRequest~~](#invalidateusersessionsrequest)
+  - [~~InvalidateUserSessionsRequest~~ (interface)](#invalidateusersessionsrequest-interface)
+  - [~~MarkEmailVerifiedRequest~~](#markemailverifiedrequest)
+  - [~~MarkEmailVerifiedRequest~~ (interface)](#markemailverifiedrequest-interface)
+  - [~~RequestPasswordResetRequest~~](#requestpasswordresetrequest)
+  - [~~RequestPasswordResetRequest~~ (interface)](#requestpasswordresetrequest-interface)
+  - [~~ResetPasswordRequest~~](#resetpasswordrequest)
+  - [~~ResetPasswordRequest~~ (interface)](#resetpasswordrequest-interface)
+  - [~~SignInEmailRequest~~](#signinemailrequest)
+  - [~~SignInEmailRequest~~ (interface)](#signinemailrequest-interface)
+  - [~~SignUpEmailRequest~~](#signupemailrequest)
+  - [~~SignUpEmailRequest~~ (interface)](#signupemailrequest-interface)
+  - [~~UpdateUserAttributesRequest~~](#updateuserattributesrequest)
+  - [~~UpdateUserAttributesRequest~~ (interface)](#updateuserattributesrequest-interface)
+  - [~~ValidateSessionRequest~~](#validatesessionrequest)
+  - [~~ValidateSessionRequest~~ (interface)](#validatesessionrequest-interface)
+  - [~~VerifyCredentialsRequest~~](#verifycredentialsrequest)
+  - [~~VerifyCredentialsRequest~~ (interface)](#verifycredentialsrequest-interface)
+  - [~~VerifyEmailRequest~~](#verifyemailrequest)
+  - [~~VerifyEmailRequest~~ (interface)](#verifyemailrequest-interface)
+  - [~~VerifyPasswordRequest~~](#verifypasswordrequest)
+  - [~~VerifyPasswordRequest~~ (interface)](#verifypasswordrequest-interface)
 
 ---
 
 # utils
 
-## CheckPermissionRequest
+## ~~CheckPermissionRequest~~
 
 **Signature**
 
@@ -59,7 +59,7 @@ description: "API reference for the Requests module."
 export declare const CheckPermissionRequest: Request.Constructor<CheckPermissionRequest, "_tag">;
 ```
 
-## CheckPermissionRequest (interface)
+## ~~CheckPermissionRequest~~ (interface)
 
 Request to check if a user has permission for an action
 
@@ -77,7 +77,7 @@ export interface CheckPermissionRequest extends Request.Request<
 }
 ```
 
-## CreateSessionRequest
+## ~~CreateSessionRequest~~
 
 **Signature**
 
@@ -85,7 +85,7 @@ export interface CheckPermissionRequest extends Request.Request<
 export declare const CreateSessionRequest: Request.Constructor<CreateSessionRequest, "_tag">;
 ```
 
-## CreateSessionRequest (interface)
+## ~~CreateSessionRequest~~ (interface)
 
 Request to create a new session for a user
 
@@ -102,7 +102,7 @@ export interface CreateSessionRequest extends Request.Request<
 }
 ```
 
-## DeleteUserRequest
+## ~~DeleteUserRequest~~
 
 **Signature**
 
@@ -110,7 +110,7 @@ export interface CreateSessionRequest extends Request.Request<
 export declare const DeleteUserRequest: Request.Constructor<DeleteUserRequest, "_tag">;
 ```
 
-## DeleteUserRequest (interface)
+## ~~DeleteUserRequest~~ (interface)
 
 Request to delete a user
 
@@ -123,7 +123,7 @@ export interface DeleteUserRequest extends Request.Request<void, Errors.AuthErro
 }
 ```
 
-## GetUserByEmailRequest
+## ~~GetUserByEmailRequest~~
 
 **Signature**
 
@@ -131,7 +131,7 @@ export interface DeleteUserRequest extends Request.Request<void, Errors.AuthErro
 export declare const GetUserByEmailRequest: Request.Constructor<GetUserByEmailRequest, "_tag">;
 ```
 
-## GetUserByEmailRequest (interface)
+## ~~GetUserByEmailRequest~~ (interface)
 
 Request to fetch a user by email
 
@@ -147,7 +147,7 @@ export interface GetUserByEmailRequest extends Request.Request<
 }
 ```
 
-## GetUserRequest
+## ~~GetUserRequest~~
 
 **Signature**
 
@@ -155,7 +155,7 @@ export interface GetUserByEmailRequest extends Request.Request<
 export declare const GetUserRequest: Request.Constructor<GetUserRequest, "_tag">;
 ```
 
-## GetUserRequest (interface)
+## ~~GetUserRequest~~ (interface)
 
 Request to fetch a user by ID
 
@@ -168,7 +168,7 @@ export interface GetUserRequest extends Request.Request<Types.User, Errors.UserN
 }
 ```
 
-## HashPasswordRequest
+## ~~HashPasswordRequest~~
 
 **Signature**
 
@@ -176,7 +176,7 @@ export interface GetUserRequest extends Request.Request<Types.User, Errors.UserN
 export declare const HashPasswordRequest: Request.Constructor<HashPasswordRequest, "_tag">;
 ```
 
-## HashPasswordRequest (interface)
+## ~~HashPasswordRequest~~ (interface)
 
 Request to hash a password
 
@@ -192,7 +192,7 @@ export interface HashPasswordRequest extends Request.Request<
 }
 ```
 
-## InvalidateSessionRequest
+## ~~InvalidateSessionRequest~~
 
 **Signature**
 
@@ -203,7 +203,7 @@ export declare const InvalidateSessionRequest: Request.Constructor<
 >;
 ```
 
-## InvalidateSessionRequest (interface)
+## ~~InvalidateSessionRequest~~ (interface)
 
 Request to invalidate/delete a session
 
@@ -219,7 +219,7 @@ export interface InvalidateSessionRequest extends Request.Request<
 }
 ```
 
-## InvalidateUserSessionsRequest
+## ~~InvalidateUserSessionsRequest~~
 
 **Signature**
 
@@ -230,7 +230,7 @@ export declare const InvalidateUserSessionsRequest: Request.Constructor<
 >;
 ```
 
-## InvalidateUserSessionsRequest (interface)
+## ~~InvalidateUserSessionsRequest~~ (interface)
 
 Request to invalidate all sessions for a user
 
@@ -243,7 +243,7 @@ export interface InvalidateUserSessionsRequest extends Request.Request<void, Err
 }
 ```
 
-## MarkEmailVerifiedRequest
+## ~~MarkEmailVerifiedRequest~~
 
 **Signature**
 
@@ -254,7 +254,7 @@ export declare const MarkEmailVerifiedRequest: Request.Constructor<
 >;
 ```
 
-## MarkEmailVerifiedRequest (interface)
+## ~~MarkEmailVerifiedRequest~~ (interface)
 
 Request to mark a user's email as verified
 
@@ -270,7 +270,7 @@ export interface MarkEmailVerifiedRequest extends Request.Request<
 }
 ```
 
-## RequestPasswordResetRequest
+## ~~RequestPasswordResetRequest~~
 
 **Signature**
 
@@ -281,7 +281,7 @@ export declare const RequestPasswordResetRequest: Request.Constructor<
 >;
 ```
 
-## RequestPasswordResetRequest (interface)
+## ~~RequestPasswordResetRequest~~ (interface)
 
 Request to initiate password reset for an email
 
@@ -297,7 +297,7 @@ export interface RequestPasswordResetRequest extends Request.Request<
 }
 ```
 
-## ResetPasswordRequest
+## ~~ResetPasswordRequest~~
 
 **Signature**
 
@@ -305,7 +305,7 @@ export interface RequestPasswordResetRequest extends Request.Request<
 export declare const ResetPasswordRequest: Request.Constructor<ResetPasswordRequest, "_tag">;
 ```
 
-## ResetPasswordRequest (interface)
+## ~~ResetPasswordRequest~~ (interface)
 
 Request to reset password with a token
 
@@ -322,7 +322,7 @@ export interface ResetPasswordRequest extends Request.Request<
 }
 ```
 
-## SignInEmailRequest
+## ~~SignInEmailRequest~~
 
 **Signature**
 
@@ -330,7 +330,7 @@ export interface ResetPasswordRequest extends Request.Request<
 export declare const SignInEmailRequest: Request.Constructor<SignInEmailRequest, "_tag">;
 ```
 
-## SignInEmailRequest (interface)
+## ~~SignInEmailRequest~~ (interface)
 
 Request to sign in with email and password through lifecycle service
 
@@ -354,7 +354,7 @@ export interface SignInEmailRequest extends Request.Request<
 }
 ```
 
-## SignUpEmailRequest
+## ~~SignUpEmailRequest~~
 
 **Signature**
 
@@ -362,7 +362,7 @@ export interface SignInEmailRequest extends Request.Request<
 export declare const SignUpEmailRequest: Request.Constructor<SignUpEmailRequest, "_tag">;
 ```
 
-## SignUpEmailRequest (interface)
+## ~~SignUpEmailRequest~~ (interface)
 
 Request to sign up with email and password through lifecycle service
 
@@ -388,7 +388,7 @@ export interface SignUpEmailRequest extends Request.Request<
 }
 ```
 
-## UpdateUserAttributesRequest
+## ~~UpdateUserAttributesRequest~~
 
 **Signature**
 
@@ -399,7 +399,7 @@ export declare const UpdateUserAttributesRequest: Request.Constructor<
 >;
 ```
 
-## UpdateUserAttributesRequest (interface)
+## ~~UpdateUserAttributesRequest~~ (interface)
 
 Request to merge attributes onto a user
 
@@ -416,7 +416,7 @@ export interface UpdateUserAttributesRequest extends Request.Request<
 }
 ```
 
-## ValidateSessionRequest
+## ~~ValidateSessionRequest~~
 
 **Signature**
 
@@ -424,7 +424,7 @@ export interface UpdateUserAttributesRequest extends Request.Request<
 export declare const ValidateSessionRequest: Request.Constructor<ValidateSessionRequest, "_tag">;
 ```
 
-## ValidateSessionRequest (interface)
+## ~~ValidateSessionRequest~~ (interface)
 
 Request to validate and retrieve a session
 
@@ -440,7 +440,7 @@ export interface ValidateSessionRequest extends Request.Request<
 }
 ```
 
-## VerifyCredentialsRequest
+## ~~VerifyCredentialsRequest~~
 
 **Signature**
 
@@ -451,7 +451,7 @@ export declare const VerifyCredentialsRequest: Request.Constructor<
 >;
 ```
 
-## VerifyCredentialsRequest (interface)
+## ~~VerifyCredentialsRequest~~ (interface)
 
 Request to verify credentials and authenticate a user
 
@@ -468,7 +468,7 @@ export interface VerifyCredentialsRequest extends Request.Request<
 }
 ```
 
-## VerifyEmailRequest
+## ~~VerifyEmailRequest~~
 
 **Signature**
 
@@ -476,7 +476,7 @@ export interface VerifyCredentialsRequest extends Request.Request<
 export declare const VerifyEmailRequest: Request.Constructor<VerifyEmailRequest, "_tag">;
 ```
 
-## VerifyEmailRequest (interface)
+## ~~VerifyEmailRequest~~ (interface)
 
 Request to verify email token through lifecycle service
 
@@ -495,7 +495,7 @@ export interface VerifyEmailRequest extends Request.Request<
 }
 ```
 
-## VerifyPasswordRequest
+## ~~VerifyPasswordRequest~~
 
 **Signature**
 
@@ -503,7 +503,7 @@ export interface VerifyEmailRequest extends Request.Request<
 export declare const VerifyPasswordRequest: Request.Constructor<VerifyPasswordRequest, "_tag">;
 ```
 
-## VerifyPasswordRequest (interface)
+## ~~VerifyPasswordRequest~~ (interface)
 
 Request to verify a password against a hash
 
