@@ -80,6 +80,7 @@ export interface UsernameService {
     AuthResult,
     | UsernameError
     | Errors.AuthError
+    | Errors.EmailInUseError
     | Errors.HashingError
     | Errors.EmailNotVerifiedError
     | HookError,

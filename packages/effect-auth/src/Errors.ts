@@ -159,3 +159,12 @@ export class PasswordResetError extends Data.TaggedError("PasswordResetError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
+
+/**
+ * Raised when an email address is already associated with another account
+ * (sign-up with an existing email, or a change-email request targeting a
+ * taken address).
+ */
+export class EmailInUseError extends Data.TaggedError("EmailInUseError")<{
+  readonly message: string;
+}> {}

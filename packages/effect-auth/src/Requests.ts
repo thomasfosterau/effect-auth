@@ -155,6 +155,7 @@ export const CheckPermissionRequest =
 export interface SignUpEmailRequest extends Request.Request<
   AuthLifecycle.AuthLifecycleResult,
   | Errors.AuthError
+  | Errors.EmailInUseError
   | Errors.HashingError
   | Errors.EmailVerificationError
   | Errors.EmailNotVerifiedError

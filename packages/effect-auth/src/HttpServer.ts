@@ -579,12 +579,13 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const lifecycle = yield* AuthLifecycleServiceTag;
           const result = yield* lifecycle.signUp(signUpInput(payload)).pipe(
             Effect.catchTags({
-              AuthError: (e) => Effect.fail(new S.Conflict({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              EmailInUseError: (e) => Effect.fail(new S.Conflict({ message: e.message })),
               EmailNotVerifiedError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
               EmailVerificationError: (e) =>
                 Effect.fail(new S.InternalServerError({ message: e.message })),
-              RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
             }),
           );
           const body: S.AuthSuccess = {
@@ -611,7 +612,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 EmailVerificationError: (e) =>
                   Effect.fail(new S.InternalServerError({ message: e.message })),
-                RateLimitError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               }),
             );
           const body: S.AuthSuccess = {
@@ -700,7 +701,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 EmailVerificationError: (e) =>
                   Effect.fail(new S.InternalServerError({ message: e.message })),
-                RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               }),
             );
           }
@@ -716,7 +717,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               EmailVerificationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-              RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
             }),
           );
           const body: S.AuthSuccess = {
@@ -726,7 +727,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return yield* withSessionCookie(body, result.session, cfg, "email-password");
         }),
       )
-      .handle("requestPasswordReset", ({ payload }) =>
+      .handle("passwordResetRequest", ({ payload }) =>
         Effect.gen(function* () {
           const passwordReset = yield* PasswordResetServiceTag;
           yield* passwordReset.requestPasswordReset(payload.email).pipe(
@@ -734,13 +735,13 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
               PasswordResetError: (e) =>
                 Effect.fail(new S.InternalServerError({ message: e.message })),
-              RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
             }),
           );
           return { status: true };
         }),
       )
-      .handle("resetPassword", ({ payload }) =>
+      .handle("passwordResetConfirm", ({ payload }) =>
         Effect.gen(function* () {
           const passwordReset = yield* PasswordResetServiceTag;
           yield* passwordReset.resetPassword(payload.token, payload.newPassword).pipe(
@@ -748,7 +749,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               PasswordResetError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
               HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-              RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
             }),
           );
           return { status: true };
@@ -919,7 +920,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 MagicLinkError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               }),
             );
           const body: S.AuthSuccess = {
@@ -952,7 +953,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 EmailOtpError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               }),
             );
           const body: S.AuthSuccess = {
@@ -968,7 +969,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const result = yield* anonymous.provideStores(anonymous.service.signInAnonymous()).pipe(
             Effect.catchTags({
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-              RateLimitError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
             }),
           );
           const body: S.AuthSuccess = {
@@ -992,7 +993,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                   Effect.fail(new S.Unauthorized({ message: e.message })),
                 HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                RateLimitError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               }),
             );
           const body: S.AuthSuccess = {
@@ -1116,7 +1117,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               UserNotFoundError: (e) =>
                 Effect.fail(new S.InternalServerError({ message: e.message })),
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-              RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
             }),
           );
           const body: S.AuthSuccess = {
@@ -1178,7 +1179,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 PhoneOtpError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               }),
             );
           const body: S.AuthSuccess = {
@@ -1279,7 +1280,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 TwoFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
                 HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               }),
             );
           return yield* secondFactorSuccess(result, cfg, "two-factor");
@@ -1294,7 +1295,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 TwoFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                RateLimitError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               }),
             );
           return yield* secondFactorSuccess(result, cfg, "two-factor");
@@ -1658,7 +1659,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
               UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-              RateLimitError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
             }),
           );
           const user = yield* userService
@@ -1805,7 +1806,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return encodeSsoProvider(provider);
         }),
       )
-      .handle("ssoSignIn", ({ payload }) =>
+      .handle("signInSso", ({ payload }) =>
         Effect.gen(function* () {
           const sso = yield* resolveSso;
           const result = yield* sso
@@ -1834,8 +1835,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                RateLimitError: (e) =>
-                  Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               }),
             );
           const body: S.AuthSuccess = {
@@ -2126,8 +2126,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 GoogleOneTapError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                RateLimitError: (e) =>
-                  Effect.fail(new S.InternalServerError({ message: e.message })),
+                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               }),
             );
           const body: S.AuthSuccess = {

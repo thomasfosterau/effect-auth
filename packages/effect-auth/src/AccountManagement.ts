@@ -59,9 +59,7 @@ export class AccountTokenError extends Data.TaggedError("AccountTokenError")<{
 }> {}
 
 /** Raised by `requestEmailChange` when the target email is already in use. */
-export class EmailInUseError extends Data.TaggedError("EmailInUseError")<{
-  readonly message: string;
-}> {}
+export { EmailInUseError } from "./Errors.js";
 
 export interface AccountManagementConfig {
   /** Lifetime of a change-email token in ms. Default 1 hour. */
@@ -114,7 +112,7 @@ export interface AccountManagementService {
     newEmail: string,
   ) => Effect.Effect<
     { readonly token: string; readonly expiresAt: number },
-    Errors.AuthError | Errors.UserNotFoundError | EmailInUseError,
+    Errors.AuthError | Errors.UserNotFoundError | Errors.EmailInUseError,
     AccountManagementStoreTag | UserServiceStoreTag
   >;
 
@@ -184,7 +182,7 @@ export const makeAccountManagementService = (
           // Uniqueness: reject if another account already owns the address.
           const existing = yield* users.getByEmail(newEmail);
           if (existing !== null && existing.id !== userId) {
-            return yield* new EmailInUseError({ message: "Email already in use" });
+            return yield* new Errors.EmailInUseError({ message: "Email already in use" });
           }
 
           const token = generateToken();

@@ -708,6 +708,11 @@ export class NotFound extends Schema.TaggedErrorClass<NotFound>()("NotFound", {
   message: Schema.String,
 }) {}
 
+/** 429 — rate limited; retry later. */
+export class TooManyRequests extends Schema.TaggedErrorClass<TooManyRequests>()("TooManyRequests", {
+  message: Schema.String,
+}) {}
+
 /** 500 — unexpected server error. */
 export class InternalServerError extends Schema.TaggedErrorClass<InternalServerError>()(
   "InternalServerError",
@@ -720,6 +725,7 @@ export const ForbiddenError = Forbidden.pipe(HttpApiSchema.status(403));
 export const ConflictError = Conflict.pipe(HttpApiSchema.status(409));
 export const BadRequestError = BadRequest.pipe(HttpApiSchema.status(400));
 export const NotFoundError = NotFound.pipe(HttpApiSchema.status(404));
+export const TooManyRequestsError = TooManyRequests.pipe(HttpApiSchema.status(429));
 export const InternalError = InternalServerError.pipe(HttpApiSchema.status(500));
 
 // -----------------------------------------------------------------------------

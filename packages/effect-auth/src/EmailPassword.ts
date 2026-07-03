@@ -109,7 +109,11 @@ export interface EmailPasswordService {
     input: SignUpInput,
   ) => Effect.Effect<
     AuthResult,
-    Errors.AuthError | Errors.HashingError | Errors.EmailNotVerifiedError | HookError,
+    | Errors.AuthError
+    | Errors.EmailInUseError
+    | Errors.HashingError
+    | Errors.EmailNotVerifiedError
+    | HookError,
     EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag | Hooks
   >;
 
@@ -236,11 +240,9 @@ export const makeEmailPasswordService = (
 
           const existing = yield* store.getUserByEmail(email);
           if (existing) {
-            return yield* Effect.fail(
-              new Errors.AuthError({
-                message: "A user with this email already exists",
-              }),
-            );
+            return yield* new Errors.EmailInUseError({
+              message: "A user with this email already exists",
+            });
           }
 
           const user = yield* store.createUser({

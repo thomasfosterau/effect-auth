@@ -40,6 +40,7 @@ export interface AuthLifecycleService {
   ) => Effect.Effect<
     AuthLifecycleResult,
     | Errors.AuthError
+    | Errors.EmailInUseError
     | Errors.HashingError
     | Errors.EmailVerificationError
     | Errors.EmailNotVerifiedError
