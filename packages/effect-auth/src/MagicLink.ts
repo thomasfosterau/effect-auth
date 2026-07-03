@@ -139,7 +139,13 @@ export interface MagicLinkService {
 
 export class MagicLinkServiceTag extends Context.Service<MagicLinkServiceTag, MagicLinkService>()(
   "@effect-auth/MagicLinkService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link MagicLinkServiceLayer}.
+   */
+  static readonly layer = (config: MagicLinkConfig) => MagicLinkServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const MagicLinkService = MagicLinkServiceTag;

@@ -405,7 +405,13 @@ export interface OidcProviderService {
 export class OidcProviderServiceTag extends Context.Service<
   OidcProviderServiceTag,
   OidcProviderService
->()("@effect-auth/OidcProviderService") {}
+>()("@effect-auth/OidcProviderService") {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link OidcProviderServiceLayer}.
+   */
+  static readonly layer = (config: OidcProviderConfig) => OidcProviderServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const OidcProviderService = OidcProviderServiceTag;

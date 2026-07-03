@@ -132,7 +132,14 @@ export interface DeviceAuthorizationService {
 export class DeviceAuthorizationServiceTag extends Context.Service<
   DeviceAuthorizationServiceTag,
   DeviceAuthorizationService
->()("@effect-auth/DeviceAuthorizationService") {}
+>()("@effect-auth/DeviceAuthorizationService") {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link DeviceAuthorizationServiceLayer}.
+   */
+  static readonly layer = (config: DeviceAuthorizationConfig) =>
+    DeviceAuthorizationServiceLayer(config);
+}
 
 export const DeviceAuthorizationService = DeviceAuthorizationServiceTag;
 

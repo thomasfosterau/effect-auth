@@ -147,7 +147,13 @@ export interface JwtService {
 
 export class JwtServiceTag extends Context.Service<JwtServiceTag, JwtService>()(
   "@effect-auth/JwtService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link JwtServiceLayer}.
+   */
+  static readonly layer = (config: JwtConfig) => JwtServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const JwtService = JwtServiceTag;

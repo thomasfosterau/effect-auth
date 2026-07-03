@@ -283,7 +283,13 @@ export interface SiweService {
 
 export class SiweServiceTag extends Context.Service<SiweServiceTag, SiweService>()(
   "@effect-auth/SiweService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link SiweServiceLayer}.
+   */
+  static readonly layer = (config: SiweConfig) => SiweServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const SiweService = SiweServiceTag;

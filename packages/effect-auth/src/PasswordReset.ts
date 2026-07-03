@@ -85,7 +85,13 @@ export interface PasswordResetService {
 export class PasswordResetServiceTag extends Context.Service<
   PasswordResetServiceTag,
   PasswordResetService
->()("@effect-auth/PasswordResetService") {}
+>()("@effect-auth/PasswordResetService") {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link PasswordResetServiceLayer}.
+   */
+  static readonly layer = (config: PasswordResetConfig) => PasswordResetServiceLayer(config);
+}
 
 export const PasswordResetService = PasswordResetServiceTag;
 

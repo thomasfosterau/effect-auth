@@ -261,7 +261,13 @@ export interface TwoFactorService {
 
 export class TwoFactorServiceTag extends Context.Service<TwoFactorServiceTag, TwoFactorService>()(
   "@effect-auth/TwoFactorService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link TwoFactorServiceLayer}.
+   */
+  static readonly layer = (config: TwoFactorConfig) => TwoFactorServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const TwoFactorService = TwoFactorServiceTag;

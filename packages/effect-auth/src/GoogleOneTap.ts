@@ -64,7 +64,13 @@ export interface GoogleOneTapService {
 export class GoogleOneTapServiceTag extends Context.Service<
   GoogleOneTapServiceTag,
   GoogleOneTapService
->()("@effect-auth/GoogleOneTapService") {}
+>()("@effect-auth/GoogleOneTapService") {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link GoogleOneTapServiceLayer}.
+   */
+  static readonly layer = (config: GoogleOneTapConfig) => GoogleOneTapServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const GoogleOneTapService = GoogleOneTapServiceTag;

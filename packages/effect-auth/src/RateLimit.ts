@@ -77,7 +77,13 @@ export const RateLimitStore = RateLimitStoreTag;
 
 export class RateLimiterTag extends Context.Service<RateLimiterTag, RateLimiter>()(
   "@effect-auth/RateLimiter",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link RateLimiterLayer}.
+   */
+  static readonly layer = () => RateLimiterLayer();
+}
 
 // Public ergonomic alias
 export const RateLimiter = RateLimiterTag;

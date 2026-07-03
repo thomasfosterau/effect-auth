@@ -104,7 +104,14 @@ export const EmailVerificationStore = EmailVerificationStoreTag;
 export class EmailVerificationServiceTag extends Context.Service<
   EmailVerificationServiceTag,
   EmailVerificationService
->()("@effect-auth/EmailVerificationService") {}
+>()("@effect-auth/EmailVerificationService") {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link EmailVerificationServiceLayer}.
+   */
+  static readonly layer = (config: EmailVerificationConfig) =>
+    EmailVerificationServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const EmailVerificationService = EmailVerificationServiceTag;

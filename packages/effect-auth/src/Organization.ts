@@ -397,7 +397,13 @@ export interface OrganizationService {
 export class OrganizationServiceTag extends Context.Service<
   OrganizationServiceTag,
   OrganizationService
->()("@effect-auth/OrganizationService") {}
+>()("@effect-auth/OrganizationService") {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link OrganizationServiceLayer}.
+   */
+  static readonly layer = (config: OrganizationConfig = {}) => OrganizationServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const OrganizationService = OrganizationServiceTag;

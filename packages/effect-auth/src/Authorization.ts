@@ -23,7 +23,13 @@ export interface AuthorizationPolicy {
 export class AuthorizationPolicyTag extends Context.Service<
   AuthorizationPolicyTag,
   AuthorizationPolicy
->()("@effect-auth/AuthorizationPolicy") {}
+>()("@effect-auth/AuthorizationPolicy") {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link AuthorizationPolicyLayer}.
+   */
+  static readonly layer = () => AuthorizationPolicyLayer();
+}
 
 // Public ergonomic alias
 export const AuthorizationPolicy = AuthorizationPolicyTag;

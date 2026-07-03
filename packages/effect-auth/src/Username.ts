@@ -111,7 +111,13 @@ export interface UsernameService {
 
 export class UsernameServiceTag extends Context.Service<UsernameServiceTag, UsernameService>()(
   "@effect-auth/UsernameService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link UsernameServiceLayer}.
+   */
+  static readonly layer = (config: UsernameConfig = {}) => UsernameServiceLayer(config);
+}
 
 export const UsernameService = UsernameServiceTag;
 

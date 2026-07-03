@@ -86,7 +86,13 @@ export interface AuthLifecycleService {
 export class AuthLifecycleServiceTag extends Context.Service<
   AuthLifecycleServiceTag,
   AuthLifecycleService
->()("@effect-auth/AuthLifecycleService") {}
+>()("@effect-auth/AuthLifecycleService") {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link AuthLifecycleServiceLayer}.
+   */
+  static readonly layer = (config: AuthLifecycleConfig = {}) => AuthLifecycleServiceLayer(config);
+}
 
 export const AuthLifecycleService = AuthLifecycleServiceTag;
 

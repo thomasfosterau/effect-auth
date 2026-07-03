@@ -187,7 +187,13 @@ export interface EmailOtpService {
 
 export class EmailOtpServiceTag extends Context.Service<EmailOtpServiceTag, EmailOtpService>()(
   "@effect-auth/EmailOtpService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link EmailOtpServiceLayer}.
+   */
+  static readonly layer = (config: EmailOtpConfig) => EmailOtpServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const EmailOtpService = EmailOtpServiceTag;

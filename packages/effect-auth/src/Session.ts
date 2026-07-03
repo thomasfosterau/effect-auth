@@ -146,7 +146,13 @@ export interface SessionManager {
  */
 export class SessionManagerTag extends Context.Service<SessionManagerTag, SessionManager>()(
   "@effect-auth/SessionManager",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link SessionManagerLayer}.
+   */
+  static readonly layer = (config: Types.SessionConfig) => SessionManagerLayer(config);
+}
 
 // Public ergonomic alias
 export const SessionManager = SessionManagerTag;

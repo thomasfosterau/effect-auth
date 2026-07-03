@@ -224,7 +224,13 @@ export interface AdminService {
 
 export class AdminServiceTag extends Context.Service<AdminServiceTag, AdminService>()(
   "@effect-auth/AdminService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link AdminServiceLayer}.
+   */
+  static readonly layer = (config: AdminConfig = {}) => AdminServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const AdminService = AdminServiceTag;

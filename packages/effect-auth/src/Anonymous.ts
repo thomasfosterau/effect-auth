@@ -77,7 +77,13 @@ export interface AnonymousService {
 
 export class AnonymousServiceTag extends Context.Service<AnonymousServiceTag, AnonymousService>()(
   "@effect-auth/AnonymousService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link AnonymousServiceLayer}.
+   */
+  static readonly layer = (config: AnonymousConfig = {}) => AnonymousServiceLayer(config);
+}
 
 export const AnonymousService = AnonymousServiceTag;
 

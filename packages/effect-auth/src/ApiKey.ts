@@ -240,7 +240,13 @@ export interface ApiKeyService {
 
 export class ApiKeyServiceTag extends Context.Service<ApiKeyServiceTag, ApiKeyService>()(
   "@effect-auth/ApiKeyService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link ApiKeyServiceLayer}.
+   */
+  static readonly layer = (config: ApiKeyConfig = {}) => ApiKeyServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const ApiKeyService = ApiKeyServiceTag;

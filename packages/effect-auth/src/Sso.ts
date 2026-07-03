@@ -159,7 +159,13 @@ export interface SsoService {
 
 export class SsoServiceTag extends Context.Service<SsoServiceTag, SsoService>()(
   "@effect-auth/SsoService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link SsoServiceLayer}.
+   */
+  static readonly layer = (config: SsoConfig = {}) => SsoServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const SsoService = SsoServiceTag;

@@ -280,7 +280,13 @@ export interface WebAuthnService {
 
 export class WebAuthnServiceTag extends Context.Service<WebAuthnServiceTag, WebAuthnService>()(
   "@effect-auth/WebAuthnService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link WebAuthnServiceLayer}.
+   */
+  static readonly layer = (config: WebAuthnConfig) => WebAuthnServiceLayer(config);
+}
 
 // Public ergonomic alias
 export const WebAuthnService = WebAuthnServiceTag;

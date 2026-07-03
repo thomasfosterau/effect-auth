@@ -170,7 +170,13 @@ export interface PhoneOtpService {
 
 export class PhoneOtpServiceTag extends Context.Service<PhoneOtpServiceTag, PhoneOtpService>()(
   "@effect-auth/PhoneOtpService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link PhoneOtpServiceLayer}.
+   */
+  static readonly layer = (config: PhoneOtpConfig) => PhoneOtpServiceLayer(config);
+}
 
 export const PhoneOtpService = PhoneOtpServiceTag;
 

@@ -154,7 +154,13 @@ export interface EmailPasswordService {
 export class EmailPasswordServiceTag extends Context.Service<
   EmailPasswordServiceTag,
   EmailPasswordService
->()("@effect-auth/EmailPasswordService") {}
+>()("@effect-auth/EmailPasswordService") {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link EmailPasswordServiceLayer}.
+   */
+  static readonly layer = (config: EmailPasswordConfig = {}) => EmailPasswordServiceLayer(config);
+}
 
 export const EmailPasswordService = EmailPasswordServiceTag;
 

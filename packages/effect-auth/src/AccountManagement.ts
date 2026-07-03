@@ -149,7 +149,14 @@ export interface AccountManagementService {
 export class AccountManagementServiceTag extends Context.Service<
   AccountManagementServiceTag,
   AccountManagementService
->()("@effect-auth/AccountManagementService") {}
+>()("@effect-auth/AccountManagementService") {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link AccountManagementServiceLayer}.
+   */
+  static readonly layer = (config: AccountManagementConfig) =>
+    AccountManagementServiceLayer(config);
+}
 
 export const AccountManagementService = AccountManagementServiceTag;
 

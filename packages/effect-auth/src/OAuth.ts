@@ -701,7 +701,16 @@ export interface OAuthService {
 
 export class OAuthServiceTag extends Context.Service<OAuthServiceTag, OAuthService>()(
   "@effect-auth/OAuthService",
-) {}
+) {
+  /**
+   * Construct a Layer providing this service — the canonical form of
+   * {@link OAuthServiceLayer}.
+   */
+  static readonly layer = (
+    providers: Record<string, OAuthProvider>,
+    options: OAuthServiceOptions = {},
+  ) => OAuthServiceLayer(providers, options);
+}
 
 // Public ergonomic alias
 export const OAuthService = OAuthServiceTag;
