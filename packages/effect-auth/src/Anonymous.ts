@@ -118,5 +118,5 @@ export const makeAnonymousService = (
     }),
   );
 
-export const AnonymousServiceLayer = (config?: AnonymousConfig) =>
+export const AnonymousServiceLayer = (config: AnonymousConfig = {}) =>
   Layer.effect(AnonymousServiceTag, makeAnonymousService(config));

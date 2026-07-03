@@ -244,5 +244,5 @@ export const makeUsernameService = (
     };
   });
 
-export const UsernameServiceLayer = (config?: UsernameConfig) =>
+export const UsernameServiceLayer = (config: UsernameConfig = {}) =>
   Layer.effect(UsernameServiceTag, makeUsernameService(config));

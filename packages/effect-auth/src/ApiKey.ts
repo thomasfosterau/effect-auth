@@ -287,7 +287,9 @@ const hasRequiredPermissions = (
 /**
  * Create an API key service
  */
-export const makeApiKeyService = (config?: ApiKeyConfig): Effect.Effect<ApiKeyService, never> => {
+export const makeApiKeyService = (
+  config: ApiKeyConfig = {},
+): Effect.Effect<ApiKeyService, never> => {
   const defaultPrefix = config?.defaultPrefix ?? "ak_";
   const keyLength = config?.keyLength ?? 32;
   const defaultExpiresIn = config?.defaultExpiresIn;
@@ -505,5 +507,5 @@ export const makeApiKeyService = (config?: ApiKeyConfig): Effect.Effect<ApiKeySe
   );
 };
 
-export const ApiKeyServiceLayer = (config?: ApiKeyConfig) =>
+export const ApiKeyServiceLayer = (config: ApiKeyConfig = {}) =>
   Layer.effect(ApiKeyServiceTag, makeApiKeyService(config));

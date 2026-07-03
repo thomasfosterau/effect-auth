@@ -96,7 +96,7 @@ export interface AdminConfig {
  * Whether a user is an administrator under the given config: either their id
  * is in `adminUserIds` or their `attributes.role` is one of `adminRoles`.
  */
-export const isAdmin = (user: Types.User, config?: AdminConfig): boolean => {
+export const isAdmin = (user: Types.User, config: AdminConfig = {}): boolean => {
   const adminRoles = config?.adminRoles ?? ["admin"];
   const adminUserIds = config?.adminUserIds ?? [];
   if (adminUserIds.includes(user.id)) {
