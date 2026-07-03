@@ -13,7 +13,8 @@
  *
  * @module svelte
  */
-import type { AuthClient, SessionState } from "./Client.js";
+import type { AuthClient, AuthClientError, SessionState } from "./Client.js";
+import type { SessionView } from "./types.js";
 
 /** Svelte's readable-store contract. */
 export interface Readable<T> {
@@ -30,3 +31,57 @@ export const sessionStore = (client: AuthClient): Readable<SessionState> => ({
     return client.session.subscribe(() => run(client.session.get()));
   },
 });
+
+/** The state emitted by {@link listSessionsStore}. */
+export interface ListSessionsState {
+  readonly data: readonly SessionView[] | null;
+  readonly isPending: boolean;
+  readonly error: AuthClientError | null;
+}
+
+/** A readable store over the user's active sessions, with a refetch handle. */
+export interface ListSessionsStore extends Readable<ListSessionsState> {
+  /** Re-run the query (e.g. after revoking a session). */
+  readonly refetch: () => void;
+}
+
+/**
+ * Fetch the authenticated user's active sessions as a readable store. The
+ * first subscription triggers the fetch; call `refetch()` to refresh.
+ * Mirrors the React `useListSessions` hook.
+ */
+export const listSessionsStore = (client: AuthClient): ListSessionsStore => {
+  let state: ListSessionsState = { data: null, isPending: true, error: null };
+  const subscribers = new Set<(value: ListSessionsState) => void>();
+  let fetched = false;
+
+  const set = (next: ListSessionsState) => {
+    state = next;
+    for (const run of subscribers) {
+      run(state);
+    }
+  };
+
+  const refetch = () => {
+    set({ ...state, isPending: true });
+    client.listSessions().then(
+      (sessions) => set({ data: sessions, isPending: false, error: null }),
+      (cause: AuthClientError) => set({ data: null, isPending: false, error: cause }),
+    );
+  };
+
+  return {
+    refetch,
+    subscribe: (run) => {
+      subscribers.add(run);
+      run(state);
+      if (!fetched) {
+        fetched = true;
+        refetch();
+      }
+      return () => {
+        subscribers.delete(run);
+      };
+    },
+  };
+};
