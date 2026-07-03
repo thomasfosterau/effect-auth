@@ -146,10 +146,6 @@ description: "API reference for the HttpApiSchemas module."
   - [SignInPayload (type alias)](#signinpayload-type-alias)
   - [SignUpPayload](#signuppayload)
   - [SignUpPayload (type alias)](#signuppayload-type-alias)
-  - [SiweNonceView](#siwenonceview)
-  - [SiweNonceView (type alias)](#siwenonceview-type-alias)
-  - [SiweVerifyPayload](#siweverifypayload)
-  - [SiweVerifyPayload (type alias)](#siweverifypayload-type-alias)
   - [SsoCallbackPayload](#ssocallbackpayload)
   - [SsoCallbackPayload (type alias)](#ssocallbackpayload-type-alias)
   - [SsoProviderView](#ssoproviderview)
@@ -1839,48 +1835,6 @@ export declare const SignUpPayload: Schema.Struct<{
 
 ```ts
 export type SignUpPayload = typeof SignUpPayload.Type;
-```
-
-## SiweNonceView
-
-A single-use SIWE nonce and its expiry (epoch millis).
-
-**Signature**
-
-```ts
-export declare const SiweNonceView: Schema.Struct<{
-  readonly nonce: Schema.String;
-  readonly expiresAt: Schema.Number;
-}>;
-```
-
-## SiweNonceView (type alias)
-
-**Signature**
-
-```ts
-export type SiweNonceView = typeof SiweNonceView.Type;
-```
-
-## SiweVerifyPayload
-
-Request body for completing a SIWE sign-in.
-
-**Signature**
-
-```ts
-export declare const SiweVerifyPayload: Schema.Struct<{
-  readonly message: Schema.String;
-  readonly signature: Schema.String;
-}>;
-```
-
-## SiweVerifyPayload (type alias)
-
-**Signature**
-
-```ts
-export type SiweVerifyPayload = typeof SiweVerifyPayload.Type;
 ```
 
 ## SsoCallbackPayload

@@ -48,7 +48,6 @@ for flexible, composable authentication flows.
   - [From "./Resolvers.js"](#from-resolversjs)
   - [From "./Scope.js"](#from-scopejs)
   - [From "./Session.js"](#from-sessionjs)
-  - [From "./Siwe.js"](#from-siwejs)
   - [From "./Sso.js"](#from-ssojs)
   - [From "./TwoFactor.js"](#from-twofactorjs)
   - [From "./Types.js"](#from-typesjs)
@@ -388,16 +387,6 @@ Session management (following Lucia/Copenhagen guidelines).
 
 ```ts
 export * from "./Session.js";
-```
-
-## From "./Siwe.js"
-
-Sign-In With Ethereum (EIP-4361); verifier implemented by @effect-auth/siwe.
-
-**Signature**
-
-```ts
-export * from "./Siwe.js";
 ```
 
 ## From "./Sso.js"

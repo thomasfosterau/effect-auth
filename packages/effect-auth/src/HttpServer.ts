@@ -53,7 +53,6 @@ import {
 } from "./OidcProvider.js";
 import { SsoServiceTag, SsoProviderStoreTag, type SsoProvider } from "./Sso.js";
 import { OAuthStateStoreTag, OAuthUserStoreTag } from "./OAuth.js";
-import { SiweServiceTag, SiweNonceStoreTag, SiweUserStoreTag, SiweVerifierTag } from "./Siwe.js";
 import { GoogleOneTapServiceTag } from "./GoogleOneTap.js";
 import {
   decodeSessionCacheCookie,
@@ -433,29 +432,6 @@ const resolveSso = Effect.gen(function* () {
       Effect.provideService(SsoProviderStoreTag, providerStore.value),
       Effect.provideService(OAuthStateStoreTag, stateStore.value),
       Effect.provideService(OAuthUserStoreTag, userStore.value),
-    );
-  return { service: service.value, provideStores };
-});
-
-/** Resolve the SIWE service, its stores, and the signature verifier, or 404. */
-const resolveSiwe = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(SiweServiceTag);
-  const nonceStore = yield* Effect.serviceOption(SiweNonceStoreTag);
-  const userStore = yield* Effect.serviceOption(SiweUserStoreTag);
-  const verifier = yield* Effect.serviceOption(SiweVerifierTag);
-  if (
-    Option.isNone(service) ||
-    Option.isNone(nonceStore) ||
-    Option.isNone(userStore) ||
-    Option.isNone(verifier)
-  ) {
-    return yield* new S.NotFound({ message: "Sign-In With Ethereum is not enabled" });
-  }
-  const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(
-      Effect.provideService(SiweNonceStoreTag, nonceStore.value),
-      Effect.provideService(SiweUserStoreTag, userStore.value),
-      Effect.provideService(SiweVerifierTag, verifier.value),
     );
   return { service: service.value, provideStores };
 });
@@ -2138,40 +2114,6 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           return { keys: jwks.keys.map((k) => ({ ...k })) };
-        }),
-      )
-      // --- Sign-In With Ethereum ----------------------------------------------
-      .handle("siweNonce", () =>
-        Effect.gen(function* () {
-          const siwe = yield* resolveSiwe;
-          return yield* siwe.provideStores(siwe.service.generateNonce()).pipe(
-            Effect.catchTags({
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-            }),
-          );
-        }),
-      )
-      .handle("signInSiwe", ({ payload }) =>
-        Effect.gen(function* () {
-          const siwe = yield* resolveSiwe;
-          const result = yield* siwe
-            .provideStores(
-              siwe.service.verify({ message: payload.message, signature: payload.signature }),
-            )
-            .pipe(
-              Effect.catchTags({
-                // A failed verification is a failed authentication attempt.
-                SiweError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                RateLimitError: (e) =>
-                  Effect.fail(new S.InternalServerError({ message: e.message })),
-              }),
-            );
-          const body: S.AuthSuccess = {
-            user: S.encodeUser(result.user),
-            needsEmailVerification: false,
-          };
-          return yield* withSessionCookie(body, result.session, cfg, "siwe");
         }),
       )
       // --- Google One Tap -------------------------------------------------------
