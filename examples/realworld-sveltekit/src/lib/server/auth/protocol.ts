@@ -121,14 +121,9 @@ const passwordResetUserStore: Auth.PasswordResetUserStore = {
 /** User profile store backed by the existing `users` table. */
 const userServiceStore: Auth.UserServiceStore = {
   get: (userId) =>
-    Effect.gen(function* () {
+    Effect.sync(() => {
       const row = db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
-      if (!row) {
-        return yield* Effect.fail(
-          new Auth.UserNotFoundError({ message: "User not found", userId }),
-        );
-      }
-      return rowToUser(row);
+      return row ? rowToUser(row) : null;
     }),
   getByEmail: (email) => emailPasswordStore.getUserByEmail(email),
   update: (user) =>

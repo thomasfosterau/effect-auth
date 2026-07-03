@@ -29,19 +29,7 @@ const sessionStore = {
       return session;
     }),
 
-  get: (sessionId: string) =>
-    Effect.gen(function* () {
-      const session = sessions.get(sessionId);
-      if (!session) {
-        return yield* Effect.fail(
-          new Errors.SessionNotFoundError({
-            message: "Session not found",
-            sessionId,
-          }),
-        );
-      }
-      return session;
-    }),
+  get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
 
   update: (session: Session) =>
     Effect.sync(() => {
@@ -68,27 +56,9 @@ const sessionStore = {
 };
 
 const userStore = {
-  get: (userId: string) =>
-    Effect.gen(function* () {
-      const user = users.get(userId);
-      if (!user) {
-        return yield* Effect.fail(
-          new Errors.UserNotFoundError({
-            message: "User not found",
-            userId,
-          }),
-        );
-      }
-      return user;
-    }),
+  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
 
-  getCredentials: (userId: string) =>
-    Effect.fail(
-      new Errors.UserNotFoundError({
-        message: "User credentials not found",
-        userId,
-      }),
-    ),
+  getCredentials: (_userId: string) => Effect.succeed(null),
 };
 
 const addUser = (user: User) => {

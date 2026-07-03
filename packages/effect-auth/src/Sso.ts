@@ -308,6 +308,9 @@ export const makeSsoService = (config: SsoConfig = {}): Effect.Effect<SsoService
         const stateEntry = yield* stateStore
           .get(state)
           .pipe(Effect.mapError(() => new SsoError({ message: "SSO state not found or expired" })));
+        if (stateEntry === null) {
+          return yield* new SsoError({ message: "SSO state not found or expired" });
+        }
         if (Date.now() > stateEntry.expiresAt) {
           yield* stateStore.delete(state);
           return yield* new SsoError({ message: "SSO state expired" });

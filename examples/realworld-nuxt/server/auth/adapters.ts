@@ -28,14 +28,9 @@ export const sessionStore: Auth.SessionStore = {
       return session;
     }),
   get: (sessionId) =>
-    Effect.gen(function* () {
+    Effect.sync(() => {
       const row = db.select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)).get();
-      if (!row) {
-        return yield* Effect.fail(
-          new Auth.SessionNotFoundError({ message: "Session not found", sessionId }),
-        );
-      }
-      return rowToSession(row);
+      return row ? rowToSession(row) : null;
     }),
   update: (session) =>
     Effect.sync(() => {
@@ -70,13 +65,9 @@ export const sessionStore: Auth.SessionStore = {
 
 export const userStore: Auth.UserStore = {
   get: (userId) =>
-    Effect.gen(function* () {
+    Effect.sync(() => {
       const row = db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
-      if (!row) {
-        return yield* Effect.fail(
-          new Auth.UserNotFoundError({ message: "User not found", userId }),
-        );
-      }
+      if (!row) return null;
       return {
         id: row.id,
         email: row.email,
@@ -88,17 +79,12 @@ export const userStore: Auth.UserStore = {
       } satisfies Auth.User;
     }),
   getCredentials: (userId) =>
-    Effect.gen(function* () {
+    Effect.sync(() => {
       const row = db
         .select({ passwordHash: schema.users.passwordHash })
         .from(schema.users)
         .where(eq(schema.users.id, userId))
         .get();
-      if (!row) {
-        return yield* Effect.fail(
-          new Auth.UserNotFoundError({ message: "User not found", userId }),
-        );
-      }
-      return row.passwordHash;
+      return row?.passwordHash ?? null;
     }),
 };

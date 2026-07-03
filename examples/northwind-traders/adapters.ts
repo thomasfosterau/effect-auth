@@ -32,18 +32,7 @@ export const sessionStore: Auth.SessionStore = {
       sessions.set(session.id, session);
       return session;
     }),
-  get: (sessionId) =>
-    Effect.suspend(() => {
-      const session = sessions.get(sessionId);
-      return session
-        ? Effect.succeed(session)
-        : Effect.fail(
-            new Auth.SessionNotFoundError({
-              message: "Session not found",
-              sessionId,
-            }),
-          );
-    }),
+  get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
   update: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -75,19 +64,11 @@ const employeeToUser = (employee: Employee): Auth.User => ({
 
 export const userStore: Auth.UserStore = {
   get: (userId) =>
-    Effect.suspend(() => {
+    Effect.sync(() => {
       const employee = employees.get(userId);
-      return employee
-        ? Effect.succeed(employeeToUser(employee))
-        : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId }));
+      return employee ? employeeToUser(employee) : null;
     }),
-  getCredentials: (userId) =>
-    Effect.suspend(() => {
-      const hash = passwords.get(userId);
-      return hash
-        ? Effect.succeed(hash)
-        : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId }));
-    }),
+  getCredentials: (userId) => Effect.sync(() => passwords.get(userId) ?? null),
 };
 
 // ---------------------------------------------------------------------------
@@ -121,11 +102,9 @@ const updateEmployeeFromUser = (user: Auth.User): Employee => {
 
 export const userServiceStore: Auth.UserServiceStore = {
   get: (userId) =>
-    Effect.suspend(() => {
+    Effect.sync(() => {
       const employee = employees.get(userId);
-      return employee
-        ? Effect.succeed(employeeToUser(employee))
-        : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId }));
+      return employee ? employeeToUser(employee) : null;
     }),
   getByEmail: (email) =>
     Effect.sync(() => {
@@ -250,13 +229,7 @@ export const oauthStateStore: Auth.OAuthStateStore = {
       oauthStates.set(state.state, state);
       return state;
     }),
-  get: (state) =>
-    Effect.suspend(() => {
-      const entry = oauthStates.get(state);
-      return entry
-        ? Effect.succeed(entry)
-        : Effect.fail(new Auth.AuthError({ message: `OAuth state not found: ${state}` }));
-    }),
+  get: (state) => Effect.sync(() => oauthStates.get(state) ?? null),
   delete: (state) =>
     Effect.sync(() => {
       oauthStates.delete(state);

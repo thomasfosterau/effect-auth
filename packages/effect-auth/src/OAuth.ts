@@ -146,7 +146,8 @@ export interface OAuthCallbackResult {
  */
 export interface OAuthStateStore {
   readonly create: (state: OAuthState) => Effect.Effect<OAuthState, AuthError>;
-  readonly get: (state: string) => Effect.Effect<OAuthState, AuthError>;
+  /** Get a pending state entry, or `null` when unknown/expired-and-purged. */
+  readonly get: (state: string) => Effect.Effect<OAuthState | null, AuthError>;
   readonly delete: (state: string) => Effect.Effect<void, AuthError>;
 }
 
@@ -747,14 +748,13 @@ export const makeOAuthService = (
     Effect.gen(function* () {
       const stateStore = yield* OAuthStateStoreTag;
 
-      const stateEntry = yield* Effect.catchTag(stateStore.get(state), "AuthError", () =>
-        Effect.fail(
-          new OAuthStateNotFoundError({
-            message: "OAuth state not found or expired",
-            state,
-          }),
-        ),
-      );
+      const stateEntry = yield* stateStore.get(state);
+      if (stateEntry === null) {
+        return yield* new OAuthStateNotFoundError({
+          message: "OAuth state not found or expired",
+          state,
+        });
+      }
 
       if (Date.now() > stateEntry.expiresAt) {
         yield* stateStore.delete(state);
@@ -802,6 +802,9 @@ export const makeOAuthService = (
           if (options?.returnTo) {
             const stateStore = yield* OAuthStateStoreTag;
             const stateEntry = yield* stateStore.get(result.state);
+            if (stateEntry === null) {
+              return yield* new AuthError({ message: "OAuth state missing after creation" });
+            }
             // Delete old state and create new one with returnTo
             yield* stateStore.delete(result.state);
             yield* stateStore.create({
@@ -819,14 +822,13 @@ export const makeOAuthService = (
           const accountStore = yield* OAuthAccountStoreTag;
 
           // Verify state
-          const stateEntry = yield* Effect.catchTag(stateStore.get(state), "AuthError", () =>
-            Effect.fail(
-              new OAuthStateNotFoundError({
-                message: "OAuth state not found or expired",
-                state,
-              }),
-            ),
-          );
+          const stateEntry = yield* stateStore.get(state);
+          if (stateEntry === null) {
+            return yield* new OAuthStateNotFoundError({
+              message: "OAuth state not found or expired",
+              state,
+            });
+          }
 
           // Check expiration
           if (Date.now() > stateEntry.expiresAt) {
@@ -1023,14 +1025,13 @@ export const makeOAuthService = (
           const accountStore = yield* OAuthAccountStoreTag;
 
           // Verify state
-          const stateEntry = yield* Effect.catchTag(stateStore.get(state), "AuthError", () =>
-            Effect.fail(
-              new OAuthStateNotFoundError({
-                message: "OAuth state not found or expired",
-                state,
-              }),
-            ),
-          );
+          const stateEntry = yield* stateStore.get(state);
+          if (stateEntry === null) {
+            return yield* new OAuthStateNotFoundError({
+              message: "OAuth state not found or expired",
+              state,
+            });
+          }
 
           if (stateEntry.provider !== provider) {
             return yield* Effect.fail(

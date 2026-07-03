@@ -12,7 +12,6 @@ import {
 } from "./AccountManagement.js";
 import { UserServiceStoreTag, type UserServiceStore } from "./User.js";
 import { SessionManagerTag, type SessionManager } from "./Session.js";
-import { UserNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
 
 interface Harness {
@@ -61,13 +60,7 @@ const makeHarness = (): Harness => {
   addUser(makeUser("user-2", "bob@example.com"));
 
   const userStore: UserServiceStore = {
-    get: (userId) =>
-      Effect.suspend(() => {
-        const user = users.get(userId);
-        return user === undefined
-          ? Effect.fail(new UserNotFoundError({ message: "not found", userId }))
-          : Effect.succeed(user);
-      }),
+    get: (userId) => Effect.sync(() => users.get(userId) ?? null),
     getByEmail: (email) =>
       Effect.sync(() => {
         const id = emailToId.get(email);

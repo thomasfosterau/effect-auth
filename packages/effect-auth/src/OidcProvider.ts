@@ -19,7 +19,7 @@
  */
 import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
-import type { AuthError, UserNotFoundError } from "./Errors.js";
+import type { AuthError } from "./Errors.js";
 import { JwtServiceTag, JwtKeyStoreTag } from "./Jwt.js";
 import { UserStoreTag } from "./Session.js";
 import type * as Types from "./Types.js";
@@ -562,10 +562,12 @@ export const makeOidcProviderService = (
           .get(grant.userId)
           .pipe(
             Effect.mapError(
-              (e: UserNotFoundError) =>
-                new OidcTokenError({ error: "invalid_grant", description: e.message }),
+              (e) => new OidcTokenError({ error: "invalid_grant", description: e.message }),
             ),
           );
+        if (user === null) {
+          return yield* new OidcTokenError({ error: "invalid_grant", description: "Unknown user" });
+        }
         const jwt = yield* JwtServiceTag;
         const signed = yield* jwt
           .sign(user, {
@@ -948,6 +950,9 @@ export const makeOidcProviderService = (
               () => new OidcProviderError({ message: "Invalid or expired access token" }),
             ),
           );
+        if (user === null) {
+          return yield* new OidcProviderError({ message: "Invalid or expired access token" });
+        }
         return claimsFor(user, record.scopes);
       }),
 

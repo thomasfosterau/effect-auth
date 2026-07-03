@@ -272,16 +272,7 @@ describe("Hooks - integration with EmailPasswordService", () => {
           sessions.set(session.id, session);
           return session;
         }),
-      get: (sessionId: string) =>
-        Effect.gen(function* () {
-          const session = sessions.get(sessionId);
-          if (!session) {
-            return yield* Effect.fail(
-              new Errors.SessionNotFoundError({ message: "not found", sessionId }),
-            );
-          }
-          return session;
-        }),
+      get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
       update: (session: Session) =>
         Effect.sync(() => {
           sessions.set(session.id, session);
@@ -304,22 +295,8 @@ describe("Hooks - integration with EmailPasswordService", () => {
     };
 
     const userStore = {
-      get: (userId: string) =>
-        Effect.gen(function* () {
-          const user = users.get(userId);
-          if (!user) {
-            return yield* Effect.fail(new Errors.UserNotFoundError({ message: "nf", userId }));
-          }
-          return user;
-        }),
-      getCredentials: (userId: string) =>
-        Effect.gen(function* () {
-          const hash = passwordHashes.get(userId);
-          if (!hash) {
-            return yield* Effect.fail(new Errors.UserNotFoundError({ message: "nf", userId }));
-          }
-          return hash;
-        }),
+      get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
+      getCredentials: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     };
 
     const emailPasswordStore = {

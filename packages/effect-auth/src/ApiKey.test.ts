@@ -22,7 +22,7 @@ const apiKeyStore = {
       return apiKey;
     }),
 
-  getById: (id: string) => Effect.sync(() => apiKeys.get(id) ?? null),
+  get: (id: string) => Effect.sync(() => apiKeys.get(id) ?? null),
 
   getByHash: (keyHash: string) =>
     Effect.sync(() => {

@@ -6,7 +6,6 @@ import { type UserStore } from "./Session.js";
 import { UserStore as UserStoreTag } from "./Session.js";
 import { PasswordHasherLive, makePasswordHasher } from "./Password.js";
 import type { User } from "./Types.js";
-import { UserNotFoundError } from "./Errors.js";
 import { makeUserService, UserService, UserServiceStore } from "./User.js";
 
 // Mock stores for testing
@@ -27,22 +26,8 @@ const users = new Map<string, User>([
 const credentials = new Map<string, string>();
 
 const mockUserStore: UserStore = {
-  get: (userId) =>
-    Effect.gen(function* () {
-      const user = users.get(userId);
-      if (!user) {
-        return yield* Effect.fail(new UserNotFoundError({ message: "Not found", userId }));
-      }
-      return user;
-    }),
-  getCredentials: (userId) =>
-    Effect.gen(function* () {
-      const hash = credentials.get(userId);
-      if (!hash) {
-        return yield* Effect.fail(new UserNotFoundError({ message: "Not found", userId }));
-      }
-      return hash;
-    }),
+  get: (userId) => Effect.sync(() => users.get(userId) ?? null),
+  getCredentials: (userId) => Effect.sync(() => credentials.get(userId) ?? null),
 };
 
 describe("Resolvers", () => {
@@ -162,14 +147,7 @@ describe("Resolvers", () => {
     const usersByEmail = new Map<string, string>();
 
     const userServiceStore = {
-      get: (userId: string) =>
-        Effect.gen(function* () {
-          const user = userRecords.get(userId);
-          if (!user) {
-            return yield* Effect.fail(new UserNotFoundError({ message: "Not found", userId }));
-          }
-          return user;
-        }),
+      get: (userId: string) => Effect.sync(() => userRecords.get(userId) ?? null),
 
       getByEmail: (email: string) =>
         Effect.sync(() => {

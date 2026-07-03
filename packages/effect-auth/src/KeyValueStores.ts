@@ -166,13 +166,7 @@ export const makeOAuthStateStoreKV: Effect.Effect<
     get: (state) =>
       kv
         .read<OAuthState>(oauthStateKey(state), "oauthState.get")
-        .pipe(
-          Effect.flatMap((entry) =>
-            entry
-              ? Effect.succeed(entry)
-              : Effect.fail(new Errors.AuthError({ message: `OAuth state not found: ${state}` })),
-          ),
-        ),
+        .pipe(Effect.map((entry) => entry ?? null)),
     delete: (state) => kv.remove(oauthStateKey(state), "oauthState.delete"),
   } satisfies OAuthStateStore;
 });
@@ -230,11 +224,7 @@ export const makeChallengeStoreKV: Effect.Effect<
     get: (challenge) =>
       kv.read<StoredChallenge>(challengeKey(challenge), "challenge.get").pipe(
         Effect.orDie,
-        Effect.flatMap((stored) =>
-          stored
-            ? Effect.succeed(decodeChallenge(stored))
-            : Effect.fail(new Errors.ChallengeNotFoundError({ message: "Challenge not found" })),
-        ),
+        Effect.map((stored) => (stored ? decodeChallenge(stored) : null)),
       ),
     delete: (challenge) => kv.remove(challengeKey(challenge), "challenge.delete"),
   } satisfies ChallengeStore;

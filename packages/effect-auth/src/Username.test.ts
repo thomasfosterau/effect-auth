@@ -26,7 +26,6 @@ import {
 } from "./Session.js";
 import type { SessionStore, UserStore } from "./Session.js";
 import { Hooks } from "./Hooks.js";
-import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
 
 const hasher = makeScryptHasher({ cost: 16384 });
@@ -96,13 +95,7 @@ const sessionStore: SessionStore = {
       sessions.set(session.id, session);
       return session;
     }),
-  get: (sessionId) =>
-    Effect.suspend(() => {
-      const session = sessions.get(sessionId);
-      return session === undefined
-        ? Effect.fail(new SessionNotFoundError({ message: "not found", sessionId }))
-        : Effect.succeed(session);
-    }),
+  get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
   update: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -118,20 +111,8 @@ const sessionStore: SessionStore = {
 };
 
 const userStore: UserStore = {
-  get: (userId) =>
-    Effect.suspend(() => {
-      const user = usersById.get(userId);
-      return user === undefined
-        ? Effect.fail(new UserNotFoundError({ message: "not found", userId }))
-        : Effect.succeed(user);
-    }),
-  getCredentials: (userId) =>
-    Effect.suspend(() => {
-      const hash = passwordHashes.get(userId);
-      return hash === undefined
-        ? Effect.fail(new UserNotFoundError({ message: "no creds", userId }))
-        : Effect.succeed(hash);
-    }),
+  get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
+  getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
 };
 
 const baseDeps = Layer.mergeAll(

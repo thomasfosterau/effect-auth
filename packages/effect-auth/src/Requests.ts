@@ -82,7 +82,7 @@ export const InvalidateUserSessionsRequest = Request.tagged<InvalidateUserSessio
  */
 export interface VerifyCredentialsRequest extends Request.Request<
   Types.User,
-  Errors.InvalidCredentialsError | Errors.UserNotFoundError | Errors.HashingError
+  Errors.InvalidCredentialsError | Errors.UserNotFoundError | Errors.HashingError | Errors.AuthError
 > {
   readonly _tag: "VerifyCredentialsRequest";
   readonly userId: string;
@@ -262,7 +262,10 @@ export const ResetPasswordRequest = Request.tagged<ResetPasswordRequest>("ResetP
  * Request to fetch a user by ID
  * @deprecated The Request/Resolver surface is vestigial — nothing in the library, examples, or docs-site code uses it. Call the service APIs directly (e.g. `SessionManager`, `AuthLifecycleService`). Scheduled for removal in 1.0 (DESIGN.md D6).
  */
-export interface GetUserRequest extends Request.Request<Types.User, Errors.UserNotFoundError> {
+export interface GetUserRequest extends Request.Request<
+  Types.User,
+  Errors.UserNotFoundError | Errors.AuthError
+> {
   readonly _tag: "GetUserRequest";
   readonly userId: string;
 }

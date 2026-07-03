@@ -16,9 +16,9 @@ export interface SessionStore {
   readonly create: (session: Types.Session) => Effect.Effect<Types.Session, Errors.AuthError>;
 
   /**
-   * Get a session by ID
+   * Get a session by ID, or `null` when no such session exists.
    */
-  readonly get: (sessionId: string) => Effect.Effect<Types.Session, Errors.SessionNotFoundError>;
+  readonly get: (sessionId: string) => Effect.Effect<Types.Session | null, Errors.AuthError>;
 
   /**
    * Update a session
@@ -59,14 +59,15 @@ export const SessionStore = SessionStoreTag;
  */
 export interface UserStore {
   /**
-   * Get a user by ID
+   * Get a user by ID, or `null` when no such user exists.
    */
-  readonly get: (userId: string) => Effect.Effect<Types.User, Errors.UserNotFoundError>;
+  readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
   /**
-   * Get user credentials (hashed password)
+   * Get user credentials (hashed password), or `null` when the user does not
+   * exist or has no password set.
    */
-  readonly getCredentials: (userId: string) => Effect.Effect<string, Errors.UserNotFoundError>;
+  readonly getCredentials: (userId: string) => Effect.Effect<string | null, Errors.AuthError>;
 }
 
 /**
@@ -209,6 +210,12 @@ export const makeSessionManager = (
           const { sessionId } = yield* hooks.beforeValidateSession({ sessionId: rawSessionId });
 
           const session = yield* sessionStore.get(sessionId);
+          if (session === null) {
+            return yield* new Errors.SessionNotFoundError({
+              message: "Session not found",
+              sessionId,
+            });
+          }
 
           // Check if session is expired
           const now = new Date();
@@ -268,6 +275,12 @@ export const makeSessionManager = (
 
           // Get user
           const user = yield* userStore.get(session.userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({
+              message: "User not found",
+              userId: session.userId,
+            });
+          }
 
           return yield* hooks.afterValidateSession({
             session: updatedSession,
@@ -305,6 +318,12 @@ export const makeSessionManager = (
       setSessionAttributes: (sessionId, attributes) =>
         Effect.gen(function* () {
           const session = yield* sessionStore.get(sessionId);
+          if (session === null) {
+            return yield* new Errors.SessionNotFoundError({
+              message: "Session not found",
+              sessionId,
+            });
+          }
           const updated: Types.Session = {
             ...session,
             attributes: { ...session.attributes, ...attributes },

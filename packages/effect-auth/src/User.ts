@@ -3,7 +3,8 @@ import * as Errors from "./Errors.js";
 import type * as Types from "./Types.js";
 
 export interface UserServiceStore {
-  readonly get: (userId: string) => Effect.Effect<Types.User, Errors.UserNotFoundError>;
+  /** Get a user by ID, or `null` when no such user exists. */
+  readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
   readonly getByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
@@ -27,7 +28,7 @@ export interface UpdateUserInput {
 export interface UserService {
   readonly getUser: (
     userId: string,
-  ) => Effect.Effect<Types.User, Errors.UserNotFoundError, UserServiceStoreTag>;
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
 
   readonly getUserByEmail: (
     email: string,
@@ -66,13 +67,24 @@ export const UserService = UserServiceTag;
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
+/** Fetch a user from the store, failing with `UserNotFoundError` on a miss. */
+const getUserOrFail = (
+  store: UserServiceStore,
+  userId: string,
+): Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError> =>
+  Effect.flatMap(store.get(userId), (user) =>
+    user === null
+      ? Effect.fail(new Errors.UserNotFoundError({ message: "User not found", userId }))
+      : Effect.succeed(user),
+  );
+
 export const makeUserService = (): Effect.Effect<UserService, never> =>
   Effect.sync(
     (): UserService => ({
       getUser: (userId: string) =>
         Effect.gen(function* () {
           const store = yield* UserServiceStoreTag;
-          return yield* store.get(userId);
+          return yield* getUserOrFail(store, userId);
         }),
 
       getUserByEmail: (email: string) =>
@@ -105,7 +117,7 @@ export const makeUserService = (): Effect.Effect<UserService, never> =>
       updateUserAttributes: (userId: string, attributes: Record<string, unknown>) =>
         Effect.gen(function* () {
           const store = yield* UserServiceStoreTag;
-          const existing = yield* store.get(userId);
+          const existing = yield* getUserOrFail(store, userId);
 
           const updated: Types.User = {
             ...existing,
@@ -122,7 +134,7 @@ export const makeUserService = (): Effect.Effect<UserService, never> =>
       updateUser: (userId: string, updates: UpdateUserInput) =>
         Effect.gen(function* () {
           const store = yield* UserServiceStoreTag;
-          const existing = yield* store.get(userId);
+          const existing = yield* getUserOrFail(store, userId);
 
           const updated: Types.User = {
             ...existing,
@@ -137,7 +149,7 @@ export const makeUserService = (): Effect.Effect<UserService, never> =>
       markEmailVerified: (userId: string) =>
         Effect.gen(function* () {
           const store = yield* UserServiceStoreTag;
-          const existing = yield* store.get(userId);
+          const existing = yield* getUserOrFail(store, userId);
 
           const updated: Types.User = {
             ...existing,

@@ -158,23 +158,23 @@ describe("@effect-auth/sql stores over a real SqlClient", () => {
         yield* store.create({ ...session, id: "sess-3", userId: "user-2" });
         const loaded = yield* store.get("sess-1");
         const updated = yield* store.update({
-          ...loaded,
+          ...loaded!,
           lastActivityAt: new Date(now.getTime() + 1000),
           attributes: { device: "phone" },
         });
         const listed = yield* store.listByUserId("user-1");
         yield* store.delete("sess-2");
         yield* store.deleteByUserId("user-1");
-        const missing = yield* Effect.flip(store.get("sess-1"));
+        const missing = yield* store.get("sess-1");
         const other = yield* store.listByUserId("user-2");
         return { loaded, updated, listed, missing, other };
       }),
     );
-    expect(result.loaded.attributes).toEqual({ device: "laptop" });
-    expect(result.loaded.expiresAt).toBeInstanceOf(Date);
+    expect(result.loaded?.attributes).toEqual({ device: "laptop" });
+    expect(result.loaded?.expiresAt).toBeInstanceOf(Date);
     expect(result.updated.attributes).toEqual({ device: "phone" });
     expect(result.listed.map((s) => s.id).sort()).toEqual(["sess-1", "sess-2"]);
-    expect(result.missing._tag).toBe("SessionNotFoundError");
+    expect(result.missing).toBeNull();
     expect(result.other).toHaveLength(1);
   });
 
@@ -190,7 +190,7 @@ describe("@effect-auth/sql stores over a real SqlClient", () => {
         const hash = yield* emailPassword.getPasswordHash(created.id);
         const credentials = yield* users.getCredentials(created.id);
         const loaded = yield* users.get(created.id);
-        const missing = yield* Effect.flip(users.get("nope"));
+        const missing = yield* users.get("nope");
         return { created, byEmail, missingEmail, hash, credentials, loaded, missing };
       }),
     );
@@ -201,8 +201,8 @@ describe("@effect-auth/sql stores over a real SqlClient", () => {
     expect(result.missingEmail).toBeNull();
     expect(result.hash).toBe("hash-1");
     expect(result.credentials).toBe("hash-1");
-    expect(result.loaded.createdAt).toBeInstanceOf(Date);
-    expect(result.missing._tag).toBe("UserNotFoundError");
+    expect(result.loaded?.createdAt).toBeInstanceOf(Date);
+    expect(result.missing).toBeNull();
   });
 
   it("UserServiceStore updates and deletes users", async () => {
@@ -223,9 +223,9 @@ describe("@effect-auth/sql stores over a real SqlClient", () => {
         return { updated, loaded, gone };
       }),
     );
-    expect(result.loaded.emailVerified).toBe(true);
-    expect(result.loaded.name).toBe("Renamed");
-    expect(result.loaded.image).toBe("https://example.com/x.png");
+    expect(result.loaded?.emailVerified).toBe(true);
+    expect(result.loaded?.name).toBe("Renamed");
+    expect(result.loaded?.image).toBe("https://example.com/x.png");
     expect(result.gone).toBeNull();
   });
 
@@ -333,13 +333,13 @@ describe("@effect-auth/sql stores over a real SqlClient", () => {
         yield* store.create({ challenge: bytes, expiresAt: Date.now() + 90_000 });
         const loaded = yield* store.get(bytes);
         yield* store.delete(bytes);
-        const missing = yield* Effect.flip(store.get(bytes));
+        const missing = yield* store.get(bytes);
         return { loaded, missing };
       }),
     );
-    expect(Array.from(result.loaded.challenge)).toEqual([0, 1, 2, 250, 255]);
-    expect(result.loaded.userId).toBeUndefined();
-    expect(result.missing._tag).toBe("ChallengeNotFoundError");
+    expect(Array.from(result.loaded?.challenge ?? [])).toEqual([0, 1, 2, 250, 255]);
+    expect(result.loaded?.userId).toBeUndefined();
+    expect(result.missing).toBeNull();
   });
 
   it("CredentialStore roundtrips credentials incl. transports", async () => {
@@ -360,18 +360,18 @@ describe("@effect-auth/sql stores over a real SqlClient", () => {
         const loaded = yield* store.get("cred-1");
         yield* store.update({ ...credential, counter: 5 });
         const updated = yield* store.get("cred-1");
-        const byUser = yield* store.getByUserId("user-1");
+        const byUser = yield* store.listByUserId("user-1");
         yield* store.delete("cred-1");
-        const missing = yield* Effect.flip(store.get("cred-1"));
+        const missing = yield* store.get("cred-1");
         return { loaded, updated, byUser, missing };
       }),
     );
-    expect(Array.from(result.loaded.publicKey)).toEqual([9, 8, 7]);
-    expect(result.loaded.transports).toEqual(["internal", "hybrid"]);
-    expect(result.loaded.name).toBe("MacBook");
-    expect(result.updated.counter).toBe(5);
+    expect(Array.from(result.loaded?.publicKey ?? [])).toEqual([9, 8, 7]);
+    expect(result.loaded?.transports).toEqual(["internal", "hybrid"]);
+    expect(result.loaded?.name).toBe("MacBook");
+    expect(result.updated?.counter).toBe(5);
     expect(result.byUser).toHaveLength(1);
-    expect(result.missing._tag).toBe("CredentialNotFoundError");
+    expect(result.missing).toBeNull();
   });
 
   it("OAuthStateStore roundtrips states", async () => {
@@ -391,13 +391,13 @@ describe("@effect-auth/sql stores over a real SqlClient", () => {
         yield* store.create({ ...state, returnTo: "/dashboard" });
         const loaded = yield* store.get("st-1");
         yield* store.delete("st-1");
-        const missing = yield* Effect.flip(store.get("st-1"));
+        const missing = yield* store.get("st-1");
         return { loaded, missing };
       }),
     );
-    expect(result.loaded.returnTo).toBe("/dashboard");
-    expect(result.loaded.codeVerifier).toBe("cv");
-    expect(result.missing._tag).toBe("AuthError");
+    expect(result.loaded?.returnTo).toBe("/dashboard");
+    expect(result.loaded?.codeVerifier).toBe("cv");
+    expect(result.missing).toBeNull();
   });
 
   it("OAuthAccountStore upserts, links and unlinks accounts", async () => {

@@ -73,12 +73,12 @@ describe("KeyValueStores", () => {
           yield* store.create(state);
           const loaded = yield* store.get("state-1");
           yield* store.delete("state-1");
-          const missing = yield* Effect.flip(store.get("state-1"));
+          const missing = yield* store.get("state-1");
           return { loaded, missing };
         }),
       );
       expect(result.loaded).toEqual(state);
-      expect(result.missing._tag).toBe("AuthError");
+      expect(result.missing).toBeNull();
     });
   });
 
@@ -95,14 +95,14 @@ describe("KeyValueStores", () => {
           yield* store.create(challenge);
           const loaded = yield* store.get(challenge.challenge);
           yield* store.delete(challenge.challenge);
-          const missing = yield* Effect.flip(store.get(challenge.challenge));
+          const missing = yield* store.get(challenge.challenge);
           return { loaded, missing };
         }),
       );
-      expect(Array.from(result.loaded.challenge)).toEqual([1, 2, 3, 255, 0, 42]);
-      expect(result.loaded.userId).toBe("user-1");
-      expect(result.loaded.expiresAt).toBe(challenge.expiresAt);
-      expect(result.missing._tag).toBe("ChallengeNotFoundError");
+      expect(Array.from(result.loaded?.challenge ?? [])).toEqual([1, 2, 3, 255, 0, 42]);
+      expect(result.loaded?.userId).toBe("user-1");
+      expect(result.loaded?.expiresAt).toBe(challenge.expiresAt);
+      expect(result.missing).toBeNull();
     });
 
     it("stores anonymous challenges (no userId)", async () => {
@@ -117,7 +117,8 @@ describe("KeyValueStores", () => {
           return yield* store.get(challenge.challenge);
         }),
       );
-      expect(loaded.userId).toBeUndefined();
+      expect(loaded).not.toBeNull();
+      expect(loaded?.userId).toBeUndefined();
     });
   });
 

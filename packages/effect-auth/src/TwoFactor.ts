@@ -416,6 +416,9 @@ export const makeTwoFactorService = (
 
           // The otpauth:// label is the user's email
           const user = yield* userStore.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
 
           const secret = yield* generateBase32Secret();
 

@@ -20,7 +20,6 @@ import {
   type UserStore,
 } from "./Session.js";
 import { Hooks } from "./Hooks.js";
-import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
 
 const records = new Map<string, DeviceAuthorizationRecord>();
@@ -50,13 +49,7 @@ const sessionStore: SessionStore = {
       sessions.set(session.id, session);
       return session;
     }),
-  get: (sessionId) =>
-    Effect.suspend(() => {
-      const session = sessions.get(sessionId);
-      return session === undefined
-        ? Effect.fail(new SessionNotFoundError({ message: "not found", sessionId }))
-        : Effect.succeed(session);
-    }),
+  get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
   update: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -72,14 +65,8 @@ const sessionStore: SessionStore = {
 };
 
 const userStore: UserStore = {
-  get: (userId) =>
-    Effect.suspend(() => {
-      const user = users.get(userId);
-      return user === undefined
-        ? Effect.fail(new UserNotFoundError({ message: "not found", userId }))
-        : Effect.succeed(user);
-    }),
-  getCredentials: (userId) => Effect.fail(new UserNotFoundError({ message: "no creds", userId })),
+  get: (userId) => Effect.sync(() => users.get(userId) ?? null),
+  getCredentials: (_userId) => Effect.succeed(null),
 };
 
 const sessionConfig: Types.SessionConfig = {

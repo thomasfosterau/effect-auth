@@ -58,12 +58,7 @@ describe("static service layers", () => {
           sessions.set(session.id, session);
           return session;
         }),
-      get: (sessionId) => {
-        const session = sessions.get(sessionId);
-        return session
-          ? Effect.succeed(session)
-          : Effect.fail(new Auth.SessionNotFoundError({ message: "not found", sessionId }));
-      },
+      get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
       update: (session) =>
         Effect.sync(() => {
           sessions.set(session.id, session);
@@ -76,12 +71,8 @@ describe("static service layers", () => {
     };
 
     const userStore: Auth.UserStore = {
-      get: (userId) =>
-        userId === user.id
-          ? Effect.succeed(user)
-          : Effect.fail(new Auth.UserNotFoundError({ message: "not found", userId })),
-      getCredentials: (userId) =>
-        Effect.fail(new Auth.UserNotFoundError({ message: "not found", userId })),
+      get: (userId) => Effect.succeed(userId === user.id ? user : null),
+      getCredentials: () => Effect.succeed(null),
     };
 
     const config: Auth.SessionConfig = {
@@ -125,10 +116,7 @@ describe("static service layers", () => {
       attributes: {},
     };
     const store: Auth.UserServiceStore = {
-      get: (userId) =>
-        userId === user.id
-          ? Effect.succeed(user)
-          : Effect.fail(new Auth.UserNotFoundError({ message: "not found", userId })),
+      get: (userId) => Effect.succeed(userId === user.id ? user : null),
       getByEmail: () => Effect.succeed(null),
       update: (u) => Effect.succeed(u),
       delete: () => Effect.void,

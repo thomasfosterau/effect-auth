@@ -48,23 +48,11 @@ export const makeServerFixture = () => {
     return id === undefined ? null : (usersById.get(id) ?? null);
   };
 
-  const getUserById = (userId: string) =>
-    Effect.suspend(() => {
-      const user = usersById.get(userId);
-      return user === undefined
-        ? Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId }))
-        : Effect.succeed(user);
-    });
+  const getUserById = (userId: string) => Effect.sync(() => usersById.get(userId) ?? null);
 
   const sessionStore: Auth.SessionStore = {
     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
-    get: (sessionId) =>
-      Effect.suspend(() => {
-        const session = sessions.get(sessionId);
-        return session === undefined
-          ? Effect.fail(new Auth.SessionNotFoundError({ message: "Session not found", sessionId }))
-          : Effect.succeed(session);
-      }),
+    get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
     delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
     deleteByUserId: (userId) =>
@@ -77,13 +65,7 @@ export const makeServerFixture = () => {
 
   const userStore: Auth.UserStore = {
     get: getUserById,
-    getCredentials: (userId) =>
-      Effect.suspend(() => {
-        const hash = passwordHashes.get(userId);
-        return hash === undefined
-          ? Effect.fail(new Auth.UserNotFoundError({ message: "No credentials", userId }))
-          : Effect.succeed(hash);
-      }),
+    getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
   };
 
   const emailPasswordStore: Auth.EmailPasswordStore = {

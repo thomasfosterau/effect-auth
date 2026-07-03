@@ -11,7 +11,6 @@ import {
   type AdminService,
   type ListUsersQuery,
 } from "./Admin.js";
-import * as Errors from "./Errors.js";
 import { Hooks } from "./Hooks.js";
 import {
   makeSessionManager,
@@ -33,16 +32,7 @@ const sessionStore = {
       return session;
     }),
 
-  get: (sessionId: string) =>
-    Effect.gen(function* () {
-      const session = sessions.get(sessionId);
-      if (!session) {
-        return yield* Effect.fail(
-          new Errors.SessionNotFoundError({ message: "Session not found", sessionId }),
-        );
-      }
-      return session;
-    }),
+  get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
 
   update: (session: Session) =>
     Effect.sync(() => {
@@ -68,22 +58,12 @@ const sessionStore = {
     Effect.sync(() => Array.from(sessions.values()).filter((session) => session.userId === userId)),
 };
 
-const getUser = (userId: string) =>
-  Effect.gen(function* () {
-    const user = users.get(userId);
-    if (!user) {
-      return yield* Effect.fail(
-        new Errors.UserNotFoundError({ message: "User not found", userId }),
-      );
-    }
-    return user;
-  });
+const getUser = (userId: string) => Effect.sync(() => users.get(userId) ?? null);
 
 // Session's UserStore (used by SessionManager.validateSession)
 const sessionUserStore = {
   get: getUser,
-  getCredentials: (userId: string) =>
-    Effect.fail(new Errors.UserNotFoundError({ message: "No credentials", userId })),
+  getCredentials: (_userId: string) => Effect.succeed(null),
 };
 
 const userServiceStore = {

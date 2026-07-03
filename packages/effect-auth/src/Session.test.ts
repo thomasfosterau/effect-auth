@@ -3,7 +3,6 @@ import { Effect, Context } from "effect";
 import { Hooks } from "./Hooks.js";
 import { makeSessionManager, SessionStore, UserStore } from "./Session.js";
 import type { Session, User, SessionConfig } from "./Types.js";
-import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
 
 // Mock implementations for testing
 const mockSessionStore = {
@@ -15,19 +14,7 @@ const mockSessionStore = {
       return session;
     }),
 
-  get: (sessionId: string) =>
-    Effect.gen(function* () {
-      const session = mockSessionStore.sessions.get(sessionId);
-      if (!session) {
-        return yield* Effect.fail(
-          new SessionNotFoundError({
-            message: "Session not found",
-            sessionId,
-          }),
-        );
-      }
-      return session;
-    }),
+  get: (sessionId: string) => Effect.sync(() => mockSessionStore.sessions.get(sessionId) ?? null),
 
   update: (session: Session) =>
     Effect.sync(() => {
@@ -83,19 +70,7 @@ const mockUserStore = {
     ],
   ]),
 
-  get: (userId: string) =>
-    Effect.gen(function* () {
-      const user = mockUserStore.users.get(userId);
-      if (!user) {
-        return yield* Effect.fail(
-          new UserNotFoundError({
-            message: "User not found",
-            userId,
-          }),
-        );
-      }
-      return user;
-    }),
+  get: (userId: string) => Effect.sync(() => mockUserStore.users.get(userId) ?? null),
 
   getCredentials: (_userId: string) => Effect.succeed("hashed-password"),
 };

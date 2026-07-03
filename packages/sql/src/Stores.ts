@@ -94,6 +94,9 @@ const userQueries = (sql: SqlClient.SqlClient) => {
       Effect.map((row) => (row ? rowToUser(row) : null)),
     );
 
+  const findById = (userId: string, label: string) =>
+    getById(userId, label).pipe(Effect.map((row) => (row ? rowToUser(row) : null)));
+
   const requireById = (userId: string, label: string) =>
     getById(userId, label).pipe(
       Effect.orDie,
@@ -140,7 +143,7 @@ const userQueries = (sql: SqlClient.SqlClient) => {
   const setPasswordHash = (userId: string, hash: string, label: string) =>
     asVoid(label, sql`UPDATE auth_users SET password_hash = ${hash} WHERE id = ${userId}`);
 
-  return { getById, getByEmail, requireById, create, setPasswordHash };
+  return { getById, getByEmail, findById, requireById, create, setPasswordHash };
 };
 
 // ---------------------------------------------------------------------------
@@ -179,16 +182,7 @@ export const makeSessionStore: Effect.Effect<Auth.SessionStore, never, SqlClient
         firstRow(
           "session.get",
           sql<SessionRow>`SELECT * FROM auth_sessions WHERE id = ${sessionId}`,
-        ).pipe(
-          Effect.orDie,
-          Effect.flatMap((row) =>
-            row
-              ? Effect.succeed(rowToSession(row))
-              : Effect.fail(
-                  new Auth.SessionNotFoundError({ message: "Session not found", sessionId }),
-                ),
-          ),
-        ),
+        ).pipe(Effect.map((row) => (row ? rowToSession(row) : null))),
       update: (session) =>
         asVoid(
           "session.update",
@@ -211,16 +205,11 @@ export const makeUserStore: Effect.Effect<Auth.UserStore, never, SqlClient.SqlCl
     const sql = yield* SqlClient.SqlClient;
     const users = userQueries(sql);
     return {
-      get: (userId) => users.requireById(userId, "user.get"),
+      get: (userId) => users.findById(userId, "user.get"),
       getCredentials: (userId) =>
-        users.getById(userId, "user.getCredentials").pipe(
-          Effect.orDie,
-          Effect.flatMap((row) =>
-            row
-              ? Effect.succeed(row.password_hash ?? "")
-              : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
-          ),
-        ),
+        users
+          .getById(userId, "user.getCredentials")
+          .pipe(Effect.map((row) => row?.password_hash ?? null)),
     } satisfies Auth.UserStore;
   },
 );
@@ -237,7 +226,7 @@ export const makeUserServiceStore: Effect.Effect<
   const sql = yield* SqlClient.SqlClient;
   const users = userQueries(sql);
   return {
-    get: (userId) => users.requireById(userId, "userService.get"),
+    get: (userId) => users.findById(userId, "userService.get"),
     getByEmail: (email) => users.getByEmail(email, "userService.getByEmail"),
     update: (user) =>
       asVoid(
@@ -477,11 +466,7 @@ export const makeChallengeStore: Effect.Effect<Auth.ChallengeStore, never, SqlCl
           sql<ChallengeRow>`SELECT * FROM auth_webauthn_challenges WHERE challenge = ${toBase64(challenge)}`,
         ).pipe(
           Effect.orDie,
-          Effect.flatMap((row) =>
-            row
-              ? Effect.succeed(rowToChallenge(row))
-              : Effect.fail(new Auth.ChallengeNotFoundError({ message: "Challenge not found" })),
-          ),
+          Effect.map((row) => (row ? rowToChallenge(row) : null)),
         ),
       delete: (challenge) =>
         asVoid(
@@ -531,16 +516,7 @@ export const makeCredentialStore: Effect.Effect<Auth.CredentialStore, never, Sql
           sql<CredentialRow>`SELECT * FROM auth_webauthn_credentials WHERE id = ${credentialId}`,
         ).pipe(
           Effect.orDie,
-          Effect.flatMap((row) =>
-            row
-              ? Effect.succeed(rowToCredential(row))
-              : Effect.fail(
-                  new Auth.CredentialNotFoundError({
-                    message: "Credential not found",
-                    credentialId,
-                  }),
-                ),
-          ),
+          Effect.map((row) => (row ? rowToCredential(row) : null)),
         ),
       update: (credential) =>
         asVoid(
@@ -554,9 +530,9 @@ export const makeCredentialStore: Effect.Effect<Auth.CredentialStore, never, Sql
           "credential.delete",
           sql`DELETE FROM auth_webauthn_credentials WHERE id = ${credentialId}`,
         ),
-      getByUserId: (userId) =>
+      listByUserId: (userId) =>
         allRows(
-          "credential.getByUserId",
+          "credential.listByUserId",
           sql<CredentialRow>`SELECT * FROM auth_webauthn_credentials WHERE user_id = ${userId}`,
         ).pipe(Effect.map((rows) => rows.map(rowToCredential))),
     } satisfies Auth.CredentialStore;
@@ -606,13 +582,7 @@ export const makeOAuthStateStore: Effect.Effect<Auth.OAuthStateStore, never, Sql
         firstRow(
           "oauthState.get",
           sql<OAuthStateRow>`SELECT * FROM auth_oauth_states WHERE state = ${state}`,
-        ).pipe(
-          Effect.flatMap((row) =>
-            row
-              ? Effect.succeed(rowToOAuthState(row))
-              : Effect.fail(new Auth.AuthError({ message: `OAuth state not found: ${state}` })),
-          ),
-        ),
+        ).pipe(Effect.map((row) => (row ? rowToOAuthState(row) : null))),
       delete: (state) =>
         asVoid("oauthState.delete", sql`DELETE FROM auth_oauth_states WHERE state = ${state}`),
     } satisfies Auth.OAuthStateStore;

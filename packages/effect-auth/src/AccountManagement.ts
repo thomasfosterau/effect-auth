@@ -177,6 +177,9 @@ export const makeAccountManagementService = (
           const store = yield* AccountManagementStoreTag;
 
           const user = yield* users.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
           const newEmail = normalizeEmail(rawNewEmail);
 
           // Uniqueness: reject if another account already owns the address.
@@ -221,6 +224,12 @@ export const makeAccountManagementService = (
           }
 
           const user = yield* users.get(record.userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({
+              message: "User not found",
+              userId: record.userId,
+            });
+          }
           const oldEmail = user.email;
           const newEmail = record.newEmail;
 
@@ -259,6 +268,9 @@ export const makeAccountManagementService = (
           const store = yield* AccountManagementStoreTag;
 
           const user = yield* users.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
 
           const token = generateToken();
           const now = Date.now();
@@ -291,6 +303,12 @@ export const makeAccountManagementService = (
           }
 
           const user = yield* users.get(record.userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({
+              message: "User not found",
+              userId: record.userId,
+            });
+          }
 
           // App-data cleanup while the user still exists (a failure aborts).
           if (config.beforeDelete !== undefined) {

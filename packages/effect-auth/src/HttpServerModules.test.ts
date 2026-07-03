@@ -24,7 +24,6 @@ import {
 import { AdminServiceLayer, AdminUserStoreTag } from "./Admin.js";
 import { ApiKeyServiceLayer, ApiKeyStoreTag, type ApiKey } from "./ApiKey.js";
 import { JwtServiceLayer, JwtKeyStoreTag, type JwtKeyPair } from "./Jwt.js";
-import { UserNotFoundError, SessionNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -70,14 +69,8 @@ const makeFixture = () => {
   };
 
   const userStore = {
-    get: (userId: string) => {
-      const u = usersById.get(userId);
-      return u
-        ? Effect.succeed(u)
-        : Effect.fail(new UserNotFoundError({ message: "not found", userId }));
-    },
-    getCredentials: (userId: string) =>
-      Effect.fail(new UserNotFoundError({ message: "no credentials", userId })),
+    get: (userId: string) => Effect.sync(() => usersById.get(userId) ?? null),
+    getCredentials: (_userId: string) => Effect.succeed(null),
   };
 
   const userServiceStore = {
@@ -105,12 +98,7 @@ const makeFixture = () => {
         sessions.set(session.id, session);
         return session;
       }),
-    get: (sessionId: string) => {
-      const s = sessions.get(sessionId);
-      return s
-        ? Effect.succeed(s)
-        : Effect.fail(new SessionNotFoundError({ message: "not found", sessionId }));
-    },
+    get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
     update: (session: Types.Session) =>
       Effect.sync(() => {
         sessions.set(session.id, session);
@@ -180,7 +168,7 @@ const makeFixture = () => {
 
   const apiKeyStore = {
     create: (k: ApiKey) => Effect.sync(() => (apiKeys.set(k.id, k), k)),
-    getById: (id: string) => Effect.succeed(apiKeys.get(id) ?? null),
+    get: (id: string) => Effect.succeed(apiKeys.get(id) ?? null),
     getByHash: (keyHash: string) =>
       Effect.succeed([...apiKeys.values()].find((k) => k.keyHash === keyHash) ?? null),
     update: (k: ApiKey) => Effect.sync(() => (apiKeys.set(k.id, k), k)),

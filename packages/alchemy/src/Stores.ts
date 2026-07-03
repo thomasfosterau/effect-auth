@@ -129,14 +129,7 @@ export const makeSessionStore = (db: D1Database): Auth.SessionStore => ({
       `SELECT * FROM auth_sessions WHERE id = ?`,
       [sessionId],
       "session.get",
-    ).pipe(
-      Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToSession(row))
-          : Effect.fail(new Auth.SessionNotFoundError({ message: "Session not found", sessionId })),
-      ),
-    ),
+    ).pipe(Effect.map((row) => (row ? rowToSession(row) : null))),
   update: (session) =>
     d1Run(
       db,
@@ -172,12 +165,7 @@ export const makeSessionStore = (db: D1Database): Auth.SessionStore => ({
 export const makeUserStore = (db: D1Database): Auth.UserStore => ({
   get: (userId) =>
     d1First<UserRow>(db, `SELECT * FROM auth_users WHERE id = ?`, [userId], "user.get").pipe(
-      Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToUser(row))
-          : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
-      ),
+      Effect.map((row) => (row ? rowToUser(row) : null)),
     ),
   getCredentials: (userId) =>
     d1First<UserRow>(
@@ -185,14 +173,7 @@ export const makeUserStore = (db: D1Database): Auth.UserStore => ({
       `SELECT password_hash FROM auth_users WHERE id = ?`,
       [userId],
       "user.getCredentials",
-    ).pipe(
-      Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(row.password_hash ?? "")
-          : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
-      ),
-    ),
+    ).pipe(Effect.map((row) => row?.password_hash ?? null)),
 });
 
 // ---------------------------------------------------------------------------
@@ -202,12 +183,7 @@ export const makeUserStore = (db: D1Database): Auth.UserStore => ({
 export const makeUserServiceStore = (db: D1Database): Auth.UserServiceStore => ({
   get: (userId) =>
     d1First<UserRow>(db, `SELECT * FROM auth_users WHERE id = ?`, [userId], "userService.get").pipe(
-      Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToUser(row))
-          : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
-      ),
+      Effect.map((row) => (row ? rowToUser(row) : null)),
     ),
   getByEmail: (email) =>
     d1First<UserRow>(
@@ -486,14 +462,7 @@ export const makeChallengeStore = (db: D1Database): Auth.ChallengeStore => ({
       `SELECT * FROM auth_webauthn_challenges WHERE challenge = ?`,
       [toBase64(challenge)],
       "challenge.get",
-    ).pipe(
-      Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToChallenge(row))
-          : Effect.fail(new Auth.ChallengeNotFoundError({ message: "Challenge not found" })),
-      ),
-    ),
+    ).pipe(Effect.map((row) => (row ? rowToChallenge(row) : null))),
   delete: (challenge) =>
     d1Run(
       db,
@@ -555,13 +524,7 @@ export const makeCredentialStore = (db: D1Database): Auth.CredentialStore => ({
       "credential.get",
     ).pipe(
       Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToCredential(row))
-          : Effect.fail(
-              new Auth.CredentialNotFoundError({ message: "Credential not found", credentialId }),
-            ),
-      ),
+      Effect.map((row) => (row ? rowToCredential(row) : null)),
     ),
   update: (credential) =>
     d1Run(
@@ -588,12 +551,12 @@ export const makeCredentialStore = (db: D1Database): Auth.CredentialStore => ({
       [credentialId],
       "credential.delete",
     ).pipe(Effect.asVoid),
-  getByUserId: (userId) =>
+  listByUserId: (userId) =>
     d1All<CredentialRow>(
       db,
       `SELECT * FROM auth_webauthn_credentials WHERE user_id = ?`,
       [userId],
-      "credential.getByUserId",
+      "credential.listByUserId",
     ).pipe(Effect.map((rows) => rows.map(rowToCredential))),
 });
 
@@ -641,13 +604,7 @@ export const makeOAuthStateStore = (db: D1Database): Auth.OAuthStateStore => ({
       `SELECT * FROM auth_oauth_states WHERE state = ?`,
       [state],
       "oauthState.get",
-    ).pipe(
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToOAuthState(row))
-          : Effect.fail(new Auth.AuthError({ message: `OAuth state not found: ${state}` })),
-      ),
-    ),
+    ).pipe(Effect.map((row) => (row ? rowToOAuthState(row) : null))),
   delete: (state) =>
     d1Run(db, `DELETE FROM auth_oauth_states WHERE state = ?`, [state], "oauthState.delete").pipe(
       Effect.asVoid,

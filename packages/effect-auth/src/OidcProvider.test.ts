@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
-import { UserNotFoundError, SessionNotFoundError } from "./Errors.js";
 import { Hooks } from "./Hooks.js";
 import { SessionManagerLayer, SessionStoreTag, UserStoreTag, type UserStore } from "./Session.js";
 import { UserServiceLayer, UserServiceStoreTag } from "./User.js";
@@ -345,11 +344,8 @@ const makeHttpFixture = () => {
   };
 
   const userStore: UserStore = {
-    get: (userId) => {
-      const u = usersById.get(userId);
-      return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
-    },
-    getCredentials: (userId) => Effect.fail(new UserNotFoundError({ message: "nc", userId })),
+    get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
+    getCredentials: (_userId) => Effect.succeed(null),
   };
   const userServiceStore = {
     get: userStore.get,
@@ -359,12 +355,7 @@ const makeHttpFixture = () => {
   };
   const sessionStore = {
     create: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
-    get: (id: string) => {
-      const s = sessions.get(id);
-      return s
-        ? Effect.succeed(s)
-        : Effect.fail(new SessionNotFoundError({ message: "nf", sessionId: id }));
-    },
+    get: (id: string) => Effect.sync(() => sessions.get(id) ?? null),
     update: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
     delete: (id: string) => Effect.sync(() => void sessions.delete(id)),
     deleteByUserId: (userId: string) =>

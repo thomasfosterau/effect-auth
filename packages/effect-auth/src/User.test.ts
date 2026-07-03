@@ -2,25 +2,12 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { Context, Effect } from "effect";
 import { UserServiceStore, makeUserService } from "./User.js";
 import type { User } from "./Types.js";
-import * as Errors from "./Errors.js";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
 
 const userStore = {
-  get: (userId: string) =>
-    Effect.gen(function* () {
-      const user = users.get(userId);
-      if (!user) {
-        return yield* Effect.fail(
-          new Errors.UserNotFoundError({
-            message: "User not found",
-            userId,
-          }),
-        );
-      }
-      return user;
-    }),
+  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
 
   getByEmail: (email: string) =>
     Effect.sync(() => {

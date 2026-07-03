@@ -38,19 +38,7 @@ const sessionStore: Auth.SessionStore = {
       return session;
     }),
 
-  get: (sessionId) =>
-    Effect.gen(function* () {
-      const session = sessions.get(sessionId);
-      if (!session) {
-        return yield* Effect.fail(
-          new Auth.SessionNotFoundError({
-            message: "Session not found",
-            sessionId,
-          }),
-        );
-      }
-      return session;
-    }),
+  get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
 
   update: (session) =>
     Effect.sync(() => {
@@ -80,33 +68,9 @@ const sessionStore: Auth.SessionStore = {
  * Implement UserStore using in-memory Map
  */
 const userStore: Auth.UserStore = {
-  get: (userId) =>
-    Effect.gen(function* () {
-      const user = users.get(userId);
-      if (!user) {
-        return yield* Effect.fail(
-          new Auth.UserNotFoundError({
-            message: "User not found",
-            userId,
-          }),
-        );
-      }
-      return user;
-    }),
+  get: (userId) => Effect.sync(() => users.get(userId) ?? null),
 
-  getCredentials: (userId) =>
-    Effect.gen(function* () {
-      const password = passwords.get(userId);
-      if (!password) {
-        return yield* Effect.fail(
-          new Auth.UserNotFoundError({
-            message: "User not found",
-            userId,
-          }),
-        );
-      }
-      return password;
-    }),
+  getCredentials: (userId) => Effect.sync(() => passwords.get(userId) ?? null),
 };
 
 /**

@@ -24,17 +24,9 @@ const challengeStore: Auth.ChallengeStore = {
     }),
 
   get: (challenge) =>
-    Effect.gen(function* () {
+    Effect.sync(() => {
       const key = Buffer.from(challenge).toString("hex");
-      const stored = challengeMap.get(key);
-      if (!stored) {
-        return yield* Effect.fail(
-          new Auth.ChallengeNotFoundError({
-            message: "Challenge not found",
-          }),
-        );
-      }
-      return stored;
+      return challengeMap.get(key) ?? null;
     }),
 
   delete: (challenge) =>
@@ -55,19 +47,7 @@ const credentialStore: Auth.CredentialStore = {
       return credential;
     }),
 
-  get: (credentialId) =>
-    Effect.gen(function* () {
-      const credential = credentialMap.get(credentialId);
-      if (!credential) {
-        return yield* Effect.fail(
-          new Auth.CredentialNotFoundError({
-            message: "Credential not found",
-            credentialId,
-          }),
-        );
-      }
-      return credential;
-    }),
+  get: (credentialId) => Effect.sync(() => credentialMap.get(credentialId) ?? null),
 
   update: (credential) =>
     Effect.sync(() => {
@@ -81,7 +61,7 @@ const credentialStore: Auth.CredentialStore = {
       credentialMap.delete(credentialId);
     }),
 
-  getByUserId: (userId) =>
+  listByUserId: (userId) =>
     Effect.sync(() => {
       const credentials = Array.from(credentialMap.values()).filter((c) => c.userId === userId);
       return credentials;
@@ -222,7 +202,7 @@ const multipleCredentialsExample = Effect.gen(function* () {
   }
 
   console.log("\n📋 Listing user's credentials");
-  const userCredentials = yield* credentialStore.getByUserId(userId);
+  const userCredentials = yield* credentialStore.listByUserId(userId);
   console.log(`  Found ${userCredentials.length} credentials:`);
   for (const cred of userCredentials) {
     console.log(`    - ${cred.name || cred.id} (counter: ${cred.counter})`);

@@ -13,7 +13,6 @@ import {
   type SessionStore,
   type UserStore,
 } from "../Session.js";
-import { SessionNotFoundError, UserNotFoundError } from "../Errors.js";
 import type * as Types from "../Types.js";
 
 const hasher = makeScryptHasher({ cost: 16384 });
@@ -51,24 +50,15 @@ const makeFixture = () => {
   };
   const sessionStore: SessionStore = {
     create: (s) => Effect.sync(() => (sessions.set(s.id, s), s)),
-    get: (sessionId) =>
-      Effect.suspend(() => {
-        const s = sessions.get(sessionId);
-        return s === undefined
-          ? Effect.fail(new SessionNotFoundError({ message: "nf", sessionId }))
-          : Effect.succeed(s);
-      }),
+    get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
     update: (s) => Effect.sync(() => (sessions.set(s.id, s), s)),
     delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
     deleteByUserId: () => Effect.void,
     listByUserId: () => Effect.succeed([]),
   };
   const userStore: UserStore = {
-    get: (userId) => {
-      const u = usersById.get(userId);
-      return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
-    },
-    getCredentials: (userId) => Effect.fail(new UserNotFoundError({ message: "nc", userId })),
+    get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
+    getCredentials: (_userId) => Effect.succeed(null),
   };
 
   const stores = Layer.mergeAll(

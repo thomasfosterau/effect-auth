@@ -72,7 +72,7 @@ export interface ApiKey {
  */
 export interface ApiKeyStore {
   readonly create: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
-  readonly getById: (id: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
+  readonly get: (id: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
   readonly getByHash: (keyHash: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
   readonly update: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
   readonly delete: (id: string) => Effect.Effect<void, Errors.AuthError>;
@@ -301,7 +301,7 @@ export const makeApiKeyService = (
   const getOwned = (userId: string, keyId: string) =>
     Effect.gen(function* () {
       const store = yield* ApiKeyStoreTag;
-      const apiKey = yield* store.getById(keyId);
+      const apiKey = yield* store.get(keyId);
       if (!apiKey || apiKey.userId !== userId) {
         return yield* Effect.fail(
           new ApiKeyError({
@@ -445,7 +445,7 @@ export const makeApiKeyService = (
       get: (keyId) =>
         Effect.gen(function* () {
           const store = yield* ApiKeyStoreTag;
-          const apiKey = yield* store.getById(keyId);
+          const apiKey = yield* store.get(keyId);
           if (!apiKey) {
             return yield* Effect.fail(
               new ApiKeyError({

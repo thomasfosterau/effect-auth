@@ -263,6 +263,9 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
 
           const userStore = yield* UserServiceStoreTag;
           const user = yield* userStore.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
 
           return yield* userStore.update({
             ...user,
@@ -281,6 +284,9 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
 
           const userStore = yield* UserServiceStoreTag;
           const user = yield* userStore.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
 
           if (isAdmin(user, config)) {
             return yield* Effect.fail(
@@ -322,6 +328,9 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
 
           const userStore = yield* UserServiceStoreTag;
           const user = yield* userStore.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
 
           const attributes: Record<string, unknown> = {};
           for (const [key, value] of Object.entries(user.attributes)) {
@@ -366,6 +375,9 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
 
           const userStore = yield* UserServiceStoreTag;
           const target = yield* userStore.get(userId);
+          if (target === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
 
           const sessionManager = yield* SessionManagerTag;
           return yield* sessionManager.createSession(target.id, {

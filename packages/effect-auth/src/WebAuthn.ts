@@ -191,8 +191,8 @@ export const SUPPORTED_COSE_ALGORITHMS = [
 export interface ChallengeStore {
   /** Store a challenge */
   create: (challenge: WebAuthnChallenge) => Effect.Effect<WebAuthnChallenge, Errors.AuthError>;
-  /** Get a challenge by its value */
-  get: (challenge: Uint8Array) => Effect.Effect<WebAuthnChallenge, Errors.ChallengeNotFoundError>;
+  /** Get a challenge by its value, or `null` when no such challenge exists. */
+  get: (challenge: Uint8Array) => Effect.Effect<WebAuthnChallenge | null, Errors.AuthError>;
   /** Delete a challenge */
   delete: (challenge: Uint8Array) => Effect.Effect<void, Errors.AuthError>;
 }
@@ -204,14 +204,14 @@ export interface ChallengeStore {
 export interface CredentialStore {
   /** Store a credential */
   create: (credential: WebAuthnCredential) => Effect.Effect<WebAuthnCredential, Errors.AuthError>;
-  /** Get a credential by ID */
-  get: (credentialId: string) => Effect.Effect<WebAuthnCredential, Errors.CredentialNotFoundError>;
+  /** Get a credential by ID, or `null` when no such credential exists. */
+  get: (credentialId: string) => Effect.Effect<WebAuthnCredential | null, Errors.AuthError>;
   /** Update a credential (e.g., counter) */
   update: (credential: WebAuthnCredential) => Effect.Effect<WebAuthnCredential, Errors.AuthError>;
   /** Delete a credential */
   delete: (credentialId: string) => Effect.Effect<void, Errors.AuthError>;
-  /** Get all credentials for a user */
-  getByUserId: (userId: string) => Effect.Effect<readonly WebAuthnCredential[], Errors.AuthError>;
+  /** List all credentials for a user */
+  listByUserId: (userId: string) => Effect.Effect<readonly WebAuthnCredential[], Errors.AuthError>;
 }
 
 /**
@@ -320,7 +320,7 @@ export const makeWebAuthnService = (
 
           // Exclude the user's existing credentials to prevent re-registering
           // the same authenticator.
-          const existing = yield* credentialStore.getByUserId(user.id);
+          const existing = yield* credentialStore.listByUserId(user.id);
           const excludeCredentials = existing.map(
             (c): PublicKeyCredentialDescriptor => ({
               type: "public-key",
@@ -352,6 +352,9 @@ export const makeWebAuthnService = (
         Effect.gen(function* () {
           // Get and verify challenge
           const storedChallenge = yield* challengeStore.get(challenge);
+          if (storedChallenge === null) {
+            return yield* new Errors.ChallengeNotFoundError({ message: "Challenge not found" });
+          }
 
           if (Date.now() > storedChallenge.expiresAt) {
             yield* challengeStore.delete(challenge);
@@ -516,6 +519,9 @@ export const makeWebAuthnService = (
         Effect.gen(function* () {
           // Get and verify challenge
           const storedChallenge = yield* challengeStore.get(challenge);
+          if (storedChallenge === null) {
+            return yield* new Errors.ChallengeNotFoundError({ message: "Challenge not found" });
+          }
 
           if (Date.now() > storedChallenge.expiresAt) {
             yield* challengeStore.delete(challenge);
@@ -529,6 +535,12 @@ export const makeWebAuthnService = (
           // Get credential
           const credentialId = base64UrlEncode(response.credentialId);
           const credential = yield* credentialStore.get(credentialId);
+          if (credential === null) {
+            return yield* new Errors.CredentialNotFoundError({
+              message: "Credential not found",
+              credentialId,
+            });
+          }
 
           // Parse client data JSON
           let clientData: ClientData;

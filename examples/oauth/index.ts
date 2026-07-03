@@ -21,17 +21,7 @@ const oauthStateStore: Auth.OAuthStateStore = {
     oauthStates.set(state.state, state);
     return Effect.succeed(state);
   },
-  get: (stateStr) => {
-    const state = oauthStates.get(stateStr);
-    if (!state) {
-      return Effect.fail(
-        new Auth.AuthError({
-          message: `OAuth state not found: ${stateStr}`,
-        }),
-      );
-    }
-    return Effect.succeed(state);
-  },
+  get: (stateStr) => Effect.succeed(oauthStates.get(stateStr) ?? null),
   delete: (stateStr) => {
     oauthStates.delete(stateStr);
     return Effect.void;

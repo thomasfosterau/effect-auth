@@ -94,6 +94,12 @@ export const makeVerifyCredentialsResolver = Effect.gen(function* () {
       // Get user and their hashed password
       const user = yield* userStore.get(request.userId);
       const hashedPassword = yield* userStore.getCredentials(request.userId);
+      if (user === null || hashedPassword === null) {
+        return yield* new Errors.UserNotFoundError({
+          message: "User not found",
+          userId: request.userId,
+        });
+      }
 
       // Verify password
       const isValid = yield* passwordHasher.verify(request.password, hashedPassword);

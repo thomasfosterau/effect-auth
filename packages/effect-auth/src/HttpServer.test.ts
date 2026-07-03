@@ -84,7 +84,7 @@ import {
   type DeviceAuthorizationStore,
 } from "./DeviceAuthorization.js";
 import { generateTOTP } from "./Otp.js";
-import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
+import { UserNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -170,13 +170,7 @@ const makeFixture = (): Fixture => {
     return id === undefined ? null : (usersById.get(id) ?? null);
   };
 
-  const getUserById = (userId: string) =>
-    Effect.suspend(() => {
-      const user = usersById.get(userId);
-      return user === undefined
-        ? Effect.fail(new UserNotFoundError({ message: "User not found", userId }))
-        : Effect.succeed(user);
-    });
+  const getUserById = (userId: string) => Effect.sync(() => usersById.get(userId) ?? null);
 
   // --- core stores -----------------------------------------------------------
   const sessionStore: SessionStore = {
@@ -186,12 +180,9 @@ const makeFixture = (): Fixture => {
         return session;
       }),
     get: (sessionId) =>
-      Effect.suspend(() => {
+      Effect.sync(() => {
         sessionStoreReads++;
-        const session = sessions.get(sessionId);
-        return session === undefined
-          ? Effect.fail(new SessionNotFoundError({ message: "Session not found", sessionId }))
-          : Effect.succeed(session);
+        return sessions.get(sessionId) ?? null;
       }),
     update: (session) =>
       Effect.sync(() => {
@@ -209,13 +200,7 @@ const makeFixture = (): Fixture => {
 
   const userStore: UserStore = {
     get: getUserById,
-    getCredentials: (userId) =>
-      Effect.suspend(() => {
-        const hash = passwordHashes.get(userId);
-        return hash === undefined
-          ? Effect.fail(new UserNotFoundError({ message: "No credentials", userId }))
-          : Effect.succeed(hash);
-      }),
+    getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
   };
 
   const emailPasswordStore: EmailPasswordStore = {

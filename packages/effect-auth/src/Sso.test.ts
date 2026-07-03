@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
-import { AuthError, UserNotFoundError, SessionNotFoundError } from "./Errors.js";
+import { UserNotFoundError } from "./Errors.js";
 import { Hooks } from "./Hooks.js";
 import {
   SessionManagerLayer,
@@ -96,10 +96,7 @@ const makeStores = () => {
 
   const stateStore = {
     create: (s: OAuthState) => Effect.sync(() => (states.set(s.state, s), s)),
-    get: (state: string) => {
-      const s = states.get(state);
-      return s ? Effect.succeed(s) : Effect.fail(new AuthError({ message: "no state" }));
-    },
+    get: (state: string) => Effect.succeed(states.get(state) ?? null),
     delete: (state: string) => Effect.sync(() => void states.delete(state)),
   };
 
@@ -344,12 +341,8 @@ const makeHttpFixture = () => {
   };
 
   const userStore = {
-    get: (userId: string) => {
-      const u = usersById.get(userId);
-      return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
-    },
-    getCredentials: (userId: string) =>
-      Effect.fail(new UserNotFoundError({ message: "nc", userId })),
+    get: (userId: string) => Effect.sync(() => usersById.get(userId) ?? null),
+    getCredentials: (_userId: string) => Effect.succeed(null),
   };
   const userServiceStore = {
     get: userStore.get,
@@ -360,12 +353,7 @@ const makeHttpFixture = () => {
   };
   const sessionStore = {
     create: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
-    get: (id: string) => {
-      const s = sessions.get(id);
-      return s
-        ? Effect.succeed(s)
-        : Effect.fail(new SessionNotFoundError({ message: "nf", sessionId: id }));
-    },
+    get: (id: string) => Effect.sync(() => sessions.get(id) ?? null),
     update: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
     delete: (id: string) => Effect.sync(() => void sessions.delete(id)),
     deleteByUserId: (userId: string) =>
@@ -376,7 +364,10 @@ const makeHttpFixture = () => {
       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
   };
   const oauthUserStore = {
-    getUser: userStore.get,
+    getUser: (userId: string) => {
+      const u = usersById.get(userId);
+      return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
+    },
     getUserByEmail: (email: string) => Effect.succeed(usersByEmail.get(email) ?? null),
     createUser: (input: { email: string; emailVerified: boolean; name?: string; image?: string }) =>
       Effect.sync(() => {
@@ -406,10 +397,7 @@ const makeHttpFixture = () => {
   };
   const stateStore = {
     create: (s: OAuthState) => Effect.sync(() => (states.set(s.state, s), s)),
-    get: (state: string) => {
-      const s = states.get(state);
-      return s ? Effect.succeed(s) : Effect.fail(new AuthError({ message: "no state" }));
-    },
+    get: (state: string) => Effect.succeed(states.get(state) ?? null),
     delete: (state: string) => Effect.sync(() => void states.delete(state)),
   };
   // SSO only ever calls getMember/createMember; the rest are unused stubs.
