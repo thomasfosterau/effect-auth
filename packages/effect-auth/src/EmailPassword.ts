@@ -270,8 +270,22 @@ export const makeEmailPasswordService = (
           }
 
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
+          const signUpResult = { user, session, method: "email-password" as const };
 
-          return yield* hooks.afterSignUp({ user, session, method: "email-password" });
+          // Session is now live in the store. If afterSignUp fails we must not
+          // return an error (that would leave a dangling session the caller
+          // doesn't know about). Log and swallow so the caller receives the
+          // auth result.
+          return yield* hooks
+            .afterSignUp(signUpResult)
+            .pipe(
+              Effect.catch((error) =>
+                Effect.logError(
+                  "[effect-auth] afterSignUp hook failed after session creation",
+                  error,
+                ).pipe(Effect.as(signUpResult)),
+              ),
+            );
         }),
 
       signIn: (rawInput) =>
@@ -360,8 +374,22 @@ export const makeEmailPasswordService = (
           }
 
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
+          const signInResult = { user, session, method: "email-password" as const };
 
-          return yield* hooks.afterSignIn({ user, session, method: "email-password" });
+          // Session is now live in the store. If afterSignIn fails we must not
+          // return an error (that would leave a dangling session the caller
+          // doesn't know about). Log and swallow so the caller receives the
+          // auth result.
+          return yield* hooks
+            .afterSignIn(signInResult)
+            .pipe(
+              Effect.catch((error) =>
+                Effect.logError(
+                  "[effect-auth] afterSignIn hook failed after session creation",
+                  error,
+                ).pipe(Effect.as(signInResult)),
+              ),
+            );
         }),
 
       changePassword: (input) =>
