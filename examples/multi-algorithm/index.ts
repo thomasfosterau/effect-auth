@@ -123,7 +123,7 @@ const multiAlgorithmExample = Effect.gen(function* () {
 const runExample = async () => {
   try {
     const result = await Effect.runPromise(
-      Effect.provide(multiAlgorithmExample, Auth.PasswordHasherLive),
+      Effect.provide(multiAlgorithmExample, Auth.PasswordHasher.layer()),
     );
 
     console.log("📊 Final Results:");

@@ -32,7 +32,7 @@ Open <http://localhost:3004>. SQLite DB at `examples/realworld-hono/conduit.db`.
 
 Same shape as the other examples — `SessionStore` and `UserStore`
 adapters in `src/auth/adapters.ts` backed by Drizzle + SQLite, shared
-`Context` value (`runtime.ts`) including `PasswordHasherLive`.
+`Context` value (`runtime.ts`) including `PasswordHasher.layer()`.
 
 ## Smoke test
 

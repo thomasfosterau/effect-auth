@@ -22,16 +22,10 @@ Inspired by Rust's password_hash crate, this module provides:
   - [HashedPassword](#hashedpassword)
   - [MultiAlgorithmVerifier (class)](#multialgorithmverifier-class)
   - [MultiAlgorithmVerifierShape (interface)](#multialgorithmverifiershape-interface)
-  - [PBKDF2HasherLive](#pbkdf2hasherlive)
   - [PasswordHasher (class)](#passwordhasher-class)
-  - [PasswordHasherLayer](#passwordhasherlayer)
-  - [PasswordHasherLive](#passwordhasherlive)
   - [PasswordHasherShape (interface)](#passwordhashershape-interface)
-  - [ScryptHasherLayer](#scrypthasherlayer)
   - [makeMultiAlgorithmVerifier](#makemultialgorithmverifier)
-  - [makeMultiAlgorithmVerifierLayer](#makemultialgorithmverifierlayer)
   - [makePBKDF2Hasher](#makepbkdf2hasher)
-  - [makePasswordHasher](#makepasswordhasher)
   - [makeScryptHasher](#makescrypthasher)
 
 ---
@@ -76,16 +70,6 @@ export interface MultiAlgorithmVerifierShape {
 }
 ```
 
-## PBKDF2HasherLive
-
-Layer that provides PBKDF2 password hasher explicitly
-
-**Signature**
-
-```ts
-export declare const PBKDF2HasherLive: Context.Context<PasswordHasher>;
-```
-
 ## PasswordHasher (class)
 
 Tag for PasswordHasher service
@@ -94,26 +78,6 @@ Tag for PasswordHasher service
 
 ```ts
 export declare class PasswordHasher
-```
-
-## PasswordHasherLayer
-
-Layer that provides the default PBKDF2 password hasher
-
-**Signature**
-
-```ts
-export declare const PasswordHasherLayer: Layer.Layer<PasswordHasher, never, never>;
-```
-
-## PasswordHasherLive
-
-Backward-compatible Context value that provides the default PBKDF2 password hasher
-
-**Signature**
-
-```ts
-export declare const PasswordHasherLive: Context.Context<PasswordHasher>;
 ```
 
 ## PasswordHasherShape (interface)
@@ -140,16 +104,6 @@ export interface PasswordHasherShape {
    */
   readonly verify: (password: string, hash: string) => Effect.Effect<boolean, Errors.HashingError>;
 }
-```
-
-## ScryptHasherLayer
-
-Layer that provides the scrypt password hasher
-
-**Signature**
-
-```ts
-export declare const ScryptHasherLayer: Layer.Layer<PasswordHasher, never, never>;
 ```
 
 ## makeMultiAlgorithmVerifier
@@ -182,18 +136,6 @@ const program = Effect.gen(function* () {
 });
 ```
 
-## makeMultiAlgorithmVerifierLayer
-
-Create a layer that provides a multi-algorithm verifier
-
-**Signature**
-
-```ts
-export declare const makeMultiAlgorithmVerifierLayer: (
-  hashers: readonly PasswordHasherShape[],
-) => Layer.Layer<MultiAlgorithmVerifier, never, never>;
-```
-
 ## makePBKDF2Hasher
 
 PBKDF2 Password Hasher implementing the PasswordHasher trait
@@ -203,16 +145,6 @@ Following Copenhagen/Oslo guidelines for secure password hashing
 
 ```ts
 export declare const makePBKDF2Hasher: () => PasswordHasherShape;
-```
-
-## makePasswordHasher
-
-Backward compatibility: Default password hasher is PBKDF2
-
-**Signature**
-
-```ts
-export declare const makePasswordHasher: () => PasswordHasherShape;
 ```
 
 ## makeScryptHasher

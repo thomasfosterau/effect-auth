@@ -152,10 +152,10 @@ export declare const authGroupLayer: (
 ) => Layer.Layer<
   ApiGroup<"AuthApi", "auth">,
   never,
-  | HttpRouter.Request<"Requires", PasswordHasher>
   | HttpRouter.Request<"Requires", EmailVerificationStore>
   | HttpRouter.Request<"Requires", AuthLifecycleService>
   | HttpRouter.Request<"Requires", EmailPasswordStore>
+  | HttpRouter.Request<"Requires", PasswordHasher>
   | HttpRouter.Request<"Requires", SessionManager>
   | HttpRouter.Request<"Requires", EmailVerificationService>
   | HttpRouter.Request<"Requires", Hooks>

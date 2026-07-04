@@ -38,7 +38,7 @@ at`http://localhost:5173/api`and`APIURL=http://localhost:5173/api newman run ...
   implementations backed by Drizzle + SQLite. The shapes match the
   interfaces in `packages/effect-auth/src/Session.ts`.
 - **`src/lib/server/auth/runtime.ts`** — a single `Context` value
-  composing the stores and `PasswordHasherLive`. Memoised on
+  composing the stores and `PasswordHasher.layer()`. Memoised on
   `globalThis` so HMR doesn't tear it down on every reload.
 - **`src/lib/server/auth/passwords.ts`** and **`sessions.ts`** —
   thin wrappers that pull the relevant service out of `effect-auth` and

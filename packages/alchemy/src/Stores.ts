@@ -811,6 +811,267 @@ export const makePasswordResetStore = (db: D1Database): Auth.PasswordResetStoreS
 });
 
 // ---------------------------------------------------------------------------
+// MagicLinkStore + MagicLinkUserStore
+// ---------------------------------------------------------------------------
+
+interface MagicLinkRow {
+  readonly token: string;
+  readonly email: string;
+  readonly created_at: number;
+  readonly expires_at: number;
+}
+
+const rowToMagicLink = (row: MagicLinkRow): Auth.MagicLinkToken => ({
+  token: row.token,
+  email: row.email,
+  createdAt: row.created_at,
+  expiresAt: row.expires_at,
+});
+
+export const makeMagicLinkStore = (db: D1Database): Auth.MagicLinkStoreShape => ({
+  create: (token) =>
+    d1Run(
+      db,
+      `INSERT INTO auth_magic_links (token, email, created_at, expires_at) VALUES (?, ?, ?, ?)`,
+      [token.token, token.email, token.createdAt, token.expiresAt],
+      "magicLink.create",
+    ).pipe(Effect.as(token)),
+  get: (token) =>
+    d1First<MagicLinkRow>(
+      db,
+      `SELECT * FROM auth_magic_links WHERE token = ?`,
+      [token],
+      "magicLink.get",
+    ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
+  delete: (token) =>
+    d1Run(db, `DELETE FROM auth_magic_links WHERE token = ?`, [token], "magicLink.delete").pipe(
+      Effect.asVoid,
+    ),
+  deleteByEmail: (email) =>
+    d1Run(
+      db,
+      `DELETE FROM auth_magic_links WHERE email = ?`,
+      [email],
+      "magicLink.deleteByEmail",
+    ).pipe(Effect.asVoid),
+});
+
+/**
+ * MagicLinkUserStoreShape and EmailOtpUserStoreShape are structurally
+ * identical (getUserByEmail + createUser over auth_users), so both stores
+ * share this implementation.
+ */
+const makeEmailSignInUserStore = (
+  db: D1Database,
+  label: string,
+): Auth.MagicLinkUserStoreShape & Auth.EmailOtpUserStoreShape => ({
+  getUserByEmail: (email) =>
+    d1First<UserRow>(
+      db,
+      `SELECT * FROM auth_users WHERE email = ?`,
+      [email],
+      `${label}.getUserByEmail`,
+    ).pipe(Effect.map((row) => (row ? rowToUser(row) : null))),
+  createUser: (input) =>
+    Effect.gen(function* () {
+      const now = new Date();
+      const user: Auth.User = {
+        id: randomUUID(),
+        email: input.email,
+        emailVerified: input.emailVerified,
+        createdAt: now,
+        updatedAt: now,
+        attributes: {},
+        ...(input.name !== undefined ? { name: input.name } : {}),
+      };
+      yield* d1Run(db, insertUser, insertUserParams(user), `${label}.createUser`);
+      return user;
+    }),
+});
+
+export const makeMagicLinkUserStore = (db: D1Database): Auth.MagicLinkUserStoreShape =>
+  makeEmailSignInUserStore(db, "magicLinkUser");
+
+// ---------------------------------------------------------------------------
+// EmailOtpStore + EmailOtpUserStore
+// ---------------------------------------------------------------------------
+
+interface EmailOtpRow {
+  readonly email: string;
+  readonly purpose: string;
+  readonly otp_hash: string;
+  readonly attempts: number;
+  readonly created_at: number;
+  readonly expires_at: number;
+}
+
+const rowToEmailOtp = (row: EmailOtpRow): Auth.EmailOtpRecord => ({
+  email: row.email,
+  purpose: row.purpose as Auth.EmailOtpPurpose,
+  otpHash: row.otp_hash,
+  attempts: row.attempts,
+  createdAt: row.created_at,
+  expiresAt: row.expires_at,
+});
+
+const upsertEmailOtp = `INSERT INTO auth_email_otps (email, purpose, otp_hash, attempts, created_at, expires_at)
+  VALUES (?, ?, ?, ?, ?, ?)
+  ON CONFLICT(email, purpose) DO UPDATE SET
+    otp_hash = excluded.otp_hash,
+    attempts = excluded.attempts,
+    created_at = excluded.created_at,
+    expires_at = excluded.expires_at`;
+
+export const makeEmailOtpStore = (db: D1Database): Auth.EmailOtpStoreShape => {
+  const read = (email: string, purpose: Auth.EmailOtpPurpose, label: string) =>
+    d1First<EmailOtpRow>(
+      db,
+      `SELECT * FROM auth_email_otps WHERE email = ? AND purpose = ?`,
+      [email, purpose],
+      label,
+    );
+
+  return {
+    upsert: (record) =>
+      d1Run(
+        db,
+        upsertEmailOtp,
+        [
+          record.email,
+          record.purpose,
+          record.otpHash,
+          record.attempts,
+          record.createdAt,
+          record.expiresAt,
+        ],
+        "emailOtp.upsert",
+      ).pipe(Effect.as(record)),
+    get: (email, purpose) =>
+      read(email, purpose, "emailOtp.get").pipe(
+        Effect.map((row) => (row ? rowToEmailOtp(row) : null)),
+      ),
+    delete: (email, purpose) =>
+      d1Run(
+        db,
+        `DELETE FROM auth_email_otps WHERE email = ? AND purpose = ?`,
+        [email, purpose],
+        "emailOtp.delete",
+      ).pipe(Effect.asVoid),
+    incrementAttempts: (email, purpose) =>
+      Effect.gen(function* () {
+        const row = yield* read(email, purpose, "emailOtp.incrementAttempts");
+        if (row == null) {
+          return yield* new Auth.AuthError({ message: "OTP record not found" });
+        }
+        const attempts = row.attempts + 1;
+        yield* d1Run(
+          db,
+          `UPDATE auth_email_otps SET attempts = ? WHERE email = ? AND purpose = ?`,
+          [attempts, email, purpose],
+          "emailOtp.incrementAttempts",
+        );
+        return attempts;
+      }),
+  };
+};
+
+export const makeEmailOtpUserStore = (db: D1Database): Auth.EmailOtpUserStoreShape =>
+  makeEmailSignInUserStore(db, "emailOtpUser");
+
+// ---------------------------------------------------------------------------
+// TwoFactorStore + PendingTwoFactorStore
+// ---------------------------------------------------------------------------
+
+interface TwoFactorRow {
+  readonly user_id: string;
+  readonly secret: string;
+  readonly backup_codes: string;
+  readonly verified: number;
+  readonly created_at: number;
+}
+
+const rowToTwoFactor = (row: TwoFactorRow): Auth.TwoFactorRecord => ({
+  userId: row.user_id,
+  secret: row.secret,
+  backupCodes: JSON.parse(row.backup_codes) as readonly string[],
+  verified: row.verified !== 0,
+  createdAt: row.created_at,
+});
+
+const upsertTwoFactor = `INSERT INTO auth_two_factor (user_id, secret, backup_codes, verified, created_at)
+  VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT(user_id) DO UPDATE SET
+    secret = excluded.secret,
+    backup_codes = excluded.backup_codes,
+    verified = excluded.verified,
+    created_at = excluded.created_at`;
+
+export const makeTwoFactorStore = (db: D1Database): Auth.TwoFactorStoreShape => ({
+  get: (userId) =>
+    d1First<TwoFactorRow>(
+      db,
+      `SELECT * FROM auth_two_factor WHERE user_id = ?`,
+      [userId],
+      "twoFactor.get",
+    ).pipe(Effect.map((row) => (row ? rowToTwoFactor(row) : null))),
+  upsert: (record) =>
+    d1Run(
+      db,
+      upsertTwoFactor,
+      [
+        record.userId,
+        record.secret,
+        JSON.stringify(record.backupCodes),
+        record.verified ? 1 : 0,
+        record.createdAt,
+      ],
+      "twoFactor.upsert",
+    ).pipe(Effect.as(record)),
+  delete: (userId) =>
+    d1Run(db, `DELETE FROM auth_two_factor WHERE user_id = ?`, [userId], "twoFactor.delete").pipe(
+      Effect.asVoid,
+    ),
+});
+
+interface PendingTwoFactorRow {
+  readonly token: string;
+  readonly user_id: string;
+  readonly expires_at: number;
+  readonly created_at: number;
+}
+
+const rowToPendingTwoFactor = (row: PendingTwoFactorRow): Auth.PendingTwoFactor => ({
+  token: row.token,
+  userId: row.user_id,
+  expiresAt: row.expires_at,
+  createdAt: row.created_at,
+});
+
+export const makePendingTwoFactorStore = (db: D1Database): Auth.PendingTwoFactorStoreShape => ({
+  create: (pending) =>
+    d1Run(
+      db,
+      `INSERT INTO auth_pending_two_factor (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)`,
+      [pending.token, pending.userId, pending.expiresAt, pending.createdAt],
+      "pendingTwoFactor.create",
+    ).pipe(Effect.as(pending)),
+  get: (token) =>
+    d1First<PendingTwoFactorRow>(
+      db,
+      `SELECT * FROM auth_pending_two_factor WHERE token = ?`,
+      [token],
+      "pendingTwoFactor.get",
+    ).pipe(Effect.map((row) => (row ? rowToPendingTwoFactor(row) : null))),
+  delete: (token) =>
+    d1Run(
+      db,
+      `DELETE FROM auth_pending_two_factor WHERE token = ?`,
+      [token],
+      "pendingTwoFactor.delete",
+    ).pipe(Effect.asVoid),
+});
+
+// ---------------------------------------------------------------------------
 // Layers
 // ---------------------------------------------------------------------------
 
@@ -840,11 +1101,24 @@ export const OAuthUserStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.OAuthUserStore, makeOAuthUserStore(db));
 export const PasswordResetStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.PasswordResetStore, makePasswordResetStore(db));
+export const MagicLinkStoreLayer = (db: D1Database) =>
+  Layer.succeed(Auth.MagicLinkStore, makeMagicLinkStore(db));
+export const MagicLinkUserStoreLayer = (db: D1Database) =>
+  Layer.succeed(Auth.MagicLinkUserStore, makeMagicLinkUserStore(db));
+export const EmailOtpStoreLayer = (db: D1Database) =>
+  Layer.succeed(Auth.EmailOtpStore, makeEmailOtpStore(db));
+export const EmailOtpUserStoreLayer = (db: D1Database) =>
+  Layer.succeed(Auth.EmailOtpUserStore, makeEmailOtpUserStore(db));
+export const TwoFactorStoreLayer = (db: D1Database) =>
+  Layer.succeed(Auth.TwoFactorStore, makeTwoFactorStore(db));
+export const PendingTwoFactorStoreLayer = (db: D1Database) =>
+  Layer.succeed(Auth.PendingTwoFactorStore, makePendingTwoFactorStore(db));
 
 /**
  * A single layer that provides every effect-auth store backed by the given D1
  * database. Provide it once and the entire auth stack (SessionManager,
- * EmailPasswordService, OAuth, WebAuthn, etc.) has persistence.
+ * EmailPasswordService, OAuth, WebAuthn, MagicLink, EmailOtp, TwoFactor, etc.)
+ * has persistence.
  */
 export const layer = (db: D1Database) =>
   Layer.mergeAll(
@@ -862,4 +1136,10 @@ export const layer = (db: D1Database) =>
     OAuthAccountStoreLayer(db),
     OAuthUserStoreLayer(db),
     PasswordResetStoreLayer(db),
+    MagicLinkStoreLayer(db),
+    MagicLinkUserStoreLayer(db),
+    EmailOtpStoreLayer(db),
+    EmailOtpUserStoreLayer(db),
+    TwoFactorStoreLayer(db),
+    PendingTwoFactorStoreLayer(db),
   );

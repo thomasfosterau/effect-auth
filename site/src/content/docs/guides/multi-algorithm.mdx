@@ -69,7 +69,7 @@ const program = Effect.gen(function* () {
   console.log(isValid); // true
 });
 
-await Effect.runPromise(Effect.provide(program, Auth.PasswordHasherLive));
+await Effect.runPromise(Effect.provide(program, Auth.PasswordHasher.layer()));
 ```
 
 ### Multi-Algorithm Migration

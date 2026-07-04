@@ -46,4 +46,4 @@ Open <http://localhost:3003>. SQLite DB at `examples/realworld-tanstack-start/co
 
 Same pattern as the other examples — `SessionStore` and `UserStore`
 adapters in `app/server/auth/adapters.ts`, shared `Context` in
-`runtime.ts` wiring them up with `PasswordHasherLive`.
+`runtime.ts` wiring them up with `PasswordHasher.layer()`.

@@ -87,7 +87,7 @@ attributes-bag era.
 
 ## Password hashing
 
-`PasswordHasherLive` (PBKDF2-SHA256) and `makeScryptHasher` ship in core;
+`PasswordHasher.layer()` (PBKDF2-SHA256) and `makeScryptHasher` ship in core;
 `@effect-auth/argon2` provides Argon2id over prebuilt native bindings.
 `makeMultiAlgorithmVerifier` verifies legacy hashes while new ones use your
 preferred algorithm — see [Multi-Algorithm Hashing](/guides/multi-algorithm/).

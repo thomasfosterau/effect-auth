@@ -3,7 +3,7 @@ import { Context, Effect } from "effect";
 import { Hooks } from "./Hooks.js";
 import { makeEmailPasswordService, EmailPasswordStore } from "./EmailPassword.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
-import { PasswordHasherLive, makePasswordHasher } from "./Password.js";
+import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 
 const users = new Map<string, User>();
@@ -111,7 +111,10 @@ const makeTestContext = async () => {
       Context.make(SessionStore, sessionStore),
       Context.merge(
         Context.make(UserStore, userStore),
-        Context.merge(Context.make(EmailPasswordStore, emailPasswordStore), PasswordHasherLive),
+        Context.merge(
+          Context.make(EmailPasswordStore, emailPasswordStore),
+          Context.make(PasswordHasher, makePBKDF2Hasher()),
+        ),
       ),
     ),
   );
@@ -154,7 +157,7 @@ describe("EmailPasswordService", () => {
   it("should sign in an existing user", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = makePasswordHasher();
+    const hasher = makePBKDF2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("sign-in-password"));
 
     const user: User = {
@@ -191,7 +194,7 @@ describe("EmailPasswordService", () => {
   it("should reject invalid credentials", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = makePasswordHasher();
+    const hasher = makePBKDF2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("correct-password"));
 
     const user: User = {
@@ -230,7 +233,7 @@ describe("EmailPasswordService", () => {
   it("should block sign-in for unverified email when required", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = makePasswordHasher();
+    const hasher = makePBKDF2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("password-123"));
 
     const user: User = {
@@ -281,7 +284,7 @@ describe("EmailPasswordService second-factor gate", () => {
     const { SecondFactorGate } = await import("./EmailPassword.js");
     const testContext = await makeTestContext();
 
-    const hasher = makePasswordHasher();
+    const hasher = makePBKDF2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("gate-password"));
 
     const user: User = {
@@ -326,7 +329,7 @@ describe("EmailPasswordService second-factor gate", () => {
     const { SecondFactorGate } = await import("./EmailPassword.js");
     const testContext = await makeTestContext();
 
-    const hasher = makePasswordHasher();
+    const hasher = makePBKDF2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("no-gate-password"));
 
     const user: User = {

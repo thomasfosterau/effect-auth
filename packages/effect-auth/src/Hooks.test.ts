@@ -5,7 +5,7 @@ import * as Errors from "./Errors.js";
 import type { AuthResult, SignInInput } from "./EmailPassword.js";
 import { EmailPasswordStore } from "./EmailPassword.js";
 import { makeEmailPasswordService } from "./EmailPassword.js";
-import { PasswordHasherLive } from "./Password.js";
+import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
 import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.js";
 import { RateLimitPlugin } from "./plugins/RateLimitPlugin.js";
@@ -348,7 +348,10 @@ describe("Hooks - integration with EmailPasswordService", () => {
 
     const testContext = Context.merge(
       Context.make(SessionManager, sessionManager),
-      Context.merge(Context.make(EmailPasswordStore, emailPasswordStore), PasswordHasherLive),
+      Context.merge(
+        Context.make(EmailPasswordStore, emailPasswordStore),
+        Context.make(PasswordHasher, makePBKDF2Hasher()),
+      ),
     );
 
     // A transform plugin that stamps an attribute onto the sign-up input.

@@ -173,7 +173,10 @@ const runExample = async () => {
         authenticationFlow,
         Context.merge(
           Context.make(Auth.SessionStore, sessionStore),
-          Context.merge(Context.make(Auth.UserStore, userStore), Auth.PasswordHasherLive),
+          Context.merge(
+            Context.make(Auth.UserStore, userStore),
+            Context.make(Auth.PasswordHasher, Auth.makePBKDF2Hasher()),
+          ),
         ),
       ).pipe(Effect.provide(Auth.Hooks.Default)),
     );

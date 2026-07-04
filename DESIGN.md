@@ -136,14 +136,15 @@ plus `PasswordHasherLive`/`PBKDF2HasherLive` (`Password.ts:408,418`) which are
 - Standalone cross-module layers (see coverage rule above) keep the
   `<What>Layer` PascalCase-value convention; a **function** returning a layer is
   named `<What>Layer(args)` too (the call site reads identically).
-- **Proposed (breaking, 1.0):** rename `authGroupLayer` → `AuthGroupLayer` (or
-  fold into an `AuthHttp.layer` static), `makeMultiAlgorithmVerifierLayer` →
-  `MultiAlgorithmVerifierLayer`, and remove `PasswordHasherLive`/
-  `PBKDF2HasherLive` (a `Context` value duplicating `PasswordHasherLayer`).
-  The hasher family (`PasswordHasherLayer`, `ScryptHasherLayer`,
-  `Argon2HasherLayer`) consolidates as statics on `PasswordHasher`
-  (`PasswordHasher.layerPbkdf2()`, `.layerScrypt()`; argon2 stays a package
-  export for dependency reasons).
+- **Applied (proposal 7, approved 2026-07-04):** the hasher family now lives as
+  statics — `PasswordHasher.layer()` (PBKDF2 default) and
+  `PasswordHasher.layerScrypt(options)`; `MultiAlgorithmVerifier.layer(hashers)`
+  replaces `makeMultiAlgorithmVerifierLayer`. Removed: `PasswordHasherLayer`,
+  `ScryptHasherLayer`, `PasswordHasherLive`, `PBKDF2HasherLive`,
+  `makePasswordHasher` (use `makePBKDF2Hasher`). `Argon2HasherLayer` stays a
+  package export in `@effect-auth/argon2` — native dependencies never enter
+  core. Still open: the `authGroupLayer` naming (unasked; revisit with any
+  future HTTP-surface change).
 
 **Rationale.** One construction verb (`X.layer`) beats four spellings; the
 `Live` suffix is an Effect-v2-era habit; a `Context.make` in a layer's clothing
@@ -197,12 +198,14 @@ keep their error unions.
 **Risk.** Medium — this changes implementor-facing signatures; staged behind a
 Changeset with a migration table.
 
-### First-party implementation coverage (documented gap, no action now)
+### First-party implementation coverage
 
-`@effect-auth/sql` implements 20 stores; `@effect-auth/alchemy` 14 (missing
-MagicLink, MagicLinkUser, EmailOtp, EmailOtpUser, TwoFactor, PendingTwoFactor).
-Neither implements the advanced-feature stores (Organization, ApiKey, Sso,
-Oidc\*, DeviceAuthorization, …). Tracked as a feature gap, not an API question.
+`@effect-auth/sql` and `@effect-auth/alchemy` both implement the same 20
+stores (the alchemy gap — MagicLink, MagicLinkUser, EmailOtp, EmailOtpUser,
+TwoFactor, PendingTwoFactor — was closed 2026-07-04). Neither implements the
+advanced-feature stores (Organization, ApiKey, Sso, Oidc\*,
+DeviceAuthorization, …); that remains a tracked feature gap, not an API
+question.
 
 ## D4. Error taxonomy
 
@@ -429,6 +432,14 @@ Shared rules applied to all: config = plain `XConfig`/`XOptions` interfaces;
 errors reuse core tags unless the package wraps a foreign SDK (workos);
 `effect`-only runtime deps in core, native/SDK deps isolated in their packages.
 
+**Dependency & platform rule (maintainer directive, 2026-07-04):** the core
+package aims to be platform-neutral and takes dependencies only where strictly
+necessary. Concretely: `effect` is the only runtime dependency; the only
+platform API used is `node:crypto` (the incidental `node:util` import was
+removed); anything platform-specific or natively-built lives in a companion
+package. A future migration of `node:crypto` usage to WebCrypto would complete
+platform neutrality and is recorded here as a candidate 1.x goal.
+
 ## D11. Docs as source of truth
 
 **Status quo.** `ARCHITECTURE.md` predates ~40 modules (lowercase `src/types.ts`,
@@ -461,7 +472,8 @@ yes (error-status fixes and the three operationId renames; `orgListInvitations`
 and `adminListUsers` keep their names), **6** — _remove SIWE entirely_, going
 beyond the proposal (core module + endpoints + `@effect-auth/siwe` package all
 deleted), **8** yes. **7** (hasher consolidation) and **9** (OIDC extraction)
-were not put to a vote; 7 remains open, 9 stays "keep in core" as recommended.
+were not put to a vote at the time; 7 was subsequently approved and applied
+(2026-07-04), 9 stays "keep in core" as recommended.
 All approved items are applied and changeset-backed.
 
 ## Ranked breaking-change proposals (as asked)

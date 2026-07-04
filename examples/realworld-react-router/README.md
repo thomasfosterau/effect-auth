@@ -42,5 +42,5 @@ here.
 
 Same shape as the other examples — `SessionStore` and `UserStore`
 adapters in `app/server/auth/adapters.ts` backed by Drizzle, a single
-shared `Context` value (`runtime.ts`) including `PasswordHasherLive`,
+shared `Context` value (`runtime.ts`) including `PasswordHasher.layer()`,
 and thin `hashPassword` / `validateSession` wrappers.

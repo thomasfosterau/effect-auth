@@ -6,15 +6,21 @@ import {
   layer,
   makeChallengeStore,
   makeCredentialStore,
+  makeEmailOtpStore,
+  makeEmailOtpUserStore,
   makeEmailPasswordStore,
   makeEmailVerificationStore,
+  makeMagicLinkStore,
+  makeMagicLinkUserStore,
   makeOAuthAccountStore,
   makeOAuthStateStore,
   makeOAuthUserStore,
   makePasswordResetStore,
+  makePendingTwoFactorStore,
   makeRateLimitStore,
   makeRoleStore,
   makeSessionStore,
+  makeTwoFactorStore,
   makeUserServiceStore,
   makeUserStore,
 } from "./Stores.js";
@@ -357,6 +363,122 @@ suite("@effect-auth/alchemy stores", () => {
     expect(await Effect.runPromise(store.get("r1"))).toBe(null);
   });
 
+  it("magic link store: roundtrip, delete by email, user store", async () => {
+    const { db } = await setup();
+    const store = makeMagicLinkStore(db);
+    const users = makeMagicLinkUserStore(db);
+    const link = (token: string, email: string): Auth.MagicLinkToken => ({
+      token,
+      email,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 300_000,
+    });
+
+    await Effect.runPromise(store.create(link("ml-1", "a@example.com")));
+    await Effect.runPromise(store.create(link("ml-2", "a@example.com")));
+    await Effect.runPromise(store.create(link("ml-3", "b@example.com")));
+
+    expect((await Effect.runPromise(store.get("ml-1")))?.email).toBe("a@example.com");
+    expect(await Effect.runPromise(store.get("nope"))).toBe(null);
+
+    await Effect.runPromise(store.delete("ml-1"));
+    await Effect.runPromise(store.deleteByEmail("a@example.com"));
+    expect(await Effect.runPromise(store.get("ml-2"))).toBe(null);
+    expect((await Effect.runPromise(store.get("ml-3")))?.email).toBe("b@example.com");
+
+    const user = await Effect.runPromise(
+      users.createUser({ email: "ml@example.com", emailVerified: true, name: "Mel" }),
+    );
+    expect(user.emailVerified).toBe(true);
+    expect(user.name).toBe("Mel");
+    const byEmail = await Effect.runPromise(users.getUserByEmail("ml@example.com"));
+    expect(byEmail?.id).toBe(user.id);
+    expect(byEmail?.emailVerified).toBe(true);
+    expect(await Effect.runPromise(users.getUserByEmail("nobody@example.com"))).toBe(null);
+  });
+
+  it("email otp store: upserts per email+purpose and increments attempts", async () => {
+    const { db } = await setup();
+    const store = makeEmailOtpStore(db);
+    const users = makeEmailOtpUserStore(db);
+    const record: Auth.EmailOtpRecord = {
+      email: "otp@example.com",
+      otpHash: "hash",
+      purpose: "sign-in",
+      attempts: 0,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 300_000,
+    };
+
+    await Effect.runPromise(store.upsert(record));
+    await Effect.runPromise(
+      store.upsert({ ...record, purpose: "forget-password", otpHash: "other" }),
+    );
+
+    expect(await Effect.runPromise(store.incrementAttempts("otp@example.com", "sign-in"))).toBe(1);
+    expect(await Effect.runPromise(store.incrementAttempts("otp@example.com", "sign-in"))).toBe(2);
+
+    await Effect.runPromise(store.upsert({ ...record, otpHash: "new-hash" }));
+    const replaced = await Effect.runPromise(store.get("otp@example.com", "sign-in"));
+    expect(replaced?.otpHash).toBe("new-hash");
+    expect(replaced?.attempts).toBe(0);
+    expect(
+      (await Effect.runPromise(store.get("otp@example.com", "forget-password")))?.otpHash,
+    ).toBe("other");
+
+    await Effect.runPromise(store.delete("otp@example.com", "sign-in"));
+    expect(await Effect.runPromise(store.get("otp@example.com", "sign-in"))).toBe(null);
+
+    const missing = await Effect.runPromise(
+      Effect.result(store.incrementAttempts("otp@example.com", "sign-in")),
+    );
+    expect(Result.isFailure(missing) && missing.failure._tag).toBe("AuthError");
+
+    const user = await Effect.runPromise(
+      users.createUser({ email: "otp@example.com", emailVerified: true }),
+    );
+    expect((await Effect.runPromise(users.getUserByEmail("otp@example.com")))?.id).toBe(user.id);
+  });
+
+  it("two factor + pending two factor stores roundtrip", async () => {
+    const { db } = await setup();
+    const store = makeTwoFactorStore(db);
+    const pendingStore = makePendingTwoFactorStore(db);
+    const record: Auth.TwoFactorRecord = {
+      userId: "user-1",
+      secret: "JBSWY3DPEHPK3PXP",
+      backupCodes: ["h1", "h2", "h3"],
+      verified: false,
+      createdAt: Date.now(),
+    };
+
+    expect(await Effect.runPromise(store.get("user-1"))).toBe(null);
+
+    await Effect.runPromise(store.upsert(record));
+    const created = await Effect.runPromise(store.get("user-1"));
+    expect(created?.verified).toBe(false);
+    expect(created?.backupCodes).toEqual(["h1", "h2", "h3"]);
+
+    await Effect.runPromise(store.upsert({ ...record, verified: true, backupCodes: ["h2", "h3"] }));
+    const updated = await Effect.runPromise(store.get("user-1"));
+    expect(updated?.verified).toBe(true);
+    expect(updated?.backupCodes).toEqual(["h2", "h3"]);
+
+    await Effect.runPromise(store.delete("user-1"));
+    expect(await Effect.runPromise(store.get("user-1"))).toBe(null);
+
+    const pending: Auth.PendingTwoFactor = {
+      token: "p2f-1",
+      userId: "user-1",
+      expiresAt: Date.now() + 300_000,
+      createdAt: Date.now(),
+    };
+    await Effect.runPromise(pendingStore.create(pending));
+    expect(await Effect.runPromise(pendingStore.get("p2f-1"))).toEqual(pending);
+    await Effect.runPromise(pendingStore.delete("p2f-1"));
+    expect(await Effect.runPromise(pendingStore.get("p2f-1"))).toBe(null);
+  });
+
   it("role store reads roles and permissions", async () => {
     const { db, sqlite } = await setup();
     sqlite.prepare("INSERT INTO auth_user_roles (user_id, role) VALUES (?, ?)").run("u1", "admin");
@@ -389,12 +511,35 @@ suite("@effect-auth/alchemy stores", () => {
       const count = yield* rateLimit.increment("layer-key", 60);
       const oauthUsers = yield* Auth.OAuthUserStore;
       const user = yield* oauthUsers.createUser({ email: "layer@l.com", emailVerified: false });
-      return { session, count, user };
+      const magicLinks = yield* Auth.MagicLinkStore;
+      yield* magicLinks.create({
+        token: "ml-layer",
+        email: "layer@l.com",
+        createdAt: now.getTime(),
+        expiresAt: now.getTime() + 60_000,
+      });
+      const magicLink = yield* magicLinks.get("ml-layer");
+      const emailOtps = yield* Auth.EmailOtpStore;
+      const twoFactor = yield* Auth.TwoFactorStore;
+      const pendingTwoFactor = yield* Auth.PendingTwoFactorStore;
+      const magicLinkUsers = yield* Auth.MagicLinkUserStore;
+      const emailOtpUsers = yield* Auth.EmailOtpUserStore;
+      return {
+        session,
+        count,
+        user,
+        magicLink,
+        stores: [emailOtps, twoFactor, pendingTwoFactor, magicLinkUsers, emailOtpUsers],
+      };
     });
 
     const result = await Effect.runPromise(program.pipe(Effect.provide(layer(db))));
     expect(result.session?.userId).toBe("u9");
     expect(result.count).toBe(1);
     expect(result.user.email).toBe("layer@l.com");
+    expect(result.magicLink?.email).toBe("layer@l.com");
+    for (const store of result.stores) {
+      expect(store).toBeDefined();
+    }
   });
 });
