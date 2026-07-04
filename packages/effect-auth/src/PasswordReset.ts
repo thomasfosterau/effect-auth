@@ -120,7 +120,7 @@ export const makePasswordResetService = (
   const expiresIn = config.expiresIn ?? 60 * 60 * 1000;
   const minPasswordLength = config.minPasswordLength ?? 8;
   const maxPasswordLength = config.maxPasswordLength ?? 128;
-  const revokeSessionsOnPasswordReset = config.revokeSessionsOnPasswordReset ?? false;
+  const revokeSessionsOnPasswordReset = config.revokeSessionsOnPasswordReset ?? true;
 
   return Effect.sync(
     (): PasswordResetServiceShape => ({

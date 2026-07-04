@@ -191,7 +191,7 @@ describe("PasswordResetService", () => {
     expect(resetTokens.size).toBe(0);
   });
 
-  it("should reset password and revoke sessions when configured", async () => {
+  it("should revoke sessions by default on password reset", async () => {
     const testContext = await makeTestContext();
 
     const hasher = makePBKDF2Hasher();
@@ -229,9 +229,9 @@ describe("PasswordResetService", () => {
       attributes: {},
     });
 
+    // No revokeSessionsOnPasswordReset option — default should revoke sessions.
     const program = Effect.gen(function* () {
       const service = yield* makePasswordResetService({
-        revokeSessionsOnPasswordReset: true,
         sendResetPassword: () => Effect.void,
       });
 
@@ -249,6 +249,65 @@ describe("PasswordResetService", () => {
     expect(updatedHash).not.toBe(oldHash.hash);
     expect(resetTokens.size).toBe(0);
     expect(sessions.size).toBe(0);
+  });
+
+  it("should not revoke sessions when revokeSessionsOnPasswordReset is false", async () => {
+    const testContext = await makeTestContext();
+
+    const hasher = makePBKDF2Hasher();
+    const oldHash = await Effect.runPromise(hasher.hash("old-password-123"));
+
+    const user: User = {
+      id: "user-reset-3",
+      email: "session-keep@example.com",
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+
+    users.set(user.id, user);
+    usersByEmail.set("session-keep@example.com", user.id);
+    passwordHashes.set(user.id, oldHash.hash);
+
+    const resetToken: PasswordResetToken = {
+      token: hashToken("token-456"),
+      userId: user.id,
+      email: "session-keep@example.com",
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    };
+
+    resetTokens.set(resetToken.token, resetToken);
+    sessions.set("session-2", {
+      id: "session-2",
+      userId: user.id,
+      createdAt: new Date(),
+      lastActivityAt: new Date(),
+      expiresAt: new Date(Date.now() + 3600_000),
+      attributes: {},
+    });
+
+    const program = Effect.gen(function* () {
+      const service = yield* makePasswordResetService({
+        revokeSessionsOnPasswordReset: false,
+        sendResetPassword: () => Effect.void,
+      });
+
+      return yield* service.resetPassword("token-456", "new-password-123");
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    const updatedHash = passwordHashes.get(user.id);
+    expect(result.userId).toBe(user.id);
+    expect(result.reset).toBe(true);
+    expect(updatedHash).toBeDefined();
+    expect(updatedHash).not.toBe(oldHash.hash);
+    expect(resetTokens.size).toBe(0);
+    expect(sessions.size).toBe(1);
   });
 
   it("should fail for invalid reset tokens", async () => {

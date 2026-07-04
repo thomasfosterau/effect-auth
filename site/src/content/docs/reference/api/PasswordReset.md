@@ -34,6 +34,11 @@ export interface PasswordResetConfig {
   readonly expiresIn?: number;
   readonly minPasswordLength?: number;
   readonly maxPasswordLength?: number;
+  /**
+   * Revoke all of the user's sessions when their password is reset. Default
+   * `true` (a password reset is a credential-change event; attacker sessions
+   * must not survive the victim's reset). Set to `false` to opt out.
+   */
   readonly revokeSessionsOnPasswordReset?: boolean;
   readonly sendResetPassword: (
     email: string,
