@@ -166,6 +166,30 @@ const makeFixture = () => {
         const limit = query.limit ?? all.length;
         return { users: all.slice(offset, offset + limit), total };
       }),
+
+    createUser: (input: {
+      email: string;
+      name?: string;
+      image?: string;
+      attributes?: Record<string, unknown>;
+    }) =>
+      Effect.sync(() => {
+        const id = `created-${Date.now()}`;
+        const user = {
+          id,
+          email: input.email,
+          emailVerified: false,
+          name: input.name,
+          image: input.image,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          attributes: input.attributes ?? {},
+        };
+        usersById.set(id, user);
+        return user;
+      }),
+
+    setPasswordHash: (_userId: string, _hash: string) => Effect.void,
   };
 
   const apiKeyStore = {
