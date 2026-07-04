@@ -33,6 +33,7 @@ export interface MagicLinkToken {
 export interface MagicLinkStoreShape {
   readonly create: (token: MagicLinkToken) => Effect.Effect<MagicLinkToken, Errors.AuthError>;
   readonly get: (token: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
+  readonly getByEmail: (email: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
   readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
   readonly deleteByEmail: (email: string) => Effect.Effect<void, Errors.AuthError>;
 }
@@ -77,6 +78,13 @@ export class MagicLinkUserStore extends Context.Service<
 export interface MagicLinkConfig {
   readonly expiresIn?: number; // Default: 5 minutes
   readonly disableSignUp?: boolean; // Default: false
+  /**
+   * Minimum interval (ms) between successive send requests for the same email.
+   * When an outstanding token created within this window already exists, `send`
+   * fails with {@link Errors.ResendTooSoonError}. Off by default; consider
+   * 60_000 for SMS-style flows. Complements the global RateLimit.
+   */
+  readonly resendCooldown?: number;
   readonly sendMagicLink: (
     email: string,
     token: string,
@@ -109,12 +117,16 @@ export interface MagicLinkServiceShape {
    * Anti-enumeration: when sign-up is enabled the link is always sent (the
    * user is created at verification time); when sign-up is disabled and no
    * user exists this succeeds silently without sending anything.
+   *
+   * When `resendCooldown` is configured and an outstanding token for the email
+   * was created within the cooldown window, fails with
+   * {@link Errors.ResendTooSoonError} containing the remaining wait time.
    */
   readonly send: (
     email: string,
   ) => Effect.Effect<
     void,
-    Errors.AuthError | Errors.MagicLinkError,
+    Errors.AuthError | Errors.MagicLinkError | Errors.ResendTooSoonError,
     MagicLinkStore | MagicLinkUserStore
   >;
 
@@ -178,6 +190,24 @@ export const makeMagicLinkService = (
             const user = yield* userStore.getUserByEmail(email);
             if (!user) {
               return;
+            }
+          }
+
+          // Resend cooldown: reject if an outstanding token was created within
+          // the configured window. The identifier (email) is already known to
+          // the caller, so this is not an enumeration risk.
+          if (config.resendCooldown !== undefined) {
+            const existing = yield* store.getByEmail(email);
+            if (existing !== null) {
+              const elapsed = Date.now() - existing.createdAt;
+              if (elapsed < config.resendCooldown) {
+                return yield* Effect.fail(
+                  new Errors.ResendTooSoonError({
+                    message: "Please wait before requesting another magic link",
+                    retryAfter: config.resendCooldown - elapsed,
+                  }),
+                );
+              }
             }
           }
 

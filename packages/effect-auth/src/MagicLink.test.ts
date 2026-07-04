@@ -94,6 +94,14 @@ const magicLinkStore = {
 
   get: (token: string) => Effect.sync(() => magicLinkTokens.get(token) ?? null),
 
+  getByEmail: (email: string) =>
+    Effect.sync(() => {
+      for (const token of magicLinkTokens.values()) {
+        if (token.email === email) return token;
+      }
+      return null;
+    }),
+
   delete: (token: string) =>
     Effect.sync(() => {
       magicLinkTokens.delete(token);
@@ -404,5 +412,81 @@ describe("MagicLinkService", () => {
     }
     expect(users.size).toBe(0);
     expect(sessions.size).toBe(0);
+  });
+
+  it("should fail with ResendTooSoonError when a resend is within the cooldown window", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({
+        sendMagicLink: recordingSend,
+        resendCooldown: 60_000,
+      });
+      yield* service.send("user@example.com");
+      return yield* Effect.result(service.send("user@example.com"));
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("ResendTooSoonError");
+      expect((result.failure as { retryAfter: number }).retryAfter).toBeGreaterThan(0);
+      expect((result.failure as { retryAfter: number }).retryAfter).toBeLessThanOrEqual(60_000);
+    }
+    // The original token is preserved — no replacement was issued.
+    expect(sentLinks.length).toBe(1);
+    expect(magicLinkTokens.size).toBe(1);
+  });
+
+  it("should allow a resend after the cooldown window has elapsed", async () => {
+    const testContext = await makeTestContext();
+
+    // Seed a token whose createdAt is older than the 60 s cooldown.
+    const oldToken = hashToken("old-magic-token");
+    magicLinkTokens.set(oldToken, {
+      token: oldToken,
+      email: "user@example.com",
+      createdAt: Date.now() - 70_000,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    });
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeMagicLinkService({
+        sendMagicLink: recordingSend,
+        resendCooldown: 60_000,
+      });
+      yield* service.send("user@example.com");
+    });
+
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    // A fresh link was issued after the cooldown elapsed.
+    expect(sentLinks.length).toBe(1);
+    expect(magicLinkTokens.size).toBe(1);
+    // The old token was replaced.
+    expect(magicLinkTokens.has(oldToken)).toBe(false);
+  });
+
+  it("should not apply the cooldown when resendCooldown is not configured", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      // No resendCooldown: default behavior — immediate resend always succeeds.
+      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      yield* service.send("repeat@example.com");
+      yield* service.send("repeat@example.com");
+    });
+
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(sentLinks.length).toBe(2);
+    expect(magicLinkTokens.size).toBe(1);
   });
 });

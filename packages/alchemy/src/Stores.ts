@@ -843,6 +843,13 @@ export const makeMagicLinkStore = (db: D1Database): Auth.MagicLinkStoreShape => 
       [token],
       "magicLink.get",
     ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
+  getByEmail: (email) =>
+    d1First<MagicLinkRow>(
+      db,
+      `SELECT * FROM auth_magic_links WHERE email = ?`,
+      [email],
+      "magicLink.getByEmail",
+    ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
   delete: (token) =>
     d1Run(db, `DELETE FROM auth_magic_links WHERE token = ?`, [token], "magicLink.delete").pipe(
       Effect.asVoid,

@@ -454,6 +454,15 @@ export const makeMagicLinkStoreKV: Effect.Effect<
         return token;
       }),
     get: (token) => kv.read<MagicLinkToken>(magicLinkTokenKey(token), "magicLink.get"),
+    getByEmail: (email) =>
+      Effect.gen(function* () {
+        const tokens = yield* kv.readIndex(magicLinkEmailKey(email), "magicLink.getByEmail");
+        if (tokens.length === 0) return null;
+        return yield* kv.read<MagicLinkToken>(
+          magicLinkTokenKey(tokens[0]!),
+          "magicLink.getByEmail",
+        );
+      }),
     delete: (token) =>
       Effect.gen(function* () {
         const existing = yield* kv.read<MagicLinkToken>(

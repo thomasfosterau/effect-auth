@@ -482,4 +482,101 @@ describe("EmailOtpService", () => {
     }
     expect(sessions.size).toBe(0);
   });
+
+  it("should fail with ResendTooSoonError when a resend is within the cooldown window", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeEmailOtpService({
+        sendVerificationOtp: recordingSend,
+        resendCooldown: 60_000,
+      });
+      yield* service.send("user@example.com", "sign-in");
+      return yield* Effect.result(service.send("user@example.com", "sign-in"));
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("ResendTooSoonError");
+      expect((result.failure as { retryAfter: number }).retryAfter).toBeGreaterThan(0);
+      expect((result.failure as { retryAfter: number }).retryAfter).toBeLessThanOrEqual(60_000);
+    }
+    // The original OTP is preserved — no replacement was issued.
+    expect(sentOtps.length).toBe(1);
+    expect(otpRecords.size).toBe(1);
+  });
+
+  it("should allow a resend after the cooldown window has elapsed", async () => {
+    const testContext = await makeTestContext();
+
+    // Seed an OTP record whose createdAt is older than the 60 s cooldown.
+    otpRecords.set("user@example.com:sign-in", {
+      email: "user@example.com",
+      otpHash: hashToken("123456"),
+      purpose: "sign-in",
+      attempts: 0,
+      createdAt: Date.now() - 70_000,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    });
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeEmailOtpService({
+        sendVerificationOtp: recordingSend,
+        resendCooldown: 60_000,
+      });
+      yield* service.send("user@example.com", "sign-in");
+    });
+
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    // A fresh OTP was issued after the cooldown elapsed.
+    expect(sentOtps.length).toBe(1);
+    expect(otpRecords.size).toBe(1);
+    // The new record has a fresh hash, not the seeded one.
+    expect(otpRecords.get("user@example.com:sign-in")?.otpHash).toBe(hashToken(sentOtps[0]!.otp));
+  });
+
+  it("should scope the cooldown to each purpose independently", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeEmailOtpService({
+        sendVerificationOtp: recordingSend,
+        resendCooldown: 60_000,
+      });
+      // First send for sign-in; immediate re-send for a different purpose is allowed.
+      yield* service.send("user@example.com", "sign-in");
+      yield* service.send("user@example.com", "email-verification");
+    });
+
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(sentOtps.length).toBe(2);
+    expect(otpRecords.size).toBe(2);
+  });
+
+  it("should not apply the cooldown when resendCooldown is not configured", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeEmailOtpService({ sendVerificationOtp: recordingSend });
+      yield* service.send("repeat@example.com", "sign-in");
+      yield* service.send("repeat@example.com", "sign-in");
+    });
+
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(sentOtps.length).toBe(2);
+    expect(otpRecords.size).toBe(1);
+  });
 });

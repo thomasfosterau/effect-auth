@@ -303,4 +303,71 @@ describe("PhoneOtpService", () => {
     );
     expect(getPhoneNumber(result.user)).toBe("+15551238888");
   });
+
+  it("fails with ResendTooSoonError when a resend is within the cooldown window", async () => {
+    const testContext = await makeTestContext();
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* makePhoneOtpService({
+          sendOtp: recordingSend,
+          resendCooldown: 60_000,
+        });
+        yield* service.send("+15559990001", "sign-in");
+        return yield* Effect.result(service.send("+15559990001", "sign-in"));
+      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("ResendTooSoonError");
+      expect((result.failure as { retryAfter: number }).retryAfter).toBeGreaterThan(0);
+      expect((result.failure as { retryAfter: number }).retryAfter).toBeLessThanOrEqual(60_000);
+    }
+    // The original OTP is preserved — no replacement was issued.
+    expect(sentOtps).toHaveLength(1);
+    expect(records.has("+15559990001:sign-in")).toBe(true);
+  });
+
+  it("allows a resend after the cooldown window has elapsed", async () => {
+    const testContext = await makeTestContext();
+
+    // Seed a record whose createdAt is older than the 60 s cooldown.
+    records.set("+15559990002:sign-in", {
+      phoneNumber: "+15559990002",
+      otpHash: hashToken("000000"),
+      purpose: "sign-in",
+      attempts: 0,
+      createdAt: Date.now() - 70_000,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    });
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* makePhoneOtpService({
+          sendOtp: recordingSend,
+          resendCooldown: 60_000,
+        });
+        yield* service.send("+15559990002", "sign-in");
+      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+    );
+
+    // A fresh OTP was issued after the cooldown elapsed.
+    expect(sentOtps).toHaveLength(1);
+    expect(records.has("+15559990002:sign-in")).toBe(true);
+    // The new record has a fresh hash, not the seeded one.
+    expect(records.get("+15559990002:sign-in")?.otpHash).toBe(hashToken(sentOtps[0]!.otp));
+  });
+
+  it("does not apply the cooldown when resendCooldown is not configured", async () => {
+    const testContext = await makeTestContext();
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* makePhoneOtpService({ sendOtp: recordingSend });
+        yield* service.send("+15559990003", "sign-in");
+        yield* service.send("+15559990003", "sign-in");
+      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+    );
+    expect(sentOtps).toHaveLength(2);
+    expect(records.has("+15559990003:sign-in")).toBe(true);
+  });
 });

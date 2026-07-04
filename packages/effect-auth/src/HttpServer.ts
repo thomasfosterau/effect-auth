@@ -1158,6 +1158,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             Effect.catchTags({
               AuthError: (e) => internalServerError(e),
               MagicLinkError: (e) => internalServerError(e),
+              ResendTooSoonError: (e) =>
+                Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
             }),
           );
           return { status: true };
@@ -1215,6 +1217,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             Effect.catchTags({
               AuthError: (e) => internalServerError(e),
               EmailOtpError: (e) => internalServerError(e),
+              ResendTooSoonError: (e) =>
+                Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
             }),
           );
           return { status: true };
@@ -1557,6 +1561,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 // Anti-enumeration: send never signals whether the number exists.
                 PhoneOtpError: (e) => internalServerError(e),
                 AuthError: (e) => internalServerError(e),
+                ResendTooSoonError: (e) =>
+                  Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
               }),
             );
           return { status: true };

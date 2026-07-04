@@ -294,6 +294,11 @@ const makeFixture = (): Fixture => {
         return token;
       }),
     get: (token) => Effect.sync(() => magicLinks.get(token) ?? null),
+    getByEmail: (email) =>
+      Effect.sync(() => {
+        for (const link of magicLinks.values()) if (link.email === email) return link;
+        return null;
+      }),
     delete: (token) => Effect.sync(() => void magicLinks.delete(token)),
     deleteByEmail: (email) =>
       Effect.sync(() => {

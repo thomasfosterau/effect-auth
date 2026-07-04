@@ -98,6 +98,14 @@ export interface PhoneOtpConfig {
   readonly expiresIn?: number; // Default: 5 minutes
   readonly maxAttempts?: number; // Default: 3
   readonly disableSignUp?: boolean; // Default: false
+  /**
+   * Minimum interval (ms) between successive send requests for the same phone
+   * number + purpose pair. When an outstanding OTP created within this window
+   * already exists, `send` fails with {@link Errors.ResendTooSoonError}. Off
+   * by default; recommend 60_000 (60 s) for SMS to limit carrier cost and
+   * DoS exposure. Complements the global RateLimit.
+   */
+  readonly resendCooldown?: number;
   readonly sendOtp: (
     phoneNumber: string,
     otp: string,
@@ -125,11 +133,19 @@ export interface PhoneOtpServiceShape {
    * outstanding one) and send it. Only a SHA-256 hash of the code is stored.
    * Anti-enumeration: for `sign-in` with sign-up disabled and no user, this
    * succeeds silently without sending.
+   *
+   * When `resendCooldown` is configured and an outstanding OTP for the phone +
+   * purpose was created within the cooldown window, fails with
+   * {@link Errors.ResendTooSoonError} containing the remaining wait time.
    */
   readonly send: (
     phoneNumber: string,
     purpose: PhoneOtpPurpose,
-  ) => Effect.Effect<void, PhoneOtpError | Errors.AuthError, PhoneOtpStore | PhoneOtpUserStore>;
+  ) => Effect.Effect<
+    void,
+    PhoneOtpError | Errors.AuthError | Errors.ResendTooSoonError,
+    PhoneOtpStore | PhoneOtpUserStore
+  >;
 
   /**
    * Verify a `sign-in` OTP (single use) and sign the user in, creating a new
@@ -257,6 +273,24 @@ export const makePhoneOtpService = (
             const user = yield* userStore.getUserByPhoneNumber(phoneNumber);
             if (!user) {
               return;
+            }
+          }
+
+          // Resend cooldown: reject if an outstanding OTP was created within
+          // the configured window. The identifier (phone number) is already
+          // known to the caller, so this is not an enumeration risk.
+          if (config.resendCooldown !== undefined) {
+            const existing = yield* store.get(phoneNumber, purpose);
+            if (existing !== null) {
+              const elapsed = Date.now() - existing.createdAt;
+              if (elapsed < config.resendCooldown) {
+                return yield* Effect.fail(
+                  new Errors.ResendTooSoonError({
+                    message: "Please wait before requesting another OTP",
+                    retryAfter: config.resendCooldown - elapsed,
+                  }),
+                );
+              }
             }
           }
 
