@@ -603,6 +603,70 @@ describe("@effect-auth/sql stores over a real SqlClient", () => {
     expect(result.deletedPending).toBeNull();
   });
 
+  it("schema declares BIGINT for all epoch-ms timestamp columns", async () => {
+    // Verifies the DDL uses BIGINT (not INTEGER) for every column that stores
+    // epoch-milliseconds, ensuring Postgres/MySQL adopters don't get int4
+    // overflow on values like Date.now() (~1.75e12).
+    const timestampColumns: Record<string, readonly string[]> = {
+      auth_users: ["created_at", "updated_at"],
+      auth_sessions: ["expires_at", "created_at", "last_activity_at"],
+      auth_rate_limits: ["reset_at", "blocked_until"],
+      auth_email_verifications: ["created_at", "expires_at"],
+      auth_webauthn_challenges: ["expires_at"],
+      auth_webauthn_credentials: ["created_at"],
+      auth_oauth_states: ["created_at", "expires_at"],
+      auth_oauth_accounts: ["expires_at", "created_at", "updated_at"],
+      auth_password_resets: ["created_at", "expires_at"],
+      auth_magic_links: ["created_at", "expires_at"],
+      auth_email_otps: ["created_at", "expires_at"],
+      auth_two_factor: ["created_at"],
+      auth_pending_two_factor: ["expires_at", "created_at"],
+    };
+
+    interface PragmaRow {
+      readonly name: string;
+      readonly type: string;
+    }
+
+    await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        for (const [table, columns] of Object.entries(timestampColumns)) {
+          const rows = yield* sql<PragmaRow>`PRAGMA table_info(${sql.literal(table)})`;
+          const typeByCol = Object.fromEntries(rows.map((r) => [r.name, r.type.toUpperCase()]));
+          for (const col of columns) {
+            expect(typeByCol[col], `${table}.${col}`).toBe("BIGINT");
+          }
+        }
+      }),
+    );
+  });
+
+  it("BIGINT timestamps beyond int4 max round-trip correctly", async () => {
+    // int4 max is 2_147_483_647; epoch-ms for 2040 is ~2.2e12, well beyond it.
+    // This test would silently truncate to a wrong value on a Postgres INT column
+    // and would throw "integer out of range" on insert.
+    const FAR_FUTURE_MS = 2_200_000_000_000; // ~2039-09
+    const result = await run(
+      Effect.gen(function* () {
+        const sessionStore = yield* Auth.SessionStore;
+        const session: Auth.Session = {
+          id: "bigint-test",
+          userId: "user-bigint",
+          expiresAt: new Date(FAR_FUTURE_MS),
+          createdAt: new Date(FAR_FUTURE_MS - 1000),
+          lastActivityAt: new Date(FAR_FUTURE_MS - 500),
+          attributes: {},
+        };
+        yield* sessionStore.create(session);
+        return yield* sessionStore.get("bigint-test");
+      }),
+    );
+    expect(result?.expiresAt.getTime()).toBe(FAR_FUTURE_MS);
+    expect(result?.createdAt.getTime()).toBe(FAR_FUTURE_MS - 1000);
+    expect(result?.lastActivityAt.getTime()).toBe(FAR_FUTURE_MS - 500);
+  });
+
   it("integration: SessionManager runs over the aggregate layer", async () => {
     const config: Auth.SessionConfig = {
       sessionExpiresIn: { activePeriod: 60_000, idlePeriod: 30_000 },
