@@ -40,8 +40,10 @@ export interface D1Result<T = unknown> {
 const prepared = (db: D1Database, sql: string, params: readonly unknown[]): D1PreparedStatement =>
   db.prepare(sql).bind(...params);
 
-const toAuthError = (label: string) => (): Auth.AuthError =>
-  new Auth.AuthError({ message: `D1 ${label} failed` });
+const toAuthError =
+  (label: string) =>
+  (cause: unknown): Auth.AuthError =>
+    new Auth.AuthError({ message: `D1 ${label} failed`, cause });
 
 /**
  * Execute a write statement (INSERT/UPDATE/DELETE/DDL).

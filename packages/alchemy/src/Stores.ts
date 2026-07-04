@@ -36,8 +36,15 @@ const fromBase64 = (text: string): Uint8Array => {
 const encodeAttributes = (attributes: Record<string, unknown>): string =>
   JSON.stringify(attributes);
 
-const decodeAttributes = (text: string | null): Record<string, unknown> =>
-  text == null ? {} : (JSON.parse(text) as Record<string, unknown>);
+const decodeAttributes = (
+  text: string | null,
+  label: string,
+): Effect.Effect<Record<string, unknown>, Auth.AuthError> =>
+  Effect.try({
+    try: () => (text == null ? {} : (JSON.parse(text) as Record<string, unknown>)),
+    catch: (cause) =>
+      new Auth.AuthError({ message: `${label}: attributes JSON parse failed`, cause }),
+  });
 
 const dateToMs = (date: Date): number => date.getTime();
 const msToDate = (ms: number): Date => new Date(ms);
@@ -59,16 +66,19 @@ interface UserRow {
   readonly updated_at: number;
 }
 
-const rowToUser = (row: UserRow): Auth.User => ({
-  id: row.id,
-  email: row.email,
-  emailVerified: row.email_verified !== 0,
-  createdAt: msToDate(row.created_at),
-  updatedAt: msToDate(row.updated_at),
-  attributes: decodeAttributes(row.attributes),
-  ...(row.name != null ? { name: row.name } : {}),
-  ...(row.image != null ? { image: row.image } : {}),
-});
+const rowToUser = (row: UserRow, label: string): Effect.Effect<Auth.User, Auth.AuthError> =>
+  decodeAttributes(row.attributes, label).pipe(
+    Effect.map((attributes) => ({
+      id: row.id,
+      email: row.email,
+      emailVerified: row.email_verified !== 0,
+      createdAt: msToDate(row.created_at),
+      updatedAt: msToDate(row.updated_at),
+      attributes,
+      ...(row.name != null ? { name: row.name } : {}),
+      ...(row.image != null ? { image: row.image } : {}),
+    })),
+  );
 
 const insertUser = `INSERT INTO auth_users (id, email, email_verified, name, image, password_hash, attributes, created_at, updated_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
@@ -98,14 +108,20 @@ interface SessionRow {
   readonly attributes: string | null;
 }
 
-const rowToSession = (row: SessionRow): Auth.Session => ({
-  id: row.id,
-  userId: row.user_id,
-  expiresAt: msToDate(row.expires_at),
-  createdAt: msToDate(row.created_at),
-  lastActivityAt: msToDate(row.last_activity_at),
-  attributes: decodeAttributes(row.attributes),
-});
+const rowToSession = (
+  row: SessionRow,
+  label: string,
+): Effect.Effect<Auth.Session, Auth.AuthError> =>
+  decodeAttributes(row.attributes, label).pipe(
+    Effect.map((attributes) => ({
+      id: row.id,
+      userId: row.user_id,
+      expiresAt: msToDate(row.expires_at),
+      createdAt: msToDate(row.created_at),
+      lastActivityAt: msToDate(row.last_activity_at),
+      attributes,
+    })),
+  );
 
 export const makeSessionStore = (db: D1Database): Auth.SessionStoreShape => ({
   create: (session) =>
@@ -129,7 +145,9 @@ export const makeSessionStore = (db: D1Database): Auth.SessionStoreShape => ({
       `SELECT * FROM auth_sessions WHERE id = ?`,
       [sessionId],
       "session.get",
-    ).pipe(Effect.map((row) => (row ? rowToSession(row) : null))),
+    ).pipe(
+      Effect.flatMap((row) => (row ? rowToSession(row, "session.get") : Effect.succeed(null))),
+    ),
   update: (session) =>
     d1Run(
       db,
@@ -159,13 +177,17 @@ export const makeSessionStore = (db: D1Database): Auth.SessionStoreShape => ({
       `SELECT * FROM auth_sessions WHERE user_id = ?`,
       [userId],
       "session.listByUserId",
-    ).pipe(Effect.map((rows) => rows.map(rowToSession))),
+    ).pipe(
+      Effect.flatMap((rows) =>
+        Effect.all(rows.map((row) => rowToSession(row, "session.listByUserId"))),
+      ),
+    ),
 });
 
 export const makeUserStore = (db: D1Database): Auth.UserStoreShape => ({
   get: (userId) =>
     d1First<UserRow>(db, `SELECT * FROM auth_users WHERE id = ?`, [userId], "user.get").pipe(
-      Effect.map((row) => (row ? rowToUser(row) : null)),
+      Effect.flatMap((row) => (row ? rowToUser(row, "user.get") : Effect.succeed(null))),
     ),
   getCredentials: (userId) =>
     d1First<UserRow>(
@@ -183,7 +205,7 @@ export const makeUserStore = (db: D1Database): Auth.UserStoreShape => ({
 export const makeUserServiceStore = (db: D1Database): Auth.UserServiceStoreShape => ({
   get: (userId) =>
     d1First<UserRow>(db, `SELECT * FROM auth_users WHERE id = ?`, [userId], "userService.get").pipe(
-      Effect.map((row) => (row ? rowToUser(row) : null)),
+      Effect.flatMap((row) => (row ? rowToUser(row, "userService.get") : Effect.succeed(null))),
     ),
   getByEmail: (email) =>
     d1First<UserRow>(
@@ -191,7 +213,11 @@ export const makeUserServiceStore = (db: D1Database): Auth.UserServiceStoreShape
       `SELECT * FROM auth_users WHERE email = ?`,
       [email],
       "userService.getByEmail",
-    ).pipe(Effect.map((row) => (row ? rowToUser(row) : null))),
+    ).pipe(
+      Effect.flatMap((row) =>
+        row ? rowToUser(row, "userService.getByEmail") : Effect.succeed(null),
+      ),
+    ),
   update: (user) =>
     d1Run(
       db,
@@ -224,7 +250,11 @@ export const makeEmailPasswordStore = (db: D1Database): Auth.EmailPasswordStoreS
       `SELECT * FROM auth_users WHERE email = ?`,
       [email],
       "emailPassword.getUserByEmail",
-    ).pipe(Effect.map((row) => (row ? rowToUser(row) : null))),
+    ).pipe(
+      Effect.flatMap((row) =>
+        row ? rowToUser(row, "emailPassword.getUserByEmail") : Effect.succeed(null),
+      ),
+    ),
   createUser: (input) =>
     Effect.gen(function* () {
       const now = new Date();
@@ -264,7 +294,11 @@ export const makePasswordResetUserStore = (db: D1Database): Auth.PasswordResetUs
       `SELECT * FROM auth_users WHERE email = ?`,
       [email],
       "passwordResetUser.getUserByEmail",
-    ).pipe(Effect.map((row) => (row ? rowToUser(row) : null))),
+    ).pipe(
+      Effect.flatMap((row) =>
+        row ? rowToUser(row, "passwordResetUser.getUserByEmail") : Effect.succeed(null),
+      ),
+    ),
   setPasswordHash: (userId, hash) =>
     d1Run(
       db,
@@ -339,7 +373,7 @@ export const makeRateLimitStore = (db: D1Database): Auth.RateLimitStoreShape => 
     ).pipe(Effect.map((row) => (row ? rowToRateLimit(row) : null)));
 
   return {
-    get: (key) => readEntry(key).pipe(Effect.orDie),
+    get: (key) => readEntry(key),
     set: (key, entry, _ttl) =>
       d1Run(
         db,
@@ -350,24 +384,20 @@ export const makeRateLimitStore = (db: D1Database): Auth.RateLimitStoreShape => 
     increment: (key, ttlSeconds) =>
       Effect.gen(function* () {
         const now = Date.now();
-        const existing = yield* readEntry(key);
-        if (existing == null || now >= existing.resetAt) {
-          yield* d1Run(
-            db,
-            upsertRateLimit,
-            [key, 1, now + ttlSeconds * 1000, null],
-            "rateLimit.increment",
-          );
-          return 1;
-        }
-        const count = existing.count + 1;
-        yield* d1Run(
+        const resetAt = now + ttlSeconds * 1000;
+        const row = yield* d1First<{ count: number }>(
           db,
-          `UPDATE auth_rate_limits SET count = ? WHERE key = ?`,
-          [count, key],
+          `INSERT INTO auth_rate_limits (key, count, reset_at, blocked_until)
+             VALUES (?, 1, ?, NULL)
+             ON CONFLICT(key) DO UPDATE SET
+               count = CASE WHEN ? >= reset_at THEN 1 ELSE count + 1 END,
+               reset_at = CASE WHEN ? >= reset_at THEN ? ELSE reset_at END,
+               blocked_until = CASE WHEN ? >= reset_at THEN NULL ELSE blocked_until END
+             RETURNING count`,
+          [key, resetAt, now, now, resetAt, now],
           "rateLimit.increment",
         );
-        return count;
+        return row?.count ?? 1;
       }),
     delete: (key) =>
       d1Run(db, `DELETE FROM auth_rate_limits WHERE key = ?`, [key], "rateLimit.delete").pipe(
@@ -483,18 +513,24 @@ interface CredentialRow {
   readonly transports: string | null;
 }
 
-const rowToCredential = (row: CredentialRow): Auth.WebAuthnCredential => ({
-  id: row.id,
-  userId: row.user_id,
-  publicKey: fromBase64(row.public_key),
-  algorithm: row.algorithm,
-  counter: row.counter,
-  createdAt: row.created_at,
-  ...(row.name != null ? { name: row.name } : {}),
-  ...(row.transports != null
-    ? { transports: JSON.parse(row.transports) as readonly string[] }
-    : {}),
-});
+const rowToCredential = (
+  row: CredentialRow,
+): Effect.Effect<Auth.WebAuthnCredential, Auth.AuthError> =>
+  Effect.try({
+    try: () => ({
+      id: row.id,
+      userId: row.user_id,
+      publicKey: fromBase64(row.public_key),
+      algorithm: row.algorithm,
+      counter: row.counter,
+      createdAt: row.created_at,
+      ...(row.name != null ? { name: row.name } : {}),
+      ...(row.transports != null
+        ? { transports: JSON.parse(row.transports) as readonly string[] }
+        : {}),
+    }),
+    catch: (cause) => new Auth.AuthError({ message: "credential decode failed", cause }),
+  });
 
 const credentialParams = (credential: Auth.WebAuthnCredential): readonly unknown[] => [
   credential.id,
@@ -522,10 +558,7 @@ export const makeCredentialStore = (db: D1Database): Auth.CredentialStoreShape =
       `SELECT * FROM auth_webauthn_credentials WHERE id = ?`,
       [credentialId],
       "credential.get",
-    ).pipe(
-      Effect.orDie,
-      Effect.map((row) => (row ? rowToCredential(row) : null)),
-    ),
+    ).pipe(Effect.flatMap((row) => (row ? rowToCredential(row) : Effect.succeed(null)))),
   update: (credential) =>
     d1Run(
       db,
@@ -557,7 +590,7 @@ export const makeCredentialStore = (db: D1Database): Auth.CredentialStoreShape =
       `SELECT * FROM auth_webauthn_credentials WHERE user_id = ?`,
       [userId],
       "credential.listByUserId",
-    ).pipe(Effect.map((rows) => rows.map(rowToCredential))),
+    ).pipe(Effect.flatMap((rows) => Effect.all(rows.map(rowToCredential)))),
 });
 
 // ---------------------------------------------------------------------------
@@ -671,9 +704,14 @@ const upsertOAuthAccount = `INSERT INTO auth_oauth_accounts
 
 export const makeOAuthAccountStore = (db: D1Database): Auth.OAuthAccountStoreShape => ({
   create: (account) =>
-    d1Run(db, upsertOAuthAccount, oauthAccountParams(account), "oauthAccount.create").pipe(
-      Effect.as(account),
-    ),
+    d1Run(
+      db,
+      `INSERT INTO auth_oauth_accounts
+        (id, user_id, provider, provider_id, email, name, picture, access_token, refresh_token, expires_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      oauthAccountParams(account),
+      "oauthAccount.create",
+    ).pipe(Effect.as(account)),
   get: (provider, providerId) =>
     d1First<OAuthAccountRow>(
       db,
@@ -727,10 +765,9 @@ export const makeOAuthUserStore = (db: D1Database): Auth.OAuthUserStoreShape => 
       [userId],
       "oauthUser.getUser",
     ).pipe(
-      Effect.orDie,
       Effect.flatMap((row) =>
         row
-          ? Effect.succeed(rowToUser(row))
+          ? rowToUser(row, "oauthUser.getUser")
           : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
       ),
     ),
@@ -740,7 +777,11 @@ export const makeOAuthUserStore = (db: D1Database): Auth.OAuthUserStoreShape => 
       `SELECT * FROM auth_users WHERE email = ?`,
       [email],
       "oauthUser.getUserByEmail",
-    ).pipe(Effect.map((row) => (row ? rowToUser(row) : null))),
+    ).pipe(
+      Effect.flatMap((row) =>
+        row ? rowToUser(row, "oauthUser.getUserByEmail") : Effect.succeed(null),
+      ),
+    ),
   createUser: (input) =>
     Effect.gen(function* () {
       const now = new Date();
@@ -871,7 +912,11 @@ const makeEmailSignInUserStore = (
       `SELECT * FROM auth_users WHERE email = ?`,
       [email],
       `${label}.getUserByEmail`,
-    ).pipe(Effect.map((row) => (row ? rowToUser(row) : null))),
+    ).pipe(
+      Effect.flatMap((row) =>
+        row ? rowToUser(row, `${label}.getUserByEmail`) : Effect.succeed(null),
+      ),
+    ),
   createUser: (input) =>
     Effect.gen(function* () {
       const now = new Date();
@@ -959,18 +1004,16 @@ export const makeEmailOtpStore = (db: D1Database): Auth.EmailOtpStoreShape => {
       ).pipe(Effect.asVoid),
     incrementAttempts: (email, purpose) =>
       Effect.gen(function* () {
-        const row = yield* read(email, purpose, "emailOtp.incrementAttempts");
-        if (row == null) {
-          return yield* new Auth.AuthError({ message: "OTP record not found" });
-        }
-        const attempts = row.attempts + 1;
-        yield* d1Run(
+        const row = yield* d1First<{ attempts: number }>(
           db,
-          `UPDATE auth_email_otps SET attempts = ? WHERE email = ? AND purpose = ?`,
-          [attempts, email, purpose],
+          `UPDATE auth_email_otps SET attempts = attempts + 1 WHERE email = ? AND purpose = ? RETURNING attempts`,
+          [email, purpose],
           "emailOtp.incrementAttempts",
         );
-        return attempts;
+        if (row == null) {
+          return yield* Effect.fail(new Auth.AuthError({ message: "OTP record not found" }));
+        }
+        return row.attempts;
       }),
   };
 };
@@ -990,13 +1033,17 @@ interface TwoFactorRow {
   readonly created_at: number;
 }
 
-const rowToTwoFactor = (row: TwoFactorRow): Auth.TwoFactorRecord => ({
-  userId: row.user_id,
-  secret: row.secret,
-  backupCodes: JSON.parse(row.backup_codes) as readonly string[],
-  verified: row.verified !== 0,
-  createdAt: row.created_at,
-});
+const rowToTwoFactor = (row: TwoFactorRow): Effect.Effect<Auth.TwoFactorRecord, Auth.AuthError> =>
+  Effect.try({
+    try: () => ({
+      userId: row.user_id,
+      secret: row.secret,
+      backupCodes: JSON.parse(row.backup_codes) as readonly string[],
+      verified: row.verified !== 0,
+      createdAt: row.created_at,
+    }),
+    catch: (cause) => new Auth.AuthError({ message: "twoFactor decode failed", cause }),
+  });
 
 const upsertTwoFactor = `INSERT INTO auth_two_factor (user_id, secret, backup_codes, verified, created_at)
   VALUES (?, ?, ?, ?, ?)
@@ -1013,7 +1060,7 @@ export const makeTwoFactorStore = (db: D1Database): Auth.TwoFactorStoreShape => 
       `SELECT * FROM auth_two_factor WHERE user_id = ?`,
       [userId],
       "twoFactor.get",
-    ).pipe(Effect.map((row) => (row ? rowToTwoFactor(row) : null))),
+    ).pipe(Effect.flatMap((row) => (row ? rowToTwoFactor(row) : Effect.succeed(null)))),
   upsert: (record) =>
     d1Run(
       db,
