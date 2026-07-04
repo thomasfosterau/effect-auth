@@ -104,6 +104,9 @@ export * from "./PasswordReset.js";
 /** User service primitive. */
 export * from "./User.js";
 
+/** Identifier domain: surrogate-keyed email/username/phone credentials. */
+export * from "./Identifier.js";
+
 /** Verification-gated email change and self-service account deletion. */
 export * from "./AccountManagement.js";
 

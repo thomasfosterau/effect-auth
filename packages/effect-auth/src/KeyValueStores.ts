@@ -50,6 +50,12 @@ import {
   EmailOtpStore,
 } from "./EmailOtp.js";
 import {
+  type Identifier,
+  IdentifierStore,
+  type IdentifierStoreShape,
+  type IdentifierType,
+} from "./Identifier.js";
+import {
   type EmailVerification,
   type EmailVerificationStoreShape,
   EmailVerificationStore,
@@ -553,6 +559,164 @@ export const PendingTwoFactorStoreKV: Layer.Layer<
   never,
   KeyValueStore.KeyValueStore
 > = Layer.effect(PendingTwoFactorStore, makePendingTwoFactorStoreKV);
+
+// ---------------------------------------------------------------------------
+// IdentifierStore
+// ---------------------------------------------------------------------------
+
+/** Wire format: dates stored as epoch-millisecond integers. */
+interface StoredIdentifier {
+  readonly id: string;
+  readonly userId: string;
+  readonly type: IdentifierType;
+  readonly value: string;
+  readonly verified: boolean;
+  readonly verifiedAt?: number;
+  readonly createdAt: number;
+}
+
+const identifierKey = (id: string) => `identifier:${id}`;
+const identifierTypeValueKey = (type: IdentifierType, value: string) =>
+  `identifier:type-value:${type}:${value}`;
+const identifierUserKey = (userId: string) => `identifier:user:${userId}`;
+
+const decodeIdentifier = (stored: StoredIdentifier): Identifier => ({
+  id: stored.id,
+  userId: stored.userId,
+  type: stored.type,
+  value: stored.value,
+  verified: stored.verified,
+  ...(stored.verifiedAt !== undefined ? { verifiedAt: new Date(stored.verifiedAt) } : {}),
+  createdAt: new Date(stored.createdAt),
+});
+
+const encodeIdentifier = (identifier: Identifier): StoredIdentifier => ({
+  id: identifier.id,
+  userId: identifier.userId,
+  type: identifier.type,
+  value: identifier.value,
+  verified: identifier.verified,
+  ...(identifier.verifiedAt !== undefined ? { verifiedAt: identifier.verifiedAt.getTime() } : {}),
+  createdAt: identifier.createdAt.getTime(),
+});
+
+/**
+ * Build an {@link IdentifierStoreShape} over the ambient `KeyValueStore`.
+ *
+ * Key layout:
+ * - `identifier:${id}` — primary record (full `StoredIdentifier`)
+ * - `identifier:type-value:${type}:${value}` — id for `getByValue` lookups
+ * - `identifier:user:${userId}` — JSON array of ids for `listByUser` /
+ *   `deleteByUser`
+ */
+export const makeIdentifierStoreKV: Effect.Effect<
+  IdentifierStoreShape,
+  never,
+  KeyValueStore.KeyValueStore
+> = Effect.gen(function* () {
+  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+  return {
+    getByValue: (type, value) =>
+      Effect.gen(function* () {
+        const id = yield* kv.read<string>(
+          identifierTypeValueKey(type, value),
+          "identifier.getByValue",
+        );
+        if (id == null) return null;
+        const stored = yield* kv.read<StoredIdentifier>(identifierKey(id), "identifier.getByValue");
+        return stored == null ? null : decodeIdentifier(stored);
+      }),
+
+    listByUser: (userId) =>
+      Effect.gen(function* () {
+        const ids = yield* kv.readIndex(identifierUserKey(userId), "identifier.listByUser");
+        const records = yield* Effect.forEach(
+          ids,
+          (id) => kv.read<StoredIdentifier>(identifierKey(id), "identifier.listByUser"),
+          { concurrency: "unbounded" },
+        );
+        return records
+          .filter((r): r is StoredIdentifier => r != null)
+          .map(decodeIdentifier)
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      }),
+
+    create: (identifier) =>
+      Effect.gen(function* () {
+        const stored = encodeIdentifier(identifier);
+        yield* kv.write(identifierKey(identifier.id), stored, "identifier.create");
+        yield* kv.write(
+          identifierTypeValueKey(identifier.type, identifier.value),
+          identifier.id,
+          "identifier.create",
+        );
+        yield* kv.indexAdd(
+          identifierUserKey(identifier.userId),
+          identifier.id,
+          "identifier.create",
+        );
+        return identifier;
+      }),
+
+    setVerified: (id, verifiedAt) =>
+      Effect.gen(function* () {
+        const stored = yield* kv.read<StoredIdentifier>(
+          identifierKey(id),
+          "identifier.setVerified",
+        );
+        if (stored == null) return null;
+        const updated: StoredIdentifier = {
+          ...stored,
+          verified: true,
+          verifiedAt: verifiedAt.getTime(),
+        };
+        yield* kv.write(identifierKey(id), updated, "identifier.setVerified");
+        return decodeIdentifier(updated);
+      }),
+
+    delete: (id) =>
+      Effect.gen(function* () {
+        const stored = yield* kv.read<StoredIdentifier>(identifierKey(id), "identifier.delete");
+        if (stored == null) return;
+        yield* kv.remove(identifierKey(id), "identifier.delete");
+        yield* kv.remove(identifierTypeValueKey(stored.type, stored.value), "identifier.delete");
+        yield* kv.indexRemove(identifierUserKey(stored.userId), id, "identifier.delete");
+      }),
+
+    deleteByUser: (userId) =>
+      Effect.gen(function* () {
+        const ids = yield* kv.readIndex(identifierUserKey(userId), "identifier.deleteByUser");
+        yield* Effect.forEach(
+          ids,
+          (id) =>
+            Effect.gen(function* () {
+              const stored = yield* kv.read<StoredIdentifier>(
+                identifierKey(id),
+                "identifier.deleteByUser",
+              );
+              if (stored == null) return;
+              yield* kv.remove(identifierKey(id), "identifier.deleteByUser");
+              yield* kv.remove(
+                identifierTypeValueKey(stored.type, stored.value),
+                "identifier.deleteByUser",
+              );
+            }),
+          { discard: true },
+        );
+        yield* kv.remove(identifierUserKey(userId), "identifier.deleteByUser");
+      }),
+  } satisfies IdentifierStoreShape;
+});
+
+/**
+ * `IdentifierStore` layer backed by `KeyValueStore`.
+ *
+ * Unlike the ephemeral stores in {@link layerKV}, identifier records are
+ * long-lived. Provide this layer alongside a `KeyValueStore` backend that
+ * persists data across restarts (file system, Redis, …).
+ */
+export const IdentifierStoreKV: Layer.Layer<IdentifierStore, never, KeyValueStore.KeyValueStore> =
+  Layer.effect(IdentifierStore, makeIdentifierStoreKV);
 
 // ---------------------------------------------------------------------------
 // Aggregate layer

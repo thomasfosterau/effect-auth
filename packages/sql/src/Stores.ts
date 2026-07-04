@@ -1002,6 +1002,78 @@ export const makePendingTwoFactorStore: Effect.Effect<
 });
 
 // ---------------------------------------------------------------------------
+// IdentifierStore
+// ---------------------------------------------------------------------------
+
+interface IdentifierRow {
+  readonly id: string;
+  readonly user_id: string;
+  readonly type: string;
+  readonly value: string;
+  readonly verified: number;
+  readonly verified_at: number | null;
+  readonly created_at: number;
+}
+
+const rowToIdentifier = (row: IdentifierRow): Auth.Identifier => ({
+  id: row.id,
+  userId: row.user_id,
+  type: row.type as Auth.IdentifierType,
+  value: row.value,
+  verified: row.verified !== 0,
+  ...(row.verified_at != null ? { verifiedAt: msToDate(row.verified_at) } : {}),
+  createdAt: msToDate(row.created_at),
+});
+
+export const makeIdentifierStore: Effect.Effect<
+  Auth.IdentifierStoreShape,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return {
+    getByValue: (type, value) =>
+      firstRow(
+        "identifier.getByValue",
+        sql<IdentifierRow>`SELECT * FROM auth_identifiers WHERE type = ${type} AND value = ${value}`,
+      ).pipe(Effect.map((row) => (row ? rowToIdentifier(row) : null))),
+
+    listByUser: (userId) =>
+      allRows(
+        "identifier.listByUser",
+        sql<IdentifierRow>`SELECT * FROM auth_identifiers WHERE user_id = ${userId} ORDER BY created_at ASC`,
+      ).pipe(Effect.map((rows) => rows.map(rowToIdentifier))),
+
+    create: (identifier) =>
+      asVoid(
+        "identifier.create",
+        sql`INSERT INTO auth_identifiers (id, user_id, type, value, verified, verified_at, created_at)
+            VALUES (${identifier.id}, ${identifier.userId}, ${identifier.type}, ${identifier.value}, ${identifier.verified ? 1 : 0}, ${identifier.verifiedAt != null ? dateToMs(identifier.verifiedAt) : null}, ${dateToMs(identifier.createdAt)})`,
+      ).pipe(Effect.as(identifier)),
+
+    setVerified: (id, verifiedAt) =>
+      Effect.gen(function* () {
+        yield* asVoid(
+          "identifier.setVerified",
+          sql`UPDATE auth_identifiers SET verified = 1, verified_at = ${dateToMs(verifiedAt)} WHERE id = ${id}`,
+        );
+        return yield* firstRow(
+          "identifier.setVerified",
+          sql<IdentifierRow>`SELECT * FROM auth_identifiers WHERE id = ${id}`,
+        ).pipe(Effect.map((row) => (row ? rowToIdentifier(row) : null)));
+      }),
+
+    delete: (id) => asVoid("identifier.delete", sql`DELETE FROM auth_identifiers WHERE id = ${id}`),
+
+    deleteByUser: (userId) =>
+      asVoid(
+        "identifier.deleteByUser",
+        sql`DELETE FROM auth_identifiers WHERE user_id = ${userId}`,
+      ),
+  } satisfies Auth.IdentifierStoreShape;
+});
+
+// ---------------------------------------------------------------------------
 // Layers
 // ---------------------------------------------------------------------------
 
@@ -1073,6 +1145,8 @@ export const PendingTwoFactorStoreLayer: Layer.Layer<
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.PendingTwoFactorStore, makePendingTwoFactorStore);
+export const IdentifierStoreLayer: Layer.Layer<Auth.IdentifierStore, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.IdentifierStore, makeIdentifierStore);
 
 /**
  * A single layer that provides every effect-auth store backed by the ambient
@@ -1100,7 +1174,8 @@ export const layer: Layer.Layer<
   | Auth.EmailOtpStore
   | Auth.EmailOtpUserStore
   | Auth.TwoFactorStore
-  | Auth.PendingTwoFactorStore,
+  | Auth.PendingTwoFactorStore
+  | Auth.IdentifierStore,
   never,
   SqlClient.SqlClient
 > = Layer.mergeAll(
@@ -1124,4 +1199,5 @@ export const layer: Layer.Layer<
   EmailOtpUserStoreLayer,
   TwoFactorStoreLayer,
   PendingTwoFactorStoreLayer,
+  IdentifierStoreLayer,
 );
