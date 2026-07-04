@@ -25,3 +25,6 @@ export * from "./HibpPlugin.js";
 
 /** Records the sign-in method into session attributes (last-login-method). */
 export * from "./LastLoginMethodPlugin.js";
+
+/** IP-keyed rate limiting (sign-in, sign-up, password-reset) using the ClientIp service. */
+export * from "./IpRateLimitPlugin.js";

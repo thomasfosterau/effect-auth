@@ -53,6 +53,9 @@ export * from "./EmailVerification.js";
 /** Rate limiting (inspired by BetterAuth). */
 export * from "./RateLimit.js";
 
+/** Trusted-proxy aware client IP extraction and per-request ClientIp service. */
+export * from "./ClientIp.js";
+
 /** RateLimiter facade backed by `effect/unstable/persistence` (+ Redis path). */
 export * from "./RateLimitPersistence.js";
 
