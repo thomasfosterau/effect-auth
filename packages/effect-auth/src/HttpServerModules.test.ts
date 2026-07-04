@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
 import { SessionStore, UserStore, SessionManager } from "./Session.js";
+import { hashToken } from "./TokenHash.js";
 import { UserServiceStore, UserService } from "./User.js";
 import { Hooks } from "./Hooks.js";
 import { AuthLifecycleService } from "./AuthLifecycle.js";
@@ -55,17 +56,18 @@ const makeFixture = () => {
   };
 
   const makeSession = (userId: string): string => {
-    const id = crypto.randomBytes(16).toString("hex");
+    const rawToken = crypto.randomBytes(16).toString("hex");
+    const tokenHash = hashToken(rawToken);
     const now = new Date();
-    sessions.set(id, {
-      id,
+    sessions.set(tokenHash, {
+      id: tokenHash,
       userId,
       expiresAt: new Date(Date.now() + HOUR),
       createdAt: now,
       lastActivityAt: now,
       attributes: {},
     });
-    return id;
+    return rawToken;
   };
 
   const userStore = {
@@ -296,7 +298,7 @@ describe("HTTP organization endpoints", () => {
       jsonReq("/organization/set-active", { organizationId: org.id }, sid),
     );
     expect(active.status).toBe(200);
-    expect(fx.sessions.get(sid)?.attributes["activeOrganizationId"]).toBe(org.id);
+    expect(fx.sessions.get(hashToken(sid))?.attributes["activeOrganizationId"]).toBe(org.id);
 
     // Delete.
     const deleted = await fx.handler(req("DELETE", `/organization/${org.id}`, sid));

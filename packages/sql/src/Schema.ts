@@ -52,6 +52,14 @@
  * ```
  * SQLite and D1 (`@effect-auth/alchemy`) need no migration — their `INTEGER`
  * affinity already stores 64-bit values.
+ *
+ * **Migration note for session token hashing:**
+ * The `auth_sessions.id` primary key now stores the SHA-256 hash of the
+ * bearer token (raw token is held only in the session cookie). Existing rows
+ * written before this change have plaintext ids that will never match any
+ * incoming hashed token, so all active sessions are effectively invalidated
+ * on upgrade — users will need to re-login. No schema change is required;
+ * the column type (`TEXT`) and index are unchanged.
  */
 
 import { Effect } from "effect";

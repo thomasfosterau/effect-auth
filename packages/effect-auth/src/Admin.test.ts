@@ -12,6 +12,7 @@ import {
 } from "./Admin.js";
 import { Hooks } from "./Hooks.js";
 import { makeSessionManager, SessionManager, SessionStore, UserStore } from "./Session.js";
+import { hashToken } from "./TokenHash.js";
 import type { Session, SessionConfig, User } from "./Types.js";
 import { UserServiceStore } from "./User.js";
 
@@ -390,7 +391,7 @@ describe("AdminService", () => {
     const impersonationExpiresAt = session.attributes["impersonationExpiresAt"];
     expect(typeof impersonationExpiresAt).toBe("number");
     expect(impersonationExpiresAt as number).toBeGreaterThanOrEqual(before + 15 * 60 * 1000);
-    expect(sessions.has(session.id)).toBe(true);
+    expect(sessions.has(hashToken(session.id))).toBe(true);
 
     const missingTarget = await runService(testContext, {}, (service) =>
       Effect.result(service.impersonateUser(admin, "ghost")),

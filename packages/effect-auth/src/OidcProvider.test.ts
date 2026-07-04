@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import { Hooks } from "./Hooks.js";
 import { SessionStore, UserStore, type UserStoreShape, SessionManager } from "./Session.js";
+import { hashToken } from "./TokenHash.js";
 import { UserServiceStore, UserService } from "./User.js";
 import { AuthLifecycleService } from "./AuthLifecycle.js";
 import { EmailPasswordStore } from "./EmailPassword.js";
@@ -330,17 +331,18 @@ const makeHttpFixture = () => {
     return id;
   };
   const makeSession = (userId: string): string => {
-    const id = crypto.randomBytes(12).toString("hex");
+    const rawToken = crypto.randomBytes(12).toString("hex");
+    const tokenHash = hashToken(rawToken);
     const now = new Date();
-    sessions.set(id, {
-      id,
+    sessions.set(tokenHash, {
+      id: tokenHash,
       userId,
       expiresAt: new Date(Date.now() + 3600_000),
       createdAt: now,
       lastActivityAt: now,
       attributes: {},
     });
-    return id;
+    return rawToken;
   };
 
   const userStore: UserStoreShape = {

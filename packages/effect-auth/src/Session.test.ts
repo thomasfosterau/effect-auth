@@ -2,6 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Context } from "effect";
 import { Hooks } from "./Hooks.js";
 import { makeSessionManager, SessionStore, UserStore } from "./Session.js";
+import { hashToken } from "./TokenHash.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 
 // Mock implementations for testing
@@ -175,6 +176,37 @@ describe("SessionManager", () => {
     if (result._tag === "Failure") {
       expect(result.failure._tag).toBe("SessionNotFoundError");
     }
+  });
+
+  it("create→validate round-trip: store keyed by hash, cookie carries raw token", async () => {
+    mockSessionStore.sessions.clear();
+
+    const program = Effect.gen(function* () {
+      const manager = yield* makeSessionManager(sessionConfig);
+      const session = yield* manager.createSession("user1");
+
+      const rawToken = session.id;
+      const storedKeys = Array.from(mockSessionStore.sessions.keys());
+
+      // The store must not contain the raw token — only its hash.
+      const validated = yield* manager.validateSession(rawToken);
+
+      return { rawToken, storedKeys, validated };
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
+        Effect.provide(Hooks.Default),
+      ),
+    );
+
+    // Raw token is not a key in the store — only the hash is.
+    expect(result.storedKeys).not.toContain(result.rawToken);
+    expect(result.storedKeys).toHaveLength(1);
+    expect(result.storedKeys[0]).toBe(hashToken(result.rawToken));
+    // Validation succeeds and returns the raw token as session.id.
+    expect(result.validated.session.id).toBe(result.rawToken);
+    expect(result.validated.user.id).toBe("user1");
   });
 
   it("should invalidate all user sessions", async () => {
