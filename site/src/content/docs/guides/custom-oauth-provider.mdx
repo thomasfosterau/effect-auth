@@ -1,0 +1,246 @@
+---
+title: Custom OAuth providers
+description: Define your own OAuth 2.0 / OIDC provider with makeOAuthProvider — covering both userinfo and id_token-only flows.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Any OAuth 2.0 or OIDC provider that isn't bundled as a preset is fully
+supported through `makeOAuthProvider`. This guide walks through building a
+custom provider end to end, including the id_token-only path used by Apple
+and similar issuers.
+
+## The building blocks
+
+```ts
+import {
+  makeOAuthProvider,
+  ProfileMap,
+  type OAuthClientConfig,
+  type OAuthProvider,
+} from "effect-auth";
+```
+
+| Export                                      | Purpose                                                                 |
+| ------------------------------------------- | ----------------------------------------------------------------------- |
+| `makeOAuthProvider(name, config, usePKCE?)` | Constructs an `OAuthProvider` from endpoint URLs and options            |
+| `ProfileMap.str(v)`                         | Coerces a value to `string \| undefined` — safe field extraction        |
+| `ProfileMap.nested(v, ...keys)`             | Traverses a nested object path without throwing                         |
+| `ProfileMap.profile(base, fields)`          | Builds a normalized `OAuthUserInfo` from raw API output                 |
+| `discoverOAuthEndpoints(issuerUrl)`         | Fetches `/.well-known/openid-configuration` and returns typed endpoints |
+
+`ProfileMap.str`, `ProfileMap.nested`, and `ProfileMap.profile` are the same
+helpers every built-in preset uses (Facebook, Twitter, Spotify, …). They are
+also available as individual named exports: `{ str, nested, profile }`.
+
+## Standard userinfo flow
+
+Most providers issue an access token you then exchange for profile data via a
+`GET /userinfo` endpoint. Below is a minimal custom provider (Linear as an
+example):
+
+```ts
+import { makeOAuthProvider, ProfileMap } from "effect-auth";
+import type { OAuthClientConfig, OAuthProvider } from "effect-auth";
+
+export const LinearProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "linear",
+    {
+      ...config,
+      authorizationEndpoint: "https://linear.app/oauth/authorize",
+      tokenEndpoint: "https://api.linear.app/oauth/token",
+      userInfoEndpoint: "https://api.linear.app/graphql",
+      scopes: ["read"],
+      mapProfile: (raw) =>
+        ProfileMap.profile(raw, {
+          id: raw["id"],
+          email: ProfileMap.str(raw["email"]),
+          name: ProfileMap.str(raw["name"]),
+          picture: ProfileMap.str(raw["avatarUrl"]),
+        }),
+    },
+    true, // use PKCE
+  );
+```
+
+`mapProfile` receives the raw JSON response and must return an `OAuthUserInfo`.
+`ProfileMap.profile` handles the base-record spread and optional-field omission
+automatically, so you only describe the fields that exist for this provider.
+
+### Nested fields
+
+Some providers wrap identity data inside an envelope. Use
+`ProfileMap.nested` to traverse safely — it returns `undefined` at the first
+missing key rather than throwing:
+
+```ts
+// Notion wraps the real user under bot.owner.user
+mapProfile: (raw) => {
+  const user = (ProfileMap.nested(raw, "bot", "owner", "user") ?? raw) as Record<string, unknown>;
+  return ProfileMap.profile(raw, {
+    id: user["id"] ?? raw["id"],
+    email: ProfileMap.str(ProfileMap.nested(user, "person", "email")),
+    name: ProfileMap.str(user["name"]),
+    picture: ProfileMap.str(user["avatar_url"]),
+  });
+},
+```
+
+### Additional config knobs
+
+| Option                     | When to use                                                                 |
+| -------------------------- | --------------------------------------------------------------------------- |
+| `tokenAuthMethod: "basic"` | Provider requires HTTP Basic at the token endpoint (Reddit, Spotify, Zoom…) |
+| `userInfoMethod: "POST"`   | Provider expects a POST instead of GET (Dropbox)                            |
+| `userInfoHeaders`          | Extra headers per request — e.g. `{ "Client-Id": "…" }` for Twitch          |
+| `authorizationParams`      | Static extra query params on the authorization URL                          |
+| `clientIdParam`            | Override the default `"client_id"` name — TikTok uses `"client_key"`        |
+
+```ts
+export const DropboxProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "dropbox",
+    {
+      ...config,
+      authorizationEndpoint: "https://www.dropbox.com/oauth2/authorize",
+      tokenEndpoint: "https://api.dropboxapi.com/oauth2/token",
+      userInfoEndpoint: "https://api.dropboxapi.com/2/users/get_current_account",
+      userInfoMethod: "POST",
+      scopes: ["account_info.read"],
+      authorizationParams: { token_access_type: "offline" },
+      mapProfile: (raw) =>
+        ProfileMap.profile(raw, {
+          id: raw["account_id"],
+          email: ProfileMap.str(raw["email"]),
+          name: ProfileMap.str(ProfileMap.nested(raw["name"], "display_name")),
+          picture: ProfileMap.str(raw["profile_photo_url"]),
+        }),
+    },
+    true,
+  );
+```
+
+## id_token-only flow (OIDC without a userinfo endpoint)
+
+Some issuers (most notably Apple) return identity exclusively in the OIDC
+`id_token` — there is no accessible `/userinfo` endpoint. Set
+`getUserInfoFromIdToken: true` and supply `jwksEndpoint` + `issuer` so the
+library can verify the token signature:
+
+```ts
+import { makeOAuthProvider } from "effect-auth";
+import type { OAuthClientConfig, OAuthProvider } from "effect-auth";
+
+export const MyOidcProvider = (config: OAuthClientConfig): OAuthProvider =>
+  makeOAuthProvider(
+    "my-oidc",
+    {
+      ...config,
+      authorizationEndpoint: "https://idp.example.com/oauth/authorize",
+      tokenEndpoint: "https://idp.example.com/oauth/token",
+      // No userInfoEndpoint — identity comes from the id_token
+      getUserInfoFromIdToken: true,
+      jwksEndpoint: "https://idp.example.com/.well-known/jwks.json",
+      issuer: "https://idp.example.com",
+      scopes: ["openid", "email", "profile"],
+    },
+    true,
+  );
+```
+
+When `getUserInfoFromIdToken` is `true`:
+
+1. The library verifies the `id_token` signature against the JWKS at
+   `jwksEndpoint` (RS256, ES256, and EdDSA are all supported).
+2. It validates the `iss`, `aud`, `exp`, and `nonce` claims.
+3. The verified claims object is passed to `mapProfile` (or the default claim
+   mapper) exactly like a userinfo response — the same `ProfileMap` helpers
+   apply.
+
+```ts
+// Add mapProfile if the id_token claims don't follow the standard names:
+mapProfile: (claims) =>
+  ProfileMap.profile(claims, {
+    id: claims["sub"],
+    email: ProfileMap.str(claims["email"]),
+    name: ProfileMap.str(claims["name"]),
+    picture: ProfileMap.str(claims["picture"]),
+    email_verified: claims["email_verified"] === true,
+  }),
+```
+
+<Aside>
+  Apple's `name` and `email` are only included in the id_token on the very first sign-in. Cache the
+  values server-side on first use.
+</Aside>
+
+## OIDC discovery
+
+If the provider publishes a discovery document you can populate the endpoints
+automatically:
+
+```ts
+import { Effect } from "effect";
+import { makeOAuthProvider, discoverOAuthEndpoints } from "effect-auth";
+import type { OAuthClientConfig } from "effect-auth";
+
+const buildProvider = (config: OAuthClientConfig) =>
+  Effect.gen(function* () {
+    const endpoints = yield* discoverOAuthEndpoints("https://idp.example.com");
+    return makeOAuthProvider("my-idp", { ...config, ...endpoints, scopes: ["openid", "email"] });
+  });
+```
+
+`discoverOAuthEndpoints` fetches `<issuerUrl>/.well-known/openid-configuration`
+and returns `{ issuer, authorizationEndpoint, tokenEndpoint, userInfoEndpoint?,
+jwksEndpoint? }`. Spread it directly into the `makeOAuthProvider` config.
+
+## Register the provider
+
+Pass the constructed provider into `makeOAuthService` alongside any preset
+providers:
+
+```ts
+import { Effect, Layer } from "effect";
+import {
+  makeOAuthService,
+  makeOAuthProvider,
+  GoogleProvider,
+  OAuthStateStore,
+  OAuthAccountStore,
+  OAuthUserStore,
+} from "effect-auth";
+import { LinearProvider } from "./LinearProvider.js";
+
+const oauthService = await Effect.runPromise(
+  makeOAuthService({
+    google: GoogleProvider({ clientId: "…", clientSecret: "…", redirectUri: "…" }),
+    linear: LinearProvider({ clientId: "…", clientSecret: "…", redirectUri: "…" }),
+  }),
+);
+```
+
+From here the built-in HTTP endpoints (`/oauth/:provider/authorize`,
+`/oauth/:provider/callback`) work for `"linear"` exactly as for any built-in
+preset.
+
+## Provider breadth checklist
+
+The following providers are not yet bundled as presets. Each is fully
+implementable today with `makeOAuthProvider` using the patterns above:
+
+- [ ] Atlassian
+- [ ] AWS Cognito (`discoverOAuthEndpoints` + issuer URL)
+- [ ] Figma
+- [ ] Kakao
+- [ ] LINE
+- [ ] Linear (example above)
+- [ ] Naver
+- [ ] Salesforce
+- [ ] Vercel
+- [ ] VK
+- [ ] WeChat
+- [ ] Railway
+
+Contributions welcome — a preset is typically ~20 lines.

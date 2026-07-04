@@ -1373,8 +1373,17 @@ export interface OAuthClientConfig {
   readonly redirectUri: string;
 }
 
-const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
-const nested = (v: unknown, ...path: string[]): unknown =>
+/** Coerce a value to `string` — returns `undefined` for non-strings. */
+export const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+
+/**
+ * Safely traverse a nested object by a chain of keys. Returns `undefined`
+ * at the first missing or non-object step.
+ *
+ * @example
+ * nested(raw["picture"], "data", "url") // → raw.picture?.data?.url
+ */
+export const nested = (v: unknown, ...path: string[]): unknown =>
   path.reduce<unknown>(
     (acc, key) =>
       acc && typeof acc === "object" ? (acc as Record<string, unknown>)[key] : undefined,
@@ -1385,8 +1394,11 @@ const nested = (v: unknown, ...path: string[]): unknown =>
  * Build an {@link OAuthUserInfo} from a base record plus normalized identity
  * fields, omitting any that are `undefined` (satisfies
  * `exactOptionalPropertyTypes`).
+ *
+ * @example
+ * profile(raw, { id: raw["id"], email: str(raw["email"]), name: str(raw["name"]) })
  */
-const profile = (
+export const profile = (
   base: Record<string, unknown>,
   fields: {
     readonly id: unknown;
@@ -1403,6 +1415,33 @@ const profile = (
   ...(fields.picture !== undefined && { picture: fields.picture }),
   ...(fields.email_verified !== undefined && { email_verified: fields.email_verified }),
 });
+
+/**
+ * Profile-mapping helpers for use in custom {@link OAuthProviderConfig.mapProfile}
+ * implementations. These are the same utilities used by every built-in provider
+ * preset (Facebook, Twitter, Spotify, …), now exported so your own `mapProfile`
+ * can be just as terse.
+ *
+ * @example
+ * import { makeOAuthProvider, ProfileMap } from "effect-auth";
+ *
+ * const LinearProvider = (config: OAuthClientConfig): OAuthProvider =>
+ *   makeOAuthProvider("linear", {
+ *     ...config,
+ *     authorizationEndpoint: "https://linear.app/oauth/authorize",
+ *     tokenEndpoint: "https://api.linear.app/oauth/token",
+ *     userInfoEndpoint: "https://api.linear.app/graphql",
+ *     scopes: ["read"],
+ *     mapProfile: (raw) =>
+ *       ProfileMap.profile(raw, {
+ *         id: raw["id"],
+ *         email: ProfileMap.str(raw["email"]),
+ *         name: ProfileMap.str(raw["name"]),
+ *         picture: ProfileMap.str(ProfileMap.nested(raw["avatarUrl"])),
+ *       }),
+ *   }, true);
+ */
+export const ProfileMap = { str, nested, profile } as const;
 
 /**
  * Sign-in with Apple. Apple returns identity only via the OIDC `id_token`

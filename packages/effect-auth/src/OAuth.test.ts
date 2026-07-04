@@ -11,6 +11,10 @@ import {
   makeAppleClientSecret,
   OAuthStateStore,
   OAuthAccountStore,
+  str,
+  nested,
+  profile,
+  ProfileMap,
   type OAuthState,
   type OAuthAccount,
   type OAuthProvider,
@@ -368,6 +372,115 @@ describe("OAuth profile mapping", () => {
       email: "a@e.com",
     });
     expect(info).toMatchObject({ id: "z-1", name: "Ada Lovelace", email: "a@e.com" });
+  });
+});
+
+// --- Profile-mapping helpers -------------------------------------------------
+
+describe("profile-mapping helpers (str / nested / profile / ProfileMap)", () => {
+  describe("str", () => {
+    it("returns the value for a string", () => {
+      expect(str("hello")).toBe("hello");
+    });
+    it("returns undefined for non-string values", () => {
+      expect(str(42)).toBeUndefined();
+      expect(str(null)).toBeUndefined();
+      expect(str(undefined)).toBeUndefined();
+      expect(str({})).toBeUndefined();
+    });
+  });
+
+  describe("nested", () => {
+    it("traverses a well-formed path", () => {
+      expect(nested({ a: { b: { c: "deep" } } }, "a", "b", "c")).toBe("deep");
+    });
+    it("returns undefined when a key is missing", () => {
+      expect(nested({ a: {} }, "a", "missing")).toBeUndefined();
+    });
+    it("returns undefined when an intermediate value is not an object", () => {
+      expect(nested({ a: 42 }, "a", "b")).toBeUndefined();
+    });
+    it("returns the value itself when given no path segments", () => {
+      expect(nested("leaf")).toBe("leaf");
+    });
+  });
+
+  describe("profile", () => {
+    it("spreads the base record and sets canonical fields", () => {
+      const raw = { id: "u1", extra: true };
+      const result = profile(raw, { id: "u1", email: "a@b.com", name: "Alice" });
+      expect(result).toMatchObject({ id: "u1", email: "a@b.com", name: "Alice", extra: true });
+    });
+    it("omits optional fields when undefined (exactOptionalPropertyTypes)", () => {
+      const result = profile({}, { id: "u2" });
+      expect(result.id).toBe("u2");
+      expect("email" in result).toBe(false);
+      expect("name" in result).toBe(false);
+      expect("picture" in result).toBe(false);
+      expect("email_verified" in result).toBe(false);
+    });
+    it("coerces a numeric id to string", () => {
+      expect(profile({}, { id: 99 }).id).toBe("99");
+    });
+  });
+
+  describe("ProfileMap namespace", () => {
+    it("re-exports the same functions", () => {
+      expect(ProfileMap.str).toBe(str);
+      expect(ProfileMap.nested).toBe(nested);
+      expect(ProfileMap.profile).toBe(profile);
+    });
+
+    it("supports a custom mapProfile using ProfileMap ergonomics", async () => {
+      const customProvider = makeOAuthProvider(
+        "custom",
+        {
+          clientId: "id",
+          clientSecret: "secret",
+          redirectUri: "https://app/cb",
+          authorizationEndpoint: "https://custom.example/oauth/authorize",
+          tokenEndpoint: "https://custom.example/oauth/token",
+          userInfoEndpoint: "https://custom.example/api/me",
+          scopes: ["read"],
+          mapProfile: (raw) =>
+            ProfileMap.profile(raw, {
+              id: raw["uid"],
+              email: ProfileMap.str(raw["email_address"]),
+              name: ProfileMap.str(ProfileMap.nested(raw["profile"], "display_name")),
+              picture: ProfileMap.str(raw["avatar"]),
+            }),
+        },
+        false,
+      );
+
+      const rawPayload = {
+        uid: "c-1",
+        email_address: "custom@example.com",
+        profile: { display_name: "Custom User" },
+        avatar: "https://img/custom.jpg",
+      };
+
+      const original = globalThis.fetch;
+      globalThis.fetch = (() =>
+        Promise.resolve(
+          new Response(JSON.stringify(rawPayload), {
+            headers: { "content-type": "application/json" },
+          }),
+        )) as typeof fetch;
+      try {
+        const info = await Effect.runPromise(
+          customProvider.getProfile({ access_token: "tok", token_type: "bearer" }),
+        );
+        expect(info).toMatchObject({
+          id: "c-1",
+          email: "custom@example.com",
+          name: "Custom User",
+          picture: "https://img/custom.jpg",
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
   });
 });
 

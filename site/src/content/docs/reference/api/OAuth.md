@@ -48,6 +48,7 @@ and related data structures.
   - [OAuthUserInfo (interface)](#oauthuserinfo-interface)
   - [OAuthUserStore (class)](#oauthuserstore-class)
   - [OAuthUserStoreShape (interface)](#oauthuserstoreshape-interface)
+  - [ProfileMap](#profilemap)
   - [RedditProvider](#redditprovider)
   - [RobloxProvider](#robloxprovider)
   - [SlackProvider](#slackprovider)
@@ -63,6 +64,9 @@ and related data structures.
   - [makeAppleClientSecret](#makeappleclientsecret)
   - [makeOAuthProvider](#makeoauthprovider)
   - [makeOAuthService](#makeoauthservice)
+  - [nested](#nested)
+  - [profile](#profile)
+  - [str](#str)
   - [verifyIdToken](#verifyidtoken)
 
 ---
@@ -633,6 +637,36 @@ export interface OAuthUserStoreShape {
 }
 ```
 
+## ProfileMap
+
+Profile-mapping helpers for use in custom `mapProfile` implementations.
+These are the same utilities used by every built-in provider preset
+(Facebook, Twitter, Spotify, …), now exported so custom providers can be
+just as terse. Each helper is also available as a top-level named export
+(`str`, `nested`, `profile`).
+
+**Signature**
+
+```ts
+export declare const ProfileMap: {
+  readonly str: (v: unknown) => string | undefined;
+  readonly nested: (v: unknown, ...path: string[]) => unknown;
+  readonly profile: (
+    base: Record<string, unknown>,
+    fields: {
+      readonly id: unknown;
+      readonly email?: string | undefined;
+      readonly name?: string | undefined;
+      readonly picture?: string | undefined;
+      readonly email_verified?: boolean | undefined;
+    },
+  ) => OAuthUserInfo;
+};
+```
+
+See the [Custom OAuth providers guide](/guides/custom-oauth-provider/) for
+usage examples.
+
 ## RedditProvider
 
 Reddit (Basic auth; `identity` scope; no email; `duration=permanent`).
@@ -805,6 +839,53 @@ export declare const makeOAuthService: (
   providers: Record<string, OAuthProvider>,
   options?: OAuthServiceOptions,
 ) => Effect.Effect<OAuthServiceShape, never>;
+```
+
+## nested
+
+Safely traverse a nested object by a chain of keys. Returns `undefined` at the
+first missing or non-object step.
+
+**Signature**
+
+```ts
+export declare const nested: (v: unknown, ...path: string[]) => unknown;
+```
+
+**Example**
+
+```ts
+nested(raw["picture"], "data", "url"); // → raw.picture?.data?.url
+```
+
+## profile
+
+Build an `OAuthUserInfo` from a base record plus normalized identity fields,
+omitting any that are `undefined` (satisfies `exactOptionalPropertyTypes`).
+
+**Signature**
+
+```ts
+export declare const profile: (
+  base: Record<string, unknown>,
+  fields: {
+    readonly id: unknown;
+    readonly email?: string | undefined;
+    readonly name?: string | undefined;
+    readonly picture?: string | undefined;
+    readonly email_verified?: boolean | undefined;
+  },
+) => OAuthUserInfo;
+```
+
+## str
+
+Coerce a value to `string` — returns `undefined` for non-strings.
+
+**Signature**
+
+```ts
+export declare const str: (v: unknown) => string | undefined;
 ```
 
 ## verifyIdToken
