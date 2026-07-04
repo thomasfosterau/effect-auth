@@ -1234,6 +1234,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 UsernameError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
                 InvalidCredentialsError: (e) =>
                   Effect.fail(new S.Unauthorized({ message: e.message })),
+                EmailNotVerifiedError: (e) =>
+                  Effect.fail(new S.Unauthorized({ message: e.message })),
                 HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
