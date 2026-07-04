@@ -7,13 +7,18 @@
  *
  * The cookie value is `base64url(payload) . base64url(HMAC-SHA256(base64url
  * payload))`, where the payload is versioned for forward compatibility and
- * carries the session, user, and a cache expiry (`now + maxAge`).
+ * carries the session, user, a cache expiry (`now + maxAge`), and the primary
+ * session id (`sid`) — binding the cache entry to a specific primary session
+ * cookie so identity cannot bleed across account switches.
  *
  * Staleness: a session revoked on another device remains usable from a cached
  * cookie until `maxAge` elapses. Keep `maxAge` short (default 5 minutes) and
  * clear the cache cookie on sign-out / revocation (the HTTP layer does this).
+ *
+ * Security note: the cookie is signed but NOT encrypted — session and user
+ * data (including any PII in `attributes`) is visible to the browser.
  */
-import { Redacted } from "effect";
+import { Option, Redacted, Schema } from "effect";
 import * as crypto from "node:crypto";
 import type * as Types from "./Types.js";
 
@@ -29,22 +34,30 @@ export interface SessionCacheConfig {
 /** Resolved cache config used internally by the HTTP layer. */
 export interface ResolvedSessionCache {
   readonly maxAge: number;
-  readonly secret: string;
+  /** Kept redacted; unwrapped only inside `sign`. */
+  readonly secret: Redacted.Redacted<string>;
 }
+
+const MIN_SECRET_LENGTH = 32;
 
 export const resolveSessionCache = (
   config: SessionCacheConfig | undefined,
-): ResolvedSessionCache | undefined =>
-  config?.enabled
-    ? { maxAge: config.maxAge ?? 5 * 60 * 1000, secret: Redacted.value(config.secret) }
-    : undefined;
+): ResolvedSessionCache | undefined => {
+  if (!config?.enabled) return undefined;
+  if (Redacted.value(config.secret).length < MIN_SECRET_LENGTH) {
+    throw new Error(
+      `SessionCookieCache: HMAC secret must be at least ${MIN_SECRET_LENGTH} characters`,
+    );
+  }
+  return { maxAge: config.maxAge ?? 5 * 60 * 1000, secret: config.secret };
+};
 
 const PAYLOAD_VERSION = 1;
 
 const b64url = (data: Uint8Array): string => Buffer.from(data).toString("base64url");
 
-const sign = (data: string, secret: string): string =>
-  b64url(crypto.createHmac("sha256", secret).update(data).digest());
+const sign = (data: string, secret: Redacted.Redacted<string>): string =>
+  b64url(crypto.createHmac("sha256", Redacted.value(secret)).update(data).digest());
 
 const timingSafeEqualStr = (a: string, b: string): boolean => {
   const ba = Buffer.from(a);
@@ -53,17 +66,48 @@ const timingSafeEqualStr = (a: string, b: string): boolean => {
   return crypto.timingSafeEqual(ba, bb);
 };
 
+// Schemas for the JSON-serialized payload form (dates stored as ms timestamps).
+const SerializedSession = Schema.Struct({
+  id: Schema.String,
+  userId: Schema.String,
+  expiresAt: Schema.Number,
+  createdAt: Schema.Number,
+  lastActivityAt: Schema.Number,
+  attributes: Schema.Record(Schema.String, Schema.Unknown),
+});
+
+const SerializedUser = Schema.Struct({
+  id: Schema.String,
+  email: Schema.String,
+  emailVerified: Schema.Boolean,
+  name: Schema.optional(Schema.String),
+  image: Schema.optional(Schema.String),
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+  attributes: Schema.Record(Schema.String, Schema.Unknown),
+});
+
+const SerializedPayload = Schema.Struct({
+  v: Schema.Literal(PAYLOAD_VERSION),
+  exp: Schema.Number,
+  sid: Schema.String,
+  session: SerializedSession,
+  user: SerializedUser,
+});
+
 /** Serialize + sign a `SessionWithUser` into the cache cookie value. */
 export const encodeSessionCacheCookie = (
   value: Types.SessionWithUser,
   cache: ResolvedSessionCache,
   now: number,
+  primarySessionId: string,
 ): string => {
   const s = value.session;
   const u = value.user;
   const payload = {
     v: PAYLOAD_VERSION,
     exp: now + cache.maxAge,
+    sid: primarySessionId,
     session: {
       ...s,
       expiresAt: s.expiresAt.getTime(),
@@ -82,13 +126,14 @@ export const encodeSessionCacheCookie = (
 
 /**
  * Verify + parse a cache cookie. Returns `null` (falling back to store
- * validation) on a bad signature, a version/expiry mismatch, or an expired
- * underlying session.
+ * validation) on a bad signature, version/expiry mismatch, an expired
+ * underlying session, or a `sid` that doesn't match `primarySessionId`.
  */
 export const decodeSessionCacheCookie = (
   cookie: string,
   cache: ResolvedSessionCache,
   now: number,
+  primarySessionId: string,
 ): Types.SessionWithUser | null => {
   const dot = cookie.lastIndexOf(".");
   if (dot <= 0) return null;
@@ -96,44 +141,45 @@ export const decodeSessionCacheCookie = (
   const signature = cookie.slice(dot + 1);
   if (!timingSafeEqualStr(signature, sign(encoded, cache.secret))) return null;
 
-  let payload: {
-    v?: unknown;
-    exp?: unknown;
-    session?: Record<string, unknown>;
-    user?: Record<string, unknown>;
-  };
+  let raw: unknown;
   try {
-    payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    raw = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
   } catch {
     return null;
   }
 
-  if (
-    payload.v !== PAYLOAD_VERSION ||
-    typeof payload.exp !== "number" ||
-    now >= payload.exp ||
-    payload.session === undefined ||
-    payload.user === undefined
-  ) {
-    return null;
-  }
+  const parsed = Schema.decodeUnknownOption(SerializedPayload)(raw);
+  if (Option.isNone(parsed)) return null;
 
-  const s = payload.session;
-  const u = payload.user;
-  const session = {
-    ...s,
-    expiresAt: new Date(s["expiresAt"] as number),
-    createdAt: new Date(s["createdAt"] as number),
-    lastActivityAt: new Date(s["lastActivityAt"] as number),
-  } as Types.Session;
+  const payload = parsed.value;
+  if (now >= payload.exp) return null;
+
+  // Reject if the cache was issued for a different primary session.
+  if (payload.sid !== primarySessionId) return null;
+
+  const ss = payload.session;
+  const session: Types.Session = {
+    id: ss.id,
+    userId: ss.userId,
+    expiresAt: new Date(ss.expiresAt),
+    createdAt: new Date(ss.createdAt),
+    lastActivityAt: new Date(ss.lastActivityAt),
+    attributes: ss.attributes,
+  };
   // Honour the session's own expiry even within the cache window.
   if (now > session.expiresAt.getTime()) return null;
 
-  const user = {
-    ...u,
-    createdAt: new Date(u["createdAt"] as number),
-    updatedAt: new Date(u["updatedAt"] as number),
-  } as Types.User;
+  const su = payload.user;
+  const user: Types.User = {
+    id: su.id,
+    email: su.email,
+    emailVerified: su.emailVerified,
+    name: su.name,
+    image: su.image,
+    createdAt: new Date(su.createdAt),
+    updatedAt: new Date(su.updatedAt),
+    attributes: su.attributes,
+  };
 
   return { session, user };
 };
