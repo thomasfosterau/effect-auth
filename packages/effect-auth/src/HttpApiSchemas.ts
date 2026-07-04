@@ -686,31 +686,37 @@ export type JwksView = typeof JwksView.Type;
 /** 401 — missing/invalid credentials or session. */
 export class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()("Unauthorized", {
   message: Schema.String,
+  code: Schema.optional(Schema.String),
 }) {}
 
-/** 403 — authenticated but not allowed (e.g. email not verified). */
+/** 403 — authenticated but not allowed (e.g. email not verified, account locked, banned). */
 export class Forbidden extends Schema.TaggedErrorClass<Forbidden>()("Forbidden", {
   message: Schema.String,
+  code: Schema.optional(Schema.String),
 }) {}
 
 /** 409 — conflict (e.g. user already exists). */
 export class Conflict extends Schema.TaggedErrorClass<Conflict>()("Conflict", {
   message: Schema.String,
+  code: Schema.optional(Schema.String),
 }) {}
 
-/** 400 — malformed/invalid request. */
+/** 400 — malformed/invalid request (e.g. password policy violation, invalid input). */
 export class BadRequest extends Schema.TaggedErrorClass<BadRequest>()("BadRequest", {
   message: Schema.String,
+  code: Schema.optional(Schema.String),
 }) {}
 
 /** 404 — resource or optional feature not available (e.g. plugin not enabled). */
 export class NotFound extends Schema.TaggedErrorClass<NotFound>()("NotFound", {
   message: Schema.String,
+  code: Schema.optional(Schema.String),
 }) {}
 
 /** 429 — rate limited; retry later. */
 export class TooManyRequests extends Schema.TaggedErrorClass<TooManyRequests>()("TooManyRequests", {
   message: Schema.String,
+  code: Schema.optional(Schema.String),
 }) {}
 
 /** 500 — unexpected server error. */

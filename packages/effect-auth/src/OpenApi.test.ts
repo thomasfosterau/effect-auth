@@ -134,10 +134,10 @@ describe("getOpenApiSpec", () => {
     const spec = getOpenApiSpec();
 
     const signUp = spec.paths["/sign-up"]?.post?.responses ?? {};
-    expect(Object.keys(signUp).sort()).toEqual(["200", "400", "409", "429", "500"]);
+    expect(Object.keys(signUp).sort()).toEqual(["200", "400", "403", "409", "429", "500"]);
 
     const signIn = spec.paths["/sign-in"]?.post?.responses ?? {};
-    expect(Object.keys(signIn).sort()).toEqual(["200", "401", "403", "429", "500"]);
+    expect(Object.keys(signIn).sort()).toEqual(["200", "400", "401", "403", "429", "500"]);
 
     const session = spec.paths["/session"]?.get?.responses ?? {};
     expect(Object.keys(session).sort()).toEqual(["200", "401"]);

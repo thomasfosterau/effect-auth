@@ -230,19 +230,65 @@ subclasses**; it composes via unions. 6 HTTP boundary errors use
 2. **Taxonomy rules:** `AuthError` means _infrastructure/unexpected_ failure
    only — never a flow outcome. A flow outcome gets a specific tagged error.
    Central `Errors.ts` holds errors shared by ≥2 modules; a module-local error
-   is fine when only that module raises it (the current 17 all qualify). New
-   modules follow the `XError { cause? }` + specific tags pattern.
-3. **HTTP mapping:** target state is a single documented table (tag → status)
-   applied uniformly. `RateLimitError` maps to **429** via a new
-   `TooManyRequests` schema; `AuthError` maps to **500** everywhere (signUp's
-   duplicate-email case gets a typed `EmailInUseError` instead of overloading
-   `AuthError` → 409).
-4. **Honest unions:** public service methods keep precise unions (already
-   largely true); `HookError` remains a type alias, not a class.
+   is fine when only that module raises it. New modules follow the
+   `XError { cause? }` + specific tags pattern. Examples of new flow-outcome
+   errors (all in `Errors.ts`): `PasswordPolicyError`, `SignUpDisabledError`,
+   `InvalidInputError`, `PasswordAlreadySetError`, `AccountLockedError`,
+   `UserBannedError`, `CaptchaError`, `PwnedPasswordError`, plus five
+   `OAuth*Error` types.
+3. **Stable codes:** every domain error carries a stable, documented, append-only
+   `code` field (e.g. `"PASSWORD_TOO_SHORT"`, `"EMAIL_IN_USE"`) sourced from the
+   `ErrorCode` const object in `Errors.ts`. Existing errors expose it via a `get
+code()` getter (no construction-site changes); new errors take `code` as a
+   constructor field (enabling union variants like `PASSWORD_TOO_SHORT |
+PASSWORD_TOO_LONG` on `PasswordPolicyError`). HTTP response bodies surface the
+   code via an optional `code` field on all non-500 schemas.
+4. **HTTP mapping:** target state is a single documented table (tag → status)
+   applied uniformly. `AuthError` → **500**; `RateLimitError` → **429** (via
+   `TooManyRequests`); `PasswordPolicyError`, `InvalidInputError`, `CaptchaError`,
+   `PwnedPasswordError` → **400**; `SignUpDisabledError`, `AccountLockedError`,
+   `UserBannedError` → **403**; `EmailInUseError` → **409**;
+   `InvalidCredentialsError` → **401** (anti-enumeration: uniform "Invalid email
+   or password" message). Session-validation ban failures use `code:
+"USER_BANNED"` on the 401 response (clients detect via `code`; a full 403
+   upgrade would require updating all ~80 endpoint declarations and is deferred).
+5. **Pluggable i18n:** a `Messages` service (`@effect-auth/Messages`) maps
+   `(code, locale?, params?) → string`. The `resolveMessage(code, fallback,
+params?)` helper in HTTP handlers falls back to the error's own `.message`
+   when the service is absent (uses `Effect.serviceOption`). English defaults ship
+   in `Messages.Default`; override via `Layer.succeed(Auth.Messages, { resolve: ... })`.
+6. **Honest unions:** public service methods keep precise unions; `HookError`
+   remains a type alias, now expanded to include `AccountLockedError`,
+   `UserBannedError`, `CaptchaError`, `PwnedPasswordError`.
+7. **`normalizeEmail` consolidated:** `email.trim().toLowerCase()` was duplicated
+   across 9 files; extracted to `utils.ts` and imported everywhere.
+
+```ts
+// Before: AuthError overloaded for all outcomes
+signUp: (...) => Effect<Result, AuthError | RateLimitError | EmailInUseError, ...>
+//  → AuthError gets 409 in signUp, 500 in signIn — inconsistent!
+
+// After: specific tags, stable codes
+signUp: (...) => Effect<
+  Result,
+  | AuthError              // infrastructure only → 500
+  | EmailInUseError        // code: "EMAIL_IN_USE"  → 409
+  | RateLimitError         // code: "RATE_LIMIT_EXCEEDED" → 429
+  | PasswordPolicyError    // code: "PASSWORD_TOO_SHORT" | "PASSWORD_TOO_LONG" → 400
+  | SignUpDisabledError     // code: "SIGN_UP_DISABLED" → 403
+  | InvalidInputError       // code: "INVALID_INPUT" → 400
+  | AccountLockedError      // code: "ACCOUNT_LOCKED" → 403 (via plugin)
+  | UserBannedError         // code: "USER_BANNED" → 403 (via plugin)
+  | CaptchaError            // code: "CAPTCHA_FAILED" → 400 (via plugin)
+  | PwnedPasswordError,     // code: "PWNED_PASSWORD" → 400 (via plugin)
+  ...
+>
+```
 
 **Applied** (approved): the 429 `TooManyRequests` schema on all 17 rate-limited
-endpoints, uniform `AuthError` → 500, and the typed `EmailInUseError` (now in
-shared `Errors.ts`) carrying signUp's duplicate-email 409.
+endpoints, uniform `AuthError` → 500, the typed `EmailInUseError` (now in
+shared `Errors.ts`) carrying signUp's duplicate-email 409, and the full
+flow-outcome error taxonomy above.
 
 **Rationale.** `Data.TaggedError` vs `Schema.TaggedErrorClass` split follows
 what each layer needs; the mapping table removes the per-handler drift that
@@ -501,6 +547,9 @@ All approved items are applied and changeset-backed.
    table + framing + quick-start (the old §2 example never provided `Hooks`
    and would not have type-checked), `CONTRIBUTING.md` structure/paths,
    `HOOKS_DESIGN.md` status header — D11.
+6. Error-model overhaul (D4): specific flow-outcome tags, stable `code` field on
+   all domain errors, `ErrorCode` const, `Messages` service + English catalog,
+   `normalizeEmail` consolidated to `utils.ts`, HTTP status fixes — D4.
 
 Changesets accompany 1 (minor: effect-auth), 3 (patch: effect-auth), 4 (minor:
-@effect-auth/client).
+@effect-auth/client), 6 (minor: effect-auth).

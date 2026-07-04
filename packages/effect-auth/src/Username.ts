@@ -81,6 +81,9 @@ export interface UsernameServiceShape {
     | Errors.EmailInUseError
     | Errors.HashingError
     | Errors.EmailNotVerifiedError
+    | Errors.PasswordPolicyError
+    | Errors.SignUpDisabledError
+    | Errors.InvalidInputError
     | HookError,
     | UsernameStore
     | EmailPasswordService

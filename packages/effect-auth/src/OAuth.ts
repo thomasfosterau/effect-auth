@@ -11,11 +11,17 @@ import {
   OAuthProviderError,
   OAuthStateNotFoundError,
   OAuthStateExpiredError,
+  OAuthAccountNotLinkedError,
+  OAuthMissingEmailError,
+  OAuthAccountConflictError,
+  OAuthAccountNotFoundError,
+  OAuthNoRefreshTokenError,
   UserNotFoundError,
 } from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
 import { SessionManager } from "./Session.js";
 import type * as Types from "./Types.js";
+import { normalizeEmail } from "./utils.js";
 
 /**
  * OAuth2 provider configuration
@@ -663,6 +669,8 @@ export interface OAuthServiceShape {
     | OAuthProviderError
     | OAuthStateNotFoundError
     | OAuthStateExpiredError
+    | OAuthAccountNotLinkedError
+    | OAuthMissingEmailError
     | UserNotFoundError
     | HookError,
     OAuthStateStore | OAuthAccountStore | OAuthUserStore | SessionManager | Hooks
@@ -675,19 +683,27 @@ export interface OAuthServiceShape {
     state: string,
   ) => Effect.Effect<
     OAuthAccount,
-    AuthError | OAuthProviderError | OAuthStateNotFoundError | OAuthStateExpiredError,
+    | AuthError
+    | OAuthProviderError
+    | OAuthStateNotFoundError
+    | OAuthStateExpiredError
+    | OAuthAccountConflictError,
     OAuthStateStore | OAuthAccountStore
   >;
 
   readonly unlinkAccount: (
     userId: string,
     provider: string,
-  ) => Effect.Effect<void, AuthError, OAuthAccountStore>;
+  ) => Effect.Effect<void, AuthError | OAuthAccountNotFoundError, OAuthAccountStore>;
 
   readonly refreshAccessToken: (
     userId: string,
     provider: string,
-  ) => Effect.Effect<string, AuthError | OAuthProviderError, OAuthAccountStore>;
+  ) => Effect.Effect<
+    string,
+    AuthError | OAuthProviderError | OAuthAccountNotFoundError | OAuthNoRefreshTokenError,
+    OAuthAccountStore
+  >;
 }
 
 export class OAuthService extends Context.Service<OAuthService, OAuthServiceShape>()(
@@ -791,8 +807,6 @@ export interface OAuthServiceOptions {
    */
   readonly encryptTokens?: { readonly secret: string } | { readonly cipher: TokenCipher };
 }
-
-const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
 /**
  * Create an OAuth service with configured providers
@@ -1045,8 +1059,9 @@ export const makeOAuthService = (
 
           if (existingAccount) {
             if (existingAccount.userId === "") {
-              return yield* new AuthError({
+              return yield* new OAuthAccountNotLinkedError({
                 message: `This ${stateEntry.provider} account is not linked to a user`,
+                provider: stateEntry.provider,
               });
             }
 
@@ -1075,8 +1090,9 @@ export const makeOAuthService = (
           const emailVerified = userInfo.email_verified === true;
 
           if (email === undefined) {
-            return yield* new AuthError({
+            return yield* new OAuthMissingEmailError({
               message: `${stateEntry.provider} did not return an email address for this account`,
+              provider: stateEntry.provider,
             });
           }
 
@@ -1182,8 +1198,9 @@ export const makeOAuthService = (
 
           if (existingAccount && existingAccount.userId !== userId) {
             return yield* Effect.fail(
-              new AuthError({
+              new OAuthAccountConflictError({
                 message: `This ${provider} account is already linked to another user`,
+                provider,
               }),
             );
           }
@@ -1223,8 +1240,9 @@ export const makeOAuthService = (
 
           if (!account) {
             return yield* Effect.fail(
-              new AuthError({
-                message: `No ${provider} account linked to user ${userId}`,
+              new OAuthAccountNotFoundError({
+                message: `No ${provider} account linked to this user`,
+                provider,
               }),
             );
           }
@@ -1238,10 +1256,19 @@ export const makeOAuthService = (
           const accounts = yield* accountStore.getByUserId(userId);
           const account = accounts.find((a) => a.provider === provider);
 
-          if (!account || !account.refreshToken) {
+          if (!account) {
             return yield* Effect.fail(
-              new AuthError({
+              new OAuthAccountNotFoundError({
+                message: `No ${provider} account linked to this user`,
+                provider,
+              }),
+            );
+          }
+          if (!account.refreshToken) {
+            return yield* Effect.fail(
+              new OAuthNoRefreshTokenError({
                 message: `No refresh token available for ${provider}`,
+                provider,
               }),
             );
           }

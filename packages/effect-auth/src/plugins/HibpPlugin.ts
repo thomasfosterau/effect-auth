@@ -17,7 +17,7 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import * as crypto from "node:crypto";
 import type { SignUpInput } from "../EmailPassword.js";
 import { makePlugin, type ResetPasswordArgs } from "../Hooks.js";
-import { AuthError } from "../Errors.js";
+import { AuthError, PwnedPasswordError } from "../Errors.js";
 
 export interface HibpConfig {
   /** Reject when the breach count is at least this. Default 1. */
@@ -65,12 +65,12 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
         );
       };
 
-      const check = (password: string): Effect.Effect<void, AuthError> =>
+      const check = (password: string): Effect.Effect<void, AuthError | PwnedPasswordError> =>
         Effect.gen(function* () {
           const count = yield* breachCount(password);
           if (count >= threshold) {
             return yield* Effect.fail(
-              new AuthError({
+              new PwnedPasswordError({
                 message: "This password has appeared in a data breach; please choose another",
               }),
             );

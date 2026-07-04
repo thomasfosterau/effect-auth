@@ -11,8 +11,7 @@
 import { Effect } from "effect";
 import type { SignInInput, SignUpInput } from "../EmailPassword.js";
 import { makePlugin } from "../Hooks.js";
-
-const normalize = (email: string): string => email.trim().toLowerCase();
+import { normalizeEmail } from "../utils.js";
 
 /**
  * Lower-cases and trims the email on `beforeSignUp` and `beforeSignIn`.
@@ -20,6 +19,8 @@ const normalize = (email: string): string => email.trim().toLowerCase();
  * `Layer<Hooks, never, Hooks>` - no dependencies.
  */
 export const NormalizeEmailPlugin = makePlugin({
-  beforeSignUp: (input: SignUpInput) => Effect.succeed({ ...input, email: normalize(input.email) }),
-  beforeSignIn: (input: SignInInput) => Effect.succeed({ ...input, email: normalize(input.email) }),
+  beforeSignUp: (input: SignUpInput) =>
+    Effect.succeed({ ...input, email: normalizeEmail(input.email) }),
+  beforeSignIn: (input: SignInInput) =>
+    Effect.succeed({ ...input, email: normalizeEmail(input.email) }),
 });

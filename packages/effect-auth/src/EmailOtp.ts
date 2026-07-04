@@ -15,6 +15,7 @@ import { Hooks, type HookError } from "./Hooks.js";
 import { SessionManager } from "./Session.js";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.js";
 import type * as Types from "./Types.js";
+import { normalizeEmail } from "./utils.js";
 
 /**
  * Email OTP error
@@ -184,8 +185,6 @@ export class EmailOtpService extends Context.Service<EmailOtpService, EmailOtpSe
   static readonly layer = (config: EmailOtpConfig) =>
     Layer.effect(EmailOtpService, makeEmailOtpService(config));
 }
-
-const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
 /** @deprecated Use {@link hashToken} from `"effect-auth"` instead. */
 export const hashOtp = hashToken;

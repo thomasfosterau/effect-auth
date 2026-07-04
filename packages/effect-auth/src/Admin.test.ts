@@ -323,8 +323,8 @@ describe("AdminService", () => {
 
     expect(result.blocked._tag).toBe("Failure");
     if (result.blocked._tag === "Failure") {
-      expect(result.blocked.failure._tag).toBe("AuthError");
-      expect(result.blocked.failure.message).toBe("User is banned");
+      expect(result.blocked.failure._tag).toBe("UserBannedError");
+      expect(result.blocked.failure.message).toBe("Your account has been suspended");
     }
     expect(result.allowed.user.id).toBe("user-1");
     expect(result.lapsed._tag).toBe("Success");
