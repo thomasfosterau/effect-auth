@@ -105,6 +105,16 @@ export interface CookieConfig {
   /** Cookie path. Default `/`. */
   readonly path?: string;
   /**
+   * Apply the `__Host-` cookie name prefix for added security. When active the
+   * browser enforces that the cookie is `Secure`, has no `Domain` attribute,
+   * and has `Path=/`. Defaults to `true` when `secure` is `true` and `path`
+   * is `/` (or not set). Set to `false` to opt out.
+   *
+   * Note: enabling this when `path` is not `/` forces the cookie path to `/`
+   * so the prefix constraint is satisfied.
+   */
+  readonly hostPrefix?: boolean;
+  /**
    * Signed session-data cookie cache. When enabled, a short-lived HMAC-signed
    * copy of the session + user is stored in a `${name}_data` cookie so
    * authenticated requests can be served without a session-store read (up to
@@ -140,22 +150,35 @@ interface ResolvedCookieConfig {
 const resolveCookieConfig = (
   config?: CookieConfig,
   multiSession?: MultiSessionConfig,
-): ResolvedCookieConfig => ({
-  name: config?.name ?? "conduit_session",
-  secure: config?.secure ?? true,
-  path: config?.path ?? "/",
-  cache: resolveSessionCache(config?.cache),
-  multiSession:
-    multiSession === undefined ? undefined : { maximumSessions: multiSession.maximumSessions ?? 5 },
-  lastLoginMethod:
-    config?.lastLoginMethod === undefined || config.lastLoginMethod === false
-      ? undefined
-      : {
-          maxAge:
-            (config.lastLoginMethod === true ? undefined : config.lastLoginMethod.maxAge) ??
-            30 * 24 * 60 * 60 * 1000,
-        },
-});
+): ResolvedCookieConfig => {
+  const secureCookies = config?.secure ?? true;
+  const configuredPath = config?.path ?? "/";
+  // Apply __Host- prefix by default when secure and path is root; the prefix
+  // forces path=/ so browsers enforce host-binding (no Domain, Secure, Path=/).
+  const useHostPrefix = config?.hostPrefix ?? (secureCookies && configuredPath === "/");
+  const baseName = config?.name ?? "conduit_session";
+  const effectiveName = useHostPrefix && secureCookies ? `__Host-${baseName}` : baseName;
+  // __Host- cookies must have Path=/; override whatever path was configured.
+  const effectivePath = useHostPrefix && secureCookies ? "/" : configuredPath;
+  return {
+    name: effectiveName,
+    secure: secureCookies,
+    path: effectivePath,
+    cache: resolveSessionCache(config?.cache),
+    multiSession:
+      multiSession === undefined
+        ? undefined
+        : { maximumSessions: multiSession.maximumSessions ?? 5 },
+    lastLoginMethod:
+      config?.lastLoginMethod === undefined || config.lastLoginMethod === false
+        ? undefined
+        : {
+            maxAge:
+              (config.lastLoginMethod === true ? undefined : config.lastLoginMethod.maxAge) ??
+              30 * 24 * 60 * 60 * 1000,
+          },
+  };
+};
 
 /** Name of the non-httpOnly last-login-method hint cookie. */
 const lastMethodCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_last_method`;
@@ -582,6 +605,17 @@ const encodeApiKey = (k: ApiKey): S.ApiKeyView => ({
   updatedAt: k.updatedAt,
 });
 
+/**
+ * Log the real error server-side and return a generic 500 body so internal
+ * implementation details are never exposed to clients.
+ */
+const internalServerError = (e: unknown): Effect.Effect<never, S.InternalServerError, never> =>
+  Effect.logError("[effect-auth] internal error", e).pipe(
+    Effect.flatMap(() =>
+      Effect.fail(new S.InternalServerError({ message: "Internal server error" })),
+    ),
+  );
+
 /** Layer implementing the `auth` group handlers. */
 export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
   const cfg = resolveCookieConfig(config, multiSession);
@@ -593,13 +627,12 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const lifecycle = yield* AuthLifecycleService;
           const result = yield* lifecycle.signUp(signUpInput(payload)).pipe(
             Effect.catchTags({
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
               EmailInUseError: (e) =>
                 Effect.fail(new S.Conflict({ message: e.message, code: e.code })),
               EmailNotVerifiedError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-              EmailVerificationError: (e) =>
-                Effect.fail(new S.InternalServerError({ message: e.message })),
+              HashingError: (e) => internalServerError(e),
+              EmailVerificationError: (e) => internalServerError(e),
               RateLimitError: (e) =>
                 Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
               PasswordPolicyError: (e) =>
@@ -667,10 +700,9 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 InvalidCredentialsError: (e) =>
                   Effect.fail(new S.Unauthorized({ message: e.message, code: e.code })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                EmailVerificationError: (e) =>
-                  Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+                HashingError: (e) => internalServerError(e),
+                EmailVerificationError: (e) => internalServerError(e),
                 RateLimitError: (e) =>
                   Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
                 AccountLockedError: (e) =>
@@ -784,18 +816,15 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const verification = yield* EmailVerificationService;
           const email = payload.email.trim().toLowerCase();
 
-          const user = yield* store
-            .getUserByEmail(email)
-            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+          const user = yield* store.getUserByEmail(email).pipe(Effect.catch(internalServerError));
 
           // Anti-enumeration: succeed uniformly whether or not the user exists
           // (or is already verified).
           if (user !== null && !user.emailVerified) {
             yield* verification.resendVerification(user.id, email).pipe(
               Effect.catchTags({
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                EmailVerificationError: (e) =>
-                  Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+                EmailVerificationError: (e) => internalServerError(e),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
                 AccountLockedError: (e) =>
                   resolveMessage(e.code, e.message).pipe(
@@ -835,7 +864,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             Effect.catchTags({
               EmailVerificationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               AccountLockedError: (e) =>
                 resolveMessage(e.code, e.message).pipe(
@@ -875,9 +904,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const passwordReset = yield* PasswordResetService;
           yield* passwordReset.requestPasswordReset(payload.email).pipe(
             Effect.catchTags({
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-              PasswordResetError: (e) =>
-                Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
+              PasswordResetError: (e) => internalServerError(e),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               AccountLockedError: (e) =>
                 resolveMessage(e.code, e.message).pipe(
@@ -914,8 +942,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           yield* passwordReset.resetPassword(payload.token, payload.newPassword).pipe(
             Effect.catchTags({
               PasswordResetError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-              HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
+              HashingError: (e) => internalServerError(e),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               AccountLockedError: (e) =>
                 resolveMessage(e.code, e.message).pipe(
@@ -964,8 +992,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 InvalidCredentialsError: (e) =>
                   Effect.fail(new S.BadRequest({ message: e.message, code: e.code })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+                HashingError: (e) => internalServerError(e),
                 PasswordPolicyError: (e) =>
                   resolveMessage(e.code, e.message, e.params).pipe(
                     Effect.flatMap((msg) =>
@@ -989,7 +1017,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 UserNotFoundError: () =>
                   Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return S.encodeUser(updated);
@@ -1007,7 +1035,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 EmailInUseError: () => Effect.void,
                 UserNotFoundError: () =>
                   Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return { status: true };
@@ -1020,7 +1048,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             Effect.catchTags({
               AccountTokenError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
           return yield* HttpServerResponse.json({ status: true }).pipe(
@@ -1048,7 +1076,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 UserNotFoundError: () =>
                   Effect.fail(new S.Unauthorized({ message: "Not authenticated" })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return { status: true };
@@ -1061,7 +1089,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             Effect.catchTags({
               AccountTokenError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
           return yield* HttpServerResponse.json({ status: true }).pipe(
@@ -1085,7 +1113,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const sessionManager = yield* SessionManager;
           const sessions = yield* sessionManager
             .listSessions(resolved.user.id)
-            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+            .pipe(Effect.catch(internalServerError));
           return sessions.map(S.encodeSession);
         }),
       )
@@ -1096,7 +1124,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
 
           const sessions = yield* sessionManager
             .listSessions(resolved.user.id)
-            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+            .pipe(Effect.catch(internalServerError));
 
           // Only the owner may revoke a session, and only their own sessions.
           // params.sessionId is the raw token from the URL; sessions in the list
@@ -1109,7 +1137,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
 
           yield* sessionManager
             .invalidateSession(params.sessionId)
-            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+            .pipe(Effect.catch(internalServerError));
         }),
       )
       .handle("revokeOtherSessions", ({ request }) =>
@@ -1118,7 +1146,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const sessionManager = yield* SessionManager;
           yield* sessionManager
             .revokeOtherSessions(resolved.user.id, resolved.session.id)
-            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+            .pipe(Effect.catch(internalServerError));
         }),
       )
       .handle("magicLinkSend", ({ payload }) =>
@@ -1128,8 +1156,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           // accounts; only store/delivery failures surface (as 500).
           yield* magicLink.provideStores(magicLink.service.send(payload.email)).pipe(
             Effect.catchTags({
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-              MagicLinkError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
+              MagicLinkError: (e) => internalServerError(e),
             }),
           );
           return { status: true };
@@ -1143,7 +1171,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 MagicLinkError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
                 AccountLockedError: (e) =>
                   resolveMessage(e.code, e.message).pipe(
@@ -1185,8 +1213,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           // accounts; only store/delivery failures surface (as 500).
           yield* emailOtp.provideStores(emailOtp.service.send(payload.email, payload.purpose)).pipe(
             Effect.catchTags({
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-              EmailOtpError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
+              EmailOtpError: (e) => internalServerError(e),
             }),
           );
           return { status: true };
@@ -1200,7 +1228,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 EmailOtpError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
                 AccountLockedError: (e) =>
                   resolveMessage(e.code, e.message).pipe(
@@ -1240,7 +1268,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const anonymous = yield* resolveAnonymous;
           const result = yield* anonymous.provideStores(anonymous.service.signInAnonymous()).pipe(
             Effect.catchTags({
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               AccountLockedError: (e) =>
                 resolveMessage(e.code, e.message).pipe(
@@ -1293,8 +1321,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                   Effect.fail(new S.Unauthorized({ message: e.message })),
                 EmailNotVerifiedError: (e) =>
                   Effect.fail(new S.Unauthorized({ message: e.message })),
-                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                HashingError: (e) => internalServerError(e),
+                AuthError: (e) => internalServerError(e),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
                 AccountLockedError: (e) =>
                   resolveMessage(e.code, e.message).pipe(
@@ -1395,7 +1423,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const sessionManager = yield* SessionManager;
           yield* sessionManager
             .invalidateSession(payload.sessionId)
-            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+            .pipe(Effect.catch(internalServerError));
 
           const remaining = readDeviceSessionIds(request, cfg).filter(
             (id) => id !== payload.sessionId,
@@ -1442,7 +1470,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             )
             .pipe(
               Effect.catchTags({
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
         }),
@@ -1454,13 +1482,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             Effect.catchTags({
               // RFC 8628 poll errors -> 400 with the error code as message.
               DevicePollError: (e) => Effect.fail(new S.BadRequest({ message: e.error })),
-              SessionNotFoundError: (e) =>
-                Effect.fail(new S.InternalServerError({ message: e.message })),
-              SessionExpiredError: (e) =>
-                Effect.fail(new S.InternalServerError({ message: e.message })),
-              UserNotFoundError: (e) =>
-                Effect.fail(new S.InternalServerError({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              SessionNotFoundError: (e) => internalServerError(e),
+              SessionExpiredError: (e) => internalServerError(e),
+              UserNotFoundError: (e) => internalServerError(e),
+              AuthError: (e) => internalServerError(e),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               AccountLockedError: (e) =>
                 resolveMessage(e.code, e.message).pipe(
@@ -1504,7 +1529,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return { status: true };
@@ -1516,7 +1541,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           yield* device.provideStores(device.service.deny(payload.userCode)).pipe(
             Effect.catchTags({
               DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
           return { status: true };
@@ -1530,9 +1555,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 // Anti-enumeration: send never signals whether the number exists.
-                PhoneOtpError: (e) =>
-                  Effect.fail(new S.InternalServerError({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                PhoneOtpError: (e) => internalServerError(e),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return { status: true };
@@ -1546,7 +1570,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 PhoneOtpError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
                 AccountLockedError: (e) =>
                   resolveMessage(e.code, e.message).pipe(
@@ -1599,12 +1623,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 InvalidCredentialsError: (e) =>
                   Effect.fail(new S.BadRequest({ message: e.message })),
-                TwoFactorError: (e) =>
-                  Effect.fail(new S.InternalServerError({ message: e.message })),
-                UserNotFoundError: (e) =>
-                  Effect.fail(new S.InternalServerError({ message: e.message })),
-                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                TwoFactorError: (e) => internalServerError(e),
+                UserNotFoundError: (e) => internalServerError(e),
+                HashingError: (e) => internalServerError(e),
+                AuthError: (e) => internalServerError(e),
               }),
             );
         }),
@@ -1618,8 +1640,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 TwoFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                HashingError: (e) => internalServerError(e),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return { status: true };
@@ -1635,8 +1657,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 InvalidCredentialsError: (e) =>
                   Effect.fail(new S.BadRequest({ message: e.message })),
-                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                HashingError: (e) => internalServerError(e),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return { status: true };
@@ -1655,8 +1677,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 TwoFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 InvalidCredentialsError: (e) =>
                   Effect.fail(new S.BadRequest({ message: e.message })),
-                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                HashingError: (e) => internalServerError(e),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return { backupCodes };
@@ -1670,8 +1692,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 TwoFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
-                HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                HashingError: (e) => internalServerError(e),
+                AuthError: (e) => internalServerError(e),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
                 AccountLockedError: (e) =>
                   resolveMessage(e.code, e.message).pipe(
@@ -1710,7 +1732,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 TwoFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
                 AccountLockedError: (e) =>
                   resolveMessage(e.code, e.message).pipe(
@@ -1758,7 +1780,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return encodeOrganization(created);
@@ -1772,7 +1794,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .provideStores(org.service.listOrganizations(resolved.user.id))
             .pipe(
               Effect.catchTags({
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return orgs.map(encodeOrganization);
@@ -1787,7 +1809,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return encodeFullOrganization(full);
@@ -1809,7 +1831,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return encodeOrganization(updated);
@@ -1824,7 +1846,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
         }),
@@ -1840,9 +1862,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             })
             .pipe(
               Effect.catchTags({
-                SessionNotFoundError: (e) =>
-                  Effect.fail(new S.InternalServerError({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                SessionNotFoundError: (e) => internalServerError(e),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return { status: true };
@@ -1862,7 +1883,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return encodeInvitation(invitation);
@@ -1876,7 +1897,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .provideStores(org.service.listInvitations(params.organizationId))
             .pipe(
               Effect.catchTags({
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return invitations.map(encodeInvitation);
@@ -1897,7 +1918,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return encodeMember(member);
@@ -1912,7 +1933,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return encodeInvitation(invitation);
@@ -1927,7 +1948,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return encodeInvitation(invitation);
@@ -1949,7 +1970,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return encodeMember(member);
@@ -1971,7 +1992,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return encodeMember(member);
@@ -1988,7 +2009,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
         }),
@@ -2009,7 +2030,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return { users: result.users.map(S.encodeUser), total: result.total };
@@ -2025,7 +2046,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
                 UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return S.encodeUser(user);
@@ -2044,7 +2065,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               Effect.catchTags({
                 AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
                 UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return S.encodeUser(user);
@@ -2058,7 +2079,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             Effect.catchTags({
               AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
               UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
           return S.encodeUser(user);
@@ -2071,7 +2092,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           yield* admin.service.removeUser(resolved.user, payload.userId).pipe(
             Effect.catchTags({
               AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
         }),
@@ -2083,7 +2104,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           yield* admin.service.revokeUserSessions(resolved.user, payload.userId).pipe(
             Effect.catchTags({
               AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
           return { status: true };
@@ -2098,7 +2119,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             Effect.catchTags({
               AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
               UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               AccountLockedError: (e) =>
                 resolveMessage(e.code, e.message).pipe(
@@ -2128,7 +2149,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           );
           const user = yield* userService
             .getUser(session.userId)
-            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+            .pipe(Effect.catch(internalServerError));
           const body: S.AuthSuccess = {
             user: S.encodeUser(user),
             needsEmailVerification: false,
@@ -2143,7 +2164,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const sessionManager = yield* SessionManager;
           yield* sessionManager
             .invalidateSession(resolved.session.id)
-            .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+            .pipe(Effect.catch(internalServerError));
           return yield* HttpServerResponse.json({ status: true }).pipe(
             Effect.flatMap((response) =>
               HttpServerResponse.setCookie(response, cfg.name, "", clearCookieOptions(cfg)),
@@ -2182,7 +2203,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return { key: result.key, apiKey: encodeApiKey(result.apiKey) };
@@ -2194,7 +2215,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const apiKey = yield* resolveApiKey;
           const keys = yield* apiKey.provideStores(apiKey.service.list(resolved.user.id)).pipe(
             Effect.catchTags({
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
           return keys.map(encodeApiKey);
@@ -2219,7 +2240,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return encodeApiKey(updated);
@@ -2232,7 +2253,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           yield* apiKey.provideStores(apiKey.service.delete(resolved.user.id, params.keyId)).pipe(
             Effect.catchTags({
               ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
         }),
@@ -2274,7 +2295,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return encodeSsoProvider(provider);
@@ -2294,7 +2315,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return { url: result.url, state: result.state };
@@ -2308,7 +2329,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
                 AccountLockedError: (e) =>
                   resolveMessage(e.code, e.message).pipe(
@@ -2350,8 +2371,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const jwt = yield* resolveJwt;
           const result = yield* jwt.provideStores(jwt.service.sign(resolved.user)).pipe(
             Effect.catchTags({
-              JwtError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              JwtError: (e) => internalServerError(e),
+              AuthError: (e) => internalServerError(e),
             }),
           );
           return { token: result.token, expiresAt: result.expiresAt };
@@ -2362,7 +2383,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const jwt = yield* resolveJwt;
           const jwks = yield* jwt.provideStores(jwt.service.getJwks()).pipe(
             Effect.catchTags({
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
           return { keys: jwks.keys.map((k) => ({ ...k })) };
@@ -2392,7 +2413,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return {
@@ -2410,7 +2431,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const oidc = yield* resolveOidcProvider;
           const clients = yield* oidc.provideStores(oidc.service.listClients()).pipe(
             Effect.catchTags({
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
           return clients.map(encodeOidcClient);
@@ -2438,7 +2459,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return encodeOidcClient(updated);
@@ -2454,7 +2475,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           yield* oidc.provideStores(oidc.service.deleteClient(params.clientId)).pipe(
             Effect.catchTags({
               OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
         }),
@@ -2500,7 +2521,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return HttpServerResponse.redirect(result.redirectTo, { status: 302 });
@@ -2517,7 +2538,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return { redirectTo: result.redirectTo };
@@ -2566,7 +2587,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                       ? new S.Unauthorized({ message: e.error })
                       : new S.BadRequest({ message: e.error }),
                   ),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
               }),
             );
           return {
@@ -2591,7 +2612,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return yield* oidc.provideStores(oidc.service.userinfo(token)).pipe(
             Effect.catchTags({
               OidcProviderError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
         }),
@@ -2608,7 +2629,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const jwt = yield* resolveJwt;
           const jwks = yield* jwt.provideStores(jwt.service.getJwks()).pipe(
             Effect.catchTags({
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
             }),
           );
           return { keys: jwks.keys.map((k) => ({ ...k })) };
@@ -2620,9 +2641,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const oneTap = yield* resolveGoogleOneTap;
           const nonce = yield* oneTap.provideStores(oneTap.service.createNonce()).pipe(
             Effect.catchTags({
-              GoogleOneTapError: (e) =>
-                Effect.fail(new S.InternalServerError({ message: e.message })),
-              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+              GoogleOneTapError: (e) => internalServerError(e),
+              AuthError: (e) => internalServerError(e),
             }),
           );
           return { nonce };
@@ -2636,7 +2656,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 GoogleOneTapError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
                 AccountLockedError: (e) =>
                   resolveMessage(e.code, e.message).pipe(
@@ -2686,9 +2706,7 @@ const secondFactorSuccess = (
 ) =>
   Effect.gen(function* () {
     const userService = yield* UserService;
-    const user = yield* userService
-      .getUser(result.userId)
-      .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
+    const user = yield* userService.getUser(result.userId).pipe(Effect.catch(internalServerError));
     const body: S.AuthSuccess = {
       user: S.encodeUser(user),
       needsEmailVerification: false,
@@ -2924,15 +2942,35 @@ export interface AuthWebHandlerOptions {
   readonly prefix?: string;
   /**
    * Origins (e.g. `"https://app.example.com"`) allowed to make state-changing
-   * (non-GET/HEAD/OPTIONS) requests, in addition to the request's own origin.
+   * requests, in addition to the request's own origin.
    *
-   * Browsers attach an `Origin` header to cross-origin (and most same-origin)
-   * mutating requests; when the header is present and matches neither the
-   * request URL's origin nor this list, the request is rejected with `403`
-   * before it reaches a handler (CSRF protection). Requests without an
-   * `Origin` header (curl, server-to-server) are allowed through.
+   * **CSRF protection**: browsers attach an `Origin` header to cross-origin
+   * (and most same-origin) mutating requests. When the header is present and
+   * matches neither the request URL's origin nor this list, the request is
+   * rejected with `403`. When `Origin` is absent but `Referer` is present
+   * (e.g. a plain HTML form submission), the `Referer` origin is used as a
+   * fallback. Requests with neither header (curl, server-to-server) are
+   * allowed through.
+   *
+   * **Host trust**: the request URL's origin is derived from the `Host` header
+   * as seen by the application. When deployed behind a reverse proxy you MUST
+   * configure {@link trustedProxy} (from issue #81 / `ClientIp`) so the proxy
+   * forwards the correct `Host` and the origin comparison is accurate.
+   *
+   * Note: `GET /token` (JWT issuance) is treated as state-changing and
+   * therefore also subject to this check.
    */
   readonly trustedOrigins?: ReadonlyArray<string>;
+  /**
+   * Maximum allowed request-body size in bytes. Requests whose
+   * `Content-Length` header exceeds this limit are rejected with `413 Payload
+   * Too Large` before the body is read or decoded. Default `65536` (64 KiB).
+   *
+   * Note: `Content-Length` is advisory — a client that omits it or sends a
+   * chunked body bypasses this check. Pair with a reverse-proxy body-size
+   * limit for a complete defence.
+   */
+  readonly maxBodySize?: number;
   /**
    * Serve the generated OpenAPI document and an API reference UI. When `true`,
    * `GET {prefix}/openapi.json` returns the OpenAPI 3.1 document and
@@ -2990,19 +3028,50 @@ const referenceResponse = (): Response =>
     headers: { "content-type": "text/html; charset=utf-8" },
   });
 
-/** CSRF check shared by the web handler. Returns `true` when allowed. */
-const isTrustedRequest = (request: Request, trustedOrigins: ReadonlyArray<string>): boolean => {
+/**
+ * CSRF guard for the web handler.
+ *
+ * Returns `true` when the request may proceed.
+ *
+ * @param inner - The path relative to the mount prefix (e.g. `/sign-in`), or
+ *   `null` when the request is outside the prefix.  Used to detect `GET /token`
+ *   which issues a JWT and must be treated as state-changing.
+ */
+const isTrustedRequest = (
+  request: Request,
+  trustedOrigins: ReadonlyArray<string>,
+  inner: string | null,
+): boolean => {
   const method = request.method.toUpperCase();
-  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return true;
+
+  // GET /token issues a signed JWT — treat as state-changing so it is subject
+  // to the same origin check as POST requests.
+  const isStateSafe =
+    (method === "GET" || method === "HEAD" || method === "OPTIONS") && inner !== "/token";
+  if (isStateSafe) return true;
 
   const origin = request.headers.get("origin");
-  // No Origin header: non-browser client (curl, server-to-server) - allow.
-  // An opaque "null" origin (sandboxed iframe, some redirects) is NOT trusted
-  // unless explicitly listed.
-  if (origin === null) return true;
 
-  const requestOrigin = new URL(request.url).origin;
-  return origin === requestOrigin || trustedOrigins.includes(origin);
+  if (origin !== null) {
+    // An opaque "null" origin (sandboxed iframe, some redirects) is NOT trusted
+    // unless explicitly listed.
+    const requestOrigin = new URL(request.url).origin;
+    return origin === requestOrigin || trustedOrigins.includes(origin);
+  }
+
+  // No Origin header.  Use Referer as a fallback (plain HTML form submissions,
+  // older browsers).  If there is no Referer either the request is likely
+  // server-to-server (curl, API clients) — allow through.
+  const referer = request.headers.get("referer");
+  if (referer === null) return true;
+  try {
+    const refererOrigin = new URL(referer).origin;
+    const requestOrigin = new URL(request.url).origin;
+    return refererOrigin === requestOrigin || trustedOrigins.includes(refererOrigin);
+  } catch {
+    // Malformed Referer — reject to be safe.
+    return false;
+  }
 };
 
 /**
@@ -3082,6 +3151,7 @@ export const makeAuthWebHandler = (
   const trustedOrigins = options.trustedOrigins ?? [];
   const prefix = options.prefix ?? "";
   const docs = options.docs ?? false;
+  const maxBodySize = options.maxBodySize ?? 65536; // 64 KiB default
 
   /** Path relative to the mount `prefix`, or `null` when outside the prefix. */
   const innerPath = (pathname: string): string | null => {
@@ -3092,11 +3162,30 @@ export const makeAuthWebHandler = (
   };
 
   const handler = (request: Request, context?: Context.Context<never>): Promise<Response> => {
-    if (!isTrustedRequest(request, trustedOrigins)) {
-      return Promise.resolve(Response.json({ message: "Origin not allowed" }, { status: 403 }));
-    }
     const url = new URL(request.url);
     const inner = innerPath(url.pathname);
+
+    // When a non-empty prefix is configured, reject requests that fall outside
+    // it with 404 instead of forwarding them to the router where unprefixed
+    // paths might accidentally match.
+    if (prefix !== "" && inner === null) {
+      return Promise.resolve(Response.json({ message: "Not Found" }, { status: 404 }));
+    }
+
+    if (!isTrustedRequest(request, trustedOrigins, inner)) {
+      return Promise.resolve(Response.json({ message: "Origin not allowed" }, { status: 403 }));
+    }
+
+    // Reject bodies that exceed the configured limit before parsing.
+    // Content-Length is advisory; complement with a proxy-level limit for full
+    // coverage of chunked / omitted-length bodies.
+    const contentLength = request.headers.get("content-length");
+    if (contentLength !== null) {
+      const bytes = parseInt(contentLength, 10);
+      if (!isNaN(bytes) && bytes > maxBodySize) {
+        return Promise.resolve(Response.json({ message: "Payload too large" }, { status: 413 }));
+      }
+    }
 
     if (docs && inner !== null && request.method === "GET") {
       if (inner === "/openapi.json") return Promise.resolve(openApiJsonResponse());

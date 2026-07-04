@@ -550,13 +550,15 @@ const handlerFor = (
     readonly trustedOrigins?: ReadonlyArray<string>;
     readonly cache?: { readonly secret: string; readonly maxAge?: number };
     readonly multiSession?: { readonly maximumSessions?: number };
+    readonly maxBodySize?: number;
+    readonly secure?: boolean;
   },
 ): Handler =>
   makeAuthWebHandler({
     services: options?.features ? fixture.featureServices : fixture.services,
     ...(options?.multiSession !== undefined && { multiSession: options.multiSession }),
     cookie: {
-      secure: false,
+      secure: options?.secure ?? false,
       ...(options?.cache !== undefined && {
         cache: {
           enabled: true,
@@ -567,6 +569,7 @@ const handlerFor = (
     },
     ...(options?.prefix !== undefined && { prefix: options.prefix }),
     ...(options?.trustedOrigins !== undefined && { trustedOrigins: options.trustedOrigins }),
+    ...(options?.maxBodySize !== undefined && { maxBodySize: options.maxBodySize }),
   }).handler;
 
 const jsonRequest = (
@@ -685,6 +688,31 @@ describe("HTTP auth protocol", () => {
     const res = await handler(jsonRequest("/api/auth/sign-up", { email: "a@b.com", password: PW }));
     expect(res.status).toBe(200);
     expect(res.headers.get("set-cookie")).toContain("conduit_session=");
+  });
+
+  it("applies __Host- cookie prefix when secure is true", async () => {
+    const handler = handlerFor(makeFixture(), { secure: true });
+    // Use a full https URL so the CSRF origin check passes for the same-origin case.
+    const res = await handler(
+      new Request("https://example.com/sign-up", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "a@b.com", password: PW }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get("set-cookie");
+    expect(setCookie).toContain("__Host-conduit_session=");
+    expect(setCookie).toContain("; Secure");
+  });
+
+  it("does not apply __Host- prefix when secure is false", async () => {
+    const handler = handlerFor(makeFixture(), { secure: false });
+    const res = await handler(jsonRequest("/sign-up", { email: "a@b.com", password: PW }));
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get("set-cookie");
+    expect(setCookie).toContain("conduit_session=");
+    expect(setCookie).not.toContain("__Host-");
   });
 
   it("works through the derived typed client (in-memory)", async () => {
@@ -968,6 +996,114 @@ describe("CSRF protection (trusted origins)", () => {
     const res = await handler(getRequest("/session", { origin: "https://evil.example" }));
     // Passes CSRF (GET) and reaches the handler, which answers 401.
     expect(res.status).toBe(401);
+  });
+
+  it("uses Referer as CSRF fallback when Origin is absent", async () => {
+    const handler = handlerFor(makeFixture(), { trustedOrigins: [] });
+
+    // Referer with a matching origin → allowed.
+    const sameReferer = await handler(
+      new Request("http://test/sign-up", {
+        method: "POST",
+        headers: { "content-type": "application/json", referer: "http://test/page" },
+        body: JSON.stringify({ email: "a@b.com", password: PW }),
+      }),
+    );
+    expect(sameReferer.status).toBe(200);
+
+    // Referer with a cross-origin → blocked.
+    const crossReferer = await handler(
+      new Request("http://test/sign-up", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          referer: "https://evil.example/page",
+        },
+        body: JSON.stringify({ email: "b@b.com", password: PW }),
+      }),
+    );
+    expect(crossReferer.status).toBe(403);
+  });
+
+  it("applies CSRF check to GET /token (JWT issuance)", async () => {
+    const handler = handlerFor(makeFixture(), { trustedOrigins: [] });
+
+    // GET /token with a cross-origin Referer should be blocked.
+    const res = await handler(
+      new Request("http://test/token", {
+        method: "GET",
+        headers: { referer: "https://evil.example/page" },
+      }),
+    );
+    // Blocked by CSRF (not 401 or 404 — those would mean CSRF was bypassed).
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("request body size limit", () => {
+  it("rejects requests whose Content-Length exceeds maxBodySize with 413", async () => {
+    const handler = handlerFor(makeFixture(), { maxBodySize: 100 });
+    const res = await handler(
+      new Request("http://test/sign-up", {
+        method: "POST",
+        headers: { "content-type": "application/json", "content-length": "101" },
+        body: JSON.stringify({ email: "a@b.com", password: PW }),
+      }),
+    );
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toBe("Payload too large");
+  });
+
+  it("allows requests within the body size limit", async () => {
+    const handler = handlerFor(makeFixture(), { maxBodySize: 65536 });
+    const res = await handler(jsonRequest("/sign-up", { email: "a@b.com", password: PW }));
+    expect(res.status).toBe(200);
+  });
+
+  it("allows requests when Content-Length is absent even if body would exceed limit", async () => {
+    const handler = handlerFor(makeFixture(), { maxBodySize: 1 });
+    // No Content-Length header — the check is advisory and cannot reject without reading.
+    const res = await handler(
+      new Request("http://test/sign-up", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "a@b.com", password: PW }),
+      }),
+    );
+    // Should pass the size gate (no Content-Length) and either succeed or fail
+    // for another reason (e.g. body actually read fine).
+    expect(res.status).not.toBe(413);
+  });
+});
+
+describe("mount prefix: 404 for out-of-prefix paths", () => {
+  it("returns 404 for paths outside the configured prefix", async () => {
+    const handler = handlerFor(makeFixture(), { prefix: "/api/auth" });
+    const res = await handler(jsonRequest("/sign-up", { email: "a@b.com", password: PW }));
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toBe("Not Found");
+  });
+
+  it("returns 404 for completely unrelated paths when prefix is set", async () => {
+    const handler = handlerFor(makeFixture(), { prefix: "/api/auth" });
+    const res = await handler(getRequest("/other-service/data"));
+    expect(res.status).toBe(404);
+  });
+
+  it("routes prefixed paths correctly and leaves non-prefixed as 404", async () => {
+    const handler = handlerFor(makeFixture(), { prefix: "/api/auth" });
+
+    // Correct prefixed path → 200.
+    const prefixed = await handler(
+      jsonRequest("/api/auth/sign-up", { email: "a@b.com", password: PW }),
+    );
+    expect(prefixed.status).toBe(200);
+
+    // Same path without prefix → 404.
+    const unprefixed = await handler(jsonRequest("/sign-up", { email: "b@b.com", password: PW }));
+    expect(unprefixed.status).toBe(404);
   });
 });
 
