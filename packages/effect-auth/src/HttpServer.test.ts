@@ -28,6 +28,7 @@ import {
   PasswordResetService,
 } from "./PasswordReset.js";
 import { UserServiceStore, type UserServiceStoreShape, UserService } from "./User.js";
+import { hashToken } from "./TokenHash.js";
 import { Hooks } from "./Hooks.js";
 import {
   MagicLinkStore,
@@ -714,7 +715,7 @@ describe("session management endpoints", () => {
     const res = await handler(getRequest("/sessions", asCookie(sid1)));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Array<{ id: string }>;
-    expect(body.map((s) => s.id).sort()).toEqual([sid1, sid2].sort());
+    expect(body.map((s) => s.id).sort()).toEqual([hashToken(sid1), hashToken(sid2)].sort());
   });
 
   it("requires authentication to list sessions", async () => {

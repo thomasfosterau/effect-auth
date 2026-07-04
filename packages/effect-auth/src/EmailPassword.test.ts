@@ -5,6 +5,7 @@ import { Hooks, makePlugin, composePlugins } from "./Hooks.js";
 import * as Errors from "./Errors.js";
 import { makeEmailPasswordService, EmailPasswordStore } from "./EmailPassword.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
+import { hashToken } from "./TokenHash.js";
 import {
   MultiAlgorithmVerifier,
   PasswordHasher,
@@ -784,7 +785,9 @@ describe("EmailPasswordService - dangling session protection", () => {
     expect(signInResult.user.email).toBe("alice@example.com");
 
     // The session is live in the store — no dangling session.
-    expect(signInResult.session && localSessions.has(signInResult.session.id)).toBe(true);
+    expect(signInResult.session && localSessions.has(hashToken(signInResult.session.id))).toBe(
+      true,
+    );
   });
 
   it("signUp succeeds and returns the session even when afterSignUp hook fails (no dangling session)", async () => {
@@ -809,6 +812,8 @@ describe("EmailPasswordService - dangling session protection", () => {
     expect(signUpResult.user.email).toBe("bob@example.com");
 
     // The session is live in the store — no dangling session.
-    expect(signUpResult.session && localSessions.has(signUpResult.session.id)).toBe(true);
+    expect(signUpResult.session && localSessions.has(hashToken(signUpResult.session.id))).toBe(
+      true,
+    );
   });
 });

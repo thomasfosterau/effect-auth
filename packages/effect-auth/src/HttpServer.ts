@@ -53,6 +53,7 @@ import {
 } from "./OidcProvider.js";
 import { SsoService, SsoProviderStore, type SsoProvider } from "./Sso.js";
 import { OAuthStateStore, OAuthUserStore } from "./OAuth.js";
+import { hashToken } from "./TokenHash.js";
 import { GoogleOneTapNonceStore, GoogleOneTapService } from "./GoogleOneTap.js";
 import {
   decodeSessionCacheCookie,
@@ -1082,13 +1083,16 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
 
           // Only the owner may revoke a session, and only their own sessions.
-          const target = sessions.find((session) => session.id === params.sessionId);
+          // params.sessionId is the raw token from the URL; sessions in the list
+          // have hash ids (stored by hash), so compare against the hash.
+          const targetHash = hashToken(params.sessionId);
+          const target = sessions.find((session) => session.id === targetHash);
           if (target === undefined) {
             return yield* new S.BadRequest({ message: "Session not found" });
           }
 
           yield* sessionManager
-            .invalidateSession(target.id)
+            .invalidateSession(params.sessionId)
             .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
         }),
       )

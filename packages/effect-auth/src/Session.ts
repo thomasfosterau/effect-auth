@@ -3,20 +3,28 @@ import * as crypto from "node:crypto";
 import type * as Types from "./Types.js";
 import * as Errors from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
+import { hashToken } from "./TokenHash.js";
 
 /**
- * Session store interface for managing session persistence
+ * Session store interface for managing session persistence.
+ *
+ * **All `session.id` values and `sessionId` parameters at this layer are
+ * SHA-256 hex digests** (produced by `hashToken` from `effect-auth`). The raw
+ * bearer token is never persisted; only its hash is stored so that a stolen
+ * database cannot be used to replay sessions.
+ *
  * Users should implement this interface with their preferred storage backend
  * (e.g., Redis, PostgreSQL, MongoDB, etc.)
  */
 export interface SessionStoreShape {
   /**
-   * Create a new session
+   * Create a new session. `session.id` must be the SHA-256 hash of the raw
+   * bearer token.
    */
   readonly create: (session: Types.Session) => Effect.Effect<Types.Session, Errors.AuthError>;
 
   /**
-   * Get a session by ID, or `null` when no such session exists.
+   * Get a session by its token hash, or `null` when no such session exists.
    */
   readonly get: (sessionId: string) => Effect.Effect<Types.Session | null, Errors.AuthError>;
 
@@ -178,12 +186,12 @@ export const makeSessionManager = (
             attributes: rawAttributes,
           });
 
-          const sessionId = generateSessionId();
+          const rawToken = generateSessionId();
           const now = new Date();
           const expiresAt = new Date(now.getTime() + config.sessionExpiresIn.activePeriod);
 
           const session: Types.Session = {
-            id: sessionId,
+            id: hashToken(rawToken), // store only the hash; raw token goes to the cookie
             userId: args.userId,
             expiresAt,
             createdAt: now,
@@ -191,32 +199,36 @@ export const makeSessionManager = (
             attributes: args.attributes ?? {},
           };
 
-          const created = yield* sessionStore.create(session);
-          return yield* hooks.afterCreateSession(created);
+          yield* sessionStore.create(session);
+          // Return the raw token as session.id so the HTTP layer can set it as the cookie value.
+          return yield* hooks.afterCreateSession({ ...session, id: rawToken });
         }),
 
       validateSession: (rawSessionId) =>
         Effect.gen(function* () {
           const hooks = yield* Hooks;
-          const { sessionId } = yield* hooks.beforeValidateSession({ sessionId: rawSessionId });
+          const { sessionId: rawToken } = yield* hooks.beforeValidateSession({
+            sessionId: rawSessionId,
+          });
 
-          const session = yield* sessionStore.get(sessionId);
+          // Look up the session by its token hash; never expose the raw token to the store.
+          const tokenHash = hashToken(rawToken);
+          const session = yield* sessionStore.get(tokenHash);
           if (session === null) {
             return yield* new Errors.SessionNotFoundError({
               message: "Session not found",
-              sessionId,
+              sessionId: tokenHash,
             });
           }
 
           // Check if session is expired
           const now = new Date();
           if (session.expiresAt.getTime() < now.getTime()) {
-            // Delete expired session (ignore errors)
-            yield* Effect.ignore(sessionStore.delete(sessionId));
+            yield* Effect.ignore(sessionStore.delete(tokenHash));
             return yield* Effect.fail(
               new Errors.SessionExpiredError({
                 message: "Session has expired",
-                sessionId,
+                sessionId: tokenHash,
               }),
             );
           }
@@ -224,12 +236,11 @@ export const makeSessionManager = (
           // Check if session has been idle for too long
           const timeSinceLastActivity = now.getTime() - session.lastActivityAt.getTime();
           if (timeSinceLastActivity > config.sessionExpiresIn.idlePeriod) {
-            // Session has been idle for too long
-            yield* Effect.ignore(sessionStore.delete(sessionId));
+            yield* Effect.ignore(sessionStore.delete(tokenHash));
             return yield* Effect.fail(
               new Errors.SessionExpiredError({
                 message: "Session expired due to inactivity",
-                sessionId,
+                sessionId: tokenHash,
               }),
             );
           }
@@ -237,12 +248,11 @@ export const makeSessionManager = (
           // Check if session has exceeded its absolute maximum lifetime
           const sessionLifetime = now.getTime() - session.createdAt.getTime();
           if (sessionLifetime > config.sessionExpiresIn.activePeriod) {
-            // Session has exceeded maximum lifetime
-            yield* Effect.ignore(sessionStore.delete(sessionId));
+            yield* Effect.ignore(sessionStore.delete(tokenHash));
             return yield* Effect.fail(
               new Errors.SessionExpiredError({
                 message: "Session exceeded maximum lifetime",
-                sessionId,
+                sessionId: tokenHash,
               }),
             );
           }
@@ -273,8 +283,10 @@ export const makeSessionManager = (
             });
           }
 
+          // Return the raw token as session.id so the HTTP layer can bind the session
+          // cookie and cache correctly — the stored hash stays in the database only.
           return yield* hooks.afterValidateSession({
-            session: updatedSession,
+            session: { ...updatedSession, id: rawToken },
             user,
           });
         }),
@@ -282,9 +294,9 @@ export const makeSessionManager = (
       invalidateSession: (rawSessionId) =>
         Effect.gen(function* () {
           const hooks = yield* Hooks;
-          const { sessionId } = yield* hooks.beforeSignOut({ sessionId: rawSessionId });
-          yield* sessionStore.delete(sessionId);
-          yield* hooks.afterSignOut({ sessionId });
+          const { sessionId: rawToken } = yield* hooks.beforeSignOut({ sessionId: rawSessionId });
+          yield* sessionStore.delete(hashToken(rawToken));
+          yield* hooks.afterSignOut({ sessionId: rawToken });
         }),
 
       invalidateUserSessions: (userId) => sessionStore.deleteByUserId(userId),
@@ -298,28 +310,33 @@ export const makeSessionManager = (
 
       revokeOtherSessions: (userId, currentSessionId) =>
         Effect.gen(function* () {
+          const currentHash = hashToken(currentSessionId);
           const sessions = yield* sessionStore.listByUserId(userId);
           yield* Effect.forEach(
-            sessions.filter((session) => session.id !== currentSessionId),
+            // session.id values from the store are hashes; compare against hashed current token
+            sessions.filter((session) => session.id !== currentHash),
             (session) => sessionStore.delete(session.id),
             { discard: true },
           );
         }),
 
-      setSessionAttributes: (sessionId, attributes) =>
+      setSessionAttributes: (rawSessionId, attributes) =>
         Effect.gen(function* () {
-          const session = yield* sessionStore.get(sessionId);
+          const tokenHash = hashToken(rawSessionId);
+          const session = yield* sessionStore.get(tokenHash);
           if (session === null) {
             return yield* new Errors.SessionNotFoundError({
               message: "Session not found",
-              sessionId,
+              sessionId: tokenHash,
             });
           }
           const updated: Types.Session = {
             ...session,
             attributes: { ...session.attributes, ...attributes },
           };
-          return yield* sessionStore.update(updated);
+          const result = yield* sessionStore.update(updated);
+          // Return raw token as id, matching the pattern from createSession/validateSession.
+          return { ...result, id: rawSessionId };
         }),
     };
   });

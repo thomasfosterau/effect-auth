@@ -25,10 +25,17 @@
  * store SHA-256 hex digests computed by the service layer (via `hashToken`
  * from `effect-auth`).
  *
+ * The `id` column in `auth_sessions` (the primary key) also now stores the
+ * SHA-256 hash of the raw bearer token. The raw token is only ever held in
+ * the session cookie; the database never sees it. This matches the
+ * Copenhagen/Lucia split: cookie carries the raw token, store persists only
+ * its hash.
+ *
  * **Migration:** existing rows are stale after this upgrade — any outstanding
- * tokens issued before the upgrade will not resolve to a matching row and
- * will be rejected as invalid. That is the safe behaviour: require users to
- * re-request links/codes after deploying. No column rename is required; the
+ * tokens (session cookies, magic links, password-reset links) issued before
+ * the upgrade will not resolve to a matching row and will be rejected as
+ * invalid. That is the safe behaviour: require users to re-login / re-request
+ * links after deploying. No column rename or type change is required; the
  * column type (`TEXT`) is unchanged.
  */
 

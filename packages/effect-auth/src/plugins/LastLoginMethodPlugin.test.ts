@@ -12,6 +12,7 @@ import {
   type SessionStoreShape,
   type UserStoreShape,
 } from "../Session.js";
+import { hashToken } from "../TokenHash.js";
 import type * as Types from "../Types.js";
 
 const hasher = makeScryptHasher({ cost: 16384 });
@@ -101,8 +102,12 @@ describe("LastLoginMethodPlugin", () => {
     expect(signedUp.method).toBe("email-password");
     expect(signedIn.method).toBe("email-password");
     // ...and the plugin persisted it onto both stored sessions.
-    expect(sessions.get(signedUp.session!.id)?.attributes["method"]).toBe("email-password");
-    expect(sessions.get(signedIn.session!.id)?.attributes["method"]).toBe("email-password");
+    expect(sessions.get(hashToken(signedUp.session!.id))?.attributes["method"]).toBe(
+      "email-password",
+    );
+    expect(sessions.get(hashToken(signedIn.session!.id))?.attributes["method"]).toBe(
+      "email-password",
+    );
   });
 
   it("does nothing when no session was issued", async () => {
