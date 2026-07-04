@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.js";
+import { normalizeEmail } from "./utils.js";
 import { Hooks, type HookError } from "./Hooks.js";
 import {
   EmailPasswordStore,
@@ -44,6 +45,9 @@ export interface AuthLifecycleServiceShape {
     | Errors.HashingError
     | Errors.EmailVerificationError
     | Errors.EmailNotVerifiedError
+    | Errors.PasswordPolicyError
+    | Errors.SignUpDisabledError
+    | Errors.InvalidInputError
     | HookError,
     | EmailPasswordStore
     | PasswordHasher
@@ -94,8 +98,6 @@ export class AuthLifecycleService extends Context.Service<
   static readonly layer = (config: AuthLifecycleConfig = {}) =>
     Layer.effect(AuthLifecycleService, makeAuthLifecycleService(config));
 }
-
-const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
 const getEmailFromUser = (user: Types.User): string | undefined =>
   user.email.length > 0 ? normalizeEmail(user.email) : undefined;

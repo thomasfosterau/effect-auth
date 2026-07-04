@@ -17,6 +17,12 @@ export * from "./Errors.js";
 /** Token hashing primitives (SHA-256, constant-time compare) shared across all bearer-token flows. */
 export * from "./TokenHash.js";
 
+/** Pluggable i18n / message resolution service. */
+export * from "./Messages.js";
+
+/** Shared utilities (e.g. normalizeEmail). */
+export * from "./utils.js";
+
 /** Password hashing (following Oslo patterns). */
 export * from "./Password.js";
 

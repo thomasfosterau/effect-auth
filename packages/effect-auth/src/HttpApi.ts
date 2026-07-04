@@ -22,12 +22,24 @@ export const authGroup = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("signUp", "/sign-up", {
     payload: S.SignUpPayload,
     success: S.AuthSuccess,
-    error: [S.ConflictError, S.BadRequestError, S.InternalError, S.TooManyRequestsError],
+    error: [
+      S.ConflictError,
+      S.BadRequestError,
+      S.ForbiddenError,
+      S.InternalError,
+      S.TooManyRequestsError,
+    ],
   }),
   HttpApiEndpoint.post("signIn", "/sign-in", {
     payload: S.SignInPayload,
     success: S.AuthSuccess,
-    error: [S.UnauthorizedError, S.ForbiddenError, S.InternalError, S.TooManyRequestsError],
+    error: [
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+      S.TooManyRequestsError,
+    ],
   }),
   HttpApiEndpoint.post("signOut", "/sign-out", {
     success: HttpApiSchema.NoContent,
@@ -39,22 +51,22 @@ export const authGroup = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("sendVerificationEmail", "/email-verification/send", {
     payload: S.SendVerificationEmailPayload,
     success: S.StatusResponse,
-    error: [S.BadRequestError, S.InternalError, S.TooManyRequestsError],
+    error: [S.BadRequestError, S.ForbiddenError, S.InternalError, S.TooManyRequestsError],
   }),
   HttpApiEndpoint.post("verifyEmail", "/email-verification/verify", {
     payload: S.VerifyEmailPayload,
     success: S.AuthSuccess,
-    error: [S.BadRequestError, S.InternalError, S.TooManyRequestsError],
+    error: [S.BadRequestError, S.ForbiddenError, S.InternalError, S.TooManyRequestsError],
   }),
   HttpApiEndpoint.post("passwordResetRequest", "/password-reset/request", {
     payload: S.RequestPasswordResetPayload,
     success: S.StatusResponse,
-    error: [S.BadRequestError, S.InternalError, S.TooManyRequestsError],
+    error: [S.BadRequestError, S.ForbiddenError, S.InternalError, S.TooManyRequestsError],
   }),
   HttpApiEndpoint.post("passwordResetConfirm", "/password-reset/reset", {
     payload: S.ResetPasswordPayload,
     success: S.StatusResponse,
-    error: [S.BadRequestError, S.InternalError, S.TooManyRequestsError],
+    error: [S.BadRequestError, S.ForbiddenError, S.InternalError, S.TooManyRequestsError],
   }),
   HttpApiEndpoint.post("changePassword", "/change-password", {
     payload: S.ChangePasswordPayload,
@@ -91,7 +103,13 @@ export const authGroup = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("magicLinkVerify", "/magic-link/verify", {
     payload: S.MagicLinkVerifyPayload,
     success: S.AuthSuccess,
-    error: [S.NotFoundError, S.BadRequestError, S.InternalError, S.TooManyRequestsError],
+    error: [
+      S.NotFoundError,
+      S.BadRequestError,
+      S.ForbiddenError,
+      S.InternalError,
+      S.TooManyRequestsError,
+    ],
   }),
   // Account management: verification-gated email change & self-service deletion.
   // Request endpoints are session-authenticated; confirm endpoints are by token.
@@ -125,18 +143,37 @@ export const authGroup = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("signInEmailOtp", "/sign-in/email-otp", {
     payload: S.EmailOtpSignInPayload,
     success: S.AuthSuccess,
-    error: [S.NotFoundError, S.BadRequestError, S.InternalError, S.TooManyRequestsError],
+    error: [
+      S.NotFoundError,
+      S.BadRequestError,
+      S.ForbiddenError,
+      S.InternalError,
+      S.TooManyRequestsError,
+    ],
   }),
   // Guest sign-in: creates an anonymous user + session. 404 when unconfigured.
   HttpApiEndpoint.post("signInAnonymous", "/sign-in/anonymous", {
     success: S.AuthSuccess,
-    error: [S.NotFoundError, S.InternalError, S.TooManyRequestsError],
+    error: [
+      S.NotFoundError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+      S.TooManyRequestsError,
+    ],
   }),
   // Username + password sign-in. Invalid credentials -> 401 (uniform message).
   HttpApiEndpoint.post("signInUsername", "/sign-in/username", {
     payload: S.UsernameSignInPayload,
     success: S.AuthSuccess,
-    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError, S.TooManyRequestsError],
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+      S.TooManyRequestsError,
+    ],
   }),
   // Multi-session (several accounts per device). 404 when not enabled.
   HttpApiEndpoint.get("multiSessionList", "/multi-session/list", {
@@ -163,7 +200,13 @@ export const authGroup = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("deviceToken", "/device/token", {
     payload: S.DeviceTokenPayload,
     success: S.AuthSuccess,
-    error: [S.NotFoundError, S.BadRequestError, S.InternalError, S.TooManyRequestsError],
+    error: [
+      S.NotFoundError,
+      S.BadRequestError,
+      S.ForbiddenError,
+      S.InternalError,
+      S.TooManyRequestsError,
+    ],
   }),
   HttpApiEndpoint.post("deviceApprove", "/device/approve", {
     payload: S.DeviceUserCodePayload,
@@ -184,7 +227,13 @@ export const authGroup = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("signInPhoneOtp", "/sign-in/phone-otp", {
     payload: S.PhoneOtpSignInPayload,
     success: S.AuthSuccess,
-    error: [S.NotFoundError, S.BadRequestError, S.InternalError, S.TooManyRequestsError],
+    error: [
+      S.NotFoundError,
+      S.BadRequestError,
+      S.ForbiddenError,
+      S.InternalError,
+      S.TooManyRequestsError,
+    ],
   }),
   // Authenticated; wrong password -> 400 BadRequest (mirrors change-password).
   HttpApiEndpoint.post("twoFactorEnable", "/two-factor/enable", {
@@ -218,6 +267,7 @@ export const authGroup = HttpApiGroup.make("auth").add(
     error: [
       S.NotFoundError,
       S.UnauthorizedError,
+      S.ForbiddenError,
       S.BadRequestError,
       S.InternalError,
       S.TooManyRequestsError,
@@ -230,6 +280,7 @@ export const authGroup = HttpApiGroup.make("auth").add(
     error: [
       S.NotFoundError,
       S.UnauthorizedError,
+      S.ForbiddenError,
       S.BadRequestError,
       S.InternalError,
       S.TooManyRequestsError,
@@ -468,14 +519,27 @@ export const authGroup = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("ssoCallback", "/sso/callback", {
     payload: S.SsoCallbackPayload,
     success: S.AuthSuccess,
-    error: [S.NotFoundError, S.BadRequestError, S.InternalError, S.TooManyRequestsError],
+    error: [
+      S.NotFoundError,
+      S.BadRequestError,
+      S.ForbiddenError,
+      S.InternalError,
+      S.TooManyRequestsError,
+    ],
   }),
   // --- Google One Tap: verify the credential (a Google-signed id_token) and
   // --- sign in by verified email. 404 when unconfigured.
   HttpApiEndpoint.post("signInGoogleOneTap", "/sign-in/google-one-tap", {
     payload: S.GoogleOneTapPayload,
     success: S.AuthSuccess,
-    error: [S.NotFoundError, S.UnauthorizedError, S.InternalError, S.TooManyRequestsError],
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+      S.TooManyRequestsError,
+    ],
   }),
   // --- JWT: issue a token for the session (`/token`) and serve the JWKS.
   HttpApiEndpoint.get("jwtToken", "/token", {

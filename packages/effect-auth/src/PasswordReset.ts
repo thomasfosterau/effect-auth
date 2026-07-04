@@ -6,6 +6,7 @@ import { Hooks, type HookError } from "./Hooks.js";
 import { PasswordHasher } from "./Password.js";
 import type * as Types from "./Types.js";
 import { SessionManager } from "./Session.js";
+import { normalizeEmail } from "./utils.js";
 
 export interface PasswordResetToken {
   readonly token: string;
@@ -85,8 +86,6 @@ export class PasswordResetService extends Context.Service<
   static readonly layer = (config: PasswordResetConfig) =>
     Layer.effect(PasswordResetService, makePasswordResetService(config));
 }
-
-const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
 const generateResetToken = (): Effect.Effect<string, Errors.AuthError> =>
   Effect.sync(() => crypto.randomBytes(32).toString("base64url"));

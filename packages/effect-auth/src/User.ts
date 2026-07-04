@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.js";
 import type * as Types from "./Types.js";
+import { normalizeEmail } from "./utils.js";
 
 export interface UserServiceStoreShape {
   /** Get a user by ID, or `null` when no such user exists. */
@@ -57,8 +58,6 @@ export class UserService extends Context.Service<UserService, UserServiceShape>(
    */
   static readonly layer = () => Layer.effect(UserService, makeUserService());
 }
-
-const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
 /** Fetch a user from the store, failing with `UserNotFoundError` on a miss. */
 const getUserOrFail = (

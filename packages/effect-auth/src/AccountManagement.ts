@@ -18,6 +18,7 @@ import * as Errors from "./Errors.js";
 import type * as Types from "./Types.js";
 import { UserServiceStore } from "./User.js";
 import { SessionManager } from "./Session.js";
+import { normalizeEmail } from "./utils.js";
 
 /** Which flow a pending token belongs to. */
 export type AccountTokenPurpose = "change-email" | "delete-account";
@@ -151,8 +152,6 @@ export class AccountManagementService extends Context.Service<
 }
 
 const generateToken = (): string => crypto.randomBytes(32).toString("base64url");
-
-const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
 export const makeAccountManagementService = (
   config: AccountManagementConfig,

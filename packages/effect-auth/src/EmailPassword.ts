@@ -3,6 +3,7 @@ import * as Errors from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
 import { PasswordHasher } from "./Password.js";
 import type * as Types from "./Types.js";
+import { normalizeEmail } from "./utils.js";
 import { SessionManager } from "./Session.js";
 
 export interface CreateUserInput {
@@ -109,6 +110,9 @@ export interface EmailPasswordServiceShape {
     | Errors.EmailInUseError
     | Errors.HashingError
     | Errors.EmailNotVerifiedError
+    | Errors.PasswordPolicyError
+    | Errors.SignUpDisabledError
+    | Errors.InvalidInputError
     | HookError,
     EmailPasswordStore | PasswordHasher | SessionManager | Hooks
   >;
@@ -133,7 +137,10 @@ export interface EmailPasswordServiceShape {
     input: ChangePasswordInput,
   ) => Effect.Effect<
     void,
-    Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
+    | Errors.InvalidCredentialsError
+    | Errors.HashingError
+    | Errors.AuthError
+    | Errors.PasswordPolicyError,
     EmailPasswordStore | PasswordHasher | SessionManager
   >;
 
@@ -146,7 +153,10 @@ export interface EmailPasswordServiceShape {
     newPassword: string,
   ) => Effect.Effect<
     void,
-    Errors.HashingError | Errors.AuthError,
+    | Errors.HashingError
+    | Errors.AuthError
+    | Errors.PasswordPolicyError
+    | Errors.PasswordAlreadySetError,
     EmailPasswordStore | PasswordHasher
   >;
 }
@@ -164,25 +174,27 @@ export class EmailPasswordService extends Context.Service<
 
 const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
 
-const normalizeEmail = (email: string): string => email.trim().toLowerCase();
-
 const validatePasswordLength = (
   password: string,
   config: Required<Pick<EmailPasswordConfig, "minPasswordLength" | "maxPasswordLength">>,
-): Effect.Effect<void, Errors.AuthError> =>
+): Effect.Effect<void, Errors.PasswordPolicyError> =>
   Effect.gen(function* () {
     if (password.length < config.minPasswordLength) {
       return yield* Effect.fail(
-        new Errors.AuthError({
+        new Errors.PasswordPolicyError({
+          code: Errors.ErrorCode.PASSWORD_TOO_SHORT,
           message: `Password must be at least ${config.minPasswordLength} characters`,
+          params: { minLength: config.minPasswordLength },
         }),
       );
     }
 
     if (password.length > config.maxPasswordLength) {
       return yield* Effect.fail(
-        new Errors.AuthError({
+        new Errors.PasswordPolicyError({
+          code: Errors.ErrorCode.PASSWORD_TOO_LONG,
           message: `Password must be at most ${config.maxPasswordLength} characters`,
+          params: { maxLength: config.maxPasswordLength },
         }),
       );
     }
@@ -208,7 +220,7 @@ export const makeEmailPasswordService = (
 
           if (resolved.disableSignUp) {
             return yield* Effect.fail(
-              new Errors.AuthError({
+              new Errors.SignUpDisabledError({
                 message: "Email/password sign-up is disabled",
               }),
             );
@@ -221,8 +233,9 @@ export const makeEmailPasswordService = (
           const email = normalizeEmail(input.email);
           if (!email) {
             return yield* Effect.fail(
-              new Errors.AuthError({
+              new Errors.InvalidInputError({
                 message: "Email is required",
+                field: "email",
               }),
             );
           }
@@ -377,7 +390,7 @@ export const makeEmailPasswordService = (
 
           const currentHash = yield* store.getPasswordHash(userId);
           if (currentHash) {
-            return yield* new Errors.AuthError({
+            return yield* new Errors.PasswordAlreadySetError({
               message: "User already has a password; use changePassword instead",
             });
           }

@@ -41,10 +41,20 @@ import type * as Types from "./Types.js";
 /**
  * The error channel permitted for every hook. Hooks participate in the existing
  * auth error channel; a transform that fails with one of these short-circuits
- * the operation. Kept intentionally small (the realistic set a plugin raises)
- * so integrated method signatures don't balloon.
+ * the operation.
+ *
+ * Flow-outcome errors are included so plugins can raise specific tags (e.g.
+ * `AccountLockedError`, `CaptchaError`) and the HTTP layer can map them to the
+ * correct status codes. `AuthError` covers any remaining infrastructure/
+ * unexpected failures.
  */
-export type HookError = Errors.AuthError | Errors.RateLimitError;
+export type HookError =
+  | Errors.AuthError
+  | Errors.RateLimitError
+  | Errors.AccountLockedError
+  | Errors.UserBannedError
+  | Errors.CaptchaError
+  | Errors.PwnedPasswordError;
 
 /** A reference to a session, used by sign-out / validation hooks. */
 export interface SessionRef {

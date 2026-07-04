@@ -1,170 +1,517 @@
 import { Data } from "effect";
 
+// ---------------------------------------------------------------------------
+// Stable error codes – append-only; never rename or remove.
+// ---------------------------------------------------------------------------
+
+export const ErrorCode = {
+  // Infrastructure
+  AUTH_ERROR: "AUTH_ERROR",
+  HASHING_ERROR: "HASHING_ERROR",
+
+  // Credentials / session
+  INVALID_CREDENTIALS: "INVALID_CREDENTIALS",
+  SESSION_NOT_FOUND: "SESSION_NOT_FOUND",
+  SESSION_EXPIRED: "SESSION_EXPIRED",
+  USER_NOT_FOUND: "USER_NOT_FOUND",
+
+  // Email / account state
+  EMAIL_NOT_VERIFIED: "EMAIL_NOT_VERIFIED",
+  EMAIL_IN_USE: "EMAIL_IN_USE",
+  EMAIL_VERIFICATION_ERROR: "EMAIL_VERIFICATION_ERROR",
+
+  // Password policy
+  PASSWORD_TOO_SHORT: "PASSWORD_TOO_SHORT",
+  PASSWORD_TOO_LONG: "PASSWORD_TOO_LONG",
+  PASSWORD_ALREADY_SET: "PASSWORD_ALREADY_SET",
+  PWNED_PASSWORD: "PWNED_PASSWORD",
+
+  // Sign-up / input
+  SIGN_UP_DISABLED: "SIGN_UP_DISABLED",
+  INVALID_INPUT: "INVALID_INPUT",
+  CAPTCHA_FAILED: "CAPTCHA_FAILED",
+
+  // Account access
+  ACCOUNT_LOCKED: "ACCOUNT_LOCKED",
+  USER_BANNED: "USER_BANNED",
+
+  // Permissions / scopes
+  PERMISSION_DENIED: "PERMISSION_DENIED",
+  INSUFFICIENT_SCOPE: "INSUFFICIENT_SCOPE",
+
+  // WebAuthn
+  CHALLENGE_NOT_FOUND: "CHALLENGE_NOT_FOUND",
+  CHALLENGE_EXPIRED: "CHALLENGE_EXPIRED",
+  CREDENTIAL_NOT_FOUND: "CREDENTIAL_NOT_FOUND",
+  WEBAUTHN_VERIFICATION_ERROR: "WEBAUTHN_VERIFICATION_ERROR",
+
+  // OAuth
+  OAUTH_STATE_NOT_FOUND: "OAUTH_STATE_NOT_FOUND",
+  OAUTH_STATE_EXPIRED: "OAUTH_STATE_EXPIRED",
+  OAUTH_PROVIDER_ERROR: "OAUTH_PROVIDER_ERROR",
+  OAUTH_ACCOUNT_NOT_LINKED: "OAUTH_ACCOUNT_NOT_LINKED",
+  OAUTH_MISSING_EMAIL: "OAUTH_MISSING_EMAIL",
+  OAUTH_ACCOUNT_CONFLICT: "OAUTH_ACCOUNT_CONFLICT",
+  OAUTH_ACCOUNT_NOT_FOUND: "OAUTH_ACCOUNT_NOT_FOUND",
+  OAUTH_NO_REFRESH_TOKEN: "OAUTH_NO_REFRESH_TOKEN",
+
+  // Misc
+  RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
+  MAGIC_LINK_ERROR: "MAGIC_LINK_ERROR",
+  PASSWORD_RESET_ERROR: "PASSWORD_RESET_ERROR",
+} as const;
+
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+
+// ---------------------------------------------------------------------------
+// Infrastructure / unexpected errors
+// ---------------------------------------------------------------------------
+
 /**
- * Base authentication error
+ * Generic infrastructure/unexpected error. Use only for failures that are NOT
+ * user-input or flow outcomes (e.g. store unavailability, crypto failure). For
+ * flow outcomes use a specific tagged error.
  */
 export class AuthError extends Data.TaggedError("AuthError")<{
   readonly message: string;
-}> {}
+  readonly cause?: unknown;
+}> {
+  get code(): typeof ErrorCode.AUTH_ERROR {
+    return ErrorCode.AUTH_ERROR;
+  }
+}
 
 /**
- * Invalid credentials error
+ * Password hashing/verification failed (infrastructure).
+ */
+export class HashingError extends Data.TaggedError("HashingError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {
+  get code(): typeof ErrorCode.HASHING_ERROR {
+    return ErrorCode.HASHING_ERROR;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Credentials / session
+// ---------------------------------------------------------------------------
+
+/**
+ * Submitted credentials are invalid. Always uses the generic "Invalid email or
+ * password" message to prevent user enumeration.
  */
 export class InvalidCredentialsError extends Data.TaggedError("InvalidCredentialsError")<{
   readonly message: string;
-}> {}
+}> {
+  get code(): typeof ErrorCode.INVALID_CREDENTIALS {
+    return ErrorCode.INVALID_CREDENTIALS;
+  }
+}
 
 /**
- * Email not verified error
- */
-export class EmailNotVerifiedError extends Data.TaggedError("EmailNotVerifiedError")<{
-  readonly message: string;
-  readonly email: string;
-}> {}
-
-/**
- * Session not found error
+ * Session ID not found in the store.
  */
 export class SessionNotFoundError extends Data.TaggedError("SessionNotFoundError")<{
   readonly message: string;
   readonly sessionId: string;
-}> {}
+}> {
+  get code(): typeof ErrorCode.SESSION_NOT_FOUND {
+    return ErrorCode.SESSION_NOT_FOUND;
+  }
+}
 
 /**
- * Session expired error
+ * Session exists but has expired (absolute lifetime or idle timeout).
  */
 export class SessionExpiredError extends Data.TaggedError("SessionExpiredError")<{
   readonly message: string;
   readonly sessionId: string;
-}> {}
+}> {
+  get code(): typeof ErrorCode.SESSION_EXPIRED {
+    return ErrorCode.SESSION_EXPIRED;
+  }
+}
 
 /**
- * User not found error
+ * User record not found in the store.
  */
 export class UserNotFoundError extends Data.TaggedError("UserNotFoundError")<{
   readonly message: string;
   readonly userId: string;
+}> {
+  get code(): typeof ErrorCode.USER_NOT_FOUND {
+    return ErrorCode.USER_NOT_FOUND;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Email / account state
+// ---------------------------------------------------------------------------
+
+/**
+ * User has not yet verified their email address.
+ */
+export class EmailNotVerifiedError extends Data.TaggedError("EmailNotVerifiedError")<{
+  readonly message: string;
+  readonly email: string;
+}> {
+  get code(): typeof ErrorCode.EMAIL_NOT_VERIFIED {
+    return ErrorCode.EMAIL_NOT_VERIFIED;
+  }
+}
+
+/**
+ * The email address is already associated with another account (sign-up or
+ * change-email targeting a taken address).
+ */
+export class EmailInUseError extends Data.TaggedError("EmailInUseError")<{
+  readonly message: string;
+}> {
+  get code(): typeof ErrorCode.EMAIL_IN_USE {
+    return ErrorCode.EMAIL_IN_USE;
+  }
+}
+
+/**
+ * Email verification operation failed (e.g. token invalid, already used).
+ */
+export class EmailVerificationError extends Data.TaggedError("EmailVerificationError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {
+  get code(): typeof ErrorCode.EMAIL_VERIFICATION_ERROR {
+    return ErrorCode.EMAIL_VERIFICATION_ERROR;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Password policy (flow outcomes – NOT infrastructure)
+// ---------------------------------------------------------------------------
+
+/**
+ * Password does not meet length policy requirements.
+ *
+ * `code` is `"PASSWORD_TOO_SHORT"` or `"PASSWORD_TOO_LONG"`.
+ * `params` carries the policy bounds for message interpolation.
+ */
+export class PasswordPolicyError extends Data.TaggedError("PasswordPolicyError")<{
+  readonly code: typeof ErrorCode.PASSWORD_TOO_SHORT | typeof ErrorCode.PASSWORD_TOO_LONG;
+  readonly message: string;
+  readonly params: { readonly minLength?: number; readonly maxLength?: number };
 }> {}
 
 /**
- * Permission denied error
+ * Attempting to set a password for a user that already has one. Callers should
+ * use `changePassword` instead.
+ */
+export class PasswordAlreadySetError extends Data.TaggedError("PasswordAlreadySetError")<{
+  readonly message: string;
+}> {
+  get code(): typeof ErrorCode.PASSWORD_ALREADY_SET {
+    return ErrorCode.PASSWORD_ALREADY_SET;
+  }
+}
+
+/**
+ * The supplied password appears in a known data-breach corpus (HIBP).
+ */
+export class PwnedPasswordError extends Data.TaggedError("PwnedPasswordError")<{
+  readonly message: string;
+}> {
+  get code(): typeof ErrorCode.PWNED_PASSWORD {
+    return ErrorCode.PWNED_PASSWORD;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sign-up / input validation (flow outcomes)
+// ---------------------------------------------------------------------------
+
+/**
+ * Email/password sign-up has been administratively disabled via config.
+ */
+export class SignUpDisabledError extends Data.TaggedError("SignUpDisabledError")<{
+  readonly message: string;
+}> {
+  get code(): typeof ErrorCode.SIGN_UP_DISABLED {
+    return ErrorCode.SIGN_UP_DISABLED;
+  }
+}
+
+/**
+ * A required input field is missing or empty (e.g. blank email after normalization).
+ * `field` names the offending field for the HTTP response.
+ */
+export class InvalidInputError extends Data.TaggedError("InvalidInputError")<{
+  readonly message: string;
+  readonly field: string;
+}> {
+  get code(): typeof ErrorCode.INVALID_INPUT {
+    return ErrorCode.INVALID_INPUT;
+  }
+}
+
+/**
+ * Bot/captcha verification failed. Raised by the `CaptchaPlugin`.
+ */
+export class CaptchaError extends Data.TaggedError("CaptchaError")<{
+  readonly message: string;
+}> {
+  get code(): typeof ErrorCode.CAPTCHA_FAILED {
+    return ErrorCode.CAPTCHA_FAILED;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Account access (flow outcomes)
+// ---------------------------------------------------------------------------
+
+/**
+ * Account is temporarily locked due to too many failed sign-in attempts.
+ * Raised by the `AccountLockoutPlugin`.
+ */
+export class AccountLockedError extends Data.TaggedError("AccountLockedError")<{
+  readonly message: string;
+  readonly retryAfter?: number;
+}> {
+  get code(): typeof ErrorCode.ACCOUNT_LOCKED {
+    return ErrorCode.ACCOUNT_LOCKED;
+  }
+}
+
+/**
+ * User account has been permanently banned by an administrator.
+ * Raised by the `BannedUserPlugin`.
+ */
+export class UserBannedError extends Data.TaggedError("UserBannedError")<{
+  readonly message: string;
+}> {
+  get code(): typeof ErrorCode.USER_BANNED {
+    return ErrorCode.USER_BANNED;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Permissions / scopes
+// ---------------------------------------------------------------------------
+
+/**
+ * Caller lacks the required permission.
  */
 export class PermissionDeniedError extends Data.TaggedError("PermissionDeniedError")<{
   readonly message: string;
   readonly resource: string;
   readonly action: string;
-}> {}
+}> {
+  get code(): typeof ErrorCode.PERMISSION_DENIED {
+    return ErrorCode.PERMISSION_DENIED;
+  }
+}
 
 /**
- * Hashing error
- */
-export class HashingError extends Data.TaggedError("HashingError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
-
-/**
- * Insufficient scope error (OAuth-style scope authorization)
+ * OAuth-style scope check: caller has been granted fewer scopes than required.
  */
 export class InsufficientScopeError extends Data.TaggedError("InsufficientScopeError")<{
   readonly message: string;
   readonly requiredScope: string;
   readonly grantedScopes: readonly string[];
-}> {}
+}> {
+  get code(): typeof ErrorCode.INSUFFICIENT_SCOPE {
+    return ErrorCode.INSUFFICIENT_SCOPE;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// WebAuthn
+// ---------------------------------------------------------------------------
 
 /**
- * WebAuthn challenge not found error
+ * No pending WebAuthn challenge found for the session.
  */
 export class ChallengeNotFoundError extends Data.TaggedError("ChallengeNotFoundError")<{
   readonly message: string;
-}> {}
+}> {
+  get code(): typeof ErrorCode.CHALLENGE_NOT_FOUND {
+    return ErrorCode.CHALLENGE_NOT_FOUND;
+  }
+}
 
 /**
- * WebAuthn challenge expired error
+ * WebAuthn challenge exists but has expired.
  */
 export class ChallengeExpiredError extends Data.TaggedError("ChallengeExpiredError")<{
   readonly message: string;
-}> {}
+}> {
+  get code(): typeof ErrorCode.CHALLENGE_EXPIRED {
+    return ErrorCode.CHALLENGE_EXPIRED;
+  }
+}
 
 /**
- * WebAuthn credential not found error
+ * WebAuthn credential not found.
  */
 export class CredentialNotFoundError extends Data.TaggedError("CredentialNotFoundError")<{
   readonly message: string;
   readonly credentialId: string;
-}> {}
+}> {
+  get code(): typeof ErrorCode.CREDENTIAL_NOT_FOUND {
+    return ErrorCode.CREDENTIAL_NOT_FOUND;
+  }
+}
 
 /**
- * WebAuthn verification error
+ * WebAuthn verification step failed (signature, origin, RP ID, ...).
  */
 export class WebAuthnVerificationError extends Data.TaggedError("WebAuthnVerificationError")<{
   readonly message: string;
   readonly cause?: unknown;
-}> {}
+}> {
+  get code(): typeof ErrorCode.WEBAUTHN_VERIFICATION_ERROR {
+    return ErrorCode.WEBAUTHN_VERIFICATION_ERROR;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OAuth
+// ---------------------------------------------------------------------------
 
 /**
- * OAuth state not found error
+ * OAuth CSRF state token not found (unknown or already consumed).
  */
 export class OAuthStateNotFoundError extends Data.TaggedError("OAuthStateNotFoundError")<{
   readonly message: string;
   readonly state: string;
-}> {}
+}> {
+  get code(): typeof ErrorCode.OAUTH_STATE_NOT_FOUND {
+    return ErrorCode.OAUTH_STATE_NOT_FOUND;
+  }
+}
 
 /**
- * OAuth state expired error
+ * OAuth CSRF state token has expired.
  */
 export class OAuthStateExpiredError extends Data.TaggedError("OAuthStateExpiredError")<{
   readonly message: string;
   readonly state: string;
-}> {}
+}> {
+  get code(): typeof ErrorCode.OAUTH_STATE_EXPIRED {
+    return ErrorCode.OAUTH_STATE_EXPIRED;
+  }
+}
 
 /**
- * OAuth provider error
+ * External OAuth provider returned an error or unexpected response.
  */
 export class OAuthProviderError extends Data.TaggedError("OAuthProviderError")<{
   readonly message: string;
   readonly provider: string;
   readonly cause?: unknown;
-}> {}
+}> {
+  get code(): typeof ErrorCode.OAUTH_PROVIDER_ERROR {
+    return ErrorCode.OAUTH_PROVIDER_ERROR;
+  }
+}
 
 /**
- * Rate limit exceeded error
+ * OAuth account exists in the store but is not linked to any user. Use
+ * `linkAccount` to associate it with a user before signing in.
+ */
+export class OAuthAccountNotLinkedError extends Data.TaggedError("OAuthAccountNotLinkedError")<{
+  readonly message: string;
+  readonly provider: string;
+}> {
+  get code(): typeof ErrorCode.OAUTH_ACCOUNT_NOT_LINKED {
+    return ErrorCode.OAUTH_ACCOUNT_NOT_LINKED;
+  }
+}
+
+/**
+ * The OAuth provider did not return an email address for this account.
+ */
+export class OAuthMissingEmailError extends Data.TaggedError("OAuthMissingEmailError")<{
+  readonly message: string;
+  readonly provider: string;
+}> {
+  get code(): typeof ErrorCode.OAUTH_MISSING_EMAIL {
+    return ErrorCode.OAUTH_MISSING_EMAIL;
+  }
+}
+
+/**
+ * The OAuth account is already linked to a different user.
+ */
+export class OAuthAccountConflictError extends Data.TaggedError("OAuthAccountConflictError")<{
+  readonly message: string;
+  readonly provider: string;
+}> {
+  get code(): typeof ErrorCode.OAUTH_ACCOUNT_CONFLICT {
+    return ErrorCode.OAUTH_ACCOUNT_CONFLICT;
+  }
+}
+
+/**
+ * No OAuth account for the given provider is linked to the user.
+ */
+export class OAuthAccountNotFoundError extends Data.TaggedError("OAuthAccountNotFoundError")<{
+  readonly message: string;
+  readonly provider: string;
+}> {
+  get code(): typeof ErrorCode.OAUTH_ACCOUNT_NOT_FOUND {
+    return ErrorCode.OAUTH_ACCOUNT_NOT_FOUND;
+  }
+}
+
+/**
+ * The OAuth account has no stored refresh token.
+ */
+export class OAuthNoRefreshTokenError extends Data.TaggedError("OAuthNoRefreshTokenError")<{
+  readonly message: string;
+  readonly provider: string;
+}> {
+  get code(): typeof ErrorCode.OAUTH_NO_REFRESH_TOKEN {
+    return ErrorCode.OAUTH_NO_REFRESH_TOKEN;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Misc
+// ---------------------------------------------------------------------------
+
+/**
+ * Rate limit exceeded. `retryAfter` is the number of milliseconds before the
+ * caller may retry.
  */
 export class RateLimitError extends Data.TaggedError("RateLimitError")<{
   readonly message: string;
   readonly key: string;
   readonly retryAfter?: number;
-}> {}
+}> {
+  get code(): typeof ErrorCode.RATE_LIMIT_EXCEEDED {
+    return ErrorCode.RATE_LIMIT_EXCEEDED;
+  }
+}
 
 /**
- * Email verification error
- */
-export class EmailVerificationError extends Data.TaggedError("EmailVerificationError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
-
-/**
- * Magic link error
+ * Magic link send/verify failure (infrastructure or token mismatch).
  */
 export class MagicLinkError extends Data.TaggedError("MagicLinkError")<{
   readonly message: string;
   readonly cause?: unknown;
-}> {}
+}> {
+  get code(): typeof ErrorCode.MAGIC_LINK_ERROR {
+    return ErrorCode.MAGIC_LINK_ERROR;
+  }
+}
 
 /**
- * Password reset error
+ * Password reset send/verify failure (infrastructure or token mismatch).
  */
 export class PasswordResetError extends Data.TaggedError("PasswordResetError")<{
   readonly message: string;
   readonly cause?: unknown;
-}> {}
-
-/**
- * Raised when an email address is already associated with another account
- * (sign-up with an existing email, or a change-email request targeting a
- * taken address).
- */
-export class EmailInUseError extends Data.TaggedError("EmailInUseError")<{
-  readonly message: string;
-}> {}
+}> {
+  get code(): typeof ErrorCode.PASSWORD_RESET_ERROR {
+    return ErrorCode.PASSWORD_RESET_ERROR;
+  }
+}

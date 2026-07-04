@@ -7,7 +7,7 @@ import {
   type AccountLockoutRecord,
   type AccountLockoutStoreShape,
 } from "./AccountLockoutPlugin.js";
-import { AuthError } from "../Errors.js";
+import { AccountLockedError } from "../Errors.js";
 import type { SignInInput, AuthResult } from "../EmailPassword.js";
 import type * as Types from "../Types.js";
 
@@ -73,14 +73,14 @@ describe("AccountLockoutPlugin", () => {
 
     // The next attempt is short-circuited while locked.
     const blocked = await h.beforeSignInResult("user@example.com");
-    expect(blocked).toBeInstanceOf(AuthError);
+    expect(blocked).toBeInstanceOf(AccountLockedError);
   });
 
   it("unlocks once the lockout window elapses", async () => {
     const h = makeHarness({ maxAttempts: 2, lockoutDurationMs: 60_000 });
     await h.beforeSignIn("user@example.com");
     await h.beforeSignIn("user@example.com");
-    expect(await h.beforeSignInResult("user@example.com")).toBeInstanceOf(AuthError);
+    expect(await h.beforeSignInResult("user@example.com")).toBeInstanceOf(AccountLockedError);
 
     // Simulate the window elapsing by moving the lock into the past.
     const key = "lockout:user@example.com";
@@ -89,7 +89,7 @@ describe("AccountLockoutPlugin", () => {
 
     // Now allowed again (counter reset to a fresh streak).
     const allowed = await h.beforeSignInResult("user@example.com");
-    expect(allowed).not.toBeInstanceOf(AuthError);
+    expect(allowed).not.toBeInstanceOf(AccountLockedError);
     expect(h.records.get(key)?.failures).toBe(1);
   });
 

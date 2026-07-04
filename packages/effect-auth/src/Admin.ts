@@ -400,6 +400,6 @@ export const makeAdminService = (
 export const BannedUserPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({
   afterValidateSession: (sessionWithUser: Types.SessionWithUser) =>
     isBanned(sessionWithUser.user)
-      ? Effect.fail(new Errors.AuthError({ message: "User is banned" }))
+      ? Effect.fail(new Errors.UserBannedError({ message: "Your account has been suspended" }))
       : Effect.succeed(sessionWithUser),
 });

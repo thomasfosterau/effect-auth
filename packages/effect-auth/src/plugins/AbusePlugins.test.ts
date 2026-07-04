@@ -5,7 +5,7 @@ import * as crypto from "node:crypto";
 import { Hooks, type HookDefs } from "../Hooks.js";
 import { HaveIBeenPwnedPlugin } from "./HibpPlugin.js";
 import { CaptchaPlugin } from "./CaptchaPlugin.js";
-import { AuthError } from "../Errors.js";
+import { PwnedPasswordError, CaptchaError } from "../Errors.js";
 import type { SignInInput, SignUpInput } from "../EmailPassword.js";
 
 /** A stubbed HttpClient that answers every request with `respond(request)`. */
@@ -62,7 +62,7 @@ describe("HaveIBeenPwnedPlugin", () => {
     const err = await drive(HaveIBeenPwnedPlugin(), client, (hooks) =>
       Effect.flip(hooks.beforeSignUp(signUp(pwd))),
     );
-    expect(err).toBeInstanceOf(AuthError);
+    expect(err).toBeInstanceOf(PwnedPasswordError);
   });
 
   it("also guards beforeResetPassword", async () => {
@@ -72,7 +72,7 @@ describe("HaveIBeenPwnedPlugin", () => {
     const err = await drive(HaveIBeenPwnedPlugin(), client, (hooks) =>
       Effect.flip(hooks.beforeResetPassword({ token: "t", newPassword: pwd })),
     );
-    expect(err).toBeInstanceOf(AuthError);
+    expect(err).toBeInstanceOf(PwnedPasswordError);
   });
 });
 
@@ -95,7 +95,7 @@ describe("CaptchaPlugin", () => {
     const err = await drive(CaptchaPlugin(config), client, (hooks) =>
       Effect.flip(hooks.beforeSignIn(signIn("tok"))),
     );
-    expect(err).toBeInstanceOf(AuthError);
+    expect(err).toBeInstanceOf(CaptchaError);
   });
 
   it("rejects when the captcha token is missing", async () => {
@@ -103,7 +103,7 @@ describe("CaptchaPlugin", () => {
     const err = await drive(CaptchaPlugin(config), client, (hooks) =>
       Effect.flip(hooks.beforeSignUp(signUp("pw"))),
     );
-    expect(err).toBeInstanceOf(AuthError);
+    expect(err).toBeInstanceOf(CaptchaError);
   });
 
   it("only guards the configured endpoints", async () => {

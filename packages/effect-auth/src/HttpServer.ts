@@ -1,4 +1,5 @@
 import { Context, Effect, FileSystem, Layer, Option, Path } from "effect";
+import { resolveMessage } from "./Messages.js";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import {
   Etag,
@@ -577,12 +578,56 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const result = yield* lifecycle.signUp(signUpInput(payload)).pipe(
             Effect.catchTags({
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
-              EmailInUseError: (e) => Effect.fail(new S.Conflict({ message: e.message })),
+              EmailInUseError: (e) =>
+                Effect.fail(new S.Conflict({ message: e.message, code: e.code })),
               EmailNotVerifiedError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
               EmailVerificationError: (e) =>
                 Effect.fail(new S.InternalServerError({ message: e.message })),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+              RateLimitError: (e) =>
+                Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
+              PasswordPolicyError: (e) =>
+                resolveMessage(e.code, e.message, e.params).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
+              SignUpDisabledError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              InvalidInputError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
+              AccountLockedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              UserBannedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              CaptchaError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
+              PwnedPasswordError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
             }),
           );
           const body: S.AuthSuccess = {
@@ -604,12 +649,37 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 InvalidCredentialsError: (e) =>
-                  Effect.fail(new S.Unauthorized({ message: e.message })),
+                  Effect.fail(new S.Unauthorized({ message: e.message, code: e.code })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 EmailVerificationError: (e) =>
                   Effect.fail(new S.InternalServerError({ message: e.message })),
-                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+                RateLimitError: (e) =>
+                  Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
+                AccountLockedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                UserBannedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                CaptchaError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
+                PwnedPasswordError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
               }),
             );
           const body: S.AuthSuccess = {
@@ -699,6 +769,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 EmailVerificationError: (e) =>
                   Effect.fail(new S.InternalServerError({ message: e.message })),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+                AccountLockedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                UserBannedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                CaptchaError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
+                PwnedPasswordError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
               }),
             );
           }
@@ -715,6 +809,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+              AccountLockedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              UserBannedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              CaptchaError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
+              PwnedPasswordError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
             }),
           );
           const body: S.AuthSuccess = {
@@ -733,6 +851,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               PasswordResetError: (e) =>
                 Effect.fail(new S.InternalServerError({ message: e.message })),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+              AccountLockedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              UserBannedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              CaptchaError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
+              PwnedPasswordError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
             }),
           );
           return { status: true };
@@ -747,6 +889,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
               HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+              AccountLockedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              UserBannedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              CaptchaError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
+              PwnedPasswordError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
             }),
           );
           return { status: true };
@@ -769,9 +935,15 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 InvalidCredentialsError: (e) =>
-                  Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                  Effect.fail(new S.BadRequest({ message: e.message, code: e.code })),
+                AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+                PasswordPolicyError: (e) =>
+                  resolveMessage(e.code, e.message, e.params).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
               }),
             );
         }),
@@ -918,6 +1090,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 MagicLinkError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+                AccountLockedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                UserBannedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                CaptchaError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
+                PwnedPasswordError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
               }),
             );
           const body: S.AuthSuccess = {
@@ -951,6 +1147,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 EmailOtpError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+                AccountLockedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                UserBannedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                CaptchaError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
+                PwnedPasswordError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
               }),
             );
           const body: S.AuthSuccess = {
@@ -967,6 +1187,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             Effect.catchTags({
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+              AccountLockedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              UserBannedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              CaptchaError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
+              PwnedPasswordError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
             }),
           );
           const body: S.AuthSuccess = {
@@ -991,6 +1235,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+                AccountLockedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                UserBannedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                CaptchaError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
+                PwnedPasswordError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
               }),
             );
           const body: S.AuthSuccess = {
@@ -1115,6 +1383,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 Effect.fail(new S.InternalServerError({ message: e.message })),
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+              AccountLockedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              UserBannedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              CaptchaError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
+              PwnedPasswordError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
             }),
           );
           const body: S.AuthSuccess = {
@@ -1177,6 +1469,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 PhoneOtpError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+                AccountLockedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                UserBannedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                CaptchaError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
+                PwnedPasswordError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
               }),
             );
           const body: S.AuthSuccess = {
@@ -1278,6 +1594,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 HashingError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+                AccountLockedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                UserBannedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                CaptchaError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
+                PwnedPasswordError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
               }),
             );
           return yield* secondFactorSuccess(result, cfg, "two-factor");
@@ -1293,6 +1633,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 TwoFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+                AccountLockedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                UserBannedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                CaptchaError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
+                PwnedPasswordError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
               }),
             );
           return yield* secondFactorSuccess(result, cfg, "two-factor");
@@ -1657,6 +2021,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+              AccountLockedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              UserBannedError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                  ),
+                ),
+              CaptchaError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
+              PwnedPasswordError: (e) =>
+                resolveMessage(e.code, e.message).pipe(
+                  Effect.flatMap((msg) =>
+                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                  ),
+                ),
             }),
           );
           const user = yield* userService
@@ -1833,6 +2221,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+                AccountLockedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                UserBannedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                CaptchaError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
+                PwnedPasswordError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
               }),
             );
           const body: S.AuthSuccess = {
@@ -2124,6 +2536,30 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 GoogleOneTapError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
                 AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+                AccountLockedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                UserBannedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                CaptchaError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
+                PwnedPasswordError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
               }),
             );
           const body: S.AuthSuccess = {
@@ -2186,9 +2622,14 @@ const resolveSession = (
       return yield* new S.Unauthorized({ message: "Not authenticated" });
     }
     const sessionManager = yield* SessionManager;
-    const resolved = yield* sessionManager
-      .validateSession(sessionId)
-      .pipe(Effect.mapError(() => new S.Unauthorized({ message: "Invalid or expired session" })));
+    const resolved = yield* sessionManager.validateSession(sessionId).pipe(
+      Effect.catchTag("UserBannedError", (e) =>
+        resolveMessage(e.code, e.message).pipe(
+          Effect.flatMap((msg) => Effect.fail(new S.Unauthorized({ message: msg, code: e.code }))),
+        ),
+      ),
+      Effect.mapError(() => new S.Unauthorized({ message: "Invalid or expired session" })),
+    );
     return { resolved, cacheHit: false };
   });
 

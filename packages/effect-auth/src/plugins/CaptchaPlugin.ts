@@ -16,7 +16,7 @@ import { Effect, Redacted } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import type { SignInInput, SignUpInput } from "../EmailPassword.js";
 import { makePlugin, type PluginImpls } from "../Hooks.js";
-import { AuthError } from "../Errors.js";
+import { CaptchaError } from "../Errors.js";
 
 export type CaptchaProvider = "cloudflare-turnstile" | "google-recaptcha" | "hcaptcha";
 
@@ -49,10 +49,10 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
 
-      const verify = (token: string | undefined): Effect.Effect<void, AuthError> =>
+      const verify = (token: string | undefined): Effect.Effect<void, CaptchaError> =>
         Effect.gen(function* () {
           if (token === undefined || token === "") {
-            return yield* Effect.fail(new AuthError({ message: "captcha verification failed" }));
+            return yield* Effect.fail(new CaptchaError({ message: "Captcha verification failed" }));
           }
           const success = yield* client
             .execute(
@@ -66,7 +66,7 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
               Effect.catch(() => Effect.succeed(false)),
             );
           if (!success) {
-            return yield* Effect.fail(new AuthError({ message: "captcha verification failed" }));
+            return yield* Effect.fail(new CaptchaError({ message: "Captcha verification failed" }));
           }
         });
 

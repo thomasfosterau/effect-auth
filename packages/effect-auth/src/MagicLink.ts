@@ -15,6 +15,7 @@ import { Hooks, type HookError } from "./Hooks.js";
 import { SessionManager } from "./Session.js";
 import { hashToken } from "./TokenHash.js";
 import type * as Types from "./Types.js";
+import { normalizeEmail } from "./utils.js";
 
 /**
  * Magic link token record
@@ -141,8 +142,6 @@ export class MagicLinkService extends Context.Service<MagicLinkService, MagicLin
   static readonly layer = (config: MagicLinkConfig) =>
     Layer.effect(MagicLinkService, makeMagicLinkService(config));
 }
-
-const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
 /**
  * Generate a cryptographically secure magic link token

@@ -21,6 +21,7 @@
 import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
+import { normalizeEmail } from "./utils.js";
 
 /**
  * Organization error
@@ -405,11 +406,6 @@ export class OrganizationService extends Context.Service<
  * Generate a random identifier for organizations, members, and invitations
  */
 const generateId = (): string => crypto.randomBytes(16).toString("hex");
-
-/**
- * Normalize an email for storage/comparison
- */
-const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
 /**
  * Create an organization service
