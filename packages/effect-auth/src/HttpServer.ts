@@ -8,6 +8,8 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http";
 import { AuthApi, getOpenApiSpec } from "./HttpApi.js";
+import { ClientIp, resolveClientIp, type TrustedProxyConfig } from "./ClientIp.js";
+import { RateLimiter, RateLimitStore, type RateLimitConfig } from "./RateLimit.js";
 import * as S from "./HttpApiSchemas.js";
 import { AuthLifecycleService } from "./AuthLifecycle.js";
 import { Hooks } from "./Hooks.js";
@@ -2258,6 +2260,103 @@ const PlatformLayer = Layer.mergeAll(Etag.layer, Path.layer, HttpPlatform.layer)
   Layer.provideMerge(FileSystem.layerNoop({})),
 );
 
+// ---------------------------------------------------------------------------
+// Per-endpoint IP rate limiting (HTTP layer)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single per-endpoint IP rate-limit rule.
+ * `path` is matched against the request pathname (exact string or regex).
+ * `methods` limits the rule to specific HTTP methods (default: all methods).
+ */
+export interface EndpointRateLimitRule {
+  readonly path: string | RegExp;
+  /** HTTP methods this rule applies to (uppercase). Default: all. */
+  readonly methods?: ReadonlyArray<string>;
+  readonly maxRequests: number;
+  readonly windowMs: number;
+  readonly blockDurationMs?: number;
+}
+
+/**
+ * IP rate-limiting configuration for the HTTP layer.
+ *
+ * When `rules` is omitted, {@link defaultEndpointRules} is used — sane
+ * defaults for all sensitive auth endpoints.
+ */
+export interface HttpIpRateLimitConfig {
+  /**
+   * Declarative rule set. First matching rule (in order) wins.
+   * Omit to use the built-in defaults for all sensitive endpoints.
+   */
+  readonly rules?: ReadonlyArray<EndpointRateLimitRule>;
+}
+
+/**
+ * Sane default IP rate-limit rules applied to sensitive auth endpoints.
+ *
+ * | Endpoint(s)                            | Limit            | Window   | Block    |
+ * |----------------------------------------|------------------|----------|----------|
+ * | `/sign-in`, `/sign-in/*`               | 10 req           | 15 min   | 30 min   |
+ * | `/sign-up`                             | 5 req            | 1 hr     | 24 hr    |
+ * | `/magic-link/send`, `/email-otp/send`  | 5 req            | 10 min   | 30 min   |
+ * | `/phone-otp/send`                      | 5 req            | 10 min   | 30 min   |
+ * | `/password-reset/request`              | 5 req            | 1 hr     | 2 hr     |
+ * | `/two-factor/verify-*`                 | 10 req           | 5 min    | 30 min   |
+ */
+export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
+  {
+    path: /^\/sign-in(\/.*)?$/,
+    methods: ["POST"],
+    maxRequests: 10,
+    windowMs: 15 * 60 * 1000,
+    blockDurationMs: 30 * 60 * 1000,
+  },
+  {
+    path: "/sign-up",
+    methods: ["POST"],
+    maxRequests: 5,
+    windowMs: 60 * 60 * 1000,
+    blockDurationMs: 24 * 60 * 60 * 1000,
+  },
+  {
+    path: /^\/(magic-link|email-otp|phone-otp)\/send$/,
+    methods: ["POST"],
+    maxRequests: 5,
+    windowMs: 10 * 60 * 1000,
+    blockDurationMs: 30 * 60 * 1000,
+  },
+  {
+    path: "/password-reset/request",
+    methods: ["POST"],
+    maxRequests: 5,
+    windowMs: 60 * 60 * 1000,
+    blockDurationMs: 2 * 60 * 60 * 1000,
+  },
+  {
+    path: /^\/two-factor\/verify-/,
+    methods: ["POST"],
+    maxRequests: 10,
+    windowMs: 5 * 60 * 1000,
+    blockDurationMs: 30 * 60 * 1000,
+  },
+];
+
+const matchesEndpointRule = (
+  rule: EndpointRateLimitRule,
+  pathname: string,
+  method: string,
+): boolean => {
+  if (rule.methods !== undefined && !rule.methods.includes(method.toUpperCase())) return false;
+  return typeof rule.path === "string" ? rule.path === pathname : rule.path.test(pathname);
+};
+
+const findEndpointRule = (
+  rules: ReadonlyArray<EndpointRateLimitRule>,
+  pathname: string,
+  method: string,
+): EndpointRateLimitRule | undefined => rules.find((r) => matchesEndpointRule(r, pathname, method));
+
 export interface AuthWebHandlerOptions {
   /** Your service layer (SessionManager, AuthLifecycle, stores, ...). */
   readonly services: Layer.Layer<AuthServices>;
@@ -2292,6 +2391,27 @@ export interface AuthWebHandlerOptions {
    * (keep off in production unless you intend to expose the docs publicly).
    */
   readonly docs?: boolean;
+  /**
+   * Trusted-proxy configuration for resolving the real client IP.
+   *
+   * **Secure default**: without this option, all `X-Forwarded-For` and similar
+   * headers are IGNORED and the socket remote address is used as-is.
+   *
+   * Provide this only when the app is deployed behind a known reverse proxy.
+   * The resolved IP is available to all hooks and handlers via
+   * `Effect.serviceOption(ClientIp)`.
+   */
+  readonly trustedProxy?: TrustedProxyConfig;
+  /**
+   * Enable IP-keyed rate limiting at the HTTP boundary, before handlers run.
+   *
+   * Requires `RateLimiter` and `RateLimitStore` in the `services` layer.
+   * Requests that exceed a limit receive HTTP 429 before any auth logic runs.
+   *
+   * Set to `{}` to use the built-in {@link defaultEndpointRules}, or supply
+   * `{ rules: [...] }` for a custom rule set.
+   */
+  readonly ipRateLimit?: HttpIpRateLimitConfig;
 }
 
 /** Minimal Scalar API reference shell pointing at the sibling `openapi.json`. */
@@ -2357,7 +2477,58 @@ export const makeAuthWebHandler = (
   // (provideMerge) both satisfies them at runtime and zeroes the web handler's
   // leftover context (HR), yielding a plain `(request) => Promise<Response>`.
   const appLayer = apiLayer.pipe(Layer.provideMerge(options.services));
-  const web = HttpRouter.toWebHandler(appLayer);
+
+  const ipRateRules = options.ipRateLimit?.rules ?? defaultEndpointRules;
+
+  const web = HttpRouter.toWebHandler(appLayer, {
+    // Cast to `Effect<..., never, never>` so TypeScript infers HR = never, keeping the
+    // `context` parameter of `web.handler` optional. The cast is safe: HttpServerRequest
+    // and Scope are always provided by the server infrastructure before middleware runs.
+    middleware: (effect) =>
+      Effect.gen(function* () {
+        const req = yield* HttpServerRequest.HttpServerRequest;
+        const ip = resolveClientIp(req, options.trustedProxy);
+
+        // Per-endpoint IP rate limiting (requires RateLimiter + RateLimitStore in services)
+        if (options.ipRateLimit !== undefined && ip !== undefined) {
+          const url = new URL(req.url, "http://localhost");
+          const rule = findEndpointRule(ipRateRules, url.pathname, req.method);
+          if (rule !== undefined) {
+            const rateLimiterOpt = yield* Effect.serviceOption(RateLimiter);
+            const storeOpt = yield* Effect.serviceOption(RateLimitStore);
+            if (Option.isSome(rateLimiterOpt) && Option.isSome(storeOpt)) {
+              const limitConfig: RateLimitConfig = {
+                maxRequests: rule.maxRequests,
+                windowMs: rule.windowMs,
+                ...(rule.blockDurationMs !== undefined && {
+                  blockDurationMs: rule.blockDurationMs,
+                }),
+              };
+              const denied = yield* rateLimiterOpt.value
+                .consumeToken(`ip:${url.pathname}:${ip}`, limitConfig)
+                .pipe(
+                  Effect.provideService(RateLimitStore, storeOpt.value),
+                  Effect.as(null as null),
+                  Effect.catchTag("RateLimitError", (e) => Effect.succeed(e)),
+                  Effect.catchTag("AuthError", () => Effect.succeed(null)),
+                );
+              if (denied !== null) {
+                return HttpServerResponse.jsonUnsafe(
+                  {
+                    message: "Too many requests",
+                    ...(denied.retryAfter !== undefined && { retryAfter: denied.retryAfter }),
+                  },
+                  { status: 429 },
+                );
+              }
+            }
+          }
+        }
+
+        // Provide the resolved ClientIp to all downstream effects (hooks, handlers)
+        return yield* effect.pipe(Effect.provideService(ClientIp, { ip }));
+      }) as unknown as Effect.Effect<HttpServerResponse.HttpServerResponse, never, never>,
+  });
 
   const trustedOrigins = options.trustedOrigins ?? [];
   const prefix = options.prefix ?? "";
