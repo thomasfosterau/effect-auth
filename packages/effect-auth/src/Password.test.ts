@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Context, Effect } from "effect";
+import * as nodeCrypto from "node:crypto";
 import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 
 describe("PasswordHasher", () => {
@@ -105,6 +106,53 @@ describe("PasswordHasher", () => {
     if (result._tag === "Failure") {
       expect(result.failure._tag).toBe("HashingError");
     }
+  });
+
+  it("should fail cleanly on malformed iterations (not a RangeError defect)", async () => {
+    // A hash with a non-numeric iteration count must produce HashingError, never a thrown RangeError.
+    const malformed = "pbkdf2-sha256$notanumber$aaaa$bbbb";
+    const result = await Effect.runPromise(Effect.result(hasher.verify("password", malformed)));
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("HashingError");
+    }
+  });
+
+  it("should fail cleanly on negative iterations", async () => {
+    const malformed = "pbkdf2-sha256$-1$aaaa$bbbb";
+    const result = await Effect.runPromise(Effect.result(hasher.verify("password", malformed)));
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("HashingError");
+    }
+  });
+
+  it("should return false (not defect) for an absurdly long password in verify", async () => {
+    const longPassword = "a".repeat(2000);
+    const hashResult = await Effect.runPromise(hasher.hash("short-password"));
+    // Should return false without running the KDF, not throw or defect.
+    const result = await Effect.runPromise(hasher.verify(longPassword, hashResult.hash));
+    expect(result).toBe(false);
+  });
+
+  it("needsRehash returns false for a current hash and true for an old one", async () => {
+    const h = makePBKDF2Hasher();
+    const current = await Effect.runPromise(h.hash("pw"));
+    expect(h.needsRehash!(current.hash)).toBe(false);
+
+    // Simulate a hash produced with old params (210000 iterations, 64-byte key).
+    const salt = nodeCrypto.randomBytes(16);
+    const oldKey = await new Promise<Buffer>((resolve, reject) =>
+      nodeCrypto.pbkdf2("pw", salt, 210000, 64, "sha256", (err, k) =>
+        err ? reject(err) : resolve(k),
+      ),
+    );
+    const oldHash = `pbkdf2-sha256$210000$${salt.toString("hex")}$${oldKey.toString("hex")}`;
+    expect(h.needsRehash!(oldHash)).toBe(true);
+
+    // Old hash must still verify correctly (uses stored key length).
+    const valid = await Effect.runPromise(h.verify("pw", oldHash));
+    expect(valid).toBe(true);
   });
 });
 
