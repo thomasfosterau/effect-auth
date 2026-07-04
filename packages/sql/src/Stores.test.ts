@@ -750,4 +750,58 @@ describe("@effect-auth/sql stores over a real SqlClient", () => {
     expect(result.validated.session.attributes).toEqual({ ip: "127.0.0.1" });
     expect(result.invalidated._tag).toBe("SessionNotFoundError");
   });
+
+  it("challenge.get / credential.get / rateLimit.get surface AuthError (not defect) on SQL failure", async () => {
+    const brokenConnection: SqlConnection.Connection = {
+      execute: () => Effect.fail(sqliteError(new Error("simulated failure"))),
+      executeRaw: () => Effect.fail(sqliteError(new Error("simulated failure"))),
+      executeStream: () => Stream.fail(sqliteError(new Error("simulated failure"))),
+      executeValues: () => Effect.fail(sqliteError(new Error("simulated failure"))),
+      executeUnprepared: () => Effect.fail(sqliteError(new Error("simulated failure"))),
+    };
+    const brokenClientLayer = Layer.effect(
+      SqlClient.SqlClient,
+      Effect.gen(function* () {
+        return yield* SqlClient.make({
+          acquirer: Effect.succeed(brokenConnection),
+          compiler: Statement.makeCompilerSqlite(),
+          spanAttributes: [],
+        });
+      }),
+    ).pipe(Layer.provide(Reactivity.layer));
+
+    const program = Effect.gen(function* () {
+      const challenges = yield* Auth.ChallengeStore;
+      const credentials = yield* Auth.CredentialStore;
+      const rateLimits = yield* Auth.RateLimitStore;
+      const e1 = yield* Effect.flip(challenges.get(new Uint8Array([1, 2, 3])));
+      const e2 = yield* Effect.flip(credentials.get("cred-id"));
+      const e3 = yield* Effect.flip(rateLimits.get("key"));
+      return { e1, e2, e3 };
+    });
+
+    const result = await Effect.runPromise(
+      program.pipe(Effect.provide(layer.pipe(Layer.provideMerge(brokenClientLayer)))),
+    );
+
+    expect(result.e1._tag).toBe("AuthError");
+    expect(result.e1.cause).toBeDefined();
+    expect(result.e2._tag).toBe("AuthError");
+    expect(result.e3._tag).toBe("AuthError");
+  });
+
+  it("decodeAttributes surfaces malformed JSON attributes as AuthError not defect", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const now = Date.now();
+        yield* sql`INSERT INTO auth_users (id, email, email_verified, name, image, password_hash, attributes, created_at, updated_at)
+          VALUES (${"u-corrupt"}, ${"corrupt@example.com"}, ${0}, ${null}, ${null}, ${null}, ${"INVALID_JSON"}, ${now}, ${now})`;
+        const store = yield* Auth.UserServiceStore;
+        return yield* Effect.flip(store.get("u-corrupt"));
+      }),
+    );
+    expect(result._tag).toBe("AuthError");
+    expect(result.cause).toBeDefined();
+  });
 });

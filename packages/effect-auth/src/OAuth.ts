@@ -192,7 +192,7 @@ export interface OAuthCreateUserInput {
  * from provider profiles. Implement alongside {@link OAuthAccountStoreShape}.
  */
 export interface OAuthUserStoreShape {
-  readonly getUser: (userId: string) => Effect.Effect<Types.User, UserNotFoundError>;
+  readonly getUser: (userId: string) => Effect.Effect<Types.User, AuthError | UserNotFoundError>;
   readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, AuthError>;
   readonly createUser: (input: OAuthCreateUserInput) => Effect.Effect<Types.User, AuthError>;
 }

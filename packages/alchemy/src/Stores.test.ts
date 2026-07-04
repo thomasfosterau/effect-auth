@@ -542,4 +542,38 @@ suite("@effect-auth/alchemy stores", () => {
       expect(store).toBeDefined();
     }
   });
+
+  it("rateLimit.increment resets count when window expires", async () => {
+    const { db } = await setup();
+    const store = makeRateLimitStore(db);
+    await Effect.runPromise(store.increment("k-reset", 1));
+    await Effect.runPromise(store.increment("k-reset", 1));
+    await Effect.runPromise(
+      store.set("k-reset", { key: "k-reset", count: 99, resetAt: Date.now() - 1 }, 1),
+    );
+    expect(await Effect.runPromise(store.increment("k-reset", 60))).toBe(1);
+  });
+
+  it("rateLimit.get / credential.get surface AuthError with cause when D1 fails", async () => {
+    const stmt: D1PreparedStatement = {
+      bind(): D1PreparedStatement {
+        return stmt;
+      },
+      first: () => Promise.reject(new Error("simulated D1 failure")),
+      all: () => Promise.reject(new Error("simulated D1 failure")),
+      run: () => Promise.reject(new Error("simulated D1 failure")),
+    };
+    const brokenDb: D1Database = { prepare: () => stmt };
+
+    const rateLimits = makeRateLimitStore(brokenDb);
+    const credentials = makeCredentialStore(brokenDb);
+
+    const e1 = await Effect.runPromise(Effect.flip(rateLimits.get("key")));
+    const e2 = await Effect.runPromise(Effect.flip(credentials.get("cred-id")));
+
+    expect(e1._tag).toBe("AuthError");
+    expect(e1.cause).toBeDefined();
+    expect(e2._tag).toBe("AuthError");
+    expect(e2.cause).toBeDefined();
+  });
 });

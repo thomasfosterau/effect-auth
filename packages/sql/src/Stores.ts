@@ -12,10 +12,10 @@
  * booleans as `0`/`1`, attribute bags and other structured values as JSON
  * `TEXT`, binary values (WebAuthn keys/challenges) as base64 `TEXT`.
  *
- * Upserts are implemented as portable select-then-update/insert rather than
- * dialect-specific `ON CONFLICT`/`ON DUPLICATE KEY` clauses, so they are not
- * atomic under concurrent writers — acceptable for these auth flows, where
- * keys are single-owner tokens or best-effort counters.
+ * Multi-step upserts (challenge, oauthState, emailOtp) run inside
+ * `sql.withTransaction` to prevent a partial DELETE+INSERT from being visible
+ * to concurrent readers. The rate-limit increment and OTP attempt increment use
+ * a single `ON CONFLICT … RETURNING` statement for true atomicity.
  *
  * ## Breaking change — token columns now store SHA-256 hashes (since bearer-token-hashing)
  *
@@ -54,8 +54,15 @@ const fromBase64 = (text: string): Uint8Array => new Uint8Array(Buffer.from(text
 const encodeAttributes = (attributes: Record<string, unknown>): string =>
   JSON.stringify(attributes);
 
-const decodeAttributes = (text: string | null): Record<string, unknown> =>
-  text == null ? {} : (JSON.parse(text) as Record<string, unknown>);
+const decodeAttributes = (
+  text: string | null,
+  label: string,
+): Effect.Effect<Record<string, unknown>, Auth.AuthError> =>
+  Effect.try({
+    try: () => (text == null ? {} : (JSON.parse(text) as Record<string, unknown>)),
+    catch: (cause) =>
+      new Auth.AuthError({ message: `${label}: attributes JSON parse failed`, cause }),
+  });
 
 const dateToMs = (date: Date): number => date.getTime();
 const msToDate = (ms: number): Date => new Date(ms);
@@ -64,8 +71,10 @@ const msToDate = (ms: number): Date => new Date(ms);
  * Map a `SqlError` (or any defect from the driver) to the `AuthError` the
  * store interfaces expose, mirroring alchemy's `toAuthError`.
  */
-const toAuthError = (label: string) => (): Auth.AuthError =>
-  new Auth.AuthError({ message: `sql ${label} failed` });
+const toAuthError =
+  (label: string) =>
+  (cause: unknown): Auth.AuthError =>
+    new Auth.AuthError({ message: `sql ${label} failed`, cause });
 
 const asVoid = <A, E>(label: string, statement: Effect.Effect<A, E>) =>
   statement.pipe(Effect.asVoid, Effect.mapError(toAuthError(label)));
@@ -75,6 +84,24 @@ const allRows = <A>(label: string, statement: Effect.Effect<ReadonlyArray<A>, un
 
 const firstRow = <A>(label: string, statement: Effect.Effect<ReadonlyArray<A>, unknown>) =>
   allRows(label, statement).pipe(Effect.map((rows) => rows[0] ?? null));
+
+/**
+ * Wraps an effect in a SQL transaction, mapping any transaction-level SQL
+ * errors (BEGIN/COMMIT failures) to `AuthError`.
+ */
+const makeTx =
+  (sql: SqlClient.SqlClient) =>
+  <A>(label: string, effect: Effect.Effect<A, Auth.AuthError>): Effect.Effect<A, Auth.AuthError> =>
+    sql
+      .withTransaction(effect)
+      .pipe(
+        Effect.mapError(
+          (e): Auth.AuthError =>
+            e instanceof Auth.AuthError
+              ? e
+              : new Auth.AuthError({ message: `sql ${label} failed`, cause: e }),
+        ),
+      );
 
 // ---------------------------------------------------------------------------
 // Shared user row (auth_users backs UserStore, UserServiceStore,
@@ -94,16 +121,19 @@ interface UserRow {
   readonly updated_at: number;
 }
 
-const rowToUser = (row: UserRow): Auth.User => ({
-  id: row.id,
-  email: row.email,
-  emailVerified: row.email_verified !== 0,
-  createdAt: msToDate(row.created_at),
-  updatedAt: msToDate(row.updated_at),
-  attributes: decodeAttributes(row.attributes),
-  ...(row.name != null ? { name: row.name } : {}),
-  ...(row.image != null ? { image: row.image } : {}),
-});
+const rowToUser = (row: UserRow, label: string): Effect.Effect<Auth.User, Auth.AuthError> =>
+  decodeAttributes(row.attributes, label).pipe(
+    Effect.map((attributes) => ({
+      id: row.id,
+      email: row.email,
+      emailVerified: row.email_verified !== 0,
+      createdAt: msToDate(row.created_at),
+      updatedAt: msToDate(row.updated_at),
+      attributes,
+      ...(row.name != null ? { name: row.name } : {}),
+      ...(row.image != null ? { image: row.image } : {}),
+    })),
+  );
 
 /** User-facing helpers shared by every store that reads/creates users. */
 const userQueries = (sql: SqlClient.SqlClient) => {
@@ -112,19 +142,21 @@ const userQueries = (sql: SqlClient.SqlClient) => {
 
   const getByEmail = (email: string, label: string) =>
     firstRow(label, sql<UserRow>`SELECT * FROM auth_users WHERE email = ${email}`).pipe(
-      Effect.map((row) => (row ? rowToUser(row) : null)),
+      Effect.flatMap((row) => (row ? rowToUser(row, label) : Effect.succeed(null))),
     );
 
   const findById = (userId: string, label: string) =>
-    getById(userId, label).pipe(Effect.map((row) => (row ? rowToUser(row) : null)));
+    getById(userId, label).pipe(
+      Effect.flatMap((row) => (row ? rowToUser(row, label) : Effect.succeed(null))),
+    );
 
   const requireById = (userId: string, label: string) =>
     getById(userId, label).pipe(
-      Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToUser(row))
-          : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
+      Effect.flatMap(
+        (row): Effect.Effect<Auth.User, Auth.AuthError | Auth.UserNotFoundError> =>
+          row
+            ? rowToUser(row, label)
+            : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
       ),
     );
 
@@ -180,14 +212,20 @@ interface SessionRow {
   readonly attributes: string | null;
 }
 
-const rowToSession = (row: SessionRow): Auth.Session => ({
-  id: row.id,
-  userId: row.user_id,
-  expiresAt: msToDate(row.expires_at),
-  createdAt: msToDate(row.created_at),
-  lastActivityAt: msToDate(row.last_activity_at),
-  attributes: decodeAttributes(row.attributes),
-});
+const rowToSession = (
+  row: SessionRow,
+  label: string,
+): Effect.Effect<Auth.Session, Auth.AuthError> =>
+  decodeAttributes(row.attributes, label).pipe(
+    Effect.map((attributes) => ({
+      id: row.id,
+      userId: row.user_id,
+      expiresAt: msToDate(row.expires_at),
+      createdAt: msToDate(row.created_at),
+      lastActivityAt: msToDate(row.last_activity_at),
+      attributes,
+    })),
+  );
 
 export const makeSessionStore: Effect.Effect<Auth.SessionStoreShape, never, SqlClient.SqlClient> =
   Effect.gen(function* () {
@@ -203,7 +241,9 @@ export const makeSessionStore: Effect.Effect<Auth.SessionStoreShape, never, SqlC
         firstRow(
           "session.get",
           sql<SessionRow>`SELECT * FROM auth_sessions WHERE id = ${sessionId}`,
-        ).pipe(Effect.map((row) => (row ? rowToSession(row) : null))),
+        ).pipe(
+          Effect.flatMap((row) => (row ? rowToSession(row, "session.get") : Effect.succeed(null))),
+        ),
       update: (session) =>
         asVoid(
           "session.update",
@@ -217,7 +257,11 @@ export const makeSessionStore: Effect.Effect<Auth.SessionStoreShape, never, SqlC
         allRows(
           "session.listByUserId",
           sql<SessionRow>`SELECT * FROM auth_sessions WHERE user_id = ${userId}`,
-        ).pipe(Effect.map((rows) => rows.map(rowToSession))),
+        ).pipe(
+          Effect.flatMap((rows) =>
+            Effect.all(rows.map((row) => rowToSession(row, "session.listByUserId"))),
+          ),
+        ),
     } satisfies Auth.SessionStoreShape;
   });
 
@@ -371,26 +415,27 @@ export const makeRateLimitStore: Effect.Effect<
     });
 
   return {
-    get: (key) => readEntry(key, "rateLimit.get").pipe(Effect.orDie),
+    get: (key) => readEntry(key, "rateLimit.get"),
     set: (key, entry, _ttl) => upsert(key, entry, "rateLimit.set"),
     increment: (key, ttlSeconds) =>
       Effect.gen(function* () {
         const now = Date.now();
-        const existing = yield* readEntry(key, "rateLimit.increment");
-        if (existing == null || now >= existing.resetAt) {
-          yield* upsert(
-            key,
-            { key, count: 1, resetAt: now + ttlSeconds * 1000 },
-            "rateLimit.increment",
-          );
-          return 1;
-        }
-        const count = existing.count + 1;
-        yield* asVoid(
+        const resetAt = now + ttlSeconds * 1000;
+        // Single atomic upsert+increment: if the row is new or the window has
+        // expired, reset count to 1; otherwise increment by 1. RETURNING
+        // avoids a separate SELECT and prevents TOCTOU undercounting.
+        const rows = yield* allRows(
           "rateLimit.increment",
-          sql`UPDATE auth_rate_limits SET count = ${count} WHERE key = ${key}`,
+          sql<{ count: number }>`
+            INSERT INTO auth_rate_limits (key, count, reset_at, blocked_until)
+              VALUES (${key}, 1, ${resetAt}, NULL)
+              ON CONFLICT(key) DO UPDATE SET
+                count = CASE WHEN ${now} >= reset_at THEN 1 ELSE count + 1 END,
+                reset_at = CASE WHEN ${now} >= reset_at THEN ${resetAt} ELSE reset_at END,
+                blocked_until = CASE WHEN ${now} >= reset_at THEN NULL ELSE blocked_until END
+              RETURNING count`,
         );
-        return count;
+        return rows[0]?.count ?? 1;
       }),
     delete: (key) =>
       asVoid("rateLimit.delete", sql`DELETE FROM auth_rate_limits WHERE key = ${key}`),
@@ -469,30 +514,30 @@ export const makeChallengeStore: Effect.Effect<
   SqlClient.SqlClient
 > = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const withTx = makeTx(sql);
   return {
     create: (challenge) =>
-      Effect.gen(function* () {
-        const encoded = toBase64(challenge.challenge);
-        // Portable upsert: replace any previous row for this challenge.
-        yield* asVoid(
-          "challenge.create",
-          sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${encoded}`,
-        );
-        yield* asVoid(
-          "challenge.create",
-          sql`INSERT INTO auth_webauthn_challenges (challenge, expires_at, user_id)
-                VALUES (${encoded}, ${challenge.expiresAt}, ${challenge.userId ?? null})`,
-        );
-        return challenge;
-      }),
+      withTx(
+        "challenge.create",
+        Effect.gen(function* () {
+          const encoded = toBase64(challenge.challenge);
+          yield* asVoid(
+            "challenge.create",
+            sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${encoded}`,
+          );
+          yield* asVoid(
+            "challenge.create",
+            sql`INSERT INTO auth_webauthn_challenges (challenge, expires_at, user_id)
+                  VALUES (${encoded}, ${challenge.expiresAt}, ${challenge.userId ?? null})`,
+          );
+          return challenge;
+        }),
+      ),
     get: (challenge) =>
       firstRow(
         "challenge.get",
         sql<ChallengeRow>`SELECT * FROM auth_webauthn_challenges WHERE challenge = ${toBase64(challenge)}`,
-      ).pipe(
-        Effect.orDie,
-        Effect.map((row) => (row ? rowToChallenge(row) : null)),
-      ),
+      ).pipe(Effect.map((row) => (row ? rowToChallenge(row) : null))),
     delete: (challenge) =>
       asVoid(
         "challenge.delete",
@@ -512,18 +557,24 @@ interface CredentialRow {
   readonly transports: string | null;
 }
 
-const rowToCredential = (row: CredentialRow): Auth.WebAuthnCredential => ({
-  id: row.id,
-  userId: row.user_id,
-  publicKey: fromBase64(row.public_key),
-  algorithm: row.algorithm,
-  counter: row.counter,
-  createdAt: row.created_at,
-  ...(row.name != null ? { name: row.name } : {}),
-  ...(row.transports != null
-    ? { transports: JSON.parse(row.transports) as readonly string[] }
-    : {}),
-});
+const rowToCredential = (
+  row: CredentialRow,
+): Effect.Effect<Auth.WebAuthnCredential, Auth.AuthError> =>
+  Effect.try({
+    try: () => ({
+      id: row.id,
+      userId: row.user_id,
+      publicKey: fromBase64(row.public_key),
+      algorithm: row.algorithm,
+      counter: row.counter,
+      createdAt: row.created_at,
+      ...(row.name != null ? { name: row.name } : {}),
+      ...(row.transports != null
+        ? { transports: JSON.parse(row.transports) as readonly string[] }
+        : {}),
+    }),
+    catch: (cause) => new Auth.AuthError({ message: "credential decode failed", cause }),
+  });
 
 export const makeCredentialStore: Effect.Effect<
   Auth.CredentialStoreShape,
@@ -542,10 +593,7 @@ export const makeCredentialStore: Effect.Effect<
       firstRow(
         "credential.get",
         sql<CredentialRow>`SELECT * FROM auth_webauthn_credentials WHERE id = ${credentialId}`,
-      ).pipe(
-        Effect.orDie,
-        Effect.map((row) => (row ? rowToCredential(row) : null)),
-      ),
+      ).pipe(Effect.flatMap((row) => (row ? rowToCredential(row) : Effect.succeed(null)))),
     update: (credential) =>
       asVoid(
         "credential.update",
@@ -562,7 +610,7 @@ export const makeCredentialStore: Effect.Effect<
       allRows(
         "credential.listByUserId",
         sql<CredentialRow>`SELECT * FROM auth_webauthn_credentials WHERE user_id = ${userId}`,
-      ).pipe(Effect.map((rows) => rows.map(rowToCredential))),
+      ).pipe(Effect.flatMap((rows) => Effect.all(rows.map((row) => rowToCredential(row))))),
   } satisfies Auth.CredentialStoreShape;
 });
 
@@ -594,21 +642,24 @@ export const makeOAuthStateStore: Effect.Effect<
   SqlClient.SqlClient
 > = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const withTx = makeTx(sql);
   return {
     create: (state) =>
-      Effect.gen(function* () {
-        // Portable upsert: replace any previous row for this state.
-        yield* asVoid(
-          "oauthState.create",
-          sql`DELETE FROM auth_oauth_states WHERE state = ${state.state}`,
-        );
-        yield* asVoid(
-          "oauthState.create",
-          sql`INSERT INTO auth_oauth_states (state, provider, code_verifier, return_to, created_at, expires_at)
-                VALUES (${state.state}, ${state.provider}, ${state.codeVerifier ?? null}, ${state.returnTo ?? null}, ${state.createdAt}, ${state.expiresAt})`,
-        );
-        return state;
-      }),
+      withTx(
+        "oauthState.create",
+        Effect.gen(function* () {
+          yield* asVoid(
+            "oauthState.create",
+            sql`DELETE FROM auth_oauth_states WHERE state = ${state.state}`,
+          );
+          yield* asVoid(
+            "oauthState.create",
+            sql`INSERT INTO auth_oauth_states (state, provider, code_verifier, return_to, created_at, expires_at)
+                  VALUES (${state.state}, ${state.provider}, ${state.codeVerifier ?? null}, ${state.returnTo ?? null}, ${state.createdAt}, ${state.expiresAt})`,
+          );
+          return state;
+        }),
+      ),
     get: (state) =>
       firstRow(
         "oauthState.get",
@@ -856,6 +907,7 @@ const rowToEmailOtp = (row: EmailOtpRow): Auth.EmailOtpRecord => ({
 export const makeEmailOtpStore: Effect.Effect<Auth.EmailOtpStoreShape, never, SqlClient.SqlClient> =
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const withTx = makeTx(sql);
 
     const read = (email: string, purpose: Auth.EmailOtpPurpose, label: string) =>
       firstRow(
@@ -865,19 +917,21 @@ export const makeEmailOtpStore: Effect.Effect<Auth.EmailOtpStoreShape, never, Sq
 
     return {
       upsert: (record) =>
-        Effect.gen(function* () {
-          // Portable upsert: at most one active OTP per (email, purpose).
-          yield* asVoid(
-            "emailOtp.upsert",
-            sql`DELETE FROM auth_email_otps WHERE email = ${record.email} AND purpose = ${record.purpose}`,
-          );
-          yield* asVoid(
-            "emailOtp.upsert",
-            sql`INSERT INTO auth_email_otps (email, purpose, otp_hash, attempts, created_at, expires_at)
+        withTx(
+          "emailOtp.upsert",
+          Effect.gen(function* () {
+            yield* asVoid(
+              "emailOtp.upsert",
+              sql`DELETE FROM auth_email_otps WHERE email = ${record.email} AND purpose = ${record.purpose}`,
+            );
+            yield* asVoid(
+              "emailOtp.upsert",
+              sql`INSERT INTO auth_email_otps (email, purpose, otp_hash, attempts, created_at, expires_at)
                 VALUES (${record.email}, ${record.purpose}, ${record.otpHash}, ${record.attempts}, ${record.createdAt}, ${record.expiresAt})`,
-          );
-          return record;
-        }),
+            );
+            return record;
+          }),
+        ),
       get: (email, purpose) =>
         read(email, purpose, "emailOtp.get").pipe(
           Effect.map((row) => (row ? rowToEmailOtp(row) : null)),
@@ -889,15 +943,19 @@ export const makeEmailOtpStore: Effect.Effect<Auth.EmailOtpStoreShape, never, Sq
         ),
       incrementAttempts: (email, purpose) =>
         Effect.gen(function* () {
-          const row = yield* read(email, purpose, "emailOtp.incrementAttempts");
-          if (row == null) {
+          // Single atomic UPDATE + RETURNING avoids a read-modify-write race.
+          const rows = yield* allRows(
+            "emailOtp.incrementAttempts",
+            sql<{ attempts: number }>`
+              UPDATE auth_email_otps
+                SET attempts = attempts + 1
+              WHERE email = ${email} AND purpose = ${purpose}
+              RETURNING attempts`,
+          );
+          const attempts = rows[0]?.attempts;
+          if (attempts == null) {
             return yield* new Auth.AuthError({ message: "OTP record not found" });
           }
-          const attempts = row.attempts + 1;
-          yield* asVoid(
-            "emailOtp.incrementAttempts",
-            sql`UPDATE auth_email_otps SET attempts = ${attempts} WHERE email = ${email} AND purpose = ${purpose}`,
-          );
           return attempts;
         }),
     } satisfies Auth.EmailOtpStoreShape;
@@ -928,13 +986,17 @@ interface TwoFactorRow {
   readonly created_at: number;
 }
 
-const rowToTwoFactor = (row: TwoFactorRow): Auth.TwoFactorRecord => ({
-  userId: row.user_id,
-  secret: row.secret,
-  backupCodes: JSON.parse(row.backup_codes) as readonly string[],
-  verified: row.verified !== 0,
-  createdAt: row.created_at,
-});
+const rowToTwoFactor = (row: TwoFactorRow): Effect.Effect<Auth.TwoFactorRecord, Auth.AuthError> =>
+  Effect.try({
+    try: () => ({
+      userId: row.user_id,
+      secret: row.secret,
+      backupCodes: JSON.parse(row.backup_codes) as readonly string[],
+      verified: row.verified !== 0,
+      createdAt: row.created_at,
+    }),
+    catch: (cause) => new Auth.AuthError({ message: "twoFactor decode failed", cause }),
+  });
 
 export const makeTwoFactorStore: Effect.Effect<
   Auth.TwoFactorStoreShape,
@@ -948,7 +1010,9 @@ export const makeTwoFactorStore: Effect.Effect<
 
   return {
     get: (userId) =>
-      read(userId, "twoFactor.get").pipe(Effect.map((row) => (row ? rowToTwoFactor(row) : null))),
+      read(userId, "twoFactor.get").pipe(
+        Effect.flatMap((row) => (row ? rowToTwoFactor(row) : Effect.succeed(null))),
+      ),
     upsert: (record) =>
       Effect.gen(function* () {
         const backupCodes = JSON.stringify(record.backupCodes);
