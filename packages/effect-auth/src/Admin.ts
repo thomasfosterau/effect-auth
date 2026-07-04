@@ -22,8 +22,11 @@
  */
 
 import { Context, Data, Effect, Layer } from "effect";
+import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
 import { Hooks, makePlugin, type HookError } from "./Hooks.js";
+import { IdentifierStore, type IdentifierType } from "./Identifier.js";
+import { PasswordHasher } from "./Password.js";
 import { SessionManager } from "./Session.js";
 import type * as Types from "./Types.js";
 import { UserServiceStore } from "./User.js";
@@ -59,10 +62,46 @@ export interface ListUsersResult {
 /**
  * Storage interface for admin-only user queries. The regular
  * `UserServiceStore` (get/update/delete) is reused for everything else;
- * this store only adds listing, which per-user stores cannot express.
+ * this store adds listing and admin-initiated creation / credential management.
  */
 export interface AdminUserStoreShape {
   readonly listUsers: (query: ListUsersQuery) => Effect.Effect<ListUsersResult, Errors.AuthError>;
+
+  /** Create a new user record. The store is responsible for assigning `id` and timestamps. */
+  readonly createUser: (input: {
+    readonly email: string;
+    readonly name?: string;
+    readonly image?: string;
+    readonly attributes?: Record<string, unknown>;
+  }) => Effect.Effect<Types.User, Errors.AuthError>;
+
+  /** Persist a hashed password for an existing user (admin reset; no current-password check). */
+  readonly setPasswordHash: (userId: string, hash: string) => Effect.Effect<void, Errors.AuthError>;
+}
+
+/**
+ * Input for admin-initiated user creation.
+ */
+export interface AdminCreateUserInput {
+  /** Primary email address — also written to `User.email`. */
+  readonly email: string;
+  readonly name?: string;
+  readonly image?: string;
+  /** Plain-text password; hashed via `PasswordHasher` before storage. */
+  readonly password?: string;
+  /** Written to `attributes.role`. */
+  readonly role?: string;
+  readonly attributes?: Record<string, unknown>;
+  /**
+   * Additional identifier records created via `IdentifierStore` (email,
+   * username, or phone). These complement the `User.email` field and are
+   * the foundation for multi-identifier sign-in (Phase 1 identifier model).
+   */
+  readonly identifiers?: ReadonlyArray<{
+    readonly type: IdentifierType;
+    readonly value: string;
+    readonly verified?: boolean;
+  }>;
 }
 
 export class AdminUserStore extends Context.Service<AdminUserStore, AdminUserStoreShape>()(
@@ -217,6 +256,46 @@ export interface AdminServiceShape {
     AdminError | Errors.AuthError | Errors.UserNotFoundError | HookError,
     UserServiceStore | SessionManager | Hooks
   >;
+
+  /**
+   * Create a new user, optionally with initial identifier records (email,
+   * username, or phone via `IdentifierStore`), a hashed initial password, and
+   * a role. The `email` field is required and populates `User.email`; any
+   * additional entries in `identifiers` are persisted via `IdentifierStore`.
+   */
+  readonly createUser: (
+    actor: Types.User,
+    input: AdminCreateUserInput,
+  ) => Effect.Effect<
+    Types.User,
+    AdminError | Errors.AuthError | Errors.HashingError,
+    AdminUserStore | IdentifierStore | PasswordHasher
+  >;
+
+  /**
+   * Set (reset) a user's password without requiring their current password.
+   * Optionally revokes all of the user's existing sessions after the reset.
+   */
+  readonly setUserPassword: (
+    actor: Types.User,
+    userId: string,
+    newPassword: string,
+    options?: { readonly revokeOtherSessions?: boolean },
+  ) => Effect.Effect<
+    void,
+    AdminError | Errors.AuthError | Errors.HashingError | Errors.UserNotFoundError,
+    UserServiceStore | AdminUserStore | PasswordHasher | SessionManager
+  >;
+
+  /**
+   * List a user's non-expired sessions (the same view used by
+   * `SessionManager.listSessions`). Useful for an admin "see where this user
+   * is signed in" view before deciding whether to call `revokeUserSessions`.
+   */
+  readonly listUserSessions: (
+    actor: Types.User,
+    userId: string,
+  ) => Effect.Effect<ReadonlyArray<Types.Session>, AdminError | Errors.AuthError, SessionManager>;
 }
 
 export class AdminService extends Context.Service<AdminService, AdminServiceShape>()(
@@ -380,6 +459,82 @@ export const makeAdminService = (
             impersonatedBy: actor.id,
             impersonationExpiresAt: Date.now() + impersonationSessionDuration,
           });
+        }),
+
+      createUser: (actor, input) =>
+        Effect.gen(function* () {
+          yield* requireAdmin(actor);
+
+          const adminStore = yield* AdminUserStore;
+
+          const attributes: Record<string, unknown> = { ...input.attributes };
+          if (input.role !== undefined) {
+            attributes["role"] = input.role;
+          }
+
+          const createInput: {
+            email: string;
+            name?: string;
+            image?: string;
+            attributes?: Record<string, unknown>;
+          } = { email: input.email, attributes };
+          if (input.name !== undefined) createInput.name = input.name;
+          if (input.image !== undefined) createInput.image = input.image;
+
+          const user = yield* adminStore.createUser(createInput);
+
+          if (input.identifiers && input.identifiers.length > 0) {
+            const identifierStore = yield* IdentifierStore;
+            const now = new Date();
+            for (const ident of input.identifiers) {
+              yield* identifierStore.create({
+                id: crypto.randomUUID(),
+                userId: user.id,
+                type: ident.type,
+                value: ident.value,
+                verified: ident.verified ?? false,
+                verifiedAt: ident.verified ? now : undefined,
+                createdAt: now,
+              });
+            }
+          }
+
+          if (input.password !== undefined) {
+            const hasher = yield* PasswordHasher;
+            const hashed = yield* hasher.hash(input.password);
+            yield* adminStore.setPasswordHash(user.id, hashed.hash);
+          }
+
+          return user;
+        }),
+
+      setUserPassword: (actor, userId, newPassword, options = {}) =>
+        Effect.gen(function* () {
+          yield* requireAdmin(actor);
+
+          const userStore = yield* UserServiceStore;
+          const user = yield* userStore.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
+
+          const hasher = yield* PasswordHasher;
+          const hashed = yield* hasher.hash(newPassword);
+
+          const adminStore = yield* AdminUserStore;
+          yield* adminStore.setPasswordHash(userId, hashed.hash);
+
+          if (options.revokeOtherSessions) {
+            const sessionManager = yield* SessionManager;
+            yield* sessionManager.invalidateUserSessions(userId);
+          }
+        }),
+
+      listUserSessions: (actor, userId) =>
+        Effect.gen(function* () {
+          yield* requireAdmin(actor);
+          const sessionManager = yield* SessionManager;
+          return yield* sessionManager.listSessions(userId);
         }),
     }),
   );
