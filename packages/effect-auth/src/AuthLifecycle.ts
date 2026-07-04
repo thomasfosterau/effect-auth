@@ -28,6 +28,11 @@ export interface AuthLifecycleResult {
   readonly needsEmailVerification: boolean;
   /** Present when a second factor is required to complete sign-in. */
   readonly secondFactor?: SecondFactorChallenge;
+  /**
+   * Propagated from `SignInInput.rememberMe`. When `false`, the HTTP layer
+   * emits a browser-session cookie (no `Max-Age`/`Expires`).
+   */
+  readonly rememberMe?: boolean;
 }
 
 export interface VerifyEmailInput {
@@ -183,6 +188,7 @@ export const makeAuthLifecycleService = (
               secondFactor: signInResult.secondFactor,
             }),
             needsEmailVerification: false,
+            ...(signInResult.rememberMe !== undefined && { rememberMe: signInResult.rememberMe }),
           } satisfies AuthLifecycleResult;
         }),
 

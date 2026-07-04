@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Context } from "effect";
 import { Hooks } from "./Hooks.js";
 import { makeSessionManager, SessionStore, UserStore } from "./Session.js";
@@ -207,6 +207,227 @@ describe("SessionManager", () => {
     // Validation succeeds and returns the raw token as session.id.
     expect(result.validated.session.id).toBe(result.rawToken);
     expect(result.validated.user.id).toBe("user1");
+  });
+
+  describe("updateAge write-throttle", () => {
+    beforeEach(() => {
+      mockSessionStore.sessions.clear();
+    });
+
+    it("writes to the store when no updateAge is configured (default: always write)", async () => {
+      let updateCallCount = 0;
+      const trackingStore = {
+        ...mockSessionStore,
+        update: (session: Session) => {
+          updateCallCount++;
+          return mockSessionStore.update(session);
+        },
+      };
+
+      const program = Effect.gen(function* () {
+        const manager = yield* makeSessionManager(sessionConfig);
+        const session = yield* manager.createSession("user1");
+        yield* manager.validateSession(session.id);
+        yield* manager.validateSession(session.id);
+      });
+
+      await Effect.runPromise(
+        Effect.provide(
+          program,
+          Context.merge(
+            Context.make(SessionStore, trackingStore),
+            Context.make(UserStore, mockUserStore),
+          ),
+        ).pipe(Effect.provide(Hooks.Default)),
+      );
+
+      expect(updateCallCount).toBe(2);
+    });
+
+    it("skips the store write when the session was refreshed within updateAge", async () => {
+      let updateCallCount = 0;
+      const trackingStore = {
+        ...mockSessionStore,
+        update: (session: Session) => {
+          updateCallCount++;
+          return mockSessionStore.update(session);
+        },
+      };
+
+      const configWithUpdateAge: SessionConfig = {
+        sessionExpiresIn: {
+          activePeriod: 1000 * 60 * 60 * 24 * 30,
+          idlePeriod: 1000 * 60 * 60 * 24 * 14,
+          updateAge: 1000 * 60 * 60 * 24, // 1 day threshold
+        },
+      };
+
+      const program = Effect.gen(function* () {
+        const manager = yield* makeSessionManager(configWithUpdateAge);
+        const session = yield* manager.createSession("user1");
+        // First validate: session was just created (lastActivityAt = now), so
+        // timeSinceUpdate ≈ 0 which is < updateAge → write is skipped.
+        yield* manager.validateSession(session.id);
+        // Second validate immediately: still within updateAge → write skipped.
+        yield* manager.validateSession(session.id);
+      });
+
+      await Effect.runPromise(
+        Effect.provide(
+          program,
+          Context.merge(
+            Context.make(SessionStore, trackingStore),
+            Context.make(UserStore, mockUserStore),
+          ),
+        ).pipe(Effect.provide(Hooks.Default)),
+      );
+
+      expect(updateCallCount).toBe(0);
+    });
+
+    it("writes to the store once the updateAge window has elapsed", async () => {
+      let updateCallCount = 0;
+      const sessions = new Map<string, Session>();
+      const timedStore = {
+        create: (session: Session) =>
+          Effect.sync(() => {
+            sessions.set(session.id, session);
+            return session;
+          }),
+        get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+        update: (session: Session) =>
+          Effect.sync(() => {
+            updateCallCount++;
+            sessions.set(session.id, session);
+            return session;
+          }),
+        delete: (sessionId: string) =>
+          Effect.sync(() => {
+            sessions.delete(sessionId);
+          }),
+        deleteByUserId: (userId: string) =>
+          Effect.sync(() => {
+            for (const [id, session] of sessions.entries()) {
+              if (session.userId === userId) sessions.delete(id);
+            }
+          }),
+        listByUserId: (userId: string) =>
+          Effect.sync(() => Array.from(sessions.values()).filter((s) => s.userId === userId)),
+      };
+
+      const configWithShortUpdateAge: SessionConfig = {
+        sessionExpiresIn: {
+          activePeriod: 1000 * 60 * 60 * 24 * 30,
+          idlePeriod: 1000 * 60 * 60 * 24 * 14,
+          updateAge: 100, // 100ms threshold — easy to exceed in a test
+        },
+      };
+
+      const program = Effect.gen(function* () {
+        const manager = yield* makeSessionManager(configWithShortUpdateAge);
+        const session = yield* manager.createSession("user1");
+        // First validate: created just now, timeSinceUpdate ≈ 0 < 100ms → skip.
+        yield* manager.validateSession(session.id);
+        return session.id;
+      });
+
+      const rawToken = await Effect.runPromise(
+        Effect.provide(
+          program,
+          Context.merge(
+            Context.make(SessionStore, timedStore),
+            Context.make(UserStore, mockUserStore),
+          ),
+        ).pipe(Effect.provide(Hooks.Default)),
+      );
+
+      expect(updateCallCount).toBe(0);
+
+      // Manually age the session's lastActivityAt beyond the updateAge threshold.
+      const tokenHash = hashToken(rawToken);
+      const stored = sessions.get(tokenHash)!;
+      sessions.set(tokenHash, {
+        ...stored,
+        lastActivityAt: new Date(stored.lastActivityAt.getTime() - 200),
+      });
+
+      const program2 = Effect.gen(function* () {
+        const manager = yield* makeSessionManager(configWithShortUpdateAge);
+        yield* manager.validateSession(rawToken);
+      });
+
+      await Effect.runPromise(
+        Effect.provide(
+          program2,
+          Context.merge(
+            Context.make(SessionStore, timedStore),
+            Context.make(UserStore, mockUserStore),
+          ),
+        ).pipe(Effect.provide(Hooks.Default)),
+      );
+
+      expect(updateCallCount).toBe(1);
+    });
+
+    it("still enforces expiry even when write is throttled", async () => {
+      const sessions = new Map<string, Session>();
+      const timedStore = {
+        create: (session: Session) =>
+          Effect.sync(() => {
+            sessions.set(session.id, session);
+            return session;
+          }),
+        get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
+        update: (session: Session) =>
+          Effect.sync(() => {
+            sessions.set(session.id, session);
+            return session;
+          }),
+        delete: (sessionId: string) =>
+          Effect.sync(() => {
+            sessions.delete(sessionId);
+          }),
+        deleteByUserId: (userId: string) =>
+          Effect.sync(() => {
+            for (const [id, session] of sessions.entries()) {
+              if (session.userId === userId) sessions.delete(id);
+            }
+          }),
+        listByUserId: (userId: string) =>
+          Effect.sync(() => Array.from(sessions.values()).filter((s) => s.userId === userId)),
+      };
+
+      // updateAge is very long (1 year), so writes are always throttled.
+      // But the session itself has a tiny activePeriod so it expires immediately.
+      const program = Effect.gen(function* () {
+        const manager = yield* makeSessionManager({
+          sessionExpiresIn: {
+            activePeriod: -1000, // already expired
+            idlePeriod: -1000,
+            updateAge: 365 * 24 * 60 * 60 * 1000, // 1 year — throttle always active
+          },
+        });
+        const session = yield* manager.createSession("user1");
+        return yield* manager.validateSession(session.id);
+      });
+
+      const result = await Effect.runPromise(
+        Effect.result(
+          Effect.provide(
+            program,
+            Context.merge(
+              Context.make(SessionStore, timedStore),
+              Context.make(UserStore, mockUserStore),
+            ),
+          ).pipe(Effect.provide(Hooks.Default)),
+        ),
+      );
+
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("SessionExpiredError");
+      }
+    });
   });
 
   it("should invalidate all user sessions", async () => {

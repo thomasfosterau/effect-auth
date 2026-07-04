@@ -75,6 +75,11 @@ export interface UsernameSignInInput {
   readonly username: string;
   readonly password: string;
   readonly sessionAttributes?: Record<string, unknown>;
+  /**
+   * When `false`, the session cookie is emitted without `Max-Age`/`Expires`
+   * (a browser-session cookie). See `SignInInput.rememberMe` for details.
+   */
+  readonly rememberMe?: boolean;
 }
 
 export interface UsernameServiceShape {
@@ -270,7 +275,12 @@ export const makeUsernameService = (
           }
 
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
-          return yield* hooks.afterSignIn({ user, session, method: "username" });
+          return yield* hooks.afterSignIn({
+            user,
+            session,
+            method: "username",
+            ...(input.rememberMe !== undefined && { rememberMe: input.rememberMe }),
+          });
         }),
 
       updateUsername: (userId, rawUsername) =>

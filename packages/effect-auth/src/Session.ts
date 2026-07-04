@@ -257,11 +257,11 @@ export const makeSessionManager = (
             );
           }
 
-          // Update session activity and potentially extend expiration
+          // Extend expiration (capped at absolute max lifetime).
           const newExpiresAt = new Date(
             Math.min(
-              now.getTime() + config.sessionExpiresIn.idlePeriod, // Extend by idle period
-              session.createdAt.getTime() + config.sessionExpiresIn.activePeriod, // But not beyond max lifetime
+              now.getTime() + config.sessionExpiresIn.idlePeriod,
+              session.createdAt.getTime() + config.sessionExpiresIn.activePeriod,
             ),
           );
 
@@ -271,8 +271,13 @@ export const makeSessionManager = (
             expiresAt: newExpiresAt,
           };
 
-          // Update session (ignore errors as it's not critical)
-          yield* Effect.ignore(sessionStore.update(updatedSession));
+          // Throttle store writes: skip the update when the session was
+          // refreshed within the last `updateAge` ms (default: always write).
+          const updateAge = config.sessionExpiresIn.updateAge ?? 0;
+          const timeSinceUpdate = now.getTime() - session.lastActivityAt.getTime();
+          if (timeSinceUpdate >= updateAge) {
+            yield* Effect.ignore(sessionStore.update(updatedSession));
+          }
 
           // Get user
           const user = yield* userStore.get(session.userId);

@@ -1643,3 +1643,97 @@ describe("HTTP multi-session", () => {
     expect(res.status).toBe(404);
   });
 });
+
+// Parse the Set-Cookie header for a named cookie and return its directives.
+const parseCookieDirectives = (res: Response, name: string): Record<string, string | true> => {
+  for (const header of res.headers.getSetCookie()) {
+    const [pair, ...directives] = header.split(/;\s*/);
+    if (pair!.startsWith(`${name}=`)) {
+      const out: Record<string, string | true> = {};
+      for (const d of directives) {
+        const eq = d.indexOf("=");
+        if (eq === -1) out[d.toLowerCase()] = true;
+        else out[d.slice(0, eq).toLowerCase()] = d.slice(eq + 1);
+      }
+      return out;
+    }
+  }
+  return {};
+};
+
+describe("rememberMe cookie behaviour", () => {
+  it("sign-in without rememberMe emits a persistent cookie with Expires", async () => {
+    const handler = handlerFor();
+    await signUp(handler, "a@b.com");
+    const res = await handler(jsonRequest("/sign-in", { email: "a@b.com", password: PW }));
+    expect(res.status).toBe(200);
+    const directives = parseCookieDirectives(res, "conduit_session");
+    expect(directives["expires"]).toBeDefined();
+  });
+
+  it("sign-in with rememberMe:true emits a persistent cookie with Expires", async () => {
+    const handler = handlerFor();
+    await signUp(handler, "a@b.com");
+    const res = await handler(
+      jsonRequest("/sign-in", { email: "a@b.com", password: PW, rememberMe: true }),
+    );
+    expect(res.status).toBe(200);
+    const directives = parseCookieDirectives(res, "conduit_session");
+    expect(directives["expires"]).toBeDefined();
+  });
+
+  it("sign-in with rememberMe:false emits a browser-session cookie (no Expires, no Max-Age)", async () => {
+    const handler = handlerFor();
+    await signUp(handler, "a@b.com");
+    const res = await handler(
+      jsonRequest("/sign-in", { email: "a@b.com", password: PW, rememberMe: false }),
+    );
+    expect(res.status).toBe(200);
+    const directives = parseCookieDirectives(res, "conduit_session");
+    expect(directives["expires"]).toBeUndefined();
+    expect(directives["max-age"]).toBeUndefined();
+  });
+
+  it("sign-up always emits a persistent cookie regardless of rememberMe", async () => {
+    const handler = handlerFor();
+    const res = await handler(jsonRequest("/sign-up", { email: "b@b.com", password: PW }));
+    expect(res.status).toBe(200);
+    const directives = parseCookieDirectives(res, "conduit_session");
+    expect(directives["expires"]).toBeDefined();
+  });
+
+  it("username sign-in with rememberMe:false emits a browser-session cookie", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true });
+
+    const up = await handler(jsonRequest("/sign-up", { email: "u@b.com", password: PW }));
+    expect(up.status).toBe(200);
+    const userId = ((await up.json()) as { user: { id: string } }).user.id;
+    fixture.registerUsername(userId, "testuser");
+
+    const res = await handler(
+      jsonRequest("/sign-in/username", { username: "testuser", password: PW, rememberMe: false }),
+    );
+    expect(res.status).toBe(200);
+    const directives = parseCookieDirectives(res, "conduit_session");
+    expect(directives["expires"]).toBeUndefined();
+    expect(directives["max-age"]).toBeUndefined();
+  });
+
+  it("username sign-in with rememberMe:true emits a persistent cookie", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true });
+
+    const up = await handler(jsonRequest("/sign-up", { email: "u2@b.com", password: PW }));
+    expect(up.status).toBe(200);
+    const userId = ((await up.json()) as { user: { id: string } }).user.id;
+    fixture.registerUsername(userId, "testuser2");
+
+    const res = await handler(
+      jsonRequest("/sign-in/username", { username: "testuser2", password: PW, rememberMe: true }),
+    );
+    expect(res.status).toBe(200);
+    const directives = parseCookieDirectives(res, "conduit_session");
+    expect(directives["expires"]).toBeDefined();
+  });
+});

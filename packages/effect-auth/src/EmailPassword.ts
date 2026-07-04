@@ -52,6 +52,14 @@ export interface SignInInput {
   readonly sessionAttributes?: Record<string, unknown>;
   /** Optional captcha token, consumed by the `CaptchaPlugin` `beforeSignIn` hook. */
   readonly captchaToken?: string;
+  /**
+   * When `false`, the session cookie is emitted without `Max-Age`/`Expires`
+   * (a browser-session cookie that is cleared when the browser is closed).
+   * The server-side session lifetime (`activePeriod`/`idlePeriod`) is
+   * unchanged; orphaned sessions expire naturally via the idle timeout.
+   * Default `true` (persistent cookie matching `session.expiresAt`).
+   */
+  readonly rememberMe?: boolean;
 }
 
 /**
@@ -89,6 +97,11 @@ export interface AuthResult {
    * `"magic-link"`, ...) for hooks like the last-login-method plugin.
    */
   readonly method?: string;
+  /**
+   * When `false`, the HTTP layer emits a browser-session cookie (no
+   * `Max-Age`/`Expires`). Propagated from `SignInInput.rememberMe`.
+   */
+  readonly rememberMe?: boolean;
 }
 
 export interface ChangePasswordInput {
@@ -371,7 +384,12 @@ export const makeEmailPasswordService = (
           }
 
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
-          const signInResult = { user, session, method: "email-password" as const };
+          const signInResult = {
+            user,
+            session,
+            method: "email-password" as const,
+            ...(input.rememberMe !== undefined && { rememberMe: input.rememberMe }),
+          };
 
           // Session is now live in the store. If afterSignIn fails we must not
           // return an error (that would leave a dangling session the caller
