@@ -11,6 +11,7 @@ import {
 import { SessionManager, type SessionManagerShape } from "./Session.js";
 import { Hooks } from "./Hooks.js";
 import type * as Types from "./Types.js";
+import { InvalidInputError } from "./Errors.js";
 
 const makeSession = (userId: string): Types.Session => {
   const now = new Date();
@@ -29,12 +30,14 @@ interface Harness {
   readonly users: Map<string, Types.User>;
   readonly created: string[];
   readonly linkCalls: Array<{ anon: string; real: string }>;
+  readonly invalidatedUserSessions: string[];
 }
 
 const makeHarness = (config?: AnonymousConfig): Harness => {
   const users = new Map<string, Types.User>();
   const created: string[] = [];
   const linkCalls: Array<{ anon: string; real: string }> = [];
+  const invalidatedUserSessions: string[] = [];
   let seq = 0;
 
   const store: AnonymousUserStoreShape = {
@@ -61,7 +64,8 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
     createSession: (userId) => Effect.sync(() => makeSession(userId)),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
-    invalidateUserSessions: () => Effect.void,
+    invalidateUserSessions: (userId) =>
+      Effect.sync(() => void invalidatedUserSessions.push(userId)),
     listSessions: () => Effect.succeed([]),
     revokeOtherSessions: () => Effect.void,
     setSessionAttributes: () => Effect.die("unused"),
@@ -85,7 +89,7 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
     ),
   );
 
-  return { layer, users, created, linkCalls };
+  return { layer, users, created, linkCalls, invalidatedUserSessions };
 };
 
 const run = <A, E>(
@@ -98,6 +102,19 @@ const run = <A, E>(
     Effect.gen(function* () {
       const svc = yield* AnonymousService;
       return yield* f(svc);
+    }).pipe(Effect.provide(h.layer)),
+  );
+
+const runFail = <A, E>(
+  h: Harness,
+  f: (
+    svc: AnonymousServiceShape,
+  ) => Effect.Effect<A, E, AnonymousUserStore | SessionManager | Hooks>,
+) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const svc = yield* AnonymousService;
+      return yield* Effect.flip(f(svc));
     }).pipe(Effect.provide(h.layer)),
   );
 
@@ -146,5 +163,75 @@ describe("Anonymous", () => {
     const real: Types.User = { ...anon, id: "b", email: "b@example.com", attributes: {} };
     expect(isAnonymousUser(anon)).toBe(true);
     expect(isAnonymousUser(real)).toBe(false);
+  });
+
+  it("linkAccount rejects a non-anonymous user", async () => {
+    const h = makeHarness();
+    const notAnon: Types.User = {
+      id: "real-99",
+      email: "real99@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    const target: Types.User = {
+      id: "real-100",
+      email: "real100@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    const err = await runFail(h, (svc) => svc.linkAccount(notAnon, target));
+    expect(err).toBeInstanceOf(InvalidInputError);
+    expect((err as InvalidInputError).field).toBe("anonymousUser");
+  });
+
+  it("linkAccount rejects when anonymousUser.id === newUser.id", async () => {
+    const h = makeHarness();
+    const { user: anon } = await run(h, (svc) => svc.signInAnonymous());
+    const err = await runFail(h, (svc) => svc.linkAccount(anon, anon));
+    expect(err).toBeInstanceOf(InvalidInputError);
+    expect((err as InvalidInputError).field).toBe("newUser");
+  });
+
+  it("linkAccount is idempotent: a second call is a no-op", async () => {
+    const h = makeHarness();
+    const realUser: Types.User = {
+      id: "real-2",
+      email: "real2@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    // Both linkAccount calls must run within the same Effect scope so they
+    // share the same service instance (and its `done` set).
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const svc = yield* AnonymousService;
+        const { user: anon } = yield* svc.signInAnonymous();
+        yield* svc.linkAccount(anon, realUser);
+        yield* svc.linkAccount(anon, realUser);
+      }).pipe(Effect.provide(h.layer)),
+    );
+    expect(h.linkCalls).toHaveLength(1);
+    expect(h.invalidatedUserSessions).toHaveLength(1);
+  });
+
+  it("linkAccount invalidates the anonymous user's sessions", async () => {
+    const h = makeHarness();
+    const { user: anon } = await run(h, (svc) => svc.signInAnonymous());
+    const realUser: Types.User = {
+      id: "real-3",
+      email: "real3@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    await run(h, (svc) => svc.linkAccount(anon, realUser));
+    expect(h.invalidatedUserSessions).toContain(anon.id);
   });
 });
