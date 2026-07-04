@@ -16,6 +16,20 @@
  * dialect-specific `ON CONFLICT`/`ON DUPLICATE KEY` clauses, so they are not
  * atomic under concurrent writers — acceptable for these auth flows, where
  * keys are single-owner tokens or best-effort counters.
+ *
+ * ## Breaking change — token columns now store SHA-256 hashes (since bearer-token-hashing)
+ *
+ * The `token` column in `auth_magic_links`, `auth_email_verifications`,
+ * `auth_password_resets`, and the `device_code` / `user_code` columns in
+ * `auth_device_authorizations` previously stored plaintext values. They now
+ * store SHA-256 hex digests computed by the service layer (via `hashToken`
+ * from `effect-auth`).
+ *
+ * **Migration:** existing rows are stale after this upgrade — any outstanding
+ * tokens issued before the upgrade will not resolve to a matching row and
+ * will be rejected as invalid. That is the safe behaviour: require users to
+ * re-request links/codes after deploying. No column rename is required; the
+ * column type (`TEXT`) is unchanged.
  */
 
 import { Effect, Layer } from "effect";

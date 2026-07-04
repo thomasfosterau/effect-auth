@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect } from "effect";
 import { Hooks } from "./Hooks.js";
 import {
-  hashOtp,
   makeEmailOtpService,
   type EmailOtpCreateUserInput,
   type EmailOtpPurpose,
@@ -10,6 +9,7 @@ import {
   EmailOtpStore,
   EmailOtpUserStore,
 } from "./EmailOtp.js";
+import { hashToken } from "./TokenHash.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 import * as Errors from "./Errors.js";
@@ -178,7 +178,7 @@ describe("EmailOtpService", () => {
 
     const record = otpRecords.get("new@example.com:sign-in");
     expect(record).toBeDefined();
-    expect(record?.otpHash).toBe(hashOtp(sent.otp));
+    expect(record?.otpHash).toBe(hashToken(sent.otp));
     expect(record?.otpHash).not.toBe(sent.otp);
     expect(record?.attempts).toBe(0);
   });
@@ -203,7 +203,7 @@ describe("EmailOtpService", () => {
     expect(sentOtps[0]?.otp).toMatch(/^\d{8}$/);
     // One active OTP per email + purpose: only the latest hash remains.
     expect(otpRecords.size).toBe(1);
-    expect(otpRecords.get("repeat@example.com:sign-in")?.otpHash).toBe(hashOtp(sentOtps[1]!.otp));
+    expect(otpRecords.get("repeat@example.com:sign-in")?.otpHash).toBe(hashToken(sentOtps[1]!.otp));
   });
 
   it("should sign in a new user with a valid OTP, creating a verified user and session", async () => {
@@ -285,7 +285,7 @@ describe("EmailOtpService", () => {
 
     otpRecords.set("late@example.com:sign-in", {
       email: "late@example.com",
-      otpHash: hashOtp("123456"),
+      otpHash: hashToken("123456"),
       purpose: "sign-in",
       attempts: 0,
       createdAt: Date.now() - 10 * 60 * 1000,
@@ -387,7 +387,7 @@ describe("EmailOtpService", () => {
 
     otpRecords.set("orphan@example.com:sign-in", {
       email: "orphan@example.com",
-      otpHash: hashOtp("123456"),
+      otpHash: hashToken("123456"),
       purpose: "sign-in",
       attempts: 0,
       createdAt: Date.now(),

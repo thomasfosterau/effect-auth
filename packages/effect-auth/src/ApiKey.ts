@@ -20,6 +20,7 @@ import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import type * as Errors from "./Errors.js";
 import { RateLimiter, RateLimitStore, type RateLimitConfig } from "./RateLimit.js";
+import { hashToken } from "./TokenHash.js";
 
 /**
  * API key error
@@ -246,11 +247,10 @@ export class ApiKeyService extends Context.Service<ApiKeyService, ApiKeyServiceS
 }
 
 /**
- * sha256 hex digest of a plaintext API key. Exposed so stores/tests can
+ * SHA-256 hex digest of a plaintext API key. Exposed so stores/tests can
  * compute lookup hashes without duplicating the hashing scheme.
  */
-export const hashApiKey = (plaintextKey: string): string =>
-  crypto.createHash("sha256").update(plaintextKey).digest("hex");
+export const hashApiKey = hashToken;
 
 /**
  * Check that every requested `resource → actions` entry is granted by the

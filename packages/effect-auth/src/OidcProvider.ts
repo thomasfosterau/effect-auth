@@ -22,6 +22,7 @@ import * as crypto from "node:crypto";
 import type { AuthError } from "./Errors.js";
 import { JwtService, JwtKeyStore } from "./Jwt.js";
 import { UserStore } from "./Session.js";
+import { hashToken } from "./TokenHash.js";
 import type * as Types from "./Types.js";
 
 /** Failure to register a client or process an authorization request. */
@@ -396,11 +397,10 @@ export class OidcProviderService extends Context.Service<
 // Helpers
 // -----------------------------------------------------------------------------
 
-/** sha256 hex digest used for every OIDC secret at rest (tokens, codes, secrets). */
-export const hashOidcSecret = (value: string): string =>
-  crypto.createHash("sha256").update(value).digest("hex");
+/** SHA-256 hex digest used for every OIDC secret at rest (tokens, codes, secrets). */
+export const hashOidcSecret = hashToken;
 
-/** Constant-time equality of two strings via their sha256 digests. */
+/** Constant-time equality of two strings via their SHA-256 digests. */
 const secretEquals = (a: string, b: string): boolean =>
   crypto.timingSafeEqual(
     crypto.createHash("sha256").update(a).digest(),

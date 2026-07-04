@@ -13,6 +13,7 @@ import * as Errors from "./Errors.js";
 import type * as Types from "./Types.js";
 import { SessionManager } from "./Session.js";
 import { Hooks, type HookError } from "./Hooks.js";
+import { hashToken } from "./TokenHash.js";
 
 /** Lifecycle status of a device authorization request. */
 export type DeviceAuthorizationStatus = "pending" | "approved" | "denied";
@@ -169,14 +170,17 @@ export const makeDeviceAuthorizationService = (
       begin: (options) =>
         Effect.gen(function* () {
           const store = yield* DeviceAuthorizationStore;
-          const deviceCode = crypto.randomBytes(32).toString("base64url");
+          const rawDeviceCode = crypto.randomBytes(32).toString("base64url");
           const rawUserCode = randomCode(userCodeLength, alphabet);
           const userCode = formatUserCode(rawUserCode);
+          const normalizedUserCode = normalizeUserCode(userCode);
           const now = Date.now();
 
           yield* store.create({
-            deviceCode,
-            userCode: normalizeUserCode(userCode),
+            // Both codes are stored as SHA-256 hashes; the raw values are
+            // returned to the caller and never persisted.
+            deviceCode: hashToken(rawDeviceCode),
+            userCode: hashToken(normalizedUserCode),
             ...(options?.clientId !== undefined && { clientId: options.clientId }),
             ...(options?.scopes !== undefined && { scopes: options.scopes }),
             status: "pending",
@@ -187,7 +191,7 @@ export const makeDeviceAuthorizationService = (
           });
 
           return {
-            deviceCode,
+            deviceCode: rawDeviceCode,
             userCode,
             verificationUri: config.verificationUri,
             expiresIn: Math.floor(expiresIn / 1000),
@@ -200,11 +204,12 @@ export const makeDeviceAuthorizationService = (
           const store = yield* DeviceAuthorizationStore;
           const sessionManager = yield* SessionManager;
 
-          const record = yield* store.getByDeviceCode(deviceCode);
+          const record = yield* store.getByDeviceCode(hashToken(deviceCode));
           const now = Date.now();
 
+          // record.deviceCode is already the stored hash.
           if (record === null || now > record.expiresAt) {
-            if (record !== null) yield* store.delete(deviceCode);
+            if (record !== null) yield* store.delete(record.deviceCode);
             return yield* new DevicePollError({
               error: "expired_token",
               message: "The device code has expired",
@@ -222,7 +227,7 @@ export const makeDeviceAuthorizationService = (
           yield* store.update({ ...record, lastPolledAt: now });
 
           if (record.status === "denied") {
-            yield* store.delete(deviceCode);
+            yield* store.delete(record.deviceCode);
             return yield* new DevicePollError({
               error: "access_denied",
               message: "The user denied the request",
@@ -241,7 +246,7 @@ export const makeDeviceAuthorizationService = (
           // direct user-store dependency (it isn't part of `AuthServices`).
           const session = yield* sessionManager.createSession(record.userId);
           const { user } = yield* sessionManager.validateSession(session.id);
-          yield* store.delete(deviceCode);
+          yield* store.delete(record.deviceCode);
 
           return { user, session };
         }),
@@ -249,7 +254,7 @@ export const makeDeviceAuthorizationService = (
       approve: (userCode, userId) =>
         Effect.gen(function* () {
           const store = yield* DeviceAuthorizationStore;
-          const record = yield* store.getByUserCode(normalizeUserCode(userCode));
+          const record = yield* store.getByUserCode(hashToken(normalizeUserCode(userCode)));
           if (record === null || Date.now() > record.expiresAt) {
             return yield* new DeviceCodeError({ message: "Invalid or expired code" });
           }
@@ -259,7 +264,7 @@ export const makeDeviceAuthorizationService = (
       deny: (userCode) =>
         Effect.gen(function* () {
           const store = yield* DeviceAuthorizationStore;
-          const record = yield* store.getByUserCode(normalizeUserCode(userCode));
+          const record = yield* store.getByUserCode(hashToken(normalizeUserCode(userCode)));
           if (record === null || Date.now() > record.expiresAt) {
             return yield* new DeviceCodeError({ message: "Invalid or expired code" });
           }

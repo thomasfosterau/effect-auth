@@ -89,6 +89,7 @@ export interface EmailVerificationServiceShape {
  * @module email-verification
  */
 import * as crypto from "node:crypto";
+import { hashToken } from "./TokenHash.js";
 
 /**
  * Email verification store context tag
@@ -132,10 +133,11 @@ export const makeEmailVerificationService = (
       });
 
       const store = yield* EmailVerificationStore;
-      const token = yield* generateVerificationToken();
+      const rawToken = yield* generateVerificationToken();
 
       const verification: EmailVerification = {
-        token,
+        // Store the hash — the raw token is delivered to the user via sendEmail.
+        token: hashToken(rawToken),
         userId,
         email,
         createdAt: Date.now(),
@@ -144,8 +146,8 @@ export const makeEmailVerificationService = (
 
       yield* store.create(verification);
 
-      // Send verification email
-      yield* Effect.catch(config.sendEmail(email, token), (error) =>
+      // Send verification email with the raw token.
+      yield* Effect.catch(config.sendEmail(email, rawToken), (error) =>
         Effect.fail(
           new EmailVerificationError({
             message: `Failed to send verification email to ${email}`,
@@ -157,7 +159,7 @@ export const makeEmailVerificationService = (
       yield* hooks.afterCreateVerification({ userId, email });
 
       return {
-        token,
+        token: rawToken,
         expiresAt: verification.expiresAt,
       };
     });
@@ -169,11 +171,13 @@ export const makeEmailVerificationService = (
       verifyToken: (rawToken: string) =>
         Effect.gen(function* () {
           const hooks = yield* Hooks;
+          // Hook receives the raw token from the URL; hash after any hook transform.
           const { token } = yield* hooks.beforeVerifyEmail({ token: rawToken });
 
           const store = yield* EmailVerificationStore;
+          const tokenHash = hashToken(token);
 
-          const verification = yield* store.get(token);
+          const verification = yield* store.get(tokenHash);
 
           if (!verification) {
             return yield* Effect.fail(
@@ -185,7 +189,7 @@ export const makeEmailVerificationService = (
 
           // Check expiration
           if (Date.now() > verification.expiresAt) {
-            yield* store.delete(token);
+            yield* store.delete(tokenHash);
             return yield* Effect.fail(
               new EmailVerificationError({
                 message: "Verification token has expired",
@@ -194,7 +198,7 @@ export const makeEmailVerificationService = (
           }
 
           // Delete token after successful verification (one-time use)
-          yield* store.delete(token);
+          yield* store.delete(tokenHash);
 
           const result = {
             userId: verification.userId,

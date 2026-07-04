@@ -182,9 +182,15 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 ### Token & Challenge Security
 
-- Verification tokens, OTPs, magic links, API keys, and OIDC codes/tokens are
-  hashed at rest and compared timing-safely; single-use with expiry;
-  anti-enumeration responses on send/request endpoints.
+- All bearer tokens — magic-link tokens, email-verification tokens,
+  password-reset tokens, device authorization codes, API keys, and OIDC
+  codes/tokens — are stored as SHA-256 digests (via the shared `hashToken`
+  primitive in `TokenHash.ts`). Only the raw token is delivered to the user;
+  the digest is the store key. OTPs follow the same pattern.
+- Lookups and comparisons use constant-time equality (`constantTimeHashEqual`)
+  to prevent timing side-channels.
+- All token flows are single-use with expiry; anti-enumeration responses on
+  send/request endpoints.
 - WebAuthn: 256-bit challenges with expiry, origin + RP ID verification,
   counter-based replay protection (ES256/RS256/EdDSA).
 

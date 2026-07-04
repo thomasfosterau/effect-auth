@@ -9,6 +9,7 @@ import {
 } from "./PasswordReset.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
 import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
+import { hashToken } from "./TokenHash.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 
 const users = new Map<string, User>();
@@ -209,8 +210,9 @@ describe("PasswordResetService", () => {
     usersByEmail.set("session-reset@example.com", user.id);
     passwordHashes.set(user.id, oldHash.hash);
 
+    // Seed with the hash as key (the service looks up by hash).
     const resetToken: PasswordResetToken = {
-      token: "token-123",
+      token: hashToken("token-123"),
       userId: user.id,
       email: "session-reset@example.com",
       createdAt: Date.now(),

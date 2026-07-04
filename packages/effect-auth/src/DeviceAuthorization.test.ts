@@ -10,6 +10,7 @@ import {
   type DeviceAuthorizationServiceShape,
   type DeviceAuthorizationStoreShape,
 } from "./DeviceAuthorization.js";
+import { hashToken } from "./TokenHash.js";
 import {
   SessionStore,
   UserStore,
@@ -27,6 +28,7 @@ const users = new Map<string, Types.User>();
 const store: DeviceAuthorizationStoreShape = {
   create: (record) =>
     Effect.sync(() => {
+      // record.deviceCode and record.userCode are already hashed by the service.
       records.set(record.deviceCode, record);
       return record;
     }),
@@ -123,7 +125,8 @@ describe("DeviceAuthorizationService", () => {
     expect(result.userCode).toMatch(/^[A-Z0-9]+-[A-Z0-9]+$/);
     expect(result.verificationUri).toBe("https://example.com/device");
     expect(result.interval).toBe(5);
-    const record = records.get(result.deviceCode);
+    // The store is keyed by hash; the returned deviceCode is the raw value.
+    const record = records.get(hashToken(result.deviceCode));
     expect(record?.status).toBe("pending");
   });
 
@@ -169,8 +172,9 @@ describe("DeviceAuthorizationService", () => {
 
   it("returns expired_token once the request has expired", async () => {
     const begun = await run((svc) => svc.begin());
-    const record = records.get(begun.deviceCode)!;
-    records.set(begun.deviceCode, { ...record, expiresAt: Date.now() - 1 });
+    const deviceHash = hashToken(begun.deviceCode);
+    const record = records.get(deviceHash)!;
+    records.set(deviceHash, { ...record, expiresAt: Date.now() - 1 });
     const expired = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
     expect((expired as DevicePollError).error).toBe("expired_token");
   });

@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
+import { hashToken } from "./TokenHash.js";
 import { Hooks, type HookError } from "./Hooks.js";
 import { PasswordHasher } from "./Password.js";
 import type * as Types from "./Types.js";
@@ -147,9 +148,10 @@ export const makePasswordResetService = (
 
           yield* resetStore.deleteByUserId(user.id);
 
-          const token = yield* generateResetToken();
+          const rawToken = yield* generateResetToken();
           const reset: PasswordResetToken = {
-            token,
+            // Store the hash — the raw token is delivered to the user via sendResetPassword.
+            token: hashToken(rawToken),
             userId: user.id,
             email: normalizedEmail,
             createdAt: Date.now(),
@@ -158,7 +160,7 @@ export const makePasswordResetService = (
 
           yield* resetStore.create(reset);
 
-          yield* Effect.catch(config.sendResetPassword(normalizedEmail, token), (error) =>
+          yield* Effect.catch(config.sendResetPassword(normalizedEmail, rawToken), (error) =>
             Effect.fail(
               new Errors.PasswordResetError({
                 message: `Failed to send reset password email to ${normalizedEmail}`,
@@ -173,6 +175,7 @@ export const makePasswordResetService = (
       resetPassword: (rawToken: string, rawNewPassword: string) =>
         Effect.gen(function* () {
           const hooks = yield* Hooks;
+          // Hook receives the raw token from the URL; hash after any hook transform.
           const { token, newPassword } = yield* hooks.beforeResetPassword({
             token: rawToken,
             newPassword: rawNewPassword,
@@ -192,7 +195,8 @@ export const makePasswordResetService = (
 
           yield* validatePasswordLength(newPassword, minPasswordLength, maxPasswordLength);
 
-          const reset = yield* resetStore.get(token);
+          const tokenHash = hashToken(token);
+          const reset = yield* resetStore.get(tokenHash);
           if (!reset) {
             return yield* Effect.fail(
               new Errors.PasswordResetError({
@@ -202,7 +206,7 @@ export const makePasswordResetService = (
           }
 
           if (Date.now() > reset.expiresAt) {
-            yield* resetStore.delete(token);
+            yield* resetStore.delete(tokenHash);
             return yield* Effect.fail(
               new Errors.PasswordResetError({
                 message: "Password reset token has expired",
@@ -213,7 +217,7 @@ export const makePasswordResetService = (
           const hashedPassword = yield* passwordHasher.hash(newPassword);
           yield* userStore.setPasswordHash(reset.userId, hashedPassword.hash);
 
-          yield* resetStore.delete(token);
+          yield* resetStore.delete(tokenHash);
 
           if (revokeSessionsOnPasswordReset) {
             const sessionManager = yield* SessionManager;
