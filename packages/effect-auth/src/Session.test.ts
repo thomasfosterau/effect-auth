@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vite-plus/test";
+import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Context } from "effect";
 import { Hooks } from "./Hooks.js";
 import { makeSessionManager, SessionStore, UserStore } from "./Session.js";
