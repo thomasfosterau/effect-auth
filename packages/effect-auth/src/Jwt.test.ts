@@ -570,7 +570,7 @@ describe("RemoteJwksVerifier", () => {
         const verifier = yield* makeRemoteJwksVerifier({
           jwksUri: jwksUrl,
           issuer: baseConfig.issuer,
-          audience: baseConfig.audience,
+          ...(baseConfig.audience !== undefined && { audience: baseConfig.audience }),
         });
         return yield* verifier.verify(signedToken);
       }),
@@ -677,7 +677,7 @@ describe("RemoteJwksVerifier", () => {
         const verifier = yield* makeRemoteJwksVerifier({
           jwksUri: jwksUrl,
           issuer: baseConfig.issuer,
-          audience: baseConfig.audience,
+          ...(baseConfig.audience !== undefined && { audience: baseConfig.audience }),
           cacheTtlMs: 60_000,
         });
         const r1 = yield* verifier.verify(signedToken);
