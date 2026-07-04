@@ -2481,6 +2481,9 @@ export const makeAuthWebHandler = (
   const ipRateRules = options.ipRateLimit?.rules ?? defaultEndpointRules;
 
   const web = HttpRouter.toWebHandler(appLayer, {
+    // Cast to `Effect<..., never, never>` so TypeScript infers HR = never, keeping the
+    // `context` parameter of `web.handler` optional. The cast is safe: HttpServerRequest
+    // and Scope are always provided by the server infrastructure before middleware runs.
     middleware: (effect) =>
       Effect.gen(function* () {
         const req = yield* HttpServerRequest.HttpServerRequest;
@@ -2524,7 +2527,7 @@ export const makeAuthWebHandler = (
 
         // Provide the resolved ClientIp to all downstream effects (hooks, handlers)
         return yield* effect.pipe(Effect.provideService(ClientIp, { ip }));
-      }),
+      }) as unknown as Effect.Effect<HttpServerResponse.HttpServerResponse, never, never>,
   });
 
   const trustedOrigins = options.trustedOrigins ?? [];
