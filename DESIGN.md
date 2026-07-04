@@ -198,12 +198,14 @@ keep their error unions.
 **Risk.** Medium — this changes implementor-facing signatures; staged behind a
 Changeset with a migration table.
 
-### First-party implementation coverage (documented gap, no action now)
+### First-party implementation coverage
 
-`@effect-auth/sql` implements 20 stores; `@effect-auth/alchemy` 14 (missing
-MagicLink, MagicLinkUser, EmailOtp, EmailOtpUser, TwoFactor, PendingTwoFactor).
-Neither implements the advanced-feature stores (Organization, ApiKey, Sso,
-Oidc\*, DeviceAuthorization, …). Tracked as a feature gap, not an API question.
+`@effect-auth/sql` and `@effect-auth/alchemy` both implement the same 20
+stores (the alchemy gap — MagicLink, MagicLinkUser, EmailOtp, EmailOtpUser,
+TwoFactor, PendingTwoFactor — was closed 2026-07-04). Neither implements the
+advanced-feature stores (Organization, ApiKey, Sso, Oidc\*,
+DeviceAuthorization, …); that remains a tracked feature gap, not an API
+question.
 
 ## D4. Error taxonomy
 

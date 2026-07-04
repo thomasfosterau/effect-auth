@@ -110,6 +110,35 @@ export const schemaStatements: readonly string[] = [
     expires_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS auth_password_resets_user_idx ON auth_password_resets (user_id)`,
+  `CREATE TABLE IF NOT EXISTS auth_magic_links (
+    token TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS auth_magic_links_email_idx ON auth_magic_links (email)`,
+  `CREATE TABLE IF NOT EXISTS auth_email_otps (
+    email TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    otp_hash TEXT NOT NULL,
+    attempts INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (email, purpose)
+  )`,
+  `CREATE TABLE IF NOT EXISTS auth_two_factor (
+    user_id TEXT PRIMARY KEY,
+    secret TEXT NOT NULL,
+    backup_codes TEXT NOT NULL,
+    verified INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS auth_pending_two_factor (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
 ];
 
 /**
