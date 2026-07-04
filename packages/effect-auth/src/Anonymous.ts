@@ -121,21 +121,17 @@ export const makeAnonymousService = (
       linkAccount: (anonymousUser, newUser) =>
         Effect.gen(function* () {
           if (!isAnonymousUser(anonymousUser)) {
-            yield* Effect.fail(
-              new Errors.InvalidInputError({
-                message: "The provided user is not an anonymous user",
-                field: "anonymousUser",
-              }),
-            );
+            return yield* new Errors.InvalidInputError({
+              message: "The provided user is not an anonymous user",
+              field: "anonymousUser",
+            });
           }
 
           if (anonymousUser.id === newUser.id) {
-            yield* Effect.fail(
-              new Errors.InvalidInputError({
-                message: "Cannot link an anonymous account to itself",
-                field: "newUser",
-              }),
-            );
+            return yield* new Errors.InvalidInputError({
+              message: "Cannot link an anonymous account to itself",
+              field: "newUser",
+            });
           }
 
           // Idempotent: already successfully linked.
