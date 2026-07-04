@@ -22,15 +22,15 @@
  * @module plugins/ip-rate-limit
  */
 import { Effect, Option } from "effect";
-import { ClientIp } from "../ClientIp.ts";
-import type { SignInInput, SignUpInput } from "../EmailPassword.ts";
-import { makePlugin } from "../Hooks.ts";
+import { ClientIp } from "./ClientIp.ts";
+import type { SignInInput, SignUpInput } from "./EmailPassword.ts";
+import { makePlugin } from "./Hooks.ts";
 import {
   type RateLimitConfig,
   RateLimitPresets,
   RateLimitStore,
   RateLimiter,
-} from "../RateLimit.ts";
+} from "./RateLimit.ts";
 
 // ---------------------------------------------------------------------------
 // Configuration

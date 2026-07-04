@@ -1,15 +1,15 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { ClientIp } from "../ClientIp.js";
-import { Hooks } from "../Hooks.js";
-import type { SignInInput } from "../EmailPassword.js";
-import { RateLimitError } from "../Errors.js";
+import { ClientIp } from "./ClientIp.js";
+import { Hooks } from "./Hooks.js";
+import type { SignInInput } from "./EmailPassword.js";
+import { RateLimitError } from "./Errors.js";
 import {
   RateLimiter,
   RateLimitStore,
   type RateLimitEntry,
   type RateLimitStoreShape,
-} from "../RateLimit.js";
+} from "./RateLimit.js";
 import { IpRateLimitPlugin } from "./IpRateLimitPlugin.js";
 
 // ---------------------------------------------------------------------------

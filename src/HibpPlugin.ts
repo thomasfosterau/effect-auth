@@ -15,9 +15,9 @@
 import { Effect } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import * as crypto from "node:crypto";
-import type { SignUpInput } from "../EmailPassword.ts";
-import { makePlugin, type ResetPasswordArgs } from "../Hooks.ts";
-import { AuthError, PwnedPasswordError } from "../Errors.ts";
+import type { SignUpInput } from "./EmailPassword.ts";
+import { makePlugin, type ResetPasswordArgs } from "./Hooks.ts";
+import { AuthError, PwnedPasswordError } from "./Errors.ts";
 
 export interface HibpConfig {
   /** Reject when the breach count is at least this. Default 1. */

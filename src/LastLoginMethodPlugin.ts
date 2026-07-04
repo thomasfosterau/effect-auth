@@ -15,9 +15,9 @@
  * @module plugins/last-login-method
  */
 import { Effect } from "effect";
-import type { AuthResult } from "../EmailPassword.ts";
-import { SessionManager } from "../Session.ts";
-import { Hooks, makePlugin } from "../Hooks.ts";
+import type { AuthResult } from "./EmailPassword.ts";
+import { SessionManager } from "./Session.ts";
+import { Hooks, makePlugin } from "./Hooks.ts";
 
 /**
  * Build the plugin. `Layer<Hooks, never, Hooks | SessionManagerTag>` —

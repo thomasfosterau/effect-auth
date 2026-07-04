@@ -14,9 +14,9 @@
  */
 import { Effect, Redacted } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
-import type { SignInInput, SignUpInput } from "../EmailPassword.ts";
-import { makePlugin, type PluginImpls } from "../Hooks.ts";
-import { CaptchaError } from "../Errors.ts";
+import type { SignInInput, SignUpInput } from "./EmailPassword.ts";
+import { makePlugin, type PluginImpls } from "./Hooks.ts";
+import { CaptchaError } from "./Errors.ts";
 
 export type CaptchaProvider = "cloudflare-turnstile" | "google-recaptcha" | "hcaptcha";
 

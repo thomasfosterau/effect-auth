@@ -1,19 +1,19 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { composePlugins, Hooks } from "../Hooks.js";
+import { composePlugins, Hooks } from "./Hooks.js";
 import { makeLastLoginMethodPlugin } from "./LastLoginMethodPlugin.js";
-import { makeEmailPasswordService } from "../EmailPassword.js";
-import { EmailPasswordStore, type EmailPasswordStoreShape } from "../EmailPassword.js";
-import { PasswordHasher, makeScryptHasher } from "../Password.js";
+import { makeEmailPasswordService } from "./EmailPassword.js";
+import { EmailPasswordStore, type EmailPasswordStoreShape } from "./EmailPassword.js";
+import { PasswordHasher, makeScryptHasher } from "./Password.js";
 import {
   SessionManager,
   SessionStore,
   UserStore,
   type SessionStoreShape,
   type UserStoreShape,
-} from "../Session.js";
-import { hashToken } from "../TokenHash.js";
-import type * as Types from "../Types.js";
+} from "./Session.js";
+import { hashToken } from "./TokenHash.js";
+import type * as Types from "./Types.js";
 
 const hasher = makeScryptHasher({ cost: 16384 });
 

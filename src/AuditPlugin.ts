@@ -9,8 +9,8 @@
  * @module plugins/audit
  */
 import { Effect } from "effect";
-import type { AuthResult } from "../EmailPassword.ts";
-import { Hooks, makePlugin, type SessionRef } from "../Hooks.ts";
+import type { AuthResult } from "./EmailPassword.ts";
+import { Hooks, makePlugin, type SessionRef } from "./Hooks.ts";
 
 /**
  * Logs `afterSignUp`, `afterSignIn` and `afterSignOut`.

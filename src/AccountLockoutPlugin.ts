@@ -14,9 +14,9 @@
  * @module plugins/account-lockout
  */
 import { Context, Effect } from "effect";
-import type { SignInInput, AuthResult } from "../EmailPassword.ts";
-import * as Errors from "../Errors.ts";
-import { makePlugin } from "../Hooks.ts";
+import type { SignInInput, AuthResult } from "./EmailPassword.ts";
+import * as Errors from "./Errors.ts";
+import { makePlugin } from "./Hooks.ts";
 
 /** Per-identifier lockout state. `lockedUntil` is epoch-ms when present. */
 export interface AccountLockoutRecord {

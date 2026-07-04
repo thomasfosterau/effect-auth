@@ -12,9 +12,9 @@
  * @module plugins/rate-limit
  */
 import { Effect } from "effect";
-import type { SignInInput } from "../EmailPassword.ts";
-import { makePlugin } from "../Hooks.ts";
-import { RateLimitPresets, RateLimitStore, RateLimiter } from "../RateLimit.ts";
+import type { SignInInput } from "./EmailPassword.ts";
+import { makePlugin } from "./Hooks.ts";
+import { RateLimitPresets, RateLimitStore, RateLimiter } from "./RateLimit.ts";
 
 const normalize = (email: string): string => email.trim().toLowerCase();
 

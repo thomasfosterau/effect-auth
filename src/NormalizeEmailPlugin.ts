@@ -9,9 +9,9 @@
  * @module plugins/normalize-email
  */
 import { Effect } from "effect";
-import type { SignInInput, SignUpInput } from "../EmailPassword.ts";
-import { makePlugin } from "../Hooks.ts";
-import { normalizeEmail } from "../utils.ts";
+import type { SignInInput, SignUpInput } from "./EmailPassword.ts";
+import { makePlugin } from "./Hooks.ts";
+import { normalizeEmail } from "./utils.ts";
 
 /**
  * Lower-cases and trims the email on `beforeSignUp` and `beforeSignIn`.

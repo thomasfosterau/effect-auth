@@ -2,11 +2,11 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import * as crypto from "node:crypto";
-import { Hooks, type HookDefs } from "../Hooks.js";
+import { Hooks, type HookDefs } from "./Hooks.js";
 import { HaveIBeenPwnedPlugin } from "./HibpPlugin.js";
 import { CaptchaPlugin } from "./CaptchaPlugin.js";
-import { PwnedPasswordError, CaptchaError } from "../Errors.js";
-import type { SignInInput, SignUpInput } from "../EmailPassword.js";
+import { PwnedPasswordError, CaptchaError } from "./Errors.js";
+import type { SignInInput, SignUpInput } from "./EmailPassword.js";
 
 /** A stubbed HttpClient that answers every request with `respond(request)`. */
 const stubHttpClient = (respond: (url: string) => Response) =>
