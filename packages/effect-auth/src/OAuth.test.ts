@@ -4,11 +4,15 @@ import * as crypto from "node:crypto";
 import { AuthError } from "./Errors.js";
 import {
   makeOAuthProvider,
+  makeOAuthService,
+  makeAes256GcmCipher,
   verifyIdToken,
   discoverOAuthEndpoints,
   makeAppleClientSecret,
   OAuthStateStore,
+  OAuthAccountStore,
   type OAuthState,
+  type OAuthAccount,
   type OAuthProvider,
   type OAuthTokenResponse,
   AppleProvider,
@@ -637,5 +641,218 @@ describe("makeAppleClientSecret", () => {
       Buffer.from(signatureSeg, "base64url"),
     );
     expect(valid).toBe(true);
+  });
+});
+
+// --- Token encryption --------------------------------------------------------
+
+const TEST_SECRET = "test-secret-for-aes-256-gcm-cipher";
+
+describe("makeAes256GcmCipher", () => {
+  it("encrypts and decrypts round-trip", async () => {
+    const cipher = makeAes256GcmCipher(TEST_SECRET);
+    const token = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ012345";
+    const encrypted = await Effect.runPromise(cipher.encrypt(token));
+    expect(encrypted).not.toBe(token);
+    expect(await Effect.runPromise(cipher.decrypt(encrypted))).toBe(token);
+  });
+
+  it("produces a different ciphertext on each call (random IV)", async () => {
+    const cipher = makeAes256GcmCipher(TEST_SECRET);
+    const e1 = await Effect.runPromise(cipher.encrypt("same-plaintext"));
+    const e2 = await Effect.runPromise(cipher.encrypt("same-plaintext"));
+    expect(e1).not.toBe(e2);
+  });
+
+  it("fails loudly on tampered ciphertext (GCM auth-tag)", async () => {
+    const cipher = makeAes256GcmCipher(TEST_SECRET);
+    const encrypted = await Effect.runPromise(cipher.encrypt("hello"));
+    const buf = Buffer.from(encrypted, "base64url");
+    buf[buf.length - 1] ^= 0xff;
+    const err = await Effect.runPromise(Effect.flip(cipher.decrypt(buf.toString("base64url"))));
+    expect(err._tag).toBe("AuthError");
+    expect(err.message).toMatch(/decrypt/i);
+  });
+
+  it("fails on ciphertext that is too short", async () => {
+    const cipher = makeAes256GcmCipher(TEST_SECRET);
+    const err = await Effect.runPromise(Effect.flip(cipher.decrypt("dG9vc2hvcnQ")));
+    expect(err._tag).toBe("AuthError");
+  });
+});
+
+describe("OAuthService encryptTokens", () => {
+  const makeAccountStore = () => {
+    const stored = new Map<string, OAuthAccount>();
+    const layer = Layer.succeed(OAuthAccountStore, {
+      create: (a) =>
+        Effect.sync(() => {
+          stored.set(`${a.provider}:${a.providerId}`, a);
+          return a;
+        }),
+      get: (p, id) => Effect.succeed(stored.get(`${p}:${id}`) ?? null),
+      getByUserId: (uid) => Effect.succeed([...stored.values()].filter((a) => a.userId === uid)),
+      update: (a) =>
+        Effect.sync(() => {
+          stored.set(`${a.provider}:${a.providerId}`, a);
+          return a;
+        }),
+      linkToUser: (uid, a) =>
+        Effect.sync(() => {
+          stored.set(`${a.provider}:${a.providerId}`, { ...a, userId: uid });
+        }),
+      unlinkFromUser: (uid, p) =>
+        Effect.sync(() => {
+          for (const [k, v] of stored) if (v.userId === uid && v.provider === p) stored.delete(k);
+        }),
+      delete: (p, id) =>
+        Effect.sync(() => {
+          stored.delete(`${p}:${id}`);
+        }),
+    });
+    return { stored, layer };
+  };
+
+  const githubProvider = makeOAuthProvider(
+    "github",
+    {
+      clientId: "c",
+      clientSecret: "s",
+      redirectUri: "https://app/cb",
+      authorizationEndpoint: "https://github.com/login/oauth/authorize",
+      tokenEndpoint: "https://github.com/login/oauth/access_token",
+      userInfoEndpoint: "https://api.github.com/user",
+      scopes: ["user:email"],
+    },
+    false,
+  );
+
+  it("stores encrypted tokens and refreshAccessToken returns plaintext", async () => {
+    const { stored, layer: accountStoreLive } = makeAccountStore();
+    const cipher = makeAes256GcmCipher(TEST_SECRET);
+
+    const PLAIN_ACCESS = "plain-access-token";
+    const PLAIN_REFRESH = "plain-refresh-token";
+    const NEW_ACCESS = "new-access-token-after-refresh";
+
+    // Pre-populate store with encrypted tokens (as the service would have stored them).
+    const encAccess = await Effect.runPromise(cipher.encrypt(PLAIN_ACCESS));
+    const encRefresh = await Effect.runPromise(cipher.encrypt(PLAIN_REFRESH));
+    stored.set("github:gh-1", {
+      id: "acc-1",
+      userId: "user-1",
+      provider: "github",
+      providerId: "gh-1",
+      accessToken: encAccess,
+      refreshToken: encRefresh,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    const service = await Effect.runPromise(
+      makeOAuthService({ github: githubProvider }, { encryptTokens: { secret: TEST_SECRET } }),
+    );
+
+    let capturedRefreshToken: string | null = null;
+    const tokenResp: OAuthTokenResponse = { access_token: NEW_ACCESS, token_type: "bearer" };
+
+    const newAccessToken = await withFetch(
+      (_url, init) => {
+        if (typeof init?.body === "string") {
+          capturedRefreshToken = new URLSearchParams(init.body).get("refresh_token");
+        }
+        return json(tokenResp);
+      },
+      () =>
+        Effect.runPromise(
+          service.refreshAccessToken("user-1", "github").pipe(Effect.provide(accountStoreLive)),
+        ),
+    );
+
+    // HTTP call must use the decrypted refresh token.
+    expect(capturedRefreshToken).toBe(PLAIN_REFRESH);
+    // Returned access token must be plaintext.
+    expect(newAccessToken).toBe(NEW_ACCESS);
+    // Stored access token must be encrypted (not the raw plaintext).
+    const updated = stored.get("github:gh-1")!;
+    expect(updated.accessToken).not.toBe(NEW_ACCESS);
+    // And it must decrypt to the new plaintext access token.
+    expect(await Effect.runPromise(cipher.decrypt(updated.accessToken))).toBe(NEW_ACCESS);
+  });
+
+  it("default (no encryptTokens) stores tokens as plaintext", async () => {
+    const { stored, layer: accountStoreLive } = makeAccountStore();
+
+    const PLAIN_ACCESS = "plain-access-token";
+    const PLAIN_REFRESH = "plain-refresh-token";
+    const NEW_ACCESS = "new-access-token-after-refresh";
+
+    stored.set("github:gh-1", {
+      id: "acc-1",
+      userId: "user-1",
+      provider: "github",
+      providerId: "gh-1",
+      accessToken: PLAIN_ACCESS,
+      refreshToken: PLAIN_REFRESH,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    const service = await Effect.runPromise(makeOAuthService({ github: githubProvider }));
+    const tokenResp: OAuthTokenResponse = { access_token: NEW_ACCESS, token_type: "bearer" };
+
+    const newAccessToken = await withFetch(
+      () => json(tokenResp),
+      () =>
+        Effect.runPromise(
+          service.refreshAccessToken("user-1", "github").pipe(Effect.provide(accountStoreLive)),
+        ),
+    );
+
+    expect(newAccessToken).toBe(NEW_ACCESS);
+    // Without encryption the stored token is the raw string.
+    expect(stored.get("github:gh-1")!.accessToken).toBe(NEW_ACCESS);
+  });
+
+  it("accepts a custom TokenCipher via { cipher }", async () => {
+    const { stored, layer: accountStoreLive } = makeAccountStore();
+    const customCipher = makeAes256GcmCipher(TEST_SECRET);
+
+    const PLAIN_REFRESH = "custom-cipher-refresh-token";
+    const NEW_ACCESS = "new-access-from-custom-cipher";
+
+    const encRefresh = await Effect.runPromise(customCipher.encrypt(PLAIN_REFRESH));
+    stored.set("github:gh-2", {
+      id: "acc-2",
+      userId: "user-2",
+      provider: "github",
+      providerId: "gh-2",
+      accessToken: await Effect.runPromise(customCipher.encrypt("old-access")),
+      refreshToken: encRefresh,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    const service = await Effect.runPromise(
+      makeOAuthService({ github: githubProvider }, { encryptTokens: { cipher: customCipher } }),
+    );
+
+    let capturedRefreshToken: string | null = null;
+    const tokenResp: OAuthTokenResponse = { access_token: NEW_ACCESS, token_type: "bearer" };
+
+    await withFetch(
+      (_url, init) => {
+        if (typeof init?.body === "string") {
+          capturedRefreshToken = new URLSearchParams(init.body).get("refresh_token");
+        }
+        return json(tokenResp);
+      },
+      () =>
+        Effect.runPromise(
+          service.refreshAccessToken("user-2", "github").pipe(Effect.provide(accountStoreLive)),
+        ),
+    );
+
+    expect(capturedRefreshToken).toBe(PLAIN_REFRESH);
   });
 });
