@@ -13,6 +13,7 @@ import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
 import { SessionManager } from "./Session.js";
+import { constantTimeHashEqual, hashToken } from "./TokenHash.js";
 import type * as Types from "./Types.js";
 
 /**
@@ -186,23 +187,8 @@ export class EmailOtpService extends Context.Service<EmailOtpService, EmailOtpSe
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
-/**
- * SHA-256 hex digest of an OTP code
- */
-export const hashOtp = (otp: string): string =>
-  crypto.createHash("sha256").update(otp).digest("hex");
-
-/**
- * Constant-time comparison of two hex-encoded hashes
- */
-const constantTimeHashEqual = (a: string, b: string): boolean => {
-  const bufferA = Buffer.from(a, "hex");
-  const bufferB = Buffer.from(b, "hex");
-  if (bufferA.length !== bufferB.length) {
-    return false;
-  }
-  return crypto.timingSafeEqual(bufferA, bufferB);
-};
+/** @deprecated Use {@link hashToken} from `"effect-auth"` instead. */
+export const hashOtp = hashToken;
 
 /**
  * Generate a numeric OTP with crypto-secure randomness (one uniform
@@ -276,7 +262,7 @@ export const makeEmailOtpService = (
         );
       }
 
-      if (!constantTimeHashEqual(record.otpHash, hashOtp(otp))) {
+      if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
         const attempts = yield* store.incrementAttempts(email, purpose);
         if (attempts >= maxAttempts) {
           yield* store.delete(email, purpose);
@@ -327,7 +313,7 @@ export const makeEmailOtpService = (
           const otp = yield* generateOtp(otpLength);
           const record: EmailOtpRecord = {
             email,
-            otpHash: hashOtp(otp),
+            otpHash: hashToken(otp),
             purpose,
             attempts: 0,
             createdAt: Date.now(),

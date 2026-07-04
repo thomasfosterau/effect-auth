@@ -13,6 +13,7 @@ import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
 import { SessionManager } from "./Session.js";
+import { hashToken } from "./TokenHash.js";
 import type * as Types from "./Types.js";
 
 /**
@@ -184,9 +185,10 @@ export const makeMagicLinkService = (
           // Invalidate outstanding tokens so only the latest link is usable.
           yield* store.deleteByEmail(email);
 
-          const token = yield* generateMagicLinkToken();
+          const rawToken = yield* generateMagicLinkToken();
           const magicLink: MagicLinkToken = {
-            token,
+            // Store the hash — the raw token is delivered to the user via sendMagicLink.
+            token: hashToken(rawToken),
             email,
             createdAt: Date.now(),
             expiresAt: Date.now() + expiresIn,
@@ -194,7 +196,7 @@ export const makeMagicLinkService = (
 
           yield* store.create(magicLink);
 
-          yield* Effect.catch(config.sendMagicLink(email, token), (error) =>
+          yield* Effect.catch(config.sendMagicLink(email, rawToken), (error) =>
             Effect.fail(
               new Errors.MagicLinkError({
                 message: `Failed to send magic link to ${email}`,
@@ -204,13 +206,13 @@ export const makeMagicLinkService = (
           );
         }),
 
-      verify: (token: string, options?: MagicLinkVerifyOptions) =>
+      verify: (rawToken: string, options?: MagicLinkVerifyOptions) =>
         Effect.gen(function* () {
           const store = yield* MagicLinkStore;
           const userStore = yield* MagicLinkUserStore;
           const sessionManager = yield* SessionManager;
 
-          if (!token) {
+          if (!rawToken) {
             return yield* Effect.fail(
               new Errors.MagicLinkError({
                 message: "Invalid or expired magic link token",
@@ -218,7 +220,8 @@ export const makeMagicLinkService = (
             );
           }
 
-          const magicLink = yield* store.get(token);
+          const tokenHash = hashToken(rawToken);
+          const magicLink = yield* store.get(tokenHash);
           if (!magicLink) {
             return yield* Effect.fail(
               new Errors.MagicLinkError({
@@ -229,7 +232,7 @@ export const makeMagicLinkService = (
 
           // Check expiration
           if (Date.now() > magicLink.expiresAt) {
-            yield* store.delete(token);
+            yield* store.delete(tokenHash);
             return yield* Effect.fail(
               new Errors.MagicLinkError({
                 message: "Magic link token has expired",
@@ -238,7 +241,7 @@ export const makeMagicLinkService = (
           }
 
           // Consume the token (one-time use)
-          yield* store.delete(token);
+          yield* store.delete(tokenHash);
 
           let user = yield* userStore.getUserByEmail(magicLink.email);
           if (!user) {

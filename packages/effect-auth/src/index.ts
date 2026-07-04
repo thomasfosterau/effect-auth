@@ -14,6 +14,9 @@ export * from "./Types.js";
 /** Tagged errors raised across the library. */
 export * from "./Errors.js";
 
+/** Token hashing primitives (SHA-256, constant-time compare) shared across all bearer-token flows. */
+export * from "./TokenHash.js";
+
 /** Password hashing (following Oslo patterns). */
 export * from "./Password.js";
 

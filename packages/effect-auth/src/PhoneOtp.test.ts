@@ -10,7 +10,7 @@ import {
   PhoneOtpStore,
   PhoneOtpUserStore,
 } from "./PhoneOtp.js";
-import { hashOtp } from "./EmailOtp.js";
+import { hashToken } from "./TokenHash.js";
 import {
   makeSessionManager,
   SessionStore,
@@ -167,7 +167,7 @@ describe("PhoneOtpService", () => {
     const otp = sentOtps[0]!.otp;
     expect(otp).toMatch(/^\d{6}$/);
     const record = records.get("+15551230000:sign-in");
-    expect(record?.otpHash).toBe(hashOtp(otp));
+    expect(record?.otpHash).toBe(hashToken(otp));
     expect(record?.attempts).toBe(0);
   });
 
@@ -226,7 +226,7 @@ describe("PhoneOtpService", () => {
     const testContext = await makeTestContext();
     records.set("+15551234444:sign-in", {
       phoneNumber: "+15551234444",
-      otpHash: hashOtp("123456"),
+      otpHash: hashToken("123456"),
       purpose: "sign-in",
       attempts: 0,
       createdAt: Date.now() - 10_000,

@@ -9,6 +9,7 @@ import {
   MagicLinkUserStore,
 } from "./MagicLink.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
+import { hashToken } from "./TokenHash.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 
 const users = new Map<string, User>();
@@ -162,7 +163,8 @@ describe("MagicLinkService", () => {
     expect(sentLinks[0]?.email).toBe("new@example.com");
     expect(magicLinkTokens.size).toBe(1);
 
-    const stored = magicLinkTokens.get(sentLinks[0]!.token);
+    // The store is keyed by hash; the sent token is the raw value.
+    const stored = magicLinkTokens.get(hashToken(sentLinks[0]!.token));
     expect(stored).toBeDefined();
     expect(stored?.email).toBe("new@example.com");
     expect(stored?.expiresAt).toBeGreaterThan(Date.now());
@@ -198,10 +200,10 @@ describe("MagicLinkService", () => {
     );
 
     expect(sentLinks.length).toBe(2);
-    // Only the latest token remains usable.
+    // Only the latest token remains usable. Compare by hash (store key).
     expect(magicLinkTokens.size).toBe(1);
-    expect(magicLinkTokens.has(sentLinks[1]!.token)).toBe(true);
-    expect(magicLinkTokens.has(sentLinks[0]!.token)).toBe(false);
+    expect(magicLinkTokens.has(hashToken(sentLinks[1]!.token))).toBe(true);
+    expect(magicLinkTokens.has(hashToken(sentLinks[0]!.token))).toBe(false);
   });
 
   it("should not send or store anything for unknown emails when sign-up is disabled", async () => {
@@ -308,8 +310,9 @@ describe("MagicLinkService", () => {
   it("should reject expired tokens and delete them", async () => {
     const testContext = await makeTestContext();
 
-    magicLinkTokens.set("expired-token", {
-      token: "expired-token",
+    // Seed with the hash as key (the service looks up by hash).
+    magicLinkTokens.set(hashToken("expired-token"), {
+      token: hashToken("expired-token"),
       email: "late@example.com",
       createdAt: Date.now() - 10 * 60 * 1000,
       expiresAt: Date.now() - 60 * 1000,
@@ -376,8 +379,8 @@ describe("MagicLinkService", () => {
   it("should not create users at verification when sign-up is disabled", async () => {
     const testContext = await makeTestContext();
 
-    magicLinkTokens.set("orphan-token", {
-      token: "orphan-token",
+    magicLinkTokens.set(hashToken("orphan-token"), {
+      token: hashToken("orphan-token"),
       email: "orphan@example.com",
       createdAt: Date.now(),
       expiresAt: Date.now() + 60 * 1000,
