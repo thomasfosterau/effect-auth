@@ -14,8 +14,8 @@
 import { Effect, Layer } from "effect";
 import {
   HashingError,
-  PasswordHasherTag,
-  type PasswordHasher,
+  PasswordHasher,
+  type PasswordHasherShape,
   type HashedPassword,
 } from "effect-auth";
 import { hash as argon2Hash, verify as argon2Verify } from "@node-rs/argon2";
@@ -49,7 +49,7 @@ export interface Argon2Options {
  * const layer = Argon2HasherLayer({ timeCost: 3 });
  * ```
  */
-export const makeArgon2Hasher = (options?: Argon2Options): PasswordHasher => {
+export const makeArgon2Hasher = (options?: Argon2Options): PasswordHasherShape => {
   // Omit `algorithm`/`version`: the binding already defaults to Argon2id / 0x13.
   const params = {
     memoryCost: options?.memoryCost ?? 19456,
@@ -94,9 +94,9 @@ export const makeArgon2Hasher = (options?: Argon2Options): PasswordHasher => {
 };
 
 /**
- * A `Layer` providing {@link PasswordHasherTag} backed by Argon2id. Use in place
+ * A `Layer` providing {@link PasswordHasher} backed by Argon2id. Use in place
  * of `PasswordHasherLayer` to make Argon2id the default hasher for new
  * passwords.
  */
-export const Argon2HasherLayer = (options?: Argon2Options): Layer.Layer<PasswordHasherTag> =>
-  Layer.succeed(PasswordHasherTag, makeArgon2Hasher(options));
+export const Argon2HasherLayer = (options?: Argon2Options): Layer.Layer<PasswordHasher> =>
+  Layer.succeed(PasswordHasher, makeArgon2Hasher(options));

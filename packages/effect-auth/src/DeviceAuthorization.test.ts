@@ -1,23 +1,21 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import {
-  DeviceAuthorizationServiceLayer,
-  DeviceAuthorizationServiceTag,
-  DeviceAuthorizationStoreTag,
+  DeviceAuthorizationService,
+  DeviceAuthorizationStore,
   DevicePollError,
   DeviceCodeError,
   normalizeUserCode,
   type DeviceAuthorizationRecord,
-  type DeviceAuthorizationService,
-  type DeviceAuthorizationStore,
+  type DeviceAuthorizationServiceShape,
+  type DeviceAuthorizationStoreShape,
 } from "./DeviceAuthorization.js";
 import {
-  SessionManagerLayer,
-  SessionStoreTag,
-  UserStoreTag,
-  SessionManagerTag,
-  type SessionStore,
-  type UserStore,
+  SessionStore,
+  UserStore,
+  SessionManager,
+  type SessionStoreShape,
+  type UserStoreShape,
 } from "./Session.js";
 import { Hooks } from "./Hooks.js";
 import type * as Types from "./Types.js";
@@ -26,7 +24,7 @@ const records = new Map<string, DeviceAuthorizationRecord>();
 const sessions = new Map<string, Types.Session>();
 const users = new Map<string, Types.User>();
 
-const store: DeviceAuthorizationStore = {
+const store: DeviceAuthorizationStoreShape = {
   create: (record) =>
     Effect.sync(() => {
       records.set(record.deviceCode, record);
@@ -43,7 +41,7 @@ const store: DeviceAuthorizationStore = {
   delete: (deviceCode) => Effect.sync(() => void records.delete(deviceCode)),
 };
 
-const sessionStore: SessionStore = {
+const sessionStore: SessionStoreShape = {
   create: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -64,7 +62,7 @@ const sessionStore: SessionStore = {
     Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
 };
 
-const userStore: UserStore = {
+const userStore: UserStoreShape = {
   get: (userId) => Effect.sync(() => users.get(userId) ?? null),
   getCredentials: (_userId) => Effect.succeed(null),
 };
@@ -74,31 +72,31 @@ const sessionConfig: Types.SessionConfig = {
 };
 
 const layer = Layer.mergeAll(
-  DeviceAuthorizationServiceLayer({
+  DeviceAuthorizationService.layer({
     verificationUri: "https://example.com/device",
     interval: 5,
   }),
-  Layer.succeed(DeviceAuthorizationStoreTag)(store),
-  SessionManagerLayer(sessionConfig).pipe(
+  Layer.succeed(DeviceAuthorizationStore)(store),
+  SessionManager.layer(sessionConfig).pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.succeed(SessionStoreTag)(sessionStore),
-        Layer.succeed(UserStoreTag)(userStore),
+        Layer.succeed(SessionStore)(sessionStore),
+        Layer.succeed(UserStore)(userStore),
       ),
     ),
   ),
-  Layer.succeed(UserStoreTag)(userStore),
+  Layer.succeed(UserStore)(userStore),
   Hooks.Default,
 );
 
 const run = <A, E>(
   f: (
-    svc: DeviceAuthorizationService,
-  ) => Effect.Effect<A, E, DeviceAuthorizationStoreTag | SessionManagerTag | Hooks>,
+    svc: DeviceAuthorizationServiceShape,
+  ) => Effect.Effect<A, E, DeviceAuthorizationStore | SessionManager | Hooks>,
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const svc = yield* DeviceAuthorizationServiceTag;
+      const svc = yield* DeviceAuthorizationService;
       return yield* f(svc);
     }).pipe(Effect.provide(layer)),
   );

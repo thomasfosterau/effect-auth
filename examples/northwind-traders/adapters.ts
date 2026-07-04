@@ -26,7 +26,7 @@ import { NorthwindRoles } from "./permissions.ts";
 // SessionStore + UserStore (consumed by SessionManager)
 // ---------------------------------------------------------------------------
 
-export const sessionStore: Auth.SessionStore = {
+export const sessionStore: Auth.SessionStoreShape = {
   create: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -62,7 +62,7 @@ const employeeToUser = (employee: Employee): Auth.User => ({
   attributes: { ...employee.attributes },
 });
 
-export const userStore: Auth.UserStore = {
+export const userStore: Auth.UserStoreShape = {
   get: (userId) =>
     Effect.sync(() => {
       const employee = employees.get(userId);
@@ -100,7 +100,7 @@ const updateEmployeeFromUser = (user: Auth.User): Employee => {
   return updated;
 };
 
-export const userServiceStore: Auth.UserServiceStore = {
+export const userServiceStore: Auth.UserServiceStoreShape = {
   get: (userId) =>
     Effect.sync(() => {
       const employee = employees.get(userId);
@@ -128,7 +128,7 @@ export const userServiceStore: Auth.UserServiceStore = {
 // EmailPasswordStore (consumed by EmailPasswordService / AuthLifecycle)
 // ---------------------------------------------------------------------------
 
-export const emailPasswordStore: Auth.EmailPasswordStore = {
+export const emailPasswordStore: Auth.EmailPasswordStoreShape = {
   getUserByEmail: (email) =>
     Effect.sync(() => {
       const employee = findEmployeeByEmail(email);
@@ -167,7 +167,7 @@ export const emailPasswordStore: Auth.EmailPasswordStore = {
 // EmailVerificationStore
 // ---------------------------------------------------------------------------
 
-export const emailVerificationStore: Auth.EmailVerificationStore = {
+export const emailVerificationStore: Auth.EmailVerificationStoreShape = {
   create: (verification) =>
     Effect.sync(() => {
       emailVerifications.set(verification.token, verification);
@@ -190,7 +190,7 @@ export const emailVerificationStore: Auth.EmailVerificationStore = {
 // RateLimitStore
 // ---------------------------------------------------------------------------
 
-export const rateLimitStore: Auth.RateLimitStore = {
+export const rateLimitStore: Auth.RateLimitStoreShape = {
   get: (key) => Effect.succeed(rateLimits.get(key) ?? null),
   set: (key, entry, _ttl) =>
     Effect.sync(() => {
@@ -223,7 +223,7 @@ export const rateLimitStore: Auth.RateLimitStore = {
 // OAuth stores
 // ---------------------------------------------------------------------------
 
-export const oauthStateStore: Auth.OAuthStateStore = {
+export const oauthStateStore: Auth.OAuthStateStoreShape = {
   create: (state) =>
     Effect.sync(() => {
       oauthStates.set(state.state, state);
@@ -238,7 +238,7 @@ export const oauthStateStore: Auth.OAuthStateStore = {
 
 const accountKey = (provider: string, providerId: string): string => `${provider}:${providerId}`;
 
-export const oauthAccountStore: Auth.OAuthAccountStore = {
+export const oauthAccountStore: Auth.OAuthAccountStoreShape = {
   create: (account) =>
     Effect.sync(() => {
       oauthAccounts.set(accountKey(account.provider, account.providerId), account);

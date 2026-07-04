@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Context } from "effect";
 import {
   makeWebAuthnService,
+  base64UrlDecode,
   ChallengeStore,
   CredentialStore,
-  base64UrlDecode,
 } from "./WebAuthn.js";
 import type {
   WebAuthnChallenge,

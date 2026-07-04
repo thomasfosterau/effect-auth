@@ -5,7 +5,7 @@ description: "API reference for the Rbac module."
 
 ## Rbac overview
 
-In-memory {@link RoleStore} builder for role-based access control (RBAC).
+In-memory {@link RoleStoreShape} builder for role-based access control (RBAC).
 
 This removes the boilerplate of hand-rolling a `RoleStore` from `Map`s and
 adds optional role inheritance: a role can declare parent roles whose
@@ -48,7 +48,7 @@ export interface InMemoryRoleStoreConfig {
 
 ## makeInMemoryRoleStore
 
-Create an in-memory {@link RoleStore} from static configuration.
+Create an in-memory {@link RoleStoreShape} from static configuration.
 
 The returned store is synchronous (its methods wrap results in
 `Effect.succeed`). When `roleHierarchy` is provided, `getRolePermissions`
@@ -58,7 +58,7 @@ roles, de-duplicated by `"resource:action"`.
 **Signature**
 
 ```ts
-export declare const makeInMemoryRoleStore: (config: InMemoryRoleStoreConfig) => RoleStore;
+export declare const makeInMemoryRoleStore: (config: InMemoryRoleStoreConfig) => RoleStoreShape;
 ```
 
 **Example**

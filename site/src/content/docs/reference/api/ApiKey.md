@@ -12,7 +12,7 @@ Mirrors better-auth's api-key plugin: users create long-lived API keys
 and verified by sha256 hash lookup. Keys support expiry, enable/disable,
 per-resource permissions, remaining-use quotas, arbitrary metadata, and
 an optional per-key rate limit that is enforced through the
-{@link RateLimiterTag} service.
+{@link RateLimiter} service.
 
 Only the sha256 hex digest of a key is ever persisted — the plaintext is
 returned once from `create` and cannot be recovered. Because verification
@@ -29,13 +29,10 @@ byte-by-byte), the comparison is inherently timing-safe.
   - [ApiKeyCreateOptions (interface)](#apikeycreateoptions-interface)
   - [ApiKeyCreateResult (interface)](#apikeycreateresult-interface)
   - [ApiKeyError (class)](#apikeyerror-class)
-  - [ApiKeyService](#apikeyservice)
-  - [ApiKeyService (interface)](#apikeyservice-interface)
-  - [ApiKeyServiceLayer](#apikeyservicelayer)
-  - [ApiKeyServiceTag (class)](#apikeyservicetag-class)
-  - [ApiKeyStore](#apikeystore)
-  - [ApiKeyStore (interface)](#apikeystore-interface)
-  - [ApiKeyStoreTag (class)](#apikeystoretag-class)
+  - [ApiKeyService (class)](#apikeyservice-class)
+  - [ApiKeyServiceShape (interface)](#apikeyserviceshape-interface)
+  - [ApiKeyStore (class)](#apikeystore-class)
+  - [ApiKeyStoreShape (interface)](#apikeystoreshape-interface)
   - [ApiKeyUpdate (interface)](#apikeyupdate-interface)
   - [ApiKeyVerifyResult (interface)](#apikeyverifyresult-interface)
   - [hashApiKey](#hashapikey)
@@ -155,22 +152,22 @@ API key error
 export declare class ApiKeyError
 ```
 
-## ApiKeyService
+## ApiKeyService (class)
 
 **Signature**
 
 ```ts
-export declare const ApiKeyService: typeof ApiKeyServiceTag;
+export declare class ApiKeyService
 ```
 
-## ApiKeyService (interface)
+## ApiKeyServiceShape (interface)
 
 API key service
 
 **Signature**
 
 ```ts
-export interface ApiKeyService {
+export interface ApiKeyServiceShape {
   /**
    * Create a new API key for a user. Returns the plaintext key (shown once)
    * alongside the stored record. Fails with {@link ApiKeyError} when the
@@ -179,7 +176,7 @@ export interface ApiKeyService {
   readonly create: (
     userId: string,
     options?: ApiKeyCreateOptions,
-  ) => Effect.Effect<ApiKeyCreateResult, ApiKeyError | Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<ApiKeyCreateResult, ApiKeyError | Errors.AuthError, ApiKeyStore>;
 
   /**
    * Verify a plaintext API key: sha256 hash lookup, then enabled / expiry /
@@ -190,11 +187,11 @@ export interface ApiKeyService {
   readonly verify: (
     plaintextKey: string,
     requiredPermissions?: Record<string, readonly string[]>,
-  ) => Effect.Effect<ApiKeyVerifyResult, Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<ApiKeyVerifyResult, Errors.AuthError, ApiKeyStore>;
 
   /**
    * Like `verify`, but when the key carries a `rateLimit` configuration a
-   * token is consumed from the {@link RateLimiterTag} bucket keyed
+   * token is consumed from the {@link RateLimiter} bucket keyed
    * `api-key:${apiKey.id}` before the remaining checks run. When the limit
    * is exhausted the result is `{ valid: false, error: "Rate limit exceeded" }`.
    */
@@ -204,7 +201,7 @@ export interface ApiKeyService {
   ) => Effect.Effect<
     ApiKeyVerifyResult,
     Errors.AuthError,
-    ApiKeyStoreTag | RateLimiterTag | RateLimitStoreTag
+    ApiKeyStore | RateLimiter | RateLimitStore
   >;
 
   /**
@@ -212,14 +209,14 @@ export interface ApiKeyService {
    */
   readonly get: (
     keyId: string,
-  ) => Effect.Effect<ApiKey, ApiKeyError | Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<ApiKey, ApiKeyError | Errors.AuthError, ApiKeyStore>;
 
   /**
    * List all keys belonging to a user.
    */
   readonly list: (
     userId: string,
-  ) => Effect.Effect<readonly ApiKey[], Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<readonly ApiKey[], Errors.AuthError, ApiKeyStore>;
 
   /**
    * Update a key on behalf of a user. Fails with {@link ApiKeyError} when the
@@ -229,7 +226,7 @@ export interface ApiKeyService {
     userId: string,
     keyId: string,
     updates: ApiKeyUpdate,
-  ) => Effect.Effect<ApiKey, ApiKeyError | Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<ApiKey, ApiKeyError | Errors.AuthError, ApiKeyStore>;
 
   /**
    * Delete a key on behalf of a user. Fails with {@link ApiKeyError} when the
@@ -238,7 +235,7 @@ export interface ApiKeyService {
   readonly delete: (
     userId: string,
     keyId: string,
-  ) => Effect.Effect<void, ApiKeyError | Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<void, ApiKeyError | Errors.AuthError, ApiKeyStore>;
 
   /**
    * Delete every key of a user whose `expiresAt` is in the past. Returns the
@@ -247,59 +244,33 @@ export interface ApiKeyService {
    */
   readonly deleteAllExpired: (
     userId: string,
-  ) => Effect.Effect<number, Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<number, Errors.AuthError, ApiKeyStore>;
 }
 ```
 
-## ApiKeyServiceLayer
+## ApiKeyStore (class)
 
 **Signature**
 
 ```ts
-export declare const ApiKeyServiceLayer: (
-  config?: ApiKeyConfig,
-) => Layer.Layer<ApiKeyServiceTag, never, never>;
+export declare class ApiKeyStore
 ```
 
-## ApiKeyServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class ApiKeyServiceTag
-```
-
-## ApiKeyStore
-
-**Signature**
-
-```ts
-export declare const ApiKeyStore: typeof ApiKeyStoreTag;
-```
-
-## ApiKeyStore (interface)
+## ApiKeyStoreShape (interface)
 
 Storage interface for API keys
 
 **Signature**
 
 ```ts
-export interface ApiKeyStore {
+export interface ApiKeyStoreShape {
   readonly create: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
-  readonly getById: (id: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
+  readonly get: (id: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
   readonly getByHash: (keyHash: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
   readonly update: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
   readonly delete: (id: string) => Effect.Effect<void, Errors.AuthError>;
   readonly listByUserId: (userId: string) => Effect.Effect<readonly ApiKey[], Errors.AuthError>;
 }
-```
-
-## ApiKeyStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class ApiKeyStoreTag
 ```
 
 ## ApiKeyUpdate (interface)
@@ -359,5 +330,5 @@ Create an API key service
 ```ts
 export declare const makeApiKeyService: (
   config?: ApiKeyConfig,
-) => Effect.Effect<ApiKeyService, never>;
+) => Effect.Effect<ApiKeyServiceShape, never>;
 ```

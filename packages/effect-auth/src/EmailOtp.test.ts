@@ -4,13 +4,13 @@ import { Hooks } from "./Hooks.js";
 import {
   hashOtp,
   makeEmailOtpService,
-  EmailOtpStore,
-  EmailOtpUserStore,
   type EmailOtpCreateUserInput,
   type EmailOtpPurpose,
   type EmailOtpRecord,
+  EmailOtpStore,
+  EmailOtpUserStore,
 } from "./EmailOtp.js";
-import { makeSessionManager, SessionStore, SessionManager, UserStore } from "./Session.js";
+import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 import * as Errors from "./Errors.js";
 

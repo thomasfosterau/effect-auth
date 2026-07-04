@@ -20,14 +20,11 @@ House module pattern: store tag + `Context.Service` tag + `make*` +
 - [utils](#utils)
   - [DeviceAuthorizationConfig (interface)](#deviceauthorizationconfig-interface)
   - [DeviceAuthorizationRecord (interface)](#deviceauthorizationrecord-interface)
-  - [DeviceAuthorizationService](#deviceauthorizationservice)
-  - [DeviceAuthorizationService (interface)](#deviceauthorizationservice-interface)
-  - [DeviceAuthorizationServiceLayer](#deviceauthorizationservicelayer)
-  - [DeviceAuthorizationServiceTag (class)](#deviceauthorizationservicetag-class)
+  - [DeviceAuthorizationService (class)](#deviceauthorizationservice-class)
+  - [DeviceAuthorizationServiceShape (interface)](#deviceauthorizationserviceshape-interface)
   - [DeviceAuthorizationStatus (type alias)](#deviceauthorizationstatus-type-alias)
-  - [DeviceAuthorizationStore](#deviceauthorizationstore)
-  - [DeviceAuthorizationStore (interface)](#deviceauthorizationstore-interface)
-  - [DeviceAuthorizationStoreTag (class)](#deviceauthorizationstoretag-class)
+  - [DeviceAuthorizationStore (class)](#deviceauthorizationstore-class)
+  - [DeviceAuthorizationStoreShape (interface)](#deviceauthorizationstoreshape-interface)
   - [DeviceBeginResult (interface)](#devicebeginresult-interface)
   - [DeviceCodeError (class)](#devicecodeerror-class)
   - [DevicePollError (class)](#devicepollerror-class)
@@ -79,25 +76,25 @@ export interface DeviceAuthorizationRecord {
 }
 ```
 
-## DeviceAuthorizationService
+## DeviceAuthorizationService (class)
 
 **Signature**
 
 ```ts
-export declare const DeviceAuthorizationService: typeof DeviceAuthorizationServiceTag;
+export declare class DeviceAuthorizationService
 ```
 
-## DeviceAuthorizationService (interface)
+## DeviceAuthorizationServiceShape (interface)
 
 **Signature**
 
 ```ts
-export interface DeviceAuthorizationService {
+export interface DeviceAuthorizationServiceShape {
   /** Start a device authorization request. */
   readonly begin: (options?: {
     readonly clientId?: string;
     readonly scopes?: readonly string[];
-  }) => Effect.Effect<DeviceBeginResult, Errors.AuthError, DeviceAuthorizationStoreTag>;
+  }) => Effect.Effect<DeviceBeginResult, Errors.AuthError, DeviceAuthorizationStore>;
 
   /**
    * Poll for completion. Returns a session once approved; otherwise fails with
@@ -114,38 +111,20 @@ export interface DeviceAuthorizationService {
     | Errors.SessionExpiredError
     | Errors.UserNotFoundError
     | HookError,
-    DeviceAuthorizationStoreTag | SessionManagerTag | Hooks
+    DeviceAuthorizationStore | SessionManager | Hooks
   >;
 
   /** Approve a user code (called from an authenticated verification page). */
   readonly approve: (
     userCode: string,
     userId: string,
-  ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStoreTag>;
+  ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStore>;
 
   /** Deny a user code. */
   readonly deny: (
     userCode: string,
-  ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStoreTag>;
+  ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStore>;
 }
-```
-
-## DeviceAuthorizationServiceLayer
-
-**Signature**
-
-```ts
-export declare const DeviceAuthorizationServiceLayer: (
-  config: DeviceAuthorizationConfig,
-) => Layer.Layer<DeviceAuthorizationServiceTag, never, never>;
-```
-
-## DeviceAuthorizationServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class DeviceAuthorizationServiceTag
 ```
 
 ## DeviceAuthorizationStatus (type alias)
@@ -158,22 +137,22 @@ Lifecycle status of a device authorization request.
 export type DeviceAuthorizationStatus = "pending" | "approved" | "denied";
 ```
 
-## DeviceAuthorizationStore
+## DeviceAuthorizationStore (class)
 
 **Signature**
 
 ```ts
-export declare const DeviceAuthorizationStore: typeof DeviceAuthorizationStoreTag;
+export declare class DeviceAuthorizationStore
 ```
 
-## DeviceAuthorizationStore (interface)
+## DeviceAuthorizationStoreShape (interface)
 
 Persistence for device authorization requests.
 
 **Signature**
 
 ```ts
-export interface DeviceAuthorizationStore {
+export interface DeviceAuthorizationStoreShape {
   readonly create: (
     record: DeviceAuthorizationRecord,
   ) => Effect.Effect<DeviceAuthorizationRecord, Errors.AuthError>;
@@ -188,14 +167,6 @@ export interface DeviceAuthorizationStore {
   ) => Effect.Effect<DeviceAuthorizationRecord, Errors.AuthError>;
   readonly delete: (deviceCode: string) => Effect.Effect<void, Errors.AuthError>;
 }
-```
-
-## DeviceAuthorizationStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class DeviceAuthorizationStoreTag
 ```
 
 ## DeviceBeginResult (interface)
@@ -250,7 +221,7 @@ export interface DevicePollResult {
 ```ts
 export declare const makeDeviceAuthorizationService: (
   config: DeviceAuthorizationConfig,
-) => Effect.Effect<DeviceAuthorizationService, never>;
+) => Effect.Effect<DeviceAuthorizationServiceShape, never>;
 ```
 
 ## normalizeUserCode

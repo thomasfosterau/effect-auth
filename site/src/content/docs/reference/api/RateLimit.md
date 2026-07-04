@@ -15,13 +15,10 @@ Rate limiting types for effect-auth
   - [RateLimitConfig (interface)](#ratelimitconfig-interface)
   - [RateLimitEntry (interface)](#ratelimitentry-interface)
   - [RateLimitPresets](#ratelimitpresets)
-  - [RateLimitStore](#ratelimitstore)
-  - [RateLimitStore (interface)](#ratelimitstore-interface)
-  - [RateLimitStoreTag (class)](#ratelimitstoretag-class)
-  - [RateLimiter](#ratelimiter)
-  - [RateLimiter (interface)](#ratelimiter-interface)
-  - [RateLimiterLayer](#ratelimiterlayer)
-  - [RateLimiterTag (class)](#ratelimitertag-class)
+  - [RateLimitStore (class)](#ratelimitstore-class)
+  - [RateLimitStoreShape (interface)](#ratelimitstoreshape-interface)
+  - [RateLimiter (class)](#ratelimiter-class)
+  - [RateLimiterShape (interface)](#ratelimitershape-interface)
   - [makeRateLimiter](#makeratelimiter)
 
 ---
@@ -74,22 +71,24 @@ export declare const RateLimitPresets: {
 };
 ```
 
-## RateLimitStore
+## RateLimitStore (class)
+
+Rate limit store context tag
 
 **Signature**
 
 ```ts
-export declare const RateLimitStore: typeof RateLimitStoreTag;
+export declare class RateLimitStore
 ```
 
-## RateLimitStore (interface)
+## RateLimitStoreShape (interface)
 
 Storage interface for rate limiting
 
 **Signature**
 
 ```ts
-export interface RateLimitStore {
+export interface RateLimitStoreShape {
   readonly get: (key: string) => Effect.Effect<RateLimitEntry | null, never>;
   readonly set: (key: string, entry: RateLimitEntry, ttl: number) => Effect.Effect<void, AuthError>;
   readonly increment: (key: string, ttl: number) => Effect.Effect<number, AuthError>;
@@ -97,65 +96,39 @@ export interface RateLimitStore {
 }
 ```
 
-## RateLimitStoreTag (class)
-
-Rate limit store context tag
+## RateLimiter (class)
 
 **Signature**
 
 ```ts
-export declare class RateLimitStoreTag
+export declare class RateLimiter
 ```
 
-## RateLimiter
-
-**Signature**
-
-```ts
-export declare const RateLimiter: typeof RateLimiterTag;
-```
-
-## RateLimiter (interface)
+## RateLimiterShape (interface)
 
 Rate limiter service
 
 **Signature**
 
 ```ts
-export interface RateLimiter {
+export interface RateLimiterShape {
   readonly checkLimit: (
     key: string,
     config: RateLimitConfig,
-  ) => Effect.Effect<boolean, RateLimitError | AuthError, RateLimitStoreTag>;
+  ) => Effect.Effect<boolean, RateLimitError | AuthError, RateLimitStore>;
 
   readonly consumeToken: (
     key: string,
     config: RateLimitConfig,
-  ) => Effect.Effect<void, RateLimitError | AuthError, RateLimitStoreTag>;
+  ) => Effect.Effect<void, RateLimitError | AuthError, RateLimitStore>;
 
-  readonly resetLimit: (key: string) => Effect.Effect<void, AuthError, RateLimitStoreTag>;
+  readonly resetLimit: (key: string) => Effect.Effect<void, AuthError, RateLimitStore>;
 
   readonly getRemainingTokens: (
     key: string,
     config: RateLimitConfig,
-  ) => Effect.Effect<number, never, RateLimitStoreTag>;
+  ) => Effect.Effect<number, never, RateLimitStore>;
 }
-```
-
-## RateLimiterLayer
-
-**Signature**
-
-```ts
-export declare const RateLimiterLayer: () => Layer.Layer<RateLimiterTag, never, never>;
-```
-
-## RateLimiterTag (class)
-
-**Signature**
-
-```ts
-export declare class RateLimiterTag
 ```
 
 ## makeRateLimiter
@@ -165,5 +138,5 @@ Create a rate limiter service
 **Signature**
 
 ```ts
-export declare const makeRateLimiter: () => Effect.Effect<RateLimiter, never>;
+export declare const makeRateLimiter: () => Effect.Effect<RateLimiterShape, never>;
 ```

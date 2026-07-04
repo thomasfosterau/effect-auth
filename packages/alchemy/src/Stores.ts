@@ -107,7 +107,7 @@ const rowToSession = (row: SessionRow): Auth.Session => ({
   attributes: decodeAttributes(row.attributes),
 });
 
-export const makeSessionStore = (db: D1Database): Auth.SessionStore => ({
+export const makeSessionStore = (db: D1Database): Auth.SessionStoreShape => ({
   create: (session) =>
     d1Run(
       db,
@@ -162,7 +162,7 @@ export const makeSessionStore = (db: D1Database): Auth.SessionStore => ({
     ).pipe(Effect.map((rows) => rows.map(rowToSession))),
 });
 
-export const makeUserStore = (db: D1Database): Auth.UserStore => ({
+export const makeUserStore = (db: D1Database): Auth.UserStoreShape => ({
   get: (userId) =>
     d1First<UserRow>(db, `SELECT * FROM auth_users WHERE id = ?`, [userId], "user.get").pipe(
       Effect.map((row) => (row ? rowToUser(row) : null)),
@@ -180,7 +180,7 @@ export const makeUserStore = (db: D1Database): Auth.UserStore => ({
 // UserServiceStore
 // ---------------------------------------------------------------------------
 
-export const makeUserServiceStore = (db: D1Database): Auth.UserServiceStore => ({
+export const makeUserServiceStore = (db: D1Database): Auth.UserServiceStoreShape => ({
   get: (userId) =>
     d1First<UserRow>(db, `SELECT * FROM auth_users WHERE id = ?`, [userId], "userService.get").pipe(
       Effect.map((row) => (row ? rowToUser(row) : null)),
@@ -217,7 +217,7 @@ export const makeUserServiceStore = (db: D1Database): Auth.UserServiceStore => (
 // EmailPasswordStore + PasswordResetUserStore (auth_users)
 // ---------------------------------------------------------------------------
 
-export const makeEmailPasswordStore = (db: D1Database): Auth.EmailPasswordStore => ({
+export const makeEmailPasswordStore = (db: D1Database): Auth.EmailPasswordStoreShape => ({
   getUserByEmail: (email) =>
     d1First<UserRow>(
       db,
@@ -257,7 +257,7 @@ export const makeEmailPasswordStore = (db: D1Database): Auth.EmailPasswordStore 
     ).pipe(Effect.asVoid),
 });
 
-export const makePasswordResetUserStore = (db: D1Database): Auth.PasswordResetUserStore => ({
+export const makePasswordResetUserStore = (db: D1Database): Auth.PasswordResetUserStoreShape => ({
   getUserByEmail: (email) =>
     d1First<UserRow>(
       db,
@@ -287,7 +287,7 @@ interface PermissionRow {
   readonly action: string;
 }
 
-export const makeRoleStore = (db: D1Database): Auth.RoleStore => ({
+export const makeRoleStore = (db: D1Database): Auth.RoleStoreShape => ({
   getUserRoles: (userId) =>
     d1All<RoleRow>(
       db,
@@ -329,7 +329,7 @@ const rowToRateLimit = (row: RateLimitRow): Auth.RateLimitEntry =>
 const upsertRateLimit = `INSERT INTO auth_rate_limits (key, count, reset_at, blocked_until) VALUES (?, ?, ?, ?)
   ON CONFLICT(key) DO UPDATE SET count = excluded.count, reset_at = excluded.reset_at, blocked_until = excluded.blocked_until`;
 
-export const makeRateLimitStore = (db: D1Database): Auth.RateLimitStore => {
+export const makeRateLimitStore = (db: D1Database): Auth.RateLimitStoreShape => {
   const readEntry = (key: string) =>
     d1First<RateLimitRow>(
       db,
@@ -396,7 +396,7 @@ const rowToEmailVerification = (row: EmailVerificationRow): Auth.EmailVerificati
   expiresAt: row.expires_at,
 });
 
-export const makeEmailVerificationStore = (db: D1Database): Auth.EmailVerificationStore => ({
+export const makeEmailVerificationStore = (db: D1Database): Auth.EmailVerificationStoreShape => ({
   create: (verification) =>
     d1Run(
       db,
@@ -448,7 +448,7 @@ const rowToChallenge = (row: ChallengeRow): Auth.WebAuthnChallenge =>
     ? { challenge: fromBase64(row.challenge), expiresAt: row.expires_at }
     : { challenge: fromBase64(row.challenge), expiresAt: row.expires_at, userId: row.user_id };
 
-export const makeChallengeStore = (db: D1Database): Auth.ChallengeStore => ({
+export const makeChallengeStore = (db: D1Database): Auth.ChallengeStoreShape => ({
   create: (challenge) =>
     d1Run(
       db,
@@ -507,7 +507,7 @@ const credentialParams = (credential: Auth.WebAuthnCredential): readonly unknown
   credential.transports ? JSON.stringify(credential.transports) : null,
 ];
 
-export const makeCredentialStore = (db: D1Database): Auth.CredentialStore => ({
+export const makeCredentialStore = (db: D1Database): Auth.CredentialStoreShape => ({
   create: (credential) =>
     d1Run(
       db,
@@ -582,7 +582,7 @@ const rowToOAuthState = (row: OAuthStateRow): Auth.OAuthState => ({
   ...(row.return_to != null ? { returnTo: row.return_to } : {}),
 });
 
-export const makeOAuthStateStore = (db: D1Database): Auth.OAuthStateStore => ({
+export const makeOAuthStateStore = (db: D1Database): Auth.OAuthStateStoreShape => ({
   create: (state) =>
     d1Run(
       db,
@@ -669,7 +669,7 @@ const upsertOAuthAccount = `INSERT INTO auth_oauth_accounts
     expires_at = excluded.expires_at,
     updated_at = excluded.updated_at`;
 
-export const makeOAuthAccountStore = (db: D1Database): Auth.OAuthAccountStore => ({
+export const makeOAuthAccountStore = (db: D1Database): Auth.OAuthAccountStoreShape => ({
   create: (account) =>
     d1Run(db, upsertOAuthAccount, oauthAccountParams(account), "oauthAccount.create").pipe(
       Effect.as(account),
@@ -719,7 +719,7 @@ export const makeOAuthAccountStore = (db: D1Database): Auth.OAuthAccountStore =>
 // OAuthUserStore (auth_users)
 // ---------------------------------------------------------------------------
 
-export const makeOAuthUserStore = (db: D1Database): Auth.OAuthUserStore => ({
+export const makeOAuthUserStore = (db: D1Database): Auth.OAuthUserStoreShape => ({
   getUser: (userId) =>
     d1First<UserRow>(
       db,
@@ -779,7 +779,7 @@ const rowToPasswordReset = (row: PasswordResetRow): Auth.PasswordResetToken => (
   expiresAt: row.expires_at,
 });
 
-export const makePasswordResetStore = (db: D1Database): Auth.PasswordResetStore => ({
+export const makePasswordResetStore = (db: D1Database): Auth.PasswordResetStoreShape => ({
   create: (reset) =>
     d1Run(
       db,

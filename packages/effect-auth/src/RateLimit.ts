@@ -27,7 +27,7 @@ export interface RateLimitEntry {
 /**
  * Storage interface for rate limiting
  */
-export interface RateLimitStore {
+export interface RateLimitStoreShape {
   readonly get: (key: string) => Effect.Effect<RateLimitEntry | null, never>;
   readonly set: (key: string, entry: RateLimitEntry, ttl: number) => Effect.Effect<void, AuthError>;
   readonly increment: (key: string, ttl: number) => Effect.Effect<number, AuthError>;
@@ -37,23 +37,23 @@ export interface RateLimitStore {
 /**
  * Rate limiter service
  */
-export interface RateLimiter {
+export interface RateLimiterShape {
   readonly checkLimit: (
     key: string,
     config: RateLimitConfig,
-  ) => Effect.Effect<boolean, RateLimitError | AuthError, RateLimitStoreTag>;
+  ) => Effect.Effect<boolean, RateLimitError | AuthError, RateLimitStore>;
 
   readonly consumeToken: (
     key: string,
     config: RateLimitConfig,
-  ) => Effect.Effect<void, RateLimitError | AuthError, RateLimitStoreTag>;
+  ) => Effect.Effect<void, RateLimitError | AuthError, RateLimitStore>;
 
-  readonly resetLimit: (key: string) => Effect.Effect<void, AuthError, RateLimitStoreTag>;
+  readonly resetLimit: (key: string) => Effect.Effect<void, AuthError, RateLimitStore>;
 
   readonly getRemainingTokens: (
     key: string,
     config: RateLimitConfig,
-  ) => Effect.Effect<number, never, RateLimitStoreTag>;
+  ) => Effect.Effect<number, never, RateLimitStore>;
 }
 
 /**
@@ -68,35 +68,28 @@ export interface RateLimiter {
 /**
  * Rate limit store context tag
  */
-export class RateLimitStoreTag extends Context.Service<RateLimitStoreTag, RateLimitStore>()(
+export class RateLimitStore extends Context.Service<RateLimitStore, RateLimitStoreShape>()(
   "@effect-auth/RateLimitStore",
 ) {}
 
-// Public ergonomic alias
-export const RateLimitStore = RateLimitStoreTag;
-
-export class RateLimiterTag extends Context.Service<RateLimiterTag, RateLimiter>()(
+export class RateLimiter extends Context.Service<RateLimiter, RateLimiterShape>()(
   "@effect-auth/RateLimiter",
 ) {
   /**
-   * Construct a Layer providing this service — the canonical form of
-   * {@link RateLimiterLayer}.
+   * Construct a Layer providing this service.
    */
-  static readonly layer = () => RateLimiterLayer();
+  static readonly layer = () => Layer.effect(RateLimiter, makeRateLimiter());
 }
-
-// Public ergonomic alias
-export const RateLimiter = RateLimiterTag;
 
 /**
  * Create a rate limiter service
  */
-export const makeRateLimiter = (): Effect.Effect<RateLimiter, never> =>
+export const makeRateLimiter = (): Effect.Effect<RateLimiterShape, never> =>
   Effect.sync(
-    (): RateLimiter => ({
+    (): RateLimiterShape => ({
       checkLimit: (key, config) =>
         Effect.gen(function* () {
-          const store = yield* RateLimitStoreTag;
+          const store = yield* RateLimitStore;
           const entry = yield* store.get(key);
 
           const now = Date.now();
@@ -143,7 +136,7 @@ export const makeRateLimiter = (): Effect.Effect<RateLimiter, never> =>
 
       consumeToken: (key, config) =>
         Effect.gen(function* () {
-          const store = yield* RateLimitStoreTag;
+          const store = yield* RateLimitStore;
           const now = Date.now();
 
           const entry = yield* store.get(key);
@@ -197,13 +190,13 @@ export const makeRateLimiter = (): Effect.Effect<RateLimiter, never> =>
 
       resetLimit: (key) =>
         Effect.gen(function* () {
-          const store = yield* RateLimitStoreTag;
+          const store = yield* RateLimitStore;
           yield* store.delete(key);
         }),
 
       getRemainingTokens: (key, config) =>
         Effect.gen(function* () {
-          const store = yield* RateLimitStoreTag;
+          const store = yield* RateLimitStore;
           const entry = yield* store.get(key);
 
           if (!entry || Date.now() >= entry.resetAt) {
@@ -214,8 +207,6 @@ export const makeRateLimiter = (): Effect.Effect<RateLimiter, never> =>
         }),
     }),
   );
-
-export const RateLimiterLayer = () => Layer.effect(RateLimiterTag, makeRateLimiter());
 
 /**
  * Common rate limit configurations

@@ -14,17 +14,11 @@ export * from "./Types.js";
 /** Tagged errors raised across the library. */
 export * from "./Errors.js";
 
-/** Effect `Request` definitions for auth operations. @deprecated Removal planned for 1.0 (DESIGN.md D6). */
-export * from "./Requests.js";
-
 /** Password hashing (following Oslo patterns). */
 export * from "./Password.js";
 
 /** Session management (following Lucia/Copenhagen guidelines). */
 export * from "./Session.js";
-
-/** Request resolvers wiring stores to requests. @deprecated Removal planned for 1.0 (DESIGN.md D6). */
-export * from "./Resolvers.js";
 
 /** Authorization primitives. */
 export * from "./Authorization.js";
@@ -132,14 +126,3 @@ export * from "./KeyValueStores.js";
  * Exposed under the `Http` namespace, e.g. `Auth.Http.makeAuthWebHandler`.
  */
 export * as Http from "./Http.js";
-
-export {
-  /** Re-export of `Effect` from `effect`. @deprecated Import from `effect` directly; removal planned for 1.0 (DESIGN.md D9). */
-  Effect,
-  /** Re-export of `Context` from `effect`. @deprecated Import from `effect` directly; removal planned for 1.0 (DESIGN.md D9). */
-  Context,
-  /** Re-export of `Layer` from `effect`. @deprecated Import from `effect` directly; removal planned for 1.0 (DESIGN.md D9). */
-  Layer,
-  /** Re-export of `RequestResolver` from `effect`. @deprecated Import from `effect` directly; removal planned for 1.0 (DESIGN.md D9). */
-  RequestResolver,
-} from "effect";

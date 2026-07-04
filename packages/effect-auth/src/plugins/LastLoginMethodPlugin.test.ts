@@ -3,15 +3,14 @@ import { Effect, Layer } from "effect";
 import { composePlugins, Hooks } from "../Hooks.js";
 import { makeLastLoginMethodPlugin } from "./LastLoginMethodPlugin.js";
 import { makeEmailPasswordService } from "../EmailPassword.js";
-import { EmailPasswordStoreTag, type EmailPasswordStore } from "../EmailPassword.js";
-import { PasswordHasherTag, makeScryptHasher } from "../Password.js";
+import { EmailPasswordStore, type EmailPasswordStoreShape } from "../EmailPassword.js";
+import { PasswordHasher, makeScryptHasher } from "../Password.js";
 import {
-  SessionManagerLayer,
-  SessionManagerTag,
-  SessionStoreTag,
-  UserStoreTag,
-  type SessionStore,
-  type UserStore,
+  SessionManager,
+  SessionStore,
+  UserStore,
+  type SessionStoreShape,
+  type UserStoreShape,
 } from "../Session.js";
 import type * as Types from "../Types.js";
 
@@ -24,7 +23,7 @@ const makeFixture = () => {
   const sessions = new Map<string, Types.Session>();
   let userSeq = 0;
 
-  const emailPasswordStore: EmailPasswordStore = {
+  const emailPasswordStore: EmailPasswordStoreShape = {
     getUserByEmail: (email) =>
       Effect.sync(() => {
         const id = userIdByEmail.get(email);
@@ -48,7 +47,7 @@ const makeFixture = () => {
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
-  const sessionStore: SessionStore = {
+  const sessionStore: SessionStoreShape = {
     create: (s) => Effect.sync(() => (sessions.set(s.id, s), s)),
     get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
     update: (s) => Effect.sync(() => (sessions.set(s.id, s), s)),
@@ -56,18 +55,18 @@ const makeFixture = () => {
     deleteByUserId: () => Effect.void,
     listByUserId: () => Effect.succeed([]),
   };
-  const userStore: UserStore = {
+  const userStore: UserStoreShape = {
     get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
     getCredentials: (_userId) => Effect.succeed(null),
   };
 
   const stores = Layer.mergeAll(
-    Layer.succeed(SessionStoreTag)(sessionStore),
-    Layer.succeed(UserStoreTag)(userStore),
-    Layer.succeed(EmailPasswordStoreTag)(emailPasswordStore),
-    Layer.succeed(PasswordHasherTag)(hasher),
+    Layer.succeed(SessionStore)(sessionStore),
+    Layer.succeed(UserStore)(userStore),
+    Layer.succeed(EmailPasswordStore)(emailPasswordStore),
+    Layer.succeed(PasswordHasher)(hasher),
   );
-  const sessionManager = SessionManagerLayer({
+  const sessionManager = SessionManager.layer({
     sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
   }).pipe(Layer.provide(stores));
 
@@ -117,7 +116,7 @@ describe("LastLoginMethodPlugin", () => {
       composePlugins([makeLastLoginMethodPlugin()]).pipe(
         Layer.provide(Hooks.Default),
         Layer.provide(
-          Layer.succeed(SessionManagerTag)({
+          Layer.succeed(SessionManager)({
             setSessionAttributes: (sessionId: string) =>
               Effect.sync(() => {
                 captured.push(sessionId);

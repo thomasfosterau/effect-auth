@@ -50,7 +50,7 @@ Useful after a password change or "sign out everywhere":
 import { Effect } from "effect";
 import * as Auth from "effect-auth";
 
-declare const sessions: Auth.SessionManager;
+declare const sessions: Auth.SessionManagerShape;
 
 const signOutEverywhere = (userId: string) => sessions.invalidateUserSessions(userId);
 ```

@@ -2,17 +2,17 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { Context, Effect } from "effect";
 import { Hooks } from "./Hooks.js";
 import { makeAuthLifecycleService } from "./AuthLifecycle.js";
-import { EmailPasswordStore } from "./EmailPassword.js";
 import {
   type EmailVerification,
-  EmailVerificationService,
-  EmailVerificationStore,
   makeEmailVerificationService,
+  EmailVerificationStore,
+  EmailVerificationService,
 } from "./EmailVerification.js";
 import { makePasswordHasher, PasswordHasherLive } from "./Password.js";
-import { makeSessionManager, SessionManager, SessionStore, UserStore } from "./Session.js";
-import { makeUserService, UserService, UserServiceStore } from "./User.js";
+import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
+import { makeUserService, UserServiceStore, UserService } from "./User.js";
 import type { Session, SessionConfig, User } from "./Types.js";
+import { EmailPasswordStore } from "./EmailPassword.js";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();

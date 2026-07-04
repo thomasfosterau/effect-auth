@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect } from "effect";
 import { makePBKDF2Hasher, makeMultiAlgorithmVerifier, PasswordHasherLive } from "./Password.js";
-import type { PasswordHasher } from "./Password.js";
+import type { PasswordHasherShape } from "./Password.js";
 
 // Mock hasher for testing multi-algorithm support
-const makeMockBcryptHasher = (): PasswordHasher => ({
+const makeMockBcryptHasher = (): PasswordHasherShape => ({
   algorithm: "bcrypt",
   hash: (password: string) =>
     Effect.succeed({

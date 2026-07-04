@@ -12,18 +12,18 @@ import {
   EmailOtpStoreKV,
   PendingTwoFactorStoreKV,
 } from "./KeyValueStores.js";
-import { OAuthStateStoreTag, type OAuthState } from "./OAuth.js";
-import { ChallengeStoreTag, type WebAuthnChallenge } from "./WebAuthn.js";
-import { RateLimitStoreTag, type RateLimitEntry } from "./RateLimit.js";
+import { OAuthStateStore, type OAuthState } from "./OAuth.js";
+import { ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.js";
+import { RateLimitStore, type RateLimitEntry } from "./RateLimit.js";
 import {
-  EmailVerificationStoreTag,
+  EmailVerificationStore,
   makeEmailVerificationService,
   type EmailVerification,
 } from "./EmailVerification.js";
-import { PasswordResetStoreTag, type PasswordResetToken } from "./PasswordReset.js";
-import { MagicLinkStoreTag, type MagicLinkToken } from "./MagicLink.js";
-import { EmailOtpStoreTag, type EmailOtpRecord } from "./EmailOtp.js";
-import { PendingTwoFactorStoreTag, type PendingTwoFactor } from "./TwoFactor.js";
+import { PasswordResetStore, type PasswordResetToken } from "./PasswordReset.js";
+import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.js";
+import { EmailOtpStore, type EmailOtpRecord } from "./EmailOtp.js";
+import { PendingTwoFactorStore, type PendingTwoFactor } from "./TwoFactor.js";
 import { Hooks } from "./Hooks.js";
 
 /** Fresh in-memory KV per invocation so tests are isolated. */
@@ -33,14 +33,14 @@ const run = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    | OAuthStateStoreTag
-    | ChallengeStoreTag
-    | RateLimitStoreTag
-    | EmailVerificationStoreTag
-    | PasswordResetStoreTag
-    | MagicLinkStoreTag
-    | EmailOtpStoreTag
-    | PendingTwoFactorStoreTag
+    | OAuthStateStore
+    | ChallengeStore
+    | RateLimitStore
+    | EmailVerificationStore
+    | PasswordResetStore
+    | MagicLinkStore
+    | EmailOtpStore
+    | PendingTwoFactorStore
   >,
 ): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(testLayer())) as Effect.Effect<A, E>);
 
@@ -69,7 +69,7 @@ describe("KeyValueStores", () => {
     it("roundtrips create/get/delete", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* OAuthStateStoreTag;
+          const store = yield* OAuthStateStore;
           yield* store.create(state);
           const loaded = yield* store.get("state-1");
           yield* store.delete("state-1");
@@ -91,7 +91,7 @@ describe("KeyValueStores", () => {
       };
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* ChallengeStoreTag;
+          const store = yield* ChallengeStore;
           yield* store.create(challenge);
           const loaded = yield* store.get(challenge.challenge);
           yield* store.delete(challenge.challenge);
@@ -112,7 +112,7 @@ describe("KeyValueStores", () => {
       };
       const loaded = await run(
         Effect.gen(function* () {
-          const store = yield* ChallengeStoreTag;
+          const store = yield* ChallengeStore;
           yield* store.create(challenge);
           return yield* store.get(challenge.challenge);
         }),
@@ -132,7 +132,7 @@ describe("KeyValueStores", () => {
       };
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* RateLimitStoreTag;
+          const store = yield* RateLimitStore;
           const before = yield* store.get("login:1.2.3.4");
           yield* store.set("login:1.2.3.4", entry, 60);
           const after = yield* store.get("login:1.2.3.4");
@@ -149,7 +149,7 @@ describe("KeyValueStores", () => {
     it("increments within a window and restarts an expired window", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* RateLimitStoreTag;
+          const store = yield* RateLimitStore;
           const first = yield* store.increment("otp:me@example.com", 60);
           const second = yield* store.increment("otp:me@example.com", 60);
           const third = yield* store.increment("otp:me@example.com", 60);
@@ -183,7 +183,7 @@ describe("KeyValueStores", () => {
       const record = verification("tok-1", "user-1");
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* EmailVerificationStoreTag;
+          const store = yield* EmailVerificationStore;
           yield* store.create(record);
           const loaded = yield* store.get("tok-1");
           yield* store.delete("tok-1");
@@ -198,7 +198,7 @@ describe("KeyValueStores", () => {
     it("deleteByUserId removes only that user's tokens", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* EmailVerificationStoreTag;
+          const store = yield* EmailVerificationStore;
           yield* store.create(verification("tok-a", "user-1"));
           yield* store.create(verification("tok-b", "user-1"));
           yield* store.create(verification("tok-c", "user-2"));
@@ -227,7 +227,7 @@ describe("KeyValueStores", () => {
     it("roundtrips and deletes by user id", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* PasswordResetStoreTag;
+          const store = yield* PasswordResetStore;
           yield* store.create(reset("pr-1", "user-1"));
           yield* store.create(reset("pr-2", "user-1"));
           yield* store.create(reset("pr-3", "user-2"));
@@ -258,7 +258,7 @@ describe("KeyValueStores", () => {
     it("roundtrips and deletes by email", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* MagicLinkStoreTag;
+          const store = yield* MagicLinkStore;
           yield* store.create(link("ml-1", "a@example.com"));
           yield* store.create(link("ml-2", "a@example.com"));
           yield* store.create(link("ml-3", "b@example.com"));
@@ -291,7 +291,7 @@ describe("KeyValueStores", () => {
     it("upserts per email+purpose and increments attempts", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* EmailOtpStoreTag;
+          const store = yield* EmailOtpStore;
           yield* store.upsert(record);
           // Same email, different purpose is a separate record.
           yield* store.upsert({ ...record, purpose: "forget-password", otpHash: "other" });
@@ -331,7 +331,7 @@ describe("KeyValueStores", () => {
       };
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* PendingTwoFactorStoreTag;
+          const store = yield* PendingTwoFactorStore;
           yield* store.create(pending);
           const loaded = yield* store.get("2fa-1");
           yield* store.delete("2fa-1");

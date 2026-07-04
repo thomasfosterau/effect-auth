@@ -20,8 +20,8 @@
 import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import type { AuthError } from "./Errors.js";
-import { JwtServiceTag, JwtKeyStoreTag } from "./Jwt.js";
-import { UserStoreTag } from "./Session.js";
+import { JwtService, JwtKeyStore } from "./Jwt.js";
+import { UserStore } from "./Session.js";
 import type * as Types from "./Types.js";
 
 /** Failure to register a client or process an authorization request. */
@@ -66,7 +66,7 @@ export interface OidcClient {
 }
 
 /** Persistent registry of OIDC clients. */
-export interface OidcClientStore {
+export interface OidcClientStoreShape {
   readonly create: (client: OidcClient) => Effect.Effect<OidcClient, AuthError>;
   readonly getByClientId: (clientId: string) => Effect.Effect<OidcClient | null, AuthError>;
   readonly update: (client: OidcClient) => Effect.Effect<OidcClient, AuthError>;
@@ -74,12 +74,9 @@ export interface OidcClientStore {
   readonly list: () => Effect.Effect<ReadonlyArray<OidcClient>, AuthError>;
 }
 
-export class OidcClientStoreTag extends Context.Service<OidcClientStoreTag, OidcClientStore>()(
+export class OidcClientStore extends Context.Service<OidcClientStore, OidcClientStoreShape>()(
   "@effect-auth/OidcClientStore",
 ) {}
-
-// Public ergonomic alias
-export const OidcClientStore = OidcClientStoreTag;
 
 /**
  * A short-lived authorization artifact: either an issued authorization code
@@ -105,18 +102,15 @@ export interface OidcAuthorizationCode {
 }
 
 /** Ephemeral store for authorization codes and pending consent requests. */
-export interface OidcCodeStore {
+export interface OidcCodeStoreShape {
   readonly create: (code: OidcAuthorizationCode) => Effect.Effect<OidcAuthorizationCode, AuthError>;
   readonly get: (codeHash: string) => Effect.Effect<OidcAuthorizationCode | null, AuthError>;
   readonly delete: (codeHash: string) => Effect.Effect<void, AuthError>;
 }
 
-export class OidcCodeStoreTag extends Context.Service<OidcCodeStoreTag, OidcCodeStore>()(
+export class OidcCodeStore extends Context.Service<OidcCodeStore, OidcCodeStoreShape>()(
   "@effect-auth/OidcCodeStore",
 ) {}
-
-// Public ergonomic alias
-export const OidcCodeStore = OidcCodeStoreTag;
 
 /** An issued opaque token, keyed by the sha256 hex digest of its value. */
 export interface OidcToken {
@@ -132,18 +126,15 @@ export interface OidcToken {
 }
 
 /** Store for issued access and refresh tokens. */
-export interface OidcTokenStore {
+export interface OidcTokenStoreShape {
   readonly create: (token: OidcToken) => Effect.Effect<OidcToken, AuthError>;
   readonly get: (tokenHash: string) => Effect.Effect<OidcToken | null, AuthError>;
   readonly delete: (tokenHash: string) => Effect.Effect<void, AuthError>;
 }
 
-export class OidcTokenStoreTag extends Context.Service<OidcTokenStoreTag, OidcTokenStore>()(
+export class OidcTokenStore extends Context.Service<OidcTokenStore, OidcTokenStoreShape>()(
   "@effect-auth/OidcTokenStore",
 ) {}
-
-// Public ergonomic alias
-export const OidcTokenStore = OidcTokenStoreTag;
 
 /** A user's recorded consent for a client (the union of granted scopes). */
 export interface OidcConsent {
@@ -156,24 +147,21 @@ export interface OidcConsent {
 }
 
 /** Store for recorded user consents. */
-export interface OidcConsentStore {
+export interface OidcConsentStoreShape {
   readonly get: (userId: string, clientId: string) => Effect.Effect<OidcConsent | null, AuthError>;
   readonly upsert: (consent: OidcConsent) => Effect.Effect<OidcConsent, AuthError>;
   readonly delete: (userId: string, clientId: string) => Effect.Effect<void, AuthError>;
 }
 
-export class OidcConsentStoreTag extends Context.Service<OidcConsentStoreTag, OidcConsentStore>()(
+export class OidcConsentStore extends Context.Service<OidcConsentStore, OidcConsentStoreShape>()(
   "@effect-auth/OidcConsentStore",
 ) {}
-
-// Public ergonomic alias
-export const OidcConsentStore = OidcConsentStoreTag;
 
 // -----------------------------------------------------------------------------
 // Service types
 // -----------------------------------------------------------------------------
 
-/** Input to {@link OidcProviderService.registerClient}. */
+/** Input to {@link OidcProviderServiceShape.registerClient}. */
 export interface RegisterOidcClientInput {
   readonly name: string;
   readonly redirectUris: readonly string[];
@@ -191,7 +179,7 @@ export interface RegisteredOidcClient {
   readonly clientSecret?: string;
 }
 
-/** Fields updatable via {@link OidcProviderService.updateClient}. */
+/** Fields updatable via {@link OidcProviderServiceShape.updateClient}. */
 export interface UpdateOidcClientInput {
   readonly name?: string;
   readonly redirectUris?: readonly string[];
@@ -295,7 +283,7 @@ export interface OidcProviderConfig {
   readonly trustedClients?: readonly TrustedOidcClient[];
 }
 
-export interface OidcProviderService {
+export interface OidcProviderServiceShape {
   /**
    * Register a client application. Generates the `client_id` and — for `web`
    * (confidential) clients — a secret returned in plaintext exactly once.
@@ -304,30 +292,26 @@ export interface OidcProviderService {
   readonly registerClient: (
     input: RegisterOidcClientInput,
     registrarUserId?: string,
-  ) => Effect.Effect<RegisteredOidcClient, OidcProviderError | AuthError, OidcClientStoreTag>;
+  ) => Effect.Effect<RegisteredOidcClient, OidcProviderError | AuthError, OidcClientStore>;
 
   /** Look up a client (trusted config clients first, then the store). */
   readonly getClient: (
     clientId: string,
-  ) => Effect.Effect<OidcClient | null, AuthError, OidcClientStoreTag>;
+  ) => Effect.Effect<OidcClient | null, AuthError, OidcClientStore>;
 
   /** List registered clients (store-backed only). */
-  readonly listClients: () => Effect.Effect<
-    ReadonlyArray<OidcClient>,
-    AuthError,
-    OidcClientStoreTag
-  >;
+  readonly listClients: () => Effect.Effect<ReadonlyArray<OidcClient>, AuthError, OidcClientStore>;
 
   /** Update a registered client. Trusted config clients cannot be updated. */
   readonly updateClient: (
     clientId: string,
     input: UpdateOidcClientInput,
-  ) => Effect.Effect<OidcClient, OidcProviderError | AuthError, OidcClientStoreTag>;
+  ) => Effect.Effect<OidcClient, OidcProviderError | AuthError, OidcClientStore>;
 
   /** Delete a registered client. */
   readonly deleteClient: (
     clientId: string,
-  ) => Effect.Effect<void, OidcProviderError | AuthError, OidcClientStoreTag>;
+  ) => Effect.Effect<void, OidcProviderError | AuthError, OidcClientStore>;
 
   /**
    * Process an authorization request for an authenticated user. Fails with
@@ -341,7 +325,7 @@ export interface OidcProviderService {
   ) => Effect.Effect<
     OidcAuthorizeResult,
     OidcProviderError | AuthError,
-    OidcClientStoreTag | OidcCodeStoreTag | OidcConsentStoreTag
+    OidcClientStore | OidcCodeStore | OidcConsentStore
   >;
 
   /**
@@ -356,7 +340,7 @@ export interface OidcProviderService {
   ) => Effect.Effect<
     { readonly redirectTo: string },
     OidcProviderError | AuthError,
-    OidcCodeStoreTag | OidcConsentStoreTag
+    OidcCodeStore | OidcConsentStore
   >;
 
   /**
@@ -370,12 +354,7 @@ export interface OidcProviderService {
   ) => Effect.Effect<
     OidcTokenResult,
     OidcTokenError | AuthError,
-    | OidcClientStoreTag
-    | OidcCodeStoreTag
-    | OidcTokenStoreTag
-    | UserStoreTag
-    | JwtServiceTag
-    | JwtKeyStoreTag
+    OidcClientStore | OidcCodeStore | OidcTokenStore | UserStore | JwtService | JwtKeyStore
   >;
 
   /**
@@ -388,7 +367,7 @@ export interface OidcProviderService {
   ) => Effect.Effect<
     Record<string, unknown>,
     OidcProviderError | AuthError,
-    OidcTokenStoreTag | UserStoreTag
+    OidcTokenStore | UserStore
   >;
 
   /** The OpenID Provider Metadata document (RFC 8414 / OIDC Discovery). */
@@ -402,19 +381,16 @@ export interface OidcProviderService {
   readonly loginRedirect: (returnTo: string) => string;
 }
 
-export class OidcProviderServiceTag extends Context.Service<
-  OidcProviderServiceTag,
-  OidcProviderService
+export class OidcProviderService extends Context.Service<
+  OidcProviderService,
+  OidcProviderServiceShape
 >()("@effect-auth/OidcProviderService") {
   /**
-   * Construct a Layer providing this service — the canonical form of
-   * {@link OidcProviderServiceLayer}.
+   * Construct a Layer providing this service.
    */
-  static readonly layer = (config: OidcProviderConfig) => OidcProviderServiceLayer(config);
+  static readonly layer = (config: OidcProviderConfig) =>
+    Layer.effect(OidcProviderService, makeOidcProviderService(config));
 }
-
-// Public ergonomic alias
-export const OidcProviderService = OidcProviderServiceTag;
 
 // -----------------------------------------------------------------------------
 // Helpers
@@ -453,7 +429,7 @@ export const DEFAULT_OIDC_SCOPES = ["openid", "profile", "email", "offline_acces
 
 export const makeOidcProviderService = (
   config: OidcProviderConfig,
-): Effect.Effect<OidcProviderService, never> => {
+): Effect.Effect<OidcProviderServiceShape, never> => {
   const codeExpiresIn = config.codeExpiresIn ?? 10 * 60 * 1000;
   const accessTokenExpiresIn = config.accessTokenExpiresIn ?? 60 * 60 * 1000;
   const refreshTokenExpiresIn = config.refreshTokenExpiresIn ?? 30 * 24 * 60 * 60 * 1000;
@@ -482,7 +458,7 @@ export const makeOidcProviderService = (
     Effect.gen(function* () {
       const trusted = trustedClients.get(clientId);
       if (trusted !== undefined) return trusted;
-      const store = yield* OidcClientStoreTag;
+      const store = yield* OidcClientStore;
       return yield* store.getByClientId(clientId);
     });
 
@@ -492,7 +468,7 @@ export const makeOidcProviderService = (
     base: Omit<OidcAuthorizationCode, "codeHash" | "kind" | "expiresAt" | "createdAt">,
   ) =>
     Effect.gen(function* () {
-      const store = yield* OidcCodeStoreTag;
+      const store = yield* OidcCodeStore;
       const value = randomToken();
       const now = Date.now();
       yield* store.create({
@@ -527,8 +503,8 @@ export const makeOidcProviderService = (
     readonly nonce?: string;
   }) =>
     Effect.gen(function* () {
-      const tokenStore = yield* OidcTokenStoreTag;
-      const userStore = yield* UserStoreTag;
+      const tokenStore = yield* OidcTokenStore;
+      const userStore = yield* UserStore;
       const now = Date.now();
 
       const accessToken = randomToken();
@@ -568,7 +544,7 @@ export const makeOidcProviderService = (
         if (user === null) {
           return yield* new OidcTokenError({ error: "invalid_grant", description: "Unknown user" });
         }
-        const jwt = yield* JwtServiceTag;
+        const jwt = yield* JwtService;
         const signed = yield* jwt
           .sign(user, {
             iss: config.issuer,
@@ -631,7 +607,7 @@ export const makeOidcProviderService = (
   return Effect.succeed({
     registerClient: (input, registrarUserId) =>
       Effect.gen(function* () {
-        const store = yield* OidcClientStoreTag;
+        const store = yield* OidcClientStore;
         if (input.redirectUris.length === 0) {
           return yield* new OidcProviderError({
             message: "At least one redirect URI is required",
@@ -668,13 +644,13 @@ export const makeOidcProviderService = (
 
     listClients: () =>
       Effect.gen(function* () {
-        const store = yield* OidcClientStoreTag;
+        const store = yield* OidcClientStore;
         return yield* store.list();
       }),
 
     updateClient: (clientId, input) =>
       Effect.gen(function* () {
-        const store = yield* OidcClientStoreTag;
+        const store = yield* OidcClientStore;
         if (trustedClients.has(clientId)) {
           return yield* new OidcProviderError({
             message: "Trusted clients are configured statically and cannot be updated",
@@ -697,7 +673,7 @@ export const makeOidcProviderService = (
 
     deleteClient: (clientId) =>
       Effect.gen(function* () {
-        const store = yield* OidcClientStoreTag;
+        const store = yield* OidcClientStore;
         const existing = yield* store.getByClientId(clientId);
         if (existing === null) {
           return yield* new OidcProviderError({ message: "Client not found" });
@@ -760,7 +736,7 @@ export const makeOidcProviderService = (
         // consent already covers every requested scope (unless prompt=consent).
         let consentNeeded = !client.skipConsent;
         if (consentNeeded && request.prompt !== "consent") {
-          const consentStore = yield* OidcConsentStoreTag;
+          const consentStore = yield* OidcConsentStore;
           const existing = yield* consentStore.get(user.id, client.clientId);
           if (existing !== null && scopes.every((s) => existing.scopes.includes(s))) {
             consentNeeded = false;
@@ -797,7 +773,7 @@ export const makeOidcProviderService = (
 
     consent: (userId, consentCode, accept) =>
       Effect.gen(function* () {
-        const codeStore = yield* OidcCodeStoreTag;
+        const codeStore = yield* OidcCodeStore;
         const pending = yield* codeStore.get(hashOidcSecret(consentCode));
         if (
           pending === null ||
@@ -820,7 +796,7 @@ export const makeOidcProviderService = (
           };
         }
 
-        const consentStore = yield* OidcConsentStoreTag;
+        const consentStore = yield* OidcConsentStore;
         const now = Date.now();
         const existing = yield* consentStore.get(userId, pending.clientId);
         yield* consentStore.upsert({
@@ -845,8 +821,8 @@ export const makeOidcProviderService = (
     token: (request) =>
       Effect.gen(function* () {
         const client = yield* authenticateClient(request);
-        const codeStore = yield* OidcCodeStoreTag;
-        const tokenStore = yield* OidcTokenStoreTag;
+        const codeStore = yield* OidcCodeStore;
+        const tokenStore = yield* OidcTokenStore;
 
         if (request.grantType === "authorization_code") {
           if (request.code === undefined) {
@@ -937,8 +913,8 @@ export const makeOidcProviderService = (
 
     userinfo: (accessToken) =>
       Effect.gen(function* () {
-        const tokenStore = yield* OidcTokenStoreTag;
-        const userStore = yield* UserStoreTag;
+        const tokenStore = yield* OidcTokenStore;
+        const userStore = yield* UserStore;
         const record = yield* tokenStore.get(hashOidcSecret(accessToken));
         if (record === null || record.kind !== "access" || Date.now() > record.expiresAt) {
           return yield* new OidcProviderError({ message: "Invalid or expired access token" });
@@ -974,8 +950,5 @@ export const makeOidcProviderService = (
     }),
 
     loginRedirect: (returnTo) => buildRedirect(config.loginPage, { redirect_to: returnTo }),
-  } satisfies OidcProviderService);
+  } satisfies OidcProviderServiceShape);
 };
-
-export const OidcProviderServiceLayer = (config: OidcProviderConfig) =>
-  Layer.effect(OidcProviderServiceTag, makeOidcProviderService(config));

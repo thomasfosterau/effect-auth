@@ -1,8 +1,9 @@
 # effect-auth — Settled Design & Public API (pre-1.0 decision record)
 
-Status: **Adopted** for everything marked _Applied_; everything marked _Proposed
-(breaking)_ awaits maintainer sign-off and ships behind a Changeset.
-Date: 2026-07-03. Supersedes the architectural framing in `ARCHITECTURE.md`
+Status: **Adopted and applied.** The non-breaking normalizations landed first;
+the breaking proposals below were put to the maintainer (2026-07-03), approved
+(see "Maintainer decisions" at the end), and have been applied behind
+Changesets. Date: 2026-07-03/04. Supersedes the architectural framing in `ARCHITECTURE.md`
 (rewritten alongside this document) and the status header of `HOOKS_DESIGN.md`.
 
 This document records, per design dimension: **status quo → problem → decision →
@@ -35,8 +36,8 @@ const app = Effect.gen(function* () {
 - **Layer construction:** `Auth.X.layer(config)` — a `static` on the service class,
   mirroring `Hooks.Default` (core) and `WorkOS.layer/layerOptions/layerClient`
   (`packages/workos/src/WorkOS.ts:246`), which already follow the Effect v4 idiom.
-- **Stores:** you implement `interface XStore` and provide it with
-  `Layer.succeed(Auth.XStore, impl)` or a first-party layer from
+- **Stores:** you implement `interface XStoreShape` and provide it with
+  `Layer.succeed(Auth.XStore)(impl)` or a first-party layer from
   `@effect-auth/sql`, `@effect-auth/alchemy`, or the KV layers in core.
 - **Errors:** tagged errors, `AuthError` for infrastructure failure, specific tags
   for flow outcomes; lookups that can legitimately miss return `X | null` from
@@ -72,18 +73,25 @@ about its own convention.
 - **Canonical layer construction is `X.layer(config)`**, a `static readonly` on
   the service class. The static mirrors the exact signature of the existing
   `XServiceLayer` constructor (required config, optional config, or no config).
-- `interface X` (the service shape) stays exported so users can type
-  implementations; the interface and the alias const merge under one name today
-  and continue to after the 1.0 rename.
+- The service shape stays exported as a named interface so users can type
+  implementations — named `XShape` (see the implementation finding below).
 - `makeX(config)` stays exported as the low-level constructor (it is what the
   static composes) — useful for embedding a service in a custom layer.
-- **Applied now (additive):** `static readonly layer` added to all 26 primary
-  service classes, delegating to the existing layer constructors. Nothing removed.
-- **Proposed (breaking, 1.0):** rename the classes so the bare name is the class
-  itself (`class SessionManager extends Context.Service<SessionManager, …>`),
-  drop the `XServiceTag` exports, and remove the standalone `XServiceLayer`
-  consts. Until approved, both spellings work and `XServiceLayer` is documented
-  as legacy.
+- **Applied (additive first, then approved rename):** `static readonly layer`
+  landed on all 26 primary service classes first; after maintainer approval the
+  classes now carry the bare names themselves, the `XServiceTag` exports and
+  alias consts are gone, and the standalone `XServiceLayer` consts are removed.
+- **Implementation finding (shape naming):** the plan to keep the shape
+  interface under the same bare name does not survive TypeScript declaration
+  merging — `class X` + `interface X` merge, so `Context.Service<X, X>`
+  resolves Shape to the merged type and every implementation is asked for tag
+  internals (`Service`, `key`, `[ServiceTypeId]`); verified empirically with a
+  minimal probe. The shape interfaces therefore carry a `Shape` suffix
+  (`SessionStoreShape`, `EmailOtpServiceShape`, …), mirroring the
+  `WorkOS`/`WorkOSService` split in `@effect-auth/workos`. Migration:
+  type-position uses of the old bare names (`const s: Auth.SessionStore` /
+  `satisfies Auth.SessionStore`) become `Auth.SessionStoreShape`; value uses
+  are unchanged.
 
 **Rationale.** Matches `effect-solutions` services-and-layers exactly ("Layer
 naming: camelCase with `Layer` suffix [as statics]: `layer`, `testLayer`,
@@ -91,10 +99,10 @@ naming: camelCase with `Layer` suffix [as statics]: `layer`, `testLayer`,
 recently (Hooks, WorkOS) — i.e. the library was already converging on this — and
 is achievable additively today because the alias const exposes class statics.
 
-**Migration & blast radius.** Additive step: zero user impact. 1.0 step: every
-consumer referencing `XServiceTag` or `XServiceLayer` renames mechanically
-(`XServiceTag` → `X`, `XServiceLayer(cfg)` → `X.layer(cfg)`); a codemod-friendly,
-error-at-compile-time change.
+**Migration & blast radius.** `XServiceTag` → `X`, `XServiceLayer(cfg)` →
+`X.layer(cfg)`, shape annotations `X` → `XShape`; all compile-visible and
+codemod-friendly (applied across sql/alchemy/client, all tests, all 13
+examples, and the site guides in this repo).
 
 **Risk.** Low. Statics are lazily-bound arrows so no TDZ/ordering hazards; the
 existing test suite plus a new static-layer test guard behavior.
@@ -229,9 +237,9 @@ subclasses**; it composes via unions. 6 HTTP boundary errors use
 4. **Honest unions:** public service methods keep precise unions (already
    largely true); `HookError` remains a type alias, not a class.
 
-**Applied now:** rules documented here + ARCHITECTURE.md. **Proposed
-(breaking):** the 429 addition and the signUp/signIn mapping fixes change
-observable HTTP behavior and the OpenAPI document — staged behind Changesets.
+**Applied** (approved): the 429 `TooManyRequests` schema on all 17 rate-limited
+endpoints, uniform `AuthError` → 500, and the typed `EmailInUseError` (now in
+shared `Errors.ts`) carrying signUp's duplicate-email 409.
 
 **Rationale.** `Data.TaggedError` vs `Schema.TaggedErrorClass` split follows
 what each layer needs; the mapping table removes the per-handler drift that
@@ -286,11 +294,9 @@ everywhere is `Context.Service` + `Layer` + `Hooks`.
 **Decision.** **`Context.Service` + `Layer` is the public pattern.**
 `Requests.ts`/`Resolvers.ts` are vestigial.
 
-- **Applied now:** `@deprecated` JSDoc on both modules' exports; all docs
-  rewritten to stop advertising the pattern (README, ARCHITECTURE.md).
-- **Proposed (breaking, 1.0):** delete both modules. If a batching/caching story
-  is ever wanted, it returns as a documented recipe over the service API, not a
-  parallel surface.
+- **Applied:** deprecation first; after approval `Requests.ts`/`Resolvers.ts`
+  were deleted outright. If a batching/caching story is ever wanted, it returns
+  as a documented recipe over the service API, not a parallel surface.
 
 **Rationale.** A second, incomplete, untested-in-anger way to do everything the
 services do is pure API surface cost; Effect v4 guidance builds libraries on
@@ -448,7 +454,17 @@ regeneration idempotent (verified: a full regen produces zero spurious diffs).
 
 ---
 
-## Ranked breaking-change proposals (each needs a yes/no)
+## Maintainer decisions (2026-07-03)
+
+Asked via review: **1** yes (all three parts), **2** yes, **3** yes, **4+5**
+yes (error-status fixes and the three operationId renames; `orgListInvitations`
+and `adminListUsers` keep their names), **6** — _remove SIWE entirely_, going
+beyond the proposal (core module + endpoints + `@effect-auth/siwe` package all
+deleted), **8** yes. **7** (hasher consolidation) and **9** (OIDC extraction)
+were not put to a vote; 7 remains open, 9 stays "keep in core" as recommended.
+All approved items are applied and changeset-backed.
+
+## Ranked breaking-change proposals (as asked)
 
 | #   | Proposal                                                                                                                                                                                                                   | Blast radius                                                          | Recommendation                                                                 |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------ |

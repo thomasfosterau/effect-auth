@@ -9,51 +9,48 @@ import {
 } from "effect/unstable/http";
 import { AuthApi, getOpenApiSpec } from "./HttpApi.js";
 import * as S from "./HttpApiSchemas.js";
-import { AuthLifecycleServiceTag } from "./AuthLifecycle.js";
+import { AuthLifecycleService } from "./AuthLifecycle.js";
 import { Hooks } from "./Hooks.js";
-import { SessionManagerTag, UserStoreTag } from "./Session.js";
-import { EmailPasswordStoreTag, makeEmailPasswordService } from "./EmailPassword.js";
-import { MagicLinkServiceTag, MagicLinkStoreTag, MagicLinkUserStoreTag } from "./MagicLink.js";
-import { AccountManagementServiceTag, AccountManagementStoreTag } from "./AccountManagement.js";
-import { AnonymousServiceTag, AnonymousUserStoreTag } from "./Anonymous.js";
-import { PhoneOtpServiceTag, PhoneOtpStoreTag, PhoneOtpUserStoreTag } from "./PhoneOtp.js";
-import { UsernameServiceTag, UsernameStoreTag } from "./Username.js";
+import { SessionManager, UserStore } from "./Session.js";
+import { EmailPasswordStore, makeEmailPasswordService } from "./EmailPassword.js";
+import { MagicLinkService, MagicLinkStore, MagicLinkUserStore } from "./MagicLink.js";
+import { AccountManagementService, AccountManagementStore } from "./AccountManagement.js";
+import { AnonymousService, AnonymousUserStore } from "./Anonymous.js";
+import { PhoneOtpService, PhoneOtpStore, PhoneOtpUserStore } from "./PhoneOtp.js";
+import { UsernameService, UsernameStore } from "./Username.js";
+import { DeviceAuthorizationService, DeviceAuthorizationStore } from "./DeviceAuthorization.js";
+import { EmailOtpService, EmailOtpStore, EmailOtpUserStore } from "./EmailOtp.js";
+import { PendingTwoFactorStore, TwoFactorService, TwoFactorStore } from "./TwoFactor.js";
+import { PasswordHasher } from "./Password.js";
+import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.js";
 import {
-  DeviceAuthorizationServiceTag,
-  DeviceAuthorizationStoreTag,
-} from "./DeviceAuthorization.js";
-import { EmailOtpServiceTag, EmailOtpStoreTag, EmailOtpUserStoreTag } from "./EmailOtp.js";
-import { PendingTwoFactorStoreTag, TwoFactorServiceTag, TwoFactorStoreTag } from "./TwoFactor.js";
-import { PasswordHasherTag } from "./Password.js";
-import { EmailVerificationServiceTag, EmailVerificationStoreTag } from "./EmailVerification.js";
-import {
-  PasswordResetServiceTag,
-  PasswordResetStoreTag,
-  PasswordResetUserStoreTag,
+  PasswordResetService,
+  PasswordResetStore,
+  PasswordResetUserStore,
 } from "./PasswordReset.js";
-import { UserServiceStoreTag, UserServiceTag } from "./User.js";
+import { UserServiceStore, UserService } from "./User.js";
 import {
-  OrganizationServiceTag,
-  OrganizationStoreTag,
+  OrganizationService,
+  OrganizationStore,
   type Organization,
   type Member,
   type Invitation,
   type FullOrganization,
 } from "./Organization.js";
-import { AdminServiceTag, AdminUserStoreTag, isAdmin } from "./Admin.js";
-import { ApiKeyServiceTag, ApiKeyStoreTag, type ApiKey } from "./ApiKey.js";
-import { JwtServiceTag, JwtKeyStoreTag } from "./Jwt.js";
+import { AdminService, AdminUserStore, isAdmin } from "./Admin.js";
+import { ApiKeyService, ApiKeyStore, type ApiKey } from "./ApiKey.js";
+import { JwtService, JwtKeyStore } from "./Jwt.js";
 import {
-  OidcProviderServiceTag,
-  OidcClientStoreTag,
-  OidcCodeStoreTag,
-  OidcTokenStoreTag,
-  OidcConsentStoreTag,
+  OidcProviderService,
+  OidcClientStore,
+  OidcCodeStore,
+  OidcTokenStore,
+  OidcConsentStore,
   type OidcClient,
 } from "./OidcProvider.js";
-import { SsoServiceTag, SsoProviderStoreTag, type SsoProvider } from "./Sso.js";
-import { OAuthStateStoreTag, OAuthUserStoreTag } from "./OAuth.js";
-import { GoogleOneTapServiceTag } from "./GoogleOneTap.js";
+import { SsoService, SsoProviderStore, type SsoProvider } from "./Sso.js";
+import { OAuthStateStore, OAuthUserStore } from "./OAuth.js";
+import { GoogleOneTapService } from "./GoogleOneTap.js";
 import {
   decodeSessionCacheCookie,
   encodeSessionCacheCookie,
@@ -70,17 +67,17 @@ import type * as Types from "./Types.js";
  * (provide `Hooks.Default` for no-op hooks, or a `composePlugins([...])` stack).
  */
 export type AuthServices =
-  | AuthLifecycleServiceTag
-  | SessionManagerTag
-  | EmailPasswordStoreTag
-  | PasswordHasherTag
-  | EmailVerificationServiceTag
-  | EmailVerificationStoreTag
-  | PasswordResetServiceTag
-  | PasswordResetStoreTag
-  | PasswordResetUserStoreTag
-  | UserServiceTag
-  | UserServiceStoreTag
+  | AuthLifecycleService
+  | SessionManager
+  | EmailPasswordStore
+  | PasswordHasher
+  | EmailVerificationService
+  | EmailVerificationStore
+  | PasswordResetService
+  | PasswordResetStore
+  | PasswordResetUserStore
+  | UserService
+  | UserServiceStore
   | Hooks;
 
 /**
@@ -255,170 +252,170 @@ const signUpInput = (payload: S.SignUpPayload) => ({
 
 /** Resolve the magic link service + stores, or fail with 404. */
 const resolveMagicLink = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(MagicLinkServiceTag);
-  const store = yield* Effect.serviceOption(MagicLinkStoreTag);
-  const userStore = yield* Effect.serviceOption(MagicLinkUserStoreTag);
+  const service = yield* Effect.serviceOption(MagicLinkService);
+  const store = yield* Effect.serviceOption(MagicLinkStore);
+  const userStore = yield* Effect.serviceOption(MagicLinkUserStore);
   if (Option.isNone(service) || Option.isNone(store) || Option.isNone(userStore)) {
     return yield* new S.NotFound({ message: "Magic link is not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provideService(MagicLinkStoreTag, store.value),
-      Effect.provideService(MagicLinkUserStoreTag, userStore.value),
+      Effect.provideService(MagicLinkStore, store.value),
+      Effect.provideService(MagicLinkUserStore, userStore.value),
     );
   return { service: service.value, provideStores };
 });
 
 /** Resolve the email OTP service + stores, or fail with 404. */
 const resolveEmailOtp = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(EmailOtpServiceTag);
-  const store = yield* Effect.serviceOption(EmailOtpStoreTag);
-  const userStore = yield* Effect.serviceOption(EmailOtpUserStoreTag);
+  const service = yield* Effect.serviceOption(EmailOtpService);
+  const store = yield* Effect.serviceOption(EmailOtpStore);
+  const userStore = yield* Effect.serviceOption(EmailOtpUserStore);
   if (Option.isNone(service) || Option.isNone(store) || Option.isNone(userStore)) {
     return yield* new S.NotFound({ message: "Email OTP is not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provideService(EmailOtpStoreTag, store.value),
-      Effect.provideService(EmailOtpUserStoreTag, userStore.value),
+      Effect.provideService(EmailOtpStore, store.value),
+      Effect.provideService(EmailOtpUserStore, userStore.value),
     );
   return { service: service.value, provideStores };
 });
 
 /** Resolve the two-factor service + stores, or fail with 404. */
 const resolveTwoFactor = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(TwoFactorServiceTag);
-  const store = yield* Effect.serviceOption(TwoFactorStoreTag);
-  const pendingStore = yield* Effect.serviceOption(PendingTwoFactorStoreTag);
+  const service = yield* Effect.serviceOption(TwoFactorService);
+  const store = yield* Effect.serviceOption(TwoFactorStore);
+  const pendingStore = yield* Effect.serviceOption(PendingTwoFactorStore);
   if (Option.isNone(service) || Option.isNone(store) || Option.isNone(pendingStore)) {
     return yield* new S.NotFound({ message: "Two-factor authentication is not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provideService(TwoFactorStoreTag, store.value),
-      Effect.provideService(PendingTwoFactorStoreTag, pendingStore.value),
+      Effect.provideService(TwoFactorStore, store.value),
+      Effect.provideService(PendingTwoFactorStore, pendingStore.value),
     );
   return { service: service.value, provideStores };
 });
 
 /** Resolve the account-management service + store, or fail with 404. */
 const resolveAccountManagement = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(AccountManagementServiceTag);
-  const store = yield* Effect.serviceOption(AccountManagementStoreTag);
+  const service = yield* Effect.serviceOption(AccountManagementService);
+  const store = yield* Effect.serviceOption(AccountManagementStore);
   if (Option.isNone(service) || Option.isNone(store)) {
     return yield* new S.NotFound({ message: "Account management is not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(Effect.provideService(AccountManagementStoreTag, store.value));
+    effect.pipe(Effect.provideService(AccountManagementStore, store.value));
   return { service: service.value, provideStores };
 });
 
 /** Resolve the device-authorization service + store, or fail with 404. */
 const resolveDevice = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(DeviceAuthorizationServiceTag);
-  const store = yield* Effect.serviceOption(DeviceAuthorizationStoreTag);
+  const service = yield* Effect.serviceOption(DeviceAuthorizationService);
+  const store = yield* Effect.serviceOption(DeviceAuthorizationStore);
   if (Option.isNone(service) || Option.isNone(store)) {
     return yield* new S.NotFound({ message: "Device authorization is not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(Effect.provideService(DeviceAuthorizationStoreTag, store.value));
+    effect.pipe(Effect.provideService(DeviceAuthorizationStore, store.value));
   return { service: service.value, provideStores };
 });
 
 /** Resolve the username service + store, or fail with 404. */
 const resolveUsername = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(UsernameServiceTag);
-  const store = yield* Effect.serviceOption(UsernameStoreTag);
+  const service = yield* Effect.serviceOption(UsernameService);
+  const store = yield* Effect.serviceOption(UsernameStore);
   if (Option.isNone(service) || Option.isNone(store)) {
     return yield* new S.NotFound({ message: "Username sign-in is not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(Effect.provideService(UsernameStoreTag, store.value));
+    effect.pipe(Effect.provideService(UsernameStore, store.value));
   return { service: service.value, provideStores };
 });
 
 /** Resolve the phone OTP service + stores, or fail with 404. */
 const resolvePhoneOtp = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(PhoneOtpServiceTag);
-  const store = yield* Effect.serviceOption(PhoneOtpStoreTag);
-  const userStore = yield* Effect.serviceOption(PhoneOtpUserStoreTag);
+  const service = yield* Effect.serviceOption(PhoneOtpService);
+  const store = yield* Effect.serviceOption(PhoneOtpStore);
+  const userStore = yield* Effect.serviceOption(PhoneOtpUserStore);
   if (Option.isNone(service) || Option.isNone(store) || Option.isNone(userStore)) {
     return yield* new S.NotFound({ message: "Phone OTP is not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provideService(PhoneOtpStoreTag, store.value),
-      Effect.provideService(PhoneOtpUserStoreTag, userStore.value),
+      Effect.provideService(PhoneOtpStore, store.value),
+      Effect.provideService(PhoneOtpUserStore, userStore.value),
     );
   return { service: service.value, provideStores };
 });
 
 /** Resolve the anonymous service + store, or fail with 404. */
 const resolveAnonymous = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(AnonymousServiceTag);
-  const store = yield* Effect.serviceOption(AnonymousUserStoreTag);
+  const service = yield* Effect.serviceOption(AnonymousService);
+  const store = yield* Effect.serviceOption(AnonymousUserStore);
   if (Option.isNone(service) || Option.isNone(store)) {
     return yield* new S.NotFound({ message: "Anonymous sign-in is not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(Effect.provideService(AnonymousUserStoreTag, store.value));
+    effect.pipe(Effect.provideService(AnonymousUserStore, store.value));
   return { service: service.value, provideStores };
 });
 
 /** Resolve the organization service + store, or fail with 404. */
 const resolveOrganization = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(OrganizationServiceTag);
-  const store = yield* Effect.serviceOption(OrganizationStoreTag);
+  const service = yield* Effect.serviceOption(OrganizationService);
+  const store = yield* Effect.serviceOption(OrganizationStore);
   if (Option.isNone(service) || Option.isNone(store)) {
     return yield* new S.NotFound({ message: "Organizations are not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(Effect.provideService(OrganizationStoreTag, store.value));
+    effect.pipe(Effect.provideService(OrganizationStore, store.value));
   return { service: service.value, provideStores };
 });
 
 /** Resolve the admin service + user store, or fail with 404. */
 const resolveAdmin = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(AdminServiceTag);
-  const store = yield* Effect.serviceOption(AdminUserStoreTag);
+  const service = yield* Effect.serviceOption(AdminService);
+  const store = yield* Effect.serviceOption(AdminUserStore);
   if (Option.isNone(service) || Option.isNone(store)) {
     return yield* new S.NotFound({ message: "Admin is not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(Effect.provideService(AdminUserStoreTag, store.value));
+    effect.pipe(Effect.provideService(AdminUserStore, store.value));
   return { service: service.value, provideStores };
 });
 
 /** Resolve the API-key service + store, or fail with 404. */
 const resolveApiKey = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(ApiKeyServiceTag);
-  const store = yield* Effect.serviceOption(ApiKeyStoreTag);
+  const service = yield* Effect.serviceOption(ApiKeyService);
+  const store = yield* Effect.serviceOption(ApiKeyStore);
   if (Option.isNone(service) || Option.isNone(store)) {
     return yield* new S.NotFound({ message: "API keys are not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(Effect.provideService(ApiKeyStoreTag, store.value));
+    effect.pipe(Effect.provideService(ApiKeyStore, store.value));
   return { service: service.value, provideStores };
 });
 
 /** Resolve the JWT service + key store, or fail with 404. */
 const resolveJwt = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(JwtServiceTag);
-  const store = yield* Effect.serviceOption(JwtKeyStoreTag);
+  const service = yield* Effect.serviceOption(JwtService);
+  const store = yield* Effect.serviceOption(JwtKeyStore);
   if (Option.isNone(service) || Option.isNone(store)) {
     return yield* new S.NotFound({ message: "JWT is not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(Effect.provideService(JwtKeyStoreTag, store.value));
+    effect.pipe(Effect.provideService(JwtKeyStore, store.value));
   return { service: service.value, provideStores };
 });
 
 /** Resolve the SSO service + its stores, or fail with 404. */
 const resolveSso = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(SsoServiceTag);
-  const providerStore = yield* Effect.serviceOption(SsoProviderStoreTag);
-  const stateStore = yield* Effect.serviceOption(OAuthStateStoreTag);
-  const userStore = yield* Effect.serviceOption(OAuthUserStoreTag);
+  const service = yield* Effect.serviceOption(SsoService);
+  const providerStore = yield* Effect.serviceOption(SsoProviderStore);
+  const stateStore = yield* Effect.serviceOption(OAuthStateStore);
+  const userStore = yield* Effect.serviceOption(OAuthUserStore);
   if (
     Option.isNone(service) ||
     Option.isNone(providerStore) ||
@@ -429,22 +426,22 @@ const resolveSso = Effect.gen(function* () {
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provideService(SsoProviderStoreTag, providerStore.value),
-      Effect.provideService(OAuthStateStoreTag, stateStore.value),
-      Effect.provideService(OAuthUserStoreTag, userStore.value),
+      Effect.provideService(SsoProviderStore, providerStore.value),
+      Effect.provideService(OAuthStateStore, stateStore.value),
+      Effect.provideService(OAuthUserStore, userStore.value),
     );
   return { service: service.value, provideStores };
 });
 
 /** Resolve the Google One Tap service + user store, or fail with 404. */
 const resolveGoogleOneTap = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(GoogleOneTapServiceTag);
-  const userStore = yield* Effect.serviceOption(OAuthUserStoreTag);
+  const service = yield* Effect.serviceOption(GoogleOneTapService);
+  const userStore = yield* Effect.serviceOption(OAuthUserStore);
   if (Option.isNone(service) || Option.isNone(userStore)) {
     return yield* new S.NotFound({ message: "Google One Tap is not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(Effect.provideService(OAuthUserStoreTag, userStore.value));
+    effect.pipe(Effect.provideService(OAuthUserStore, userStore.value));
   return { service: service.value, provideStores };
 });
 
@@ -455,14 +452,14 @@ const resolveGoogleOneTap = Effect.gen(function* () {
  * OIDC stores.
  */
 const resolveOidcProvider = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(OidcProviderServiceTag);
-  const clientStore = yield* Effect.serviceOption(OidcClientStoreTag);
-  const codeStore = yield* Effect.serviceOption(OidcCodeStoreTag);
-  const tokenStore = yield* Effect.serviceOption(OidcTokenStoreTag);
-  const consentStore = yield* Effect.serviceOption(OidcConsentStoreTag);
-  const jwtService = yield* Effect.serviceOption(JwtServiceTag);
-  const jwtKeyStore = yield* Effect.serviceOption(JwtKeyStoreTag);
-  const userStore = yield* Effect.serviceOption(UserStoreTag);
+  const service = yield* Effect.serviceOption(OidcProviderService);
+  const clientStore = yield* Effect.serviceOption(OidcClientStore);
+  const codeStore = yield* Effect.serviceOption(OidcCodeStore);
+  const tokenStore = yield* Effect.serviceOption(OidcTokenStore);
+  const consentStore = yield* Effect.serviceOption(OidcConsentStore);
+  const jwtService = yield* Effect.serviceOption(JwtService);
+  const jwtKeyStore = yield* Effect.serviceOption(JwtKeyStore);
+  const userStore = yield* Effect.serviceOption(UserStore);
   if (
     Option.isNone(service) ||
     Option.isNone(clientStore) ||
@@ -477,13 +474,13 @@ const resolveOidcProvider = Effect.gen(function* () {
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provideService(OidcClientStoreTag, clientStore.value),
-      Effect.provideService(OidcCodeStoreTag, codeStore.value),
-      Effect.provideService(OidcTokenStoreTag, tokenStore.value),
-      Effect.provideService(OidcConsentStoreTag, consentStore.value),
-      Effect.provideService(JwtServiceTag, jwtService.value),
-      Effect.provideService(JwtKeyStoreTag, jwtKeyStore.value),
-      Effect.provideService(UserStoreTag, userStore.value),
+      Effect.provideService(OidcClientStore, clientStore.value),
+      Effect.provideService(OidcCodeStore, codeStore.value),
+      Effect.provideService(OidcTokenStore, tokenStore.value),
+      Effect.provideService(OidcConsentStore, consentStore.value),
+      Effect.provideService(JwtService, jwtService.value),
+      Effect.provideService(JwtKeyStore, jwtKeyStore.value),
+      Effect.provideService(UserStore, userStore.value),
     );
   return { service: service.value, provideStores };
 });
@@ -576,7 +573,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
     handlers
       .handle("signUp", ({ payload }) =>
         Effect.gen(function* () {
-          const lifecycle = yield* AuthLifecycleServiceTag;
+          const lifecycle = yield* AuthLifecycleService;
           const result = yield* lifecycle.signUp(signUpInput(payload)).pipe(
             Effect.catchTags({
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
@@ -597,7 +594,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("signIn", ({ payload }) =>
         Effect.gen(function* () {
-          const lifecycle = yield* AuthLifecycleServiceTag;
+          const lifecycle = yield* AuthLifecycleService;
           const result = yield* lifecycle
             .signIn({
               email: payload.email,
@@ -627,7 +624,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         Effect.gen(function* () {
           const sessionId = sessionIdFromRequest(request, cfg);
           if (sessionId !== undefined) {
-            const sessionManager = yield* SessionManagerTag;
+            const sessionManager = yield* SessionManager;
             yield* Effect.ignore(sessionManager.invalidateSession(sessionId));
           }
           let response = yield* HttpServerResponse.setCookie(
@@ -685,8 +682,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("sendVerificationEmail", ({ payload }) =>
         Effect.gen(function* () {
-          const store = yield* EmailPasswordStoreTag;
-          const verification = yield* EmailVerificationServiceTag;
+          const store = yield* EmailPasswordStore;
+          const verification = yield* EmailVerificationService;
           const email = payload.email.trim().toLowerCase();
 
           const user = yield* store
@@ -711,7 +708,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("verifyEmail", ({ payload }) =>
         Effect.gen(function* () {
-          const lifecycle = yield* AuthLifecycleServiceTag;
+          const lifecycle = yield* AuthLifecycleService;
           const result = yield* lifecycle.verifyEmail({ token: payload.token }).pipe(
             Effect.catchTags({
               EmailVerificationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
@@ -729,7 +726,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("passwordResetRequest", ({ payload }) =>
         Effect.gen(function* () {
-          const passwordReset = yield* PasswordResetServiceTag;
+          const passwordReset = yield* PasswordResetService;
           yield* passwordReset.requestPasswordReset(payload.email).pipe(
             Effect.catchTags({
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
@@ -743,7 +740,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("passwordResetConfirm", ({ payload }) =>
         Effect.gen(function* () {
-          const passwordReset = yield* PasswordResetServiceTag;
+          const passwordReset = yield* PasswordResetService;
           yield* passwordReset.resetPassword(payload.token, payload.newPassword).pipe(
             Effect.catchTags({
               PasswordResetError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
@@ -782,7 +779,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("updateUser", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const userService = yield* UserServiceTag;
+          const userService = yield* UserService;
           const updated = yield* userService
             .updateUser(resolved.user.id, {
               ...(payload.name !== undefined && { name: payload.name }),
@@ -861,7 +858,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("listSessions", ({ request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
           const sessions = yield* sessionManager
             .listSessions(resolved.user.id)
             .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
@@ -871,7 +868,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("revokeSession", ({ params, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
 
           const sessions = yield* sessionManager
             .listSessions(resolved.user.id)
@@ -891,7 +888,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("revokeOtherSessions", ({ request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
           yield* sessionManager
             .revokeOtherSessions(resolved.user.id, resolved.session.id)
             .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
@@ -1009,7 +1006,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           if (cfg.multiSession === undefined) {
             return yield* new S.NotFound({ message: "Multi-session is not enabled" });
           }
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
           const active = sessionIdFromRequest(request, cfg);
           const ids = new Set(readDeviceSessionIds(request, cfg));
           if (active !== undefined) ids.add(active);
@@ -1032,7 +1029,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           if (!readDeviceSessionIds(request, cfg).includes(payload.sessionId)) {
             return yield* new S.BadRequest({ message: "Session is not on this device" });
           }
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
           const resolved = yield* sessionManager
             .validateSession(payload.sessionId)
             .pipe(
@@ -1056,7 +1053,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           if (cfg.multiSession === undefined) {
             return yield* new S.NotFound({ message: "Multi-session is not enabled" });
           }
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
           yield* sessionManager
             .invalidateSession(payload.sessionId)
             .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
@@ -1196,14 +1193,14 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           // `enable` labels the otpauth:// URI with the user's email via the
           // core UserStore, which is not part of `AuthServices` - resolve it
           // optionally alongside the feature.
-          const userStore = yield* Effect.serviceOption(UserStoreTag);
+          const userStore = yield* Effect.serviceOption(UserStore);
           if (Option.isNone(userStore)) {
             return yield* new S.NotFound({ message: "Two-factor authentication is not enabled" });
           }
           return yield* twoFactor
             .provideStores(twoFactor.service.enable(resolved.user.id, payload.password))
             .pipe(
-              Effect.provideService(UserStoreTag, userStore.value),
+              Effect.provideService(UserStore, userStore.value),
               Effect.catchTags({
                 InvalidCredentialsError: (e) =>
                   Effect.fail(new S.BadRequest({ message: e.message })),
@@ -1393,7 +1390,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         Effect.gen(function* () {
           yield* resolveOrganization; // 404 when organizations are not enabled
           const resolved = yield* requireSession(request, cfg);
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
           yield* sessionManager
             .setSessionAttributes(resolved.session.id, {
               activeOrganizationId: payload.organizationId,
@@ -1653,7 +1650,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
           const admin = yield* resolveAdmin;
-          const userService = yield* UserServiceTag;
+          const userService = yield* UserService;
           const session = yield* admin.service.impersonateUser(resolved.user, payload.userId).pipe(
             Effect.catchTags({
               AdminError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
@@ -1676,7 +1673,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         Effect.gen(function* () {
           yield* resolveAdmin; // 404 when admin is not enabled
           const resolved = yield* requireSession(request, cfg);
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
           yield* sessionManager
             .invalidateSession(resolved.session.id)
             .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
@@ -2150,7 +2147,7 @@ const secondFactorSuccess = (
   method?: string,
 ) =>
   Effect.gen(function* () {
-    const userService = yield* UserServiceTag;
+    const userService = yield* UserService;
     const user = yield* userService
       .getUser(result.userId)
       .pipe(Effect.mapError((e) => new S.InternalServerError({ message: e.message })));
@@ -2174,7 +2171,7 @@ const resolveSession = (
 ): Effect.Effect<
   { readonly resolved: Types.SessionWithUser; readonly cacheHit: boolean },
   S.Unauthorized,
-  SessionManagerTag | Hooks
+  SessionManager | Hooks
 > =>
   Effect.gen(function* () {
     if (cfg.cache !== undefined) {
@@ -2188,7 +2185,7 @@ const resolveSession = (
     if (sessionId === undefined) {
       return yield* new S.Unauthorized({ message: "Not authenticated" });
     }
-    const sessionManager = yield* SessionManagerTag;
+    const sessionManager = yield* SessionManager;
     const resolved = yield* sessionManager
       .validateSession(sessionId)
       .pipe(Effect.mapError(() => new S.Unauthorized({ message: "Invalid or expired session" })));
@@ -2198,7 +2195,7 @@ const resolveSession = (
 const requireSession = (
   request: HttpServerRequest.HttpServerRequest,
   cfg: ResolvedCookieConfig,
-): Effect.Effect<Types.SessionWithUser, S.Unauthorized, SessionManagerTag | Hooks> =>
+): Effect.Effect<Types.SessionWithUser, S.Unauthorized, SessionManager | Hooks> =>
   resolveSession(request, cfg).pipe(Effect.map((r) => r.resolved));
 
 /**

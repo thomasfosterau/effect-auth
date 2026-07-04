@@ -37,13 +37,10 @@ keys) so verifiers can fetch the public keys.
   - [JwtConfig (interface)](#jwtconfig-interface)
   - [JwtError (class)](#jwterror-class)
   - [JwtKeyPair (interface)](#jwtkeypair-interface)
-  - [JwtKeyStore](#jwtkeystore)
-  - [JwtKeyStore (interface)](#jwtkeystore-interface)
-  - [JwtKeyStoreTag (class)](#jwtkeystoretag-class)
-  - [JwtService](#jwtservice)
-  - [JwtService (interface)](#jwtservice-interface)
-  - [JwtServiceLayer](#jwtservicelayer)
-  - [JwtServiceTag (class)](#jwtservicetag-class)
+  - [JwtKeyStore (class)](#jwtkeystore-class)
+  - [JwtKeyStoreShape (interface)](#jwtkeystoreshape-interface)
+  - [JwtService (class)](#jwtservice-class)
+  - [JwtServiceShape (interface)](#jwtserviceshape-interface)
   - [JwtSignResult (interface)](#jwtsignresult-interface)
   - [generateKeyPair](#generatekeypair)
   - [makeJwtService](#makejwtservice)
@@ -131,22 +128,22 @@ export interface JwtKeyPair {
 }
 ```
 
-## JwtKeyStore
+## JwtKeyStore (class)
 
 **Signature**
 
 ```ts
-export declare const JwtKeyStore: typeof JwtKeyStoreTag;
+export declare class JwtKeyStore
 ```
 
-## JwtKeyStore (interface)
+## JwtKeyStoreShape (interface)
 
 Storage interface for JWT signing keys
 
 **Signature**
 
 ```ts
-export interface JwtKeyStore {
+export interface JwtKeyStoreShape {
   /** The key pair new tokens should be signed with, or null when none exists */
   readonly getActive: () => Effect.Effect<JwtKeyPair | null, Errors.AuthError>;
   readonly create: (pair: JwtKeyPair) => Effect.Effect<JwtKeyPair, Errors.AuthError>;
@@ -155,30 +152,22 @@ export interface JwtKeyStore {
 }
 ```
 
-## JwtKeyStoreTag (class)
+## JwtService (class)
 
 **Signature**
 
 ```ts
-export declare class JwtKeyStoreTag
+export declare class JwtService
 ```
 
-## JwtService
-
-**Signature**
-
-```ts
-export declare const JwtService: typeof JwtServiceTag;
-```
-
-## JwtService (interface)
+## JwtServiceShape (interface)
 
 JWT service
 
 **Signature**
 
 ```ts
-export interface JwtService {
+export interface JwtServiceShape {
   /**
    * Sign a JWT for a user. The header is `{ alg, kid, typ: "JWT" }`; the
    * payload carries `iss`/`aud?`/`sub`/`iat`/`exp` plus `definePayload(user)`
@@ -188,7 +177,7 @@ export interface JwtService {
   readonly sign: (
     user: Types.User,
     extraClaims?: Record<string, unknown>,
-  ) => Effect.Effect<JwtSignResult, JwtError | Errors.AuthError, JwtKeyStoreTag>;
+  ) => Effect.Effect<JwtSignResult, JwtError | Errors.AuthError, JwtKeyStore>;
 
   /**
    * Verify a compact JWS and return its decoded payload. Validates the
@@ -198,33 +187,15 @@ export interface JwtService {
    */
   readonly verify: (
     token: string,
-  ) => Effect.Effect<Record<string, unknown>, JwtError | Errors.AuthError, JwtKeyStoreTag>;
+  ) => Effect.Effect<Record<string, unknown>, JwtError | Errors.AuthError, JwtKeyStore>;
 
   /**
    * The JWKS document containing every stored public key (with `kid`,
    * `alg`, and `use: "sig"`) and no private material. Serve this at
    * `/.well-known/jwks.json`.
    */
-  readonly getJwks: () => Effect.Effect<Jwks, Errors.AuthError, JwtKeyStoreTag>;
+  readonly getJwks: () => Effect.Effect<Jwks, Errors.AuthError, JwtKeyStore>;
 }
-```
-
-## JwtServiceLayer
-
-**Signature**
-
-```ts
-export declare const JwtServiceLayer: (
-  config: JwtConfig,
-) => Layer.Layer<JwtServiceTag, never, never>;
-```
-
-## JwtServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class JwtServiceTag
 ```
 
 ## JwtSignResult (interface)
@@ -263,5 +234,5 @@ Create a JWT service
 **Signature**
 
 ```ts
-export declare const makeJwtService: (config: JwtConfig) => Effect.Effect<JwtService, never>;
+export declare const makeJwtService: (config: JwtConfig) => Effect.Effect<JwtServiceShape, never>;
 ```

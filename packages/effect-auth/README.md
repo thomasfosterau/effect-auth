@@ -47,7 +47,7 @@ import { Effect } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement session storage (e.g., Redis, PostgreSQL, etc.)
-const sessionStore: Auth.SessionStore = {
+const sessionStore: Auth.SessionStoreShape = {
   create: (session) => Effect.succeed(session), // Your implementation
   get: (sessionId) =>
     Effect.fail(new Auth.SessionNotFoundError({ message: "Not found", sessionId })),
@@ -60,7 +60,7 @@ const sessionStore: Auth.SessionStore = {
 // Implement user storage. Users carry first-class identity fields
 // (email, emailVerified, name, image, createdAt, updatedAt) plus an
 // `attributes` bag for app-specific data.
-const userStore: Auth.UserStore = {
+const userStore: Auth.UserStoreShape = {
   get: (userId) => Effect.fail(new Auth.UserNotFoundError({ message: "Not found", userId })),
   getCredentials: (userId) => Effect.succeed("hashed-password"),
 };
@@ -161,7 +161,7 @@ import { Effect, Context } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement your role store
-const roleStore: Auth.RoleStore = {
+const roleStore: Auth.RoleStoreShape = {
   getUserRoles: (userId) => Effect.succeed(["admin", "user"]),
   getRolePermissions: (role) =>
     Effect.succeed([
@@ -301,7 +301,7 @@ import { Effect, Context } from "effect"
 import * as Auth from "effect-auth"
 
 // Implement challenge store (temporary storage for challenges)
-const challengeStore: Auth.ChallengeStore = {
+const challengeStore: Auth.ChallengeStoreShape = {
   create: (challenge) =>
     Effect.succeed(challenge), // Store in Redis/memory
   get: (challenge) =>
@@ -311,7 +311,7 @@ const challengeStore: Auth.ChallengeStore = {
 }
 
 // Implement credential store (persistent storage for passkeys)
-const credentialStore: Auth.CredentialStore = {
+const credentialStore: Auth.CredentialStoreShape = {
   create: (credential) =>
     Effect.succeed(credential), // Store in database
   get: (credentialId) =>
@@ -410,7 +410,7 @@ import { Effect, Context } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement OAuth state store (temporary, Redis/memory recommended)
-const oauthStateStore: Auth.OAuthStateStore = {
+const oauthStateStore: Auth.OAuthStateStoreShape = {
   create: (state) => Effect.succeed(state), // Store in Redis with 10-minute TTL
   get: (stateStr) =>
     Effect.fail(
@@ -423,7 +423,7 @@ const oauthStateStore: Auth.OAuthStateStore = {
 };
 
 // Implement OAuth account store (persistent, database)
-const oauthAccountStore: Auth.OAuthAccountStore = {
+const oauthAccountStore: Auth.OAuthAccountStoreShape = {
   create: (account) => Effect.succeed(account), // Store in database
   get: (provider, providerId) => Effect.succeed(null), // Return account or null
   getByUserId: (userId) => Effect.succeed([]), // Return all user's OAuth accounts
@@ -559,7 +559,7 @@ import { Effect, Context } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement email verification store
-const emailVerificationStore: Auth.EmailVerificationStore = {
+const emailVerificationStore: Auth.EmailVerificationStoreShape = {
   create: (verification) => Effect.succeed(verification), // Store in database
   get: (token) => Effect.succeed(null), // Return verification or null
   delete: (token) => Effect.void,
@@ -628,7 +628,7 @@ import { Effect, Context } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement rate limit store (Redis recommended for distributed systems)
-const rateLimitStore: Auth.RateLimitStore = {
+const rateLimitStore: Auth.RateLimitStoreShape = {
   get: (key) => Effect.succeed(null), // Return entry or null from Redis
   set: (key, entry, ttl) => Effect.void, // Store in Redis with TTL
   increment: (key, ttl) => Effect.succeed(1), // Atomic increment in Redis

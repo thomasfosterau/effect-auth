@@ -14,17 +14,17 @@ challenge token instead of a session, and redeem it with a code.
 import { Layer } from "effect";
 import * as Auth from "effect-auth";
 
-declare const twoFactorStore: Auth.TwoFactorStore;
-declare const pendingStore: Auth.PendingTwoFactorStore;
+declare const twoFactorStore: Auth.TwoFactorStoreShape;
+declare const pendingStore: Auth.PendingTwoFactorStoreShape;
 
 const twoFactor = Layer.mergeAll(
-  Auth.TwoFactorServiceLayer({
+  Auth.TwoFactorService.layer({
     issuer: "My App", // shown in authenticator apps
     backupCodeCount: 10, // default
     pendingExpiresIn: 5 * 60 * 1000, // challenge lifetime, default 5 minutes
   }),
-  Layer.succeed(Auth.TwoFactorStoreTag)(twoFactorStore),
-  Layer.succeed(Auth.PendingTwoFactorStoreTag)(pendingStore),
+  Layer.succeed(Auth.TwoFactorStore)(twoFactorStore),
+  Layer.succeed(Auth.PendingTwoFactorStore)(pendingStore),
   // Makes password sign-in return a challenge for enrolled users:
   Auth.TwoFactorGateLayer,
 );

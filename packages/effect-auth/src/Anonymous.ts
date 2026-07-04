@@ -12,36 +12,34 @@
  *
  * Account linking is triggered explicitly by the app/HTTP layer (hooks operate
  * on input values and cannot see the current session): after a guest signs up
- * for a real account, call {@link AnonymousService.linkAccount} with the
+ * for a real account, call {@link AnonymousServiceShape.linkAccount} with the
  * anonymous user and the freshly-created user; the `linkAccount` config
  * callback migrates any data, then the anonymous user is deleted.
  */
 import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.js";
 import type * as Types from "./Types.js";
-import { SessionManagerTag } from "./Session.js";
+import { SessionManager } from "./Session.js";
 import { Hooks, type HookError } from "./Hooks.js";
 
 /**
  * Persistence for anonymous users. The implementer generates an id and a
  * placeholder email, and sets `attributes.isAnonymous: true`.
  */
-export interface AnonymousUserStore {
+export interface AnonymousUserStoreShape {
   readonly createAnonymousUser: () => Effect.Effect<Types.User, Errors.AuthError>;
   readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class AnonymousUserStoreTag extends Context.Service<
-  AnonymousUserStoreTag,
-  AnonymousUserStore
+export class AnonymousUserStore extends Context.Service<
+  AnonymousUserStore,
+  AnonymousUserStoreShape
 >()("@effect-auth/AnonymousUserStore") {}
-
-export const AnonymousUserStore = AnonymousUserStoreTag;
 
 export interface AnonymousConfig {
   /**
    * Migrate data from the anonymous user to the newly-created real user during
-   * {@link AnonymousService.linkAccount}. Runs before the anonymous user is
+   * {@link AnonymousServiceShape.linkAccount}. Runs before the anonymous user is
    * deleted, so related rows can still be resolved.
    */
   readonly linkAccount?: (params: {
@@ -55,14 +53,14 @@ export interface AnonymousResult {
   readonly session: Types.Session;
 }
 
-export interface AnonymousService {
+export interface AnonymousServiceShape {
   /** Create an anonymous user and an authenticated session for them. */
   readonly signInAnonymous: (
     sessionAttributes?: Record<string, unknown>,
   ) => Effect.Effect<
     AnonymousResult,
     Errors.AuthError | HookError,
-    AnonymousUserStoreTag | SessionManagerTag | Hooks
+    AnonymousUserStore | SessionManager | Hooks
   >;
 
   /**
@@ -72,20 +70,18 @@ export interface AnonymousService {
   readonly linkAccount: (
     anonymousUser: Types.User,
     newUser: Types.User,
-  ) => Effect.Effect<void, Errors.AuthError, AnonymousUserStoreTag>;
+  ) => Effect.Effect<void, Errors.AuthError, AnonymousUserStore>;
 }
 
-export class AnonymousServiceTag extends Context.Service<AnonymousServiceTag, AnonymousService>()(
+export class AnonymousService extends Context.Service<AnonymousService, AnonymousServiceShape>()(
   "@effect-auth/AnonymousService",
 ) {
   /**
-   * Construct a Layer providing this service — the canonical form of
-   * {@link AnonymousServiceLayer}.
+   * Construct a Layer providing this service.
    */
-  static readonly layer = (config: AnonymousConfig = {}) => AnonymousServiceLayer(config);
+  static readonly layer = (config: AnonymousConfig = {}) =>
+    Layer.effect(AnonymousService, makeAnonymousService(config));
 }
-
-export const AnonymousService = AnonymousServiceTag;
 
 /** Whether a user is an anonymous (guest) user. */
 export const isAnonymousUser = (user: Types.User): boolean =>
@@ -93,13 +89,13 @@ export const isAnonymousUser = (user: Types.User): boolean =>
 
 export const makeAnonymousService = (
   config: AnonymousConfig = {},
-): Effect.Effect<AnonymousService, never> =>
+): Effect.Effect<AnonymousServiceShape, never> =>
   Effect.sync(
-    (): AnonymousService => ({
+    (): AnonymousServiceShape => ({
       signInAnonymous: (sessionAttributes) =>
         Effect.gen(function* () {
-          const store = yield* AnonymousUserStoreTag;
-          const sessionManager = yield* SessionManagerTag;
+          const store = yield* AnonymousUserStore;
+          const sessionManager = yield* SessionManager;
 
           const user = yield* store.createAnonymousUser();
           const session = yield* sessionManager.createSession(user.id, sessionAttributes);
@@ -109,7 +105,7 @@ export const makeAnonymousService = (
 
       linkAccount: (anonymousUser, newUser) =>
         Effect.gen(function* () {
-          const store = yield* AnonymousUserStoreTag;
+          const store = yield* AnonymousUserStore;
           if (config.linkAccount !== undefined) {
             yield* config.linkAccount({ anonymousUser, newUser });
           }
@@ -117,6 +113,3 @@ export const makeAnonymousService = (
         }),
     }),
   );
-
-export const AnonymousServiceLayer = (config: AnonymousConfig = {}) =>
-  Layer.effect(AnonymousServiceTag, makeAnonymousService(config));

@@ -14,17 +14,13 @@ description: "API reference for the EmailPassword module."
   - [ChangePasswordInput (interface)](#changepasswordinput-interface)
   - [CreateUserInput (interface)](#createuserinput-interface)
   - [EmailPasswordConfig (interface)](#emailpasswordconfig-interface)
-  - [EmailPasswordService](#emailpasswordservice)
-  - [EmailPasswordService (interface)](#emailpasswordservice-interface)
-  - [EmailPasswordServiceLayer](#emailpasswordservicelayer)
-  - [EmailPasswordServiceTag (class)](#emailpasswordservicetag-class)
-  - [EmailPasswordStore](#emailpasswordstore)
-  - [EmailPasswordStore (interface)](#emailpasswordstore-interface)
-  - [EmailPasswordStoreTag (class)](#emailpasswordstoretag-class)
+  - [EmailPasswordService (class)](#emailpasswordservice-class)
+  - [EmailPasswordServiceShape (interface)](#emailpasswordserviceshape-interface)
+  - [EmailPasswordStore (class)](#emailpasswordstore-class)
+  - [EmailPasswordStoreShape (interface)](#emailpasswordstoreshape-interface)
   - [SecondFactorChallenge (interface)](#secondfactorchallenge-interface)
-  - [SecondFactorGate](#secondfactorgate)
-  - [SecondFactorGate (interface)](#secondfactorgate-interface)
-  - [SecondFactorGateTag (class)](#secondfactorgatetag-class)
+  - [SecondFactorGate (class)](#secondfactorgate-class)
+  - [SecondFactorGateShape (interface)](#secondfactorgateshape-interface)
   - [SignInInput (interface)](#signininput-interface)
   - [SignUpInput (interface)](#signupinput-interface)
   - [makeEmailPasswordService](#makeemailpasswordservice)
@@ -94,26 +90,30 @@ export interface EmailPasswordConfig {
 }
 ```
 
-## EmailPasswordService
+## EmailPasswordService (class)
 
 **Signature**
 
 ```ts
-export declare const EmailPasswordService: typeof EmailPasswordServiceTag;
+export declare class EmailPasswordService
 ```
 
-## EmailPasswordService (interface)
+## EmailPasswordServiceShape (interface)
 
 **Signature**
 
 ```ts
-export interface EmailPasswordService {
+export interface EmailPasswordServiceShape {
   readonly signUp: (
     input: SignUpInput,
   ) => Effect.Effect<
     AuthResult,
-    Errors.AuthError | Errors.HashingError | Errors.EmailNotVerifiedError | HookError,
-    EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag | Hooks
+    | Errors.AuthError
+    | Errors.EmailInUseError
+    | Errors.HashingError
+    | Errors.EmailNotVerifiedError
+    | HookError,
+    EmailPasswordStore | PasswordHasher | SessionManager | Hooks
   >;
 
   readonly signIn: (
@@ -125,7 +125,7 @@ export interface EmailPasswordService {
     | Errors.AuthError
     | Errors.EmailNotVerifiedError
     | HookError,
-    EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag | Hooks
+    EmailPasswordStore | PasswordHasher | SessionManager | Hooks
   >;
 
   /**
@@ -137,7 +137,7 @@ export interface EmailPasswordService {
   ) => Effect.Effect<
     void,
     Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
-    EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag
+    EmailPasswordStore | PasswordHasher | SessionManager
   >;
 
   /**
@@ -150,43 +150,25 @@ export interface EmailPasswordService {
   ) => Effect.Effect<
     void,
     Errors.HashingError | Errors.AuthError,
-    EmailPasswordStoreTag | PasswordHasherTag
+    EmailPasswordStore | PasswordHasher
   >;
 }
 ```
 
-## EmailPasswordServiceLayer
+## EmailPasswordStore (class)
 
 **Signature**
 
 ```ts
-export declare const EmailPasswordServiceLayer: (
-  config?: EmailPasswordConfig,
-) => Layer.Layer<EmailPasswordServiceTag, never, never>;
+export declare class EmailPasswordStore
 ```
 
-## EmailPasswordServiceTag (class)
+## EmailPasswordStoreShape (interface)
 
 **Signature**
 
 ```ts
-export declare class EmailPasswordServiceTag
-```
-
-## EmailPasswordStore
-
-**Signature**
-
-```ts
-export declare const EmailPasswordStore: typeof EmailPasswordStoreTag;
-```
-
-## EmailPasswordStore (interface)
-
-**Signature**
-
-```ts
-export interface EmailPasswordStore {
+export interface EmailPasswordStoreShape {
   readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
   readonly createUser: (input: CreateUserInput) => Effect.Effect<Types.User, Errors.AuthError>;
@@ -195,14 +177,6 @@ export interface EmailPasswordStore {
 
   readonly setPasswordHash: (userId: string, hash: string) => Effect.Effect<void, Errors.AuthError>;
 }
-```
-
-## EmailPasswordStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class EmailPasswordStoreTag
 ```
 
 ## SecondFactorChallenge (interface)
@@ -220,15 +194,15 @@ export interface SecondFactorChallenge {
 }
 ```
 
-## SecondFactorGate
+## SecondFactorGate (class)
 
 **Signature**
 
 ```ts
-export declare const SecondFactorGate: typeof SecondFactorGateTag;
+export declare class SecondFactorGate
 ```
 
-## SecondFactorGate (interface)
+## SecondFactorGateShape (interface)
 
 Optional seam consulted by password sign-in after the first factor
 succeeds. When present in context (see `TwoFactorGateLayer` in the
@@ -238,18 +212,10 @@ TwoFactor module) and `required` reports true, sign-in returns a
 **Signature**
 
 ```ts
-export interface SecondFactorGate {
+export interface SecondFactorGateShape {
   readonly required: (user: Types.User) => Effect.Effect<boolean, Errors.AuthError>;
   readonly begin: (user: Types.User) => Effect.Effect<SecondFactorChallenge, Errors.AuthError>;
 }
-```
-
-## SecondFactorGateTag (class)
-
-**Signature**
-
-```ts
-export declare class SecondFactorGateTag
 ```
 
 ## SignInInput (interface)
@@ -289,5 +255,5 @@ export interface SignUpInput {
 ```ts
 export declare const makeEmailPasswordService: (
   config?: EmailPasswordConfig,
-) => Effect.Effect<EmailPasswordService, never>;
+) => Effect.Effect<EmailPasswordServiceShape, never>;
 ```

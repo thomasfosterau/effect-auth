@@ -2,15 +2,14 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect } from "effect";
 import {
   ApiKeyStore,
-  ApiKeyStoreTag,
   hashApiKey,
   makeApiKeyService,
   type ApiKey,
   type ApiKeyConfig,
-  type ApiKeyService,
+  type ApiKeyServiceShape,
   type ApiKeyVerifyResult,
 } from "./ApiKey.js";
-import { makeRateLimiter, RateLimiter, RateLimitStore, type RateLimitEntry } from "./RateLimit.js";
+import { makeRateLimiter, type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.js";
 
 const apiKeys = new Map<string, ApiKey>();
 const rateLimitEntries = new Map<string, RateLimitEntry>();
@@ -87,7 +86,7 @@ const makeRateLimitContext = async () => {
 };
 
 const runService = <A, E>(
-  program: (service: ApiKeyService) => Effect.Effect<A, E, ApiKeyStoreTag>,
+  program: (service: ApiKeyServiceShape) => Effect.Effect<A, E, ApiKeyStore>,
   config?: ApiKeyConfig,
 ) =>
   Effect.runPromise(

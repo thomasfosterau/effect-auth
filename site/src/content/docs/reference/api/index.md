@@ -46,8 +46,6 @@ settled API conventions.
   - [From "./RateLimit.js"](#from-ratelimitjs)
   - [From "./RateLimitPersistence.js"](#from-ratelimitpersistencejs)
   - [From "./Rbac.js"](#from-rbacjs)
-  - [From "./Requests.js"](#from-requestsjs)
-  - [From "./Resolvers.js"](#from-resolversjs)
   - [From "./Scope.js"](#from-scopejs)
   - [From "./Session.js"](#from-sessionjs)
   - [From "./Sso.js"](#from-ssojs)
@@ -57,11 +55,6 @@ settled API conventions.
   - [From "./Username.js"](#from-usernamejs)
   - [From "./WebAuthn.js"](#from-webauthnjs)
   - [From "./plugins/index.js"](#from-pluginsindexjs)
-- [utils](#utils)
-  - [Context](#context)
-  - [Effect](#effect)
-  - [Layer](#layer)
-  - [RequestResolver](#requestresolver)
 
 ---
 
@@ -351,26 +344,6 @@ In-memory role store with hierarchy (RBAC).
 export * from "./Rbac.js";
 ```
 
-## From "./Requests.js"
-
-Effect `Request` definitions for auth operations. @deprecated Removal planned for 1.0 (DESIGN.md D6).
-
-**Signature**
-
-```ts
-export * from "./Requests.js";
-```
-
-## From "./Resolvers.js"
-
-Request resolvers wiring stores to requests. @deprecated Removal planned for 1.0 (DESIGN.md D6).
-
-**Signature**
-
-```ts
-export * from "./Resolvers.js";
-```
-
 ## From "./Scope.js"
 
 OAuth-style scope helpers.
@@ -465,46 +438,4 @@ Example plugins built on the hooks system.
 
 ```ts
 export * from "./plugins/index.js";
-```
-
-# utils
-
-## Context
-
-Re-export of `Context` from `effect`. @deprecated Import from `effect` directly; removal planned for 1.0 (DESIGN.md D9).
-
-**Signature**
-
-```ts
-export declare const Context: typeof import("effect/dist/Context");
-```
-
-## Effect
-
-Re-export of `Effect` from `effect`. @deprecated Import from `effect` directly; removal planned for 1.0 (DESIGN.md D9).
-
-**Signature**
-
-```ts
-export declare const Effect: typeof import("effect/dist/Effect");
-```
-
-## Layer
-
-Re-export of `Layer` from `effect`. @deprecated Import from `effect` directly; removal planned for 1.0 (DESIGN.md D9).
-
-**Signature**
-
-```ts
-export declare const Layer: typeof import("effect/dist/Layer");
-```
-
-## RequestResolver
-
-Re-export of `RequestResolver` from `effect`. @deprecated Import from `effect` directly; removal planned for 1.0 (DESIGN.md D9).
-
-**Signature**
-
-```ts
-export declare const RequestResolver: typeof import("effect/dist/RequestResolver");
 ```

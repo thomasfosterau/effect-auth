@@ -32,17 +32,17 @@ the stores the orchestration services depend on, plus the `Hooks` service
 
 ```ts
 export type AuthServices =
-  | AuthLifecycleServiceTag
-  | SessionManagerTag
-  | EmailPasswordStoreTag
-  | PasswordHasherTag
-  | EmailVerificationServiceTag
-  | EmailVerificationStoreTag
-  | PasswordResetServiceTag
-  | PasswordResetStoreTag
-  | PasswordResetUserStoreTag
-  | UserServiceTag
-  | UserServiceStoreTag
+  | AuthLifecycleService
+  | SessionManager
+  | EmailPasswordStore
+  | PasswordHasher
+  | EmailVerificationService
+  | EmailVerificationStore
+  | PasswordResetService
+  | PasswordResetStore
+  | PasswordResetUserStore
+  | UserService
+  | UserServiceStore
   | Hooks;
 ```
 
@@ -152,18 +152,18 @@ export declare const authGroupLayer: (
 ) => Layer.Layer<
   ApiGroup<"AuthApi", "auth">,
   never,
-  | HttpRouter.Request<"Requires", SessionManagerTag>
+  | HttpRouter.Request<"Requires", PasswordHasher>
+  | HttpRouter.Request<"Requires", EmailVerificationStore>
+  | HttpRouter.Request<"Requires", AuthLifecycleService>
+  | HttpRouter.Request<"Requires", EmailPasswordStore>
+  | HttpRouter.Request<"Requires", SessionManager>
+  | HttpRouter.Request<"Requires", EmailVerificationService>
   | HttpRouter.Request<"Requires", Hooks>
-  | HttpRouter.Request<"Requires", PasswordHasherTag>
-  | HttpRouter.Request<"Requires", AuthLifecycleServiceTag>
-  | HttpRouter.Request<"Requires", EmailPasswordStoreTag>
-  | HttpRouter.Request<"Requires", EmailVerificationServiceTag>
-  | HttpRouter.Request<"Requires", EmailVerificationStoreTag>
-  | HttpRouter.Request<"Requires", UserServiceTag>
-  | HttpRouter.Request<"Requires", UserServiceStoreTag>
-  | HttpRouter.Request<"Requires", PasswordResetServiceTag>
-  | HttpRouter.Request<"Requires", PasswordResetStoreTag>
-  | HttpRouter.Request<"Requires", PasswordResetUserStoreTag>
+  | HttpRouter.Request<"Requires", UserService>
+  | HttpRouter.Request<"Requires", UserServiceStore>
+  | HttpRouter.Request<"Requires", PasswordResetStore>
+  | HttpRouter.Request<"Requires", PasswordResetService>
+  | HttpRouter.Request<"Requires", PasswordResetUserStore>
 >;
 ```
 

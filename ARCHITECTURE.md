@@ -31,23 +31,21 @@ document describes how the pieces fit together.
 
 ## The service pattern
 
-Each core module ships the same quartet (see DESIGN.md D1):
+Each core module ships the same trio (see DESIGN.md D1):
 
 ```ts
-// 1. The service shape — an interface users can reference
-export interface SessionManager { readonly createSession: (...) => Effect<...>; ... }
+// 1. The service shape — the interface store/service implementors reference
+export interface SessionManagerShape { readonly createSession: (...) => Effect<...>; ... }
 
-// 2. The service class (Context.Service tag) with its canonical layer
-export class SessionManagerTag extends Context.Service<SessionManagerTag, SessionManager>()(
+// 2. The service class — tag, name, and canonical layer in one
+export class SessionManager extends Context.Service<SessionManager, SessionManagerShape>()(
   "@effect-auth/SessionManager",
 ) {
-  static readonly layer = (config: SessionConfig) => SessionManagerLayer(config);
+  static readonly layer = (config: SessionConfig) =>
+    Layer.effect(SessionManager, makeSessionManager(config));
 }
 
-// 3. The bare-name export — the canonical way to reference the service
-export const SessionManager = SessionManagerTag;
-
-// 4. The low-level constructor, for embedding in custom layers
+// 3. The low-level constructor, for embedding in custom layers
 export const makeSessionManager = (config) => Effect.gen(...);
 ```
 
@@ -76,14 +74,12 @@ const layer = Auth.SessionManager.layer(sessionConfig).pipe(
 await Effect.runPromise(Effect.provide(program, layer));
 ```
 
-The `XServiceTag` class names and standalone `XServiceLayer(config)` constructors
-remain exported for compatibility; `X` + `X.layer(config)` is the canonical
-spelling (DESIGN.md D1 proposes retiring the legacy names at 1.0).
-
-> **Note**: `Requests.ts`/`Resolvers.ts` (Effect `Request`/`RequestResolver`
-> wrappers) are **deprecated**. They were an early experiment; nothing in the
-> library, the examples, or the HTTP layer uses them. The service pattern above
-> is the public API (DESIGN.md D6).
+`X` is both the value you `yield*` and the tag you provide; `XShape` is the
+structural interface you implement (`const store: Auth.SessionStoreShape =
+{...}` / `satisfies Auth.SessionStoreShape`). The former `XServiceTag` names,
+`XServiceLayer` constructors, and the `Requests.ts`/`Resolvers.ts`
+Request/Resolver surface were removed in the 1.0 normalization (DESIGN.md
+D1/D2/D6).
 
 ## Module map (`packages/effect-auth/src`)
 
@@ -124,9 +120,6 @@ Users persist state by implementing plain store interfaces (DESIGN.md D3):
 
 - Stores are **dumb persistence**: lookups return `X | null` when a row may
   legitimately be absent; services convert misses into typed domain errors.
-  (A few older stores — `SessionStore.get`, `UserStore.get`, the WebAuthn
-  stores — still fail typed not-found errors; normalizing them is proposed for
-  1.0.)
 - The store error channel is `AuthError` (infrastructure failure only).
 - Vocabulary: `create`, `get`, `getBy<Key>`, `list()`/`listBy<Key>` (arrays),
   `update`, `upsert`, `delete`, `deleteBy<Key>`.
@@ -146,8 +139,10 @@ Two mechanisms, by boundary (DESIGN.md D4):
   flow outcomes get specific tags. Nothing subclasses `AuthError` — errors
   compose in unions, keeping method signatures honest.
 - **HTTP boundary errors** are `Schema.TaggedErrorClass` classes in
-  `HttpApiSchemas.ts` with fixed status codes (401/403/400/404/409/500).
-  Handlers in `HttpServer.ts` map domain errors to these per endpoint.
+  `HttpApiSchemas.ts` with fixed status codes (400/401/403/404/409/429/500).
+  Handlers in `HttpServer.ts` map domain errors to these per endpoint;
+  `RateLimitError` is always 429, `AuthError` is always 500, and typed flow
+  errors carry the specific statuses (e.g. `EmailInUseError` → 409).
 
 ## HTTP protocol
 

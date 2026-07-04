@@ -12,7 +12,7 @@ OIDC connection, route sign-ins by email domain, and provision users (and,
 optionally, organization members) on first login. An SSO connection is, under
 the hood, a dynamically-registered OAuth provider, so this module reuses the
 OAuth machinery in {@link module:oauth} — {@link makeOAuthProvider},
-{@link discoverOAuthEndpoints}, and the shared {@link OAuthStateStoreTag}.
+{@link discoverOAuthEndpoints}, and the shared {@link OAuthStateStore}.
 
 SAML is out of scope for now; the store shape carries a `protocol` field so a
 SAML connection type can be added later without a migration.
@@ -26,13 +26,10 @@ SAML connection type can be added later without a migration.
   - [SsoConfig (interface)](#ssoconfig-interface)
   - [SsoError (class)](#ssoerror-class)
   - [SsoProvider (interface)](#ssoprovider-interface)
-  - [SsoProviderStore](#ssoproviderstore)
-  - [SsoProviderStore (interface)](#ssoproviderstore-interface)
-  - [SsoProviderStoreTag (class)](#ssoproviderstoretag-class)
-  - [SsoService](#ssoservice)
-  - [SsoService (interface)](#ssoservice-interface)
-  - [SsoServiceLayer](#ssoservicelayer)
-  - [SsoServiceTag (class)](#ssoservicetag-class)
+  - [SsoProviderStore (class)](#ssoproviderstore-class)
+  - [SsoProviderStoreShape (interface)](#ssoproviderstoreshape-interface)
+  - [SsoService (class)](#ssoservice-class)
+  - [SsoServiceShape (interface)](#ssoserviceshape-interface)
   - [SsoSignInResult (interface)](#ssosigninresult-interface)
   - [SsoSignInSelector (interface)](#ssosigninselector-interface)
   - [makeSsoService](#makessoservice)
@@ -43,7 +40,7 @@ SAML connection type can be added later without a migration.
 
 ## RegisterProviderInput (interface)
 
-Input to {@link SsoService.registerProvider}.
+Input to {@link SsoServiceShape.registerProvider}.
 
 **Signature**
 
@@ -125,22 +122,22 @@ export interface SsoProvider {
 }
 ```
 
-## SsoProviderStore
+## SsoProviderStore (class)
 
 **Signature**
 
 ```ts
-export declare const SsoProviderStore: typeof SsoProviderStoreTag;
+export declare class SsoProviderStore
 ```
 
-## SsoProviderStore (interface)
+## SsoProviderStoreShape (interface)
 
 Persistent registry of SSO connections.
 
 **Signature**
 
 ```ts
-export interface SsoProviderStore {
+export interface SsoProviderStoreShape {
   readonly create: (provider: SsoProvider) => Effect.Effect<SsoProvider, AuthError>;
   readonly getById: (id: string) => Effect.Effect<SsoProvider | null, AuthError>;
   readonly getByDomain: (domain: string) => Effect.Effect<SsoProvider | null, AuthError>;
@@ -148,28 +145,20 @@ export interface SsoProviderStore {
 }
 ```
 
-## SsoProviderStoreTag (class)
+## SsoService (class)
 
 **Signature**
 
 ```ts
-export declare class SsoProviderStoreTag
+export declare class SsoService
 ```
 
-## SsoService
+## SsoServiceShape (interface)
 
 **Signature**
 
 ```ts
-export declare const SsoService: typeof SsoServiceTag;
-```
-
-## SsoService (interface)
-
-**Signature**
-
-```ts
-export interface SsoService {
+export interface SsoServiceShape {
   /**
    * Register (or discover + register) an SSO connection. The registrar
    * (`registrarUserId`) is recorded on the connection; gate this behind an
@@ -178,7 +167,7 @@ export interface SsoService {
   readonly registerProvider: (
     registrarUserId: string,
     input: RegisterProviderInput,
-  ) => Effect.Effect<SsoProvider, SsoError | AuthError, SsoProviderStoreTag>;
+  ) => Effect.Effect<SsoProvider, SsoError | AuthError, SsoProviderStore>;
 
   /**
    * Resolve the connection an email address routes to, by domain. Returns
@@ -186,7 +175,7 @@ export interface SsoService {
    */
   readonly resolveProviderForEmail: (
     email: string,
-  ) => Effect.Effect<SsoProvider | null, AuthError, SsoProviderStoreTag>;
+  ) => Effect.Effect<SsoProvider | null, AuthError, SsoProviderStore>;
 
   /**
    * Begin an SSO sign-in: resolve the connection (by `providerId`, `domain`, or
@@ -197,7 +186,7 @@ export interface SsoService {
   ) => Effect.Effect<
     { readonly url: string; readonly state: string },
     SsoError | AuthError,
-    SsoProviderStoreTag | OAuthStateStoreTag
+    SsoProviderStore | OAuthStateStore
   >;
 
   /**
@@ -211,27 +200,9 @@ export interface SsoService {
   ) => Effect.Effect<
     SsoSignInResult,
     SsoError | AuthError | HookError,
-    SsoProviderStoreTag | OAuthStateStoreTag | OAuthUserStoreTag | SessionManagerTag | Hooks
+    SsoProviderStore | OAuthStateStore | OAuthUserStore | SessionManager | Hooks
   >;
 }
-```
-
-## SsoServiceLayer
-
-**Signature**
-
-```ts
-export declare const SsoServiceLayer: (
-  config?: SsoConfig,
-) => Layer.Layer<SsoServiceTag, never, never>;
-```
-
-## SsoServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class SsoServiceTag
 ```
 
 ## SsoSignInResult (interface)
@@ -268,5 +239,5 @@ export interface SsoSignInSelector {
 **Signature**
 
 ```ts
-export declare const makeSsoService: (config?: SsoConfig) => Effect.Effect<SsoService, never>;
+export declare const makeSsoService: (config?: SsoConfig) => Effect.Effect<SsoServiceShape, never>;
 ```

@@ -2,25 +2,18 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect, Layer } from "effect";
 import {
   AdminUserStore,
-  AdminUserStoreTag,
   BannedUserPlugin,
   isAdmin,
   isBanned,
   makeAdminService,
   type AdminConfig,
-  type AdminService,
+  type AdminServiceShape,
   type ListUsersQuery,
 } from "./Admin.js";
 import { Hooks } from "./Hooks.js";
-import {
-  makeSessionManager,
-  SessionManager,
-  SessionManagerTag,
-  SessionStore,
-  UserStore,
-} from "./Session.js";
+import { makeSessionManager, SessionManager, SessionStore, UserStore } from "./Session.js";
 import type { Session, SessionConfig, User } from "./Types.js";
-import { UserServiceStore, UserServiceStoreTag } from "./User.js";
+import { UserServiceStore } from "./User.js";
 
 const users = new Map<string, User>();
 const sessions = new Map<string, Session>();
@@ -142,8 +135,8 @@ const runService = <A, E>(
   testContext: TestContext,
   config: AdminConfig,
   program: (
-    service: AdminService,
-  ) => Effect.Effect<A, E, UserServiceStoreTag | AdminUserStoreTag | SessionManagerTag | Hooks>,
+    service: AdminServiceShape,
+  ) => Effect.Effect<A, E, UserServiceStore | AdminUserStore | SessionManager | Hooks>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.provide(
@@ -226,7 +219,7 @@ describe("AdminService", () => {
 
     const result = await runService(testContext, {}, (service) =>
       Effect.gen(function* () {
-        const sessionManager = yield* SessionManagerTag;
+        const sessionManager = yield* SessionManager;
         yield* sessionManager.createSession("user-1");
         yield* sessionManager.createSession("user-1");
         const sessionsBefore = sessions.size;
@@ -305,7 +298,7 @@ describe("AdminService", () => {
 
     const program = Effect.gen(function* () {
       const service = yield* makeAdminService({});
-      const sessionManager = yield* SessionManagerTag;
+      const sessionManager = yield* SessionManager;
 
       // Ban first (revokes existing sessions), then mint a fresh session to
       // prove the plugin blocks validation even when a session exists.
@@ -344,7 +337,7 @@ describe("AdminService", () => {
 
     const result = await runService(testContext, {}, (service) =>
       Effect.gen(function* () {
-        const sessionManager = yield* SessionManagerTag;
+        const sessionManager = yield* SessionManager;
         yield* sessionManager.createSession("user-1");
 
         const removeSelf = yield* Effect.result(service.removeUser(admin, "admin-1"));
@@ -368,7 +361,7 @@ describe("AdminService", () => {
 
     await runService(testContext, {}, (service) =>
       Effect.gen(function* () {
-        const sessionManager = yield* SessionManagerTag;
+        const sessionManager = yield* SessionManager;
         yield* sessionManager.createSession("user-1");
         yield* sessionManager.createSession("user-2");
         yield* service.revokeUserSessions(admin, "user-1");

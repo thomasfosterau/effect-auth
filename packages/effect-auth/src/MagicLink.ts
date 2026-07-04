@@ -12,7 +12,7 @@ import { Context, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
-import { SessionManagerTag } from "./Session.js";
+import { SessionManager } from "./Session.js";
 import type * as Types from "./Types.js";
 
 /**
@@ -28,7 +28,7 @@ export interface MagicLinkToken {
 /**
  * Storage interface for magic link tokens
  */
-export interface MagicLinkStore {
+export interface MagicLinkStoreShape {
   readonly create: (token: MagicLinkToken) => Effect.Effect<MagicLinkToken, Errors.AuthError>;
   readonly get: (token: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
   readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
@@ -47,7 +47,7 @@ export interface MagicLinkCreateUserInput {
 /**
  * User store interface for magic link sign-in
  */
-export interface MagicLinkUserStore {
+export interface MagicLinkUserStoreShape {
   readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
   readonly createUser: (
     input: MagicLinkCreateUserInput,
@@ -57,23 +57,17 @@ export interface MagicLinkUserStore {
 /**
  * Magic link store context tag
  */
-export class MagicLinkStoreTag extends Context.Service<MagicLinkStoreTag, MagicLinkStore>()(
+export class MagicLinkStore extends Context.Service<MagicLinkStore, MagicLinkStoreShape>()(
   "@effect-auth/MagicLinkStore",
 ) {}
-
-// Public ergonomic alias
-export const MagicLinkStore = MagicLinkStoreTag;
 
 /**
  * Magic link user store context tag
  */
-export class MagicLinkUserStoreTag extends Context.Service<
-  MagicLinkUserStoreTag,
-  MagicLinkUserStore
+export class MagicLinkUserStore extends Context.Service<
+  MagicLinkUserStore,
+  MagicLinkUserStoreShape
 >()("@effect-auth/MagicLinkUserStore") {}
-
-// Public ergonomic alias
-export const MagicLinkUserStore = MagicLinkUserStoreTag;
 
 /**
  * Magic link service configuration
@@ -105,7 +99,7 @@ export interface MagicLinkResult {
 /**
  * Magic link service
  */
-export interface MagicLinkService {
+export interface MagicLinkServiceShape {
   /**
    * Request a magic link for the given email. Outstanding tokens for the
    * email are invalidated first so only the latest link is usable.
@@ -119,7 +113,7 @@ export interface MagicLinkService {
   ) => Effect.Effect<
     void,
     Errors.AuthError | Errors.MagicLinkError,
-    MagicLinkStoreTag | MagicLinkUserStoreTag
+    MagicLinkStore | MagicLinkUserStore
   >;
 
   /**
@@ -133,22 +127,19 @@ export interface MagicLinkService {
   ) => Effect.Effect<
     MagicLinkResult,
     Errors.MagicLinkError | Errors.AuthError | HookError,
-    MagicLinkStoreTag | MagicLinkUserStoreTag | SessionManagerTag | Hooks
+    MagicLinkStore | MagicLinkUserStore | SessionManager | Hooks
   >;
 }
 
-export class MagicLinkServiceTag extends Context.Service<MagicLinkServiceTag, MagicLinkService>()(
+export class MagicLinkService extends Context.Service<MagicLinkService, MagicLinkServiceShape>()(
   "@effect-auth/MagicLinkService",
 ) {
   /**
-   * Construct a Layer providing this service — the canonical form of
-   * {@link MagicLinkServiceLayer}.
+   * Construct a Layer providing this service.
    */
-  static readonly layer = (config: MagicLinkConfig) => MagicLinkServiceLayer(config);
+  static readonly layer = (config: MagicLinkConfig) =>
+    Layer.effect(MagicLinkService, makeMagicLinkService(config));
 }
-
-// Public ergonomic alias
-export const MagicLinkService = MagicLinkServiceTag;
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
@@ -163,16 +154,16 @@ export const generateMagicLinkToken = (): Effect.Effect<string, Errors.AuthError
  */
 export const makeMagicLinkService = (
   config: MagicLinkConfig,
-): Effect.Effect<MagicLinkService, never> => {
+): Effect.Effect<MagicLinkServiceShape, never> => {
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
   const disableSignUp = config.disableSignUp ?? false;
 
   return Effect.sync(
-    (): MagicLinkService => ({
+    (): MagicLinkServiceShape => ({
       send: (rawEmail: string) =>
         Effect.gen(function* () {
-          const store = yield* MagicLinkStoreTag;
-          const userStore = yield* MagicLinkUserStoreTag;
+          const store = yield* MagicLinkStore;
+          const userStore = yield* MagicLinkUserStore;
 
           const email = normalizeEmail(rawEmail);
           if (!email) {
@@ -215,9 +206,9 @@ export const makeMagicLinkService = (
 
       verify: (token: string, options?: MagicLinkVerifyOptions) =>
         Effect.gen(function* () {
-          const store = yield* MagicLinkStoreTag;
-          const userStore = yield* MagicLinkUserStoreTag;
-          const sessionManager = yield* SessionManagerTag;
+          const store = yield* MagicLinkStore;
+          const userStore = yield* MagicLinkUserStore;
+          const sessionManager = yield* SessionManager;
 
           if (!token) {
             return yield* Effect.fail(
@@ -276,6 +267,3 @@ export const makeMagicLinkService = (
     }),
   );
 };
-
-export const MagicLinkServiceLayer = (config: MagicLinkConfig) =>
-  Layer.effect(MagicLinkServiceTag, makeMagicLinkService(config));

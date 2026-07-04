@@ -64,7 +64,7 @@ export interface JwtKeyPair {
 /**
  * Storage interface for JWT signing keys
  */
-export interface JwtKeyStore {
+export interface JwtKeyStoreShape {
   /** The key pair new tokens should be signed with, or null when none exists */
   readonly getActive: () => Effect.Effect<JwtKeyPair | null, Errors.AuthError>;
   readonly create: (pair: JwtKeyPair) => Effect.Effect<JwtKeyPair, Errors.AuthError>;
@@ -72,12 +72,9 @@ export interface JwtKeyStore {
   readonly list: () => Effect.Effect<readonly JwtKeyPair[], Errors.AuthError>;
 }
 
-export class JwtKeyStoreTag extends Context.Service<JwtKeyStoreTag, JwtKeyStore>()(
+export class JwtKeyStore extends Context.Service<JwtKeyStore, JwtKeyStoreShape>()(
   "@effect-auth/JwtKeyStore",
 ) {}
-
-// Public ergonomic alias
-export const JwtKeyStore = JwtKeyStoreTag;
 
 /**
  * JWT service configuration
@@ -115,7 +112,7 @@ export interface Jwks {
 /**
  * JWT service
  */
-export interface JwtService {
+export interface JwtServiceShape {
   /**
    * Sign a JWT for a user. The header is `{ alg, kid, typ: "JWT" }`; the
    * payload carries `iss`/`aud?`/`sub`/`iat`/`exp` plus `definePayload(user)`
@@ -125,7 +122,7 @@ export interface JwtService {
   readonly sign: (
     user: Types.User,
     extraClaims?: Record<string, unknown>,
-  ) => Effect.Effect<JwtSignResult, JwtError | Errors.AuthError, JwtKeyStoreTag>;
+  ) => Effect.Effect<JwtSignResult, JwtError | Errors.AuthError, JwtKeyStore>;
 
   /**
    * Verify a compact JWS and return its decoded payload. Validates the
@@ -135,28 +132,24 @@ export interface JwtService {
    */
   readonly verify: (
     token: string,
-  ) => Effect.Effect<Record<string, unknown>, JwtError | Errors.AuthError, JwtKeyStoreTag>;
+  ) => Effect.Effect<Record<string, unknown>, JwtError | Errors.AuthError, JwtKeyStore>;
 
   /**
    * The JWKS document containing every stored public key (with `kid`,
    * `alg`, and `use: "sig"`) and no private material. Serve this at
    * `/.well-known/jwks.json`.
    */
-  readonly getJwks: () => Effect.Effect<Jwks, Errors.AuthError, JwtKeyStoreTag>;
+  readonly getJwks: () => Effect.Effect<Jwks, Errors.AuthError, JwtKeyStore>;
 }
 
-export class JwtServiceTag extends Context.Service<JwtServiceTag, JwtService>()(
+export class JwtService extends Context.Service<JwtService, JwtServiceShape>()(
   "@effect-auth/JwtService",
 ) {
   /**
-   * Construct a Layer providing this service — the canonical form of
-   * {@link JwtServiceLayer}.
+   * Construct a Layer providing this service.
    */
-  static readonly layer = (config: JwtConfig) => JwtServiceLayer(config);
+  static readonly layer = (config: JwtConfig) => Layer.effect(JwtService, makeJwtService(config));
 }
-
-// Public ergonomic alias
-export const JwtService = JwtServiceTag;
 
 /**
  * Unpadded base64url of a UTF-8 string or byte buffer (Node's "base64url"
@@ -264,7 +257,7 @@ const decodeJsonSegment = (
 /**
  * Create a JWT service
  */
-export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtService, never> => {
+export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtServiceShape, never> => {
   const expiresIn = config.expiresIn ?? 15 * 60 * 1000; // 15 minutes default
   const algorithm = config.algorithm ?? "ES256";
   const getSubject = config.getSubject ?? ((user: Types.User) => user.id);
@@ -274,7 +267,7 @@ export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtService, nev
    * the store is empty.
    */
   const getOrCreateActiveKey = Effect.gen(function* () {
-    const store = yield* JwtKeyStoreTag;
+    const store = yield* JwtKeyStore;
     const active = yield* store.getActive();
     if (active) {
       return active;
@@ -284,7 +277,7 @@ export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtService, nev
   });
 
   return Effect.sync(
-    (): JwtService => ({
+    (): JwtServiceShape => ({
       sign: (user, extraClaims) =>
         Effect.gen(function* () {
           const pair = yield* getOrCreateActiveKey;
@@ -338,7 +331,7 @@ export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtService, nev
 
           const header = yield* decodeJsonSegment(headerSegment, "header");
 
-          const store = yield* JwtKeyStoreTag;
+          const store = yield* JwtKeyStore;
           const keys = yield* store.list();
           const pair = keys.find((candidate) => candidate.id === header["kid"]);
           if (!pair) {
@@ -408,7 +401,7 @@ export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtService, nev
 
       getJwks: () =>
         Effect.gen(function* () {
-          const store = yield* JwtKeyStoreTag;
+          const store = yield* JwtKeyStore;
           const keys = yield* store.list();
 
           return {
@@ -423,6 +416,3 @@ export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtService, nev
     }),
   );
 };
-
-export const JwtServiceLayer = (config: JwtConfig) =>
-  Layer.effect(JwtServiceTag, makeJwtService(config));

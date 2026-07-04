@@ -17,7 +17,7 @@ import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
 import type * as Types from "./Types.js";
-import { SessionManagerTag } from "./Session.js";
+import { SessionManager } from "./Session.js";
 import { Hooks, type HookError } from "./Hooks.js";
 
 /** Error raised by phone OTP verification failures. */
@@ -43,7 +43,7 @@ export interface PhoneOtpRecord {
  * Persistence for phone OTPs, keyed by the (normalized phoneNumber, purpose)
  * pair; `upsert` replaces any existing record for the pair.
  */
-export interface PhoneOtpStore {
+export interface PhoneOtpStoreShape {
   readonly upsert: (record: PhoneOtpRecord) => Effect.Effect<PhoneOtpRecord, Errors.AuthError>;
   readonly get: (
     phoneNumber: string,
@@ -71,7 +71,7 @@ export interface PhoneOtpCreateUserInput {
  * `attributes.phoneNumber` and the verification flag in
  * `attributes.phoneNumberVerified`.
  */
-export interface PhoneOtpUserStore {
+export interface PhoneOtpUserStoreShape {
   readonly getUserByPhoneNumber: (
     phoneNumber: string,
   ) => Effect.Effect<Types.User | null, Errors.AuthError>;
@@ -84,18 +84,13 @@ export interface PhoneOtpUserStore {
   ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
 }
 
-export class PhoneOtpStoreTag extends Context.Service<PhoneOtpStoreTag, PhoneOtpStore>()(
+export class PhoneOtpStore extends Context.Service<PhoneOtpStore, PhoneOtpStoreShape>()(
   "@effect-auth/PhoneOtpStore",
 ) {}
 
-export const PhoneOtpStore = PhoneOtpStoreTag;
-
-export class PhoneOtpUserStoreTag extends Context.Service<
-  PhoneOtpUserStoreTag,
-  PhoneOtpUserStore
->()("@effect-auth/PhoneOtpUserStore") {}
-
-export const PhoneOtpUserStore = PhoneOtpUserStoreTag;
+export class PhoneOtpUserStore extends Context.Service<PhoneOtpUserStore, PhoneOtpUserStoreShape>()(
+  "@effect-auth/PhoneOtpUserStore",
+) {}
 
 export interface PhoneOtpConfig {
   readonly otpLength?: number; // Default: 6 digits
@@ -123,7 +118,7 @@ export interface PhoneOtpAuthResult {
   readonly session: Types.Session;
 }
 
-export interface PhoneOtpService {
+export interface PhoneOtpServiceShape {
   /**
    * Generate an OTP for the given phone number + purpose (replacing any
    * outstanding one) and send it. Only a SHA-256 hash of the code is stored.
@@ -133,11 +128,7 @@ export interface PhoneOtpService {
   readonly send: (
     phoneNumber: string,
     purpose: PhoneOtpPurpose,
-  ) => Effect.Effect<
-    void,
-    PhoneOtpError | Errors.AuthError,
-    PhoneOtpStoreTag | PhoneOtpUserStoreTag
-  >;
+  ) => Effect.Effect<void, PhoneOtpError | Errors.AuthError, PhoneOtpStore | PhoneOtpUserStore>;
 
   /**
    * Verify a `sign-in` OTP (single use) and sign the user in, creating a new
@@ -150,7 +141,7 @@ export interface PhoneOtpService {
   ) => Effect.Effect<
     PhoneOtpAuthResult,
     PhoneOtpError | Errors.AuthError | HookError,
-    PhoneOtpStoreTag | PhoneOtpUserStoreTag | SessionManagerTag | Hooks
+    PhoneOtpStore | PhoneOtpUserStore | SessionManager | Hooks
   >;
 
   /**
@@ -164,21 +155,19 @@ export interface PhoneOtpService {
   ) => Effect.Effect<
     Types.User,
     PhoneOtpError | Errors.AuthError | Errors.UserNotFoundError,
-    PhoneOtpStoreTag | PhoneOtpUserStoreTag
+    PhoneOtpStore | PhoneOtpUserStore
   >;
 }
 
-export class PhoneOtpServiceTag extends Context.Service<PhoneOtpServiceTag, PhoneOtpService>()(
+export class PhoneOtpService extends Context.Service<PhoneOtpService, PhoneOtpServiceShape>()(
   "@effect-auth/PhoneOtpService",
 ) {
   /**
-   * Construct a Layer providing this service — the canonical form of
-   * {@link PhoneOtpServiceLayer}.
+   * Construct a Layer providing this service.
    */
-  static readonly layer = (config: PhoneOtpConfig) => PhoneOtpServiceLayer(config);
+  static readonly layer = (config: PhoneOtpConfig) =>
+    Layer.effect(PhoneOtpService, makePhoneOtpService(config));
 }
-
-export const PhoneOtpService = PhoneOtpServiceTag;
 
 /** Read the phone number from a user's attributes, or `null`. */
 export const getPhoneNumber = (user: Types.User): string | null => {
@@ -206,7 +195,7 @@ const generateOtp = (length: number): Effect.Effect<string, Errors.AuthError> =>
 
 export const makePhoneOtpService = (
   config: PhoneOtpConfig,
-): Effect.Effect<PhoneOtpService, never> => {
+): Effect.Effect<PhoneOtpServiceShape, never> => {
   const otpLength = config.otpLength ?? 6;
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000;
   const maxAttempts = config.maxAttempts ?? 3;
@@ -223,9 +212,9 @@ export const makePhoneOtpService = (
     phoneNumber: string,
     otp: string,
     purpose: PhoneOtpPurpose,
-  ): Effect.Effect<void, PhoneOtpError | Errors.AuthError, PhoneOtpStoreTag> =>
+  ): Effect.Effect<void, PhoneOtpError | Errors.AuthError, PhoneOtpStore> =>
     Effect.gen(function* () {
-      const store = yield* PhoneOtpStoreTag;
+      const store = yield* PhoneOtpStore;
 
       if (!phoneNumber || !otp) {
         return yield* invalidOtp();
@@ -260,11 +249,11 @@ export const makePhoneOtpService = (
     });
 
   return Effect.sync(
-    (): PhoneOtpService => ({
+    (): PhoneOtpServiceShape => ({
       send: (rawPhoneNumber, purpose) =>
         Effect.gen(function* () {
-          const store = yield* PhoneOtpStoreTag;
-          const userStore = yield* PhoneOtpUserStoreTag;
+          const store = yield* PhoneOtpStore;
+          const userStore = yield* PhoneOtpUserStore;
 
           const phoneNumber = yield* normalize(rawPhoneNumber);
           if (!phoneNumber) {
@@ -301,8 +290,8 @@ export const makePhoneOtpService = (
 
       signIn: (rawPhoneNumber, otp, options) =>
         Effect.gen(function* () {
-          const userStore = yield* PhoneOtpUserStoreTag;
-          const sessionManager = yield* SessionManagerTag;
+          const userStore = yield* PhoneOtpUserStore;
+          const sessionManager = yield* SessionManager;
 
           const phoneNumber = yield* normalize(rawPhoneNumber);
 
@@ -324,7 +313,7 @@ export const makePhoneOtpService = (
 
       verifyPhoneNumber: (userId, rawPhoneNumber, otp) =>
         Effect.gen(function* () {
-          const userStore = yield* PhoneOtpUserStoreTag;
+          const userStore = yield* PhoneOtpUserStore;
           const phoneNumber = yield* normalize(rawPhoneNumber);
 
           yield* verifyOtp(phoneNumber, otp, "phone-verification");
@@ -334,6 +323,3 @@ export const makePhoneOtpService = (
     }),
   );
 };
-
-export const PhoneOtpServiceLayer = (config: PhoneOtpConfig) =>
-  Layer.effect(PhoneOtpServiceTag, makePhoneOtpService(config));

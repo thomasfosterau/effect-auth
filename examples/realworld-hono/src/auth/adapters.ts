@@ -12,7 +12,7 @@ const rowToSession = (row: typeof schema.sessions.$inferSelect): Auth.Session =>
   attributes: (row.attributes ?? {}) as Record<string, unknown>,
 });
 
-export const sessionStore: Auth.SessionStore = {
+export const sessionStore: Auth.SessionStoreShape = {
   create: (session) =>
     Effect.sync(() => {
       db.insert(schema.sessions)
@@ -63,7 +63,7 @@ export const sessionStore: Auth.SessionStore = {
     ),
 };
 
-export const userStore: Auth.UserStore = {
+export const userStore: Auth.UserStoreShape = {
   get: (userId) =>
     Effect.sync(() => {
       const row = db.select().from(schema.users).where(eq(schema.users.id, userId)).get();

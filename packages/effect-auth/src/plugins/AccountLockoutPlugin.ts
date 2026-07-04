@@ -29,7 +29,7 @@ export interface AccountLockoutRecord {
  * Implement over your database, or reuse an in-memory map for single-instance
  * deployments. Entries can safely expire after `lockoutDurationMs`.
  */
-export interface AccountLockoutStore {
+export interface AccountLockoutStoreShape {
   readonly get: (key: string) => Effect.Effect<AccountLockoutRecord | null, Errors.AuthError>;
   readonly set: (
     key: string,
@@ -38,12 +38,10 @@ export interface AccountLockoutStore {
   readonly delete: (key: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class AccountLockoutStoreTag extends Context.Service<
-  AccountLockoutStoreTag,
-  AccountLockoutStore
+export class AccountLockoutStore extends Context.Service<
+  AccountLockoutStore,
+  AccountLockoutStoreShape
 >()("@effect-auth/AccountLockoutStore") {}
-
-export const AccountLockoutStore = AccountLockoutStoreTag;
 
 export interface AccountLockoutConfig {
   /** Consecutive failures before locking. Default 5. */
@@ -68,7 +66,7 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
 
   return makePlugin(
     Effect.gen(function* () {
-      const store = yield* AccountLockoutStoreTag;
+      const store = yield* AccountLockoutStore;
 
       return {
         beforeSignIn: (input: SignInInput) =>

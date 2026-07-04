@@ -24,17 +24,13 @@ single-use, expire, and are attempt-limited. Comparison is constant-time.
   - [EmailOtpError (class)](#emailotperror-class)
   - [EmailOtpPurpose (type alias)](#emailotppurpose-type-alias)
   - [EmailOtpRecord (interface)](#emailotprecord-interface)
-  - [EmailOtpService](#emailotpservice)
-  - [EmailOtpService (interface)](#emailotpservice-interface)
-  - [EmailOtpServiceLayer](#emailotpservicelayer)
-  - [EmailOtpServiceTag (class)](#emailotpservicetag-class)
+  - [EmailOtpService (class)](#emailotpservice-class)
+  - [EmailOtpServiceShape (interface)](#emailotpserviceshape-interface)
   - [EmailOtpSignInOptions (interface)](#emailotpsigninoptions-interface)
-  - [EmailOtpStore](#emailotpstore)
-  - [EmailOtpStore (interface)](#emailotpstore-interface)
-  - [EmailOtpStoreTag (class)](#emailotpstoretag-class)
-  - [EmailOtpUserStore](#emailotpuserstore)
-  - [EmailOtpUserStore (interface)](#emailotpuserstore-interface)
-  - [EmailOtpUserStoreTag (class)](#emailotpuserstoretag-class)
+  - [EmailOtpStore (class)](#emailotpstore-class)
+  - [EmailOtpStoreShape (interface)](#emailotpstoreshape-interface)
+  - [EmailOtpUserStore (class)](#emailotpuserstore-class)
+  - [EmailOtpUserStoreShape (interface)](#emailotpuserstoreshape-interface)
   - [generateOtp](#generateotp)
   - [hashOtp](#hashotp)
   - [makeEmailOtpService](#makeemailotpservice)
@@ -140,22 +136,22 @@ export interface EmailOtpRecord {
 }
 ```
 
-## EmailOtpService
+## EmailOtpService (class)
 
 **Signature**
 
 ```ts
-export declare const EmailOtpService: typeof EmailOtpServiceTag;
+export declare class EmailOtpService
 ```
 
-## EmailOtpService (interface)
+## EmailOtpServiceShape (interface)
 
 Email OTP service
 
 **Signature**
 
 ```ts
-export interface EmailOtpService {
+export interface EmailOtpServiceShape {
   /**
    * Generate an OTP for the given email + purpose (replacing any outstanding
    * one) and send it. Only a SHA-256 hash of the code is stored.
@@ -167,11 +163,7 @@ export interface EmailOtpService {
   readonly send: (
     email: string,
     purpose: EmailOtpPurpose,
-  ) => Effect.Effect<
-    void,
-    Errors.AuthError | EmailOtpError,
-    EmailOtpStoreTag | EmailOtpUserStoreTag
-  >;
+  ) => Effect.Effect<void, Errors.AuthError | EmailOtpError, EmailOtpStore | EmailOtpUserStore>;
 
   /**
    * Verify a `"sign-in"` OTP and create a session. Users created here are
@@ -184,7 +176,7 @@ export interface EmailOtpService {
   ) => Effect.Effect<
     EmailOtpAuthResult,
     EmailOtpError | Errors.AuthError | HookError,
-    EmailOtpStoreTag | EmailOtpUserStoreTag | SessionManagerTag | Hooks
+    EmailOtpStore | EmailOtpUserStore | SessionManager | Hooks
   >;
 
   /**
@@ -196,26 +188,8 @@ export interface EmailOtpService {
     email: string,
     otp: string,
     purpose: EmailOtpPurpose,
-  ) => Effect.Effect<EmailOtpCheckResult, EmailOtpError | Errors.AuthError, EmailOtpStoreTag>;
+  ) => Effect.Effect<EmailOtpCheckResult, EmailOtpError | Errors.AuthError, EmailOtpStore>;
 }
-```
-
-## EmailOtpServiceLayer
-
-**Signature**
-
-```ts
-export declare const EmailOtpServiceLayer: (
-  config: EmailOtpConfig,
-) => Layer.Layer<EmailOtpServiceTag, never, never>;
-```
-
-## EmailOtpServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class EmailOtpServiceTag
 ```
 
 ## EmailOtpSignInOptions (interface)
@@ -230,15 +204,17 @@ export interface EmailOtpSignInOptions {
 }
 ```
 
-## EmailOtpStore
+## EmailOtpStore (class)
+
+Email OTP store context tag
 
 **Signature**
 
 ```ts
-export declare const EmailOtpStore: typeof EmailOtpStoreTag;
+export declare class EmailOtpStore
 ```
 
-## EmailOtpStore (interface)
+## EmailOtpStoreShape (interface)
 
 Storage interface for email OTPs. There is at most one active OTP per
 email + purpose pair; `upsert` replaces any existing record for the pair.
@@ -246,7 +222,7 @@ email + purpose pair; `upsert` replaces any existing record for the pair.
 **Signature**
 
 ```ts
-export interface EmailOtpStore {
+export interface EmailOtpStoreShape {
   readonly upsert: (record: EmailOtpRecord) => Effect.Effect<EmailOtpRecord, Errors.AuthError>;
   readonly get: (
     email: string,
@@ -263,47 +239,29 @@ export interface EmailOtpStore {
 }
 ```
 
-## EmailOtpStoreTag (class)
-
-Email OTP store context tag
-
-**Signature**
-
-```ts
-export declare class EmailOtpStoreTag
-```
-
-## EmailOtpUserStore
-
-**Signature**
-
-```ts
-export declare const EmailOtpUserStore: typeof EmailOtpUserStoreTag;
-```
-
-## EmailOtpUserStore (interface)
-
-User store interface for email OTP sign-in
-
-**Signature**
-
-```ts
-export interface EmailOtpUserStore {
-  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
-  readonly createUser: (
-    input: EmailOtpCreateUserInput,
-  ) => Effect.Effect<Types.User, Errors.AuthError>;
-}
-```
-
-## EmailOtpUserStoreTag (class)
+## EmailOtpUserStore (class)
 
 Email OTP user store context tag
 
 **Signature**
 
 ```ts
-export declare class EmailOtpUserStoreTag
+export declare class EmailOtpUserStore
+```
+
+## EmailOtpUserStoreShape (interface)
+
+User store interface for email OTP sign-in
+
+**Signature**
+
+```ts
+export interface EmailOtpUserStoreShape {
+  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
+  readonly createUser: (
+    input: EmailOtpCreateUserInput,
+  ) => Effect.Effect<Types.User, Errors.AuthError>;
+}
 ```
 
 ## generateOtp
@@ -336,5 +294,5 @@ Create an email OTP service
 ```ts
 export declare const makeEmailOtpService: (
   config: EmailOtpConfig,
-) => Effect.Effect<EmailOtpService, never>;
+) => Effect.Effect<EmailOtpServiceShape, never>;
 ```

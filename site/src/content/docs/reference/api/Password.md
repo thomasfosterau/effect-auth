@@ -20,15 +20,13 @@ Inspired by Rust's password_hash crate, this module provides:
 
 - [utils](#utils)
   - [HashedPassword](#hashedpassword)
-  - [MultiAlgorithmVerifier](#multialgorithmverifier)
-  - [MultiAlgorithmVerifier (interface)](#multialgorithmverifier-interface)
-  - [MultiAlgorithmVerifierTag (class)](#multialgorithmverifiertag-class)
+  - [MultiAlgorithmVerifier (class)](#multialgorithmverifier-class)
+  - [MultiAlgorithmVerifierShape (interface)](#multialgorithmverifiershape-interface)
   - [PBKDF2HasherLive](#pbkdf2hasherlive)
-  - [PasswordHasher](#passwordhasher)
-  - [PasswordHasher (interface)](#passwordhasher-interface)
+  - [PasswordHasher (class)](#passwordhasher-class)
   - [PasswordHasherLayer](#passwordhasherlayer)
   - [PasswordHasherLive](#passwordhasherlive)
-  - [PasswordHasherTag (class)](#passwordhashertag-class)
+  - [PasswordHasherShape (interface)](#passwordhashershape-interface)
   - [ScryptHasherLayer](#scrypthasherlayer)
   - [makeMultiAlgorithmVerifier](#makemultialgorithmverifier)
   - [makeMultiAlgorithmVerifierLayer](#makemultialgorithmverifierlayer)
@@ -50,15 +48,17 @@ Re-export of {@link Types.HashedPassword} for convenience.
 export declare const HashedPassword: Types.HashedPassword;
 ```
 
-## MultiAlgorithmVerifier
+## MultiAlgorithmVerifier (class)
+
+Tag for MultiAlgorithmVerifier service
 
 **Signature**
 
 ```ts
-export declare const MultiAlgorithmVerifier: typeof MultiAlgorithmVerifierTag;
+export declare class MultiAlgorithmVerifier
 ```
 
-## MultiAlgorithmVerifier (interface)
+## MultiAlgorithmVerifierShape (interface)
 
 Multi-algorithm password verifier
 Supports verifying passwords against different hash formats,
@@ -67,23 +67,13 @@ enabling seamless migration between algorithms
 **Signature**
 
 ```ts
-export interface MultiAlgorithmVerifier {
+export interface MultiAlgorithmVerifierShape {
   /**
    * Verify a password against a hash, automatically detecting the algorithm
    * from the PHC format string
    */
   readonly verify: (password: string, hash: string) => Effect.Effect<boolean, Errors.HashingError>;
 }
-```
-
-## MultiAlgorithmVerifierTag (class)
-
-Tag for MultiAlgorithmVerifier service
-
-**Signature**
-
-```ts
-export declare class MultiAlgorithmVerifierTag
 ```
 
 ## PBKDF2HasherLive
@@ -93,18 +83,40 @@ Layer that provides PBKDF2 password hasher explicitly
 **Signature**
 
 ```ts
-export declare const PBKDF2HasherLive: Context.Context<PasswordHasherTag>;
+export declare const PBKDF2HasherLive: Context.Context<PasswordHasher>;
 ```
 
-## PasswordHasher
+## PasswordHasher (class)
+
+Tag for PasswordHasher service
 
 **Signature**
 
 ```ts
-export declare const PasswordHasher: typeof PasswordHasherTag;
+export declare class PasswordHasher
 ```
 
-## PasswordHasher (interface)
+## PasswordHasherLayer
+
+Layer that provides the default PBKDF2 password hasher
+
+**Signature**
+
+```ts
+export declare const PasswordHasherLayer: Layer.Layer<PasswordHasher, never, never>;
+```
+
+## PasswordHasherLive
+
+Backward-compatible Context value that provides the default PBKDF2 password hasher
+
+**Signature**
+
+```ts
+export declare const PasswordHasherLive: Context.Context<PasswordHasher>;
+```
+
+## PasswordHasherShape (interface)
 
 Core password hashing interface (trait)
 Implement this interface to support custom password hashing algorithms
@@ -112,7 +124,7 @@ Implement this interface to support custom password hashing algorithms
 **Signature**
 
 ```ts
-export interface PasswordHasher {
+export interface PasswordHasherShape {
   /**
    * Unique identifier for this algorithm (used in PHC format)
    */
@@ -130,36 +142,6 @@ export interface PasswordHasher {
 }
 ```
 
-## PasswordHasherLayer
-
-Layer that provides the default PBKDF2 password hasher
-
-**Signature**
-
-```ts
-export declare const PasswordHasherLayer: Layer.Layer<PasswordHasherTag, never, never>;
-```
-
-## PasswordHasherLive
-
-Backward-compatible Context value that provides the default PBKDF2 password hasher
-
-**Signature**
-
-```ts
-export declare const PasswordHasherLive: Context.Context<PasswordHasherTag>;
-```
-
-## PasswordHasherTag (class)
-
-Tag for PasswordHasher service
-
-**Signature**
-
-```ts
-export declare class PasswordHasherTag
-```
-
 ## ScryptHasherLayer
 
 Layer that provides the scrypt password hasher
@@ -167,7 +149,7 @@ Layer that provides the scrypt password hasher
 **Signature**
 
 ```ts
-export declare const ScryptHasherLayer: Layer.Layer<PasswordHasherTag, never, never>;
+export declare const ScryptHasherLayer: Layer.Layer<PasswordHasher, never, never>;
 ```
 
 ## makeMultiAlgorithmVerifier
@@ -180,8 +162,8 @@ which is useful during algorithm migration
 
 ```ts
 export declare const makeMultiAlgorithmVerifier: (
-  hashers: readonly PasswordHasher[],
-) => MultiAlgorithmVerifier;
+  hashers: readonly PasswordHasherShape[],
+) => MultiAlgorithmVerifierShape;
 ```
 
 **Example**
@@ -208,8 +190,8 @@ Create a layer that provides a multi-algorithm verifier
 
 ```ts
 export declare const makeMultiAlgorithmVerifierLayer: (
-  hashers: readonly PasswordHasher[],
-) => Layer.Layer<MultiAlgorithmVerifierTag, never, never>;
+  hashers: readonly PasswordHasherShape[],
+) => Layer.Layer<MultiAlgorithmVerifier, never, never>;
 ```
 
 ## makePBKDF2Hasher
@@ -220,7 +202,7 @@ Following Copenhagen/Oslo guidelines for secure password hashing
 **Signature**
 
 ```ts
-export declare const makePBKDF2Hasher: () => PasswordHasher;
+export declare const makePBKDF2Hasher: () => PasswordHasherShape;
 ```
 
 ## makePasswordHasher
@@ -230,7 +212,7 @@ Backward compatibility: Default password hasher is PBKDF2
 **Signature**
 
 ```ts
-export declare const makePasswordHasher: () => PasswordHasher;
+export declare const makePasswordHasher: () => PasswordHasherShape;
 ```
 
 ## makeScryptHasher
@@ -251,5 +233,5 @@ export declare const makeScryptHasher: (options?: {
   readonly cost?: number;
   readonly blockSize?: number;
   readonly parallelization?: number;
-}) => PasswordHasher;
+}) => PasswordHasherShape;
 ```

@@ -30,29 +30,24 @@ and related data structures.
   - [MicrosoftProvider](#microsoftprovider)
   - [NotionProvider](#notionprovider)
   - [OAuthAccount (interface)](#oauthaccount-interface)
-  - [OAuthAccountStore](#oauthaccountstore)
-  - [OAuthAccountStore (interface)](#oauthaccountstore-interface)
-  - [OAuthAccountStoreTag (class)](#oauthaccountstoretag-class)
+  - [OAuthAccountStore (class)](#oauthaccountstore-class)
+  - [OAuthAccountStoreShape (interface)](#oauthaccountstoreshape-interface)
   - [OAuthCallbackResult (interface)](#oauthcallbackresult-interface)
   - [OAuthClientConfig (interface)](#oauthclientconfig-interface)
   - [OAuthCreateUserInput (interface)](#oauthcreateuserinput-interface)
   - [OAuthProvider (interface)](#oauthprovider-interface)
   - [OAuthProviderConfig (interface)](#oauthproviderconfig-interface)
-  - [OAuthService](#oauthservice)
-  - [OAuthService (interface)](#oauthservice-interface)
-  - [OAuthServiceLayer](#oauthservicelayer)
+  - [OAuthService (class)](#oauthservice-class)
   - [OAuthServiceOptions (interface)](#oauthserviceoptions-interface)
-  - [OAuthServiceTag (class)](#oauthservicetag-class)
+  - [OAuthServiceShape (interface)](#oauthserviceshape-interface)
   - [OAuthSignInResult (interface)](#oauthsigninresult-interface)
   - [OAuthState (interface)](#oauthstate-interface)
-  - [OAuthStateStore](#oauthstatestore)
-  - [OAuthStateStore (interface)](#oauthstatestore-interface)
-  - [OAuthStateStoreTag (class)](#oauthstatestoretag-class)
+  - [OAuthStateStore (class)](#oauthstatestore-class)
+  - [OAuthStateStoreShape (interface)](#oauthstatestoreshape-interface)
   - [OAuthTokenResponse (interface)](#oauthtokenresponse-interface)
   - [OAuthUserInfo (interface)](#oauthuserinfo-interface)
-  - [OAuthUserStore](#oauthuserstore)
-  - [OAuthUserStore (interface)](#oauthuserstore-interface)
-  - [OAuthUserStoreTag (class)](#oauthuserstoretag-class)
+  - [OAuthUserStore (class)](#oauthuserstore-class)
+  - [OAuthUserStoreShape (interface)](#oauthuserstoreshape-interface)
   - [RedditProvider](#redditprovider)
   - [RobloxProvider](#robloxprovider)
   - [SlackProvider](#slackprovider)
@@ -263,22 +258,24 @@ export interface OAuthAccount {
 }
 ```
 
-## OAuthAccountStore
+## OAuthAccountStore (class)
+
+OAuth account store context tag
 
 **Signature**
 
 ```ts
-export declare const OAuthAccountStore: typeof OAuthAccountStoreTag;
+export declare class OAuthAccountStore
 ```
 
-## OAuthAccountStore (interface)
+## OAuthAccountStoreShape (interface)
 
 Storage interface for OAuth accounts (persistent, database)
 
 **Signature**
 
 ```ts
-export interface OAuthAccountStore {
+export interface OAuthAccountStoreShape {
   readonly create: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
   readonly get: (
     provider: string,
@@ -290,16 +287,6 @@ export interface OAuthAccountStore {
   readonly unlinkFromUser: (userId: string, provider: string) => Effect.Effect<void, AuthError>;
   readonly delete: (provider: string, providerId: string) => Effect.Effect<void, AuthError>;
 }
-```
-
-## OAuthAccountStoreTag (class)
-
-OAuth account store context tag
-
-**Signature**
-
-```ts
-export declare class OAuthAccountStoreTag
 ```
 
 ## OAuthCallbackResult (interface)
@@ -361,7 +348,7 @@ export interface OAuthProvider {
   readonly config: OAuthProviderConfig;
   readonly generateAuthorizationUrl: (
     scopes?: readonly string[],
-  ) => Effect.Effect<AuthorizationUrlResult, OAuthProviderError | AuthError, OAuthStateStoreTag>;
+  ) => Effect.Effect<AuthorizationUrlResult, OAuthProviderError | AuthError, OAuthStateStore>;
   readonly exchangeCode: (
     code: string,
     codeVerifier?: string,
@@ -430,26 +417,44 @@ export interface OAuthProviderConfig {
 }
 ```
 
-## OAuthService
+## OAuthService (class)
 
 **Signature**
 
 ```ts
-export declare const OAuthService: typeof OAuthServiceTag;
+export declare class OAuthService
 ```
 
-## OAuthService (interface)
+## OAuthServiceOptions (interface)
+
+Options controlling {@link OAuthServiceShape} behaviour.
+
+**Signature**
+
+```ts
+export interface OAuthServiceOptions {
+  /**
+   * When a new OAuth account arrives with a provider-verified email that
+   * matches an existing user, link the account to that user instead of
+   * creating a new one. Defaults to `true`. Only ever applies when the
+   * provider reports `email_verified: true`.
+   */
+  readonly autoLinkByVerifiedEmail?: boolean;
+}
+```
+
+## OAuthServiceShape (interface)
 
 OAuth service for managing OAuth flows
 
 **Signature**
 
 ```ts
-export interface OAuthService {
+export interface OAuthServiceShape {
   readonly generateAuthorizationUrl: (
     provider: string,
     options?: { scopes?: readonly string[]; returnTo?: string },
-  ) => Effect.Effect<AuthorizationUrlResult, AuthError | OAuthProviderError, OAuthStateStoreTag>;
+  ) => Effect.Effect<AuthorizationUrlResult, AuthError | OAuthProviderError, OAuthStateStore>;
 
   readonly handleCallback: (
     state: string,
@@ -458,7 +463,7 @@ export interface OAuthService {
   ) => Effect.Effect<
     OAuthCallbackResult,
     AuthError | OAuthProviderError | OAuthStateNotFoundError | OAuthStateExpiredError,
-    OAuthStateStoreTag | OAuthAccountStoreTag
+    OAuthStateStore | OAuthAccountStore
   >;
 
   /**
@@ -480,7 +485,7 @@ export interface OAuthService {
     | OAuthStateExpiredError
     | UserNotFoundError
     | HookError,
-    OAuthStateStoreTag | OAuthAccountStoreTag | OAuthUserStoreTag | SessionManagerTag | Hooks
+    OAuthStateStore | OAuthAccountStore | OAuthUserStore | SessionManager | Hooks
   >;
 
   readonly linkAccount: (
@@ -491,56 +496,19 @@ export interface OAuthService {
   ) => Effect.Effect<
     OAuthAccount,
     AuthError | OAuthProviderError | OAuthStateNotFoundError | OAuthStateExpiredError,
-    OAuthStateStoreTag | OAuthAccountStoreTag
+    OAuthStateStore | OAuthAccountStore
   >;
 
   readonly unlinkAccount: (
     userId: string,
     provider: string,
-  ) => Effect.Effect<void, AuthError, OAuthAccountStoreTag>;
+  ) => Effect.Effect<void, AuthError, OAuthAccountStore>;
 
   readonly refreshAccessToken: (
     userId: string,
     provider: string,
-  ) => Effect.Effect<string, AuthError | OAuthProviderError, OAuthAccountStoreTag>;
+  ) => Effect.Effect<string, AuthError | OAuthProviderError, OAuthAccountStore>;
 }
-```
-
-## OAuthServiceLayer
-
-**Signature**
-
-```ts
-export declare const OAuthServiceLayer: (
-  providers: Record<string, OAuthProvider>,
-  options?: OAuthServiceOptions,
-) => Layer.Layer<OAuthServiceTag, never, never>;
-```
-
-## OAuthServiceOptions (interface)
-
-Options controlling {@link OAuthService} behaviour.
-
-**Signature**
-
-```ts
-export interface OAuthServiceOptions {
-  /**
-   * When a new OAuth account arrives with a provider-verified email that
-   * matches an existing user, link the account to that user instead of
-   * creating a new one. Defaults to `true`. Only ever applies when the
-   * provider reports `email_verified: true`.
-   */
-  readonly autoLinkByVerifiedEmail?: boolean;
-}
-```
-
-## OAuthServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class OAuthServiceTag
 ```
 
 ## OAuthSignInResult (interface)
@@ -578,36 +546,29 @@ export interface OAuthState {
 }
 ```
 
-## OAuthStateStore
-
-**Signature**
-
-```ts
-export declare const OAuthStateStore: typeof OAuthStateStoreTag;
-```
-
-## OAuthStateStore (interface)
-
-Storage interface for OAuth state (temporary, Redis/memory)
-
-**Signature**
-
-```ts
-export interface OAuthStateStore {
-  readonly create: (state: OAuthState) => Effect.Effect<OAuthState, AuthError>;
-  readonly get: (state: string) => Effect.Effect<OAuthState, AuthError>;
-  readonly delete: (state: string) => Effect.Effect<void, AuthError>;
-}
-```
-
-## OAuthStateStoreTag (class)
+## OAuthStateStore (class)
 
 OAuth state store context tag
 
 **Signature**
 
 ```ts
-export declare class OAuthStateStoreTag
+export declare class OAuthStateStore
+```
+
+## OAuthStateStoreShape (interface)
+
+Storage interface for OAuth state (temporary, Redis/memory)
+
+**Signature**
+
+```ts
+export interface OAuthStateStoreShape {
+  readonly create: (state: OAuthState) => Effect.Effect<OAuthState, AuthError>;
+  /** Get a pending state entry, or `null` when unknown/expired-and-purged. */
+  readonly get: (state: string) => Effect.Effect<OAuthState | null, AuthError>;
+  readonly delete: (state: string) => Effect.Effect<void, AuthError>;
+}
 ```
 
 ## OAuthTokenResponse (interface)
@@ -647,37 +608,29 @@ export interface OAuthUserInfo {
 }
 ```
 
-## OAuthUserStore
-
-**Signature**
-
-```ts
-export declare const OAuthUserStore: typeof OAuthUserStoreTag;
-```
-
-## OAuthUserStore (interface)
-
-Minimal user store the OAuth sign-in flow needs to create or look up users
-from provider profiles. Implement alongside {@link OAuthAccountStore}.
-
-**Signature**
-
-```ts
-export interface OAuthUserStore {
-  readonly getUser: (userId: string) => Effect.Effect<Types.User, UserNotFoundError>;
-  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, AuthError>;
-  readonly createUser: (input: OAuthCreateUserInput) => Effect.Effect<Types.User, AuthError>;
-}
-```
-
-## OAuthUserStoreTag (class)
+## OAuthUserStore (class)
 
 OAuth user store context tag
 
 **Signature**
 
 ```ts
-export declare class OAuthUserStoreTag
+export declare class OAuthUserStore
+```
+
+## OAuthUserStoreShape (interface)
+
+Minimal user store the OAuth sign-in flow needs to create or look up users
+from provider profiles. Implement alongside {@link OAuthAccountStoreShape}.
+
+**Signature**
+
+```ts
+export interface OAuthUserStoreShape {
+  readonly getUser: (userId: string) => Effect.Effect<Types.User, UserNotFoundError>;
+  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, AuthError>;
+  readonly createUser: (input: OAuthCreateUserInput) => Effect.Effect<Types.User, AuthError>;
+}
 ```
 
 ## RedditProvider
@@ -851,7 +804,7 @@ Create an OAuth service with configured providers
 export declare const makeOAuthService: (
   providers: Record<string, OAuthProvider>,
   options?: OAuthServiceOptions,
-) => Effect.Effect<OAuthService, never>;
+) => Effect.Effect<OAuthServiceShape, never>;
 ```
 
 ## verifyIdToken

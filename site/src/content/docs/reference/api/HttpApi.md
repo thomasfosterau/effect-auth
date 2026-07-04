@@ -99,6 +99,19 @@ export declare const AuthApi: HttpApi.HttpApi<
               never,
               never
             >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              never,
+              never
+            >
         >,
         never,
         never
@@ -146,6 +159,19 @@ export declare const AuthApi: HttpApi.HttpApi<
                 { readonly message: string; readonly _tag: "InternalServerError" }
               >,
               Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
               never,
               never
             >
@@ -268,6 +294,19 @@ export declare const AuthApi: HttpApi.HttpApi<
               never,
               never
             >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              never,
+              never
+            >
         >,
         never,
         never
@@ -323,12 +362,25 @@ export declare const AuthApi: HttpApi.HttpApi<
               never,
               never
             >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              never,
+              never
+            >
         >,
         never,
         never
       >
     | HttpApiEndpoint.HttpApiEndpoint<
-        "requestPasswordReset",
+        "passwordResetRequest",
         "POST",
         "/password-reset/request",
         HttpApiEndpoint.StringTree<never>,
@@ -361,12 +413,25 @@ export declare const AuthApi: HttpApi.HttpApi<
               never,
               never
             >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              never,
+              never
+            >
         >,
         never,
         never
       >
     | HttpApiEndpoint.HttpApiEndpoint<
-        "resetPassword",
+        "passwordResetConfirm",
         "POST",
         "/password-reset/reset",
         HttpApiEndpoint.StringTree<never>,
@@ -398,6 +463,19 @@ export declare const AuthApi: HttpApi.HttpApi<
                 { readonly message: string; readonly _tag: "InternalServerError" }
               >,
               Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
               never,
               never
             >
@@ -741,6 +819,19 @@ export declare const AuthApi: HttpApi.HttpApi<
             >
           | Schema.decodeTo<
               Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
                 S.NotFound,
                 { readonly message: string; readonly _tag: "NotFound" },
                 readonly [Schema.TaggedStruct<"NotFound", { readonly message: Schema.String }>],
@@ -1050,6 +1141,19 @@ export declare const AuthApi: HttpApi.HttpApi<
             >
           | Schema.decodeTo<
               Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
                 S.NotFound,
                 { readonly message: string; readonly _tag: "NotFound" },
                 readonly [Schema.TaggedStruct<"NotFound", { readonly message: Schema.String }>],
@@ -1100,6 +1204,19 @@ export declare const AuthApi: HttpApi.HttpApi<
                 { readonly message: string; readonly _tag: "InternalServerError" }
               >,
               Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
               never,
               never
             >
@@ -1157,6 +1274,19 @@ export declare const AuthApi: HttpApi.HttpApi<
                 { readonly message: string; readonly _tag: "InternalServerError" }
               >,
               Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
               never,
               never
             >
@@ -1438,6 +1568,19 @@ export declare const AuthApi: HttpApi.HttpApi<
             >
           | Schema.decodeTo<
               Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
                 S.NotFound,
                 { readonly message: string; readonly _tag: "NotFound" },
                 readonly [Schema.TaggedStruct<"NotFound", { readonly message: Schema.String }>],
@@ -1653,6 +1796,19 @@ export declare const AuthApi: HttpApi.HttpApi<
                 { readonly message: string; readonly _tag: "InternalServerError" }
               >,
               Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
               never,
               never
             >
@@ -1972,6 +2128,19 @@ export declare const AuthApi: HttpApi.HttpApi<
             >
           | Schema.decodeTo<
               Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
                 S.Unauthorized,
                 { readonly message: string; readonly _tag: "Unauthorized" },
                 readonly [Schema.TaggedStruct<"Unauthorized", { readonly message: Schema.String }>],
@@ -2046,6 +2215,19 @@ export declare const AuthApi: HttpApi.HttpApi<
                 { readonly message: string; readonly _tag: "InternalServerError" }
               >,
               Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
               never,
               never
             >
@@ -3630,6 +3812,19 @@ export declare const AuthApi: HttpApi.HttpApi<
             >
           | Schema.decodeTo<
               Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
                 S.Unauthorized,
                 { readonly message: string; readonly _tag: "Unauthorized" },
                 readonly [Schema.TaggedStruct<"Unauthorized", { readonly message: Schema.String }>],
@@ -4158,7 +4353,7 @@ export declare const AuthApi: HttpApi.HttpApi<
         never
       >
     | HttpApiEndpoint.HttpApiEndpoint<
-        "ssoSignIn",
+        "signInSso",
         "POST",
         "/sign-in/sso",
         HttpApiEndpoint.StringTree<never>,
@@ -4269,6 +4464,19 @@ export declare const AuthApi: HttpApi.HttpApi<
             >
           | Schema.decodeTo<
               Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
                 S.NotFound,
                 { readonly message: string; readonly _tag: "NotFound" },
                 readonly [Schema.TaggedStruct<"NotFound", { readonly message: Schema.String }>],
@@ -4319,6 +4527,19 @@ export declare const AuthApi: HttpApi.HttpApi<
                 { readonly message: string; readonly _tag: "InternalServerError" }
               >,
               Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+              never,
+              never
+            >
+          | Schema.decodeTo<
+              Schema.declareConstructor<
+                S.TooManyRequests,
+                { readonly message: string; readonly _tag: "TooManyRequests" },
+                readonly [
+                  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+                ],
+                { readonly message: string; readonly _tag: "TooManyRequests" }
+              >,
+              Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
               never,
               never
             >
@@ -5187,6 +5408,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
             never,
             never
           >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+            never,
+            never
+          >
       >,
       never,
       never
@@ -5234,6 +5468,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
               { readonly message: string; readonly _tag: "InternalServerError" }
             >,
             Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
             never,
             never
           >
@@ -5356,6 +5603,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
             never,
             never
           >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+            never,
+            never
+          >
       >,
       never,
       never
@@ -5411,12 +5671,25 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
             never,
             never
           >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+            never,
+            never
+          >
       >,
       never,
       never
     >
   | HttpApiEndpoint.HttpApiEndpoint<
-      "requestPasswordReset",
+      "passwordResetRequest",
       "POST",
       "/password-reset/request",
       HttpApiEndpoint.StringTree<never>,
@@ -5449,12 +5722,25 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
             never,
             never
           >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+            never,
+            never
+          >
       >,
       never,
       never
     >
   | HttpApiEndpoint.HttpApiEndpoint<
-      "resetPassword",
+      "passwordResetConfirm",
       "POST",
       "/password-reset/reset",
       HttpApiEndpoint.StringTree<never>,
@@ -5486,6 +5772,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
               { readonly message: string; readonly _tag: "InternalServerError" }
             >,
             Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
             never,
             never
           >
@@ -5829,6 +6128,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
           >
         | Schema.decodeTo<
             Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
               S.NotFound,
               { readonly message: string; readonly _tag: "NotFound" },
               readonly [Schema.TaggedStruct<"NotFound", { readonly message: Schema.String }>],
@@ -6138,6 +6450,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
           >
         | Schema.decodeTo<
             Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
               S.NotFound,
               { readonly message: string; readonly _tag: "NotFound" },
               readonly [Schema.TaggedStruct<"NotFound", { readonly message: Schema.String }>],
@@ -6188,6 +6513,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
               { readonly message: string; readonly _tag: "InternalServerError" }
             >,
             Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
             never,
             never
           >
@@ -6245,6 +6583,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
               { readonly message: string; readonly _tag: "InternalServerError" }
             >,
             Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
             never,
             never
           >
@@ -6526,6 +6877,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
           >
         | Schema.decodeTo<
             Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
               S.NotFound,
               { readonly message: string; readonly _tag: "NotFound" },
               readonly [Schema.TaggedStruct<"NotFound", { readonly message: Schema.String }>],
@@ -6741,6 +7105,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
               { readonly message: string; readonly _tag: "InternalServerError" }
             >,
             Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
             never,
             never
           >
@@ -7060,6 +7437,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
           >
         | Schema.decodeTo<
             Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
               S.Unauthorized,
               { readonly message: string; readonly _tag: "Unauthorized" },
               readonly [Schema.TaggedStruct<"Unauthorized", { readonly message: Schema.String }>],
@@ -7134,6 +7524,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
               { readonly message: string; readonly _tag: "InternalServerError" }
             >,
             Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
             never,
             never
           >
@@ -8718,6 +9121,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
           >
         | Schema.decodeTo<
             Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
               S.Unauthorized,
               { readonly message: string; readonly _tag: "Unauthorized" },
               readonly [Schema.TaggedStruct<"Unauthorized", { readonly message: Schema.String }>],
@@ -9237,7 +9653,7 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
       never
     >
   | HttpApiEndpoint.HttpApiEndpoint<
-      "ssoSignIn",
+      "signInSso",
       "POST",
       "/sign-in/sso",
       HttpApiEndpoint.StringTree<never>,
@@ -9348,6 +9764,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
           >
         | Schema.decodeTo<
             Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
               S.NotFound,
               { readonly message: string; readonly _tag: "NotFound" },
               readonly [Schema.TaggedStruct<"NotFound", { readonly message: Schema.String }>],
@@ -9398,6 +9827,19 @@ export declare const authGroup: HttpApiGroup.HttpApiGroup<
               { readonly message: string; readonly _tag: "InternalServerError" }
             >,
             Schema.TaggedStruct<"InternalServerError", { readonly message: Schema.String }>,
+            never,
+            never
+          >
+        | Schema.decodeTo<
+            Schema.declareConstructor<
+              S.TooManyRequests,
+              { readonly message: string; readonly _tag: "TooManyRequests" },
+              readonly [
+                Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+              ],
+              { readonly message: string; readonly _tag: "TooManyRequests" }
+            >,
+            Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
             never,
             never
           >

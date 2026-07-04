@@ -20,17 +20,13 @@ so newly created users are marked `emailVerified: true`.
   - [MagicLinkConfig (interface)](#magiclinkconfig-interface)
   - [MagicLinkCreateUserInput (interface)](#magiclinkcreateuserinput-interface)
   - [MagicLinkResult (interface)](#magiclinkresult-interface)
-  - [MagicLinkService](#magiclinkservice)
-  - [MagicLinkService (interface)](#magiclinkservice-interface)
-  - [MagicLinkServiceLayer](#magiclinkservicelayer)
-  - [MagicLinkServiceTag (class)](#magiclinkservicetag-class)
-  - [MagicLinkStore](#magiclinkstore)
-  - [MagicLinkStore (interface)](#magiclinkstore-interface)
-  - [MagicLinkStoreTag (class)](#magiclinkstoretag-class)
+  - [MagicLinkService (class)](#magiclinkservice-class)
+  - [MagicLinkServiceShape (interface)](#magiclinkserviceshape-interface)
+  - [MagicLinkStore (class)](#magiclinkstore-class)
+  - [MagicLinkStoreShape (interface)](#magiclinkstoreshape-interface)
   - [MagicLinkToken (interface)](#magiclinktoken-interface)
-  - [MagicLinkUserStore](#magiclinkuserstore)
-  - [MagicLinkUserStore (interface)](#magiclinkuserstore-interface)
-  - [MagicLinkUserStoreTag (class)](#magiclinkuserstoretag-class)
+  - [MagicLinkUserStore (class)](#magiclinkuserstore-class)
+  - [MagicLinkUserStoreShape (interface)](#magiclinkuserstoreshape-interface)
   - [MagicLinkVerifyOptions (interface)](#magiclinkverifyoptions-interface)
   - [generateMagicLinkToken](#generatemagiclinktoken)
   - [makeMagicLinkService](#makemagiclinkservice)
@@ -83,22 +79,22 @@ export interface MagicLinkResult {
 }
 ```
 
-## MagicLinkService
+## MagicLinkService (class)
 
 **Signature**
 
 ```ts
-export declare const MagicLinkService: typeof MagicLinkServiceTag;
+export declare class MagicLinkService
 ```
 
-## MagicLinkService (interface)
+## MagicLinkServiceShape (interface)
 
 Magic link service
 
 **Signature**
 
 ```ts
-export interface MagicLinkService {
+export interface MagicLinkServiceShape {
   /**
    * Request a magic link for the given email. Outstanding tokens for the
    * email are invalidated first so only the latest link is usable.
@@ -112,7 +108,7 @@ export interface MagicLinkService {
   ) => Effect.Effect<
     void,
     Errors.AuthError | Errors.MagicLinkError,
-    MagicLinkStoreTag | MagicLinkUserStoreTag
+    MagicLinkStore | MagicLinkUserStore
   >;
 
   /**
@@ -126,60 +122,34 @@ export interface MagicLinkService {
   ) => Effect.Effect<
     MagicLinkResult,
     Errors.MagicLinkError | Errors.AuthError | HookError,
-    MagicLinkStoreTag | MagicLinkUserStoreTag | SessionManagerTag | Hooks
+    MagicLinkStore | MagicLinkUserStore | SessionManager | Hooks
   >;
 }
 ```
 
-## MagicLinkServiceLayer
-
-**Signature**
-
-```ts
-export declare const MagicLinkServiceLayer: (
-  config: MagicLinkConfig,
-) => Layer.Layer<MagicLinkServiceTag, never, never>;
-```
-
-## MagicLinkServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class MagicLinkServiceTag
-```
-
-## MagicLinkStore
-
-**Signature**
-
-```ts
-export declare const MagicLinkStore: typeof MagicLinkStoreTag;
-```
-
-## MagicLinkStore (interface)
-
-Storage interface for magic link tokens
-
-**Signature**
-
-```ts
-export interface MagicLinkStore {
-  readonly create: (token: MagicLinkToken) => Effect.Effect<MagicLinkToken, Errors.AuthError>;
-  readonly get: (token: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
-  readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
-  readonly deleteByEmail: (email: string) => Effect.Effect<void, Errors.AuthError>;
-}
-```
-
-## MagicLinkStoreTag (class)
+## MagicLinkStore (class)
 
 Magic link store context tag
 
 **Signature**
 
 ```ts
-export declare class MagicLinkStoreTag
+export declare class MagicLinkStore
+```
+
+## MagicLinkStoreShape (interface)
+
+Storage interface for magic link tokens
+
+**Signature**
+
+```ts
+export interface MagicLinkStoreShape {
+  readonly create: (token: MagicLinkToken) => Effect.Effect<MagicLinkToken, Errors.AuthError>;
+  readonly get: (token: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
+  readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
+  readonly deleteByEmail: (email: string) => Effect.Effect<void, Errors.AuthError>;
+}
 ```
 
 ## MagicLinkToken (interface)
@@ -197,37 +167,29 @@ export interface MagicLinkToken {
 }
 ```
 
-## MagicLinkUserStore
-
-**Signature**
-
-```ts
-export declare const MagicLinkUserStore: typeof MagicLinkUserStoreTag;
-```
-
-## MagicLinkUserStore (interface)
-
-User store interface for magic link sign-in
-
-**Signature**
-
-```ts
-export interface MagicLinkUserStore {
-  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
-  readonly createUser: (
-    input: MagicLinkCreateUserInput,
-  ) => Effect.Effect<Types.User, Errors.AuthError>;
-}
-```
-
-## MagicLinkUserStoreTag (class)
+## MagicLinkUserStore (class)
 
 Magic link user store context tag
 
 **Signature**
 
 ```ts
-export declare class MagicLinkUserStoreTag
+export declare class MagicLinkUserStore
+```
+
+## MagicLinkUserStoreShape (interface)
+
+User store interface for magic link sign-in
+
+**Signature**
+
+```ts
+export interface MagicLinkUserStoreShape {
+  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
+  readonly createUser: (
+    input: MagicLinkCreateUserInput,
+  ) => Effect.Effect<Types.User, Errors.AuthError>;
+}
 ```
 
 ## MagicLinkVerifyOptions (interface)
@@ -261,5 +223,5 @@ Create a magic link service
 ```ts
 export declare const makeMagicLinkService: (
   config: MagicLinkConfig,
-) => Effect.Effect<MagicLinkService, never>;
+) => Effect.Effect<MagicLinkServiceShape, never>;
 ```

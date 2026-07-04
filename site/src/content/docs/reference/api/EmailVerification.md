@@ -15,13 +15,10 @@ Email verification types for effect-auth
   - [EmailVerification (interface)](#emailverification-interface)
   - [EmailVerificationConfig (interface)](#emailverificationconfig-interface)
   - [EmailVerificationResult (interface)](#emailverificationresult-interface)
-  - [EmailVerificationService](#emailverificationservice)
-  - [EmailVerificationService (interface)](#emailverificationservice-interface)
-  - [EmailVerificationServiceLayer](#emailverificationservicelayer)
-  - [EmailVerificationServiceTag (class)](#emailverificationservicetag-class)
-  - [EmailVerificationStore](#emailverificationstore)
-  - [EmailVerificationStore (interface)](#emailverificationstore-interface)
-  - [EmailVerificationStoreTag (class)](#emailverificationstoretag-class)
+  - [EmailVerificationService (class)](#emailverificationservice-class)
+  - [EmailVerificationServiceShape (interface)](#emailverificationserviceshape-interface)
+  - [EmailVerificationStore (class)](#emailverificationstore-class)
+  - [EmailVerificationStoreShape (interface)](#emailverificationstoreshape-interface)
   - [generateVerificationToken](#generateverificationtoken)
   - [makeEmailVerificationService](#makeemailverificationservice)
 
@@ -72,29 +69,29 @@ export interface EmailVerificationResult {
 }
 ```
 
-## EmailVerificationService
+## EmailVerificationService (class)
 
 **Signature**
 
 ```ts
-export declare const EmailVerificationService: typeof EmailVerificationServiceTag;
+export declare class EmailVerificationService
 ```
 
-## EmailVerificationService (interface)
+## EmailVerificationServiceShape (interface)
 
 Email verification service
 
 **Signature**
 
 ```ts
-export interface EmailVerificationService {
+export interface EmailVerificationServiceShape {
   readonly createVerification: (
     userId: string,
     email: string,
   ) => Effect.Effect<
     { token: string; expiresAt: number },
     AuthError | EmailVerificationError | HookError,
-    EmailVerificationStoreTag | Hooks
+    EmailVerificationStore | Hooks
   >;
 
   readonly verifyToken: (
@@ -102,7 +99,7 @@ export interface EmailVerificationService {
   ) => Effect.Effect<
     EmailVerificationResult,
     EmailVerificationError | AuthError | HookError,
-    EmailVerificationStoreTag | Hooks
+    EmailVerificationStore | Hooks
   >;
 
   /**
@@ -116,60 +113,34 @@ export interface EmailVerificationService {
   ) => Effect.Effect<
     { token: string; expiresAt: number },
     AuthError | RateLimitError | EmailVerificationError | HookError,
-    EmailVerificationStoreTag | Hooks
+    EmailVerificationStore | Hooks
   >;
 }
 ```
 
-## EmailVerificationServiceLayer
-
-**Signature**
-
-```ts
-export declare const EmailVerificationServiceLayer: (
-  config: EmailVerificationConfig,
-) => Layer.Layer<EmailVerificationServiceTag, never, never>;
-```
-
-## EmailVerificationServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class EmailVerificationServiceTag
-```
-
-## EmailVerificationStore
-
-**Signature**
-
-```ts
-export declare const EmailVerificationStore: typeof EmailVerificationStoreTag;
-```
-
-## EmailVerificationStore (interface)
-
-Storage interface for email verifications
-
-**Signature**
-
-```ts
-export interface EmailVerificationStore {
-  readonly create: (verification: EmailVerification) => Effect.Effect<EmailVerification, AuthError>;
-  readonly get: (token: string) => Effect.Effect<EmailVerification | null, AuthError>;
-  readonly delete: (token: string) => Effect.Effect<void, AuthError>;
-  readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
-}
-```
-
-## EmailVerificationStoreTag (class)
+## EmailVerificationStore (class)
 
 Email verification store context tag
 
 **Signature**
 
 ```ts
-export declare class EmailVerificationStoreTag
+export declare class EmailVerificationStore
+```
+
+## EmailVerificationStoreShape (interface)
+
+Storage interface for email verifications
+
+**Signature**
+
+```ts
+export interface EmailVerificationStoreShape {
+  readonly create: (verification: EmailVerification) => Effect.Effect<EmailVerification, AuthError>;
+  readonly get: (token: string) => Effect.Effect<EmailVerification | null, AuthError>;
+  readonly delete: (token: string) => Effect.Effect<void, AuthError>;
+  readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
+}
 ```
 
 ## generateVerificationToken
@@ -191,5 +162,5 @@ Create an email verification service
 ```ts
 export declare const makeEmailVerificationService: (
   config: EmailVerificationConfig,
-) => Effect.Effect<EmailVerificationService, never>;
+) => Effect.Effect<EmailVerificationServiceShape, never>;
 ```

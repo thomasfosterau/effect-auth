@@ -46,28 +46,28 @@ import * as Errors from "./Errors.js";
 import {
   type EmailOtpPurpose,
   type EmailOtpRecord,
-  type EmailOtpStore,
-  EmailOtpStoreTag,
+  type EmailOtpStoreShape,
+  EmailOtpStore,
 } from "./EmailOtp.js";
 import {
   type EmailVerification,
-  type EmailVerificationStore,
-  EmailVerificationStoreTag,
+  type EmailVerificationStoreShape,
+  EmailVerificationStore,
 } from "./EmailVerification.js";
-import { type MagicLinkStore, MagicLinkStoreTag, type MagicLinkToken } from "./MagicLink.js";
-import { type OAuthState, type OAuthStateStore, OAuthStateStoreTag } from "./OAuth.js";
+import { type MagicLinkStoreShape, MagicLinkStore, type MagicLinkToken } from "./MagicLink.js";
+import { type OAuthState, type OAuthStateStoreShape, OAuthStateStore } from "./OAuth.js";
 import {
-  type PasswordResetStore,
-  PasswordResetStoreTag,
+  type PasswordResetStoreShape,
+  PasswordResetStore,
   type PasswordResetToken,
 } from "./PasswordReset.js";
-import { type RateLimitEntry, type RateLimitStore, RateLimitStoreTag } from "./RateLimit.js";
+import { type RateLimitEntry, type RateLimitStoreShape, RateLimitStore } from "./RateLimit.js";
 import {
   type PendingTwoFactor,
-  type PendingTwoFactorStore,
-  PendingTwoFactorStoreTag,
+  type PendingTwoFactorStoreShape,
+  PendingTwoFactorStore,
 } from "./TwoFactor.js";
-import { type ChallengeStore, ChallengeStoreTag, type WebAuthnChallenge } from "./WebAuthn.js";
+import { type ChallengeStoreShape, ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.js";
 
 // ---------------------------------------------------------------------------
 // Codecs & helpers
@@ -152,10 +152,10 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
 const oauthStateKey = (state: string) => `oauth-state:${state}`;
 
 /**
- * Build an {@link OAuthStateStore} over the ambient `KeyValueStore`.
+ * Build an {@link OAuthStateStoreShape} over the ambient `KeyValueStore`.
  */
 export const makeOAuthStateStoreKV: Effect.Effect<
-  OAuthStateStore,
+  OAuthStateStoreShape,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -168,17 +168,14 @@ export const makeOAuthStateStoreKV: Effect.Effect<
         .read<OAuthState>(oauthStateKey(state), "oauthState.get")
         .pipe(Effect.map((entry) => entry ?? null)),
     delete: (state) => kv.remove(oauthStateKey(state), "oauthState.delete"),
-  } satisfies OAuthStateStore;
+  } satisfies OAuthStateStoreShape;
 });
 
 /**
  * `OAuthStateStore` layer backed by `KeyValueStore`.
  */
-export const OAuthStateStoreKV: Layer.Layer<
-  OAuthStateStoreTag,
-  never,
-  KeyValueStore.KeyValueStore
-> = Layer.effect(OAuthStateStoreTag, makeOAuthStateStoreKV);
+export const OAuthStateStoreKV: Layer.Layer<OAuthStateStore, never, KeyValueStore.KeyValueStore> =
+  Layer.effect(OAuthStateStore, makeOAuthStateStoreKV);
 
 // ---------------------------------------------------------------------------
 // WebAuthn ChallengeStore
@@ -200,10 +197,10 @@ const decodeChallenge = (stored: StoredChallenge): WebAuthnChallenge => ({
 });
 
 /**
- * Build a WebAuthn {@link ChallengeStore} over the ambient `KeyValueStore`.
+ * Build a WebAuthn {@link ChallengeStoreShape} over the ambient `KeyValueStore`.
  */
 export const makeChallengeStoreKV: Effect.Effect<
-  ChallengeStore,
+  ChallengeStoreShape,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -227,14 +224,14 @@ export const makeChallengeStoreKV: Effect.Effect<
         Effect.map((stored) => (stored ? decodeChallenge(stored) : null)),
       ),
     delete: (challenge) => kv.remove(challengeKey(challenge), "challenge.delete"),
-  } satisfies ChallengeStore;
+  } satisfies ChallengeStoreShape;
 });
 
 /**
  * WebAuthn `ChallengeStore` layer backed by `KeyValueStore`.
  */
-export const ChallengeStoreKV: Layer.Layer<ChallengeStoreTag, never, KeyValueStore.KeyValueStore> =
-  Layer.effect(ChallengeStoreTag, makeChallengeStoreKV);
+export const ChallengeStoreKV: Layer.Layer<ChallengeStore, never, KeyValueStore.KeyValueStore> =
+  Layer.effect(ChallengeStore, makeChallengeStoreKV);
 
 // ---------------------------------------------------------------------------
 // RateLimitStore
@@ -243,7 +240,7 @@ export const ChallengeStoreKV: Layer.Layer<ChallengeStoreTag, never, KeyValueSto
 const rateLimitKey = (key: string) => `rate-limit:${key}`;
 
 /**
- * Build a {@link RateLimitStore} over the ambient `KeyValueStore`.
+ * Build a {@link RateLimitStoreShape} over the ambient `KeyValueStore`.
  *
  * `increment` is read-modify-write and therefore not atomic (see the module
  * docs) — fine for best-effort limiting, not for strict quota enforcement.
@@ -251,7 +248,7 @@ const rateLimitKey = (key: string) => `rate-limit:${key}`;
  * rather than by backend-level expiry, since `KeyValueStore` has no TTL API.
  */
 export const makeRateLimitStoreKV: Effect.Effect<
-  RateLimitStore,
+  RateLimitStoreShape,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -274,14 +271,14 @@ export const makeRateLimitStoreKV: Effect.Effect<
         return updated.count;
       }),
     delete: (key) => kv.remove(rateLimitKey(key), "rateLimit.delete"),
-  } satisfies RateLimitStore;
+  } satisfies RateLimitStoreShape;
 });
 
 /**
  * `RateLimitStore` layer backed by `KeyValueStore`.
  */
-export const RateLimitStoreKV: Layer.Layer<RateLimitStoreTag, never, KeyValueStore.KeyValueStore> =
-  Layer.effect(RateLimitStoreTag, makeRateLimitStoreKV);
+export const RateLimitStoreKV: Layer.Layer<RateLimitStore, never, KeyValueStore.KeyValueStore> =
+  Layer.effect(RateLimitStore, makeRateLimitStoreKV);
 
 // ---------------------------------------------------------------------------
 // EmailVerificationStore
@@ -291,13 +288,13 @@ const emailVerificationTokenKey = (token: string) => `email-verification:token:$
 const emailVerificationUserKey = (userId: string) => `email-verification:user:${userId}`;
 
 /**
- * Build an {@link EmailVerificationStore} over the ambient `KeyValueStore`.
+ * Build an {@link EmailVerificationStoreShape} over the ambient `KeyValueStore`.
  *
  * `deleteByUserId` is served by a secondary index key per user holding the
  * user's live tokens (see the module docs for staleness guarantees).
  */
 export const makeEmailVerificationStoreKV: Effect.Effect<
-  EmailVerificationStore,
+  EmailVerificationStoreShape,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -347,17 +344,17 @@ export const makeEmailVerificationStoreKV: Effect.Effect<
         );
         yield* kv.remove(emailVerificationUserKey(userId), "emailVerification.deleteByUserId");
       }),
-  } satisfies EmailVerificationStore;
+  } satisfies EmailVerificationStoreShape;
 });
 
 /**
  * `EmailVerificationStore` layer backed by `KeyValueStore`.
  */
 export const EmailVerificationStoreKV: Layer.Layer<
-  EmailVerificationStoreTag,
+  EmailVerificationStore,
   never,
   KeyValueStore.KeyValueStore
-> = Layer.effect(EmailVerificationStoreTag, makeEmailVerificationStoreKV);
+> = Layer.effect(EmailVerificationStore, makeEmailVerificationStoreKV);
 
 // ---------------------------------------------------------------------------
 // PasswordResetStore
@@ -367,12 +364,12 @@ const passwordResetTokenKey = (token: string) => `password-reset:token:${token}`
 const passwordResetUserKey = (userId: string) => `password-reset:user:${userId}`;
 
 /**
- * Build a {@link PasswordResetStore} over the ambient `KeyValueStore`.
+ * Build a {@link PasswordResetStoreShape} over the ambient `KeyValueStore`.
  *
  * `deleteByUserId` is served by a secondary index key per user.
  */
 export const makePasswordResetStoreKV: Effect.Effect<
-  PasswordResetStore,
+  PasswordResetStoreShape,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -408,17 +405,17 @@ export const makePasswordResetStoreKV: Effect.Effect<
         );
         yield* kv.remove(passwordResetUserKey(userId), "passwordReset.deleteByUserId");
       }),
-  } satisfies PasswordResetStore;
+  } satisfies PasswordResetStoreShape;
 });
 
 /**
  * `PasswordResetStore` layer backed by `KeyValueStore`.
  */
 export const PasswordResetStoreKV: Layer.Layer<
-  PasswordResetStoreTag,
+  PasswordResetStore,
   never,
   KeyValueStore.KeyValueStore
-> = Layer.effect(PasswordResetStoreTag, makePasswordResetStoreKV);
+> = Layer.effect(PasswordResetStore, makePasswordResetStoreKV);
 
 // ---------------------------------------------------------------------------
 // MagicLinkStore
@@ -428,12 +425,12 @@ const magicLinkTokenKey = (token: string) => `magic-link:token:${token}`;
 const magicLinkEmailKey = (email: string) => `magic-link:email:${email}`;
 
 /**
- * Build a {@link MagicLinkStore} over the ambient `KeyValueStore`.
+ * Build a {@link MagicLinkStoreShape} over the ambient `KeyValueStore`.
  *
  * `deleteByEmail` is served by a secondary index key per email address.
  */
 export const makeMagicLinkStoreKV: Effect.Effect<
-  MagicLinkStore,
+  MagicLinkStoreShape,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -466,14 +463,14 @@ export const makeMagicLinkStoreKV: Effect.Effect<
         );
         yield* kv.remove(magicLinkEmailKey(email), "magicLink.deleteByEmail");
       }),
-  } satisfies MagicLinkStore;
+  } satisfies MagicLinkStoreShape;
 });
 
 /**
  * `MagicLinkStore` layer backed by `KeyValueStore`.
  */
-export const MagicLinkStoreKV: Layer.Layer<MagicLinkStoreTag, never, KeyValueStore.KeyValueStore> =
-  Layer.effect(MagicLinkStoreTag, makeMagicLinkStoreKV);
+export const MagicLinkStoreKV: Layer.Layer<MagicLinkStore, never, KeyValueStore.KeyValueStore> =
+  Layer.effect(MagicLinkStore, makeMagicLinkStoreKV);
 
 // ---------------------------------------------------------------------------
 // EmailOtpStore
@@ -482,43 +479,46 @@ export const MagicLinkStoreKV: Layer.Layer<MagicLinkStoreTag, never, KeyValueSto
 const emailOtpKey = (email: string, purpose: EmailOtpPurpose) => `email-otp:${purpose}:${email}`;
 
 /**
- * Build an {@link EmailOtpStore} over the ambient `KeyValueStore`.
+ * Build an {@link EmailOtpStoreShape} over the ambient `KeyValueStore`.
  *
  * There is at most one active OTP per email + purpose pair, so the pair is
  * the key itself and no secondary index is needed. `incrementAttempts` is
  * read-modify-write (see the module docs on atomicity).
  */
-export const makeEmailOtpStoreKV: Effect.Effect<EmailOtpStore, never, KeyValueStore.KeyValueStore> =
-  Effect.gen(function* () {
-    const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
-    return {
-      upsert: (record) =>
-        kv
-          .write(emailOtpKey(record.email, record.purpose), record, "emailOtp.upsert")
-          .pipe(Effect.as(record)),
-      get: (email, purpose) => kv.read<EmailOtpRecord>(emailOtpKey(email, purpose), "emailOtp.get"),
-      delete: (email, purpose) => kv.remove(emailOtpKey(email, purpose), "emailOtp.delete"),
-      incrementAttempts: (email, purpose) =>
-        Effect.gen(function* () {
-          const record = yield* kv.read<EmailOtpRecord>(
-            emailOtpKey(email, purpose),
-            "emailOtp.incrementAttempts",
-          );
-          if (record == null) {
-            return yield* new Errors.AuthError({ message: "OTP record not found" });
-          }
-          const updated: EmailOtpRecord = { ...record, attempts: record.attempts + 1 };
-          yield* kv.write(emailOtpKey(email, purpose), updated, "emailOtp.incrementAttempts");
-          return updated.attempts;
-        }),
-    } satisfies EmailOtpStore;
-  });
+export const makeEmailOtpStoreKV: Effect.Effect<
+  EmailOtpStoreShape,
+  never,
+  KeyValueStore.KeyValueStore
+> = Effect.gen(function* () {
+  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+  return {
+    upsert: (record) =>
+      kv
+        .write(emailOtpKey(record.email, record.purpose), record, "emailOtp.upsert")
+        .pipe(Effect.as(record)),
+    get: (email, purpose) => kv.read<EmailOtpRecord>(emailOtpKey(email, purpose), "emailOtp.get"),
+    delete: (email, purpose) => kv.remove(emailOtpKey(email, purpose), "emailOtp.delete"),
+    incrementAttempts: (email, purpose) =>
+      Effect.gen(function* () {
+        const record = yield* kv.read<EmailOtpRecord>(
+          emailOtpKey(email, purpose),
+          "emailOtp.incrementAttempts",
+        );
+        if (record == null) {
+          return yield* new Errors.AuthError({ message: "OTP record not found" });
+        }
+        const updated: EmailOtpRecord = { ...record, attempts: record.attempts + 1 };
+        yield* kv.write(emailOtpKey(email, purpose), updated, "emailOtp.incrementAttempts");
+        return updated.attempts;
+      }),
+  } satisfies EmailOtpStoreShape;
+});
 
 /**
  * `EmailOtpStore` layer backed by `KeyValueStore`.
  */
-export const EmailOtpStoreKV: Layer.Layer<EmailOtpStoreTag, never, KeyValueStore.KeyValueStore> =
-  Layer.effect(EmailOtpStoreTag, makeEmailOtpStoreKV);
+export const EmailOtpStoreKV: Layer.Layer<EmailOtpStore, never, KeyValueStore.KeyValueStore> =
+  Layer.effect(EmailOtpStore, makeEmailOtpStoreKV);
 
 // ---------------------------------------------------------------------------
 // PendingTwoFactorStore
@@ -527,10 +527,10 @@ export const EmailOtpStoreKV: Layer.Layer<EmailOtpStoreTag, never, KeyValueStore
 const pendingTwoFactorKey = (token: string) => `pending-two-factor:${token}`;
 
 /**
- * Build a {@link PendingTwoFactorStore} over the ambient `KeyValueStore`.
+ * Build a {@link PendingTwoFactorStoreShape} over the ambient `KeyValueStore`.
  */
 export const makePendingTwoFactorStoreKV: Effect.Effect<
-  PendingTwoFactorStore,
+  PendingTwoFactorStoreShape,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -542,17 +542,17 @@ export const makePendingTwoFactorStoreKV: Effect.Effect<
         .pipe(Effect.as(pending)),
     get: (token) => kv.read<PendingTwoFactor>(pendingTwoFactorKey(token), "pendingTwoFactor.get"),
     delete: (token) => kv.remove(pendingTwoFactorKey(token), "pendingTwoFactor.delete"),
-  } satisfies PendingTwoFactorStore;
+  } satisfies PendingTwoFactorStoreShape;
 });
 
 /**
  * `PendingTwoFactorStore` layer backed by `KeyValueStore`.
  */
 export const PendingTwoFactorStoreKV: Layer.Layer<
-  PendingTwoFactorStoreTag,
+  PendingTwoFactorStore,
   never,
   KeyValueStore.KeyValueStore
-> = Layer.effect(PendingTwoFactorStoreTag, makePendingTwoFactorStoreKV);
+> = Layer.effect(PendingTwoFactorStore, makePendingTwoFactorStoreKV);
 
 // ---------------------------------------------------------------------------
 // Aggregate layer
@@ -565,14 +565,14 @@ export const PendingTwoFactorStoreKV: Layer.Layer<
  * stores) for a complete auth stack.
  */
 export const layerKV: Layer.Layer<
-  | OAuthStateStoreTag
-  | ChallengeStoreTag
-  | RateLimitStoreTag
-  | EmailVerificationStoreTag
-  | PasswordResetStoreTag
-  | MagicLinkStoreTag
-  | EmailOtpStoreTag
-  | PendingTwoFactorStoreTag,
+  | OAuthStateStore
+  | ChallengeStore
+  | RateLimitStore
+  | EmailVerificationStore
+  | PasswordResetStore
+  | MagicLinkStore
+  | EmailOtpStore
+  | PendingTwoFactorStore,
   never,
   KeyValueStore.KeyValueStore
 > = Layer.mergeAll(

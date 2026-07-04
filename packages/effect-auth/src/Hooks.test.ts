@@ -3,10 +3,11 @@ import { Context, Effect, Layer } from "effect";
 import { Hooks, composePlugins, makePlugin } from "./Hooks.js";
 import * as Errors from "./Errors.js";
 import type { AuthResult, SignInInput } from "./EmailPassword.js";
-import { EmailPasswordStore, makeEmailPasswordService } from "./EmailPassword.js";
+import { EmailPasswordStore } from "./EmailPassword.js";
+import { makeEmailPasswordService } from "./EmailPassword.js";
 import { PasswordHasherLive } from "./Password.js";
-import { SessionManager, SessionStore, UserStore, makeSessionManager } from "./Session.js";
-import { RateLimiterLayer, RateLimitStore, type RateLimitEntry } from "./RateLimit.js";
+import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
+import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.js";
 import { RateLimitPlugin } from "./plugins/RateLimitPlugin.js";
 import type { Session, SessionConfig, User } from "./Types.js";
 
@@ -237,7 +238,7 @@ describe("RateLimitPlugin - dependency composition + short-circuit", () => {
     // RateLimitPlugin declares its own deps: Layer<Hooks, never, Hooks | RateLimiter | RateLimitStore>.
     const layer = composePlugins([RateLimitPlugin]).pipe(
       Layer.provide(Hooks.Default),
-      Layer.provide(RateLimiterLayer()),
+      Layer.provide(RateLimiter.layer()),
       Layer.provide(makeRateLimitStoreLayer()),
     );
 

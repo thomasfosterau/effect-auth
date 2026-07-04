@@ -1,9 +1,9 @@
 import { Context, Effect, Layer, Option } from "effect";
 import * as Errors from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
-import { PasswordHasherTag } from "./Password.js";
+import { PasswordHasher } from "./Password.js";
 import type * as Types from "./Types.js";
-import { SessionManagerTag } from "./Session.js";
+import { SessionManager } from "./Session.js";
 
 export interface CreateUserInput {
   readonly email: string;
@@ -12,7 +12,7 @@ export interface CreateUserInput {
   readonly attributes?: Record<string, unknown>;
 }
 
-export interface EmailPasswordStore {
+export interface EmailPasswordStoreShape {
   readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
   readonly createUser: (input: CreateUserInput) => Effect.Effect<Types.User, Errors.AuthError>;
@@ -22,12 +22,10 @@ export interface EmailPasswordStore {
   readonly setPasswordHash: (userId: string, hash: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class EmailPasswordStoreTag extends Context.Service<
-  EmailPasswordStoreTag,
-  EmailPasswordStore
+export class EmailPasswordStore extends Context.Service<
+  EmailPasswordStore,
+  EmailPasswordStoreShape
 >()("@effect-auth/EmailPasswordStore") {}
-
-export const EmailPasswordStore = EmailPasswordStoreTag;
 
 export interface EmailPasswordConfig {
   readonly disableSignUp?: boolean;
@@ -71,16 +69,14 @@ export interface SecondFactorChallenge {
  * TwoFactor module) and `required` reports true, sign-in returns a
  * {@link SecondFactorChallenge} instead of a session.
  */
-export interface SecondFactorGate {
+export interface SecondFactorGateShape {
   readonly required: (user: Types.User) => Effect.Effect<boolean, Errors.AuthError>;
   readonly begin: (user: Types.User) => Effect.Effect<SecondFactorChallenge, Errors.AuthError>;
 }
 
-export class SecondFactorGateTag extends Context.Service<SecondFactorGateTag, SecondFactorGate>()(
+export class SecondFactorGate extends Context.Service<SecondFactorGate, SecondFactorGateShape>()(
   "@effect-auth/SecondFactorGate",
 ) {}
-
-export const SecondFactorGate = SecondFactorGateTag;
 
 export interface AuthResult {
   readonly user: Types.User;
@@ -104,7 +100,7 @@ export interface ChangePasswordInput {
   readonly currentSessionId?: string;
 }
 
-export interface EmailPasswordService {
+export interface EmailPasswordServiceShape {
   readonly signUp: (
     input: SignUpInput,
   ) => Effect.Effect<
@@ -114,7 +110,7 @@ export interface EmailPasswordService {
     | Errors.HashingError
     | Errors.EmailNotVerifiedError
     | HookError,
-    EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag | Hooks
+    EmailPasswordStore | PasswordHasher | SessionManager | Hooks
   >;
 
   readonly signIn: (
@@ -126,7 +122,7 @@ export interface EmailPasswordService {
     | Errors.AuthError
     | Errors.EmailNotVerifiedError
     | HookError,
-    EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag | Hooks
+    EmailPasswordStore | PasswordHasher | SessionManager | Hooks
   >;
 
   /**
@@ -138,7 +134,7 @@ export interface EmailPasswordService {
   ) => Effect.Effect<
     void,
     Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
-    EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag
+    EmailPasswordStore | PasswordHasher | SessionManager
   >;
 
   /**
@@ -151,22 +147,20 @@ export interface EmailPasswordService {
   ) => Effect.Effect<
     void,
     Errors.HashingError | Errors.AuthError,
-    EmailPasswordStoreTag | PasswordHasherTag
+    EmailPasswordStore | PasswordHasher
   >;
 }
 
-export class EmailPasswordServiceTag extends Context.Service<
-  EmailPasswordServiceTag,
-  EmailPasswordService
+export class EmailPasswordService extends Context.Service<
+  EmailPasswordService,
+  EmailPasswordServiceShape
 >()("@effect-auth/EmailPasswordService") {
   /**
-   * Construct a Layer providing this service — the canonical form of
-   * {@link EmailPasswordServiceLayer}.
+   * Construct a Layer providing this service.
    */
-  static readonly layer = (config: EmailPasswordConfig = {}) => EmailPasswordServiceLayer(config);
+  static readonly layer = (config: EmailPasswordConfig = {}) =>
+    Layer.effect(EmailPasswordService, makeEmailPasswordService(config));
 }
-
-export const EmailPasswordService = EmailPasswordServiceTag;
 
 const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
 
@@ -196,7 +190,7 @@ const validatePasswordLength = (
 
 export const makeEmailPasswordService = (
   config: EmailPasswordConfig = {},
-): Effect.Effect<EmailPasswordService, never> => {
+): Effect.Effect<EmailPasswordServiceShape, never> => {
   const resolved = {
     disableSignUp: config.disableSignUp ?? false,
     requireEmailVerification: config.requireEmailVerification ?? false,
@@ -206,7 +200,7 @@ export const makeEmailPasswordService = (
   };
 
   return Effect.sync(
-    (): EmailPasswordService => ({
+    (): EmailPasswordServiceShape => ({
       signUp: (rawInput) =>
         Effect.gen(function* () {
           const hooks = yield* Hooks;
@@ -220,9 +214,9 @@ export const makeEmailPasswordService = (
             );
           }
 
-          const store = yield* EmailPasswordStoreTag;
-          const passwordHasher = yield* PasswordHasherTag;
-          const sessionManager = yield* SessionManagerTag;
+          const store = yield* EmailPasswordStore;
+          const passwordHasher = yield* PasswordHasher;
+          const sessionManager = yield* SessionManager;
 
           const email = normalizeEmail(input.email);
           if (!email) {
@@ -272,9 +266,9 @@ export const makeEmailPasswordService = (
           const hooks = yield* Hooks;
           const input = yield* hooks.beforeSignIn(rawInput);
 
-          const store = yield* EmailPasswordStoreTag;
-          const passwordHasher = yield* PasswordHasherTag;
-          const sessionManager = yield* SessionManagerTag;
+          const store = yield* EmailPasswordStore;
+          const passwordHasher = yield* PasswordHasher;
+          const sessionManager = yield* SessionManager;
 
           const email = normalizeEmail(input.email);
           if (!email) {
@@ -323,7 +317,7 @@ export const makeEmailPasswordService = (
 
           // Second factor: when a gate is present and required for this user,
           // return a challenge instead of a session.
-          const gate = yield* Effect.serviceOption(SecondFactorGateTag);
+          const gate = yield* Effect.serviceOption(SecondFactorGate);
           if (Option.isSome(gate) && (yield* gate.value.required(user))) {
             const secondFactor = yield* gate.value.begin(user);
             return yield* hooks.afterSignIn({ user, secondFactor, method: "email-password" });
@@ -336,9 +330,9 @@ export const makeEmailPasswordService = (
 
       changePassword: (input) =>
         Effect.gen(function* () {
-          const store = yield* EmailPasswordStoreTag;
-          const passwordHasher = yield* PasswordHasherTag;
-          const sessionManager = yield* SessionManagerTag;
+          const store = yield* EmailPasswordStore;
+          const passwordHasher = yield* PasswordHasher;
+          const sessionManager = yield* SessionManager;
 
           yield* validatePasswordLength(input.newPassword, {
             minPasswordLength: resolved.minPasswordLength,
@@ -373,8 +367,8 @@ export const makeEmailPasswordService = (
 
       setPassword: (userId, newPassword) =>
         Effect.gen(function* () {
-          const store = yield* EmailPasswordStoreTag;
-          const passwordHasher = yield* PasswordHasherTag;
+          const store = yield* EmailPasswordStore;
+          const passwordHasher = yield* PasswordHasher;
 
           yield* validatePasswordLength(newPassword, {
             minPasswordLength: resolved.minPasswordLength,
@@ -394,6 +388,3 @@ export const makeEmailPasswordService = (
     }),
   );
 };
-
-export const EmailPasswordServiceLayer = (config: EmailPasswordConfig = {}) =>
-  Layer.effect(EmailPasswordServiceTag, makeEmailPasswordService(config));

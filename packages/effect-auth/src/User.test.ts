@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { Context, Effect } from "effect";
-import { UserServiceStore, makeUserService } from "./User.js";
+import { makeUserService, UserServiceStore } from "./User.js";
 import type { User } from "./Types.js";
 
 const users = new Map<string, User>();

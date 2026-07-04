@@ -9,7 +9,7 @@ import { Hooks, type HookError } from "./Hooks.js";
  * Users should implement this interface with their preferred storage backend
  * (e.g., Redis, PostgreSQL, MongoDB, etc.)
  */
-export interface SessionStore {
+export interface SessionStoreShape {
   /**
    * Create a new session
    */
@@ -46,18 +46,15 @@ export interface SessionStore {
 /**
  * Tag for SessionStore service
  */
-export class SessionStoreTag extends Context.Service<SessionStoreTag, SessionStore>()(
+export class SessionStore extends Context.Service<SessionStore, SessionStoreShape>()(
   "@effect-auth/SessionStore",
 ) {}
-
-// Public ergonomic alias
-export const SessionStore = SessionStoreTag;
 
 /**
  * User store interface for managing user persistence
  * Users should implement this interface with their preferred storage backend
  */
-export interface UserStore {
+export interface UserStoreShape {
   /**
    * Get a user by ID, or `null` when no such user exists.
    */
@@ -73,17 +70,14 @@ export interface UserStore {
 /**
  * Tag for UserStore service
  */
-export class UserStoreTag extends Context.Service<UserStoreTag, UserStore>()(
+export class UserStore extends Context.Service<UserStore, UserStoreShape>()(
   "@effect-auth/UserStore",
 ) {}
-
-// Public ergonomic alias
-export const UserStore = UserStoreTag;
 
 /**
  * Session manager service
  */
-export interface SessionManager {
+export interface SessionManagerShape {
   /**
    * Create a new session for a user
    */
@@ -145,18 +139,15 @@ export interface SessionManager {
 /**
  * Tag for SessionManager service
  */
-export class SessionManagerTag extends Context.Service<SessionManagerTag, SessionManager>()(
+export class SessionManager extends Context.Service<SessionManager, SessionManagerShape>()(
   "@effect-auth/SessionManager",
 ) {
   /**
-   * Construct a Layer providing this service — the canonical form of
-   * {@link SessionManagerLayer}.
+   * Construct a Layer providing this service.
    */
-  static readonly layer = (config: Types.SessionConfig) => SessionManagerLayer(config);
+  static readonly layer = (config: Types.SessionConfig) =>
+    Layer.effect(SessionManager, makeSessionManager(config));
 }
-
-// Public ergonomic alias
-export const SessionManager = SessionManagerTag;
 
 /**
  * Generate a secure random session ID
@@ -173,10 +164,10 @@ const generateSessionId = (): string => {
  */
 export const makeSessionManager = (
   config: Types.SessionConfig,
-): Effect.Effect<SessionManager, never, SessionStoreTag | UserStoreTag> =>
+): Effect.Effect<SessionManagerShape, never, SessionStore | UserStore> =>
   Effect.gen(function* () {
-    const sessionStore = yield* SessionStoreTag;
-    const userStore = yield* UserStoreTag;
+    const sessionStore = yield* SessionStore;
+    const userStore = yield* UserStore;
 
     return {
       createSession: (rawUserId, rawAttributes = {}) =>
@@ -332,6 +323,3 @@ export const makeSessionManager = (
         }),
     };
   });
-
-export const SessionManagerLayer = (config: Types.SessionConfig) =>
-  Layer.effect(SessionManagerTag, makeSessionManager(config));

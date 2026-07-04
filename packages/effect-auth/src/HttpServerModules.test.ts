@@ -2,28 +2,28 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
-import { SessionManagerLayer, SessionStoreTag, UserStoreTag } from "./Session.js";
-import { UserServiceLayer, UserServiceStoreTag } from "./User.js";
+import { SessionStore, UserStore, SessionManager } from "./Session.js";
+import { UserServiceStore, UserService } from "./User.js";
 import { Hooks } from "./Hooks.js";
-import { AuthLifecycleServiceTag } from "./AuthLifecycle.js";
-import { EmailPasswordStoreTag } from "./EmailPassword.js";
-import { PasswordHasherTag } from "./Password.js";
-import { EmailVerificationServiceTag, EmailVerificationStoreTag } from "./EmailVerification.js";
+import { AuthLifecycleService } from "./AuthLifecycle.js";
+import { EmailPasswordStore } from "./EmailPassword.js";
+import { PasswordHasher } from "./Password.js";
+import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.js";
 import {
-  PasswordResetServiceTag,
-  PasswordResetStoreTag,
-  PasswordResetUserStoreTag,
+  PasswordResetService,
+  PasswordResetStore,
+  PasswordResetUserStore,
 } from "./PasswordReset.js";
 import {
-  OrganizationServiceLayer,
-  OrganizationStoreTag,
+  OrganizationStore,
   type Organization,
   type Member,
   type Invitation,
+  OrganizationService,
 } from "./Organization.js";
-import { AdminServiceLayer, AdminUserStoreTag } from "./Admin.js";
-import { ApiKeyServiceLayer, ApiKeyStoreTag, type ApiKey } from "./ApiKey.js";
-import { JwtServiceLayer, JwtKeyStoreTag, type JwtKeyPair } from "./Jwt.js";
+import { AdminUserStore, AdminService } from "./Admin.js";
+import { ApiKeyStore, type ApiKey, ApiKeyService } from "./ApiKey.js";
+import { JwtKeyStore, type JwtKeyPair, JwtService } from "./Jwt.js";
 import type * as Types from "./Types.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -184,38 +184,38 @@ const makeFixture = () => {
   };
 
   const base = Layer.mergeAll(
-    SessionManagerLayer({ sessionExpiresIn: { activePeriod: HOUR, idlePeriod: HOUR } }).pipe(
+    SessionManager.layer({ sessionExpiresIn: { activePeriod: HOUR, idlePeriod: HOUR } }).pipe(
       Layer.provide(
         Layer.mergeAll(
-          Layer.succeed(SessionStoreTag)(sessionStore as never),
-          Layer.succeed(UserStoreTag)(userStore),
+          Layer.succeed(SessionStore)(sessionStore as never),
+          Layer.succeed(UserStore)(userStore),
         ),
       ),
     ),
-    UserServiceLayer().pipe(Layer.provide(Layer.succeed(UserServiceStoreTag)(userServiceStore))),
+    UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
     // Admin handlers use the user store directly, so expose it in the context too.
-    Layer.succeed(UserServiceStoreTag)(userServiceStore),
+    Layer.succeed(UserServiceStore)(userServiceStore),
     Hooks.Default,
     // Unused base services (org/admin/api-key/jwt handlers never touch them).
-    Layer.succeed(AuthLifecycleServiceTag)(undefined as never),
-    Layer.succeed(EmailPasswordStoreTag)(undefined as never),
-    Layer.succeed(PasswordHasherTag)(undefined as never),
-    Layer.succeed(EmailVerificationServiceTag)(undefined as never),
-    Layer.succeed(EmailVerificationStoreTag)(undefined as never),
-    Layer.succeed(PasswordResetServiceTag)(undefined as never),
-    Layer.succeed(PasswordResetStoreTag)(undefined as never),
-    Layer.succeed(PasswordResetUserStoreTag)(undefined as never),
+    Layer.succeed(AuthLifecycleService)(undefined as never),
+    Layer.succeed(EmailPasswordStore)(undefined as never),
+    Layer.succeed(PasswordHasher)(undefined as never),
+    Layer.succeed(EmailVerificationService)(undefined as never),
+    Layer.succeed(EmailVerificationStore)(undefined as never),
+    Layer.succeed(PasswordResetService)(undefined as never),
+    Layer.succeed(PasswordResetStore)(undefined as never),
+    Layer.succeed(PasswordResetUserStore)(undefined as never),
   );
 
   const modules = Layer.mergeAll(
-    OrganizationServiceLayer(),
-    Layer.succeed(OrganizationStoreTag)(orgStore),
-    AdminServiceLayer({ adminRoles: ["admin"] }),
-    Layer.succeed(AdminUserStoreTag)(adminUserStore),
-    ApiKeyServiceLayer(),
-    Layer.succeed(ApiKeyStoreTag)(apiKeyStore),
-    JwtServiceLayer({ issuer: "https://auth.test" }),
-    Layer.succeed(JwtKeyStoreTag)(jwtKeyStore),
+    OrganizationService.layer(),
+    Layer.succeed(OrganizationStore)(orgStore),
+    AdminService.layer({ adminRoles: ["admin"] }),
+    Layer.succeed(AdminUserStore)(adminUserStore),
+    ApiKeyService.layer(),
+    Layer.succeed(ApiKeyStore)(apiKeyStore),
+    JwtService.layer({ issuer: "https://auth.test" }),
+    Layer.succeed(JwtKeyStore)(jwtKeyStore),
   );
 
   const services = Layer.mergeAll(base, modules) as Layer.Layer<AuthServices>;

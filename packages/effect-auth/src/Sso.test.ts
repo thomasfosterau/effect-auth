@@ -3,32 +3,26 @@ import { Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import { UserNotFoundError } from "./Errors.js";
 import { Hooks } from "./Hooks.js";
+import { SessionManager, SessionStore, UserStore, type SessionManagerShape } from "./Session.js";
+import { UserServiceStore, UserService } from "./User.js";
+import { AuthLifecycleService } from "./AuthLifecycle.js";
+import { EmailPasswordStore } from "./EmailPassword.js";
+import { PasswordHasher } from "./Password.js";
+import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.js";
 import {
-  SessionManagerLayer,
-  SessionManagerTag,
-  SessionStoreTag,
-  UserStoreTag,
-  type SessionManager,
-} from "./Session.js";
-import { UserServiceLayer, UserServiceStoreTag } from "./User.js";
-import { AuthLifecycleServiceTag } from "./AuthLifecycle.js";
-import { EmailPasswordStoreTag } from "./EmailPassword.js";
-import { PasswordHasherTag } from "./Password.js";
-import { EmailVerificationServiceTag, EmailVerificationStoreTag } from "./EmailVerification.js";
-import {
-  PasswordResetServiceTag,
-  PasswordResetStoreTag,
-  PasswordResetUserStoreTag,
+  PasswordResetService,
+  PasswordResetStore,
+  PasswordResetUserStore,
 } from "./PasswordReset.js";
 import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
-import { OrganizationStoreTag, type Member, type SsoProvider } from "./index.js";
-import { OAuthStateStoreTag, OAuthUserStoreTag, type OAuthState } from "./OAuth.js";
+import { OrganizationStore, type Member, type SsoProvider } from "./index.js";
+import { OAuthStateStore, OAuthUserStore, type OAuthState } from "./OAuth.js";
 import {
   makeSsoService,
-  SsoServiceLayer,
-  SsoProviderStoreTag,
+  SsoProviderStore,
   SsoError,
-  type SsoProviderStore,
+  type SsoProviderStoreShape,
+  SsoService,
 } from "./Sso.js";
 import type * as Types from "./Types.js";
 
@@ -61,7 +55,7 @@ const makeStores = () => {
   const members: Member[] = [];
   let userSeq = 0;
 
-  const ssoStore: SsoProviderStore = {
+  const ssoStore: SsoProviderStoreShape = {
     create: (p) => Effect.sync(() => (providers.set(p.id, p), p)),
     getById: (id) => Effect.succeed(providers.get(id) ?? null),
     getByDomain: (domain) =>
@@ -100,7 +94,7 @@ const makeStores = () => {
     delete: (state: string) => Effect.sync(() => void states.delete(state)),
   };
 
-  const sessionManager: SessionManager = {
+  const sessionManager: SessionManagerShape = {
     createSession: (userId) =>
       Effect.succeed({
         id: `s-${userId}`,
@@ -143,11 +137,11 @@ const makeStores = () => {
   };
 
   const layer = Layer.mergeAll(
-    Layer.succeed(SsoProviderStoreTag)(ssoStore),
-    Layer.succeed(OAuthStateStoreTag)(stateStore),
-    Layer.succeed(OAuthUserStoreTag)(userStore),
-    Layer.succeed(SessionManagerTag)(sessionManager),
-    Layer.succeed(OrganizationStoreTag)(orgStore),
+    Layer.succeed(SsoProviderStore)(ssoStore),
+    Layer.succeed(OAuthStateStore)(stateStore),
+    Layer.succeed(OAuthUserStore)(userStore),
+    Layer.succeed(SessionManager)(sessionManager),
+    Layer.succeed(OrganizationStore)(orgStore),
     Hooks.Default,
   );
 
@@ -388,7 +382,7 @@ const makeHttpFixture = () => {
         return user;
       }),
   };
-  const ssoStore: SsoProviderStore = {
+  const ssoStore: SsoProviderStoreShape = {
     create: (p) => Effect.sync(() => (providers.set(p.id, p), p)),
     getById: (id) => Effect.succeed(providers.get(id) ?? null),
     getByDomain: (domain) =>
@@ -410,35 +404,35 @@ const makeHttpFixture = () => {
   };
 
   const base = Layer.mergeAll(
-    SessionManagerLayer({
+    SessionManager.layer({
       sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
     }).pipe(
       Layer.provide(
         Layer.mergeAll(
-          Layer.succeed(SessionStoreTag)(sessionStore as never),
-          Layer.succeed(UserStoreTag)(userStore),
+          Layer.succeed(SessionStore)(sessionStore as never),
+          Layer.succeed(UserStore)(userStore),
         ),
       ),
     ),
-    UserServiceLayer().pipe(Layer.provide(Layer.succeed(UserServiceStoreTag)(userServiceStore))),
-    Layer.succeed(UserServiceStoreTag)(userServiceStore),
+    UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
+    Layer.succeed(UserServiceStore)(userServiceStore),
     Hooks.Default,
-    Layer.succeed(AuthLifecycleServiceTag)(undefined as never),
-    Layer.succeed(EmailPasswordStoreTag)(undefined as never),
-    Layer.succeed(PasswordHasherTag)(undefined as never),
-    Layer.succeed(EmailVerificationServiceTag)(undefined as never),
-    Layer.succeed(EmailVerificationStoreTag)(undefined as never),
-    Layer.succeed(PasswordResetServiceTag)(undefined as never),
-    Layer.succeed(PasswordResetStoreTag)(undefined as never),
-    Layer.succeed(PasswordResetUserStoreTag)(undefined as never),
+    Layer.succeed(AuthLifecycleService)(undefined as never),
+    Layer.succeed(EmailPasswordStore)(undefined as never),
+    Layer.succeed(PasswordHasher)(undefined as never),
+    Layer.succeed(EmailVerificationService)(undefined as never),
+    Layer.succeed(EmailVerificationStore)(undefined as never),
+    Layer.succeed(PasswordResetService)(undefined as never),
+    Layer.succeed(PasswordResetStore)(undefined as never),
+    Layer.succeed(PasswordResetUserStore)(undefined as never),
   );
 
   const ssoLayer = Layer.mergeAll(
-    SsoServiceLayer(),
-    Layer.succeed(SsoProviderStoreTag)(ssoStore),
-    Layer.succeed(OAuthStateStoreTag)(stateStore),
-    Layer.succeed(OAuthUserStoreTag)(oauthUserStore),
-    Layer.succeed(OrganizationStoreTag)(orgStore as never),
+    SsoService.layer(),
+    Layer.succeed(SsoProviderStore)(ssoStore),
+    Layer.succeed(OAuthStateStore)(stateStore),
+    Layer.succeed(OAuthUserStore)(oauthUserStore),
+    Layer.succeed(OrganizationStore)(orgStore as never),
   );
 
   const withSso = Layer.mergeAll(base, ssoLayer) as Layer.Layer<AuthServices>;

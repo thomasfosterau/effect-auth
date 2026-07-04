@@ -5,7 +5,7 @@ description: "API reference for the RateLimitPersistence module."
 
 ## RateLimitPersistence overview
 
-A {@link RateLimiterTag} implementation backed by
+A {@link RateLimiter} implementation backed by
 `effect/unstable/persistence`'s `RateLimiter`, so consumers keep the existing
 `consumeToken`/`checkLimit` facade but gain the library's tested fixed-window
 algorithm and pluggable storage backends (in-memory or Redis for
@@ -62,7 +62,7 @@ store) to obtain a runnable limiter (see the module docs for examples).
 
 ```ts
 export declare const RateLimiterPersistenceLayer: Layer.Layer<
-  RateLimiterTag,
+  RateLimiter,
   never,
   PersistenceRateLimiter.RateLimiter
 >;
@@ -79,7 +79,7 @@ store.
 
 ```ts
 export declare const makeRateLimiterPersistence: Effect.Effect<
-  RateLimiter,
+  RateLimiterShape,
   never,
   PersistenceRateLimiter.RateLimiter
 >;

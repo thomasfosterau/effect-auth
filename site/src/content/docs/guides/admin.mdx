@@ -14,13 +14,13 @@ impersonation. An actor is an admin when `user.attributes.role` is
 import { Layer } from "effect";
 import * as Auth from "effect-auth";
 
-declare const adminUserStore: Auth.AdminUserStore;
+declare const adminUserStore: Auth.AdminUserStoreShape;
 
 const admin = Layer.mergeAll(
-  Auth.AdminServiceLayer({
+  Auth.AdminService.layer({
     // adminRoles: ["admin"], adminUserIds: [], impersonationSessionDuration...
   }),
-  Layer.succeed(Auth.AdminUserStoreTag)(adminUserStore),
+  Layer.succeed(Auth.AdminUserStore)(adminUserStore),
 );
 ```
 
@@ -50,7 +50,7 @@ validation until the ban expires or is lifted.
 import { Effect } from "effect";
 import * as Auth from "effect-auth";
 
-declare const service: Auth.AdminService;
+declare const service: Auth.AdminServiceShape;
 declare const admin: Auth.User;
 
 const support = Effect.gen(function* () {

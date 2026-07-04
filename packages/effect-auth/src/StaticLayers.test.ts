@@ -3,9 +3,8 @@ import { Effect, Layer } from "effect";
 import * as Auth from "./index.js";
 
 /**
- * D1 (DESIGN.md): every primary service class exposes a `static layer`
- * mirroring its standalone `XServiceLayer` constructor, reachable through the
- * bare-alias export (`Auth.SessionManager.layer(...)`).
+ * D1 (DESIGN.md): every primary service class exposes a `static layer` — the
+ * canonical construction `Auth.SessionManager.layer(...)`.
  */
 describe("static service layers", () => {
   it("exposes a static layer constructor on every primary service", () => {
@@ -52,7 +51,7 @@ describe("static service layers", () => {
       attributes: {},
     };
 
-    const sessionStore: Auth.SessionStore = {
+    const sessionStore: Auth.SessionStoreShape = {
       create: (session) =>
         Effect.sync(() => {
           sessions.set(session.id, session);
@@ -70,7 +69,7 @@ describe("static service layers", () => {
         Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
     };
 
-    const userStore: Auth.UserStore = {
+    const userStore: Auth.UserStoreShape = {
       get: (userId) => Effect.succeed(userId === user.id ? user : null),
       getCredentials: () => Effect.succeed(null),
     };
@@ -115,7 +114,7 @@ describe("static service layers", () => {
       updatedAt: new Date(),
       attributes: {},
     };
-    const store: Auth.UserServiceStore = {
+    const store: Auth.UserServiceStoreShape = {
       get: (userId) => Effect.succeed(userId === user.id ? user : null),
       getByEmail: () => Effect.succeed(null),
       update: (u) => Effect.succeed(u),

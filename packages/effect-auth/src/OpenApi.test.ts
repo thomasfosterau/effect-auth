@@ -2,17 +2,17 @@ import { describe, it, expect } from "vite-plus/test";
 import { Layer } from "effect";
 import { getOpenApiSpec } from "./HttpApi.js";
 import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
-import { SessionManagerTag } from "./Session.js";
-import { AuthLifecycleServiceTag } from "./AuthLifecycle.js";
-import { EmailPasswordStoreTag } from "./EmailPassword.js";
-import { PasswordHasherTag } from "./Password.js";
-import { EmailVerificationServiceTag, EmailVerificationStoreTag } from "./EmailVerification.js";
+import { SessionManager } from "./Session.js";
+import { AuthLifecycleService } from "./AuthLifecycle.js";
+import { EmailPasswordStore } from "./EmailPassword.js";
+import { PasswordHasher } from "./Password.js";
+import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.js";
 import {
-  PasswordResetServiceTag,
-  PasswordResetStoreTag,
-  PasswordResetUserStoreTag,
+  PasswordResetService,
+  PasswordResetStore,
+  PasswordResetUserStore,
 } from "./PasswordReset.js";
-import { UserServiceTag, UserServiceStoreTag } from "./User.js";
+import { UserService, UserServiceStore } from "./User.js";
 import { Hooks } from "./Hooks.js";
 
 /**
@@ -21,17 +21,17 @@ import { Hooks } from "./Hooks.js";
  */
 const stubServices = (): Layer.Layer<AuthServices> =>
   Layer.mergeAll(
-    Layer.succeed(AuthLifecycleServiceTag)(undefined as never),
-    Layer.succeed(SessionManagerTag)(undefined as never),
-    Layer.succeed(EmailPasswordStoreTag)(undefined as never),
-    Layer.succeed(PasswordHasherTag)(undefined as never),
-    Layer.succeed(EmailVerificationServiceTag)(undefined as never),
-    Layer.succeed(EmailVerificationStoreTag)(undefined as never),
-    Layer.succeed(PasswordResetServiceTag)(undefined as never),
-    Layer.succeed(PasswordResetStoreTag)(undefined as never),
-    Layer.succeed(PasswordResetUserStoreTag)(undefined as never),
-    Layer.succeed(UserServiceTag)(undefined as never),
-    Layer.succeed(UserServiceStoreTag)(undefined as never),
+    Layer.succeed(AuthLifecycleService)(undefined as never),
+    Layer.succeed(SessionManager)(undefined as never),
+    Layer.succeed(EmailPasswordStore)(undefined as never),
+    Layer.succeed(PasswordHasher)(undefined as never),
+    Layer.succeed(EmailVerificationService)(undefined as never),
+    Layer.succeed(EmailVerificationStore)(undefined as never),
+    Layer.succeed(PasswordResetService)(undefined as never),
+    Layer.succeed(PasswordResetStore)(undefined as never),
+    Layer.succeed(PasswordResetUserStore)(undefined as never),
+    Layer.succeed(UserService)(undefined as never),
+    Layer.succeed(UserServiceStore)(undefined as never),
     Hooks.Default,
   );
 

@@ -1,15 +1,14 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import {
-  AnonymousServiceLayer,
-  AnonymousServiceTag,
-  AnonymousUserStoreTag,
+  AnonymousService,
+  AnonymousUserStore,
   isAnonymousUser,
   type AnonymousConfig,
-  type AnonymousService,
-  type AnonymousUserStore,
+  type AnonymousServiceShape,
+  type AnonymousUserStoreShape,
 } from "./Anonymous.js";
-import { SessionManagerTag, type SessionManager } from "./Session.js";
+import { SessionManager, type SessionManagerShape } from "./Session.js";
 import { Hooks } from "./Hooks.js";
 import type * as Types from "./Types.js";
 
@@ -26,9 +25,7 @@ const makeSession = (userId: string): Types.Session => {
 };
 
 interface Harness {
-  readonly layer: Layer.Layer<
-    AnonymousServiceTag | AnonymousUserStoreTag | SessionManagerTag | Hooks
-  >;
+  readonly layer: Layer.Layer<AnonymousService | AnonymousUserStore | SessionManager | Hooks>;
   readonly users: Map<string, Types.User>;
   readonly created: string[];
   readonly linkCalls: Array<{ anon: string; real: string }>;
@@ -40,7 +37,7 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
   const linkCalls: Array<{ anon: string; real: string }> = [];
   let seq = 0;
 
-  const store: AnonymousUserStore = {
+  const store: AnonymousUserStoreShape = {
     createAnonymousUser: () =>
       Effect.sync(() => {
         const id = `anon-${++seq}`;
@@ -60,7 +57,7 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
     deleteUser: (userId) => Effect.sync(() => void users.delete(userId)),
   };
 
-  const sessionManager: SessionManager = {
+  const sessionManager: SessionManagerShape = {
     createSession: (userId) => Effect.sync(() => makeSession(userId)),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
@@ -78,11 +75,11 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
       ),
   };
 
-  const layer = AnonymousServiceLayer(linkConfig).pipe(
+  const layer = AnonymousService.layer(linkConfig).pipe(
     Layer.provideMerge(
       Layer.mergeAll(
-        Layer.succeed(AnonymousUserStoreTag)(store),
-        Layer.succeed(SessionManagerTag)(sessionManager),
+        Layer.succeed(AnonymousUserStore)(store),
+        Layer.succeed(SessionManager)(sessionManager),
         Hooks.Default,
       ),
     ),
@@ -94,12 +91,12 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
 const run = <A, E>(
   h: Harness,
   f: (
-    svc: AnonymousService,
-  ) => Effect.Effect<A, E, AnonymousUserStoreTag | SessionManagerTag | Hooks>,
+    svc: AnonymousServiceShape,
+  ) => Effect.Effect<A, E, AnonymousUserStore | SessionManager | Hooks>,
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const svc = yield* AnonymousServiceTag;
+      const svc = yield* AnonymousService;
       return yield* f(svc);
     }).pipe(Effect.provide(h.layer)),
   );

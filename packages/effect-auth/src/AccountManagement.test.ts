@@ -1,25 +1,21 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import {
-  AccountManagementServiceLayer,
-  AccountManagementServiceTag,
-  AccountManagementStoreTag,
+  AccountManagementService,
+  AccountManagementStore,
   AccountTokenError,
-  EmailInUseError,
-  type AccountManagementService,
-  type AccountManagementStore,
+  type AccountManagementServiceShape,
+  type AccountManagementStoreShape,
   type AccountToken,
 } from "./AccountManagement.js";
-import { UserServiceStoreTag, type UserServiceStore } from "./User.js";
-import { SessionManagerTag, type SessionManager } from "./Session.js";
+import { EmailInUseError } from "./Errors.js";
+import { UserServiceStore, type UserServiceStoreShape } from "./User.js";
+import { SessionManager, type SessionManagerShape } from "./Session.js";
 import type * as Types from "./Types.js";
 
 interface Harness {
   readonly layer: Layer.Layer<
-    | AccountManagementServiceTag
-    | AccountManagementStoreTag
-    | UserServiceStoreTag
-    | SessionManagerTag
+    AccountManagementService | AccountManagementStore | UserServiceStore | SessionManager
   >;
   readonly users: Map<string, Types.User>;
   readonly tokens: Map<string, AccountToken>;
@@ -59,7 +55,7 @@ const makeHarness = (): Harness => {
   addUser(makeUser("user-1", "alice@example.com"));
   addUser(makeUser("user-2", "bob@example.com"));
 
-  const userStore: UserServiceStore = {
+  const userStore: UserServiceStoreShape = {
     get: (userId) => Effect.sync(() => users.get(userId) ?? null),
     getByEmail: (email) =>
       Effect.sync(() => {
@@ -84,7 +80,7 @@ const makeHarness = (): Harness => {
       }),
   };
 
-  const tokenStore: AccountManagementStore = {
+  const tokenStore: AccountManagementStoreShape = {
     create: (token) =>
       Effect.sync(() => {
         tokens.set(token.token, token);
@@ -99,7 +95,7 @@ const makeHarness = (): Harness => {
   };
 
   // Minimal SessionManager: only `invalidateUserSessions` is exercised.
-  const sessionManager: SessionManager = {
+  const sessionManager: SessionManagerShape = {
     createSession: () => Effect.die("unused"),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
@@ -109,7 +105,7 @@ const makeHarness = (): Harness => {
     setSessionAttributes: () => Effect.die("unused"),
   };
 
-  const layer = AccountManagementServiceLayer({
+  const layer = AccountManagementService.layer({
     sendChangeEmailVerification: ({ newEmail, token }) =>
       Effect.sync(() => void changeEmails.push({ newEmail, token })),
     sendDeleteAccountVerification: ({ user, token }) =>
@@ -120,9 +116,9 @@ const makeHarness = (): Harness => {
   }).pipe(
     Layer.provideMerge(
       Layer.mergeAll(
-        Layer.succeed(UserServiceStoreTag)(userStore),
-        Layer.succeed(AccountManagementStoreTag)(tokenStore),
-        Layer.succeed(SessionManagerTag)(sessionManager),
+        Layer.succeed(UserServiceStore)(userStore),
+        Layer.succeed(AccountManagementStore)(tokenStore),
+        Layer.succeed(SessionManager)(sessionManager),
       ),
     ),
   );
@@ -142,12 +138,12 @@ const makeHarness = (): Harness => {
 const run = <A, E>(
   h: Harness,
   f: (
-    svc: AccountManagementService,
-  ) => Effect.Effect<A, E, AccountManagementStoreTag | UserServiceStoreTag | SessionManagerTag>,
+    svc: AccountManagementServiceShape,
+  ) => Effect.Effect<A, E, AccountManagementStore | UserServiceStore | SessionManager>,
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const svc = yield* AccountManagementServiceTag;
+      const svc = yield* AccountManagementService;
       return yield* f(svc);
     }).pipe(Effect.provide(h.layer)),
   );

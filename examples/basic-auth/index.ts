@@ -31,7 +31,7 @@ users.set("user-1", {
 /**
  * Implement SessionStore using in-memory Map
  */
-const sessionStore: Auth.SessionStore = {
+const sessionStore: Auth.SessionStoreShape = {
   create: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -67,7 +67,7 @@ const sessionStore: Auth.SessionStore = {
 /**
  * Implement UserStore using in-memory Map
  */
-const userStore: Auth.UserStore = {
+const userStore: Auth.UserStoreShape = {
   get: (userId) => Effect.sync(() => users.get(userId) ?? null),
 
   getCredentials: (userId) => Effect.sync(() => passwords.get(userId) ?? null),

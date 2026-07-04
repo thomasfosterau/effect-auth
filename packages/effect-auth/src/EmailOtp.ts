@@ -12,7 +12,7 @@ import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
-import { SessionManagerTag } from "./Session.js";
+import { SessionManager } from "./Session.js";
 import type * as Types from "./Types.js";
 
 /**
@@ -44,7 +44,7 @@ export interface EmailOtpRecord {
  * Storage interface for email OTPs. There is at most one active OTP per
  * email + purpose pair; `upsert` replaces any existing record for the pair.
  */
-export interface EmailOtpStore {
+export interface EmailOtpStoreShape {
   readonly upsert: (record: EmailOtpRecord) => Effect.Effect<EmailOtpRecord, Errors.AuthError>;
   readonly get: (
     email: string,
@@ -72,7 +72,7 @@ export interface EmailOtpCreateUserInput {
 /**
  * User store interface for email OTP sign-in
  */
-export interface EmailOtpUserStore {
+export interface EmailOtpUserStoreShape {
   readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
   readonly createUser: (
     input: EmailOtpCreateUserInput,
@@ -82,23 +82,16 @@ export interface EmailOtpUserStore {
 /**
  * Email OTP store context tag
  */
-export class EmailOtpStoreTag extends Context.Service<EmailOtpStoreTag, EmailOtpStore>()(
+export class EmailOtpStore extends Context.Service<EmailOtpStore, EmailOtpStoreShape>()(
   "@effect-auth/EmailOtpStore",
 ) {}
-
-// Public ergonomic alias
-export const EmailOtpStore = EmailOtpStoreTag;
 
 /**
  * Email OTP user store context tag
  */
-export class EmailOtpUserStoreTag extends Context.Service<
-  EmailOtpUserStoreTag,
-  EmailOtpUserStore
->()("@effect-auth/EmailOtpUserStore") {}
-
-// Public ergonomic alias
-export const EmailOtpUserStore = EmailOtpUserStoreTag;
+export class EmailOtpUserStore extends Context.Service<EmailOtpUserStore, EmailOtpUserStoreShape>()(
+  "@effect-auth/EmailOtpUserStore",
+) {}
 
 /**
  * Email OTP service configuration
@@ -141,7 +134,7 @@ export interface EmailOtpCheckResult {
 /**
  * Email OTP service
  */
-export interface EmailOtpService {
+export interface EmailOtpServiceShape {
   /**
    * Generate an OTP for the given email + purpose (replacing any outstanding
    * one) and send it. Only a SHA-256 hash of the code is stored.
@@ -153,11 +146,7 @@ export interface EmailOtpService {
   readonly send: (
     email: string,
     purpose: EmailOtpPurpose,
-  ) => Effect.Effect<
-    void,
-    Errors.AuthError | EmailOtpError,
-    EmailOtpStoreTag | EmailOtpUserStoreTag
-  >;
+  ) => Effect.Effect<void, Errors.AuthError | EmailOtpError, EmailOtpStore | EmailOtpUserStore>;
 
   /**
    * Verify a `"sign-in"` OTP and create a session. Users created here are
@@ -170,7 +159,7 @@ export interface EmailOtpService {
   ) => Effect.Effect<
     EmailOtpAuthResult,
     EmailOtpError | Errors.AuthError | HookError,
-    EmailOtpStoreTag | EmailOtpUserStoreTag | SessionManagerTag | Hooks
+    EmailOtpStore | EmailOtpUserStore | SessionManager | Hooks
   >;
 
   /**
@@ -182,21 +171,18 @@ export interface EmailOtpService {
     email: string,
     otp: string,
     purpose: EmailOtpPurpose,
-  ) => Effect.Effect<EmailOtpCheckResult, EmailOtpError | Errors.AuthError, EmailOtpStoreTag>;
+  ) => Effect.Effect<EmailOtpCheckResult, EmailOtpError | Errors.AuthError, EmailOtpStore>;
 }
 
-export class EmailOtpServiceTag extends Context.Service<EmailOtpServiceTag, EmailOtpService>()(
+export class EmailOtpService extends Context.Service<EmailOtpService, EmailOtpServiceShape>()(
   "@effect-auth/EmailOtpService",
 ) {
   /**
-   * Construct a Layer providing this service — the canonical form of
-   * {@link EmailOtpServiceLayer}.
+   * Construct a Layer providing this service.
    */
-  static readonly layer = (config: EmailOtpConfig) => EmailOtpServiceLayer(config);
+  static readonly layer = (config: EmailOtpConfig) =>
+    Layer.effect(EmailOtpService, makeEmailOtpService(config));
 }
-
-// Public ergonomic alias
-export const EmailOtpService = EmailOtpServiceTag;
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
@@ -236,7 +222,7 @@ export const generateOtp = (length: number): Effect.Effect<string, Errors.AuthEr
  */
 export const makeEmailOtpService = (
   config: EmailOtpConfig,
-): Effect.Effect<EmailOtpService, never> => {
+): Effect.Effect<EmailOtpServiceShape, never> => {
   const otpLength = config.otpLength ?? 6;
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
   const maxAttempts = config.maxAttempts ?? 3;
@@ -257,9 +243,9 @@ export const makeEmailOtpService = (
     email: string,
     otp: string,
     purpose: EmailOtpPurpose,
-  ): Effect.Effect<void, EmailOtpError | Errors.AuthError, EmailOtpStoreTag> =>
+  ): Effect.Effect<void, EmailOtpError | Errors.AuthError, EmailOtpStore> =>
     Effect.gen(function* () {
-      const store = yield* EmailOtpStoreTag;
+      const store = yield* EmailOtpStore;
 
       if (!email || !otp) {
         return yield* invalidOtp();
@@ -308,11 +294,11 @@ export const makeEmailOtpService = (
     });
 
   return Effect.sync(
-    (): EmailOtpService => ({
+    (): EmailOtpServiceShape => ({
       send: (rawEmail: string, purpose: EmailOtpPurpose) =>
         Effect.gen(function* () {
-          const store = yield* EmailOtpStoreTag;
-          const userStore = yield* EmailOtpUserStoreTag;
+          const store = yield* EmailOtpStore;
+          const userStore = yield* EmailOtpUserStore;
 
           const email = normalizeEmail(rawEmail);
           if (!email) {
@@ -363,8 +349,8 @@ export const makeEmailOtpService = (
 
       signIn: (rawEmail: string, otp: string, options?: EmailOtpSignInOptions) =>
         Effect.gen(function* () {
-          const userStore = yield* EmailOtpUserStoreTag;
-          const sessionManager = yield* SessionManagerTag;
+          const userStore = yield* EmailOtpUserStore;
+          const sessionManager = yield* SessionManager;
 
           const email = normalizeEmail(rawEmail);
 
@@ -409,6 +395,3 @@ export const makeEmailOtpService = (
     }),
   );
 };
-
-export const EmailOtpServiceLayer = (config: EmailOtpConfig) =>
-  Layer.effect(EmailOtpServiceTag, makeEmailOtpService(config));

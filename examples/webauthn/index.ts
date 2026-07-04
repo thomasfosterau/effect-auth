@@ -15,7 +15,7 @@ import * as Auth from "effect-auth";
 // In-memory challenge store (use Redis in production)
 const challengeMap = new Map<string, Auth.WebAuthnChallenge>();
 
-const challengeStore: Auth.ChallengeStore = {
+const challengeStore: Auth.ChallengeStoreShape = {
   create: (challenge) =>
     Effect.sync(() => {
       const key = Buffer.from(challenge.challenge).toString("hex");
@@ -39,7 +39,7 @@ const challengeStore: Auth.ChallengeStore = {
 // In-memory credential store (use database in production)
 const credentialMap = new Map<string, Auth.WebAuthnCredential>();
 
-const credentialStore: Auth.CredentialStore = {
+const credentialStore: Auth.CredentialStoreShape = {
   create: (credential) =>
     Effect.sync(() => {
       credentialMap.set(credential.id, credential);

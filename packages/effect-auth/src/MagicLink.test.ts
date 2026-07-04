@@ -3,12 +3,12 @@ import { Context, Effect } from "effect";
 import { Hooks } from "./Hooks.js";
 import {
   makeMagicLinkService,
-  MagicLinkStore,
-  MagicLinkUserStore,
   type MagicLinkCreateUserInput,
   type MagicLinkToken,
+  MagicLinkStore,
+  MagicLinkUserStore,
 } from "./MagicLink.js";
-import { makeSessionManager, SessionStore, SessionManager, UserStore } from "./Session.js";
+import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 
 const users = new Map<string, User>();

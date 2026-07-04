@@ -60,7 +60,7 @@ const rolePermissions = new Map<string, ReadonlyArray<Permission>>([
   ],
 ]);
 
-export const roleStore: Auth.RoleStore = {
+export const roleStore: Auth.RoleStoreShape = {
   getUserRoles: (userId) => Effect.succeed(userRoles.get(userId) ?? []),
   getRolePermissions: (role) => Effect.succeed(rolePermissions.get(role) ?? []),
 };

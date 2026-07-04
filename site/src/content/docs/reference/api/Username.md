@@ -11,7 +11,7 @@ email.
 Username is a first-class _lookup key_ but not a first-class `User` field —
 implementers store it in `attributes.username` (normalized lowercase for
 case-insensitive uniqueness). Sign-up validates + reserves the username then
-delegates credential creation to {@link EmailPasswordServiceTag}; sign-in
+delegates credential creation to {@link EmailPasswordService}; sign-in
 resolves the user by username and verifies the password with the same
 anti-enumeration error and the same `SecondFactorGate` seam as email/password
 sign-in.
@@ -23,15 +23,12 @@ sign-in.
 - [utils](#utils)
   - [UsernameConfig (interface)](#usernameconfig-interface)
   - [UsernameError (class)](#usernameerror-class)
-  - [UsernameService](#usernameservice)
-  - [UsernameService (interface)](#usernameservice-interface)
-  - [UsernameServiceLayer](#usernameservicelayer)
-  - [UsernameServiceTag (class)](#usernameservicetag-class)
+  - [UsernameService (class)](#usernameservice-class)
+  - [UsernameServiceShape (interface)](#usernameserviceshape-interface)
   - [UsernameSignInInput (interface)](#usernamesignininput-interface)
   - [UsernameSignUpInput (interface)](#usernamesignupinput-interface)
-  - [UsernameStore](#usernamestore)
-  - [UsernameStore (interface)](#usernamestore-interface)
-  - [UsernameStoreTag (class)](#usernamestoretag-class)
+  - [UsernameStore (class)](#usernamestore-class)
+  - [UsernameStoreShape (interface)](#usernamestoreshape-interface)
   - [makeUsernameService](#makeusernameservice)
 
 ---
@@ -66,34 +63,35 @@ Raised for invalid or already-taken usernames.
 export declare class UsernameError
 ```
 
-## UsernameService
+## UsernameService (class)
 
 **Signature**
 
 ```ts
-export declare const UsernameService: typeof UsernameServiceTag;
+export declare class UsernameService
 ```
 
-## UsernameService (interface)
+## UsernameServiceShape (interface)
 
 **Signature**
 
 ```ts
-export interface UsernameService {
+export interface UsernameServiceShape {
   readonly signUp: (
     input: UsernameSignUpInput,
   ) => Effect.Effect<
     AuthResult,
     | UsernameError
     | Errors.AuthError
+    | Errors.EmailInUseError
     | Errors.HashingError
     | Errors.EmailNotVerifiedError
     | HookError,
-    | UsernameStoreTag
-    | EmailPasswordServiceTag
-    | EmailPasswordStoreTag
-    | PasswordHasherTag
-    | SessionManagerTag
+    | UsernameStore
+    | EmailPasswordService
+    | EmailPasswordStore
+    | PasswordHasher
+    | SessionManager
     | Hooks
   >;
 
@@ -106,32 +104,14 @@ export interface UsernameService {
     | Errors.HashingError
     | Errors.AuthError
     | HookError,
-    UsernameStoreTag | EmailPasswordStoreTag | PasswordHasherTag | SessionManagerTag | Hooks
+    UsernameStore | EmailPasswordStore | PasswordHasher | SessionManager | Hooks
   >;
 
   readonly updateUsername: (
     userId: string,
     username: string,
-  ) => Effect.Effect<void, UsernameError | Errors.AuthError, UsernameStoreTag>;
+  ) => Effect.Effect<void, UsernameError | Errors.AuthError, UsernameStore>;
 }
-```
-
-## UsernameServiceLayer
-
-**Signature**
-
-```ts
-export declare const UsernameServiceLayer: (
-  config?: UsernameConfig,
-) => Layer.Layer<UsernameServiceTag, never, never>;
-```
-
-## UsernameServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class UsernameServiceTag
 ```
 
 ## UsernameSignInInput (interface)
@@ -161,15 +141,15 @@ export interface UsernameSignUpInput {
 }
 ```
 
-## UsernameStore
+## UsernameStore (class)
 
 **Signature**
 
 ```ts
-export declare const UsernameStore: typeof UsernameStoreTag;
+export declare class UsernameStore
 ```
 
-## UsernameStore (interface)
+## UsernameStoreShape (interface)
 
 Username lookup / reservation. Keys are the normalized (trimmed, lowercased)
 username; implementers persist it in `attributes.username`.
@@ -177,21 +157,13 @@ username; implementers persist it in `attributes.username`.
 **Signature**
 
 ```ts
-export interface UsernameStore {
+export interface UsernameStoreShape {
   readonly getUserByUsername: (
     username: string,
   ) => Effect.Effect<Types.User | null, Errors.AuthError>;
   readonly isUsernameTaken: (username: string) => Effect.Effect<boolean, Errors.AuthError>;
   readonly setUsername: (userId: string, username: string) => Effect.Effect<void, Errors.AuthError>;
 }
-```
-
-## UsernameStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class UsernameStoreTag
 ```
 
 ## makeUsernameService
@@ -201,5 +173,5 @@ export declare class UsernameStoreTag
 ```ts
 export declare const makeUsernameService: (
   config?: UsernameConfig,
-) => Effect.Effect<UsernameService, never>;
+) => Effect.Effect<UsernameServiceShape, never>;
 ```

@@ -3,9 +3,9 @@ import { Effect, Layer } from "effect";
 import { Hooks, type HookDefs, type HookError } from "../Hooks.js";
 import {
   AccountLockoutPlugin,
-  AccountLockoutStoreTag,
+  AccountLockoutStore,
   type AccountLockoutRecord,
-  type AccountLockoutStore,
+  type AccountLockoutStoreShape,
 } from "./AccountLockoutPlugin.js";
 import { AuthError } from "../Errors.js";
 import type { SignInInput, AuthResult } from "../EmailPassword.js";
@@ -33,7 +33,7 @@ interface Harness {
 
 const makeHarness = (config?: { maxAttempts?: number; lockoutDurationMs?: number }): Harness => {
   const records = new Map<string, AccountLockoutRecord>();
-  const store: AccountLockoutStore = {
+  const store: AccountLockoutStoreShape = {
     get: (key) => Effect.sync(() => records.get(key) ?? null),
     set: (key, record) => Effect.sync(() => void records.set(key, record)),
     delete: (key) => Effect.sync(() => void records.delete(key)),
@@ -41,7 +41,7 @@ const makeHarness = (config?: { maxAttempts?: number; lockoutDurationMs?: number
 
   const layer = AccountLockoutPlugin(config).pipe(
     Layer.provide(Hooks.Default),
-    Layer.provide(Layer.succeed(AccountLockoutStoreTag)(store)),
+    Layer.provide(Layer.succeed(AccountLockoutStore)(store)),
   );
 
   const drive = <A, E>(f: (hooks: HookDefs) => Effect.Effect<A, E, never>) =>

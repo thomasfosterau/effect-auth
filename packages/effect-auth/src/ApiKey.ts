@@ -6,7 +6,7 @@
  * and verified by sha256 hash lookup. Keys support expiry, enable/disable,
  * per-resource permissions, remaining-use quotas, arbitrary metadata, and
  * an optional per-key rate limit that is enforced through the
- * {@link RateLimiterTag} service.
+ * {@link RateLimiter} service.
  *
  * Only the sha256 hex digest of a key is ever persisted — the plaintext is
  * returned once from `create` and cannot be recovered. Because verification
@@ -19,7 +19,7 @@
 import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import type * as Errors from "./Errors.js";
-import { RateLimiterTag, RateLimitStoreTag, type RateLimitConfig } from "./RateLimit.js";
+import { RateLimiter, RateLimitStore, type RateLimitConfig } from "./RateLimit.js";
 
 /**
  * API key error
@@ -70,7 +70,7 @@ export interface ApiKey {
 /**
  * Storage interface for API keys
  */
-export interface ApiKeyStore {
+export interface ApiKeyStoreShape {
   readonly create: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
   readonly get: (id: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
   readonly getByHash: (keyHash: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
@@ -79,12 +79,9 @@ export interface ApiKeyStore {
   readonly listByUserId: (userId: string) => Effect.Effect<readonly ApiKey[], Errors.AuthError>;
 }
 
-export class ApiKeyStoreTag extends Context.Service<ApiKeyStoreTag, ApiKeyStore>()(
+export class ApiKeyStore extends Context.Service<ApiKeyStore, ApiKeyStoreShape>()(
   "@effect-auth/ApiKeyStore",
 ) {}
-
-// Public ergonomic alias
-export const ApiKeyStore = ApiKeyStoreTag;
 
 /**
  * API key service configuration
@@ -158,7 +155,7 @@ export interface ApiKeyUpdate {
 /**
  * API key service
  */
-export interface ApiKeyService {
+export interface ApiKeyServiceShape {
   /**
    * Create a new API key for a user. Returns the plaintext key (shown once)
    * alongside the stored record. Fails with {@link ApiKeyError} when the
@@ -167,7 +164,7 @@ export interface ApiKeyService {
   readonly create: (
     userId: string,
     options?: ApiKeyCreateOptions,
-  ) => Effect.Effect<ApiKeyCreateResult, ApiKeyError | Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<ApiKeyCreateResult, ApiKeyError | Errors.AuthError, ApiKeyStore>;
 
   /**
    * Verify a plaintext API key: sha256 hash lookup, then enabled / expiry /
@@ -178,11 +175,11 @@ export interface ApiKeyService {
   readonly verify: (
     plaintextKey: string,
     requiredPermissions?: Record<string, readonly string[]>,
-  ) => Effect.Effect<ApiKeyVerifyResult, Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<ApiKeyVerifyResult, Errors.AuthError, ApiKeyStore>;
 
   /**
    * Like `verify`, but when the key carries a `rateLimit` configuration a
-   * token is consumed from the {@link RateLimiterTag} bucket keyed
+   * token is consumed from the {@link RateLimiter} bucket keyed
    * `api-key:${apiKey.id}` before the remaining checks run. When the limit
    * is exhausted the result is `{ valid: false, error: "Rate limit exceeded" }`.
    */
@@ -192,7 +189,7 @@ export interface ApiKeyService {
   ) => Effect.Effect<
     ApiKeyVerifyResult,
     Errors.AuthError,
-    ApiKeyStoreTag | RateLimiterTag | RateLimitStoreTag
+    ApiKeyStore | RateLimiter | RateLimitStore
   >;
 
   /**
@@ -200,14 +197,14 @@ export interface ApiKeyService {
    */
   readonly get: (
     keyId: string,
-  ) => Effect.Effect<ApiKey, ApiKeyError | Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<ApiKey, ApiKeyError | Errors.AuthError, ApiKeyStore>;
 
   /**
    * List all keys belonging to a user.
    */
   readonly list: (
     userId: string,
-  ) => Effect.Effect<readonly ApiKey[], Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<readonly ApiKey[], Errors.AuthError, ApiKeyStore>;
 
   /**
    * Update a key on behalf of a user. Fails with {@link ApiKeyError} when the
@@ -217,7 +214,7 @@ export interface ApiKeyService {
     userId: string,
     keyId: string,
     updates: ApiKeyUpdate,
-  ) => Effect.Effect<ApiKey, ApiKeyError | Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<ApiKey, ApiKeyError | Errors.AuthError, ApiKeyStore>;
 
   /**
    * Delete a key on behalf of a user. Fails with {@link ApiKeyError} when the
@@ -226,7 +223,7 @@ export interface ApiKeyService {
   readonly delete: (
     userId: string,
     keyId: string,
-  ) => Effect.Effect<void, ApiKeyError | Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<void, ApiKeyError | Errors.AuthError, ApiKeyStore>;
 
   /**
    * Delete every key of a user whose `expiresAt` is in the past. Returns the
@@ -235,21 +232,18 @@ export interface ApiKeyService {
    */
   readonly deleteAllExpired: (
     userId: string,
-  ) => Effect.Effect<number, Errors.AuthError, ApiKeyStoreTag>;
+  ) => Effect.Effect<number, Errors.AuthError, ApiKeyStore>;
 }
 
-export class ApiKeyServiceTag extends Context.Service<ApiKeyServiceTag, ApiKeyService>()(
+export class ApiKeyService extends Context.Service<ApiKeyService, ApiKeyServiceShape>()(
   "@effect-auth/ApiKeyService",
 ) {
   /**
-   * Construct a Layer providing this service — the canonical form of
-   * {@link ApiKeyServiceLayer}.
+   * Construct a Layer providing this service.
    */
-  static readonly layer = (config: ApiKeyConfig = {}) => ApiKeyServiceLayer(config);
+  static readonly layer = (config: ApiKeyConfig = {}) =>
+    Layer.effect(ApiKeyService, makeApiKeyService(config));
 }
-
-// Public ergonomic alias
-export const ApiKeyService = ApiKeyServiceTag;
 
 /**
  * sha256 hex digest of a plaintext API key. Exposed so stores/tests can
@@ -289,7 +283,7 @@ const hasRequiredPermissions = (
  */
 export const makeApiKeyService = (
   config: ApiKeyConfig = {},
-): Effect.Effect<ApiKeyService, never> => {
+): Effect.Effect<ApiKeyServiceShape, never> => {
   const defaultPrefix = config?.defaultPrefix ?? "ak_";
   const keyLength = config?.keyLength ?? 32;
   const defaultExpiresIn = config?.defaultExpiresIn;
@@ -300,7 +294,7 @@ export const makeApiKeyService = (
    */
   const getOwned = (userId: string, keyId: string) =>
     Effect.gen(function* () {
-      const store = yield* ApiKeyStoreTag;
+      const store = yield* ApiKeyStore;
       const apiKey = yield* store.get(keyId);
       if (!apiKey || apiKey.userId !== userId) {
         return yield* Effect.fail(
@@ -345,7 +339,7 @@ export const makeApiKeyService = (
         } satisfies ApiKeyVerifyResult;
       }
 
-      const store = yield* ApiKeyStoreTag;
+      const store = yield* ApiKeyStore;
       const updated = yield* store.update({
         ...apiKey,
         ...(apiKey.remaining !== undefined && { remaining: apiKey.remaining - 1 }),
@@ -362,15 +356,15 @@ export const makeApiKeyService = (
    */
   const lookup = (plaintextKey: string) =>
     Effect.gen(function* () {
-      const store = yield* ApiKeyStoreTag;
+      const store = yield* ApiKeyStore;
       return yield* store.getByHash(hashApiKey(plaintextKey));
     });
 
   return Effect.sync(
-    (): ApiKeyService => ({
+    (): ApiKeyServiceShape => ({
       create: (userId, options) =>
         Effect.gen(function* () {
-          const store = yield* ApiKeyStoreTag;
+          const store = yield* ApiKeyStore;
 
           const existing = yield* store.listByUserId(userId);
           if (existing.length >= maxKeysPerUser) {
@@ -427,7 +421,7 @@ export const makeApiKeyService = (
           }
 
           if (apiKey.rateLimit) {
-            const rateLimiter = yield* RateLimiterTag;
+            const rateLimiter = yield* RateLimiter;
             const limited = yield* rateLimiter
               .consumeToken(`api-key:${apiKey.id}`, apiKey.rateLimit satisfies RateLimitConfig)
               .pipe(
@@ -444,7 +438,7 @@ export const makeApiKeyService = (
 
       get: (keyId) =>
         Effect.gen(function* () {
-          const store = yield* ApiKeyStoreTag;
+          const store = yield* ApiKeyStore;
           const apiKey = yield* store.get(keyId);
           if (!apiKey) {
             return yield* Effect.fail(
@@ -458,14 +452,14 @@ export const makeApiKeyService = (
 
       list: (userId) =>
         Effect.gen(function* () {
-          const store = yield* ApiKeyStoreTag;
+          const store = yield* ApiKeyStore;
           return yield* store.listByUserId(userId);
         }),
 
       update: (userId, keyId, updates) =>
         Effect.gen(function* () {
           const apiKey = yield* getOwned(userId, keyId);
-          const store = yield* ApiKeyStoreTag;
+          const store = yield* ApiKeyStore;
 
           return yield* store.update({
             ...apiKey,
@@ -483,13 +477,13 @@ export const makeApiKeyService = (
       delete: (userId, keyId) =>
         Effect.gen(function* () {
           const apiKey = yield* getOwned(userId, keyId);
-          const store = yield* ApiKeyStoreTag;
+          const store = yield* ApiKeyStore;
           yield* store.delete(apiKey.id);
         }),
 
       deleteAllExpired: (userId) =>
         Effect.gen(function* () {
-          const store = yield* ApiKeyStoreTag;
+          const store = yield* ApiKeyStore;
           const now = Date.now();
 
           const candidates = yield* store.listByUserId(userId);
@@ -506,6 +500,3 @@ export const makeApiKeyService = (
     }),
   );
 };
-
-export const ApiKeyServiceLayer = (config: ApiKeyConfig = {}) =>
-  Layer.effect(ApiKeyServiceTag, makeApiKeyService(config));

@@ -12,23 +12,23 @@ import { sessionConfig } from "./runtime";
  * The remaining `AuthServices` are unused no-op stubs.
  */
 const stores = Layer.mergeAll(
-  Layer.succeed(Auth.SessionStoreTag)(sessionStore),
-  Layer.succeed(Auth.UserStoreTag)(userStore),
+  Layer.succeed(Auth.SessionStore)(sessionStore),
+  Layer.succeed(Auth.UserStore)(userStore),
 );
 
 const services: Layer.Layer<Auth.Http.AuthServices> = Layer.mergeAll(
-  Auth.SessionManagerLayer(sessionConfig).pipe(Layer.provide(stores)),
+  Auth.SessionManager.layer(sessionConfig).pipe(Layer.provide(stores)),
   Auth.Hooks.Default,
-  Layer.succeed(Auth.AuthLifecycleServiceTag)(undefined as never),
-  Layer.succeed(Auth.EmailPasswordStoreTag)(undefined as never),
-  Layer.succeed(Auth.PasswordHasherTag)(undefined as never),
-  Layer.succeed(Auth.EmailVerificationServiceTag)(undefined as never),
-  Layer.succeed(Auth.EmailVerificationStoreTag)(undefined as never),
-  Layer.succeed(Auth.PasswordResetServiceTag)(undefined as never),
-  Layer.succeed(Auth.PasswordResetStoreTag)(undefined as never),
-  Layer.succeed(Auth.PasswordResetUserStoreTag)(undefined as never),
-  Layer.succeed(Auth.UserServiceTag)(undefined as never),
-  Layer.succeed(Auth.UserServiceStoreTag)(undefined as never),
+  Layer.succeed(Auth.AuthLifecycleService)(undefined as never),
+  Layer.succeed(Auth.EmailPasswordStore)(undefined as never),
+  Layer.succeed(Auth.PasswordHasher)(undefined as never),
+  Layer.succeed(Auth.EmailVerificationService)(undefined as never),
+  Layer.succeed(Auth.EmailVerificationStore)(undefined as never),
+  Layer.succeed(Auth.PasswordResetService)(undefined as never),
+  Layer.succeed(Auth.PasswordResetStore)(undefined as never),
+  Layer.succeed(Auth.PasswordResetUserStore)(undefined as never),
+  Layer.succeed(Auth.UserService)(undefined as never),
+  Layer.succeed(Auth.UserServiceStore)(undefined as never),
 );
 
 export const authWebHandler = Auth.Http.makeAuthWebHandler({

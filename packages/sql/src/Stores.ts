@@ -168,7 +168,7 @@ const rowToSession = (row: SessionRow): Auth.Session => ({
   attributes: decodeAttributes(row.attributes),
 });
 
-export const makeSessionStore: Effect.Effect<Auth.SessionStore, never, SqlClient.SqlClient> =
+export const makeSessionStore: Effect.Effect<Auth.SessionStoreShape, never, SqlClient.SqlClient> =
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     return {
@@ -197,11 +197,11 @@ export const makeSessionStore: Effect.Effect<Auth.SessionStore, never, SqlClient
           "session.listByUserId",
           sql<SessionRow>`SELECT * FROM auth_sessions WHERE user_id = ${userId}`,
         ).pipe(Effect.map((rows) => rows.map(rowToSession))),
-    } satisfies Auth.SessionStore;
+    } satisfies Auth.SessionStoreShape;
   });
 
-export const makeUserStore: Effect.Effect<Auth.UserStore, never, SqlClient.SqlClient> = Effect.gen(
-  function* () {
+export const makeUserStore: Effect.Effect<Auth.UserStoreShape, never, SqlClient.SqlClient> =
+  Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const users = userQueries(sql);
     return {
@@ -210,16 +210,15 @@ export const makeUserStore: Effect.Effect<Auth.UserStore, never, SqlClient.SqlCl
         users
           .getById(userId, "user.getCredentials")
           .pipe(Effect.map((row) => row?.password_hash ?? null)),
-    } satisfies Auth.UserStore;
-  },
-);
+    } satisfies Auth.UserStoreShape;
+  });
 
 // ---------------------------------------------------------------------------
 // UserServiceStore
 // ---------------------------------------------------------------------------
 
 export const makeUserServiceStore: Effect.Effect<
-  Auth.UserServiceStore,
+  Auth.UserServiceStoreShape,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -235,7 +234,7 @@ export const makeUserServiceStore: Effect.Effect<
       ).pipe(Effect.as(user)),
     delete: (userId) =>
       asVoid("userService.delete", sql`DELETE FROM auth_users WHERE id = ${userId}`),
-  } satisfies Auth.UserServiceStore;
+  } satisfies Auth.UserServiceStoreShape;
 });
 
 // ---------------------------------------------------------------------------
@@ -243,7 +242,7 @@ export const makeUserServiceStore: Effect.Effect<
 // ---------------------------------------------------------------------------
 
 export const makeEmailPasswordStore: Effect.Effect<
-  Auth.EmailPasswordStore,
+  Auth.EmailPasswordStoreShape,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -258,11 +257,11 @@ export const makeEmailPasswordStore: Effect.Effect<
         .pipe(Effect.map((row) => row?.password_hash ?? null)),
     setPasswordHash: (userId, hash) =>
       users.setPasswordHash(userId, hash, "emailPassword.setPasswordHash"),
-  } satisfies Auth.EmailPasswordStore;
+  } satisfies Auth.EmailPasswordStoreShape;
 });
 
 export const makePasswordResetUserStore: Effect.Effect<
-  Auth.PasswordResetUserStore,
+  Auth.PasswordResetUserStoreShape,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -272,7 +271,7 @@ export const makePasswordResetUserStore: Effect.Effect<
     getUserByEmail: (email) => users.getByEmail(email, "passwordResetUser.getUserByEmail"),
     setPasswordHash: (userId, hash) =>
       users.setPasswordHash(userId, hash, "passwordResetUser.setPasswordHash"),
-  } satisfies Auth.PasswordResetUserStore;
+  } satisfies Auth.PasswordResetUserStoreShape;
 });
 
 // ---------------------------------------------------------------------------
@@ -288,8 +287,8 @@ interface PermissionRow {
   readonly action: string;
 }
 
-export const makeRoleStore: Effect.Effect<Auth.RoleStore, never, SqlClient.SqlClient> = Effect.gen(
-  function* () {
+export const makeRoleStore: Effect.Effect<Auth.RoleStoreShape, never, SqlClient.SqlClient> =
+  Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     return {
       getUserRoles: (userId) =>
@@ -302,9 +301,8 @@ export const makeRoleStore: Effect.Effect<Auth.RoleStore, never, SqlClient.SqlCl
           Effect.map((rows) => rows.map((row) => ({ resource: row.resource, action: row.action }))),
           Effect.orDie,
         ),
-    } satisfies Auth.RoleStore;
-  },
-);
+    } satisfies Auth.RoleStoreShape;
+  });
 
 // ---------------------------------------------------------------------------
 // RateLimitStore
@@ -322,58 +320,61 @@ const rowToRateLimit = (row: RateLimitRow): Auth.RateLimitEntry =>
     ? { key: row.key, count: row.count, resetAt: row.reset_at }
     : { key: row.key, count: row.count, resetAt: row.reset_at, blockedUntil: row.blocked_until };
 
-export const makeRateLimitStore: Effect.Effect<Auth.RateLimitStore, never, SqlClient.SqlClient> =
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
+export const makeRateLimitStore: Effect.Effect<
+  Auth.RateLimitStoreShape,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
 
-    const readEntry = (key: string, label: string) =>
-      firstRow(label, sql<RateLimitRow>`SELECT * FROM auth_rate_limits WHERE key = ${key}`).pipe(
-        Effect.map((row) => (row ? rowToRateLimit(row) : null)),
-      );
+  const readEntry = (key: string, label: string) =>
+    firstRow(label, sql<RateLimitRow>`SELECT * FROM auth_rate_limits WHERE key = ${key}`).pipe(
+      Effect.map((row) => (row ? rowToRateLimit(row) : null)),
+    );
 
-    const upsert = (key: string, entry: Auth.RateLimitEntry, label: string) =>
-      Effect.gen(function* () {
-        const existing = yield* readEntry(key, label);
-        if (existing == null) {
-          yield* asVoid(
-            label,
-            sql`INSERT INTO auth_rate_limits (key, count, reset_at, blocked_until)
+  const upsert = (key: string, entry: Auth.RateLimitEntry, label: string) =>
+    Effect.gen(function* () {
+      const existing = yield* readEntry(key, label);
+      if (existing == null) {
+        yield* asVoid(
+          label,
+          sql`INSERT INTO auth_rate_limits (key, count, reset_at, blocked_until)
                 VALUES (${key}, ${entry.count}, ${entry.resetAt}, ${entry.blockedUntil ?? null})`,
-          );
-        } else {
-          yield* asVoid(
-            label,
-            sql`UPDATE auth_rate_limits SET count = ${entry.count}, reset_at = ${entry.resetAt}, blocked_until = ${entry.blockedUntil ?? null} WHERE key = ${key}`,
-          );
-        }
-      });
+        );
+      } else {
+        yield* asVoid(
+          label,
+          sql`UPDATE auth_rate_limits SET count = ${entry.count}, reset_at = ${entry.resetAt}, blocked_until = ${entry.blockedUntil ?? null} WHERE key = ${key}`,
+        );
+      }
+    });
 
-    return {
-      get: (key) => readEntry(key, "rateLimit.get").pipe(Effect.orDie),
-      set: (key, entry, _ttl) => upsert(key, entry, "rateLimit.set"),
-      increment: (key, ttlSeconds) =>
-        Effect.gen(function* () {
-          const now = Date.now();
-          const existing = yield* readEntry(key, "rateLimit.increment");
-          if (existing == null || now >= existing.resetAt) {
-            yield* upsert(
-              key,
-              { key, count: 1, resetAt: now + ttlSeconds * 1000 },
-              "rateLimit.increment",
-            );
-            return 1;
-          }
-          const count = existing.count + 1;
-          yield* asVoid(
+  return {
+    get: (key) => readEntry(key, "rateLimit.get").pipe(Effect.orDie),
+    set: (key, entry, _ttl) => upsert(key, entry, "rateLimit.set"),
+    increment: (key, ttlSeconds) =>
+      Effect.gen(function* () {
+        const now = Date.now();
+        const existing = yield* readEntry(key, "rateLimit.increment");
+        if (existing == null || now >= existing.resetAt) {
+          yield* upsert(
+            key,
+            { key, count: 1, resetAt: now + ttlSeconds * 1000 },
             "rateLimit.increment",
-            sql`UPDATE auth_rate_limits SET count = ${count} WHERE key = ${key}`,
           );
-          return count;
-        }),
-      delete: (key) =>
-        asVoid("rateLimit.delete", sql`DELETE FROM auth_rate_limits WHERE key = ${key}`),
-    } satisfies Auth.RateLimitStore;
-  });
+          return 1;
+        }
+        const count = existing.count + 1;
+        yield* asVoid(
+          "rateLimit.increment",
+          sql`UPDATE auth_rate_limits SET count = ${count} WHERE key = ${key}`,
+        );
+        return count;
+      }),
+    delete: (key) =>
+      asVoid("rateLimit.delete", sql`DELETE FROM auth_rate_limits WHERE key = ${key}`),
+  } satisfies Auth.RateLimitStoreShape;
+});
 
 // ---------------------------------------------------------------------------
 // EmailVerificationStore
@@ -396,7 +397,7 @@ const rowToEmailVerification = (row: EmailVerificationRow): Auth.EmailVerificati
 });
 
 export const makeEmailVerificationStore: Effect.Effect<
-  Auth.EmailVerificationStore,
+  Auth.EmailVerificationStoreShape,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -423,7 +424,7 @@ export const makeEmailVerificationStore: Effect.Effect<
         "emailVerification.deleteByUserId",
         sql`DELETE FROM auth_email_verifications WHERE user_id = ${userId}`,
       ),
-  } satisfies Auth.EmailVerificationStore;
+  } satisfies Auth.EmailVerificationStoreShape;
 });
 
 // ---------------------------------------------------------------------------
@@ -441,40 +442,43 @@ const rowToChallenge = (row: ChallengeRow): Auth.WebAuthnChallenge =>
     ? { challenge: fromBase64(row.challenge), expiresAt: row.expires_at }
     : { challenge: fromBase64(row.challenge), expiresAt: row.expires_at, userId: row.user_id };
 
-export const makeChallengeStore: Effect.Effect<Auth.ChallengeStore, never, SqlClient.SqlClient> =
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    return {
-      create: (challenge) =>
-        Effect.gen(function* () {
-          const encoded = toBase64(challenge.challenge);
-          // Portable upsert: replace any previous row for this challenge.
-          yield* asVoid(
-            "challenge.create",
-            sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${encoded}`,
-          );
-          yield* asVoid(
-            "challenge.create",
-            sql`INSERT INTO auth_webauthn_challenges (challenge, expires_at, user_id)
+export const makeChallengeStore: Effect.Effect<
+  Auth.ChallengeStoreShape,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return {
+    create: (challenge) =>
+      Effect.gen(function* () {
+        const encoded = toBase64(challenge.challenge);
+        // Portable upsert: replace any previous row for this challenge.
+        yield* asVoid(
+          "challenge.create",
+          sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${encoded}`,
+        );
+        yield* asVoid(
+          "challenge.create",
+          sql`INSERT INTO auth_webauthn_challenges (challenge, expires_at, user_id)
                 VALUES (${encoded}, ${challenge.expiresAt}, ${challenge.userId ?? null})`,
-          );
-          return challenge;
-        }),
-      get: (challenge) =>
-        firstRow(
-          "challenge.get",
-          sql<ChallengeRow>`SELECT * FROM auth_webauthn_challenges WHERE challenge = ${toBase64(challenge)}`,
-        ).pipe(
-          Effect.orDie,
-          Effect.map((row) => (row ? rowToChallenge(row) : null)),
-        ),
-      delete: (challenge) =>
-        asVoid(
-          "challenge.delete",
-          sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${toBase64(challenge)}`,
-        ),
-    } satisfies Auth.ChallengeStore;
-  });
+        );
+        return challenge;
+      }),
+    get: (challenge) =>
+      firstRow(
+        "challenge.get",
+        sql<ChallengeRow>`SELECT * FROM auth_webauthn_challenges WHERE challenge = ${toBase64(challenge)}`,
+      ).pipe(
+        Effect.orDie,
+        Effect.map((row) => (row ? rowToChallenge(row) : null)),
+      ),
+    delete: (challenge) =>
+      asVoid(
+        "challenge.delete",
+        sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${toBase64(challenge)}`,
+      ),
+  } satisfies Auth.ChallengeStoreShape;
+});
 
 interface CredentialRow {
   readonly id: string;
@@ -500,43 +504,46 @@ const rowToCredential = (row: CredentialRow): Auth.WebAuthnCredential => ({
     : {}),
 });
 
-export const makeCredentialStore: Effect.Effect<Auth.CredentialStore, never, SqlClient.SqlClient> =
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    return {
-      create: (credential) =>
-        asVoid(
-          "credential.create",
-          sql`INSERT INTO auth_webauthn_credentials (id, user_id, public_key, algorithm, counter, created_at, name, transports)
+export const makeCredentialStore: Effect.Effect<
+  Auth.CredentialStoreShape,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return {
+    create: (credential) =>
+      asVoid(
+        "credential.create",
+        sql`INSERT INTO auth_webauthn_credentials (id, user_id, public_key, algorithm, counter, created_at, name, transports)
               VALUES (${credential.id}, ${credential.userId}, ${toBase64(credential.publicKey)}, ${credential.algorithm}, ${credential.counter}, ${credential.createdAt}, ${credential.name ?? null}, ${credential.transports ? JSON.stringify(credential.transports) : null})`,
-        ).pipe(Effect.as(credential)),
-      get: (credentialId) =>
-        firstRow(
-          "credential.get",
-          sql<CredentialRow>`SELECT * FROM auth_webauthn_credentials WHERE id = ${credentialId}`,
-        ).pipe(
-          Effect.orDie,
-          Effect.map((row) => (row ? rowToCredential(row) : null)),
-        ),
-      update: (credential) =>
-        asVoid(
-          "credential.update",
-          sql`UPDATE auth_webauthn_credentials
+      ).pipe(Effect.as(credential)),
+    get: (credentialId) =>
+      firstRow(
+        "credential.get",
+        sql<CredentialRow>`SELECT * FROM auth_webauthn_credentials WHERE id = ${credentialId}`,
+      ).pipe(
+        Effect.orDie,
+        Effect.map((row) => (row ? rowToCredential(row) : null)),
+      ),
+    update: (credential) =>
+      asVoid(
+        "credential.update",
+        sql`UPDATE auth_webauthn_credentials
               SET user_id = ${credential.userId}, public_key = ${toBase64(credential.publicKey)}, algorithm = ${credential.algorithm}, counter = ${credential.counter}, created_at = ${credential.createdAt}, name = ${credential.name ?? null}, transports = ${credential.transports ? JSON.stringify(credential.transports) : null}
               WHERE id = ${credential.id}`,
-        ).pipe(Effect.as(credential)),
-      delete: (credentialId) =>
-        asVoid(
-          "credential.delete",
-          sql`DELETE FROM auth_webauthn_credentials WHERE id = ${credentialId}`,
-        ),
-      listByUserId: (userId) =>
-        allRows(
-          "credential.listByUserId",
-          sql<CredentialRow>`SELECT * FROM auth_webauthn_credentials WHERE user_id = ${userId}`,
-        ).pipe(Effect.map((rows) => rows.map(rowToCredential))),
-    } satisfies Auth.CredentialStore;
-  });
+      ).pipe(Effect.as(credential)),
+    delete: (credentialId) =>
+      asVoid(
+        "credential.delete",
+        sql`DELETE FROM auth_webauthn_credentials WHERE id = ${credentialId}`,
+      ),
+    listByUserId: (userId) =>
+      allRows(
+        "credential.listByUserId",
+        sql<CredentialRow>`SELECT * FROM auth_webauthn_credentials WHERE user_id = ${userId}`,
+      ).pipe(Effect.map((rows) => rows.map(rowToCredential))),
+  } satisfies Auth.CredentialStoreShape;
+});
 
 // ---------------------------------------------------------------------------
 // OAuthStateStore + OAuthAccountStore + OAuthUserStore
@@ -560,33 +567,36 @@ const rowToOAuthState = (row: OAuthStateRow): Auth.OAuthState => ({
   ...(row.return_to != null ? { returnTo: row.return_to } : {}),
 });
 
-export const makeOAuthStateStore: Effect.Effect<Auth.OAuthStateStore, never, SqlClient.SqlClient> =
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    return {
-      create: (state) =>
-        Effect.gen(function* () {
-          // Portable upsert: replace any previous row for this state.
-          yield* asVoid(
-            "oauthState.create",
-            sql`DELETE FROM auth_oauth_states WHERE state = ${state.state}`,
-          );
-          yield* asVoid(
-            "oauthState.create",
-            sql`INSERT INTO auth_oauth_states (state, provider, code_verifier, return_to, created_at, expires_at)
+export const makeOAuthStateStore: Effect.Effect<
+  Auth.OAuthStateStoreShape,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return {
+    create: (state) =>
+      Effect.gen(function* () {
+        // Portable upsert: replace any previous row for this state.
+        yield* asVoid(
+          "oauthState.create",
+          sql`DELETE FROM auth_oauth_states WHERE state = ${state.state}`,
+        );
+        yield* asVoid(
+          "oauthState.create",
+          sql`INSERT INTO auth_oauth_states (state, provider, code_verifier, return_to, created_at, expires_at)
                 VALUES (${state.state}, ${state.provider}, ${state.codeVerifier ?? null}, ${state.returnTo ?? null}, ${state.createdAt}, ${state.expiresAt})`,
-          );
-          return state;
-        }),
-      get: (state) =>
-        firstRow(
-          "oauthState.get",
-          sql<OAuthStateRow>`SELECT * FROM auth_oauth_states WHERE state = ${state}`,
-        ).pipe(Effect.map((row) => (row ? rowToOAuthState(row) : null))),
-      delete: (state) =>
-        asVoid("oauthState.delete", sql`DELETE FROM auth_oauth_states WHERE state = ${state}`),
-    } satisfies Auth.OAuthStateStore;
-  });
+        );
+        return state;
+      }),
+    get: (state) =>
+      firstRow(
+        "oauthState.get",
+        sql<OAuthStateRow>`SELECT * FROM auth_oauth_states WHERE state = ${state}`,
+      ).pipe(Effect.map((row) => (row ? rowToOAuthState(row) : null))),
+    delete: (state) =>
+      asVoid("oauthState.delete", sql`DELETE FROM auth_oauth_states WHERE state = ${state}`),
+  } satisfies Auth.OAuthStateStoreShape;
+});
 
 interface OAuthAccountRow {
   readonly id: string;
@@ -619,7 +629,7 @@ const rowToOAuthAccount = (row: OAuthAccountRow): Auth.OAuthAccount => ({
 });
 
 export const makeOAuthAccountStore: Effect.Effect<
-  Auth.OAuthAccountStore,
+  Auth.OAuthAccountStoreShape,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -674,19 +684,22 @@ export const makeOAuthAccountStore: Effect.Effect<
         "oauthAccount.delete",
         sql`DELETE FROM auth_oauth_accounts WHERE provider = ${provider} AND provider_id = ${providerId}`,
       ),
-  } satisfies Auth.OAuthAccountStore;
+  } satisfies Auth.OAuthAccountStoreShape;
 });
 
-export const makeOAuthUserStore: Effect.Effect<Auth.OAuthUserStore, never, SqlClient.SqlClient> =
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const users = userQueries(sql);
-    return {
-      getUser: (userId) => users.requireById(userId, "oauthUser.getUser"),
-      getUserByEmail: (email) => users.getByEmail(email, "oauthUser.getUserByEmail"),
-      createUser: (input) => users.create(input, "oauthUser.createUser"),
-    } satisfies Auth.OAuthUserStore;
-  });
+export const makeOAuthUserStore: Effect.Effect<
+  Auth.OAuthUserStoreShape,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const users = userQueries(sql);
+  return {
+    getUser: (userId) => users.requireById(userId, "oauthUser.getUser"),
+    getUserByEmail: (email) => users.getByEmail(email, "oauthUser.getUserByEmail"),
+    createUser: (input) => users.create(input, "oauthUser.createUser"),
+  } satisfies Auth.OAuthUserStoreShape;
+});
 
 // ---------------------------------------------------------------------------
 // PasswordResetStore
@@ -709,7 +722,7 @@ const rowToPasswordReset = (row: PasswordResetRow): Auth.PasswordResetToken => (
 });
 
 export const makePasswordResetStore: Effect.Effect<
-  Auth.PasswordResetStore,
+  Auth.PasswordResetStoreShape,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -733,7 +746,7 @@ export const makePasswordResetStore: Effect.Effect<
         "passwordReset.deleteByUserId",
         sql`DELETE FROM auth_password_resets WHERE user_id = ${userId}`,
       ),
-  } satisfies Auth.PasswordResetStore;
+  } satisfies Auth.PasswordResetStoreShape;
 });
 
 // ---------------------------------------------------------------------------
@@ -754,30 +767,33 @@ const rowToMagicLink = (row: MagicLinkRow): Auth.MagicLinkToken => ({
   expiresAt: row.expires_at,
 });
 
-export const makeMagicLinkStore: Effect.Effect<Auth.MagicLinkStore, never, SqlClient.SqlClient> =
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    return {
-      create: (token) =>
-        asVoid(
-          "magicLink.create",
-          sql`INSERT INTO auth_magic_links (token, email, created_at, expires_at)
+export const makeMagicLinkStore: Effect.Effect<
+  Auth.MagicLinkStoreShape,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return {
+    create: (token) =>
+      asVoid(
+        "magicLink.create",
+        sql`INSERT INTO auth_magic_links (token, email, created_at, expires_at)
               VALUES (${token.token}, ${token.email}, ${token.createdAt}, ${token.expiresAt})`,
-        ).pipe(Effect.as(token)),
-      get: (token) =>
-        firstRow(
-          "magicLink.get",
-          sql<MagicLinkRow>`SELECT * FROM auth_magic_links WHERE token = ${token}`,
-        ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
-      delete: (token) =>
-        asVoid("magicLink.delete", sql`DELETE FROM auth_magic_links WHERE token = ${token}`),
-      deleteByEmail: (email) =>
-        asVoid("magicLink.deleteByEmail", sql`DELETE FROM auth_magic_links WHERE email = ${email}`),
-    } satisfies Auth.MagicLinkStore;
-  });
+      ).pipe(Effect.as(token)),
+    get: (token) =>
+      firstRow(
+        "magicLink.get",
+        sql<MagicLinkRow>`SELECT * FROM auth_magic_links WHERE token = ${token}`,
+      ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
+    delete: (token) =>
+      asVoid("magicLink.delete", sql`DELETE FROM auth_magic_links WHERE token = ${token}`),
+    deleteByEmail: (email) =>
+      asVoid("magicLink.deleteByEmail", sql`DELETE FROM auth_magic_links WHERE email = ${email}`),
+  } satisfies Auth.MagicLinkStoreShape;
+});
 
 export const makeMagicLinkUserStore: Effect.Effect<
-  Auth.MagicLinkUserStore,
+  Auth.MagicLinkUserStoreShape,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -786,7 +802,7 @@ export const makeMagicLinkUserStore: Effect.Effect<
   return {
     getUserByEmail: (email) => users.getByEmail(email, "magicLinkUser.getUserByEmail"),
     createUser: (input) => users.create(input, "magicLinkUser.createUser"),
-  } satisfies Auth.MagicLinkUserStore;
+  } satisfies Auth.MagicLinkUserStoreShape;
 });
 
 // ---------------------------------------------------------------------------
@@ -811,7 +827,7 @@ const rowToEmailOtp = (row: EmailOtpRow): Auth.EmailOtpRecord => ({
   expiresAt: row.expires_at,
 });
 
-export const makeEmailOtpStore: Effect.Effect<Auth.EmailOtpStore, never, SqlClient.SqlClient> =
+export const makeEmailOtpStore: Effect.Effect<Auth.EmailOtpStoreShape, never, SqlClient.SqlClient> =
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
@@ -858,11 +874,11 @@ export const makeEmailOtpStore: Effect.Effect<Auth.EmailOtpStore, never, SqlClie
           );
           return attempts;
         }),
-    } satisfies Auth.EmailOtpStore;
+    } satisfies Auth.EmailOtpStoreShape;
   });
 
 export const makeEmailOtpUserStore: Effect.Effect<
-  Auth.EmailOtpUserStore,
+  Auth.EmailOtpUserStoreShape,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -871,7 +887,7 @@ export const makeEmailOtpUserStore: Effect.Effect<
   return {
     getUserByEmail: (email) => users.getByEmail(email, "emailOtpUser.getUserByEmail"),
     createUser: (input) => users.create(input, "emailOtpUser.createUser"),
-  } satisfies Auth.EmailOtpUserStore;
+  } satisfies Auth.EmailOtpUserStoreShape;
 });
 
 // ---------------------------------------------------------------------------
@@ -894,39 +910,42 @@ const rowToTwoFactor = (row: TwoFactorRow): Auth.TwoFactorRecord => ({
   createdAt: row.created_at,
 });
 
-export const makeTwoFactorStore: Effect.Effect<Auth.TwoFactorStore, never, SqlClient.SqlClient> =
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
+export const makeTwoFactorStore: Effect.Effect<
+  Auth.TwoFactorStoreShape,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
 
-    const read = (userId: string, label: string) =>
-      firstRow(label, sql<TwoFactorRow>`SELECT * FROM auth_two_factor WHERE user_id = ${userId}`);
+  const read = (userId: string, label: string) =>
+    firstRow(label, sql<TwoFactorRow>`SELECT * FROM auth_two_factor WHERE user_id = ${userId}`);
 
-    return {
-      get: (userId) =>
-        read(userId, "twoFactor.get").pipe(Effect.map((row) => (row ? rowToTwoFactor(row) : null))),
-      upsert: (record) =>
-        Effect.gen(function* () {
-          const backupCodes = JSON.stringify(record.backupCodes);
-          const verified = record.verified ? 1 : 0;
-          const existing = yield* read(record.userId, "twoFactor.upsert");
-          if (existing == null) {
-            yield* asVoid(
-              "twoFactor.upsert",
-              sql`INSERT INTO auth_two_factor (user_id, secret, backup_codes, verified, created_at)
+  return {
+    get: (userId) =>
+      read(userId, "twoFactor.get").pipe(Effect.map((row) => (row ? rowToTwoFactor(row) : null))),
+    upsert: (record) =>
+      Effect.gen(function* () {
+        const backupCodes = JSON.stringify(record.backupCodes);
+        const verified = record.verified ? 1 : 0;
+        const existing = yield* read(record.userId, "twoFactor.upsert");
+        if (existing == null) {
+          yield* asVoid(
+            "twoFactor.upsert",
+            sql`INSERT INTO auth_two_factor (user_id, secret, backup_codes, verified, created_at)
                   VALUES (${record.userId}, ${record.secret}, ${backupCodes}, ${verified}, ${record.createdAt})`,
-            );
-          } else {
-            yield* asVoid(
-              "twoFactor.upsert",
-              sql`UPDATE auth_two_factor SET secret = ${record.secret}, backup_codes = ${backupCodes}, verified = ${verified}, created_at = ${record.createdAt} WHERE user_id = ${record.userId}`,
-            );
-          }
-          return record;
-        }),
-      delete: (userId) =>
-        asVoid("twoFactor.delete", sql`DELETE FROM auth_two_factor WHERE user_id = ${userId}`),
-    } satisfies Auth.TwoFactorStore;
-  });
+          );
+        } else {
+          yield* asVoid(
+            "twoFactor.upsert",
+            sql`UPDATE auth_two_factor SET secret = ${record.secret}, backup_codes = ${backupCodes}, verified = ${verified}, created_at = ${record.createdAt} WHERE user_id = ${record.userId}`,
+          );
+        }
+        return record;
+      }),
+    delete: (userId) =>
+      asVoid("twoFactor.delete", sql`DELETE FROM auth_two_factor WHERE user_id = ${userId}`),
+  } satisfies Auth.TwoFactorStoreShape;
+});
 
 interface PendingTwoFactorRow {
   readonly token: string;
@@ -943,7 +962,7 @@ const rowToPendingTwoFactor = (row: PendingTwoFactorRow): Auth.PendingTwoFactor 
 });
 
 export const makePendingTwoFactorStore: Effect.Effect<
-  Auth.PendingTwoFactorStore,
+  Auth.PendingTwoFactorStoreShape,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -965,83 +984,78 @@ export const makePendingTwoFactorStore: Effect.Effect<
         "pendingTwoFactor.delete",
         sql`DELETE FROM auth_pending_two_factor WHERE token = ${token}`,
       ),
-  } satisfies Auth.PendingTwoFactorStore;
+  } satisfies Auth.PendingTwoFactorStoreShape;
 });
 
 // ---------------------------------------------------------------------------
 // Layers
 // ---------------------------------------------------------------------------
 
-export const SessionStoreLayer: Layer.Layer<Auth.SessionStoreTag, never, SqlClient.SqlClient> =
+export const SessionStoreLayer: Layer.Layer<Auth.SessionStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.SessionStore, makeSessionStore);
-export const UserStoreLayer: Layer.Layer<Auth.UserStoreTag, never, SqlClient.SqlClient> =
-  Layer.effect(Auth.UserStore, makeUserStore);
-export const UserServiceStoreLayer: Layer.Layer<
-  Auth.UserServiceStoreTag,
-  never,
-  SqlClient.SqlClient
-> = Layer.effect(Auth.UserServiceStore, makeUserServiceStore);
+export const UserStoreLayer: Layer.Layer<Auth.UserStore, never, SqlClient.SqlClient> = Layer.effect(
+  Auth.UserStore,
+  makeUserStore,
+);
+export const UserServiceStoreLayer: Layer.Layer<Auth.UserServiceStore, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.UserServiceStore, makeUserServiceStore);
 export const EmailPasswordStoreLayer: Layer.Layer<
-  Auth.EmailPasswordStoreTag,
+  Auth.EmailPasswordStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.EmailPasswordStore, makeEmailPasswordStore);
 export const PasswordResetUserStoreLayer: Layer.Layer<
-  Auth.PasswordResetUserStoreTag,
+  Auth.PasswordResetUserStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.PasswordResetUserStore, makePasswordResetUserStore);
-export const RoleStoreLayer: Layer.Layer<Auth.RoleStoreTag, never, SqlClient.SqlClient> =
-  Layer.effect(Auth.RoleStore, makeRoleStore);
-export const RateLimitStoreLayer: Layer.Layer<Auth.RateLimitStoreTag, never, SqlClient.SqlClient> =
+export const RoleStoreLayer: Layer.Layer<Auth.RoleStore, never, SqlClient.SqlClient> = Layer.effect(
+  Auth.RoleStore,
+  makeRoleStore,
+);
+export const RateLimitStoreLayer: Layer.Layer<Auth.RateLimitStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.RateLimitStore, makeRateLimitStore);
 export const EmailVerificationStoreLayer: Layer.Layer<
-  Auth.EmailVerificationStoreTag,
+  Auth.EmailVerificationStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.EmailVerificationStore, makeEmailVerificationStore);
-export const ChallengeStoreLayer: Layer.Layer<Auth.ChallengeStoreTag, never, SqlClient.SqlClient> =
+export const ChallengeStoreLayer: Layer.Layer<Auth.ChallengeStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.ChallengeStore, makeChallengeStore);
-export const CredentialStoreLayer: Layer.Layer<
-  Auth.CredentialStoreTag,
-  never,
-  SqlClient.SqlClient
-> = Layer.effect(Auth.CredentialStore, makeCredentialStore);
-export const OAuthStateStoreLayer: Layer.Layer<
-  Auth.OAuthStateStoreTag,
-  never,
-  SqlClient.SqlClient
-> = Layer.effect(Auth.OAuthStateStore, makeOAuthStateStore);
+export const CredentialStoreLayer: Layer.Layer<Auth.CredentialStore, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.CredentialStore, makeCredentialStore);
+export const OAuthStateStoreLayer: Layer.Layer<Auth.OAuthStateStore, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.OAuthStateStore, makeOAuthStateStore);
 export const OAuthAccountStoreLayer: Layer.Layer<
-  Auth.OAuthAccountStoreTag,
+  Auth.OAuthAccountStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.OAuthAccountStore, makeOAuthAccountStore);
-export const OAuthUserStoreLayer: Layer.Layer<Auth.OAuthUserStoreTag, never, SqlClient.SqlClient> =
+export const OAuthUserStoreLayer: Layer.Layer<Auth.OAuthUserStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.OAuthUserStore, makeOAuthUserStore);
 export const PasswordResetStoreLayer: Layer.Layer<
-  Auth.PasswordResetStoreTag,
+  Auth.PasswordResetStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.PasswordResetStore, makePasswordResetStore);
-export const MagicLinkStoreLayer: Layer.Layer<Auth.MagicLinkStoreTag, never, SqlClient.SqlClient> =
+export const MagicLinkStoreLayer: Layer.Layer<Auth.MagicLinkStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.MagicLinkStore, makeMagicLinkStore);
 export const MagicLinkUserStoreLayer: Layer.Layer<
-  Auth.MagicLinkUserStoreTag,
+  Auth.MagicLinkUserStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.MagicLinkUserStore, makeMagicLinkUserStore);
-export const EmailOtpStoreLayer: Layer.Layer<Auth.EmailOtpStoreTag, never, SqlClient.SqlClient> =
+export const EmailOtpStoreLayer: Layer.Layer<Auth.EmailOtpStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.EmailOtpStore, makeEmailOtpStore);
 export const EmailOtpUserStoreLayer: Layer.Layer<
-  Auth.EmailOtpUserStoreTag,
+  Auth.EmailOtpUserStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.EmailOtpUserStore, makeEmailOtpUserStore);
-export const TwoFactorStoreLayer: Layer.Layer<Auth.TwoFactorStoreTag, never, SqlClient.SqlClient> =
+export const TwoFactorStoreLayer: Layer.Layer<Auth.TwoFactorStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.TwoFactorStore, makeTwoFactorStore);
 export const PendingTwoFactorStoreLayer: Layer.Layer<
-  Auth.PendingTwoFactorStoreTag,
+  Auth.PendingTwoFactorStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.PendingTwoFactorStore, makePendingTwoFactorStore);
@@ -1053,26 +1067,26 @@ export const PendingTwoFactorStoreLayer: Layer.Layer<
  * MagicLink, EmailOtp, TwoFactor, etc.) has persistence.
  */
 export const layer: Layer.Layer<
-  | Auth.SessionStoreTag
-  | Auth.UserStoreTag
-  | Auth.UserServiceStoreTag
-  | Auth.EmailPasswordStoreTag
-  | Auth.PasswordResetUserStoreTag
-  | Auth.RoleStoreTag
-  | Auth.RateLimitStoreTag
-  | Auth.EmailVerificationStoreTag
-  | Auth.ChallengeStoreTag
-  | Auth.CredentialStoreTag
-  | Auth.OAuthStateStoreTag
-  | Auth.OAuthAccountStoreTag
-  | Auth.OAuthUserStoreTag
-  | Auth.PasswordResetStoreTag
-  | Auth.MagicLinkStoreTag
-  | Auth.MagicLinkUserStoreTag
-  | Auth.EmailOtpStoreTag
-  | Auth.EmailOtpUserStoreTag
-  | Auth.TwoFactorStoreTag
-  | Auth.PendingTwoFactorStoreTag,
+  | Auth.SessionStore
+  | Auth.UserStore
+  | Auth.UserServiceStore
+  | Auth.EmailPasswordStore
+  | Auth.PasswordResetUserStore
+  | Auth.RoleStore
+  | Auth.RateLimitStore
+  | Auth.EmailVerificationStore
+  | Auth.ChallengeStore
+  | Auth.CredentialStore
+  | Auth.OAuthStateStore
+  | Auth.OAuthAccountStore
+  | Auth.OAuthUserStore
+  | Auth.PasswordResetStore
+  | Auth.MagicLinkStore
+  | Auth.MagicLinkUserStore
+  | Auth.EmailOtpStore
+  | Auth.EmailOtpUserStore
+  | Auth.TwoFactorStore
+  | Auth.PendingTwoFactorStore,
   never,
   SqlClient.SqlClient
 > = Layer.mergeAll(
