@@ -1,9 +1,12 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vite-plus/test";
+import { createServer } from "node:http";
+import type { Server } from "node:http";
 import { Context, Effect } from "effect";
 import {
   generateKeyPair,
   JwtKeyStore,
   makeJwtService,
+  makeRemoteJwksVerifier,
   type JwtConfig,
   type JwtKeyPair,
 } from "./Jwt.js";
@@ -276,6 +279,126 @@ describe("JwtService", () => {
   });
 });
 
+describe("JwtService — nbf validation", () => {
+  beforeEach(() => {
+    keyPairs.splice(0, keyPairs.length);
+  });
+
+  it("should accept a token with a past nbf", async () => {
+    const payload = await run(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService(baseConfig);
+        const pastNbf = Math.floor(Date.now() / 1000) - 60; // 1 minute ago
+        const { token } = yield* service.sign(user, { nbf: pastNbf });
+        return yield* service.verify(token);
+      }),
+    );
+
+    expect(payload["sub"]).toBe("user-1");
+  });
+
+  it("should reject a token whose nbf is in the future", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService(baseConfig);
+        const futureNbf = Math.floor(Date.now() / 1000) + 3600; // 1 hour ahead
+        const { token } = yield* service.sign(user, { nbf: futureNbf });
+        return yield* Effect.result(service.verify(token));
+      }),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("JwtError");
+      expect(result.failure.message).toContain("not yet valid");
+    }
+  });
+
+  it("should accept a token with no nbf claim", async () => {
+    const payload = await run(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService(baseConfig);
+        const { token } = yield* service.sign(user); // no nbf
+        return yield* service.verify(token);
+      }),
+    );
+
+    expect(payload["nbf"]).toBeUndefined();
+    expect(payload["sub"]).toBe("user-1");
+  });
+});
+
+describe("JwtService — clock-skew leeway", () => {
+  beforeEach(() => {
+    keyPairs.splice(0, keyPairs.length);
+  });
+
+  it("should accept a slightly-expired token when leeway covers the gap", async () => {
+    // Token expired 2 s ago; leeway of 5 s should accept it.
+    const payload = await run(
+      Effect.gen(function* () {
+        // Sign with a negative expiresIn so exp is 2 s in the past
+        const signer = yield* makeJwtService({ ...baseConfig, expiresIn: -2000 });
+        const verifier = yield* makeJwtService({ ...baseConfig, clockSkewLeeway: 5000 });
+        const { token } = yield* signer.sign(user);
+        return yield* verifier.verify(token);
+      }),
+    );
+
+    expect(payload["sub"]).toBe("user-1");
+  });
+
+  it("should reject an expired token when gap exceeds leeway", async () => {
+    // Token expired 10 s ago; leeway of 5 s is not enough.
+    const result = await run(
+      Effect.gen(function* () {
+        const signer = yield* makeJwtService({ ...baseConfig, expiresIn: -10000 });
+        const verifier = yield* makeJwtService({ ...baseConfig, clockSkewLeeway: 5000 });
+        const { token } = yield* signer.sign(user);
+        return yield* Effect.result(verifier.verify(token));
+      }),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("JwtError");
+      expect(result.failure.message).toContain("expired");
+    }
+  });
+
+  it("should accept a not-yet-valid token when leeway covers the gap", async () => {
+    // nbf is 2 s in the future; leeway of 5 s should accept it.
+    const payload = await run(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService({ ...baseConfig, clockSkewLeeway: 5000 });
+        const nearFutureNbf = Math.floor(Date.now() / 1000) + 2;
+        const { token } = yield* service.sign(user, { nbf: nearFutureNbf });
+        return yield* service.verify(token);
+      }),
+    );
+
+    expect(payload["sub"]).toBe("user-1");
+  });
+
+  it("should reject a not-yet-valid token when gap exceeds leeway", async () => {
+    // nbf is 10 s in the future; leeway of 5 s is not enough.
+    const result = await run(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService({ ...baseConfig, clockSkewLeeway: 5000 });
+        const farFutureNbf = Math.floor(Date.now() / 1000) + 10;
+        const { token } = yield* service.sign(user, { nbf: farFutureNbf });
+        return yield* Effect.result(service.verify(token));
+      }),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("JwtError");
+      expect(result.failure.message).toContain("not yet valid");
+    }
+  });
+});
+
 describe("JwtService with private key encryption", () => {
   beforeEach(() => {
     keyPairs.splice(0, keyPairs.length);
@@ -382,5 +505,208 @@ describe("JwtService with private key encryption", () => {
     );
 
     expect(result["sub"]).toBe("user-1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Remote JWKS verification
+// ---------------------------------------------------------------------------
+
+describe("RemoteJwksVerifier", () => {
+  // Isolated key store so beforeEach on the shared store doesn't interfere.
+  const remotePairs: JwtKeyPair[] = [];
+  const remoteStore = {
+    getActive: () => Effect.sync(() => remotePairs[remotePairs.length - 1] ?? null),
+    create: (pair: JwtKeyPair) =>
+      Effect.sync(() => {
+        remotePairs.push(pair);
+        return pair;
+      }),
+    list: () => Effect.sync(() => [...remotePairs]),
+  };
+  const remoteContext = Context.make(JwtKeyStore, remoteStore);
+  const runRemote = <A, E>(program: Effect.Effect<A, E, JwtKeyStore>) =>
+    Effect.runPromise(Effect.provide(program, remoteContext));
+
+  let server: Server;
+  let jwksUrl: string;
+  let signedToken: string;
+
+  beforeAll(async () => {
+    // Sign a token to trigger lazy key-pair creation in the remote store.
+    signedToken = await runRemote(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService(baseConfig);
+        const { token } = yield* service.sign(user);
+        return token;
+      }),
+    );
+
+    // Get the JWKS to serve from the test HTTP server.
+    const jwks = await runRemote(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService(baseConfig);
+        return yield* service.getJwks();
+      }),
+    );
+
+    server = createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(jwks));
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, () => resolve()));
+    const addr = server.address() as { port: number };
+    jwksUrl = `http://127.0.0.1:${addr.port}/.well-known/jwks.json`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it("should verify a valid JWT against the remote JWKS", async () => {
+    const payload = await Effect.runPromise(
+      Effect.gen(function* () {
+        const verifier = yield* makeRemoteJwksVerifier({
+          jwksUri: jwksUrl,
+          issuer: baseConfig.issuer,
+          ...(baseConfig.audience !== undefined && { audience: baseConfig.audience }),
+        });
+        return yield* verifier.verify(signedToken);
+      }),
+    );
+
+    expect(payload["sub"]).toBe("user-1");
+    expect(payload["iss"]).toBe(baseConfig.issuer);
+    expect(payload["aud"]).toBe(baseConfig.audience);
+  });
+
+  it("should reject a tampered token", async () => {
+    const [hdr, pay, sig] = signedToken.split(".") as [string, string, string];
+    const forgedPay = Buffer.from(
+      JSON.stringify({
+        ...(JSON.parse(Buffer.from(pay, "base64url").toString("utf8")) as Record<string, unknown>),
+        sub: "attacker",
+      }),
+    ).toString("base64url");
+
+    const result = await Effect.runPromise(
+      Effect.result(
+        Effect.gen(function* () {
+          const verifier = yield* makeRemoteJwksVerifier({
+            jwksUri: jwksUrl,
+            issuer: baseConfig.issuer,
+          });
+          return yield* verifier.verify(`${hdr}.${forgedPay}.${sig}`);
+        }),
+      ),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("JwtError");
+      expect(result.failure.message).toContain("signature");
+    }
+  });
+
+  it("should reject a token with an unknown kid", async () => {
+    // Replace the kid in the header with one that doesn't exist in the JWKS.
+    const [hdr, pay, sig] = signedToken.split(".") as [string, string, string];
+    const parsedHeader = JSON.parse(Buffer.from(hdr, "base64url").toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+    const badHeader = Buffer.from(JSON.stringify({ ...parsedHeader, kid: "no-such-kid" })).toString(
+      "base64url",
+    );
+
+    const result = await Effect.runPromise(
+      Effect.result(
+        Effect.gen(function* () {
+          const verifier = yield* makeRemoteJwksVerifier({
+            jwksUri: jwksUrl,
+            issuer: baseConfig.issuer,
+          });
+          return yield* verifier.verify(`${badHeader}.${pay}.${sig}`);
+        }),
+      ),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("JwtError");
+      expect(result.failure.message).toContain("kid");
+    }
+  });
+
+  it("should reject a token with a future nbf via the remote verifier", async () => {
+    const futureNbfToken = await runRemote(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService(baseConfig);
+        const { token } = yield* service.sign(user, {
+          nbf: Math.floor(Date.now() / 1000) + 3600,
+        });
+        return token;
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.result(
+        Effect.gen(function* () {
+          const verifier = yield* makeRemoteJwksVerifier({
+            jwksUri: jwksUrl,
+            issuer: baseConfig.issuer,
+          });
+          return yield* verifier.verify(futureNbfToken);
+        }),
+      ),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("JwtError");
+      expect(result.failure.message).toContain("not yet valid");
+    }
+  });
+
+  it("should reuse the cache across multiple verify calls", async () => {
+    // Two verify calls on the same verifier instance should both succeed;
+    // internal caching means only one network request was made.
+    const results = await Effect.runPromise(
+      Effect.gen(function* () {
+        const verifier = yield* makeRemoteJwksVerifier({
+          jwksUri: jwksUrl,
+          issuer: baseConfig.issuer,
+          ...(baseConfig.audience !== undefined && { audience: baseConfig.audience }),
+          cacheTtlMs: 60_000,
+        });
+        const r1 = yield* verifier.verify(signedToken);
+        const r2 = yield* verifier.verify(signedToken);
+        return [r1, r2] as const;
+      }),
+    );
+
+    expect(results[0]["sub"]).toBe("user-1");
+    expect(results[1]["sub"]).toBe("user-1");
+  });
+
+  it("should reject an issuer mismatch via the remote verifier", async () => {
+    const result = await Effect.runPromise(
+      Effect.result(
+        Effect.gen(function* () {
+          const verifier = yield* makeRemoteJwksVerifier({
+            jwksUri: jwksUrl,
+            issuer: "https://wrong-issuer.example.com",
+          });
+          return yield* verifier.verify(signedToken);
+        }),
+      ),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("JwtError");
+      expect(result.failure.message).toContain("issuer");
+    }
   });
 });
