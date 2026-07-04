@@ -92,6 +92,12 @@ export * from "./DeviceAuthorization.js";
 /** Two-factor authentication (TOTP + backup codes). */
 export * from "./TwoFactor.js";
 
+/** Trusted-device tokens for skipping second-factor challenges. */
+export * from "./TrustedDevice.js";
+
+/** OTP-based second-factor gate (email / SMS OTP as a second factor). */
+export * from "./OtpSecondFactor.js";
+
 /** Organizations: members, invitations, and role-based org permissions. */
 export * from "./Organization.js";
 
