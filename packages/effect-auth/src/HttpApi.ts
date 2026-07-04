@@ -470,6 +470,12 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.AuthSuccess,
     error: [S.NotFoundError, S.BadRequestError, S.InternalError, S.TooManyRequestsError],
   }),
+  // --- Google One Tap: generate a server-side nonce for the One Tap prompt.
+  // --- 404 when unconfigured.
+  HttpApiEndpoint.get("getGoogleOneTapNonce", "/sign-in/google-one-tap/nonce", {
+    success: S.GoogleOneTapNonceView,
+    error: [S.NotFoundError, S.InternalError],
+  }),
   // --- Google One Tap: verify the credential (a Google-signed id_token) and
   // --- sign in by verified email. 404 when unconfigured.
   HttpApiEndpoint.post("signInGoogleOneTap", "/sign-in/google-one-tap", {

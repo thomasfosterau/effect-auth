@@ -74,6 +74,11 @@ import {
   PendingTwoFactorStore,
 } from "./TwoFactor.js";
 import { type ChallengeStoreShape, ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.js";
+import {
+  type GoogleOneTapNonceEntry,
+  type GoogleOneTapNonceStoreShape,
+  GoogleOneTapNonceStore,
+} from "./GoogleOneTap.js";
 
 // ---------------------------------------------------------------------------
 // Codecs & helpers
@@ -717,6 +722,47 @@ export const makeIdentifierStoreKV: Effect.Effect<
  */
 export const IdentifierStoreKV: Layer.Layer<IdentifierStore, never, KeyValueStore.KeyValueStore> =
   Layer.effect(IdentifierStore, makeIdentifierStoreKV);
+
+// ---------------------------------------------------------------------------
+// GoogleOneTapNonceStore
+// ---------------------------------------------------------------------------
+
+const googleOneTapNonceKey = (nonce: string) => `google-one-tap-nonce:${nonce}`;
+
+/**
+ * Build a {@link GoogleOneTapNonceStoreShape} over the ambient `KeyValueStore`.
+ *
+ * Nonce entries are stored as JSON objects with an `expiresAt` epoch-ms field.
+ * Expiry is enforced logically in `GoogleOneTap.signIn` (the entry is deleted
+ * on first access regardless of validity, making every nonce single-use).
+ */
+export const makeGoogleOneTapNonceStoreKV: Effect.Effect<
+  GoogleOneTapNonceStoreShape,
+  never,
+  KeyValueStore.KeyValueStore
+> = Effect.gen(function* () {
+  const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+  return {
+    create: (nonce, expiresAt) =>
+      kv.write(
+        googleOneTapNonceKey(nonce),
+        { expiresAt } satisfies GoogleOneTapNonceEntry,
+        "googleOneTapNonce.create",
+      ),
+    get: (nonce) =>
+      kv.read<GoogleOneTapNonceEntry>(googleOneTapNonceKey(nonce), "googleOneTapNonce.get"),
+    delete: (nonce) => kv.remove(googleOneTapNonceKey(nonce), "googleOneTapNonce.delete"),
+  } satisfies GoogleOneTapNonceStoreShape;
+});
+
+/**
+ * `GoogleOneTapNonceStore` layer backed by `KeyValueStore`.
+ */
+export const GoogleOneTapNonceStoreKV: Layer.Layer<
+  GoogleOneTapNonceStore,
+  never,
+  KeyValueStore.KeyValueStore
+> = Layer.effect(GoogleOneTapNonceStore, makeGoogleOneTapNonceStoreKV);
 
 // ---------------------------------------------------------------------------
 // Aggregate layer
