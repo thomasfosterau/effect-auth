@@ -102,10 +102,12 @@ describe("TrustedDeviceService", () => {
     const program = Effect.gen(function* () {
       const service = yield* makeTrustedDeviceService(testConfig);
       const { cookieValue } = yield* service.issue(testUser.id);
-      // Flip a character in the HMAC (last segment)
+      // Flip a character in the HMAC (last segment), ensuring it actually changes
       const parts = cookieValue.split(".");
       const lastIdx = parts.length - 1;
-      parts[lastIdx] = parts[lastIdx]!.slice(0, -1) + "0";
+      const lastChar = parts[lastIdx]!.slice(-1);
+      const newChar = lastChar === "0" ? "1" : "0";
+      parts[lastIdx] = parts[lastIdx]!.slice(0, -1) + newChar;
       const tampered = parts.join(".");
       return yield* service.verify(tampered);
     }).pipe(Effect.provide(storeCtx));
