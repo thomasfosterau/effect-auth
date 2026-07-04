@@ -1,6 +1,6 @@
 {
   "name": "effect-auth",
-  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node",
   "remoteUser": "node",
   "features": {
     "ghcr.io/devcontainers-extra/features/bun:1": {},
@@ -8,11 +8,7 @@
   },
   "customizations": {
     "vscode": {
-      "extensions": ["Anthropic.claude-code"],
-      "settings": {
-        "js/ts.tsdk.path": "./node_modules/typescript/lib",
-        "js/ts.tsdk.promptToUseWorkspaceVersion": true
-      }
+      "extensions": ["Anthropic.claude-code"]
     }
   }
 }
