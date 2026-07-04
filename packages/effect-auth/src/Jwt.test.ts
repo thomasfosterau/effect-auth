@@ -7,6 +7,7 @@ import {
   type JwtConfig,
   type JwtKeyPair,
 } from "./Jwt.js";
+import { makeAes256GcmCipher } from "./Cipher.js";
 import type { User } from "./Types.js";
 
 const keyPairs: JwtKeyPair[] = [];
@@ -272,5 +273,114 @@ describe("JwtService", () => {
     );
 
     expect(payload["sub"]).toBe("user-1");
+  });
+});
+
+describe("JwtService with private key encryption", () => {
+  beforeEach(() => {
+    keyPairs.splice(0, keyPairs.length);
+  });
+
+  it("should sign and verify with encrypted private key (ES256, { secret })", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService({
+          ...baseConfig,
+          encryptPrivateKey: { secret: "test-encryption-secret-32-bytes!!" },
+        });
+        const signed = yield* service.sign(user);
+        const payload = yield* service.verify(signed.token);
+        return { signed, payload };
+      }),
+    );
+
+    expect(result.signed.token.split(".")).toHaveLength(3);
+    expect(result.signed.expiresAt).toBeGreaterThan(Date.now());
+    expect(result.payload["sub"]).toBe("user-1");
+    expect(result.payload["iss"]).toBe("https://auth.example.com");
+
+    // The stored private key PEM should be ciphertext, not a PEM block
+    expect(keyPairs[0]?.privateKeyPem).toBeDefined();
+    expect(keyPairs[0]?.privateKeyPem).not.toContain("PRIVATE KEY");
+  });
+
+  it("should sign and verify with encrypted private key (EdDSA, { secret })", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService({
+          ...baseConfig,
+          algorithm: "EdDSA",
+          encryptPrivateKey: { secret: "test-encryption-secret-32-bytes!!" },
+        });
+        const signed = yield* service.sign(user);
+        const payload = yield* service.verify(signed.token);
+        return { payload };
+      }),
+    );
+
+    expect(result.payload["sub"]).toBe("user-1");
+    expect(keyPairs[0]?.algorithm).toBe("EdDSA");
+    expect(keyPairs[0]?.privateKeyPem).not.toContain("PRIVATE KEY");
+  });
+
+  it("should sign and verify with a custom { cipher }", async () => {
+    const cipher = makeAes256GcmCipher("custom-cipher-secret");
+
+    const result = await run(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService({
+          ...baseConfig,
+          encryptPrivateKey: { cipher },
+        });
+        const signed = yield* service.sign(user);
+        const payload = yield* service.verify(signed.token);
+        return { payload };
+      }),
+    );
+
+    expect(result.payload["sub"]).toBe("user-1");
+    expect(keyPairs[0]?.privateKeyPem).not.toContain("PRIVATE KEY");
+  });
+
+  it("should reuse the encrypted key across multiple sign calls", async () => {
+    await run(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService({
+          ...baseConfig,
+          encryptPrivateKey: { secret: "test-encryption-secret-32-bytes!!" },
+        });
+        yield* service.sign(user);
+        yield* service.sign(user);
+        yield* service.sign(user);
+      }),
+    );
+
+    // Only one key pair should be generated and stored
+    expect(keyPairs).toHaveLength(1);
+  });
+
+  it("should verify tokens signed with an encrypted key after key rotation", async () => {
+    // Verification uses publicKeyJwk (plaintext), not privateKeyPem, so the
+    // encrypted private key in the store does not need to be decrypted here.
+    const result = await run(
+      Effect.gen(function* () {
+        const service = yield* makeJwtService({
+          ...baseConfig,
+          encryptPrivateKey: { secret: "test-encryption-secret-32-bytes!!" },
+        });
+
+        const { token } = yield* service.sign(user);
+
+        // Rotate: new unencrypted key becomes active in the store
+        const rotated = yield* generateKeyPair("ES256");
+        const store = yield* JwtKeyStore;
+        yield* store.create(rotated);
+
+        // Verify still resolves the correct kid and uses its public key
+        return yield* service.verify(token);
+      }),
+    );
+
+    expect(result["sub"]).toBe("user-1");
   });
 });

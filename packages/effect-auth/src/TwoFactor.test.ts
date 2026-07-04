@@ -8,6 +8,7 @@ import {
   TwoFactorStore,
   PendingTwoFactorStore,
 } from "./TwoFactor.js";
+import { makeAes256GcmCipher } from "./Cipher.js";
 import { type CreateUserInput, EmailPasswordStore } from "./EmailPassword.js";
 import { generateTOTP } from "./Otp.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
@@ -509,5 +510,137 @@ describe("TwoFactorService", () => {
       expect(unverified.failure._tag).toBe("TwoFactorError");
     }
     expect(pendingChallenges.size).toBe(0);
+  });
+});
+
+describe("TwoFactorService with TOTP secret encryption", () => {
+  beforeEach(() => {
+    users.clear();
+    usersByEmail.clear();
+    passwordHashes.clear();
+    twoFactorRecords.clear();
+    pendingChallenges.clear();
+    sessions.clear();
+  });
+
+  it("should enroll and verify TOTP with { secret } encryption", async () => {
+    const testContext = await makeTestContext();
+    await seedUser("user-enc-1", "enc-totp@example.com", "correct-password");
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeTwoFactorService({
+        issuer: "TestApp",
+        skipVerificationOnEnable: false,
+        encryptSecret: { secret: "totp-encryption-secret-32-bytes!!" },
+      });
+
+      const enableResult = yield* service.enable("user-enc-1", "correct-password");
+
+      const code = yield* generateTOTP(enableResult.secret);
+      yield* service.confirmEnable("user-enc-1", code);
+
+      const enabled = yield* service.isEnabled("user-enc-1");
+
+      const challenge = yield* service.beginChallenge("user-enc-1");
+      const verifyCode = yield* generateTOTP(enableResult.secret);
+      const verifyResult = yield* service.verifyTotp(challenge.token, verifyCode);
+
+      return { enableResult, enabled, verifyResult };
+    });
+
+    const { enableResult, enabled, verifyResult } = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(enabled).toBe(true);
+    expect(verifyResult.userId).toBe("user-enc-1");
+    expect(sessions.size).toBe(1);
+
+    // The stored secret must be ciphertext, not the plaintext base32 secret
+    const record = twoFactorRecords.get("user-enc-1");
+    expect(record?.secret).toBeDefined();
+    expect(record?.secret).not.toBe(enableResult.secret);
+    expect(record?.secret).not.toMatch(/^[A-Z2-7]+=*$/);
+  });
+
+  it("should enroll and verify TOTP with a custom { cipher }", async () => {
+    const testContext = await makeTestContext();
+    await seedUser("user-enc-2", "enc-cipher@example.com", "correct-password");
+
+    const cipher = makeAes256GcmCipher("custom-cipher-secret");
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeTwoFactorService({
+        issuer: "TestApp",
+        skipVerificationOnEnable: true,
+        encryptSecret: { cipher },
+      });
+
+      const enableResult = yield* service.enable("user-enc-2", "correct-password");
+
+      const challenge = yield* service.beginChallenge("user-enc-2");
+      const code = yield* generateTOTP(enableResult.secret);
+      const verifyResult = yield* service.verifyTotp(challenge.token, code);
+
+      return { enableResult, verifyResult };
+    });
+
+    const { enableResult, verifyResult } = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(verifyResult.userId).toBe("user-enc-2");
+
+    // Stored secret is ciphertext
+    const record = twoFactorRecords.get("user-enc-2");
+    expect(record?.secret).not.toBe(enableResult.secret);
+  });
+
+  it("should return plaintext secret and valid totpUri from enable even with encryption", async () => {
+    const testContext = await makeTestContext();
+    await seedUser("user-enc-3", "enc-uri@example.com", "correct-password");
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeTwoFactorService({
+        issuer: "TestApp",
+        encryptSecret: { secret: "totp-encryption-secret-32-bytes!!" },
+      });
+      return yield* service.enable("user-enc-3", "correct-password");
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    // The returned secret is plaintext base32 (for QR code display)
+    expect(result.secret).toMatch(/^[A-Z2-7]+=*$/);
+    // The totpUri uses the plaintext secret
+    expect(result.totpUri).toContain(result.secret);
+    expect(result.totpUri).toContain("otpauth://totp/");
+  });
+
+  it("should accept backup code redemption when secret is encrypted", async () => {
+    const testContext = await makeTestContext();
+    await seedUser("user-enc-4", "enc-backup@example.com", "correct-password");
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeTwoFactorService({
+        issuer: "TestApp",
+        skipVerificationOnEnable: true,
+        encryptSecret: { secret: "totp-encryption-secret-32-bytes!!" },
+      });
+
+      const { backupCodes } = yield* service.enable("user-enc-4", "correct-password");
+
+      const challenge = yield* service.beginChallenge("user-enc-4");
+      return yield* service.verifyBackupCode(challenge.token, backupCodes[0]);
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result.userId).toBe("user-enc-4");
+    expect(sessions.size).toBe(1);
   });
 });

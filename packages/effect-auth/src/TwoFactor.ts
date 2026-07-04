@@ -14,6 +14,8 @@
 
 import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
+import { makeAes256GcmCipher } from "./Cipher.js";
+import type { TokenCipher } from "./Cipher.js";
 import * as Errors from "./Errors.js";
 import {
   EmailPasswordStore,
@@ -108,6 +110,19 @@ export interface TwoFactorConfig {
    * `confirmEnable` TOTP confirmation step (default: false).
    */
   readonly skipVerificationOnEnable?: boolean;
+  /**
+   * Opt-in encryption-at-rest for the base32 TOTP `secret` field in
+   * {@link TwoFactorStore}. The store sees only ciphertext; plaintext is only
+   * ever held in memory during enrollment and verification.
+   *
+   * Pass `{ secret }` to use the built-in AES-256-GCM cipher. Pass
+   * `{ cipher }` to supply a custom {@link TokenCipher} (envelope
+   * encryption, HSM-backed keys, etc.).
+   *
+   * Strongly recommended in production. Backup codes are already SHA-256
+   * hashed and are unaffected by this option.
+   */
+  readonly encryptSecret?: { readonly secret: string } | { readonly cipher: TokenCipher };
 }
 
 /**
@@ -314,6 +329,12 @@ export const makeTwoFactorService = (
   const pendingExpiresIn = config.pendingExpiresIn ?? 5 * 60 * 1000; // 5 minutes default
   const skipVerificationOnEnable = config.skipVerificationOnEnable ?? false;
 
+  const cipher: TokenCipher | null = config.encryptSecret
+    ? "cipher" in config.encryptSecret
+      ? config.encryptSecret.cipher
+      : makeAes256GcmCipher(config.encryptSecret.secret)
+    : null;
+
   /**
    * Verify the user's password against the hash held by the email/password
    * store. Fails with InvalidCredentialsError on mismatch or missing hash.
@@ -406,12 +427,13 @@ export const makeTwoFactorService = (
           }
 
           const secret = yield* generateBase32Secret();
+          const storedSecret = cipher !== null ? yield* cipher.encrypt(secret) : secret;
 
           const backupCodes = Array.from({ length: backupCodeCount }, () => generateBackupCode());
 
           const record: TwoFactorRecord = {
             userId,
-            secret,
+            secret: storedSecret,
             backupCodes: backupCodes.map(hashBackupCode),
             verified: skipVerificationOnEnable,
             createdAt: Date.now(),
@@ -426,7 +448,7 @@ export const makeTwoFactorService = (
                 type: "totp",
                 label: user.email,
                 issuer: config.issuer,
-                secret,
+                secret, // always use plaintext for URI generation
                 ...(totp?.period !== undefined && { period: totp.period }),
                 ...(totp?.digits !== undefined && { digits: totp.digits }),
                 ...(totp?.algorithm !== undefined && { algorithm: totp.algorithm }),
@@ -439,7 +461,7 @@ export const makeTwoFactorService = (
           });
 
           return {
-            secret,
+            secret, // always return plaintext secret
             totpUri,
             backupCodes,
           } satisfies TwoFactorEnableResult;
@@ -458,7 +480,9 @@ export const makeTwoFactorService = (
             );
           }
 
-          const isValid = yield* verifyTOTP(code, record.secret, config.totp);
+          const plainSecret =
+            cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
+          const isValid = yield* verifyTOTP(code, plainSecret, config.totp);
           if (!isValid) {
             return yield* Effect.fail(
               new TwoFactorError({
@@ -513,7 +537,9 @@ export const makeTwoFactorService = (
           const pending = yield* resolvePending(pendingToken);
           const record = yield* getVerifiedRecord(pending.userId);
 
-          const isValid = yield* verifyTOTP(code, record.secret, config.totp);
+          const plainSecret =
+            cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
+          const isValid = yield* verifyTOTP(code, plainSecret, config.totp);
           if (!isValid) {
             return yield* Effect.fail(
               new TwoFactorError({

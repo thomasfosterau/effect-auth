@@ -26,6 +26,8 @@
 
 import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
+import { makeAes256GcmCipher } from "./Cipher.js";
+import type { TokenCipher } from "./Cipher.js";
 import type * as Errors from "./Errors.js";
 import type * as Types from "./Types.js";
 
@@ -92,6 +94,20 @@ export interface JwtConfig {
   readonly getSubject?: (user: Types.User) => string;
   /** Extra claims merged into every token's payload */
   readonly definePayload?: (user: Types.User) => Record<string, unknown>;
+  /**
+   * Opt-in encryption-at-rest for the PKCS#8 PEM private key stored in
+   * {@link JwtKeyStore}. The store sees only ciphertext; plaintext is only
+   * ever held in memory during signing.
+   *
+   * Pass `{ secret }` to use the built-in AES-256-GCM cipher (key derived
+   * from the secret via SHA-256; each stored key gets a unique random IV and
+   * a GCM auth-tag for integrity). Pass `{ cipher }` to supply a custom
+   * {@link TokenCipher} (envelope encryption, HSM-backed keys, etc.).
+   *
+   * Strongly recommended in production. When this option is set, encryption
+   * is always applied — there is no opt-out per key.
+   */
+  readonly encryptPrivateKey?: { readonly secret: string } | { readonly cipher: TokenCipher };
 }
 
 /**
@@ -262,18 +278,31 @@ export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtServiceShape
   const algorithm = config.algorithm ?? "ES256";
   const getSubject = config.getSubject ?? ((user: Types.User) => user.id);
 
+  const cipher: TokenCipher | null = config.encryptPrivateKey
+    ? "cipher" in config.encryptPrivateKey
+      ? config.encryptPrivateKey.cipher
+      : makeAes256GcmCipher(config.encryptPrivateKey.secret)
+    : null;
+
   /**
    * Fetch the active signing key, lazily generating and persisting one when
-   * the store is empty.
+   * the store is empty. Private key PEM is decrypted (when a cipher is
+   * configured) before returning, so callers always receive plaintext.
    */
   const getOrCreateActiveKey = Effect.gen(function* () {
     const store = yield* JwtKeyStore;
     const active = yield* store.getActive();
     if (active) {
-      return active;
+      if (cipher === null) return active;
+      return { ...active, privateKeyPem: yield* cipher.decrypt(active.privateKeyPem) };
     }
     const pair = yield* generateKeyPair(algorithm);
-    return yield* store.create(pair);
+    const toStore =
+      cipher !== null
+        ? { ...pair, privateKeyPem: yield* cipher.encrypt(pair.privateKeyPem) }
+        : pair;
+    yield* store.create(toStore);
+    return pair; // always return plaintext pair
   });
 
   return Effect.sync(
