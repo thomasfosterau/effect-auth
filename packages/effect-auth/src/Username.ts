@@ -19,7 +19,7 @@ import {
   SecondFactorGate,
   type AuthResult,
 } from "./EmailPassword.js";
-import { PasswordHasher } from "./Password.js";
+import { MultiAlgorithmVerifier, PasswordHasher } from "./Password.js";
 import { SessionManager } from "./Session.js";
 import { Hooks, type HookError } from "./Hooks.js";
 
@@ -213,9 +213,27 @@ export const makeUsernameService = (
             return yield* invalid();
           }
 
-          const isValid = yield* passwordHasher.verify(input.password, passwordHash);
+          // Route through MultiAlgorithmVerifier when present (migration support).
+          // Convert HashingError (format/algorithm mismatch) → invalid credentials.
+          const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
+          const verifyEffect = Option.isSome(multiVerifier)
+            ? multiVerifier.value.verify(input.password, passwordHash)
+            : passwordHasher.verify(input.password, passwordHash);
+          const isValid = yield* verifyEffect.pipe(
+            Effect.catchTag("HashingError", () => Effect.succeed(false)),
+          );
           if (!isValid) {
             return yield* invalid();
+          }
+
+          // Silently upgrade the stored hash when the current hasher considers it outdated.
+          if (passwordHasher.needsRehash?.(passwordHash)) {
+            yield* passwordHasher.hash(input.password).pipe(
+              Effect.flatMap((newHash) =>
+                emailPasswordStore.setPasswordHash(user.id, newHash.hash),
+              ),
+              Effect.ignore,
+            );
           }
 
           // Same second-factor seam as email/password sign-in.

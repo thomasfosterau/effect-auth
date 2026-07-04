@@ -1,9 +1,16 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect } from "effect";
+import * as nodeCrypto from "node:crypto";
 import { Hooks } from "./Hooks.js";
 import { makeEmailPasswordService, EmailPasswordStore } from "./EmailPassword.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
-import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
+import {
+  MultiAlgorithmVerifier,
+  PasswordHasher,
+  makePBKDF2Hasher,
+  makeScryptHasher,
+  makeMultiAlgorithmVerifier,
+} from "./Password.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 
 const users = new Map<string, User>();
@@ -363,5 +370,174 @@ describe("EmailPasswordService second-factor gate", () => {
 
     expect(result.secondFactor).toBeUndefined();
     expect(result.session).toBeDefined();
+  });
+});
+
+describe("EmailPasswordService — migration and security hardening", () => {
+  beforeEach(() => {
+    users.clear();
+    usersByEmail.clear();
+    passwordHashes.clear();
+    sessions.clear();
+  });
+
+  /** Build an old-style PBKDF2 hash (210 000 iterations, 64-byte key). */
+  const makeOldPbkdf2Hash = (password: string): Promise<string> => {
+    const salt = nodeCrypto.randomBytes(16);
+    return new Promise<string>((resolve, reject) =>
+      nodeCrypto.pbkdf2(password, salt, 210000, 64, "sha256", (err, key) =>
+        err
+          ? reject(err)
+          : resolve(`pbkdf2-sha256$210000$${salt.toString("hex")}$${key.toString("hex")}`),
+      ),
+    );
+  };
+
+  it("verifies an old PBKDF2 hash and rehashes it to current params on sign-in", async () => {
+    const testContext = await makeTestContext();
+
+    // Seed user with an old-style hash (fewer iterations, larger key).
+    const oldHash = await makeOldPbkdf2Hash("migration-password");
+    const user: User = {
+      id: "user-migration",
+      email: "migration@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(user.id, user);
+    usersByEmail.set(user.email, user.id);
+    passwordHashes.set(user.id, oldHash);
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeEmailPasswordService();
+      return yield* service.signIn({ email: user.email, password: "migration-password" });
+    });
+
+    // Use the current PBKDF2 hasher — it detects the outdated hash via needsRehash.
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result.user.id).toBe(user.id);
+    expect(result.session).toBeDefined();
+
+    // The stored hash must have been silently upgraded to the current params.
+    const updatedHash = passwordHashes.get(user.id)!;
+    expect(updatedHash).not.toBe(oldHash);
+    expect(updatedHash.startsWith("pbkdf2-sha256$600000$")).toBe(true);
+  });
+
+  it("signs in with old PBKDF2 hash after switching default hasher to scrypt via MultiAlgorithmVerifier", async () => {
+    const testContext = await makeTestContext();
+
+    const oldHash = await makeOldPbkdf2Hash("switch-password");
+    const user: User = {
+      id: "user-switch",
+      email: "switch@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(user.id, user);
+    usersByEmail.set(user.email, user.id);
+    passwordHashes.set(user.id, oldHash);
+
+    const scryptHasher = makeScryptHasher({ cost: 16384 });
+    const verifier = makeMultiAlgorithmVerifier([makePBKDF2Hasher(), scryptHasher]);
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeEmailPasswordService();
+      return yield* service.signIn({ email: user.email, password: "switch-password" });
+    });
+
+    // testContext has PBKDF2 as PasswordHasher; override with scrypt + add verifier.
+    // Context.merge(a, b) → b wins on conflict, so place the overrides second.
+    const ctx = Context.merge(
+      Context.merge(testContext, Context.make(PasswordHasher, scryptHasher)),
+      Context.make(MultiAlgorithmVerifier, verifier),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, ctx).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result.user.id).toBe(user.id);
+    expect(result.session).toBeDefined();
+
+    // Hash must have been rehashed to scrypt by the active hasher.
+    const updatedHash = passwordHashes.get(user.id)!;
+    expect(updatedHash.startsWith("scrypt$")).toBe(true);
+  });
+
+  it("returns InvalidCredentialsError (not a defect) when hash format is malformed on sign-in", async () => {
+    const testContext = await makeTestContext();
+
+    const user: User = {
+      id: "user-malformed",
+      email: "malformed@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(user.id, user);
+    usersByEmail.set(user.email, user.id);
+    // Malformed hash: non-numeric iteration count — would previously cause a RangeError defect.
+    passwordHashes.set(user.id, "pbkdf2-sha256$notanumber$aabbcc$ddeeff");
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeEmailPasswordService();
+      return yield* Effect.result(service.signIn({ email: user.email, password: "any-password" }));
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("InvalidCredentialsError");
+    }
+  });
+
+  it("returns InvalidCredentialsError (not defect) for an excessively long password on sign-in", async () => {
+    const testContext = await makeTestContext();
+    const hasher = makePBKDF2Hasher();
+    const hashResult = await Effect.runPromise(hasher.hash("real-password"));
+
+    const user: User = {
+      id: "user-long-pw",
+      email: "longpw@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(user.id, user);
+    usersByEmail.set(user.email, user.id);
+    passwordHashes.set(user.id, hashResult.hash);
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeEmailPasswordService();
+      return yield* Effect.result(
+        service.signIn({
+          email: user.email,
+          // 2000 'a' chars — well over MAX_PASSWORD_BYTES (1024)
+          password: "a".repeat(2000),
+        }),
+      );
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("InvalidCredentialsError");
+    }
   });
 });

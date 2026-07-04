@@ -31,6 +31,14 @@ export interface PasswordHasherShape {
    * Verify a password against a hash using this algorithm
    */
   readonly verify: (password: string, hash: string) => Effect.Effect<boolean, Errors.HashingError>;
+
+  /**
+   * Returns true when the stored hash should be re-hashed using the current
+   * algorithm and parameters (e.g. after upgrading iteration count or switching
+   * algorithm). When present in `signIn`, the stored hash is silently upgraded
+   * on a successful login so users are migrated without any downtime.
+   */
+  readonly needsRehash?: (hash: string) => boolean;
 }
 
 /**
@@ -149,6 +157,10 @@ export const makeMultiAlgorithmVerifier = (
 
 import * as crypto from "node:crypto";
 
+// Anti-DoS: reject inputs longer than this before running any KDF.
+// Legitimate passwords are always well below this threshold.
+const MAX_PASSWORD_BYTES = 1024;
+
 const pbkdf2 = (
   password: string,
   salt: Buffer,
@@ -169,19 +181,35 @@ export type {
 
 /**
  * PBKDF2 Password Hasher implementing the PasswordHasher trait
- * Following Copenhagen/Oslo guidelines for secure password hashing
+ * Following OWASP guidelines for secure password hashing
  */
 export const makePBKDF2Hasher = (): PasswordHasherShape => {
   const ALGORITHM = "pbkdf2-sha256";
-  const ITERATIONS = 210000; // OWASP recommended minimum
-  const KEY_LENGTH = 64;
+  // OWASP recommended minimum for SHA-256: 600,000 iterations (2023)
+  const ITERATIONS = 600000;
+  // SHA-256 produces a 32-byte digest; using more bytes adds nothing and
+  // reduces cost for the defender while an attacker can crack block-by-block.
+  const KEY_LENGTH = 32;
   const SALT_LENGTH = 16;
 
   return {
     algorithm: ALGORITHM,
+
+    needsRehash: (hash: string): boolean => {
+      const parts = hash.split("$");
+      if (parts.length !== 4) return true;
+      const [algorithm, iterationsStr, , hashHex] = parts;
+      if (algorithm !== ALGORITHM) return true;
+      const iters = parseInt(iterationsStr!, 10);
+      if (!Number.isFinite(iters) || iters < ITERATIONS) return true;
+      // Stored key length must match current KEY_LENGTH.
+      const storedKeyLen = Buffer.from(hashHex!, "hex").length;
+      if (storedKeyLen !== KEY_LENGTH) return true;
+      return false;
+    },
+
     hash: (password: string) =>
       Effect.gen(function* () {
-        // Validate input
         if (!password || typeof password !== "string") {
           return yield* Effect.fail(
             new Errors.HashingError({
@@ -194,6 +222,14 @@ export const makePBKDF2Hasher = (): PasswordHasherShape => {
           return yield* Effect.fail(
             new Errors.HashingError({
               message: "Password cannot be empty",
+            }),
+          );
+        }
+
+        if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+          return yield* Effect.fail(
+            new Errors.HashingError({
+              message: "Password exceeds maximum length",
             }),
           );
         }
@@ -220,7 +256,6 @@ export const makePBKDF2Hasher = (): PasswordHasherShape => {
 
     verify: (password: string, hash: string) =>
       Effect.gen(function* () {
-        // Validate inputs
         if (!password || typeof password !== "string") {
           return yield* Effect.fail(
             new Errors.HashingError({
@@ -237,6 +272,11 @@ export const makePBKDF2Hasher = (): PasswordHasherShape => {
           );
         }
 
+        // Anti-DoS: bail out before the expensive KDF for absurdly long inputs.
+        if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+          return false;
+        }
+
         const parts = hash.split("$");
 
         if (parts.length !== 4) {
@@ -247,7 +287,7 @@ export const makePBKDF2Hasher = (): PasswordHasherShape => {
           );
         }
 
-        const [algorithm, iterations, saltHex, hashHex] = parts;
+        const [algorithm, iterationsStr, saltHex, hashHex] = parts;
 
         if (algorithm !== ALGORITHM) {
           return yield* Effect.fail(
@@ -257,17 +297,33 @@ export const makePBKDF2Hasher = (): PasswordHasherShape => {
           );
         }
 
-        const salt = Buffer.from(saltHex, "hex");
-        const expectedHash = Buffer.from(hashHex, "hex");
+        const iterCount = parseInt(iterationsStr!, 10);
+        if (!Number.isFinite(iterCount) || iterCount <= 0) {
+          return yield* Effect.fail(
+            new Errors.HashingError({
+              message: "Invalid hash parameters",
+            }),
+          );
+        }
 
+        const salt = Buffer.from(saltHex!, "hex");
+        const expectedHash = Buffer.from(hashHex!, "hex");
+
+        // Derive using the stored key length so hashes produced with an older
+        // KEY_LENGTH value still verify correctly (needsRehash detects and
+        // upgrades them on the next successful login).
         const derivedKey = yield* Effect.tryPromise({
-          try: () => pbkdf2(password, salt, parseInt(iterations), KEY_LENGTH, "sha256"),
+          try: () => pbkdf2(password, salt, iterCount, expectedHash.length, "sha256"),
           catch: (error) =>
             new Errors.HashingError({
               message: "Failed to verify password",
               cause: error,
             }),
         });
+
+        if (derivedKey.length !== expectedHash.length) {
+          return false;
+        }
 
         // Use timing-safe comparison
         return crypto.timingSafeEqual(derivedKey, expectedHash);
@@ -330,12 +386,31 @@ export const makeScryptHasher = (options?: {
 
   return {
     algorithm: ALGORITHM,
+
+    needsRehash: (hash: string): boolean => {
+      const parts = hash.split("$");
+      if (parts.length !== 6) return true;
+      const [algorithm, costStr] = parts;
+      if (algorithm !== ALGORITHM) return true;
+      const N = parseInt(costStr!, 10);
+      if (!Number.isFinite(N) || N < COST) return true;
+      return false;
+    },
+
     hash: (password: string) =>
       Effect.gen(function* () {
         if (!password || typeof password !== "string") {
           return yield* Effect.fail(
             new Errors.HashingError({
               message: "Password must be a non-empty string",
+            }),
+          );
+        }
+
+        if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+          return yield* Effect.fail(
+            new Errors.HashingError({
+              message: "Password exceeds maximum length",
             }),
           );
         }
@@ -369,6 +444,11 @@ export const makeScryptHasher = (options?: {
           );
         }
 
+        // Anti-DoS: bail out before the expensive KDF for absurdly long inputs.
+        if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+          return false;
+        }
+
         const parts = hash.split("$");
         if (parts.length !== 6) {
           return yield* Effect.fail(
@@ -388,9 +468,9 @@ export const makeScryptHasher = (options?: {
           );
         }
 
-        const N = parseInt(costStr, 10);
-        const r = parseInt(blockSizeStr, 10);
-        const p = parseInt(parallelizationStr, 10);
+        const N = parseInt(costStr!, 10);
+        const r = parseInt(blockSizeStr!, 10);
+        const p = parseInt(parallelizationStr!, 10);
         if (!Number.isFinite(N) || !Number.isFinite(r) || !Number.isFinite(p)) {
           return yield* Effect.fail(
             new Errors.HashingError({
@@ -399,8 +479,8 @@ export const makeScryptHasher = (options?: {
           );
         }
 
-        const salt = Buffer.from(saltHex, "hex");
-        const expectedHash = Buffer.from(hashHex, "hex");
+        const salt = Buffer.from(saltHex!, "hex");
+        const expectedHash = Buffer.from(hashHex!, "hex");
         const derivedKey = yield* scrypt(password, salt, N, r, p);
 
         if (derivedKey.length !== expectedHash.length) {

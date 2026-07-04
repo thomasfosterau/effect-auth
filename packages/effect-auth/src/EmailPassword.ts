@@ -1,7 +1,7 @@
 import { Context, Effect, Layer, Option } from "effect";
 import * as Errors from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
-import { PasswordHasher } from "./Password.js";
+import { MultiAlgorithmVerifier, PasswordHasher } from "./Password.js";
 import type * as Types from "./Types.js";
 import { normalizeEmail } from "./utils.js";
 import { SessionManager } from "./Session.js";
@@ -310,12 +310,35 @@ export const makeEmailPasswordService = (
             );
           }
 
-          const isValid = yield* passwordHasher.verify(input.password, passwordHash);
+          // Route through MultiAlgorithmVerifier when present in context so that
+          // a hasher switch (e.g. PBKDF2 → scrypt) does not lock out users whose
+          // hashes were produced with the previous algorithm.  Fall back to the
+          // current PasswordHasher when no verifier is configured.  In both
+          // cases, convert HashingError (format / algorithm mismatch) to false so
+          // sign-in always returns InvalidCredentialsError and never a 500.
+          const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
+          const verifyEffect = Option.isSome(multiVerifier)
+            ? multiVerifier.value.verify(input.password, passwordHash)
+            : passwordHasher.verify(input.password, passwordHash);
+          const isValid = yield* verifyEffect.pipe(
+            Effect.catchTag("HashingError", () => Effect.succeed(false)),
+          );
           if (!isValid) {
             return yield* Effect.fail(
               new Errors.InvalidCredentialsError({
                 message: "Invalid email or password",
               }),
+            );
+          }
+
+          // Silently upgrade the stored hash when the current hasher considers
+          // it outdated (e.g. iteration count raised, algorithm switched).  A
+          // failure here must never abort sign-in — the user is already
+          // authenticated at this point.
+          if (passwordHasher.needsRehash?.(passwordHash)) {
+            yield* passwordHasher.hash(input.password).pipe(
+              Effect.flatMap((newHash) => store.setPasswordHash(user.id, newHash.hash)),
+              Effect.ignore,
             );
           }
 
