@@ -162,7 +162,7 @@ const AuthStores = Layer.mergeAll(
   Layer.succeed(Auth.PasswordResetStore)(passwordResetStore),
   Layer.succeed(Auth.PasswordResetUserStore)(passwordResetUserStore),
   Layer.succeed(Auth.UserServiceStore)(userServiceStore),
-  Layer.succeedContext(Auth.PasswordHasherLive),
+  Auth.PasswordHasher.layer(),
 );
 
 const ServicesLayer: Layer.Layer<Auth.Http.AuthServices> = Layer.mergeAll(

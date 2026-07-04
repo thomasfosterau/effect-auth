@@ -95,7 +95,7 @@ export const makeArgon2Hasher = (options?: Argon2Options): PasswordHasherShape =
 
 /**
  * A `Layer` providing {@link PasswordHasher} backed by Argon2id. Use in place
- * of `PasswordHasherLayer` to make Argon2id the default hasher for new
+ * of `PasswordHasher.layer()` to make Argon2id the default hasher for new
  * passwords.
  */
 export const Argon2HasherLayer = (options?: Argon2Options): Layer.Layer<PasswordHasher> =>

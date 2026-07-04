@@ -8,7 +8,7 @@ import {
   PasswordResetUserStore,
 } from "./PasswordReset.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
-import { PasswordHasherLive, makePasswordHasher } from "./Password.js";
+import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 
 const users = new Map<string, User>();
@@ -119,7 +119,7 @@ const makeTestContext = async () => {
           Context.make(PasswordResetStore, passwordResetStore),
           Context.merge(
             Context.make(PasswordResetUserStore, passwordResetUserStore),
-            PasswordHasherLive,
+            Context.make(PasswordHasher, makePBKDF2Hasher()),
           ),
         ),
       ),
@@ -193,7 +193,7 @@ describe("PasswordResetService", () => {
   it("should reset password and revoke sessions when configured", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = makePasswordHasher();
+    const hasher = makePBKDF2Hasher();
     const oldHash = await Effect.runPromise(hasher.hash("old-password-123"));
 
     const user: User = {

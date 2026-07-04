@@ -51,7 +51,23 @@ export interface MultiAlgorithmVerifierShape {
  */
 export class PasswordHasher extends Context.Service<PasswordHasher, PasswordHasherShape>()(
   "@effect-auth/PasswordHasher",
-) {}
+) {
+  /**
+   * Layer providing the default hasher: PBKDF2-SHA256 with OWASP parameters
+   * (see {@link makePBKDF2Hasher}).
+   */
+  static readonly layer = () => Layer.succeed(PasswordHasher, makePBKDF2Hasher());
+
+  /**
+   * Layer providing the scrypt hasher (memory-hard; PHC-format output, see
+   * {@link makeScryptHasher}).
+   */
+  static readonly layerScrypt = (options?: {
+    readonly cost?: number;
+    readonly blockSize?: number;
+    readonly parallelization?: number;
+  }) => Layer.succeed(PasswordHasher, makeScryptHasher(options));
+}
 
 /**
  * Tag for MultiAlgorithmVerifier service
@@ -59,7 +75,14 @@ export class PasswordHasher extends Context.Service<PasswordHasher, PasswordHash
 export class MultiAlgorithmVerifier extends Context.Service<
   MultiAlgorithmVerifier,
   MultiAlgorithmVerifierShape
->()("@effect-auth/MultiAlgorithmVerifier") {}
+>()("@effect-auth/MultiAlgorithmVerifier") {
+  /**
+   * Layer that verifies passwords against any of the given hashers, sniffing
+   * the algorithm from the PHC-format hash (see {@link makeMultiAlgorithmVerifier}).
+   */
+  static readonly layer = (hashers: readonly PasswordHasherShape[]) =>
+    Layer.succeed(MultiAlgorithmVerifier, makeMultiAlgorithmVerifier(hashers));
+}
 
 /**
  * Parse a PHC format string to extract the algorithm identifier
@@ -124,16 +147,20 @@ export const makeMultiAlgorithmVerifier = (
   };
 };
 
-/**
- * Create a layer that provides a multi-algorithm verifier
- */
-export const makeMultiAlgorithmVerifierLayer = (hashers: readonly PasswordHasherShape[]) =>
-  Layer.succeed(MultiAlgorithmVerifier, makeMultiAlgorithmVerifier(hashers));
-
 import * as crypto from "node:crypto";
-import { promisify } from "node:util";
 
-const pbkdf2 = promisify(crypto.pbkdf2);
+const pbkdf2 = (
+  password: string,
+  salt: Buffer,
+  iterations: number,
+  keylen: number,
+  digest: string,
+): Promise<Buffer> =>
+  new Promise((resolve, reject) => {
+    crypto.pbkdf2(password, salt, iterations, keylen, digest, (err, derivedKey) =>
+      err ? reject(err) : resolve(derivedKey),
+    );
+  });
 
 export type {
   /** Re-export of {@link Types.HashedPassword} for convenience. */
@@ -385,28 +412,3 @@ export const makeScryptHasher = (options?: {
       }),
   };
 };
-
-/**
- * Layer that provides the scrypt password hasher
- */
-export const ScryptHasherLayer = Layer.succeed(PasswordHasher, makeScryptHasher());
-
-/**
- * Backward compatibility: Default password hasher is PBKDF2
- */
-export const makePasswordHasher = makePBKDF2Hasher;
-
-/**
- * Backward-compatible Context value that provides the default PBKDF2 password hasher
- */
-export const PasswordHasherLive = Context.make(PasswordHasher, makePBKDF2Hasher());
-
-/**
- * Layer that provides the default PBKDF2 password hasher
- */
-export const PasswordHasherLayer = Layer.succeed(PasswordHasher, makePBKDF2Hasher());
-
-/**
- * Layer that provides PBKDF2 password hasher explicitly
- */
-export const PBKDF2HasherLive = PasswordHasherLive;

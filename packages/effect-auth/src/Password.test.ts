@@ -1,13 +1,16 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect } from "effect";
-import { makePasswordHasher, PasswordHasherLive } from "./Password.js";
+import { Context, Effect } from "effect";
+import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 
 describe("PasswordHasher", () => {
-  const hasher = makePasswordHasher();
+  const hasher = makePBKDF2Hasher();
 
   it("should hash a password", async () => {
     const result = await Effect.runPromise(
-      Effect.provide(hasher.hash("myPassword123"), PasswordHasherLive),
+      Effect.provide(
+        hasher.hash("myPassword123"),
+        Context.make(PasswordHasher, makePBKDF2Hasher()),
+      ),
     );
 
     expect(result.hash).toBeDefined();
@@ -18,11 +21,17 @@ describe("PasswordHasher", () => {
 
   it("should verify a correct password", async () => {
     const hashResult = await Effect.runPromise(
-      Effect.provide(hasher.hash("myPassword123"), PasswordHasherLive),
+      Effect.provide(
+        hasher.hash("myPassword123"),
+        Context.make(PasswordHasher, makePBKDF2Hasher()),
+      ),
     );
 
     const verifyResult = await Effect.runPromise(
-      Effect.provide(hasher.verify("myPassword123", hashResult.hash), PasswordHasherLive),
+      Effect.provide(
+        hasher.verify("myPassword123", hashResult.hash),
+        Context.make(PasswordHasher, makePBKDF2Hasher()),
+      ),
     );
 
     expect(verifyResult).toBe(true);
@@ -30,11 +39,17 @@ describe("PasswordHasher", () => {
 
   it("should reject an incorrect password", async () => {
     const hashResult = await Effect.runPromise(
-      Effect.provide(hasher.hash("myPassword123"), PasswordHasherLive),
+      Effect.provide(
+        hasher.hash("myPassword123"),
+        Context.make(PasswordHasher, makePBKDF2Hasher()),
+      ),
     );
 
     const verifyResult = await Effect.runPromise(
-      Effect.provide(hasher.verify("wrongPassword", hashResult.hash), PasswordHasherLive),
+      Effect.provide(
+        hasher.verify("wrongPassword", hashResult.hash),
+        Context.make(PasswordHasher, makePBKDF2Hasher()),
+      ),
     );
 
     expect(verifyResult).toBe(false);
@@ -42,11 +57,17 @@ describe("PasswordHasher", () => {
 
   it("should generate different hashes for the same password", async () => {
     const hash1 = await Effect.runPromise(
-      Effect.provide(hasher.hash("myPassword123"), PasswordHasherLive),
+      Effect.provide(
+        hasher.hash("myPassword123"),
+        Context.make(PasswordHasher, makePBKDF2Hasher()),
+      ),
     );
 
     const hash2 = await Effect.runPromise(
-      Effect.provide(hasher.hash("myPassword123"), PasswordHasherLive),
+      Effect.provide(
+        hasher.hash("myPassword123"),
+        Context.make(PasswordHasher, makePBKDF2Hasher()),
+      ),
     );
 
     // Hashes should be different due to random salt
@@ -54,10 +75,16 @@ describe("PasswordHasher", () => {
 
     // But both should verify correctly
     const verify1 = await Effect.runPromise(
-      Effect.provide(hasher.verify("myPassword123", hash1.hash), PasswordHasherLive),
+      Effect.provide(
+        hasher.verify("myPassword123", hash1.hash),
+        Context.make(PasswordHasher, makePBKDF2Hasher()),
+      ),
     );
     const verify2 = await Effect.runPromise(
-      Effect.provide(hasher.verify("myPassword123", hash2.hash), PasswordHasherLive),
+      Effect.provide(
+        hasher.verify("myPassword123", hash2.hash),
+        Context.make(PasswordHasher, makePBKDF2Hasher()),
+      ),
     );
 
     expect(verify1).toBe(true);
@@ -66,7 +93,12 @@ describe("PasswordHasher", () => {
 
   it("should fail on invalid hash format", async () => {
     const result = await Effect.runPromise(
-      Effect.result(Effect.provide(hasher.verify("password", "invalid-hash"), PasswordHasherLive)),
+      Effect.result(
+        Effect.provide(
+          hasher.verify("password", "invalid-hash"),
+          Context.make(PasswordHasher, makePBKDF2Hasher()),
+        ),
+      ),
     );
 
     expect(result._tag).toBe("Failure");

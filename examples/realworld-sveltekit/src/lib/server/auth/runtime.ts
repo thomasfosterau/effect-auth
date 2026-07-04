@@ -16,7 +16,7 @@ const AppContext: Context.Context<AppServices> = Context.merge(
     Context.make(Auth.SessionStore, sessionStore),
     Context.make(Auth.UserStore, userStore),
   ),
-  Auth.PasswordHasherLive,
+  Context.make(Auth.PasswordHasher, Auth.makePBKDF2Hasher()),
 );
 
 const globalForAuth = globalThis as unknown as {

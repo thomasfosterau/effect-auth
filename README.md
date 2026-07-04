@@ -155,7 +155,7 @@ const program = Effect.gen(function* () {
 });
 
 // Run with the default hasher
-const isValid = await Effect.runPromise(Effect.provide(program, Auth.PasswordHasherLive));
+const isValid = await Effect.runPromise(Effect.provide(program, Auth.PasswordHasher.layer()));
 ```
 
 ### 4. Compose custom layers with the low-level constructors

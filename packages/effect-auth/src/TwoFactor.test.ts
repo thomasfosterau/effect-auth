@@ -11,7 +11,7 @@ import {
 import { type CreateUserInput, EmailPasswordStore } from "./EmailPassword.js";
 import { generateTOTP } from "./Otp.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
-import { PasswordHasherLive, makePasswordHasher } from "./Password.js";
+import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 
 const users = new Map<string, User>();
@@ -148,7 +148,7 @@ const makeTestContext = async () => {
             Context.make(TwoFactorStore, twoFactorStore),
             Context.merge(
               Context.make(PendingTwoFactorStore, pendingTwoFactorStore),
-              PasswordHasherLive,
+              Context.make(PasswordHasher, makePBKDF2Hasher()),
             ),
           ),
         ),
@@ -169,7 +169,7 @@ const seedUser = async (id: string, email: string, password: string): Promise<Us
   users.set(id, user);
   usersByEmail.set(email, id);
 
-  const hasher = makePasswordHasher();
+  const hasher = makePBKDF2Hasher();
   const hashed = await Effect.runPromise(hasher.hash(password));
   passwordHashes.set(id, hashed.hash);
 

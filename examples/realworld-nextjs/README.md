@@ -37,7 +37,7 @@ accept either the session cookie or `Authorization: Token <sid>` for
 - `lib/server/auth/adapters.ts` — `SessionStore` and `UserStore`
   backed by Drizzle + SQLite.
 - `lib/server/auth/runtime.ts` — single `Context` value composing the
-  stores and `PasswordHasherLive`, memoised on `globalThis` so Next's
+  stores and the default `PasswordHasher`, memoised on `globalThis` so Next's
   HMR doesn't tear it down.
 
 ## Smoke test

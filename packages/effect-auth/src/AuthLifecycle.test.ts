@@ -8,7 +8,7 @@ import {
   EmailVerificationStore,
   EmailVerificationService,
 } from "./EmailVerification.js";
-import { makePasswordHasher, PasswordHasherLive } from "./Password.js";
+import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
 import { makeUserService, UserServiceStore, UserService } from "./User.js";
 import type { Session, SessionConfig, User } from "./Types.js";
@@ -185,7 +185,10 @@ const makeTestContext = async () => {
               Context.make(EmailVerificationService, emailVerificationService),
               Context.merge(
                 Context.make(UserServiceStore, userServiceStore),
-                Context.merge(Context.make(UserService, userService), PasswordHasherLive),
+                Context.merge(
+                  Context.make(UserService, userService),
+                  Context.make(PasswordHasher, makePBKDF2Hasher()),
+                ),
               ),
             ),
           ),
@@ -233,7 +236,7 @@ describe("AuthLifecycleService", () => {
   it("should return verification-needed on sign-in and resend when enabled", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = makePasswordHasher();
+    const hasher = makePBKDF2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("password-123"));
 
     const user: User = {
@@ -318,7 +321,7 @@ describe("AuthLifecycleService", () => {
   it("should sign in verified users normally", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = makePasswordHasher();
+    const hasher = makePBKDF2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("verified-password-123"));
 
     const user: User = {

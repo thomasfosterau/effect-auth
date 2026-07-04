@@ -30,7 +30,7 @@ Conduit spec. Method-specific files like `index.post.ts`and`[slug]/favorite.dele
 
 - `server/auth/adapters.ts` and `runtime.ts` — same shape as the other
   examples: `SessionStore` and `UserStore` backed by Drizzle, single
-  shared `Context` value providing them plus `PasswordHasherLive`.
+  shared `Context` value providing them plus the default `PasswordHasher`.
 
 ## Smoke test
 
