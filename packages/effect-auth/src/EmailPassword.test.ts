@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import * as nodeCrypto from "node:crypto";
-import { Hooks } from "./Hooks.js";
+import { Hooks, makePlugin, composePlugins } from "./Hooks.js";
+import * as Errors from "./Errors.js";
 import { makeEmailPasswordService, EmailPasswordStore } from "./EmailPassword.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
 import {
@@ -539,5 +540,169 @@ describe("EmailPasswordService — migration and security hardening", () => {
     if (result._tag === "Failure") {
       expect(result.failure._tag).toBe("InvalidCredentialsError");
     }
+  });
+});
+
+describe("EmailPasswordService - dangling session protection", () => {
+  // Shared in-memory stores for these tests.
+  const localUsers = new Map<string, User>();
+  const localUsersByEmail = new Map<string, string>();
+  const localPasswordHashes = new Map<string, string>();
+  const localSessions = new Map<string, Session>();
+
+  const localSessionStore = {
+    create: (session: Session) =>
+      Effect.sync(() => {
+        localSessions.set(session.id, session);
+        return session;
+      }),
+    get: (sessionId: string) => Effect.sync(() => localSessions.get(sessionId) ?? null),
+    update: (session: Session) =>
+      Effect.sync(() => {
+        localSessions.set(session.id, session);
+        return session;
+      }),
+    delete: (sessionId: string) =>
+      Effect.sync(() => {
+        localSessions.delete(sessionId);
+      }),
+    deleteByUserId: (userId: string) =>
+      Effect.sync(() => {
+        for (const [id, session] of localSessions.entries()) {
+          if (session.userId === userId) localSessions.delete(id);
+        }
+      }),
+    listByUserId: (userId: string) =>
+      Effect.sync(() => Array.from(localSessions.values()).filter((s) => s.userId === userId)),
+  };
+
+  const localUserStore = {
+    get: (userId: string) => Effect.sync(() => localUsers.get(userId) ?? null),
+    getCredentials: (userId: string) => Effect.sync(() => localPasswordHashes.get(userId) ?? null),
+  };
+
+  const localEmailPasswordStore = {
+    getUserByEmail: (email: string) =>
+      Effect.sync(() => {
+        const id = localUsersByEmail.get(email);
+        return id ? (localUsers.get(id) ?? null) : null;
+      }),
+    createUser: ({
+      email,
+      attributes,
+    }: {
+      email: string;
+      name?: string;
+      attributes?: Record<string, unknown>;
+    }) =>
+      Effect.sync(() => {
+        const id = `user-${localUsers.size + 1}`;
+        const user: User = {
+          id,
+          email,
+          emailVerified: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          attributes: attributes ?? {},
+        };
+        localUsers.set(id, user);
+        localUsersByEmail.set(email, id);
+        return user;
+      }),
+    getPasswordHash: (userId: string) => Effect.sync(() => localPasswordHashes.get(userId) ?? null),
+    setPasswordHash: (userId: string, hash: string) =>
+      Effect.sync(() => {
+        localPasswordHashes.set(userId, hash);
+      }),
+  };
+
+  const makeLocalContext = async () => {
+    const sessionManager = await Effect.runPromise(
+      Effect.provide(
+        makeSessionManager({
+          sessionExpiresIn: { activePeriod: 3_600_000, idlePeriod: 1_800_000 },
+        }),
+        Context.merge(
+          Context.make(SessionStore, localSessionStore),
+          Context.make(UserStore, localUserStore),
+        ),
+      ),
+    );
+    return Context.merge(
+      Context.make(SessionManager, sessionManager),
+      Context.merge(
+        Context.make(EmailPasswordStore, localEmailPasswordStore),
+        Context.make(PasswordHasher, makePBKDF2Hasher()),
+      ),
+    );
+  };
+
+  beforeEach(() => {
+    localUsers.clear();
+    localUsersByEmail.clear();
+    localPasswordHashes.clear();
+    localSessions.clear();
+  });
+
+  it("signIn succeeds and returns the session even when afterSignIn hook fails (no dangling session)", async () => {
+    const ctx = await makeLocalContext();
+
+    // First, register a user.
+    const signUpResult = await Effect.runPromise(
+      Effect.gen(function* () {
+        const svc = yield* makeEmailPasswordService();
+        return yield* svc.signUp({ email: "alice@example.com", password: "hunter2!" });
+      }).pipe(Effect.provide(ctx), Effect.provide(Hooks.Default)),
+    );
+    expect(signUpResult.session).toBeDefined();
+
+    localSessions.clear(); // clear sign-up session so we can inspect sign-in session cleanly
+
+    // A failing afterSignIn hook.
+    const failingAfterSignIn = makePlugin({
+      afterSignIn: () => Effect.fail(new Errors.AuthError({ message: "hook boom" })),
+    });
+
+    const signInResult = await Effect.runPromise(
+      Effect.gen(function* () {
+        const svc = yield* makeEmailPasswordService();
+        return yield* svc.signIn({ email: "alice@example.com", password: "hunter2!" });
+      }).pipe(
+        Effect.provide(ctx),
+        Effect.provide(composePlugins([failingAfterSignIn]).pipe(Layer.provide(Hooks.Default))),
+      ),
+    );
+
+    // signIn must succeed (no error propagated) even though the hook failed.
+    expect(signInResult.session).toBeDefined();
+    expect(signInResult.user.email).toBe("alice@example.com");
+
+    // The session is live in the store — no dangling session.
+    expect(signInResult.session && localSessions.has(signInResult.session.id)).toBe(true);
+  });
+
+  it("signUp succeeds and returns the session even when afterSignUp hook fails (no dangling session)", async () => {
+    const ctx = await makeLocalContext();
+
+    const failingAfterSignUp = makePlugin({
+      afterSignUp: () => Effect.fail(new Errors.AuthError({ message: "hook boom" })),
+    });
+
+    const signUpResult = await Effect.runPromise(
+      Effect.gen(function* () {
+        const svc = yield* makeEmailPasswordService();
+        return yield* svc.signUp({ email: "bob@example.com", password: "hunter2!" });
+      }).pipe(
+        Effect.provide(ctx),
+        Effect.provide(composePlugins([failingAfterSignUp]).pipe(Layer.provide(Hooks.Default))),
+      ),
+    );
+
+    // signUp must succeed (no error propagated) even though the hook failed.
+    expect(signUpResult.session).toBeDefined();
+    expect(signUpResult.user.email).toBe("bob@example.com");
+
+    // The session is live in the store — no dangling session.
+    expect(signUpResult.session && localSessions.has(signUpResult.session.id)).toBe(true);
   });
 });

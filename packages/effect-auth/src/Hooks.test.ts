@@ -139,7 +139,7 @@ describe("Hooks - tap error handling", () => {
     expect(result).toBe(authResult);
   });
 
-  it("without isolateTaps, a failing tap aborts the operation", async () => {
+  it("without isolateTaps, a failing after* tap aborts the hook call", async () => {
     const strictTap = makePlugin({
       afterSignIn: Hooks.tap(() => Effect.fail(new Errors.AuthError({ message: "nope" }))),
     });
@@ -156,6 +156,65 @@ describe("Hooks - tap error handling", () => {
     if (result._tag === "Failure") {
       expect(result.failure._tag).toBe("AuthError");
     }
+  });
+});
+
+describe("Hooks - before* transform isolation: isolateTaps must not swallow denies", () => {
+  it("before* deny propagates even when isolateTaps: true is set (primary bug fix)", async () => {
+    // A plugin with isolateTaps:true that also defines a before* transform.
+    // The before* failure must never be swallowed — doing so would silently
+    // allow an operation that the plugin intended to deny (captcha / geo-block
+    // / lockout semantics).
+    const deny = makePlugin(
+      {
+        beforeSignIn: () =>
+          Effect.fail(new Errors.RateLimitError({ message: "blocked", key: "k" })),
+      },
+      { isolateTaps: true },
+    );
+
+    const result = await runWithPlugins(
+      [deny],
+      Effect.gen(function* () {
+        const hooks = yield* Hooks;
+        return yield* Effect.result(hooks.beforeSignIn(signIn("x")));
+      }),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("RateLimitError");
+    }
+  });
+
+  it("before* deny under isolateTaps: true blocks later plugins too", async () => {
+    let laterRan = false;
+
+    const deny = makePlugin(
+      {
+        beforeSignIn: () =>
+          Effect.fail(new Errors.RateLimitError({ message: "blocked", key: "k" })),
+      },
+      { isolateTaps: true },
+    );
+    const later = makePlugin({
+      beforeSignIn: (input) =>
+        Effect.sync(() => {
+          laterRan = true;
+          return input;
+        }),
+    });
+
+    const result = await runWithPlugins(
+      [deny, later],
+      Effect.gen(function* () {
+        const hooks = yield* Hooks;
+        return yield* Effect.result(hooks.beforeSignIn(signIn("x")));
+      }),
+    );
+
+    expect(result._tag).toBe("Failure");
+    expect(laterRan).toBe(false);
   });
 });
 

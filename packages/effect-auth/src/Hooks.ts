@@ -204,24 +204,48 @@ export type PluginImpls = Partial<HookDefs>;
 /** Options controlling how a plugin's hooks behave. */
 export interface MakePluginOptions {
   /**
-   * When `true`, failures from this plugin's hooks are caught, logged via
-   * `Effect.logError`, and swallowed (the value flows on unchanged). Intended
-   * for best-effort, tap-only plugins (e.g. audit logging) where a logging
-   * failure must never break the auth operation.
+   * When `true`, failures from this plugin's **`after*` tap hooks** are caught,
+   * logged via `Effect.logError`, and swallowed (the value flows on unchanged).
+   * Intended for best-effort, tap-only plugins (e.g. audit logging) where a
+   * logging failure must never break the auth operation.
    *
-   * Defaults to `false`: hook failures propagate through the error channel.
-   * Transform hooks rely on propagation for their short-circuit semantics, so
-   * `isolateTaps` should only be enabled for tap-only plugins.
+   * Defaults to `false`: after-hook failures propagate through the error
+   * channel.
+   *
+   * **`before*` transforms are never isolated regardless of this flag.**
+   * Transform failures are the short-circuit / deny mechanism (captcha,
+   * geo-block, lockout, etc.); silencing them would silently allow operations
+   * that should be denied.
    */
   readonly isolateTaps?: boolean;
 }
 
 /**
+ * The set of hook keys that are `after*` taps. Isolation (`isolateTaps: true`)
+ * applies exclusively to these — `before*` transforms are never eligible for
+ * isolation regardless of plugin options.
+ */
+const AFTER_HOOK_KEYS: ReadonlySet<string> = new Set([
+  "afterSignUp",
+  "afterSignIn",
+  "afterSignOut",
+  "afterCreateSession",
+  "afterValidateSession",
+  "afterRequestPasswordReset",
+  "afterResetPassword",
+  "afterCreateVerification",
+  "afterVerifyEmail",
+]);
+
+/**
  * Wrap an inner implementation with a plugin's hooks. For each hook the plugin
  * provides, the result calls `inner` first and pipes its output into the
- * plugin's function (uniform value-threading - this is the same combinator for
- * transforms and taps, so no runtime kind detection is needed). Hooks the
- * plugin doesn't provide fall through to `inner` untouched.
+ * plugin's function.
+ *
+ * Isolation is per-hook-kind, not per-plugin:
+ * - `before*` transforms: **never** isolated — failures propagate (this is the
+ *   deny / short-circuit mechanism). `isolateTaps: true` has no effect here.
+ * - `after*` taps: isolated only when `options.isolateTaps === true`.
  */
 const wrapHooks = (inner: HookDefs, impls: PluginImpls, options: MakePluginOptions): HookDefs => {
   const innerRecord = inner as unknown as Record<string, Transform<unknown>>;
@@ -233,14 +257,19 @@ const wrapHooks = (inner: HookDefs, impls: PluginImpls, options: MakePluginOptio
       continue;
     }
     const innerFn = innerRecord[key as string]!;
+    const isTap = AFTER_HOOK_KEYS.has(key as string);
 
     result[key as string] = (value: unknown) =>
       innerFn(value).pipe(
         Effect.flatMap((innerOut: unknown) => {
           const ran = pluginFn(innerOut);
-          if (!options.isolateTaps) {
+          // before* transforms: failures are the deny mechanism — never swallow
+          // them, even when isolateTaps is set.
+          if (!isTap || !options.isolateTaps) {
             return ran;
           }
+          // after* taps with isolateTaps: true — log and swallow errors so a
+          // tap failure doesn't abort the auth operation.
           return ran.pipe(
             Effect.catch((error) =>
               Effect.logError(`[effect-auth/hooks] '${String(key)}' failed (isolated)`, error).pipe(
