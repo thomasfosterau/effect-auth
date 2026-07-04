@@ -22,4 +22,5 @@ export interface UserStore {
 /**
  * Tag for UserStore service
  */
-export class UserStore extends Context.Service<UserStore, UserStore>()("@effect-auth/UserStore") {}
+export const UserStore: Context.Service<UserStore, UserStore> =
+  Context.Service("@effect-auth/UserStore");
