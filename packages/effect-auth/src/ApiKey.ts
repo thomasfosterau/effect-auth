@@ -59,6 +59,19 @@ export interface ApiKey {
   readonly metadata: Record<string, unknown>;
   /** Remaining uses; decremented on each successful verify. undefined = unlimited */
   readonly remaining?: number;
+  /**
+   * Refill amount applied per elapsed `refillInterval`. When set alongside
+   * `refillInterval`, each successful verify lazily tops up `remaining` by
+   * `floor((now - lastRefillAt) / refillInterval) * refillAmount`, capped at
+   * `refillMax`. Only meaningful when `remaining` is also set.
+   */
+  readonly refillAmount?: number;
+  /** Interval in milliseconds between refill ticks */
+  readonly refillInterval?: number;
+  /** Maximum value `remaining` can be refilled to; defaults to initial `remaining` at creation */
+  readonly refillMax?: number;
+  /** Unix ms timestamp of the last refill tick baseline */
+  readonly lastRefillAt?: number;
   /** Per-key rate limit configuration, enforced by `verifyWithRateLimit` */
   readonly rateLimit?: {
     readonly maxRequests: number;
@@ -111,6 +124,12 @@ export interface ApiKeyCreateOptions {
   readonly metadata?: Record<string, unknown>;
   /** Number of allowed uses; undefined = unlimited */
   readonly remaining?: number;
+  /** Number of uses to restore per `refillInterval` */
+  readonly refillAmount?: number;
+  /** Milliseconds between refill ticks */
+  readonly refillInterval?: number;
+  /** Cap for refill; defaults to `remaining` at creation time */
+  readonly refillMax?: number;
   readonly rateLimit?: {
     readonly maxRequests: number;
     readonly windowMs: number;
@@ -147,6 +166,11 @@ export interface ApiKeyUpdate {
   readonly permissions?: Record<string, readonly string[]>;
   readonly metadata?: Record<string, unknown>;
   readonly remaining?: number;
+  readonly refillAmount?: number;
+  readonly refillInterval?: number;
+  readonly refillMax?: number;
+  /** Override the refill baseline timestamp (useful for testing and admin corrections) */
+  readonly lastRefillAt?: number;
   readonly rateLimit?: {
     readonly maxRequests: number;
     readonly windowMs: number;
@@ -309,6 +333,7 @@ export const makeApiKeyService = (
   /**
    * Run the enabled/expiry/remaining/permission checks against a record
    * found by hash lookup, updating `remaining`/`lastUsedAt` on success.
+   * Due quota refills are applied lazily before the remaining-uses check.
    */
   const verifyRecord = (
     apiKey: ApiKey,
@@ -325,14 +350,36 @@ export const makeApiKeyService = (
         return { valid: false, error: "API key has expired" } satisfies ApiKeyVerifyResult;
       }
 
-      if (apiKey.remaining !== undefined && apiKey.remaining <= 0) {
+      // Lazily apply quota refills before checking remaining
+      let key = apiKey;
+      if (
+        key.remaining !== undefined &&
+        key.refillAmount !== undefined &&
+        key.refillInterval !== undefined &&
+        key.lastRefillAt !== undefined
+      ) {
+        const dueRefills = Math.floor((now - key.lastRefillAt) / key.refillInterval);
+        if (dueRefills > 0) {
+          const refilled =
+            key.refillMax !== undefined
+              ? Math.min(key.remaining + dueRefills * key.refillAmount, key.refillMax)
+              : key.remaining + dueRefills * key.refillAmount;
+          key = {
+            ...key,
+            remaining: refilled,
+            lastRefillAt: key.lastRefillAt + dueRefills * key.refillInterval,
+          };
+        }
+      }
+
+      if (key.remaining !== undefined && key.remaining <= 0) {
         return {
           valid: false,
           error: "API key has no remaining uses",
         } satisfies ApiKeyVerifyResult;
       }
 
-      if (requiredPermissions && !hasRequiredPermissions(apiKey.permissions, requiredPermissions)) {
+      if (requiredPermissions && !hasRequiredPermissions(key.permissions, requiredPermissions)) {
         return {
           valid: false,
           error: "API key is missing required permissions",
@@ -341,8 +388,8 @@ export const makeApiKeyService = (
 
       const store = yield* ApiKeyStore;
       const updated = yield* store.update({
-        ...apiKey,
-        ...(apiKey.remaining !== undefined && { remaining: apiKey.remaining - 1 }),
+        ...key,
+        ...(key.remaining !== undefined && { remaining: key.remaining - 1 }),
         lastUsedAt: now,
         updatedAt: now,
       });
@@ -382,6 +429,9 @@ export const makeApiKeyService = (
           const now = Date.now();
           const expiresIn = options?.expiresIn ?? defaultExpiresIn;
 
+          const hasRefill =
+            options?.refillAmount !== undefined && options?.refillInterval !== undefined;
+
           const apiKey: ApiKey = {
             id: crypto.randomUUID(),
             ...(options?.name !== undefined && { name: options.name }),
@@ -394,6 +444,14 @@ export const makeApiKeyService = (
             ...(options?.permissions !== undefined && { permissions: options.permissions }),
             metadata: options?.metadata ?? {},
             ...(options?.remaining !== undefined && { remaining: options.remaining }),
+            ...(hasRefill && { refillAmount: options!.refillAmount }),
+            ...(hasRefill && { refillInterval: options!.refillInterval }),
+            ...(hasRefill && {
+              lastRefillAt: now,
+              ...(options?.remaining !== undefined && {
+                refillMax: options.refillMax ?? options.remaining,
+              }),
+            }),
             ...(options?.rateLimit !== undefined && { rateLimit: options.rateLimit }),
             createdAt: now,
             updatedAt: now,
@@ -469,6 +527,10 @@ export const makeApiKeyService = (
             ...(updates.permissions !== undefined && { permissions: updates.permissions }),
             ...(updates.metadata !== undefined && { metadata: updates.metadata }),
             ...(updates.remaining !== undefined && { remaining: updates.remaining }),
+            ...(updates.refillAmount !== undefined && { refillAmount: updates.refillAmount }),
+            ...(updates.refillInterval !== undefined && { refillInterval: updates.refillInterval }),
+            ...(updates.refillMax !== undefined && { refillMax: updates.refillMax }),
+            ...(updates.lastRefillAt !== undefined && { lastRefillAt: updates.lastRefillAt }),
             ...(updates.rateLimit !== undefined && { rateLimit: updates.rateLimit }),
             updatedAt: Date.now(),
           });

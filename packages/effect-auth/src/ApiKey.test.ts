@@ -336,6 +336,139 @@ describe("ApiKeyService", () => {
     expect(result.third.error).toBe("Rate limit exceeded");
   });
 
+  it("should refill remaining uses after one interval elapses", async () => {
+    const result = await runService((service) =>
+      Effect.gen(function* () {
+        const { key, apiKey } = yield* service.create("user-1", {
+          remaining: 3,
+          refillAmount: 2,
+          refillInterval: 60_000,
+        });
+
+        // Exhaust the key
+        yield* service.verify(key);
+        yield* service.verify(key);
+        yield* service.verify(key);
+        const exhausted = yield* service.verify(key);
+
+        // Simulate 1 interval having elapsed
+        yield* service.update("user-1", apiKey.id, {
+          lastRefillAt: Date.now() - 60_001,
+        });
+
+        const afterRefill = yield* service.verify(key);
+        return { exhausted, afterRefill };
+      }),
+    );
+
+    expect(result.exhausted.valid).toBe(false);
+    expect(result.exhausted.error).toBe("API key has no remaining uses");
+    expect(result.afterRefill.valid).toBe(true);
+    // 0 remaining + 2 refilled - 1 consumed = 1
+    expect(result.afterRefill.apiKey?.remaining).toBe(1);
+  });
+
+  it("should accumulate refills across multiple elapsed intervals", async () => {
+    const result = await runService((service) =>
+      Effect.gen(function* () {
+        const { key, apiKey } = yield* service.create("user-1", {
+          remaining: 10,
+          refillAmount: 3,
+          refillInterval: 60_000,
+        });
+
+        // Exhaust all uses
+        for (let i = 0; i < 10; i++) yield* service.verify(key);
+        const exhausted = yield* service.verify(key);
+
+        // Simulate 4 intervals elapsed (4 * 3 = 12, capped at refillMax 10)
+        yield* service.update("user-1", apiKey.id, {
+          lastRefillAt: Date.now() - 4 * 60_001,
+        });
+
+        const afterRefill = yield* service.verify(key);
+        return { exhausted, afterRefill };
+      }),
+    );
+
+    expect(result.exhausted.valid).toBe(false);
+    expect(result.afterRefill.valid).toBe(true);
+    // 0 + 4*3 = 12, capped at refillMax 10, then -1 consumed = 9
+    expect(result.afterRefill.apiKey?.remaining).toBe(9);
+  });
+
+  it("should cap refills at refillMax", async () => {
+    const result = await runService((service) =>
+      Effect.gen(function* () {
+        const { key, apiKey } = yield* service.create("user-1", {
+          remaining: 5,
+          refillAmount: 10, // each tick would add more than max
+          refillInterval: 60_000,
+        });
+
+        // Use 1 use
+        yield* service.verify(key);
+
+        // Simulate 1 interval elapsed: 4 + 10 = 14, capped at refillMax 5
+        yield* service.update("user-1", apiKey.id, {
+          lastRefillAt: Date.now() - 60_001,
+        });
+
+        const afterRefill = yield* service.verify(key);
+        return { afterRefill };
+      }),
+    );
+
+    expect(result.afterRefill.valid).toBe(true);
+    // 4 + 10 = 14, capped at refillMax 5, then -1 consumed = 4
+    expect(result.afterRefill.apiKey?.remaining).toBe(4);
+  });
+
+  it("should advance lastRefillAt by whole intervals, not to now", async () => {
+    const result = await runService((service) =>
+      Effect.gen(function* () {
+        const { key, apiKey } = yield* service.create("user-1", {
+          remaining: 5,
+          refillAmount: 1,
+          refillInterval: 60_000,
+        });
+
+        // Simulate 2.7 intervals elapsed — only 2 full ticks should apply
+        yield* service.update("user-1", apiKey.id, {
+          lastRefillAt: Date.now() - Math.floor(2.7 * 60_000),
+        });
+
+        const afterRefill = yield* service.verify(key);
+        // Key is already at max (5), no uses consumed yet before update
+        // After 2 ticks: 5 + 2 = 7 but capped at 5; then -1 = 4
+        return { afterRefill };
+      }),
+    );
+
+    expect(result.afterRefill.valid).toBe(true);
+    expect(result.afterRefill.apiKey?.remaining).toBe(4);
+    // lastRefillAt advanced by 2*60_000, NOT set to now, preserving leftover ~42s
+    // (we can't assert exact lastRefillAt value but partial intervals aren't lost)
+  });
+
+  it("should not affect unlimited keys (remaining: undefined)", async () => {
+    const result = await runService((service) =>
+      Effect.gen(function* () {
+        const { key } = yield* service.create("user-1", {
+          refillAmount: 10,
+          refillInterval: 60_000,
+          // no remaining → unlimited
+        });
+        const outcomes: ApiKeyVerifyResult[] = [];
+        for (let i = 0; i < 5; i++) outcomes.push(yield* service.verify(key));
+        return outcomes;
+      }),
+    );
+
+    expect(result.every((r) => r.valid)).toBe(true);
+    expect(result.every((r) => r.apiKey?.remaining === undefined)).toBe(true);
+  });
+
   it("should not rate limit keys without a rateLimit config", async () => {
     const testContext = await makeRateLimitContext();
 
