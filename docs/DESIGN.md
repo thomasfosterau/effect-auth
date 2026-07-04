@@ -55,7 +55,7 @@ const app = Effect.gen(function* () {
 2. `class SessionManagerTag extends Context.Service<SessionManagerTag, SessionManager>()("@effect-auth/SessionManager")`;
 3. `export const SessionManager = SessionManagerTag` — bare ergonomic alias
    (**68** such dual exports, one per tag; only `Hooks` has none);
-4. `makeSessionManager(config)` (Effect) + `export const SessionManagerLayer =
+4. `SessionService.make(config)` (Effect) + `export const SessionManagerLayer =
 (config) => Layer.effect(...)` (standalone const).
 
 **Problem.** Two names for every service (`XServiceTag` vs `X`) double the API
@@ -260,8 +260,6 @@ params?)` helper in HTTP handlers falls back to the error's own `.message`
 6. **Honest unions:** public service methods keep precise unions; `HookError`
    remains a type alias, now expanded to include `AccountLockedError`,
    `UserBannedError`, `CaptchaError`, `PwnedPasswordError`.
-7. **`normalizeEmail` consolidated:** `email.trim().toLowerCase()` was duplicated
-   across 9 files; extracted to `utils.ts` and imported everywhere.
 
 ```ts
 // Before: AuthError overloaded for all outcomes
@@ -547,9 +545,6 @@ All approved items are applied and changeset-backed.
    table + framing + quick-start (the old §2 example never provided `Hooks`
    and would not have type-checked), `CONTRIBUTING.md` structure/paths,
    `HOOKS_DESIGN.md` status header — D11.
-6. Error-model overhaul (D4): specific flow-outcome tags, stable `code` field on
-   all domain errors, `ErrorCode` const, `Messages` service + English catalog,
-   `normalizeEmail` consolidated to `utils.ts`, HTTP status fixes — D4.
+6. Error-model overhaul (D4): specific flow-outcome tags, stable `code` field on all domain errors, `ErrorCode` const, `Messages` service + English catalog, HTTP status fixes — D4.
 
-Changesets accompany 1 (minor: effect-auth), 3 (patch: effect-auth), 4 (minor:
-@effect-auth/client), 6 (minor: effect-auth).
+Changesets accompany 1 (minor: effect-auth), 3 (patch: effect-auth), 4 (minor: @effect-auth/client), 6 (minor: effect-auth).

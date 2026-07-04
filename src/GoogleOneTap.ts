@@ -31,7 +31,7 @@ import { Context, Data, Effect, Layer } from "effect";
 import type { AuthError } from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { SessionManager } from "./Session.ts";
-import { OAuthUserStore, generateNonce, verifyIdToken } from "./OAuth.ts";
+import { OAuthUserStore, generateNonce, verifyIdToken } from "./OAuth/OAuth.ts";
 import type * as Types from "./Types.ts";
 
 /** Failure to verify a One Tap credential or complete the sign-in. */

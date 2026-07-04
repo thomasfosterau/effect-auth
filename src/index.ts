@@ -21,7 +21,7 @@ export * from "./AccountLockoutPlugin.ts";
 export * from "./CaptchaPlugin.ts";
 
 /** Have-I-Been-Pwned compromised-password checks. */
-export * from "./HibpPlugin.ts";
+export * from "./HaveIBeenPwned.ts";
 
 /** Records the sign-in method into session attributes (last-login-method). */
 export * from "./LastLoginMethodPlugin.ts";

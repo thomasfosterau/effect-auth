@@ -52,7 +52,7 @@ import {
   type OidcClient,
 } from "./OidcProvider.ts";
 import { SsoService, SsoProviderStore, type SsoProvider } from "./Sso.ts";
-import { OAuthStateStore, OAuthUserStore } from "./OAuth.ts";
+import { OAuthStateStore, OAuthUserStore } from "./OAuth/OAuth.ts";
 import { hashToken } from "./TokenHash.ts";
 import { GoogleOneTapNonceStore, GoogleOneTapService } from "./GoogleOneTap.ts";
 import {

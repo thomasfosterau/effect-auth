@@ -172,6 +172,7 @@ import {
 } from "@oslojs/webauthn";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
+import type { Uint8Array } from "effect/Schema";
 
 /**
  * COSE algorithm identifiers this service can register and verify:

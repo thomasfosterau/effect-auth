@@ -12,13 +12,9 @@
  * @module argon2
  */
 import { Effect, Layer } from "effect";
-import {
-  HashingError,
-  PasswordHasher,
-  type PasswordHasherShape,
-  type HashedPassword,
-} from "effect-auth";
 import { hash as argon2Hash, verify as argon2Verify } from "@node-rs/argon2";
+import { PasswordHasher, type HashedPassword, type PasswordHasherShape } from "./Password.ts";
+import { HashingError } from "./Errors.ts";
 
 /** PHC/`parseAlgorithm` identifier for the hashes this hasher produces. */
 export const ARGON2ID = "argon2id";

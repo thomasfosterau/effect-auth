@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect } from "effect";
-import { makeMultiAlgorithmVerifier, makePBKDF2Hasher } from "effect-auth";
 import { makeArgon2Hasher, ARGON2ID } from "./Argon2.js";
+import { makeMultiAlgorithmVerifier, makePBKDF2Hasher } from "./Password.js";
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
 

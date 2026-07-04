@@ -61,7 +61,7 @@ import {
   EmailVerificationStore,
 } from "./EmailVerification.ts";
 import { type MagicLinkStoreShape, MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
-import { type OAuthState, type OAuthStateStoreShape, OAuthStateStore } from "./OAuth.ts";
+import { type OAuthState, type OAuthStateStoreShape, OAuthStateStore } from "./OAuth/OAuth.ts";
 import {
   type PasswordResetStoreShape,
   PasswordResetStore,

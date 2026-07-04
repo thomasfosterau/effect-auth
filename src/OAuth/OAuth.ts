@@ -6,10 +6,10 @@
  */
 
 import { Context, Effect, Layer } from "effect";
-import { makeAes256GcmCipher } from "./Cipher.ts";
-import type { TokenCipher } from "./Cipher.ts";
-export type { TokenCipher } from "./Cipher.ts";
-export { makeAes256GcmCipher } from "./Cipher.ts";
+import { makeAes256GcmCipher } from "../Cipher.ts";
+import type { TokenCipher } from "../Cipher.ts";
+export type { TokenCipher } from "../Cipher.ts";
+export { makeAes256GcmCipher } from "../Cipher.ts";
 import {
   AuthError,
   OAuthProviderError,
@@ -21,11 +21,11 @@ import {
   OAuthAccountNotFoundError,
   OAuthNoRefreshTokenError,
   UserNotFoundError,
-} from "./Errors.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
-import { SessionManager } from "./Session.ts";
-import type * as Types from "./Types.ts";
-import { normalizeEmail } from "./utils.ts";
+} from "../Errors.ts";
+import { Hooks, type HookError } from "../Hooks.ts";
+import { SessionManager } from "../Session.ts";
+import type * as Types from "../Types.ts";
+import { normalizeEmail } from "../utils.ts";
 
 /**
  * OAuth2 provider configuration

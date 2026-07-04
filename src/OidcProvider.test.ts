@@ -16,7 +16,7 @@ import {
 } from "./PasswordReset.js";
 import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
 import { JwtKeyStore, type JwtKeyPair, type JwtKeyStoreShape, JwtService } from "./Jwt.js";
-import { generatePKCE, verifyIdToken } from "./OAuth.js";
+import { generatePKCE, verifyIdToken } from "./OAuth/OAuth.js";
 import {
   makeOidcProviderService,
   OidcClientStore,

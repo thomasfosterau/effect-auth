@@ -24,7 +24,7 @@ import {
   OAuthStateStore,
   OAuthUserStore,
   type OAuthProviderConfig,
-} from "./OAuth.ts";
+} from "./OAuth/OAuth.ts";
 import * as crypto from "node:crypto";
 import type * as Types from "./Types.ts";
 

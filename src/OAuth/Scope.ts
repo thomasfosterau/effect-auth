@@ -8,7 +8,7 @@
  */
 
 import { Effect } from "effect";
-import * as Errors from "./Errors.ts";
+import * as Errors from "../Errors.ts";
 
 /**
  * Parse a space-delimited scope string into an array of scopes, dropping empty

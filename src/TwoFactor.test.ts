@@ -11,7 +11,6 @@ import {
 import { makeAes256GcmCipher } from "./Cipher.js";
 import { type CreateUserInput, EmailPasswordStore } from "./EmailPassword.js";
 import { generateTOTP } from "./Otp.js";
-import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
 import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 
@@ -132,13 +131,13 @@ const sessionConfig: SessionConfig = {
 const makeTestContext = async () => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
-      makeSessionManager(sessionConfig),
+      SessionService.make(sessionConfig),
       Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
     ),
   );
 
   return Context.merge(
-    Context.make(SessionManager, sessionManager),
+    Context.make(SessionService, sessionManager),
     Context.merge(
       Context.make(SessionStore, sessionStore),
       Context.merge(

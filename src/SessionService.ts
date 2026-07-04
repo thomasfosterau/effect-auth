@@ -4,88 +4,13 @@ import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { hashToken } from "./TokenHash.ts";
-
-/**
- * Session store interface for managing session persistence.
- *
- * **All `session.id` values and `sessionId` parameters at this layer are
- * SHA-256 hex digests** (produced by `hashToken` from `effect-auth`). The raw
- * bearer token is never persisted; only its hash is stored so that a stolen
- * database cannot be used to replay sessions.
- *
- * Users should implement this interface with their preferred storage backend
- * (e.g., Redis, PostgreSQL, MongoDB, etc.)
- */
-export interface SessionStoreShape {
-  /**
-   * Create a new session. `session.id` must be the SHA-256 hash of the raw
-   * bearer token.
-   */
-  readonly create: (session: Types.Session) => Effect.Effect<Types.Session, Errors.AuthError>;
-
-  /**
-   * Get a session by its token hash, or `null` when no such session exists.
-   */
-  readonly get: (sessionId: string) => Effect.Effect<Types.Session | null, Errors.AuthError>;
-
-  /**
-   * Update a session
-   */
-  readonly update: (session: Types.Session) => Effect.Effect<Types.Session, Errors.AuthError>;
-
-  /**
-   * Delete a session
-   */
-  readonly delete: (sessionId: string) => Effect.Effect<void, Errors.AuthError>;
-
-  /**
-   * Delete all sessions for a user
-   */
-  readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-
-  /**
-   * List all sessions for a user
-   */
-  readonly listByUserId: (
-    userId: string,
-  ) => Effect.Effect<ReadonlyArray<Types.Session>, Errors.AuthError>;
-}
-
-/**
- * Tag for SessionStore service
- */
-export class SessionStore extends Context.Service<SessionStore, SessionStoreShape>()(
-  "@effect-auth/SessionStore",
-) {}
-
-/**
- * User store interface for managing user persistence
- * Users should implement this interface with their preferred storage backend
- */
-export interface UserStoreShape {
-  /**
-   * Get a user by ID, or `null` when no such user exists.
-   */
-  readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
-
-  /**
-   * Get user credentials (hashed password), or `null` when the user does not
-   * exist or has no password set.
-   */
-  readonly getCredentials: (userId: string) => Effect.Effect<string | null, Errors.AuthError>;
-}
-
-/**
- * Tag for UserStore service
- */
-export class UserStore extends Context.Service<UserStore, UserStoreShape>()(
-  "@effect-auth/UserStore",
-) {}
+import type { SessionStore } from "./SessionStore.ts";
+import type { UserStore } from "./UserStore.ts";
 
 /**
  * Session manager service
  */
-export interface SessionManagerShape {
+export interface SessionService {
   /**
    * Create a new session for a user
    */
@@ -147,14 +72,14 @@ export interface SessionManagerShape {
 /**
  * Tag for SessionManager service
  */
-export class SessionManager extends Context.Service<SessionManager, SessionManagerShape>()(
-  "@effect-auth/SessionManager",
+export class SessionService extends Context.Service<SessionService, SessionService>()(
+  "@effect-auth/SessionService",
 ) {
   /**
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: Types.SessionConfig) =>
-    Layer.effect(SessionManager, makeSessionManager(config));
+    Layer.effect(SessionService, make(config));
 }
 
 /**
@@ -170,9 +95,9 @@ const generateSessionId = (): string => {
 /**
  * Create a SessionManager implementation
  */
-export const makeSessionManager = (
+export const make = (
   config: Types.SessionConfig,
-): Effect.Effect<SessionManagerShape, never, SessionStore | UserStore> =>
+): Effect.Effect<SessionService, never, SessionStore | UserStore> =>
   Effect.gen(function* () {
     const sessionStore = yield* SessionStore;
     const userStore = yield* UserStore;

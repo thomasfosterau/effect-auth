@@ -161,20 +161,16 @@ own layers when the static `X.layer(config)` isn't flexible enough:
 
 ```typescript
 import { Effect, Layer } from "effect";
-import * as Auth from "effect-auth";
+import { SessionService } from "effect-auth";
 
 const customSessionLayer = Layer.effect(
-  Auth.SessionManager,
+  SessionService.SessionManager,
   Effect.gen(function* () {
     // ...acquire resources, read config, etc.
-    return yield* Auth.makeSessionManager(sessionConfig);
+    return yield* SessionService.make(sessionConfig);
   }),
 );
 ```
-
-> **Note**: the `Request`/`Resolver` exports (`CreateSessionRequest`,
-> `makeCreateSessionResolver`, ...) are deprecated and scheduled for removal
-> in 1.0 — call the services directly (see `DESIGN.md`, D6).
 
 ## Authorization
 

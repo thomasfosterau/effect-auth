@@ -39,10 +39,6 @@
   },
   "scripts": {
     "prepare": "vp config && bunx effect-language-service patch",
-    "prepublishOnly": "nx run-many -t build,typecheck,test --projects effect-auth",
-    "changeset": "nx changeset effect-auth",
-    "version": "nx version effect-auth",
-    "release": "nx run effect-auth:build && nx run effect-auth:release",
     "build": "tsc",
     "test": "vp test run",
     "typecheck": "tsc --noEmit && vp test --typecheck --run",
@@ -55,7 +51,7 @@
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
     "@effect/docgen": "^0.5.2",
-    "@effect/language-service": "^0.86.4",
+    "@effect/l@anguage-service": "^0.86.4",
     "@types/node": "^26.1.0",
     "effect": ">=4.0.0-beta.93",
     "tsx": "^4.19.0",
