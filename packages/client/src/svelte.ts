@@ -54,6 +54,7 @@ export const listSessionsStore = (client: AuthClient): ListSessionsStore => {
   let state: ListSessionsState = { data: null, isPending: true, error: null };
   const subscribers = new Set<(value: ListSessionsState) => void>();
   let fetched = false;
+  let refetchSeq = 0;
 
   const set = (next: ListSessionsState) => {
     state = next;
@@ -63,10 +64,17 @@ export const listSessionsStore = (client: AuthClient): ListSessionsStore => {
   };
 
   const refetch = () => {
+    const seq = ++refetchSeq;
     set({ ...state, isPending: true });
     client.listSessions().then(
-      (sessions) => set({ data: sessions, isPending: false, error: null }),
-      (cause: AuthClientError) => set({ data: null, isPending: false, error: cause }),
+      (sessions) => {
+        if (seq !== refetchSeq) return;
+        set({ data: sessions, isPending: false, error: null });
+      },
+      (cause: AuthClientError) => {
+        if (seq !== refetchSeq) return;
+        set({ data: null, isPending: false, error: cause });
+      },
     );
   };
 

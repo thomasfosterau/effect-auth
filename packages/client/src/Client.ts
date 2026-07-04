@@ -165,8 +165,9 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
 
   // --- Session store ----------------------------------------------------------
 
-  let state: SessionState = { data: null, isPending: false, error: null };
+  let state: SessionState = { data: null, isPending: true, error: null };
   let fetchedOnce = false;
+  let refetchSeq = 0;
   const listeners = new Set<() => void>();
 
   const setState = (next: SessionState): void => {
@@ -184,13 +185,16 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   };
 
   const refetch = async (): Promise<void> => {
+    const seq = ++refetchSeq;
     setState({ ...state, isPending: true });
     try {
       const data = await getSession();
+      if (seq !== refetchSeq) return;
       setState({ data, isPending: false, error: null });
     } catch (error) {
+      if (seq !== refetchSeq) return;
       setState({
-        data: null,
+        data: state.data,
         isPending: false,
         error:
           error instanceof AuthClientError
