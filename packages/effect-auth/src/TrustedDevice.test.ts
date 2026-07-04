@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect } from "effect";
+import { AuthError } from "./Errors.js";
 import { Hooks } from "./Hooks.js";
 import {
   makeTrustedDeviceService,
@@ -187,7 +188,7 @@ describe("TrustedDeviceService", () => {
 describe("makeTrustedDeviceGateShape", () => {
   const innerRequired = {
     required: (_user: User) => Effect.succeed(true),
-    begin: (_user: User) => Effect.fail(new (class extends Error {})()), // not exercised in these tests
+    begin: (_user: User) => Effect.fail(new AuthError({ message: "not exercised" })),
   } as any;
 
   it("required returns false when a valid device token is in TrustedDeviceCookieRef", async () => {
