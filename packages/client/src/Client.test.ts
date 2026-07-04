@@ -103,3 +103,92 @@ describe("createAuthClient", () => {
     expect((err as AuthClientError).status).toBe(404);
   });
 });
+
+describe("session store correctness", () => {
+  it("initializes isPending:true to avoid a signed-out flash on first paint", () => {
+    const { client } = makeClient();
+    const initial = client.session.get();
+    expect(initial.isPending).toBe(true);
+    expect(initial.data).toBeNull();
+    expect(initial.error).toBeNull();
+  });
+
+  it("preserves session data when a refetch fails with a transient (non-401) error", async () => {
+    const server = makeServerFixture();
+    let injectError = false;
+    const base = makeCookieJarFetch(server.handler);
+
+    const client = createAuthClient({
+      baseUrl: "http://client.test",
+      fetch: (input, init?) => {
+        if (injectError && String(input).endsWith("/session")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ message: "Service Unavailable" }), {
+              status: 503,
+              headers: { "content-type": "application/json" },
+            }),
+          );
+        }
+        return base(input, init);
+      },
+    });
+
+    await client.signUp({ email: EMAIL, password: PW });
+    expect(client.session.get().data?.user.email).toBe(EMAIL);
+
+    injectError = true;
+    await client.session.refetch();
+
+    const after = client.session.get();
+    expect(after.data?.user.email).toBe(EMAIL);
+    expect(after.error).toBeInstanceOf(AuthClientError);
+    expect((after.error as AuthClientError).status).toBe(503);
+    expect(after.isPending).toBe(false);
+  });
+
+  it("discards stale refetch responses — last dispatch wins", async () => {
+    let firstResolve!: () => void;
+    let callCount = 0;
+
+    const client = createAuthClient({
+      baseUrl: "http://client.test",
+      fetch: (input) => {
+        if (String(input).endsWith("/session")) {
+          callCount++;
+          if (callCount === 1) {
+            // First (stale) call: held until manually released with a 500.
+            return new Promise<Response>((resolve) => {
+              firstResolve = () =>
+                resolve(
+                  new Response(JSON.stringify({ message: "Internal Server Error" }), {
+                    status: 500,
+                    headers: { "content-type": "application/json" },
+                  }),
+                );
+            });
+          }
+          // Second (newer) call: resolves immediately as signed-out.
+          return Promise.resolve(new Response(null, { status: 401 }));
+        }
+        return Promise.resolve(new Response(null, { status: 404 }));
+      },
+    });
+
+    const first = client.session.refetch();
+    const second = client.session.refetch();
+    await second; // newer refetch settled: signed out, no error
+
+    expect(client.session.get().data).toBeNull();
+    expect(client.session.get().error).toBeNull();
+    expect(client.session.get().isPending).toBe(false);
+
+    // Release the stale first request (500 error).
+    firstResolve();
+    await first;
+
+    // Stale response discarded — state must not change.
+    expect(client.session.get().data).toBeNull();
+    expect(client.session.get().error).toBeNull();
+    expect(client.session.get().isPending).toBe(false);
+  });
+});

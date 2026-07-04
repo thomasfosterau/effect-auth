@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vite-plus/test";
-import { createAuthClient } from "./Client.js";
+import { createAuthClient, type AuthClient } from "./Client.js";
 import { listSessionsStore, sessionStore, type ListSessionsState } from "./svelte.js";
 import { useListSessions as useVueListSessions, useSession as useVueSession } from "./vue.js";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.js";
+import type { SessionView } from "./types.js";
 
 const EMAIL = "alice@adapters.test";
 const PW = "password-123";
@@ -79,6 +80,51 @@ describe("svelte listSessionsStore", () => {
     await nextTick();
     expect(seen[seen.length - 1]?.data?.length).toBe(1);
 
+    unsubscribe();
+  });
+
+  it("discards stale listSessions responses — last refetch wins", async () => {
+    let resolveFirst!: (sessions: readonly SessionView[]) => void;
+    let callCount = 0;
+
+    const fakeClient = {
+      listSessions: (): Promise<readonly SessionView[]> => {
+        callCount++;
+        if (callCount === 2) {
+          // First explicit refetch: slow.
+          return new Promise((resolve) => {
+            resolveFirst = resolve;
+          });
+        }
+        // Initial fetch and second explicit refetch: resolve immediately with [] sessions.
+        return Promise.resolve([]);
+      },
+    } as unknown as AuthClient;
+
+    const store = listSessionsStore(fakeClient);
+    const seen: ListSessionsState[] = [];
+    const unsubscribe = store.subscribe((s) => seen.push(s));
+    await nextTick(); // let the initial fetch settle
+
+    const initialLen = seen[seen.length - 1]?.data?.length ?? -1;
+    expect(initialLen).toBe(0);
+
+    // First refetch (slow/stale), then second refetch immediately.
+    store.refetch();
+    store.refetch();
+    await nextTick(); // second refetch settles
+
+    // Second refetch resolved with [].
+    expect(seen[seen.length - 1]?.data?.length).toBe(0);
+    expect(seen[seen.length - 1]?.isPending).toBe(false);
+
+    // Release the stale first refetch with different data.
+    const staleSession = { id: "stale" } as unknown as SessionView;
+    resolveFirst([staleSession]);
+    await nextTick();
+
+    // Stale response discarded — data still reflects the second refetch.
+    expect(seen[seen.length - 1]?.data?.length).toBe(0);
     unsubscribe();
   });
 });
