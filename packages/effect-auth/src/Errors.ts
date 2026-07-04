@@ -54,6 +54,8 @@ export const ErrorCode = {
   OAUTH_ACCOUNT_CONFLICT: "OAUTH_ACCOUNT_CONFLICT",
   OAUTH_ACCOUNT_NOT_FOUND: "OAUTH_ACCOUNT_NOT_FOUND",
   OAUTH_NO_REFRESH_TOKEN: "OAUTH_NO_REFRESH_TOKEN",
+  OAUTH_LAST_CREDENTIAL: "OAUTH_LAST_CREDENTIAL",
+  OAUTH_EMAIL_MISMATCH: "OAUTH_EMAIL_MISMATCH",
 
   // Misc
   RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
@@ -471,6 +473,32 @@ export class OAuthNoRefreshTokenError extends Data.TaggedError("OAuthNoRefreshTo
 }> {
   get code(): typeof ErrorCode.OAUTH_NO_REFRESH_TOKEN {
     return ErrorCode.OAUTH_NO_REFRESH_TOKEN;
+  }
+}
+
+/**
+ * Unlinking would remove the user's last sign-in credential. Pass
+ * `allowUnlinkingAll: true` to override.
+ */
+export class OAuthLastCredentialError extends Data.TaggedError("OAuthLastCredentialError")<{
+  readonly message: string;
+  readonly userId: string;
+}> {
+  get code(): typeof ErrorCode.OAUTH_LAST_CREDENTIAL {
+    return ErrorCode.OAUTH_LAST_CREDENTIAL;
+  }
+}
+
+/**
+ * The OAuth account's provider email differs from the user's current email.
+ * Pass `allowDifferentEmails: true` in OAuthServiceOptions to override.
+ */
+export class OAuthEmailMismatchError extends Data.TaggedError("OAuthEmailMismatchError")<{
+  readonly message: string;
+  readonly provider: string;
+}> {
+  get code(): typeof ErrorCode.OAUTH_EMAIL_MISMATCH {
+    return ErrorCode.OAUTH_EMAIL_MISMATCH;
   }
 }
 

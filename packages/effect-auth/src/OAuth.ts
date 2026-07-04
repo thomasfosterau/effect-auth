@@ -20,6 +20,8 @@ import {
   OAuthAccountConflictError,
   OAuthAccountNotFoundError,
   OAuthNoRefreshTokenError,
+  OAuthLastCredentialError,
+  OAuthEmailMismatchError,
   UserNotFoundError,
 } from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
@@ -175,6 +177,12 @@ export interface OAuthAccountStoreShape {
   readonly linkToUser: (userId: string, account: OAuthAccount) => Effect.Effect<void, AuthError>;
   readonly unlinkFromUser: (userId: string, provider: string) => Effect.Effect<void, AuthError>;
   readonly delete: (provider: string, providerId: string) => Effect.Effect<void, AuthError>;
+  /**
+   * Optional: return whether the user has a password hash set. Used by
+   * `unlinkAccount` to determine whether the account being unlinked is the
+   * user's last credential. When absent, no password is assumed.
+   */
+  readonly hasPassword?: (userId: string) => Effect.Effect<boolean, AuthError>;
 }
 
 /**
@@ -195,6 +203,14 @@ export interface OAuthUserStoreShape {
   readonly getUser: (userId: string) => Effect.Effect<Types.User, UserNotFoundError>;
   readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, AuthError>;
   readonly createUser: (input: OAuthCreateUserInput) => Effect.Effect<Types.User, AuthError>;
+  /**
+   * Optional: update profile fields (name / image) on an existing user.
+   * Used by `linkAccount` when `updateUserInfoOnLink: true` is set.
+   */
+  readonly updateUser?: (
+    userId: string,
+    update: { readonly name?: string; readonly image?: string },
+  ) => Effect.Effect<Types.User, AuthError>;
 }
 
 /**
@@ -691,14 +707,21 @@ export interface OAuthServiceShape {
     | OAuthProviderError
     | OAuthStateNotFoundError
     | OAuthStateExpiredError
-    | OAuthAccountConflictError,
-    OAuthStateStore | OAuthAccountStore
+    | OAuthAccountConflictError
+    | OAuthEmailMismatchError
+    | UserNotFoundError,
+    OAuthStateStore | OAuthAccountStore | OAuthUserStore
   >;
 
   readonly unlinkAccount: (
     userId: string,
     provider: string,
-  ) => Effect.Effect<void, AuthError | OAuthAccountNotFoundError, OAuthAccountStore>;
+    options?: { readonly allowUnlinkingAll?: boolean },
+  ) => Effect.Effect<
+    void,
+    AuthError | OAuthAccountNotFoundError | OAuthLastCredentialError,
+    OAuthAccountStore
+  >;
 
   readonly refreshAccessToken: (
     userId: string,
@@ -749,6 +772,28 @@ export interface OAuthServiceOptions {
    * Rotation requires re-encrypting every stored token with the new key.
    */
   readonly encryptTokens?: { readonly secret: string } | { readonly cipher: TokenCipher };
+
+  /**
+   * Providers whose email address is unconditionally trusted for auto-linking
+   * in `signInWithCallback`, even when the provider reports
+   * `email_verified: false`. Applies on top of `autoLinkByVerifiedEmail`.
+   * Defaults to `[]` (no provider is trusted beyond the verified-email check).
+   */
+  readonly trustedProviders?: readonly string[];
+
+  /**
+   * Allow `linkAccount` to succeed even when the OAuth provider's email
+   * differs from the user's current account email. Defaults to `false`
+   * (reject cross-email linking).
+   */
+  readonly allowDifferentEmails?: boolean;
+
+  /**
+   * Refresh the user's `name` and `image` fields from the provider profile
+   * when `linkAccount` succeeds. Requires `OAuthUserStoreShape.updateUser` to
+   * be implemented; silently skipped otherwise. Defaults to `false`.
+   */
+  readonly updateUserInfoOnLink?: boolean;
 }
 
 /**
@@ -759,6 +804,9 @@ export const makeOAuthService = (
   options: OAuthServiceOptions = {},
 ): Effect.Effect<OAuthServiceShape, never> => {
   const autoLinkByVerifiedEmail = options.autoLinkByVerifiedEmail ?? true;
+  const trustedProviders = options.trustedProviders ?? [];
+  const allowDifferentEmails = options.allowDifferentEmails ?? false;
+  const updateUserInfoOnLink = options.updateUserInfoOnLink ?? false;
 
   const cipher: TokenCipher | null = options.encryptTokens
     ? "cipher" in options.encryptTokens
@@ -1040,7 +1088,8 @@ export const makeOAuthService = (
           }
 
           let user: Types.User | null = null;
-          if (autoLinkByVerifiedEmail && emailVerified) {
+          const isTrustedProvider = trustedProviders.includes(stateEntry.provider);
+          if ((autoLinkByVerifiedEmail && emailVerified) || isTrustedProvider) {
             user = yield* userStore.getUserByEmail(email);
           }
 
@@ -1085,6 +1134,7 @@ export const makeOAuthService = (
           // This follows the same flow as handleCallback but links to existing user
           const stateStore = yield* OAuthStateStore;
           const accountStore = yield* OAuthAccountStore;
+          const userStore = yield* OAuthUserStore;
 
           // Verify state
           const stateEntry = yield* stateStore.get(state);
@@ -1136,6 +1186,22 @@ export const makeOAuthService = (
           // Clean up state
           yield* stateStore.delete(state);
 
+          // Email-mismatch guard: reject if the provider email differs from the
+          // user's current account email (overridable with allowDifferentEmails).
+          if (!allowDifferentEmails && userInfo.email) {
+            const currentUser = yield* userStore.getUser(userId);
+            const providerEmail = normalizeEmail(userInfo.email);
+            const userEmail = normalizeEmail(currentUser.email);
+            if (providerEmail !== userEmail) {
+              return yield* Effect.fail(
+                new OAuthEmailMismatchError({
+                  message: `Cannot link ${provider} account: provider email (${providerEmail}) differs from account email (${userEmail})`,
+                  provider,
+                }),
+              );
+            }
+          }
+
           // Check if this OAuth account is already linked to another user
           const existingAccount = yield* accountStore.get(provider, userInfo.id);
 
@@ -1172,10 +1238,20 @@ export const makeOAuthService = (
             yield* accountStore.create(yield* encryptAccount(account));
           }
 
+          // Refresh user profile fields from the provider if requested
+          if (updateUserInfoOnLink && userStore.updateUser) {
+            const profileUpdate: { name?: string; image?: string } = {};
+            if (userInfo.name !== undefined) profileUpdate.name = userInfo.name;
+            if (userInfo.picture !== undefined) profileUpdate.image = userInfo.picture;
+            if (profileUpdate.name !== undefined || profileUpdate.image !== undefined) {
+              yield* userStore.updateUser(userId, profileUpdate);
+            }
+          }
+
           return account;
         }),
 
-      unlinkAccount: (userId, provider) =>
+      unlinkAccount: (userId, provider, opts) =>
         Effect.gen(function* () {
           const accountStore = yield* OAuthAccountStore;
           const accounts = yield* accountStore.getByUserId(userId);
@@ -1188,6 +1264,21 @@ export const makeOAuthService = (
                 provider,
               }),
             );
+          }
+
+          if (!(opts?.allowUnlinkingAll ?? false)) {
+            const remainingOAuth = accounts.filter((a) => a.provider !== provider).length;
+            const hasPass = accountStore.hasPassword
+              ? yield* accountStore.hasPassword(userId)
+              : false;
+            if (remainingOAuth === 0 && !hasPass) {
+              return yield* Effect.fail(
+                new OAuthLastCredentialError({
+                  message: `Cannot unlink the last sign-in credential for user ${userId}`,
+                  userId,
+                }),
+              );
+            }
           }
 
           yield* accountStore.delete(provider, account.providerId);

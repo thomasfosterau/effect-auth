@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
-import { AuthError } from "./Errors.js";
+import { AuthError, OAuthLastCredentialError, OAuthEmailMismatchError } from "./Errors.js";
+import { Hooks } from "./Hooks.js";
+import { SessionManager } from "./Session.js";
 import {
   makeOAuthProvider,
   makeOAuthService,
@@ -11,6 +13,7 @@ import {
   makeAppleClientSecret,
   OAuthStateStore,
   OAuthAccountStore,
+  OAuthUserStore,
   type OAuthState,
   type OAuthAccount,
   type OAuthProvider,
@@ -854,5 +857,521 @@ describe("OAuthService encryptTokens", () => {
     );
 
     expect(capturedRefreshToken).toBe(PLAIN_REFRESH);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// unlinkAccount — last-credential lockout guard
+// ---------------------------------------------------------------------------
+
+describe("OAuthService unlinkAccount guard", () => {
+  const makeGithubProvider = () =>
+    makeOAuthProvider(
+      "github",
+      {
+        clientId: "c",
+        clientSecret: "s",
+        redirectUri: "https://app/cb",
+        authorizationEndpoint: "https://github.com/login/oauth/authorize",
+        tokenEndpoint: "https://github.com/login/oauth/access_token",
+        userInfoEndpoint: "https://api.github.com/user",
+        scopes: ["user:email"],
+      },
+      false,
+    );
+
+  const baseAccount = (overrides?: Partial<OAuthAccount>): OAuthAccount => ({
+    id: "acc-1",
+    userId: "user-1",
+    provider: "github",
+    providerId: "gh-1",
+    accessToken: "at",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    ...overrides,
+  });
+
+  const makeAccountLayer = (accounts: OAuthAccount[], hasPassword?: boolean) => {
+    const stored = new Map<string, OAuthAccount>(
+      accounts.map((a) => [`${a.provider}:${a.providerId}`, a]),
+    );
+    return Layer.succeed(OAuthAccountStore, {
+      create: (a) =>
+        Effect.sync(() => {
+          stored.set(`${a.provider}:${a.providerId}`, a);
+          return a;
+        }),
+      get: (p, id) => Effect.succeed(stored.get(`${p}:${id}`) ?? null),
+      getByUserId: (uid) => Effect.succeed([...stored.values()].filter((a) => a.userId === uid)),
+      update: (a) =>
+        Effect.sync(() => {
+          stored.set(`${a.provider}:${a.providerId}`, a);
+          return a;
+        }),
+      linkToUser: (uid, a) =>
+        Effect.sync(() => {
+          stored.set(`${a.provider}:${a.providerId}`, { ...a, userId: uid });
+        }),
+      unlinkFromUser: (uid, p) =>
+        Effect.sync(() => {
+          for (const [k, v] of stored) if (v.userId === uid && v.provider === p) stored.delete(k);
+        }),
+      delete: (p, id) =>
+        Effect.sync(() => {
+          stored.delete(`${p}:${id}`);
+        }),
+      ...(hasPassword !== undefined && { hasPassword: () => Effect.succeed(hasPassword) }),
+    });
+  };
+
+  it("fails with OAuthLastCredentialError when the account is the only credential", async () => {
+    const service = await Effect.runPromise(makeOAuthService({ github: makeGithubProvider() }));
+    const accountLayer = makeAccountLayer([baseAccount()]);
+
+    const err = await Effect.runPromise(
+      Effect.flip(service.unlinkAccount("user-1", "github").pipe(Effect.provide(accountLayer))),
+    );
+
+    expect(err).toBeInstanceOf(OAuthLastCredentialError);
+  });
+
+  it("succeeds when the user has another linked OAuth account", async () => {
+    const service = await Effect.runPromise(makeOAuthService({ github: makeGithubProvider() }));
+    const accountLayer = makeAccountLayer([
+      baseAccount(),
+      baseAccount({ id: "acc-2", provider: "google", providerId: "gl-1" }),
+    ]);
+
+    await Effect.runPromise(
+      service.unlinkAccount("user-1", "github").pipe(Effect.provide(accountLayer)),
+    );
+  });
+
+  it("succeeds when the user has a password (hasPassword returns true)", async () => {
+    const service = await Effect.runPromise(makeOAuthService({ github: makeGithubProvider() }));
+    const accountLayer = makeAccountLayer([baseAccount()], true);
+
+    await Effect.runPromise(
+      service.unlinkAccount("user-1", "github").pipe(Effect.provide(accountLayer)),
+    );
+  });
+
+  it("succeeds with allowUnlinkingAll: true even when the account is the only credential", async () => {
+    const service = await Effect.runPromise(makeOAuthService({ github: makeGithubProvider() }));
+    const accountLayer = makeAccountLayer([baseAccount()]);
+
+    await Effect.runPromise(
+      service
+        .unlinkAccount("user-1", "github", { allowUnlinkingAll: true })
+        .pipe(Effect.provide(accountLayer)),
+    );
+  });
+
+  it("fails with OAuthAccountNotFoundError when the provider is not linked", async () => {
+    const service = await Effect.runPromise(makeOAuthService({ github: makeGithubProvider() }));
+    const accountLayer = makeAccountLayer([]);
+
+    const err = await Effect.runPromise(
+      Effect.flip(service.unlinkAccount("user-1", "github").pipe(Effect.provide(accountLayer))),
+    );
+
+    expect(err._tag).toBe("OAuthAccountNotFoundError");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// linkAccount — linking controls (allowDifferentEmails, trustedProviders,
+// updateUserInfoOnLink)
+// ---------------------------------------------------------------------------
+
+describe("OAuthService linkAccount controls", () => {
+  const makeTestProvider = (name: string) =>
+    makeOAuthProvider(
+      name,
+      {
+        clientId: "c",
+        clientSecret: "s",
+        redirectUri: "https://app/cb",
+        authorizationEndpoint: `https://${name}.example/authorize`,
+        tokenEndpoint: `https://${name}.example/token`,
+        userInfoEndpoint: `https://${name}.example/userinfo`,
+        scopes: ["profile"],
+      },
+      false,
+    );
+
+  const makeState = (provider: string, stateKey = "state-123"): OAuthState => ({
+    state: stateKey,
+    provider,
+    expiresAt: Date.now() + 60_000,
+    createdAt: Date.now(),
+  });
+
+  const makeStateLayer = (state: OAuthState) =>
+    Layer.succeed(OAuthStateStore, {
+      create: (s) => Effect.succeed(s),
+      get: (k) => Effect.succeed(k === state.state ? state : null),
+      delete: () => Effect.void,
+    });
+
+  const makeAccountLayer = (existing?: OAuthAccount) => {
+    const stored = new Map<string, OAuthAccount>(
+      existing ? [[`${existing.provider}:${existing.providerId}`, existing]] : [],
+    );
+    return Layer.succeed(OAuthAccountStore, {
+      create: (a) =>
+        Effect.sync(() => {
+          stored.set(`${a.provider}:${a.providerId}`, a);
+          return a;
+        }),
+      get: (p, id) => Effect.succeed(stored.get(`${p}:${id}`) ?? null),
+      getByUserId: (uid) => Effect.succeed([...stored.values()].filter((a) => a.userId === uid)),
+      update: (a) =>
+        Effect.sync(() => {
+          stored.set(`${a.provider}:${a.providerId}`, a);
+          return a;
+        }),
+      linkToUser: (uid, a) =>
+        Effect.sync(() => {
+          stored.set(`${a.provider}:${a.providerId}`, { ...a, userId: uid });
+        }),
+      unlinkFromUser: () => Effect.void,
+      delete: (p, id) =>
+        Effect.sync(() => {
+          stored.delete(`${p}:${id}`);
+        }),
+    });
+  };
+
+  type UserRecord = {
+    id: string;
+    email: string;
+    name?: string;
+    image?: string;
+    emailVerified: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+    attributes: Record<string, unknown>;
+  };
+
+  const makeUserLayer = (
+    user: UserRecord,
+    onUpdate?: (id: string, u: { name?: string; image?: string }) => void,
+  ) =>
+    Layer.succeed(OAuthUserStore, {
+      getUser: (id) =>
+        id === user.id
+          ? Effect.succeed(user)
+          : Effect.fail(new AuthError({ message: "not found" })),
+      getUserByEmail: (email) => Effect.succeed(email === user.email ? user : null),
+      createUser: (input) => Effect.succeed({ ...user, ...input }),
+      ...(onUpdate && {
+        updateUser: (id, u) => {
+          onUpdate(id, u);
+          return Effect.succeed({ ...user, ...u });
+        },
+      }),
+    });
+
+  const makeSessionLayer = (userId: string) =>
+    Layer.succeed(SessionManager, {
+      createSession: () =>
+        Effect.succeed({
+          id: "sess-test",
+          userId,
+          expiresAt: new Date(Date.now() + 3600_000),
+          createdAt: new Date(),
+          lastActivityAt: new Date(),
+          attributes: {},
+        }),
+      validateSession: () =>
+        Effect.succeed({
+          session: {
+            id: "sess-test",
+            userId,
+            expiresAt: new Date(),
+            createdAt: new Date(),
+            lastActivityAt: new Date(),
+            attributes: {},
+          },
+          user: {
+            id: userId,
+            email: "",
+            emailVerified: false,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            attributes: {},
+          },
+        }),
+      invalidateSession: () => Effect.void,
+      invalidateUserSessions: () => Effect.void,
+      listSessions: () => Effect.succeed([]),
+      revokeOtherSessions: () => Effect.void,
+      setSessionAttributes: () =>
+        Effect.succeed({
+          id: "sess-test",
+          userId,
+          expiresAt: new Date(),
+          createdAt: new Date(),
+          lastActivityAt: new Date(),
+          attributes: {},
+        }),
+    });
+
+  const mockTokenResponse = { access_token: "at-new", token_type: "bearer" };
+
+  const mockUserInfo = (
+    overrides?: Partial<{
+      email: string;
+      name: string;
+      picture: string;
+      id: string;
+      email_verified: boolean;
+    }>,
+  ) => ({
+    id: "provider-uid-1",
+    email: "user@example.com",
+    name: "Test User",
+    picture: "https://img/user.jpg",
+    email_verified: true,
+    ...overrides,
+  });
+
+  const withProviderFetch = <A>(
+    userInfo: ReturnType<typeof mockUserInfo>,
+    thunk: () => Promise<A>,
+  ) =>
+    withFetch((url) => (url.includes("/token") ? json(mockTokenResponse) : json(userInfo)), thunk);
+
+  it("allowDifferentEmails: false (default) rejects linking when emails differ", async () => {
+    const service = await Effect.runPromise(
+      makeOAuthService({ github: makeTestProvider("github") }),
+    );
+    const user: UserRecord = {
+      id: "u1",
+      email: "other@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    const layers = Layer.mergeAll(
+      makeStateLayer(makeState("github")),
+      makeAccountLayer(),
+      makeUserLayer(user),
+    );
+
+    const err = await withProviderFetch(mockUserInfo({ email: "user@example.com" }), () =>
+      Effect.runPromise(
+        Effect.flip(
+          service.linkAccount("u1", "github", "code-abc", "state-123").pipe(Effect.provide(layers)),
+        ),
+      ),
+    );
+
+    expect(err).toBeInstanceOf(OAuthEmailMismatchError);
+  });
+
+  it("allowDifferentEmails: true allows linking when emails differ", async () => {
+    const service = await Effect.runPromise(
+      makeOAuthService({ github: makeTestProvider("github") }, { allowDifferentEmails: true }),
+    );
+    const user: UserRecord = {
+      id: "u1",
+      email: "other@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    const layers = Layer.mergeAll(
+      makeStateLayer(makeState("github")),
+      makeAccountLayer(),
+      makeUserLayer(user),
+    );
+
+    await withProviderFetch(mockUserInfo({ email: "user@example.com" }), () =>
+      Effect.runPromise(
+        service.linkAccount("u1", "github", "code-abc", "state-123").pipe(Effect.provide(layers)),
+      ),
+    );
+  });
+
+  it("allowDifferentEmails: false succeeds when emails match", async () => {
+    const service = await Effect.runPromise(
+      makeOAuthService({ github: makeTestProvider("github") }),
+    );
+    const user: UserRecord = {
+      id: "u1",
+      email: "user@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    const layers = Layer.mergeAll(
+      makeStateLayer(makeState("github")),
+      makeAccountLayer(),
+      makeUserLayer(user),
+    );
+
+    await withProviderFetch(mockUserInfo({ email: "user@example.com" }), () =>
+      Effect.runPromise(
+        service.linkAccount("u1", "github", "code-abc", "state-123").pipe(Effect.provide(layers)),
+      ),
+    );
+  });
+
+  it("trustedProviders: trusted provider auto-links without email_verified in signInWithCallback", async () => {
+    const service = await Effect.runPromise(
+      makeOAuthService({ github: makeTestProvider("github") }, { trustedProviders: ["github"] }),
+    );
+
+    const existingUser: UserRecord = {
+      id: "user-existing",
+      email: "user@example.com",
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    const layers = Layer.mergeAll(
+      makeStateLayer(makeState("github", "trust-state")),
+      makeAccountLayer(),
+      makeUserLayer(existingUser),
+      makeSessionLayer(existingUser.id),
+      Hooks.Default,
+    );
+
+    const result = await withProviderFetch(
+      mockUserInfo({ email: "user@example.com", id: "gh-trusted", email_verified: false }),
+      () =>
+        Effect.runPromise(
+          service.signInWithCallback("trust-state", "code-trust").pipe(Effect.provide(layers)),
+        ),
+    );
+
+    expect(result.isNewUser).toBe(false);
+    expect(result.user.id).toBe(existingUser.id);
+  });
+
+  it("trustedProviders: untrusted provider creates a new user without email_verified", async () => {
+    const newUser: UserRecord = {
+      id: "new-user-id",
+      email: "user@example.com",
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    const existingUser: UserRecord = {
+      id: "existing-id",
+      email: "user@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+
+    const service = await Effect.runPromise(
+      makeOAuthService({ github: makeTestProvider("github") }, { trustedProviders: [] }),
+    );
+
+    const userLayer = Layer.succeed(OAuthUserStore, {
+      getUser: (id) => (id === newUser.id ? Effect.succeed(newUser) : Effect.succeed(existingUser)),
+      getUserByEmail: () => Effect.succeed(existingUser),
+      createUser: () => Effect.succeed(newUser),
+    });
+
+    const layers = Layer.mergeAll(
+      makeStateLayer(makeState("github", "untrust-state")),
+      makeAccountLayer(),
+      userLayer,
+      makeSessionLayer(newUser.id),
+      Hooks.Default,
+    );
+
+    const result = await withProviderFetch(
+      mockUserInfo({ email: "user@example.com", id: "gh-untrusted", email_verified: false }),
+      () =>
+        Effect.runPromise(
+          service.signInWithCallback("untrust-state", "code-untrust").pipe(Effect.provide(layers)),
+        ),
+    );
+
+    // Without trusted provider and without email_verified, a new user is created
+    expect(result.isNewUser).toBe(true);
+  });
+
+  it("updateUserInfoOnLink: false (default) does not update user profile", async () => {
+    const service = await Effect.runPromise(
+      makeOAuthService({ github: makeTestProvider("github") }, { allowDifferentEmails: true }),
+    );
+
+    let updateCalled = false;
+    const user: UserRecord = {
+      id: "u1",
+      email: "user@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    const layers = Layer.mergeAll(
+      makeStateLayer(makeState("github")),
+      makeAccountLayer(),
+      makeUserLayer(user, () => {
+        updateCalled = true;
+      }),
+    );
+
+    await withProviderFetch(
+      mockUserInfo({ email: "different@example.com", name: "New Name" }),
+      () =>
+        Effect.runPromise(
+          service.linkAccount("u1", "github", "code-abc", "state-123").pipe(Effect.provide(layers)),
+        ),
+    );
+
+    expect(updateCalled).toBe(false);
+  });
+
+  it("updateUserInfoOnLink: true updates user name and image from provider", async () => {
+    const service = await Effect.runPromise(
+      makeOAuthService(
+        { github: makeTestProvider("github") },
+        { allowDifferentEmails: true, updateUserInfoOnLink: true },
+      ),
+    );
+
+    const updates: { name?: string; image?: string }[] = [];
+    const user: UserRecord = {
+      id: "u1",
+      email: "user@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    const layers = Layer.mergeAll(
+      makeStateLayer(makeState("github")),
+      makeAccountLayer(),
+      makeUserLayer(user, (_, u) => updates.push(u)),
+    );
+
+    await withProviderFetch(
+      mockUserInfo({
+        email: "different@example.com",
+        name: "Updated Name",
+        picture: "https://img/new.jpg",
+      }),
+      () =>
+        Effect.runPromise(
+          service.linkAccount("u1", "github", "code-abc", "state-123").pipe(Effect.provide(layers)),
+        ),
+    );
+
+    expect(updates.length).toBe(1);
+    expect(updates[0]).toMatchObject({ name: "Updated Name", image: "https://img/new.jpg" });
   });
 });
