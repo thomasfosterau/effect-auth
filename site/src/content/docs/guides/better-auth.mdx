@@ -13,7 +13,7 @@ delivery, hooks) is an explicit, typed dependency.
 
 | better-auth                                                               | effect-auth                                                                                                                                       |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `betterAuth({ ... })` options object                                      | `Layer`s composed per feature (`SessionManagerLayer`, `AuthLifecycleServiceLayer`, ...)                                                           |
+| `betterAuth({ ... })` options object                                      | `Layer`s composed per feature (`SessionManager.layer`, `AuthLifecycleService.layer`, ...)                                                         |
 | Plugins (`twoFactor()`, `organization()`, ...)                            | Feature modules — provide the module's service + store layers to enable; HTTP endpoints answer 404 until you do                                   |
 | Database adapters (Kysely/Prisma/Drizzle)                                 | Store interfaces (`SessionStore`, `EmailPasswordStore`, ...) — implement against anything; `@effect-auth/sql` ships SQL-backed layers             |
 | `hooks` / middleware                                                      | The typed `Hooks` service: `makePlugin` + `composePlugins` decorator layers with transform (short-circuiting) and tap (observing) hook points     |
@@ -22,14 +22,14 @@ delivery, hooks) is an explicit, typed dependency.
 | `useSession()`                                                            | `useSession(client)` from `@effect-auth/client/react` (Svelte stores and Vue composables included)                                                |
 | Session cookie cache                                                      | `cookie.cache` (HMAC-signed session-data cookie)                                                                                                  |
 | `secondaryStorage`                                                        | KV-backed layers from `KeyValueStores` over `effect/unstable/persistence` (in-memory, file system, Redis)                                         |
-| `jwt()` plugin                                                            | `JwtServiceLayer` (ES256/EdDSA, JWKS at `GET /jwks`)                                                                                              |
-| `oidcProvider()` plugin                                                   | `OidcProviderServiceLayer` (authorization-code + PKCE, consent, discovery, shared JWKS)                                                           |
-| `organization()` plugin                                                   | `OrganizationServiceLayer` (members, invitations, roles)                                                                                          |
-| `admin()` plugin                                                          | `AdminServiceLayer` (list/ban/impersonate)                                                                                                        |
-| `apiKey()` plugin                                                         | `ApiKeyServiceLayer` (sha256 at rest, permissions, quotas, rate limits)                                                                           |
+| `jwt()` plugin                                                            | `JwtService.layer` (ES256/EdDSA, JWKS at `GET /jwks`)                                                                                             |
+| `oidcProvider()` plugin                                                   | `OidcProviderService.layer` (authorization-code + PKCE, consent, discovery, shared JWKS)                                                          |
+| `organization()` plugin                                                   | `OrganizationService.layer` (members, invitations, roles)                                                                                         |
+| `admin()` plugin                                                          | `AdminService.layer` (list/ban/impersonate)                                                                                                       |
+| `apiKey()` plugin                                                         | `ApiKeyService.layer` (sha256 at rest, permissions, quotas, rate limits)                                                                          |
 | `magicLink()`, `emailOTP()`, `phoneNumber()`, `anonymous()`, `username()` | `MagicLink`, `EmailOtp`, `PhoneOtp`, `Anonymous`, `Username` modules                                                                              |
 | `oneTap()`, `lastLoginMethod()`                                           | `GoogleOneTap` module; `makeLastLoginMethodPlugin` + `cookie.lastLoginMethod`                                                                     |
-| `sso()` plugin                                                            | `SsoServiceLayer` (OIDC relying party with email-domain routing)                                                                                  |
+| `sso()` plugin                                                            | `SsoService.layer` (OIDC relying party with email-domain routing)                                                                                 |
 | `captcha()`, `haveIBeenPwned()`                                           | `CaptchaPlugin`, `HibpPlugin` hooks plugins                                                                                                       |
 
 ## What a migration looks like
@@ -52,20 +52,20 @@ import { Layer } from "effect";
 import * as Auth from "effect-auth";
 
 const stores = Layer.mergeAll(
-  Layer.succeed(Auth.SessionStoreTag)(sessionStore),
-  Layer.succeed(Auth.UserStoreTag)(userStore),
-  Layer.succeed(Auth.EmailPasswordStoreTag)(emailPasswordStore),
+  Layer.succeed(Auth.SessionStore)(sessionStore),
+  Layer.succeed(Auth.UserStore)(userStore),
+  Layer.succeed(Auth.EmailPasswordStore)(emailPasswordStore),
   // ... the stores for the features you enable
 );
 
 const services = Layer.mergeAll(
   stores,
-  Auth.SessionManagerLayer(sessionConfig).pipe(Layer.provide(stores)),
-  Auth.AuthLifecycleServiceLayer(),
-  Auth.UserServiceLayer(),
+  Auth.SessionManager.layer(sessionConfig).pipe(Layer.provide(stores)),
+  Auth.AuthLifecycleService.layer(),
+  Auth.UserService.layer(),
   Auth.Hooks.Default,
   // Optional features — merge their layers to switch the endpoints on:
-  // Auth.TwoFactorServiceLayer(...), Auth.OrganizationServiceLayer(), ...
+  // Auth.TwoFactorService.layer(...), Auth.OrganizationService.layer(), ...
 );
 
 const { handler } = Auth.Http.makeAuthWebHandler({

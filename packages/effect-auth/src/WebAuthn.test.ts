@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Context } from "effect";
 import {
   makeWebAuthnService,
+  base64UrlDecode,
   ChallengeStore,
   CredentialStore,
-  base64UrlDecode,
 } from "./WebAuthn.js";
 import type {
   WebAuthnChallenge,
@@ -16,7 +16,6 @@ import type {
 import {
   ChallengeNotFoundError,
   ChallengeExpiredError,
-  CredentialNotFoundError,
   WebAuthnVerificationError,
 } from "./Errors.js";
 import * as crypto from "node:crypto";
@@ -33,17 +32,9 @@ const mockChallengeStore = {
     }),
 
   get: (challenge: Uint8Array) =>
-    Effect.gen(function* () {
+    Effect.sync(() => {
       const key = Buffer.from(challenge).toString("hex");
-      const stored = mockChallengeStore.challenges.get(key);
-      if (!stored) {
-        return yield* Effect.fail(
-          new ChallengeNotFoundError({
-            message: "Challenge not found",
-          }),
-        );
-      }
-      return stored;
+      return mockChallengeStore.challenges.get(key) ?? null;
     }),
 
   delete: (challenge: Uint8Array) =>
@@ -63,18 +54,7 @@ const mockCredentialStore = {
     }),
 
   get: (credentialId: string) =>
-    Effect.gen(function* () {
-      const credential = mockCredentialStore.credentials.get(credentialId);
-      if (!credential) {
-        return yield* Effect.fail(
-          new CredentialNotFoundError({
-            message: "Credential not found",
-            credentialId,
-          }),
-        );
-      }
-      return credential;
-    }),
+    Effect.sync(() => mockCredentialStore.credentials.get(credentialId) ?? null),
 
   update: (credential: WebAuthnCredential) =>
     Effect.sync(() => {
@@ -87,7 +67,7 @@ const mockCredentialStore = {
       mockCredentialStore.credentials.delete(credentialId);
     }),
 
-  getByUserId: (userId: string) =>
+  listByUserId: (userId: string) =>
     Effect.sync(() => {
       const credentials = Array.from(mockCredentialStore.credentials.values()).filter(
         (c) => c.userId === userId,
@@ -271,7 +251,7 @@ describe("WebAuthn Service", () => {
       yield* mockCredentialStore.create(mockCredential);
 
       const stored = yield* mockCredentialStore.get("test-credential-id");
-      expect(stored.userId).toBe(testUser.id);
+      expect(stored?.userId).toBe(testUser.id);
     });
 
     await Effect.runPromise(Effect.provide(program, dependencies));
@@ -302,7 +282,7 @@ describe("WebAuthn Service", () => {
         yield* mockCredentialStore.create(cred);
       }
 
-      const userCredentials = yield* mockCredentialStore.getByUserId(testUser.id);
+      const userCredentials = yield* mockCredentialStore.listByUserId(testUser.id);
       expect(userCredentials.length).toBe(2);
     });
 
@@ -326,7 +306,7 @@ describe("WebAuthn Service", () => {
       yield* mockCredentialStore.update(updated);
 
       const retrieved = yield* mockCredentialStore.get("test-cred");
-      expect(retrieved.counter).toBe(6);
+      expect(retrieved?.counter).toBe(6);
     });
 
     await Effect.runPromise(Effect.provide(program, dependencies));

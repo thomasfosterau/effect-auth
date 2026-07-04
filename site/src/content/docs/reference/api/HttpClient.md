@@ -66,7 +66,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (Conflict | BadRequest | InternalServerError) | SchemaError),
+            : (Conflict | BadRequest | InternalServerError | TooManyRequests) | SchemaError),
         | never
         | never
         | never
@@ -107,7 +107,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (InternalServerError | Unauthorized | Forbidden) | SchemaError),
+            : (InternalServerError | TooManyRequests | Unauthorized | Forbidden) | SchemaError),
         | never
         | never
         | never
@@ -180,7 +180,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (BadRequest | InternalServerError) | SchemaError),
+            : (BadRequest | InternalServerError | TooManyRequests) | SchemaError),
         | never
         | never
         | never
@@ -217,7 +217,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (BadRequest | InternalServerError) | SchemaError),
+            : (BadRequest | InternalServerError | TooManyRequests) | SchemaError),
         | never
         | never
         | never
@@ -225,7 +225,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | never
         | ([Mode] extends ["response-only"] ? never : never | never)
       >;
-      readonly requestPasswordReset: <Mode>(request: {
+      readonly passwordResetRequest: <Mode>(request: {
         readonly payload: { readonly email: string };
         readonly responseMode?: Mode | undefined;
       }) => Effect<
@@ -236,7 +236,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (BadRequest | InternalServerError) | SchemaError),
+            : (BadRequest | InternalServerError | TooManyRequests) | SchemaError),
         | never
         | never
         | never
@@ -244,7 +244,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | never
         | ([Mode] extends ["response-only"] ? never : never | never)
       >;
-      readonly resetPassword: <Mode>(request: {
+      readonly passwordResetConfirm: <Mode>(request: {
         readonly payload: { readonly token: string; readonly newPassword: string };
         readonly responseMode?: Mode | undefined;
       }) => Effect<
@@ -255,7 +255,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (BadRequest | InternalServerError) | SchemaError),
+            : (BadRequest | InternalServerError | TooManyRequests) | SchemaError),
         | never
         | never
         | never
@@ -433,7 +433,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (BadRequest | InternalServerError | NotFound) | SchemaError),
+            : (BadRequest | InternalServerError | TooManyRequests | NotFound) | SchemaError),
         | never
         | never
         | never
@@ -567,7 +567,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (BadRequest | InternalServerError | NotFound) | SchemaError),
+            : (BadRequest | InternalServerError | TooManyRequests | NotFound) | SchemaError),
         | never
         | never
         | never
@@ -603,7 +603,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (InternalServerError | NotFound) | SchemaError),
+            : (InternalServerError | TooManyRequests | NotFound) | SchemaError),
         | never
         | never
         | never
@@ -640,7 +640,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (InternalServerError | Unauthorized | NotFound) | SchemaError),
+            : (InternalServerError | TooManyRequests | Unauthorized | NotFound) | SchemaError),
         | never
         | never
         | never
@@ -786,7 +786,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (BadRequest | InternalServerError | NotFound) | SchemaError),
+            : (BadRequest | InternalServerError | TooManyRequests | NotFound) | SchemaError),
         | never
         | never
         | never
@@ -883,7 +883,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (BadRequest | InternalServerError | NotFound) | SchemaError),
+            : (BadRequest | InternalServerError | TooManyRequests | NotFound) | SchemaError),
         | never
         | never
         | never
@@ -1003,7 +1003,9 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (BadRequest | InternalServerError | Unauthorized | NotFound) | SchemaError),
+            :
+                | (BadRequest | InternalServerError | TooManyRequests | Unauthorized | NotFound)
+                | SchemaError),
         | never
         | never
         | never
@@ -1040,7 +1042,9 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (BadRequest | InternalServerError | Unauthorized | NotFound) | SchemaError),
+            :
+                | (BadRequest | InternalServerError | TooManyRequests | Unauthorized | NotFound)
+                | SchemaError),
         | never
         | never
         | never
@@ -1676,7 +1680,14 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | ([Mode] extends ["response-only"]
             ? never
             :
-                | (BadRequest | InternalServerError | Unauthorized | Forbidden | NotFound)
+                | (
+                    | BadRequest
+                    | InternalServerError
+                    | TooManyRequests
+                    | Unauthorized
+                    | Forbidden
+                    | NotFound
+                  )
                 | SchemaError),
         | never
         | never
@@ -1914,7 +1925,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | never
         | ([Mode] extends ["response-only"] ? never : never | never)
       >;
-      readonly ssoSignIn: <Mode>(request: {
+      readonly signInSso: <Mode>(request: {
         readonly payload: {
           readonly email?: string | undefined;
           readonly domain?: string | undefined;
@@ -1966,7 +1977,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (BadRequest | InternalServerError | NotFound) | SchemaError),
+            : (BadRequest | InternalServerError | TooManyRequests | NotFound) | SchemaError),
         | never
         | never
         | never
@@ -2003,7 +2014,7 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
         | HttpClientError
         | ([Mode] extends ["response-only"]
             ? never
-            : (InternalServerError | Unauthorized | NotFound) | SchemaError),
+            : (InternalServerError | TooManyRequests | Unauthorized | NotFound) | SchemaError),
         | never
         | never
         | never
@@ -2189,13 +2200,13 @@ export declare const makeAuthClient: (baseUrl: string | URL) => Effect<
       readonly oidcAuthorize: <Mode>(request: {
         readonly query: {
           readonly state?: string | undefined;
-          readonly nonce?: string | undefined;
           readonly response_type?: string | undefined;
           readonly client_id?: string | undefined;
           readonly redirect_uri?: string | undefined;
           readonly scope?: string | undefined;
           readonly code_challenge?: string | undefined;
           readonly code_challenge_method?: string | undefined;
+          readonly nonce?: string | undefined;
           readonly prompt?: string | undefined;
         };
         readonly responseMode?: Mode | undefined;

@@ -14,7 +14,7 @@ import {
   UserNotFoundError,
 } from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
-import { SessionManagerTag } from "./Session.js";
+import { SessionManager } from "./Session.js";
 import type * as Types from "./Types.js";
 
 /**
@@ -144,16 +144,17 @@ export interface OAuthCallbackResult {
 /**
  * Storage interface for OAuth state (temporary, Redis/memory)
  */
-export interface OAuthStateStore {
+export interface OAuthStateStoreShape {
   readonly create: (state: OAuthState) => Effect.Effect<OAuthState, AuthError>;
-  readonly get: (state: string) => Effect.Effect<OAuthState, AuthError>;
+  /** Get a pending state entry, or `null` when unknown/expired-and-purged. */
+  readonly get: (state: string) => Effect.Effect<OAuthState | null, AuthError>;
   readonly delete: (state: string) => Effect.Effect<void, AuthError>;
 }
 
 /**
  * Storage interface for OAuth accounts (persistent, database)
  */
-export interface OAuthAccountStore {
+export interface OAuthAccountStoreShape {
   readonly create: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
   readonly get: (
     provider: string,
@@ -178,9 +179,9 @@ export interface OAuthCreateUserInput {
 
 /**
  * Minimal user store the OAuth sign-in flow needs to create or look up users
- * from provider profiles. Implement alongside {@link OAuthAccountStore}.
+ * from provider profiles. Implement alongside {@link OAuthAccountStoreShape}.
  */
-export interface OAuthUserStore {
+export interface OAuthUserStoreShape {
   readonly getUser: (userId: string) => Effect.Effect<Types.User, UserNotFoundError>;
   readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, AuthError>;
   readonly createUser: (input: OAuthCreateUserInput) => Effect.Effect<Types.User, AuthError>;
@@ -206,7 +207,7 @@ export interface OAuthProvider {
   readonly config: OAuthProviderConfig;
   readonly generateAuthorizationUrl: (
     scopes?: readonly string[],
-  ) => Effect.Effect<AuthorizationUrlResult, OAuthProviderError | AuthError, OAuthStateStoreTag>;
+  ) => Effect.Effect<AuthorizationUrlResult, OAuthProviderError | AuthError, OAuthStateStore>;
   readonly exchangeCode: (
     code: string,
     codeVerifier?: string,
@@ -238,33 +239,23 @@ import * as crypto from "node:crypto";
 /**
  * OAuth state store context tag
  */
-export class OAuthStateStoreTag extends Context.Service<OAuthStateStoreTag, OAuthStateStore>()(
+export class OAuthStateStore extends Context.Service<OAuthStateStore, OAuthStateStoreShape>()(
   "@effect-auth/OAuthStateStore",
 ) {}
-
-// Public ergonomic alias
-export const OAuthStateStore = OAuthStateStoreTag;
 
 /**
  * OAuth account store context tag
  */
-export class OAuthAccountStoreTag extends Context.Service<
-  OAuthAccountStoreTag,
-  OAuthAccountStore
->()("@effect-auth/OAuthAccountStore") {}
-
-// Public ergonomic alias
-export const OAuthAccountStore = OAuthAccountStoreTag;
+export class OAuthAccountStore extends Context.Service<OAuthAccountStore, OAuthAccountStoreShape>()(
+  "@effect-auth/OAuthAccountStore",
+) {}
 
 /**
  * OAuth user store context tag
  */
-export class OAuthUserStoreTag extends Context.Service<OAuthUserStoreTag, OAuthUserStore>()(
+export class OAuthUserStore extends Context.Service<OAuthUserStore, OAuthUserStoreShape>()(
   "@effect-auth/OAuthUserStore",
 ) {}
-
-// Public ergonomic alias
-export const OAuthUserStore = OAuthUserStoreTag;
 
 /**
  * Generate a cryptographically secure random state parameter
@@ -494,7 +485,7 @@ export const makeOAuthProvider = (
 
     generateAuthorizationUrl: (customScopes?: readonly string[]) =>
       Effect.gen(function* () {
-        const stateStore = yield* OAuthStateStoreTag;
+        const stateStore = yield* OAuthStateStore;
         const state = yield* generateState();
 
         // Generate PKCE if enabled
@@ -639,11 +630,11 @@ export const makeOAuthProvider = (
 /**
  * OAuth service for managing OAuth flows
  */
-export interface OAuthService {
+export interface OAuthServiceShape {
   readonly generateAuthorizationUrl: (
     provider: string,
     options?: { scopes?: readonly string[]; returnTo?: string },
-  ) => Effect.Effect<AuthorizationUrlResult, AuthError | OAuthProviderError, OAuthStateStoreTag>;
+  ) => Effect.Effect<AuthorizationUrlResult, AuthError | OAuthProviderError, OAuthStateStore>;
 
   readonly handleCallback: (
     state: string,
@@ -652,7 +643,7 @@ export interface OAuthService {
   ) => Effect.Effect<
     OAuthCallbackResult,
     AuthError | OAuthProviderError | OAuthStateNotFoundError | OAuthStateExpiredError,
-    OAuthStateStoreTag | OAuthAccountStoreTag
+    OAuthStateStore | OAuthAccountStore
   >;
 
   /**
@@ -674,7 +665,7 @@ export interface OAuthService {
     | OAuthStateExpiredError
     | UserNotFoundError
     | HookError,
-    OAuthStateStoreTag | OAuthAccountStoreTag | OAuthUserStoreTag | SessionManagerTag | Hooks
+    OAuthStateStore | OAuthAccountStore | OAuthUserStore | SessionManager | Hooks
   >;
 
   readonly linkAccount: (
@@ -685,29 +676,34 @@ export interface OAuthService {
   ) => Effect.Effect<
     OAuthAccount,
     AuthError | OAuthProviderError | OAuthStateNotFoundError | OAuthStateExpiredError,
-    OAuthStateStoreTag | OAuthAccountStoreTag
+    OAuthStateStore | OAuthAccountStore
   >;
 
   readonly unlinkAccount: (
     userId: string,
     provider: string,
-  ) => Effect.Effect<void, AuthError, OAuthAccountStoreTag>;
+  ) => Effect.Effect<void, AuthError, OAuthAccountStore>;
 
   readonly refreshAccessToken: (
     userId: string,
     provider: string,
-  ) => Effect.Effect<string, AuthError | OAuthProviderError, OAuthAccountStoreTag>;
+  ) => Effect.Effect<string, AuthError | OAuthProviderError, OAuthAccountStore>;
 }
 
-export class OAuthServiceTag extends Context.Service<OAuthServiceTag, OAuthService>()(
+export class OAuthService extends Context.Service<OAuthService, OAuthServiceShape>()(
   "@effect-auth/OAuthService",
-) {}
-
-// Public ergonomic alias
-export const OAuthService = OAuthServiceTag;
+) {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = (
+    providers: Record<string, OAuthProvider>,
+    options: OAuthServiceOptions = {},
+  ) => Layer.effect(OAuthService, makeOAuthService(providers, options));
+}
 
 /**
- * Options controlling {@link OAuthService} behaviour.
+ * Options controlling {@link OAuthServiceShape} behaviour.
  */
 export interface OAuthServiceOptions {
   /**
@@ -727,7 +723,7 @@ const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 export const makeOAuthService = (
   providers: Record<string, OAuthProvider>,
   options: OAuthServiceOptions = {},
-): Effect.Effect<OAuthService, never> => {
+): Effect.Effect<OAuthServiceShape, never> => {
   const autoLinkByVerifiedEmail = options.autoLinkByVerifiedEmail ?? true;
 
   /**
@@ -736,16 +732,15 @@ export const makeOAuthService = (
    */
   const resolveCallback = (state: string, code: string) =>
     Effect.gen(function* () {
-      const stateStore = yield* OAuthStateStoreTag;
+      const stateStore = yield* OAuthStateStore;
 
-      const stateEntry = yield* Effect.catchTag(stateStore.get(state), "AuthError", () =>
-        Effect.fail(
-          new OAuthStateNotFoundError({
-            message: "OAuth state not found or expired",
-            state,
-          }),
-        ),
-      );
+      const stateEntry = yield* stateStore.get(state);
+      if (stateEntry === null) {
+        return yield* new OAuthStateNotFoundError({
+          message: "OAuth state not found or expired",
+          state,
+        });
+      }
 
       if (Date.now() > stateEntry.expiresAt) {
         yield* stateStore.delete(state);
@@ -774,7 +769,7 @@ export const makeOAuthService = (
     });
 
   return Effect.sync(
-    (): OAuthService => ({
+    (): OAuthServiceShape => ({
       generateAuthorizationUrl: (provider, options) =>
         Effect.gen(function* () {
           const providerInstance = providers[provider];
@@ -791,8 +786,11 @@ export const makeOAuthService = (
 
           // Update state with returnTo if provided
           if (options?.returnTo) {
-            const stateStore = yield* OAuthStateStoreTag;
+            const stateStore = yield* OAuthStateStore;
             const stateEntry = yield* stateStore.get(result.state);
+            if (stateEntry === null) {
+              return yield* new AuthError({ message: "OAuth state missing after creation" });
+            }
             // Delete old state and create new one with returnTo
             yield* stateStore.delete(result.state);
             yield* stateStore.create({
@@ -806,18 +804,17 @@ export const makeOAuthService = (
 
       handleCallback: (state, code, options) =>
         Effect.gen(function* () {
-          const stateStore = yield* OAuthStateStoreTag;
-          const accountStore = yield* OAuthAccountStoreTag;
+          const stateStore = yield* OAuthStateStore;
+          const accountStore = yield* OAuthAccountStore;
 
           // Verify state
-          const stateEntry = yield* Effect.catchTag(stateStore.get(state), "AuthError", () =>
-            Effect.fail(
-              new OAuthStateNotFoundError({
-                message: "OAuth state not found or expired",
-                state,
-              }),
-            ),
-          );
+          const stateEntry = yield* stateStore.get(state);
+          if (stateEntry === null) {
+            return yield* new OAuthStateNotFoundError({
+              message: "OAuth state not found or expired",
+              state,
+            });
+          }
 
           // Check expiration
           if (Date.now() > stateEntry.expiresAt) {
@@ -915,9 +912,9 @@ export const makeOAuthService = (
 
       signInWithCallback: (state, code) =>
         Effect.gen(function* () {
-          const accountStore = yield* OAuthAccountStoreTag;
-          const userStore = yield* OAuthUserStoreTag;
-          const sessionManager = yield* SessionManagerTag;
+          const accountStore = yield* OAuthAccountStore;
+          const userStore = yield* OAuthUserStore;
+          const sessionManager = yield* SessionManager;
 
           const { stateEntry, tokens, userInfo } = yield* resolveCallback(state, code);
           const now = Date.now();
@@ -1010,18 +1007,17 @@ export const makeOAuthService = (
         Effect.gen(function* () {
           // Properly implement OAuth flow for account linking
           // This follows the same flow as handleCallback but links to existing user
-          const stateStore = yield* OAuthStateStoreTag;
-          const accountStore = yield* OAuthAccountStoreTag;
+          const stateStore = yield* OAuthStateStore;
+          const accountStore = yield* OAuthAccountStore;
 
           // Verify state
-          const stateEntry = yield* Effect.catchTag(stateStore.get(state), "AuthError", () =>
-            Effect.fail(
-              new OAuthStateNotFoundError({
-                message: "OAuth state not found or expired",
-                state,
-              }),
-            ),
-          );
+          const stateEntry = yield* stateStore.get(state);
+          if (stateEntry === null) {
+            return yield* new OAuthStateNotFoundError({
+              message: "OAuth state not found or expired",
+              state,
+            });
+          }
 
           if (stateEntry.provider !== provider) {
             return yield* Effect.fail(
@@ -1104,7 +1100,7 @@ export const makeOAuthService = (
 
       unlinkAccount: (userId, provider) =>
         Effect.gen(function* () {
-          const accountStore = yield* OAuthAccountStoreTag;
+          const accountStore = yield* OAuthAccountStore;
           const accounts = yield* accountStore.getByUserId(userId);
           const account = accounts.find((a) => a.provider === provider);
 
@@ -1121,7 +1117,7 @@ export const makeOAuthService = (
 
       refreshAccessToken: (userId, provider) =>
         Effect.gen(function* () {
-          const accountStore = yield* OAuthAccountStoreTag;
+          const accountStore = yield* OAuthAccountStore;
           const accounts = yield* accountStore.getByUserId(userId);
           const account = accounts.find((a) => a.provider === provider);
 
@@ -1207,11 +1203,6 @@ export const makeOAuthService = (
     }),
   );
 };
-
-export const OAuthServiceLayer = (
-  providers: Record<string, OAuthProvider>,
-  options: OAuthServiceOptions = {},
-) => Layer.effect(OAuthServiceTag, makeOAuthService(providers, options));
 
 /**
  * Pre-built OAuth providers

@@ -1,39 +1,38 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
-import { UserNotFoundError, SessionNotFoundError } from "./Errors.js";
 import { Hooks } from "./Hooks.js";
-import { SessionManagerLayer, SessionStoreTag, UserStoreTag, type UserStore } from "./Session.js";
-import { UserServiceLayer, UserServiceStoreTag } from "./User.js";
-import { AuthLifecycleServiceTag } from "./AuthLifecycle.js";
-import { EmailPasswordStoreTag } from "./EmailPassword.js";
-import { PasswordHasherTag } from "./Password.js";
-import { EmailVerificationServiceTag, EmailVerificationStoreTag } from "./EmailVerification.js";
+import { SessionStore, UserStore, type UserStoreShape, SessionManager } from "./Session.js";
+import { UserServiceStore, UserService } from "./User.js";
+import { AuthLifecycleService } from "./AuthLifecycle.js";
+import { EmailPasswordStore } from "./EmailPassword.js";
+import { PasswordHasher } from "./Password.js";
+import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.js";
 import {
-  PasswordResetServiceTag,
-  PasswordResetStoreTag,
-  PasswordResetUserStoreTag,
+  PasswordResetService,
+  PasswordResetStore,
+  PasswordResetUserStore,
 } from "./PasswordReset.js";
 import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
-import { JwtServiceLayer, JwtKeyStoreTag, type JwtKeyPair, type JwtKeyStore } from "./Jwt.js";
+import { JwtKeyStore, type JwtKeyPair, type JwtKeyStoreShape, JwtService } from "./Jwt.js";
 import { generatePKCE, verifyIdToken } from "./OAuth.js";
 import {
   makeOidcProviderService,
-  OidcProviderServiceLayer,
-  OidcClientStoreTag,
-  OidcCodeStoreTag,
-  OidcTokenStoreTag,
-  OidcConsentStoreTag,
+  OidcClientStore,
+  OidcCodeStore,
+  OidcTokenStore,
+  OidcConsentStore,
   OidcProviderError,
   hashOidcSecret,
   type OidcAuthorizationCode,
   type OidcClient,
-  type OidcClientStore,
-  type OidcCodeStore,
+  type OidcClientStoreShape,
+  type OidcCodeStoreShape,
   type OidcConsent,
-  type OidcConsentStore,
+  type OidcConsentStoreShape,
   type OidcToken,
-  type OidcTokenStore,
+  type OidcTokenStoreShape,
+  OidcProviderService,
 } from "./OidcProvider.js";
 import type * as Types from "./Types.js";
 
@@ -50,29 +49,29 @@ const makeOidcStores = () => {
   const consents = new Map<string, OidcConsent>();
   const jwtKeys: JwtKeyPair[] = [];
 
-  const clientStore: OidcClientStore = {
+  const clientStore: OidcClientStoreShape = {
     create: (c) => Effect.sync(() => (clients.set(c.clientId, c), c)),
     getByClientId: (id) => Effect.succeed(clients.get(id) ?? null),
     update: (c) => Effect.sync(() => (clients.set(c.clientId, c), c)),
     delete: (id) => Effect.sync(() => void clients.delete(id)),
     list: () => Effect.succeed([...clients.values()]),
   };
-  const codeStore: OidcCodeStore = {
+  const codeStore: OidcCodeStoreShape = {
     create: (c) => Effect.sync(() => (codes.set(c.codeHash, c), c)),
     get: (hash) => Effect.succeed(codes.get(hash) ?? null),
     delete: (hash) => Effect.sync(() => void codes.delete(hash)),
   };
-  const tokenStore: OidcTokenStore = {
+  const tokenStore: OidcTokenStoreShape = {
     create: (t) => Effect.sync(() => (tokens.set(t.tokenHash, t), t)),
     get: (hash) => Effect.succeed(tokens.get(hash) ?? null),
     delete: (hash) => Effect.sync(() => void tokens.delete(hash)),
   };
-  const consentStore: OidcConsentStore = {
+  const consentStore: OidcConsentStoreShape = {
     get: (userId, clientId) => Effect.succeed(consents.get(`${userId}:${clientId}`) ?? null),
     upsert: (c) => Effect.sync(() => (consents.set(`${c.userId}:${c.clientId}`, c), c)),
     delete: (userId, clientId) => Effect.sync(() => void consents.delete(`${userId}:${clientId}`)),
   };
-  const jwtKeyStore: JwtKeyStore = {
+  const jwtKeyStore: JwtKeyStoreShape = {
     getActive: () => Effect.succeed(jwtKeys[0] ?? null),
     create: (pair) => Effect.sync(() => (jwtKeys.push(pair), pair)),
     list: () => Effect.succeed([...jwtKeys]),
@@ -108,10 +107,10 @@ describe("OidcProviderService", () => {
   const setup = () => {
     const stores = makeOidcStores();
     const layer = Layer.mergeAll(
-      Layer.succeed(OidcClientStoreTag)(stores.clientStore),
-      Layer.succeed(OidcCodeStoreTag)(stores.codeStore),
-      Layer.succeed(OidcTokenStoreTag)(stores.tokenStore),
-      Layer.succeed(OidcConsentStoreTag)(stores.consentStore),
+      Layer.succeed(OidcClientStore)(stores.clientStore),
+      Layer.succeed(OidcCodeStore)(stores.codeStore),
+      Layer.succeed(OidcTokenStore)(stores.tokenStore),
+      Layer.succeed(OidcConsentStore)(stores.consentStore),
     );
     return { stores, layer };
   };
@@ -344,12 +343,9 @@ const makeHttpFixture = () => {
     return id;
   };
 
-  const userStore: UserStore = {
-    get: (userId) => {
-      const u = usersById.get(userId);
-      return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
-    },
-    getCredentials: (userId) => Effect.fail(new UserNotFoundError({ message: "nc", userId })),
+  const userStore: UserStoreShape = {
+    get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
+    getCredentials: (_userId) => Effect.succeed(null),
   };
   const userServiceStore = {
     get: userStore.get,
@@ -359,12 +355,7 @@ const makeHttpFixture = () => {
   };
   const sessionStore = {
     create: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
-    get: (id: string) => {
-      const s = sessions.get(id);
-      return s
-        ? Effect.succeed(s)
-        : Effect.fail(new SessionNotFoundError({ message: "nf", sessionId: id }));
-    },
+    get: (id: string) => Effect.sync(() => sessions.get(id) ?? null),
     update: (s: Types.Session) => Effect.sync(() => (sessions.set(s.id, s), s)),
     delete: (id: string) => Effect.sync(() => void sessions.delete(id)),
     deleteByUserId: (userId: string) =>
@@ -376,43 +367,43 @@ const makeHttpFixture = () => {
   };
 
   const base = Layer.mergeAll(
-    SessionManagerLayer({
+    SessionManager.layer({
       sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
     }).pipe(
       Layer.provide(
         Layer.mergeAll(
-          Layer.succeed(SessionStoreTag)(sessionStore as never),
-          Layer.succeed(UserStoreTag)(userStore),
+          Layer.succeed(SessionStore)(sessionStore as never),
+          Layer.succeed(UserStore)(userStore),
         ),
       ),
     ),
-    UserServiceLayer().pipe(Layer.provide(Layer.succeed(UserServiceStoreTag)(userServiceStore))),
-    Layer.succeed(UserServiceStoreTag)(userServiceStore),
+    UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
+    Layer.succeed(UserServiceStore)(userServiceStore),
     Hooks.Default,
-    Layer.succeed(AuthLifecycleServiceTag)(undefined as never),
-    Layer.succeed(EmailPasswordStoreTag)(undefined as never),
-    Layer.succeed(PasswordHasherTag)(undefined as never),
-    Layer.succeed(EmailVerificationServiceTag)(undefined as never),
-    Layer.succeed(EmailVerificationStoreTag)(undefined as never),
-    Layer.succeed(PasswordResetServiceTag)(undefined as never),
-    Layer.succeed(PasswordResetStoreTag)(undefined as never),
-    Layer.succeed(PasswordResetUserStoreTag)(undefined as never),
+    Layer.succeed(AuthLifecycleService)(undefined as never),
+    Layer.succeed(EmailPasswordStore)(undefined as never),
+    Layer.succeed(PasswordHasher)(undefined as never),
+    Layer.succeed(EmailVerificationService)(undefined as never),
+    Layer.succeed(EmailVerificationStore)(undefined as never),
+    Layer.succeed(PasswordResetService)(undefined as never),
+    Layer.succeed(PasswordResetStore)(undefined as never),
+    Layer.succeed(PasswordResetUserStore)(undefined as never),
   );
 
   const oidcLayer = Layer.mergeAll(
-    OidcProviderServiceLayer({
+    OidcProviderService.layer({
       issuer: ISSUER,
       loginPage: "http://idp.test/login",
       consentPage: "http://idp.test/consent",
     }),
-    JwtServiceLayer({ issuer: ISSUER }),
-    Layer.succeed(OidcClientStoreTag)(oidc.clientStore),
-    Layer.succeed(OidcCodeStoreTag)(oidc.codeStore),
-    Layer.succeed(OidcTokenStoreTag)(oidc.tokenStore),
-    Layer.succeed(OidcConsentStoreTag)(oidc.consentStore),
-    Layer.succeed(JwtKeyStoreTag)(oidc.jwtKeyStore),
+    JwtService.layer({ issuer: ISSUER }),
+    Layer.succeed(OidcClientStore)(oidc.clientStore),
+    Layer.succeed(OidcCodeStore)(oidc.codeStore),
+    Layer.succeed(OidcTokenStore)(oidc.tokenStore),
+    Layer.succeed(OidcConsentStore)(oidc.consentStore),
+    Layer.succeed(JwtKeyStore)(oidc.jwtKeyStore),
     // resolveOidcProvider needs the core user store in the ambient context.
-    Layer.succeed(UserStoreTag)(userStore),
+    Layer.succeed(UserStore)(userStore),
   );
 
   const withOidc = Layer.mergeAll(base, oidcLayer) as Layer.Layer<AuthServices>;

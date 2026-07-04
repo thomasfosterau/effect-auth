@@ -10,7 +10,7 @@
  * - Upgrading security without breaking existing user accounts
  */
 
-import { Effect } from "effect-auth";
+import { Effect } from "effect";
 import * as Auth from "effect-auth";
 
 // Simulate users with different hash algorithms in the database

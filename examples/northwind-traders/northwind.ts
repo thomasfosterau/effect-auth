@@ -37,25 +37,17 @@ export interface SalesReport {
 export interface NorthwindService {
   readonly listProducts: (
     userId: string,
-  ) => Effect.Effect<
-    ReadonlyArray<Product>,
-    Auth.PermissionDeniedError,
-    Auth.AuthorizationPolicyTag
-  >;
+  ) => Effect.Effect<ReadonlyArray<Product>, Auth.PermissionDeniedError, Auth.AuthorizationPolicy>;
 
   readonly createCustomer: (
     userId: string,
     input: NewCustomerInput,
-  ) => Effect.Effect<Customer, Auth.PermissionDeniedError, Auth.AuthorizationPolicyTag>;
+  ) => Effect.Effect<Customer, Auth.PermissionDeniedError, Auth.AuthorizationPolicy>;
 
   readonly placeOrder: (
     userId: string,
     input: PlaceOrderInput,
-  ) => Effect.Effect<
-    Order,
-    Auth.PermissionDeniedError | Auth.AuthError,
-    Auth.AuthorizationPolicyTag
-  >;
+  ) => Effect.Effect<Order, Auth.PermissionDeniedError | Auth.AuthError, Auth.AuthorizationPolicy>;
 
   readonly discontinueProduct: (
     userId: string,
@@ -63,12 +55,12 @@ export interface NorthwindService {
   ) => Effect.Effect<
     Product,
     Auth.PermissionDeniedError | Auth.AuthError,
-    Auth.AuthorizationPolicyTag
+    Auth.AuthorizationPolicy
   >;
 
   readonly viewSalesReport: (
     userId: string,
-  ) => Effect.Effect<SalesReport, Auth.PermissionDeniedError, Auth.AuthorizationPolicyTag>;
+  ) => Effect.Effect<SalesReport, Auth.PermissionDeniedError, Auth.AuthorizationPolicy>;
 }
 
 export class NorthwindServiceTag extends Context.Service<NorthwindServiceTag, NorthwindService>()(

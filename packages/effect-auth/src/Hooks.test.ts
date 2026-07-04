@@ -3,10 +3,11 @@ import { Context, Effect, Layer } from "effect";
 import { Hooks, composePlugins, makePlugin } from "./Hooks.js";
 import * as Errors from "./Errors.js";
 import type { AuthResult, SignInInput } from "./EmailPassword.js";
-import { EmailPasswordStore, makeEmailPasswordService } from "./EmailPassword.js";
+import { EmailPasswordStore } from "./EmailPassword.js";
+import { makeEmailPasswordService } from "./EmailPassword.js";
 import { PasswordHasherLive } from "./Password.js";
-import { SessionManager, SessionStore, UserStore, makeSessionManager } from "./Session.js";
-import { RateLimiterLayer, RateLimitStore, type RateLimitEntry } from "./RateLimit.js";
+import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
+import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.js";
 import { RateLimitPlugin } from "./plugins/RateLimitPlugin.js";
 import type { Session, SessionConfig, User } from "./Types.js";
 
@@ -237,7 +238,7 @@ describe("RateLimitPlugin - dependency composition + short-circuit", () => {
     // RateLimitPlugin declares its own deps: Layer<Hooks, never, Hooks | RateLimiter | RateLimitStore>.
     const layer = composePlugins([RateLimitPlugin]).pipe(
       Layer.provide(Hooks.Default),
-      Layer.provide(RateLimiterLayer()),
+      Layer.provide(RateLimiter.layer()),
       Layer.provide(makeRateLimitStoreLayer()),
     );
 
@@ -272,16 +273,7 @@ describe("Hooks - integration with EmailPasswordService", () => {
           sessions.set(session.id, session);
           return session;
         }),
-      get: (sessionId: string) =>
-        Effect.gen(function* () {
-          const session = sessions.get(sessionId);
-          if (!session) {
-            return yield* Effect.fail(
-              new Errors.SessionNotFoundError({ message: "not found", sessionId }),
-            );
-          }
-          return session;
-        }),
+      get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
       update: (session: Session) =>
         Effect.sync(() => {
           sessions.set(session.id, session);
@@ -304,22 +296,8 @@ describe("Hooks - integration with EmailPasswordService", () => {
     };
 
     const userStore = {
-      get: (userId: string) =>
-        Effect.gen(function* () {
-          const user = users.get(userId);
-          if (!user) {
-            return yield* Effect.fail(new Errors.UserNotFoundError({ message: "nf", userId }));
-          }
-          return user;
-        }),
-      getCredentials: (userId: string) =>
-        Effect.gen(function* () {
-          const hash = passwordHashes.get(userId);
-          if (!hash) {
-            return yield* Effect.fail(new Errors.UserNotFoundError({ message: "nf", userId }));
-          }
-          return hash;
-        }),
+      get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
+      getCredentials: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     };
 
     const emailPasswordStore = {

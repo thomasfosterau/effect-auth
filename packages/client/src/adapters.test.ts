@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { createAuthClient } from "./Client.js";
-import { sessionStore } from "./svelte.js";
-import { useSession as useVueSession } from "./vue.js";
+import { listSessionsStore, sessionStore, type ListSessionsState } from "./svelte.js";
+import { useListSessions as useVueListSessions, useSession as useVueSession } from "./vue.js";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.js";
 
 const EMAIL = "alice@adapters.test";
@@ -51,5 +51,53 @@ describe("vue useSession", () => {
 
     await client.signOut();
     expect(session.value.data).toBeNull();
+  });
+});
+
+const nextTick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe("svelte listSessionsStore", () => {
+  it("fetches sessions on first subscribe and supports refetch", async () => {
+    const client = makeClient();
+    await client.signUp({ email: EMAIL, password: PW });
+
+    const store = listSessionsStore(client);
+    const seen: ListSessionsState[] = [];
+    const unsubscribe = store.subscribe((state) => {
+      seen.push(state);
+    });
+
+    expect(seen[0]?.isPending).toBe(true);
+    await nextTick();
+
+    const settled = seen[seen.length - 1];
+    expect(settled?.isPending).toBe(false);
+    expect(settled?.error).toBeNull();
+    expect(settled?.data?.length).toBe(1);
+
+    store.refetch();
+    await nextTick();
+    expect(seen[seen.length - 1]?.data?.length).toBe(1);
+
+    unsubscribe();
+  });
+});
+
+describe("vue useListSessions", () => {
+  it("fetches sessions into refs and supports refetch", async () => {
+    const client = makeClient();
+    await client.signUp({ email: EMAIL, password: PW });
+
+    const { data, isPending, error, refetch } = useVueListSessions(client);
+    expect(isPending.value).toBe(true);
+    await nextTick();
+
+    expect(isPending.value).toBe(false);
+    expect(error.value).toBeNull();
+    expect(data.value?.length).toBe(1);
+
+    refetch();
+    await nextTick();
+    expect(data.value?.length).toBe(1);
   });
 });

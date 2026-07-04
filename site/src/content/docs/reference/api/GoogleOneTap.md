@@ -22,10 +22,8 @@ their verified email and issues a session.
   - [GOOGLE_JWKS_ENDPOINT](#google_jwks_endpoint)
   - [GoogleOneTapConfig (interface)](#googleonetapconfig-interface)
   - [GoogleOneTapError (class)](#googleonetaperror-class)
-  - [GoogleOneTapService](#googleonetapservice)
-  - [GoogleOneTapService (interface)](#googleonetapservice-interface)
-  - [GoogleOneTapServiceLayer](#googleonetapservicelayer)
-  - [GoogleOneTapServiceTag (class)](#googleonetapservicetag-class)
+  - [GoogleOneTapService (class)](#googleonetapservice-class)
+  - [GoogleOneTapServiceShape (interface)](#googleonetapserviceshape-interface)
   - [GoogleOneTapSignInResult (interface)](#googleonetapsigninresult-interface)
   - [makeGoogleOneTapService](#makegoogleonetapservice)
 
@@ -83,20 +81,20 @@ Failure to verify a One Tap credential or complete the sign-in.
 export declare class GoogleOneTapError
 ```
 
-## GoogleOneTapService
+## GoogleOneTapService (class)
 
 **Signature**
 
 ```ts
-export declare const GoogleOneTapService: typeof GoogleOneTapServiceTag;
+export declare class GoogleOneTapService
 ```
 
-## GoogleOneTapService (interface)
+## GoogleOneTapServiceShape (interface)
 
 **Signature**
 
 ```ts
-export interface GoogleOneTapService {
+export interface GoogleOneTapServiceShape {
   /**
    * Verify a One Tap `credential` (id_token) and sign the user in:
    * find-or-create by the token's verified email, then issue a session.
@@ -106,27 +104,9 @@ export interface GoogleOneTapService {
   ) => Effect.Effect<
     GoogleOneTapSignInResult,
     GoogleOneTapError | AuthError | HookError,
-    OAuthUserStoreTag | SessionManagerTag | Hooks
+    OAuthUserStore | SessionManager | Hooks
   >;
 }
-```
-
-## GoogleOneTapServiceLayer
-
-**Signature**
-
-```ts
-export declare const GoogleOneTapServiceLayer: (
-  config: GoogleOneTapConfig,
-) => Layer.Layer<GoogleOneTapServiceTag, never, never>;
-```
-
-## GoogleOneTapServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class GoogleOneTapServiceTag
 ```
 
 ## GoogleOneTapSignInResult (interface)
@@ -152,5 +132,5 @@ export interface GoogleOneTapSignInResult {
 ```ts
 export declare const makeGoogleOneTapService: (
   config: GoogleOneTapConfig,
-) => Effect.Effect<GoogleOneTapService, never>;
+) => Effect.Effect<GoogleOneTapServiceShape, never>;
 ```

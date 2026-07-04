@@ -2,7 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import { RateLimiter as PersistenceRateLimiter } from "effect/unstable/persistence";
 import { RateLimiterPersistenceLayer } from "./RateLimitPersistence.js";
-import { RateLimiterTag, RateLimitStoreTag, RateLimitPresets } from "./RateLimit.js";
+import { RateLimiter, RateLimitStore, RateLimitPresets } from "./RateLimit.js";
 import { RateLimitError } from "./Errors.js";
 
 /**
@@ -15,10 +15,10 @@ const Live = Layer.mergeAll(
     Layer.provide(PersistenceRateLimiter.layer),
     Layer.provide(PersistenceRateLimiter.layerStoreMemory),
   ),
-  Layer.succeed(RateLimitStoreTag)(undefined as never),
+  Layer.succeed(RateLimitStore)(undefined as never),
 );
 
-const run = <A, E>(eff: Effect.Effect<A, E, RateLimiterTag | RateLimitStoreTag>) =>
+const run = <A, E>(eff: Effect.Effect<A, E, RateLimiter | RateLimitStore>) =>
   Effect.runPromise(eff.pipe(Effect.provide(Live)));
 
 describe("RateLimiterPersistenceLayer", () => {
@@ -26,7 +26,7 @@ describe("RateLimiterPersistenceLayer", () => {
     const config = { maxRequests: 3, windowMs: 60_000 };
     const result = await run(
       Effect.gen(function* () {
-        const rl = yield* RateLimiterTag;
+        const rl = yield* RateLimiter;
         yield* rl.consumeToken("k1", config);
         yield* rl.consumeToken("k1", config);
         yield* rl.consumeToken("k1", config);
@@ -41,7 +41,7 @@ describe("RateLimiterPersistenceLayer", () => {
     const config = { maxRequests: 1, windowMs: 60_000 };
     const [before, after] = await run(
       Effect.gen(function* () {
-        const rl = yield* RateLimiterTag;
+        const rl = yield* RateLimiter;
         const before = yield* rl.checkLimit("k2", config);
         yield* rl.consumeToken("k2", config);
         const after = yield* rl.checkLimit("k2", config);
@@ -56,7 +56,7 @@ describe("RateLimiterPersistenceLayer", () => {
     const config = { maxRequests: 2, windowMs: 60_000 };
     const [start, mid, end] = await run(
       Effect.gen(function* () {
-        const rl = yield* RateLimiterTag;
+        const rl = yield* RateLimiter;
         const start = yield* rl.getRemainingTokens("k3", config);
         yield* rl.consumeToken("k3", config);
         const mid = yield* rl.getRemainingTokens("k3", config);
@@ -74,7 +74,7 @@ describe("RateLimiterPersistenceLayer", () => {
     // RateLimitPresets.login = 5 attempts; the 6th must be rejected.
     const result = await run(
       Effect.gen(function* () {
-        const rl = yield* RateLimiterTag;
+        const rl = yield* RateLimiter;
         for (let i = 0; i < 5; i++) {
           yield* rl.consumeToken("login:user", RateLimitPresets.login);
         }

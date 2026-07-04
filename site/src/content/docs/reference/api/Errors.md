@@ -14,6 +14,7 @@ description: "API reference for the Errors module."
   - [ChallengeExpiredError (class)](#challengeexpirederror-class)
   - [ChallengeNotFoundError (class)](#challengenotfounderror-class)
   - [CredentialNotFoundError (class)](#credentialnotfounderror-class)
+  - [EmailInUseError (class)](#emailinuseerror-class)
   - [EmailNotVerifiedError (class)](#emailnotverifiederror-class)
   - [EmailVerificationError (class)](#emailverificationerror-class)
   - [HashingError (class)](#hashingerror-class)
@@ -73,6 +74,18 @@ WebAuthn credential not found error
 
 ```ts
 export declare class CredentialNotFoundError
+```
+
+## EmailInUseError (class)
+
+Raised when an email address is already associated with another account
+(sign-up with an existing email, or a change-email request targeting a
+taken address).
+
+**Signature**
+
+```ts
+export declare class EmailInUseError
 ```
 
 ## EmailNotVerifiedError (class)

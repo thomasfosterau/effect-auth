@@ -47,33 +47,33 @@ const oauthProviders = {
 };
 
 const StoresLayer = Layer.mergeAll(
-  Layer.succeed(Auth.SessionStoreTag, sessionStore),
-  Layer.succeed(Auth.UserStoreTag, userStore),
-  Layer.succeed(Auth.UserServiceStoreTag, userServiceStore),
-  Layer.succeed(Auth.EmailPasswordStoreTag, emailPasswordStore),
-  Layer.succeed(Auth.EmailVerificationStoreTag, emailVerificationStore),
-  Layer.succeed(Auth.RateLimitStoreTag, rateLimitStore),
-  Layer.succeed(Auth.OAuthStateStoreTag, oauthStateStore),
-  Layer.succeed(Auth.OAuthAccountStoreTag, oauthAccountStore),
-  Layer.succeed(Auth.RoleStoreTag, roleStore),
+  Layer.succeed(Auth.SessionStore, sessionStore),
+  Layer.succeed(Auth.UserStore, userStore),
+  Layer.succeed(Auth.UserServiceStore, userServiceStore),
+  Layer.succeed(Auth.EmailPasswordStore, emailPasswordStore),
+  Layer.succeed(Auth.EmailVerificationStore, emailVerificationStore),
+  Layer.succeed(Auth.RateLimitStore, rateLimitStore),
+  Layer.succeed(Auth.OAuthStateStore, oauthStateStore),
+  Layer.succeed(Auth.OAuthAccountStore, oauthAccountStore),
+  Layer.succeed(Auth.RoleStore, roleStore),
 );
 
 const ServicesLayer = Layer.mergeAll(
   // No-op hooks base; swap for a `composePlugins([...])` stack to install plugins.
   Auth.Hooks.Default,
   Auth.PasswordHasherLayer,
-  Auth.SessionManagerLayer(sessionConfig),
-  Auth.UserServiceLayer(),
-  Auth.EmailVerificationServiceLayer({
+  Auth.SessionManager.layer(sessionConfig),
+  Auth.UserService.layer(),
+  Auth.EmailVerificationService.layer({
     sendEmail: (_to, token) => Effect.sync(() => setCapturedToken(token)),
   }),
-  Auth.AuthLifecycleServiceLayer({
+  Auth.AuthLifecycleService.layer({
     requireEmailVerification: true,
     sendOnSignUp: true,
   }),
-  Auth.RateLimiterLayer(),
-  Auth.AuthorizationPolicyLayer(),
-  Auth.OAuthServiceLayer(oauthProviders),
+  Auth.RateLimiter.layer(),
+  Auth.AuthorizationPolicy.layer(),
+  Auth.OAuthService.layer(oauthProviders),
 );
 
 export const AppLayer = Layer.provideMerge(

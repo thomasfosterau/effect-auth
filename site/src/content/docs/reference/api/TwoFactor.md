@@ -21,22 +21,18 @@ backup code to mint the session.
 
 - [utils](#utils)
   - [PendingTwoFactor (interface)](#pendingtwofactor-interface)
-  - [PendingTwoFactorStore](#pendingtwofactorstore)
-  - [PendingTwoFactorStore (interface)](#pendingtwofactorstore-interface)
-  - [PendingTwoFactorStoreTag (class)](#pendingtwofactorstoretag-class)
+  - [PendingTwoFactorStore (class)](#pendingtwofactorstore-class)
+  - [PendingTwoFactorStoreShape (interface)](#pendingtwofactorstoreshape-interface)
   - [TwoFactorChallenge (interface)](#twofactorchallenge-interface)
   - [TwoFactorConfig (interface)](#twofactorconfig-interface)
   - [TwoFactorEnableResult (interface)](#twofactorenableresult-interface)
   - [TwoFactorError (class)](#twofactorerror-class)
   - [TwoFactorGateLayer](#twofactorgatelayer)
   - [TwoFactorRecord (interface)](#twofactorrecord-interface)
-  - [TwoFactorService](#twofactorservice)
-  - [TwoFactorService (interface)](#twofactorservice-interface)
-  - [TwoFactorServiceLayer](#twofactorservicelayer)
-  - [TwoFactorServiceTag (class)](#twofactorservicetag-class)
-  - [TwoFactorStore](#twofactorstore)
-  - [TwoFactorStore (interface)](#twofactorstore-interface)
-  - [TwoFactorStoreTag (class)](#twofactorstoretag-class)
+  - [TwoFactorService (class)](#twofactorservice-class)
+  - [TwoFactorServiceShape (interface)](#twofactorserviceshape-interface)
+  - [TwoFactorStore (class)](#twofactorstore-class)
+  - [TwoFactorStoreShape (interface)](#twofactorstoreshape-interface)
   - [TwoFactorVerifyOptions (interface)](#twofactorverifyoptions-interface)
   - [TwoFactorVerifyResult (interface)](#twofactorverifyresult-interface)
   - [hashBackupCode](#hashbackupcode)
@@ -62,34 +58,26 @@ export interface PendingTwoFactor {
 }
 ```
 
-## PendingTwoFactorStore
+## PendingTwoFactorStore (class)
 
 **Signature**
 
 ```ts
-export declare const PendingTwoFactorStore: typeof PendingTwoFactorStoreTag;
+export declare class PendingTwoFactorStore
 ```
 
-## PendingTwoFactorStore (interface)
+## PendingTwoFactorStoreShape (interface)
 
 Storage interface for pending two-factor challenges
 
 **Signature**
 
 ```ts
-export interface PendingTwoFactorStore {
+export interface PendingTwoFactorStoreShape {
   readonly create: (pending: PendingTwoFactor) => Effect.Effect<PendingTwoFactor, Errors.AuthError>;
   readonly get: (token: string) => Effect.Effect<PendingTwoFactor | null, Errors.AuthError>;
   readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
 }
-```
-
-## PendingTwoFactorStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class PendingTwoFactorStoreTag
 ```
 
 ## TwoFactorChallenge (interface)
@@ -159,7 +147,7 @@ export declare class TwoFactorError
 
 ## TwoFactorGateLayer
 
-Provides the {@link SecondFactorGateTag} seam so password sign-in returns a
+Provides the {@link SecondFactorGate} seam so password sign-in returns a
 two-factor challenge (instead of a session) for enrolled users.
 
 The gate's methods are self-contained (`R = never`), so the two-factor
@@ -167,9 +155,9 @@ stores are captured from context when the layer is built:
 
 ```ts
 const services = Layer.mergeAll(
-  EmailPasswordServiceLayer(),
+  EmailPasswordService.layer(),
   TwoFactorGateLayer.pipe(
-    Layer.provide(TwoFactorServiceLayer({ issuer: "MyApp" })),
+    Layer.provide(TwoFactorService.layer({ issuer: "MyApp" })),
     Layer.provide(twoFactorStores),
   ),
 );
@@ -179,9 +167,9 @@ const services = Layer.mergeAll(
 
 ```ts
 export declare const TwoFactorGateLayer: Layer.Layer<
-  SecondFactorGateTag,
+  SecondFactorGate,
   never,
-  TwoFactorServiceTag | TwoFactorStoreTag | PendingTwoFactorStoreTag
+  TwoFactorService | TwoFactorStore | PendingTwoFactorStore
 >;
 ```
 
@@ -209,22 +197,22 @@ export interface TwoFactorRecord {
 }
 ```
 
-## TwoFactorService
+## TwoFactorService (class)
 
 **Signature**
 
 ```ts
-export declare const TwoFactorService: typeof TwoFactorServiceTag;
+export declare class TwoFactorService
 ```
 
-## TwoFactorService (interface)
+## TwoFactorServiceShape (interface)
 
 Two-factor authentication service
 
 **Signature**
 
 ```ts
-export interface TwoFactorService {
+export interface TwoFactorServiceShape {
   /**
    * Enable two-factor for a user. Verifies the user's password, generates a
    * TOTP secret plus backup codes, and stores the record (unverified unless
@@ -241,7 +229,7 @@ export interface TwoFactorService {
     | Errors.HashingError
     | Errors.AuthError
     | Errors.UserNotFoundError,
-    TwoFactorStoreTag | EmailPasswordStoreTag | PasswordHasherTag | UserStoreTag
+    TwoFactorStore | EmailPasswordStore | PasswordHasher | UserStore
   >;
 
   /**
@@ -251,11 +239,7 @@ export interface TwoFactorService {
   readonly confirmEnable: (
     userId: string,
     code: string,
-  ) => Effect.Effect<
-    void,
-    TwoFactorError | Errors.HashingError | Errors.AuthError,
-    TwoFactorStoreTag
-  >;
+  ) => Effect.Effect<void, TwoFactorError | Errors.HashingError | Errors.AuthError, TwoFactorStore>;
 
   /**
    * Disable two-factor after re-verifying the user's password.
@@ -266,15 +250,13 @@ export interface TwoFactorService {
   ) => Effect.Effect<
     void,
     Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
-    TwoFactorStoreTag | EmailPasswordStoreTag | PasswordHasherTag
+    TwoFactorStore | EmailPasswordStore | PasswordHasher
   >;
 
   /**
    * Whether the user has a verified two-factor record.
    */
-  readonly isEnabled: (
-    userId: string,
-  ) => Effect.Effect<boolean, Errors.AuthError, TwoFactorStoreTag>;
+  readonly isEnabled: (userId: string) => Effect.Effect<boolean, Errors.AuthError, TwoFactorStore>;
 
   /**
    * Start a second-factor challenge for a user whose first factor (e.g.
@@ -286,7 +268,7 @@ export interface TwoFactorService {
   ) => Effect.Effect<
     TwoFactorChallenge,
     TwoFactorError | Errors.AuthError,
-    TwoFactorStoreTag | PendingTwoFactorStoreTag
+    TwoFactorStore | PendingTwoFactorStore
   >;
 
   /**
@@ -300,7 +282,7 @@ export interface TwoFactorService {
   ) => Effect.Effect<
     TwoFactorVerifyResult,
     TwoFactorError | Errors.HashingError | Errors.AuthError | HookError,
-    TwoFactorStoreTag | PendingTwoFactorStoreTag | SessionManagerTag | Hooks
+    TwoFactorStore | PendingTwoFactorStore | SessionManager | Hooks
   >;
 
   /**
@@ -314,7 +296,7 @@ export interface TwoFactorService {
   ) => Effect.Effect<
     TwoFactorVerifyResult,
     TwoFactorError | Errors.AuthError | HookError,
-    TwoFactorStoreTag | PendingTwoFactorStoreTag | SessionManagerTag | Hooks
+    TwoFactorStore | PendingTwoFactorStore | SessionManager | Hooks
   >;
 
   /**
@@ -327,57 +309,31 @@ export interface TwoFactorService {
   ) => Effect.Effect<
     readonly string[],
     TwoFactorError | Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
-    TwoFactorStoreTag | EmailPasswordStoreTag | PasswordHasherTag
+    TwoFactorStore | EmailPasswordStore | PasswordHasher
   >;
 }
 ```
 
-## TwoFactorServiceLayer
+## TwoFactorStore (class)
 
 **Signature**
 
 ```ts
-export declare const TwoFactorServiceLayer: (
-  config: TwoFactorConfig,
-) => Layer.Layer<TwoFactorServiceTag, never, never>;
+export declare class TwoFactorStore
 ```
 
-## TwoFactorServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class TwoFactorServiceTag
-```
-
-## TwoFactorStore
-
-**Signature**
-
-```ts
-export declare const TwoFactorStore: typeof TwoFactorStoreTag;
-```
-
-## TwoFactorStore (interface)
+## TwoFactorStoreShape (interface)
 
 Storage interface for two-factor records
 
 **Signature**
 
 ```ts
-export interface TwoFactorStore {
+export interface TwoFactorStoreShape {
   readonly get: (userId: string) => Effect.Effect<TwoFactorRecord | null, Errors.AuthError>;
   readonly upsert: (record: TwoFactorRecord) => Effect.Effect<TwoFactorRecord, Errors.AuthError>;
   readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
 }
-```
-
-## TwoFactorStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class TwoFactorStoreTag
 ```
 
 ## TwoFactorVerifyOptions (interface)
@@ -422,5 +378,5 @@ Create a two-factor service
 ```ts
 export declare const makeTwoFactorService: (
   config: TwoFactorConfig,
-) => Effect.Effect<TwoFactorService, never>;
+) => Effect.Effect<TwoFactorServiceShape, never>;
 ```

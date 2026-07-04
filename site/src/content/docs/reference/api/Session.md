@@ -10,38 +10,36 @@ description: "API reference for the Session module."
 <h2 class="text-delta">Table of contents</h2>
 
 - [utils](#utils)
-  - [SessionManager](#sessionmanager)
-  - [SessionManager (interface)](#sessionmanager-interface)
-  - [SessionManagerLayer](#sessionmanagerlayer)
-  - [SessionManagerTag (class)](#sessionmanagertag-class)
-  - [SessionStore](#sessionstore)
-  - [SessionStore (interface)](#sessionstore-interface)
-  - [SessionStoreTag (class)](#sessionstoretag-class)
-  - [UserStore](#userstore)
-  - [UserStore (interface)](#userstore-interface)
-  - [UserStoreTag (class)](#userstoretag-class)
+  - [SessionManager (class)](#sessionmanager-class)
+  - [SessionManagerShape (interface)](#sessionmanagershape-interface)
+  - [SessionStore (class)](#sessionstore-class)
+  - [SessionStoreShape (interface)](#sessionstoreshape-interface)
+  - [UserStore (class)](#userstore-class)
+  - [UserStoreShape (interface)](#userstoreshape-interface)
   - [makeSessionManager](#makesessionmanager)
 
 ---
 
 # utils
 
-## SessionManager
+## SessionManager (class)
+
+Tag for SessionManager service
 
 **Signature**
 
 ```ts
-export declare const SessionManager: typeof SessionManagerTag;
+export declare class SessionManager
 ```
 
-## SessionManager (interface)
+## SessionManagerShape (interface)
 
 Session manager service
 
 **Signature**
 
 ```ts
-export interface SessionManager {
+export interface SessionManagerShape {
   /**
    * Create a new session for a user
    */
@@ -101,35 +99,17 @@ export interface SessionManager {
 }
 ```
 
-## SessionManagerLayer
+## SessionStore (class)
+
+Tag for SessionStore service
 
 **Signature**
 
 ```ts
-export declare const SessionManagerLayer: (
-  config: Types.SessionConfig,
-) => Layer.Layer<SessionManagerTag, never, SessionStoreTag | UserStoreTag>;
+export declare class SessionStore
 ```
 
-## SessionManagerTag (class)
-
-Tag for SessionManager service
-
-**Signature**
-
-```ts
-export declare class SessionManagerTag
-```
-
-## SessionStore
-
-**Signature**
-
-```ts
-export declare const SessionStore: typeof SessionStoreTag;
-```
-
-## SessionStore (interface)
+## SessionStoreShape (interface)
 
 Session store interface for managing session persistence
 Users should implement this interface with their preferred storage backend
@@ -138,16 +118,16 @@ Users should implement this interface with their preferred storage backend
 **Signature**
 
 ```ts
-export interface SessionStore {
+export interface SessionStoreShape {
   /**
    * Create a new session
    */
   readonly create: (session: Types.Session) => Effect.Effect<Types.Session, Errors.AuthError>;
 
   /**
-   * Get a session by ID
+   * Get a session by ID, or `null` when no such session exists.
    */
-  readonly get: (sessionId: string) => Effect.Effect<Types.Session, Errors.SessionNotFoundError>;
+  readonly get: (sessionId: string) => Effect.Effect<Types.Session | null, Errors.AuthError>;
 
   /**
    * Update a session
@@ -173,25 +153,17 @@ export interface SessionStore {
 }
 ```
 
-## SessionStoreTag (class)
+## UserStore (class)
 
-Tag for SessionStore service
-
-**Signature**
-
-```ts
-export declare class SessionStoreTag
-```
-
-## UserStore
+Tag for UserStore service
 
 **Signature**
 
 ```ts
-export declare const UserStore: typeof UserStoreTag;
+export declare class UserStore
 ```
 
-## UserStore (interface)
+## UserStoreShape (interface)
 
 User store interface for managing user persistence
 Users should implement this interface with their preferred storage backend
@@ -199,27 +171,18 @@ Users should implement this interface with their preferred storage backend
 **Signature**
 
 ```ts
-export interface UserStore {
+export interface UserStoreShape {
   /**
-   * Get a user by ID
+   * Get a user by ID, or `null` when no such user exists.
    */
-  readonly get: (userId: string) => Effect.Effect<Types.User, Errors.UserNotFoundError>;
+  readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
   /**
-   * Get user credentials (hashed password)
+   * Get user credentials (hashed password), or `null` when the user does not
+   * exist or has no password set.
    */
-  readonly getCredentials: (userId: string) => Effect.Effect<string, Errors.UserNotFoundError>;
+  readonly getCredentials: (userId: string) => Effect.Effect<string | null, Errors.AuthError>;
 }
-```
-
-## UserStoreTag (class)
-
-Tag for UserStore service
-
-**Signature**
-
-```ts
-export declare class UserStoreTag
 ```
 
 ## makeSessionManager
@@ -231,5 +194,5 @@ Create a SessionManager implementation
 ```ts
 export declare const makeSessionManager: (
   config: Types.SessionConfig,
-) => Effect.Effect<SessionManager, never, SessionStoreTag | UserStoreTag>;
+) => Effect.Effect<SessionManagerShape, never, SessionStore | UserStore>;
 ```

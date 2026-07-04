@@ -24,9 +24,9 @@
 import { Context, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.js";
 import { Hooks, makePlugin, type HookError } from "./Hooks.js";
-import { SessionManagerTag } from "./Session.js";
+import { SessionManager } from "./Session.js";
 import type * as Types from "./Types.js";
-import { UserServiceStoreTag } from "./User.js";
+import { UserServiceStore } from "./User.js";
 
 /**
  * Admin error
@@ -61,16 +61,13 @@ export interface ListUsersResult {
  * `UserServiceStore` (get/update/delete) is reused for everything else;
  * this store only adds listing, which per-user stores cannot express.
  */
-export interface AdminUserStore {
+export interface AdminUserStoreShape {
   readonly listUsers: (query: ListUsersQuery) => Effect.Effect<ListUsersResult, Errors.AuthError>;
 }
 
-export class AdminUserStoreTag extends Context.Service<AdminUserStoreTag, AdminUserStore>()(
+export class AdminUserStore extends Context.Service<AdminUserStore, AdminUserStoreShape>()(
   "@effect-auth/AdminUserStore",
 ) {}
-
-// Public ergonomic alias
-export const AdminUserStore = AdminUserStoreTag;
 
 /**
  * Admin service configuration
@@ -87,7 +84,7 @@ export interface AdminConfig {
   /**
    * Advisory lifetime of impersonation sessions in milliseconds (default:
    * 1 hour). Recorded on the session as `attributes.impersonationExpiresAt`;
-   * see {@link AdminService.impersonateUser}.
+   * see {@link AdminServiceShape.impersonateUser}.
    */
   readonly impersonationSessionDuration?: number;
 }
@@ -96,7 +93,7 @@ export interface AdminConfig {
  * Whether a user is an administrator under the given config: either their id
  * is in `adminUserIds` or their `attributes.role` is one of `adminRoles`.
  */
-export const isAdmin = (user: Types.User, config?: AdminConfig): boolean => {
+export const isAdmin = (user: Types.User, config: AdminConfig = {}): boolean => {
   const adminRoles = config?.adminRoles ?? ["admin"];
   const adminUserIds = config?.adminUserIds ?? [];
   if (adminUserIds.includes(user.id)) {
@@ -137,14 +134,14 @@ export interface BanUserOptions {
  * as its first argument and fails with `AdminError` unless
  * {@link isAdmin | `isAdmin(actor, config)`} holds.
  */
-export interface AdminService {
+export interface AdminServiceShape {
   /**
    * List users with pagination and optional email search.
    */
   readonly listUsers: (
     actor: Types.User,
     query?: ListUsersQuery,
-  ) => Effect.Effect<ListUsersResult, AdminError | Errors.AuthError, AdminUserStoreTag>;
+  ) => Effect.Effect<ListUsersResult, AdminError | Errors.AuthError, AdminUserStore>;
 
   /**
    * Set a user's role (written to `attributes.role`).
@@ -156,7 +153,7 @@ export interface AdminService {
   ) => Effect.Effect<
     Types.User,
     AdminError | Errors.AuthError | Errors.UserNotFoundError,
-    UserServiceStoreTag
+    UserServiceStore
   >;
 
   /**
@@ -170,7 +167,7 @@ export interface AdminService {
   ) => Effect.Effect<
     Types.User,
     AdminError | Errors.AuthError | Errors.UserNotFoundError,
-    UserServiceStoreTag | SessionManagerTag
+    UserServiceStore | SessionManager
   >;
 
   /**
@@ -182,7 +179,7 @@ export interface AdminService {
   ) => Effect.Effect<
     Types.User,
     AdminError | Errors.AuthError | Errors.UserNotFoundError,
-    UserServiceStoreTag
+    UserServiceStore
   >;
 
   /**
@@ -192,7 +189,7 @@ export interface AdminService {
   readonly removeUser: (
     actor: Types.User,
     userId: string,
-  ) => Effect.Effect<void, AdminError | Errors.AuthError, UserServiceStoreTag | SessionManagerTag>;
+  ) => Effect.Effect<void, AdminError | Errors.AuthError, UserServiceStore | SessionManager>;
 
   /**
    * Revoke all sessions of a user.
@@ -200,7 +197,7 @@ export interface AdminService {
   readonly revokeUserSessions: (
     actor: Types.User,
     userId: string,
-  ) => Effect.Effect<void, AdminError | Errors.AuthError, SessionManagerTag>;
+  ) => Effect.Effect<void, AdminError | Errors.AuthError, SessionManager>;
 
   /**
    * Create a session for the target user marked with
@@ -218,21 +215,26 @@ export interface AdminService {
   ) => Effect.Effect<
     Types.Session,
     AdminError | Errors.AuthError | Errors.UserNotFoundError | HookError,
-    UserServiceStoreTag | SessionManagerTag | Hooks
+    UserServiceStore | SessionManager | Hooks
   >;
 }
 
-export class AdminServiceTag extends Context.Service<AdminServiceTag, AdminService>()(
+export class AdminService extends Context.Service<AdminService, AdminServiceShape>()(
   "@effect-auth/AdminService",
-) {}
-
-// Public ergonomic alias
-export const AdminService = AdminServiceTag;
+) {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = (config: AdminConfig = {}) =>
+    Layer.effect(AdminService, makeAdminService(config));
+}
 
 /**
  * Create an admin service
  */
-export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminService, never> => {
+export const makeAdminService = (
+  config: AdminConfig = {},
+): Effect.Effect<AdminServiceShape, never> => {
   const defaultBanReason = config.defaultBanReason ?? "No reason";
   const impersonationSessionDuration = config.impersonationSessionDuration ?? 60 * 60 * 1000; // 1 hour
 
@@ -243,11 +245,11 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
       : Effect.fail(new AdminError({ message: "Forbidden: administrator privileges required" }));
 
   return Effect.sync(
-    (): AdminService => ({
+    (): AdminServiceShape => ({
       listUsers: (actor, query = {}) =>
         Effect.gen(function* () {
           yield* requireAdmin(actor);
-          const store = yield* AdminUserStoreTag;
+          const store = yield* AdminUserStore;
           return yield* store.listUsers(query);
         }),
 
@@ -255,8 +257,11 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
         Effect.gen(function* () {
           yield* requireAdmin(actor);
 
-          const userStore = yield* UserServiceStoreTag;
+          const userStore = yield* UserServiceStore;
           const user = yield* userStore.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
 
           return yield* userStore.update({
             ...user,
@@ -273,8 +278,11 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
             return yield* Effect.fail(new AdminError({ message: "You cannot ban yourself" }));
           }
 
-          const userStore = yield* UserServiceStoreTag;
+          const userStore = yield* UserServiceStore;
           const user = yield* userStore.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
 
           if (isAdmin(user, config)) {
             return yield* Effect.fail(
@@ -304,7 +312,7 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
             attributes,
           });
 
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
           yield* sessionManager.invalidateUserSessions(userId);
 
           return banned;
@@ -314,8 +322,11 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
         Effect.gen(function* () {
           yield* requireAdmin(actor);
 
-          const userStore = yield* UserServiceStoreTag;
+          const userStore = yield* UserServiceStore;
           const user = yield* userStore.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
 
           const attributes: Record<string, unknown> = {};
           for (const [key, value] of Object.entries(user.attributes)) {
@@ -340,8 +351,8 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
             return yield* Effect.fail(new AdminError({ message: "You cannot remove yourself" }));
           }
 
-          const userStore = yield* UserServiceStoreTag;
-          const sessionManager = yield* SessionManagerTag;
+          const userStore = yield* UserServiceStore;
+          const sessionManager = yield* SessionManager;
 
           yield* sessionManager.invalidateUserSessions(userId);
           yield* userStore.delete(userId);
@@ -350,7 +361,7 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
       revokeUserSessions: (actor, userId) =>
         Effect.gen(function* () {
           yield* requireAdmin(actor);
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
           yield* sessionManager.invalidateUserSessions(userId);
         }),
 
@@ -358,10 +369,13 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
         Effect.gen(function* () {
           yield* requireAdmin(actor);
 
-          const userStore = yield* UserServiceStoreTag;
+          const userStore = yield* UserServiceStore;
           const target = yield* userStore.get(userId);
+          if (target === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
 
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
           return yield* sessionManager.createSession(target.id, {
             impersonatedBy: actor.id,
             impersonationExpiresAt: Date.now() + impersonationSessionDuration,
@@ -370,9 +384,6 @@ export const makeAdminService = (config: AdminConfig = {}): Effect.Effect<AdminS
     }),
   );
 };
-
-export const AdminServiceLayer = (config: AdminConfig = {}) =>
-  Layer.effect(AdminServiceTag, makeAdminService(config));
 
 /**
  * Hooks plugin that blocks banned users at session validation.

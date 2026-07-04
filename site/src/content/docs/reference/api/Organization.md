@@ -35,13 +35,10 @@ requests.
   - [Organization (interface)](#organization-interface)
   - [OrganizationConfig (interface)](#organizationconfig-interface)
   - [OrganizationError (class)](#organizationerror-class)
-  - [OrganizationService](#organizationservice)
-  - [OrganizationService (interface)](#organizationservice-interface)
-  - [OrganizationServiceLayer](#organizationservicelayer)
-  - [OrganizationServiceTag (class)](#organizationservicetag-class)
-  - [OrganizationStore](#organizationstore)
-  - [OrganizationStore (interface)](#organizationstore-interface)
-  - [OrganizationStoreTag (class)](#organizationstoretag-class)
+  - [OrganizationService (class)](#organizationservice-class)
+  - [OrganizationServiceShape (interface)](#organizationserviceshape-interface)
+  - [OrganizationStore (class)](#organizationstore-class)
+  - [OrganizationStoreShape (interface)](#organizationstoreshape-interface)
   - [UpdateOrganizationInput (interface)](#updateorganizationinput-interface)
   - [defaultOrganizationRoles](#defaultorganizationroles)
   - [makeOrganizationService](#makeorganizationservice)
@@ -203,22 +200,22 @@ Organization error
 export declare class OrganizationError
 ```
 
-## OrganizationService
+## OrganizationService (class)
 
 **Signature**
 
 ```ts
-export declare const OrganizationService: typeof OrganizationServiceTag;
+export declare class OrganizationService
 ```
 
-## OrganizationService (interface)
+## OrganizationServiceShape (interface)
 
 Organization service
 
 **Signature**
 
 ```ts
-export interface OrganizationService {
+export interface OrganizationServiceShape {
   /**
    * Create an organization. Enforces `allowUserToCreateOrganization`,
    * `organizationLimit` (organizations the user already belongs to) and slug
@@ -227,7 +224,7 @@ export interface OrganizationService {
   readonly createOrganization: (
     userId: string,
     input: CreateOrganizationInput,
-  ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError, OrganizationStore>;
 
   /**
    * Update an organization's fields. Requires the `organization:update`
@@ -237,7 +234,7 @@ export interface OrganizationService {
     userId: string,
     organizationId: string,
     updates: UpdateOrganizationInput,
-  ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError, OrganizationStore>;
 
   /**
    * Delete an organization. Requires the `organization:delete` permission.
@@ -245,21 +242,21 @@ export interface OrganizationService {
   readonly deleteOrganization: (
     userId: string,
     organizationId: string,
-  ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStore>;
 
   /**
    * Fetch an organization together with all of its members.
    */
   readonly getFullOrganization: (
     organizationId: string,
-  ) => Effect.Effect<FullOrganization, OrganizationError | Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<FullOrganization, OrganizationError | Errors.AuthError, OrganizationStore>;
 
   /**
    * List the organizations a user belongs to.
    */
   readonly listOrganizations: (
     userId: string,
-  ) => Effect.Effect<ReadonlyArray<Organization>, Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<ReadonlyArray<Organization>, Errors.AuthError, OrganizationStore>;
 
   /**
    * Invite a user (by email) to the organization. Requires the
@@ -272,7 +269,7 @@ export interface OrganizationService {
     inviterId: string,
     organizationId: string,
     input: InviteMemberInput,
-  ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStore>;
 
   /**
    * Accept a pending invitation. Validates that the invitation is pending,
@@ -283,7 +280,7 @@ export interface OrganizationService {
     userId: string,
     invitationId: string,
     userEmail: string,
-  ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStore>;
 
   /**
    * Reject a pending invitation addressed to `userEmail`.
@@ -291,7 +288,7 @@ export interface OrganizationService {
   readonly rejectInvitation: (
     invitationId: string,
     userEmail: string,
-  ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStore>;
 
   /**
    * Cancel a pending invitation. The canceler needs the `invitation:cancel`
@@ -300,21 +297,21 @@ export interface OrganizationService {
   readonly cancelInvitation: (
     cancelerId: string,
     invitationId: string,
-  ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStore>;
 
   /**
    * List all invitations for an organization (any status).
    */
   readonly listInvitations: (
     organizationId: string,
-  ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError, OrganizationStore>;
 
   /**
    * List pending, unexpired invitations addressed to an email.
    */
   readonly listUserInvitations: (
     email: string,
-  ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError, OrganizationStore>;
 
   /**
    * Add a user to the organization directly (no invitation). Requires the
@@ -325,7 +322,7 @@ export interface OrganizationService {
     organizationId: string,
     userId: string,
     role: string,
-  ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStore>;
 
   /**
    * Remove a member. Requires the `member:delete` permission. An owner can
@@ -335,7 +332,7 @@ export interface OrganizationService {
     actorId: string,
     organizationId: string,
     memberUserId: string,
-  ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStore>;
 
   /**
    * Change a member's role. Requires the `member:update` permission. The last
@@ -346,7 +343,7 @@ export interface OrganizationService {
     organizationId: string,
     memberUserId: string,
     role: string,
-  ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStore>;
 
   /**
    * Whether the user's role in the organization grants the given
@@ -356,7 +353,7 @@ export interface OrganizationService {
     userId: string,
     organizationId: string,
     permission: string,
-  ) => Effect.Effect<boolean, Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<boolean, Errors.AuthError, OrganizationStore>;
 
   /**
    * Like {@link checkPermission} but fails with `OrganizationError` when the
@@ -366,37 +363,19 @@ export interface OrganizationService {
     userId: string,
     organizationId: string,
     permission: string,
-  ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStoreTag>;
+  ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStore>;
 }
 ```
 
-## OrganizationServiceLayer
+## OrganizationStore (class)
 
 **Signature**
 
 ```ts
-export declare const OrganizationServiceLayer: (
-  config?: OrganizationConfig,
-) => Layer.Layer<OrganizationServiceTag, never, never>;
+export declare class OrganizationStore
 ```
 
-## OrganizationServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class OrganizationServiceTag
-```
-
-## OrganizationStore
-
-**Signature**
-
-```ts
-export declare const OrganizationStore: typeof OrganizationStoreTag;
-```
-
-## OrganizationStore (interface)
+## OrganizationStoreShape (interface)
 
 Storage interface for organizations, members, and invitations.
 Implement with your preferred backend (SQL, Redis, ...).
@@ -407,7 +386,7 @@ to remove the organization's members and invitations as well.
 **Signature**
 
 ```ts
-export interface OrganizationStore {
+export interface OrganizationStoreShape {
   readonly createOrganization: (
     organization: Organization,
   ) => Effect.Effect<Organization, Errors.AuthError>;
@@ -457,14 +436,6 @@ export interface OrganizationStore {
 }
 ```
 
-## OrganizationStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class OrganizationStoreTag
-```
-
 ## UpdateOrganizationInput (interface)
 
 Partial update of an organization's fields
@@ -508,5 +479,5 @@ Create an organization service
 ```ts
 export declare const makeOrganizationService: (
   config?: OrganizationConfig,
-) => Effect.Effect<OrganizationService, never>;
+) => Effect.Effect<OrganizationServiceShape, never>;
 ```

@@ -48,23 +48,11 @@ export const makeServerFixture = () => {
     return id === undefined ? null : (usersById.get(id) ?? null);
   };
 
-  const getUserById = (userId: string) =>
-    Effect.suspend(() => {
-      const user = usersById.get(userId);
-      return user === undefined
-        ? Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId }))
-        : Effect.succeed(user);
-    });
+  const getUserById = (userId: string) => Effect.sync(() => usersById.get(userId) ?? null);
 
-  const sessionStore: Auth.SessionStore = {
+  const sessionStore: Auth.SessionStoreShape = {
     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
-    get: (sessionId) =>
-      Effect.suspend(() => {
-        const session = sessions.get(sessionId);
-        return session === undefined
-          ? Effect.fail(new Auth.SessionNotFoundError({ message: "Session not found", sessionId }))
-          : Effect.succeed(session);
-      }),
+    get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
     delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
     deleteByUserId: (userId) =>
@@ -75,25 +63,19 @@ export const makeServerFixture = () => {
       Effect.sync(() => [...sessions.values()].filter((session) => session.userId === userId)),
   };
 
-  const userStore: Auth.UserStore = {
+  const userStore: Auth.UserStoreShape = {
     get: getUserById,
-    getCredentials: (userId) =>
-      Effect.suspend(() => {
-        const hash = passwordHashes.get(userId);
-        return hash === undefined
-          ? Effect.fail(new Auth.UserNotFoundError({ message: "No credentials", userId }))
-          : Effect.succeed(hash);
-      }),
+    getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
   };
 
-  const emailPasswordStore: Auth.EmailPasswordStore = {
+  const emailPasswordStore: Auth.EmailPasswordStoreShape = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
 
-  const userServiceStore: Auth.UserServiceStore = {
+  const userServiceStore: Auth.UserServiceStoreShape = {
     get: getUserById,
     getByEmail: (email) => Effect.sync(() => userByEmail(email)),
     update: (user) =>
@@ -112,7 +94,7 @@ export const makeServerFixture = () => {
       }),
   };
 
-  const emailVerificationStore: Auth.EmailVerificationStore = {
+  const emailVerificationStore: Auth.EmailVerificationStoreShape = {
     create: (v) => Effect.sync(() => (verifications.set(v.token, v), v)),
     get: (token) => Effect.sync(() => verifications.get(token) ?? null),
     delete: (token) => Effect.sync(() => void verifications.delete(token)),
@@ -123,7 +105,7 @@ export const makeServerFixture = () => {
       }),
   };
 
-  const passwordResetStore: Auth.PasswordResetStore = {
+  const passwordResetStore: Auth.PasswordResetStoreShape = {
     create: (reset) => Effect.sync(() => (resets.set(reset.token, reset), reset)),
     get: (token) => Effect.sync(() => resets.get(token) ?? null),
     delete: (token) => Effect.sync(() => void resets.delete(token)),
@@ -133,32 +115,32 @@ export const makeServerFixture = () => {
       }),
   };
 
-  const passwordResetUserStore: Auth.PasswordResetUserStore = {
+  const passwordResetUserStore: Auth.PasswordResetUserStoreShape = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
 
   const storeLayer = Layer.mergeAll(
-    Layer.succeed(Auth.SessionStoreTag)(sessionStore),
-    Layer.succeed(Auth.UserStoreTag)(userStore),
-    Layer.succeed(Auth.EmailPasswordStoreTag)(emailPasswordStore),
-    Layer.succeed(Auth.PasswordHasherTag)(hasher),
-    Layer.succeed(Auth.EmailVerificationStoreTag)(emailVerificationStore),
-    Layer.succeed(Auth.PasswordResetStoreTag)(passwordResetStore),
-    Layer.succeed(Auth.PasswordResetUserStoreTag)(passwordResetUserStore),
-    Layer.succeed(Auth.UserServiceStoreTag)(userServiceStore),
+    Layer.succeed(Auth.SessionStore)(sessionStore),
+    Layer.succeed(Auth.UserStore)(userStore),
+    Layer.succeed(Auth.EmailPasswordStore)(emailPasswordStore),
+    Layer.succeed(Auth.PasswordHasher)(hasher),
+    Layer.succeed(Auth.EmailVerificationStore)(emailVerificationStore),
+    Layer.succeed(Auth.PasswordResetStore)(passwordResetStore),
+    Layer.succeed(Auth.PasswordResetUserStore)(passwordResetUserStore),
+    Layer.succeed(Auth.UserServiceStore)(userServiceStore),
     Auth.Hooks.Default,
   );
 
   const services: Layer.Layer<Auth.Http.AuthServices> = Layer.mergeAll(
     storeLayer,
-    Auth.SessionManagerLayer({
+    Auth.SessionManager.layer({
       sessionExpiresIn: { activePeriod: HOUR, idlePeriod: HOUR },
     }).pipe(Layer.provide(storeLayer)),
-    Auth.AuthLifecycleServiceLayer(),
-    Auth.EmailVerificationServiceLayer({ sendEmail: () => Effect.void }),
-    Auth.PasswordResetServiceLayer({ sendResetPassword: () => Effect.void }),
-    Auth.UserServiceLayer(),
+    Auth.AuthLifecycleService.layer(),
+    Auth.EmailVerificationService.layer({ sendEmail: () => Effect.void }),
+    Auth.PasswordResetService.layer({ sendResetPassword: () => Effect.void }),
+    Auth.UserService.layer(),
   );
 
   const { handler } = Auth.Http.makeAuthWebHandler({

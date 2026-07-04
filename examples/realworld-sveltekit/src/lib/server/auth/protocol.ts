@@ -32,7 +32,7 @@ const rowToUser = (row: typeof schema.users.$inferSelect): Auth.User => ({
 });
 
 /** Email/password store backed by the existing `users` table. */
-const emailPasswordStore: Auth.EmailPasswordStore = {
+const emailPasswordStore: Auth.EmailPasswordStoreShape = {
   getUserByEmail: (email) =>
     Effect.sync(() => {
       const row = db.select().from(schema.users).where(eq(schema.users.email, email)).get();
@@ -84,7 +84,7 @@ const emailPasswordStore: Auth.EmailPasswordStore = {
 };
 
 /** Email verification is disabled here but the service + store must be present. */
-const noopVerificationStore: Auth.EmailVerificationStore = {
+const noopVerificationStore: Auth.EmailVerificationStoreShape = {
   create: (verification) => Effect.succeed(verification),
   get: () => Effect.succeed(null),
   delete: () => Effect.void,
@@ -94,7 +94,7 @@ const noopVerificationStore: Auth.EmailVerificationStore = {
 /** Password-reset tokens kept in memory; the reset flow is unused by the app. */
 const passwordResetTokens = new Map<string, Auth.PasswordResetToken>();
 
-const passwordResetStore: Auth.PasswordResetStore = {
+const passwordResetStore: Auth.PasswordResetStoreShape = {
   create: (token) =>
     Effect.sync(() => {
       passwordResetTokens.set(token.token, token);
@@ -113,22 +113,17 @@ const passwordResetStore: Auth.PasswordResetStore = {
     }),
 };
 
-const passwordResetUserStore: Auth.PasswordResetUserStore = {
+const passwordResetUserStore: Auth.PasswordResetUserStoreShape = {
   getUserByEmail: (email) => emailPasswordStore.getUserByEmail(email),
   setPasswordHash: (userId, hash) => emailPasswordStore.setPasswordHash(userId, hash),
 };
 
 /** User profile store backed by the existing `users` table. */
-const userServiceStore: Auth.UserServiceStore = {
+const userServiceStore: Auth.UserServiceStoreShape = {
   get: (userId) =>
-    Effect.gen(function* () {
+    Effect.sync(() => {
       const row = db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
-      if (!row) {
-        return yield* Effect.fail(
-          new Auth.UserNotFoundError({ message: "User not found", userId }),
-        );
-      }
-      return rowToUser(row);
+      return row ? rowToUser(row) : null;
     }),
   getByEmail: (email) => emailPasswordStore.getUserByEmail(email),
   update: (user) =>
@@ -164,18 +159,18 @@ const InternalStores = Layer.mergeAll(
 const AuthStores = Layer.mergeAll(
   Layer.succeed(Auth.EmailPasswordStore)(emailPasswordStore),
   Layer.succeed(Auth.EmailVerificationStore)(noopVerificationStore),
-  Layer.succeed(Auth.PasswordResetStoreTag)(passwordResetStore),
-  Layer.succeed(Auth.PasswordResetUserStoreTag)(passwordResetUserStore),
-  Layer.succeed(Auth.UserServiceStoreTag)(userServiceStore),
+  Layer.succeed(Auth.PasswordResetStore)(passwordResetStore),
+  Layer.succeed(Auth.PasswordResetUserStore)(passwordResetUserStore),
+  Layer.succeed(Auth.UserServiceStore)(userServiceStore),
   Layer.succeedContext(Auth.PasswordHasherLive),
 );
 
 const ServicesLayer: Layer.Layer<Auth.Http.AuthServices> = Layer.mergeAll(
-  Auth.SessionManagerLayer(sessionConfig),
-  Auth.AuthLifecycleServiceLayer({ requireEmailVerification: false }),
-  Auth.EmailVerificationServiceLayer({ sendEmail: () => Effect.void }),
-  Auth.PasswordResetServiceLayer({ sendResetPassword: () => Effect.void }),
-  Auth.UserServiceLayer(),
+  Auth.SessionManager.layer(sessionConfig),
+  Auth.AuthLifecycleService.layer({ requireEmailVerification: false }),
+  Auth.EmailVerificationService.layer({ sendEmail: () => Effect.void }),
+  Auth.PasswordResetService.layer({ sendResetPassword: () => Effect.void }),
+  Auth.UserService.layer(),
   // No-op hooks base; swap for a `composePlugins([...])` stack to install plugins.
   Auth.Hooks.Default,
 ).pipe(Layer.provide(InternalStores), Layer.provideMerge(AuthStores));

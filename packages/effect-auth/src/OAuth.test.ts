@@ -7,7 +7,7 @@ import {
   verifyIdToken,
   discoverOAuthEndpoints,
   makeAppleClientSecret,
-  OAuthStateStoreTag,
+  OAuthStateStore,
   type OAuthState,
   type OAuthProvider,
   type OAuthTokenResponse,
@@ -32,7 +32,7 @@ import {
 /** In-memory OAuth state store for authorization-URL tests. */
 const StateStoreLive = () => {
   const map = new Map<string, OAuthState>();
-  return Layer.succeed(OAuthStateStoreTag, {
+  return Layer.succeed(OAuthStateStore, {
     create: (s: OAuthState) =>
       Effect.sync(() => {
         map.set(s.state, s);
@@ -49,7 +49,7 @@ const StateStoreLive = () => {
   });
 };
 
-const runWithState = <A, E>(eff: Effect.Effect<A, E, OAuthStateStoreTag>): Promise<A> =>
+const runWithState = <A, E>(eff: Effect.Effect<A, E, OAuthStateStore>): Promise<A> =>
   Effect.runPromise(eff.pipe(Effect.provide(StateStoreLive())));
 
 /** A single captured fetch call. */

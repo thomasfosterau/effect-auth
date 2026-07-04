@@ -18,7 +18,7 @@ implementer. Use {@link isAnonymousUser} to detect them.
 
 Account linking is triggered explicitly by the app/HTTP layer (hooks operate
 on input values and cannot see the current session): after a guest signs up
-for a real account, call {@link AnonymousService.linkAccount} with the
+for a real account, call {@link AnonymousServiceShape.linkAccount} with the
 anonymous user and the freshly-created user; the `linkAccount` config
 callback migrates any data, then the anonymous user is deleted.
 
@@ -29,13 +29,10 @@ callback migrates any data, then the anonymous user is deleted.
 - [utils](#utils)
   - [AnonymousConfig (interface)](#anonymousconfig-interface)
   - [AnonymousResult (interface)](#anonymousresult-interface)
-  - [AnonymousService](#anonymousservice)
-  - [AnonymousService (interface)](#anonymousservice-interface)
-  - [AnonymousServiceLayer](#anonymousservicelayer)
-  - [AnonymousServiceTag (class)](#anonymousservicetag-class)
-  - [AnonymousUserStore](#anonymoususerstore)
-  - [AnonymousUserStore (interface)](#anonymoususerstore-interface)
-  - [AnonymousUserStoreTag (class)](#anonymoususerstoretag-class)
+  - [AnonymousService (class)](#anonymousservice-class)
+  - [AnonymousServiceShape (interface)](#anonymousserviceshape-interface)
+  - [AnonymousUserStore (class)](#anonymoususerstore-class)
+  - [AnonymousUserStoreShape (interface)](#anonymoususerstoreshape-interface)
   - [isAnonymousUser](#isanonymoususer)
   - [makeAnonymousService](#makeanonymousservice)
 
@@ -51,7 +48,7 @@ callback migrates any data, then the anonymous user is deleted.
 export interface AnonymousConfig {
   /**
    * Migrate data from the anonymous user to the newly-created real user during
-   * {@link AnonymousService.linkAccount}. Runs before the anonymous user is
+   * {@link AnonymousServiceShape.linkAccount}. Runs before the anonymous user is
    * deleted, so related rows can still be resolved.
    */
   readonly linkAccount?: (params: {
@@ -72,27 +69,27 @@ export interface AnonymousResult {
 }
 ```
 
-## AnonymousService
+## AnonymousService (class)
 
 **Signature**
 
 ```ts
-export declare const AnonymousService: typeof AnonymousServiceTag;
+export declare class AnonymousService
 ```
 
-## AnonymousService (interface)
+## AnonymousServiceShape (interface)
 
 **Signature**
 
 ```ts
-export interface AnonymousService {
+export interface AnonymousServiceShape {
   /** Create an anonymous user and an authenticated session for them. */
   readonly signInAnonymous: (
     sessionAttributes?: Record<string, unknown>,
   ) => Effect.Effect<
     AnonymousResult,
     Errors.AuthError | HookError,
-    AnonymousUserStoreTag | SessionManagerTag | Hooks
+    AnonymousUserStore | SessionManager | Hooks
   >;
 
   /**
@@ -102,37 +99,19 @@ export interface AnonymousService {
   readonly linkAccount: (
     anonymousUser: Types.User,
     newUser: Types.User,
-  ) => Effect.Effect<void, Errors.AuthError, AnonymousUserStoreTag>;
+  ) => Effect.Effect<void, Errors.AuthError, AnonymousUserStore>;
 }
 ```
 
-## AnonymousServiceLayer
+## AnonymousUserStore (class)
 
 **Signature**
 
 ```ts
-export declare const AnonymousServiceLayer: (
-  config?: AnonymousConfig,
-) => Layer.Layer<AnonymousServiceTag, never, never>;
+export declare class AnonymousUserStore
 ```
 
-## AnonymousServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class AnonymousServiceTag
-```
-
-## AnonymousUserStore
-
-**Signature**
-
-```ts
-export declare const AnonymousUserStore: typeof AnonymousUserStoreTag;
-```
-
-## AnonymousUserStore (interface)
+## AnonymousUserStoreShape (interface)
 
 Persistence for anonymous users. The implementer generates an id and a
 placeholder email, and sets `attributes.isAnonymous: true`.
@@ -140,18 +119,10 @@ placeholder email, and sets `attributes.isAnonymous: true`.
 **Signature**
 
 ```ts
-export interface AnonymousUserStore {
+export interface AnonymousUserStoreShape {
   readonly createAnonymousUser: () => Effect.Effect<Types.User, Errors.AuthError>;
   readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
 }
-```
-
-## AnonymousUserStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class AnonymousUserStoreTag
 ```
 
 ## isAnonymousUser
@@ -171,5 +142,5 @@ export declare const isAnonymousUser: (user: Types.User) => boolean;
 ```ts
 export declare const makeAnonymousService: (
   config?: AnonymousConfig,
-) => Effect.Effect<AnonymousService, never>;
+) => Effect.Effect<AnonymousServiceShape, never>;
 ```

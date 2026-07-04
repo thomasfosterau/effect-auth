@@ -15,16 +15,16 @@ no shared secret, no call back to the auth server. Implemented with
 import { Layer } from "effect";
 import * as Auth from "effect-auth";
 
-declare const jwtKeyStore: Auth.JwtKeyStore;
+declare const jwtKeyStore: Auth.JwtKeyStoreShape;
 
 const jwt = Layer.mergeAll(
-  Auth.JwtServiceLayer({
+  Auth.JwtService.layer({
     issuer: "https://app.example.com",
     expiresIn: 15 * 60 * 1000, // default 15 minutes
     algorithm: "ES256", // or "EdDSA"
     definePayload: (user) => ({ role: user.attributes["role"] }),
   }),
-  Layer.succeed(Auth.JwtKeyStoreTag)(jwtKeyStore),
+  Layer.succeed(Auth.JwtKeyStore)(jwtKeyStore),
 );
 ```
 
@@ -46,7 +46,7 @@ verifies too:
 import { Effect } from "effect";
 import * as Auth from "effect-auth";
 
-declare const service: Auth.JwtService;
+declare const service: Auth.JwtServiceShape;
 
 const check = (token: string) =>
   Effect.gen(function* () {

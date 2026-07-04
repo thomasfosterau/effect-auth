@@ -24,18 +24,14 @@ value (tokens are high-entropy random), anti-enumeration at the HTTP layer
 
 - [utils](#utils)
   - [AccountManagementConfig (interface)](#accountmanagementconfig-interface)
-  - [AccountManagementService](#accountmanagementservice)
-  - [AccountManagementService (interface)](#accountmanagementservice-interface)
-  - [AccountManagementServiceLayer](#accountmanagementservicelayer)
-  - [AccountManagementServiceTag (class)](#accountmanagementservicetag-class)
-  - [AccountManagementStore](#accountmanagementstore)
-  - [AccountManagementStore (interface)](#accountmanagementstore-interface)
-  - [AccountManagementStoreTag (class)](#accountmanagementstoretag-class)
+  - [AccountManagementService (class)](#accountmanagementservice-class)
+  - [AccountManagementServiceShape (interface)](#accountmanagementserviceshape-interface)
+  - [AccountManagementStore (class)](#accountmanagementstore-class)
+  - [AccountManagementStoreShape (interface)](#accountmanagementstoreshape-interface)
   - [AccountToken (interface)](#accounttoken-interface)
   - [AccountTokenError (class)](#accounttokenerror-class)
   - [AccountTokenPurpose (type alias)](#accounttokenpurpose-type-alias)
   - [EmailChangeResult (interface)](#emailchangeresult-interface)
-  - [EmailInUseError (class)](#emailinuseerror-class)
   - [makeAccountManagementService](#makeaccountmanagementservice)
 
 ---
@@ -83,20 +79,20 @@ export interface AccountManagementConfig {
 }
 ```
 
-## AccountManagementService
+## AccountManagementService (class)
 
 **Signature**
 
 ```ts
-export declare const AccountManagementService: typeof AccountManagementServiceTag;
+export declare class AccountManagementService
 ```
 
-## AccountManagementService (interface)
+## AccountManagementServiceShape (interface)
 
 **Signature**
 
 ```ts
-export interface AccountManagementService {
+export interface AccountManagementServiceShape {
   /**
    * Begin an email change: validate the new address is free, then issue a
    * token delivered to the new address. Returns the token (for the caller to
@@ -107,8 +103,8 @@ export interface AccountManagementService {
     newEmail: string,
   ) => Effect.Effect<
     { readonly token: string; readonly expiresAt: number },
-    Errors.AuthError | Errors.UserNotFoundError | EmailInUseError,
-    AccountManagementStoreTag | UserServiceStoreTag
+    Errors.AuthError | Errors.UserNotFoundError | Errors.EmailInUseError,
+    AccountManagementStore | UserServiceStore
   >;
 
   /** Confirm an email change by token: swaps the email and marks it verified. */
@@ -117,7 +113,7 @@ export interface AccountManagementService {
   ) => Effect.Effect<
     EmailChangeResult,
     Errors.AuthError | Errors.UserNotFoundError | AccountTokenError,
-    AccountManagementStoreTag | UserServiceStoreTag | SessionManagerTag
+    AccountManagementStore | UserServiceStore | SessionManager
   >;
 
   /** Begin account deletion: issue a token delivered to the user's address. */
@@ -126,7 +122,7 @@ export interface AccountManagementService {
   ) => Effect.Effect<
     { readonly token: string; readonly expiresAt: number },
     Errors.AuthError | Errors.UserNotFoundError,
-    AccountManagementStoreTag | UserServiceStoreTag
+    AccountManagementStore | UserServiceStore
   >;
 
   /** Confirm deletion by token: runs cleanup, revokes sessions, deletes user. */
@@ -135,38 +131,20 @@ export interface AccountManagementService {
   ) => Effect.Effect<
     { readonly userId: string },
     Errors.AuthError | Errors.UserNotFoundError | AccountTokenError,
-    AccountManagementStoreTag | UserServiceStoreTag | SessionManagerTag
+    AccountManagementStore | UserServiceStore | SessionManager
   >;
 }
 ```
 
-## AccountManagementServiceLayer
+## AccountManagementStore (class)
 
 **Signature**
 
 ```ts
-export declare const AccountManagementServiceLayer: (
-  config: AccountManagementConfig,
-) => Layer.Layer<AccountManagementServiceTag, never, never>;
+export declare class AccountManagementStore
 ```
 
-## AccountManagementServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class AccountManagementServiceTag
-```
-
-## AccountManagementStore
-
-**Signature**
-
-```ts
-export declare const AccountManagementStore: typeof AccountManagementStoreTag;
-```
-
-## AccountManagementStore (interface)
+## AccountManagementStoreShape (interface)
 
 Persistence for pending account-management tokens. Implement over your
 database; keys are the opaque token strings.
@@ -174,20 +152,12 @@ database; keys are the opaque token strings.
 **Signature**
 
 ```ts
-export interface AccountManagementStore {
+export interface AccountManagementStoreShape {
   readonly create: (token: AccountToken) => Effect.Effect<AccountToken, Errors.AuthError>;
   readonly get: (token: string) => Effect.Effect<AccountToken | null, Errors.AuthError>;
   readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
   readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
 }
-```
-
-## AccountManagementStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class AccountManagementStoreTag
 ```
 
 ## AccountToken (interface)
@@ -240,16 +210,6 @@ export interface EmailChangeResult {
 }
 ```
 
-## EmailInUseError (class)
-
-Raised by `requestEmailChange` when the target email is already in use.
-
-**Signature**
-
-```ts
-export declare class EmailInUseError
-```
-
 ## makeAccountManagementService
 
 **Signature**
@@ -257,5 +217,5 @@ export declare class EmailInUseError
 ```ts
 export declare const makeAccountManagementService: (
   config: AccountManagementConfig,
-) => Effect.Effect<AccountManagementService, never>;
+) => Effect.Effect<AccountManagementServiceShape, never>;
 ```

@@ -43,7 +43,7 @@ import * as Auth from "effect-auth";
 
 const sessions = new Map<string, Auth.Session>();
 
-const sessionStore: Auth.SessionStore = {
+const sessionStore: Auth.SessionStoreShape = {
   create: (s) => Effect.sync(() => (sessions.set(s.id, s), s)),
   get: (id) =>
     Effect.gen(function* () {

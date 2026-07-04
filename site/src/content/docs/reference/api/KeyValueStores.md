@@ -81,7 +81,7 @@ WebAuthn `ChallengeStore` layer backed by `KeyValueStore`.
 
 ```ts
 export declare const ChallengeStoreKV: Layer.Layer<
-  ChallengeStoreTag,
+  ChallengeStore,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -95,7 +95,7 @@ export declare const ChallengeStoreKV: Layer.Layer<
 
 ```ts
 export declare const EmailOtpStoreKV: Layer.Layer<
-  EmailOtpStoreTag,
+  EmailOtpStore,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -109,7 +109,7 @@ export declare const EmailOtpStoreKV: Layer.Layer<
 
 ```ts
 export declare const EmailVerificationStoreKV: Layer.Layer<
-  EmailVerificationStoreTag,
+  EmailVerificationStore,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -123,7 +123,7 @@ export declare const EmailVerificationStoreKV: Layer.Layer<
 
 ```ts
 export declare const MagicLinkStoreKV: Layer.Layer<
-  MagicLinkStoreTag,
+  MagicLinkStore,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -137,7 +137,7 @@ export declare const MagicLinkStoreKV: Layer.Layer<
 
 ```ts
 export declare const OAuthStateStoreKV: Layer.Layer<
-  OAuthStateStoreTag,
+  OAuthStateStore,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -151,7 +151,7 @@ export declare const OAuthStateStoreKV: Layer.Layer<
 
 ```ts
 export declare const PasswordResetStoreKV: Layer.Layer<
-  PasswordResetStoreTag,
+  PasswordResetStore,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -165,7 +165,7 @@ export declare const PasswordResetStoreKV: Layer.Layer<
 
 ```ts
 export declare const PendingTwoFactorStoreKV: Layer.Layer<
-  PendingTwoFactorStoreTag,
+  PendingTwoFactorStore,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -179,7 +179,7 @@ export declare const PendingTwoFactorStoreKV: Layer.Layer<
 
 ```ts
 export declare const RateLimitStoreKV: Layer.Layer<
-  RateLimitStoreTag,
+  RateLimitStore,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -196,14 +196,14 @@ stores) for a complete auth stack.
 
 ```ts
 export declare const layerKV: Layer.Layer<
-  | ChallengeStoreTag
-  | PendingTwoFactorStoreTag
-  | EmailVerificationStoreTag
-  | PasswordResetStoreTag
-  | RateLimitStoreTag
-  | OAuthStateStoreTag
-  | MagicLinkStoreTag
-  | EmailOtpStoreTag,
+  | ChallengeStore
+  | PendingTwoFactorStore
+  | OAuthStateStore
+  | RateLimitStore
+  | EmailVerificationStore
+  | PasswordResetStore
+  | MagicLinkStore
+  | EmailOtpStore,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -211,13 +211,13 @@ export declare const layerKV: Layer.Layer<
 
 ## makeChallengeStoreKV
 
-Build a WebAuthn {@link ChallengeStore} over the ambient `KeyValueStore`.
+Build a WebAuthn {@link ChallengeStoreShape} over the ambient `KeyValueStore`.
 
 **Signature**
 
 ```ts
 export declare const makeChallengeStoreKV: Effect.Effect<
-  ChallengeStore,
+  ChallengeStoreShape,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -225,7 +225,7 @@ export declare const makeChallengeStoreKV: Effect.Effect<
 
 ## makeEmailOtpStoreKV
 
-Build an {@link EmailOtpStore} over the ambient `KeyValueStore`.
+Build an {@link EmailOtpStoreShape} over the ambient `KeyValueStore`.
 
 There is at most one active OTP per email + purpose pair, so the pair is
 the key itself and no secondary index is needed. `incrementAttempts` is
@@ -235,7 +235,7 @@ read-modify-write (see the module docs on atomicity).
 
 ```ts
 export declare const makeEmailOtpStoreKV: Effect.Effect<
-  EmailOtpStore,
+  EmailOtpStoreShape,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -243,7 +243,7 @@ export declare const makeEmailOtpStoreKV: Effect.Effect<
 
 ## makeEmailVerificationStoreKV
 
-Build an {@link EmailVerificationStore} over the ambient `KeyValueStore`.
+Build an {@link EmailVerificationStoreShape} over the ambient `KeyValueStore`.
 
 `deleteByUserId` is served by a secondary index key per user holding the
 user's live tokens (see the module docs for staleness guarantees).
@@ -252,7 +252,7 @@ user's live tokens (see the module docs for staleness guarantees).
 
 ```ts
 export declare const makeEmailVerificationStoreKV: Effect.Effect<
-  EmailVerificationStore,
+  EmailVerificationStoreShape,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -260,7 +260,7 @@ export declare const makeEmailVerificationStoreKV: Effect.Effect<
 
 ## makeMagicLinkStoreKV
 
-Build a {@link MagicLinkStore} over the ambient `KeyValueStore`.
+Build a {@link MagicLinkStoreShape} over the ambient `KeyValueStore`.
 
 `deleteByEmail` is served by a secondary index key per email address.
 
@@ -268,7 +268,7 @@ Build a {@link MagicLinkStore} over the ambient `KeyValueStore`.
 
 ```ts
 export declare const makeMagicLinkStoreKV: Effect.Effect<
-  MagicLinkStore,
+  MagicLinkStoreShape,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -276,13 +276,13 @@ export declare const makeMagicLinkStoreKV: Effect.Effect<
 
 ## makeOAuthStateStoreKV
 
-Build an {@link OAuthStateStore} over the ambient `KeyValueStore`.
+Build an {@link OAuthStateStoreShape} over the ambient `KeyValueStore`.
 
 **Signature**
 
 ```ts
 export declare const makeOAuthStateStoreKV: Effect.Effect<
-  OAuthStateStore,
+  OAuthStateStoreShape,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -290,7 +290,7 @@ export declare const makeOAuthStateStoreKV: Effect.Effect<
 
 ## makePasswordResetStoreKV
 
-Build a {@link PasswordResetStore} over the ambient `KeyValueStore`.
+Build a {@link PasswordResetStoreShape} over the ambient `KeyValueStore`.
 
 `deleteByUserId` is served by a secondary index key per user.
 
@@ -298,7 +298,7 @@ Build a {@link PasswordResetStore} over the ambient `KeyValueStore`.
 
 ```ts
 export declare const makePasswordResetStoreKV: Effect.Effect<
-  PasswordResetStore,
+  PasswordResetStoreShape,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -306,13 +306,13 @@ export declare const makePasswordResetStoreKV: Effect.Effect<
 
 ## makePendingTwoFactorStoreKV
 
-Build a {@link PendingTwoFactorStore} over the ambient `KeyValueStore`.
+Build a {@link PendingTwoFactorStoreShape} over the ambient `KeyValueStore`.
 
 **Signature**
 
 ```ts
 export declare const makePendingTwoFactorStoreKV: Effect.Effect<
-  PendingTwoFactorStore,
+  PendingTwoFactorStoreShape,
   never,
   KeyValueStore.KeyValueStore
 >;
@@ -320,7 +320,7 @@ export declare const makePendingTwoFactorStoreKV: Effect.Effect<
 
 ## makeRateLimitStoreKV
 
-Build a {@link RateLimitStore} over the ambient `KeyValueStore`.
+Build a {@link RateLimitStoreShape} over the ambient `KeyValueStore`.
 
 `increment` is read-modify-write and therefore not atomic (see the module
 docs) — fine for best-effort limiting, not for strict quota enforcement.
@@ -331,7 +331,7 @@ rather than by backend-level expiry, since `KeyValueStore` has no TTL API.
 
 ```ts
 export declare const makeRateLimitStoreKV: Effect.Effect<
-  RateLimitStore,
+  RateLimitStoreShape,
   never,
   KeyValueStore.KeyValueStore
 >;

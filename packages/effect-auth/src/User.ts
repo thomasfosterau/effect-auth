@@ -2,8 +2,9 @@ import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.js";
 import type * as Types from "./Types.js";
 
-export interface UserServiceStore {
-  readonly get: (userId: string) => Effect.Effect<Types.User, Errors.UserNotFoundError>;
+export interface UserServiceStoreShape {
+  /** Get a user by ID, or `null` when no such user exists. */
+  readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
   readonly getByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
@@ -12,11 +13,9 @@ export interface UserServiceStore {
   readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class UserServiceStoreTag extends Context.Service<UserServiceStoreTag, UserServiceStore>()(
+export class UserServiceStore extends Context.Service<UserServiceStore, UserServiceStoreShape>()(
   "@effect-auth/UserServiceStore",
 ) {}
-
-export const UserServiceStore = UserServiceStoreTag;
 
 /** Partial update of a user's first-class profile fields. */
 export interface UpdateUserInput {
@@ -24,54 +23,66 @@ export interface UpdateUserInput {
   readonly image?: string;
 }
 
-export interface UserService {
+export interface UserServiceShape {
   readonly getUser: (
     userId: string,
-  ) => Effect.Effect<Types.User, Errors.UserNotFoundError, UserServiceStoreTag>;
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
   readonly getUserByEmail: (
     email: string,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
   readonly updateUserAttributes: (
     userId: string,
     attributes: Record<string, unknown>,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
   readonly updateUser: (
     userId: string,
     updates: UpdateUserInput,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
   readonly markEmailVerified: (
     userId: string,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
-  readonly deleteUser: (
-    userId: string,
-  ) => Effect.Effect<void, Errors.AuthError, UserServiceStoreTag>;
+  readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError, UserServiceStore>;
 }
 
-export class UserServiceTag extends Context.Service<UserServiceTag, UserService>()(
+export class UserService extends Context.Service<UserService, UserServiceShape>()(
   "@effect-auth/UserService",
-) {}
-
-export const UserService = UserServiceTag;
+) {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = () => Layer.effect(UserService, makeUserService());
+}
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
-export const makeUserService = (): Effect.Effect<UserService, never> =>
+/** Fetch a user from the store, failing with `UserNotFoundError` on a miss. */
+const getUserOrFail = (
+  store: UserServiceStoreShape,
+  userId: string,
+): Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError> =>
+  Effect.flatMap(store.get(userId), (user) =>
+    user === null
+      ? Effect.fail(new Errors.UserNotFoundError({ message: "User not found", userId }))
+      : Effect.succeed(user),
+  );
+
+export const makeUserService = (): Effect.Effect<UserServiceShape, never> =>
   Effect.sync(
-    (): UserService => ({
+    (): UserServiceShape => ({
       getUser: (userId: string) =>
         Effect.gen(function* () {
-          const store = yield* UserServiceStoreTag;
-          return yield* store.get(userId);
+          const store = yield* UserServiceStore;
+          return yield* getUserOrFail(store, userId);
         }),
 
       getUserByEmail: (email: string) =>
         Effect.gen(function* () {
-          const store = yield* UserServiceStoreTag;
+          const store = yield* UserServiceStore;
           const normalizedEmail = normalizeEmail(email);
 
           if (!normalizedEmail) {
@@ -98,8 +109,8 @@ export const makeUserService = (): Effect.Effect<UserService, never> =>
 
       updateUserAttributes: (userId: string, attributes: Record<string, unknown>) =>
         Effect.gen(function* () {
-          const store = yield* UserServiceStoreTag;
-          const existing = yield* store.get(userId);
+          const store = yield* UserServiceStore;
+          const existing = yield* getUserOrFail(store, userId);
 
           const updated: Types.User = {
             ...existing,
@@ -115,8 +126,8 @@ export const makeUserService = (): Effect.Effect<UserService, never> =>
 
       updateUser: (userId: string, updates: UpdateUserInput) =>
         Effect.gen(function* () {
-          const store = yield* UserServiceStoreTag;
-          const existing = yield* store.get(userId);
+          const store = yield* UserServiceStore;
+          const existing = yield* getUserOrFail(store, userId);
 
           const updated: Types.User = {
             ...existing,
@@ -130,8 +141,8 @@ export const makeUserService = (): Effect.Effect<UserService, never> =>
 
       markEmailVerified: (userId: string) =>
         Effect.gen(function* () {
-          const store = yield* UserServiceStoreTag;
-          const existing = yield* store.get(userId);
+          const store = yield* UserServiceStore;
+          const existing = yield* getUserOrFail(store, userId);
 
           const updated: Types.User = {
             ...existing,
@@ -144,10 +155,8 @@ export const makeUserService = (): Effect.Effect<UserService, never> =>
 
       deleteUser: (userId: string) =>
         Effect.gen(function* () {
-          const store = yield* UserServiceStoreTag;
+          const store = yield* UserServiceStore;
           yield* store.delete(userId);
         }),
     }),
   );
-
-export const UserServiceLayer = () => Layer.effect(UserServiceTag, makeUserService());

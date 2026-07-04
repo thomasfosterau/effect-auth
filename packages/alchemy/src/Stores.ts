@@ -107,7 +107,7 @@ const rowToSession = (row: SessionRow): Auth.Session => ({
   attributes: decodeAttributes(row.attributes),
 });
 
-export const makeSessionStore = (db: D1Database): Auth.SessionStore => ({
+export const makeSessionStore = (db: D1Database): Auth.SessionStoreShape => ({
   create: (session) =>
     d1Run(
       db,
@@ -129,14 +129,7 @@ export const makeSessionStore = (db: D1Database): Auth.SessionStore => ({
       `SELECT * FROM auth_sessions WHERE id = ?`,
       [sessionId],
       "session.get",
-    ).pipe(
-      Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToSession(row))
-          : Effect.fail(new Auth.SessionNotFoundError({ message: "Session not found", sessionId })),
-      ),
-    ),
+    ).pipe(Effect.map((row) => (row ? rowToSession(row) : null))),
   update: (session) =>
     d1Run(
       db,
@@ -169,15 +162,10 @@ export const makeSessionStore = (db: D1Database): Auth.SessionStore => ({
     ).pipe(Effect.map((rows) => rows.map(rowToSession))),
 });
 
-export const makeUserStore = (db: D1Database): Auth.UserStore => ({
+export const makeUserStore = (db: D1Database): Auth.UserStoreShape => ({
   get: (userId) =>
     d1First<UserRow>(db, `SELECT * FROM auth_users WHERE id = ?`, [userId], "user.get").pipe(
-      Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToUser(row))
-          : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
-      ),
+      Effect.map((row) => (row ? rowToUser(row) : null)),
     ),
   getCredentials: (userId) =>
     d1First<UserRow>(
@@ -185,29 +173,17 @@ export const makeUserStore = (db: D1Database): Auth.UserStore => ({
       `SELECT password_hash FROM auth_users WHERE id = ?`,
       [userId],
       "user.getCredentials",
-    ).pipe(
-      Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(row.password_hash ?? "")
-          : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
-      ),
-    ),
+    ).pipe(Effect.map((row) => row?.password_hash ?? null)),
 });
 
 // ---------------------------------------------------------------------------
 // UserServiceStore
 // ---------------------------------------------------------------------------
 
-export const makeUserServiceStore = (db: D1Database): Auth.UserServiceStore => ({
+export const makeUserServiceStore = (db: D1Database): Auth.UserServiceStoreShape => ({
   get: (userId) =>
     d1First<UserRow>(db, `SELECT * FROM auth_users WHERE id = ?`, [userId], "userService.get").pipe(
-      Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToUser(row))
-          : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
-      ),
+      Effect.map((row) => (row ? rowToUser(row) : null)),
     ),
   getByEmail: (email) =>
     d1First<UserRow>(
@@ -241,7 +217,7 @@ export const makeUserServiceStore = (db: D1Database): Auth.UserServiceStore => (
 // EmailPasswordStore + PasswordResetUserStore (auth_users)
 // ---------------------------------------------------------------------------
 
-export const makeEmailPasswordStore = (db: D1Database): Auth.EmailPasswordStore => ({
+export const makeEmailPasswordStore = (db: D1Database): Auth.EmailPasswordStoreShape => ({
   getUserByEmail: (email) =>
     d1First<UserRow>(
       db,
@@ -281,7 +257,7 @@ export const makeEmailPasswordStore = (db: D1Database): Auth.EmailPasswordStore 
     ).pipe(Effect.asVoid),
 });
 
-export const makePasswordResetUserStore = (db: D1Database): Auth.PasswordResetUserStore => ({
+export const makePasswordResetUserStore = (db: D1Database): Auth.PasswordResetUserStoreShape => ({
   getUserByEmail: (email) =>
     d1First<UserRow>(
       db,
@@ -311,7 +287,7 @@ interface PermissionRow {
   readonly action: string;
 }
 
-export const makeRoleStore = (db: D1Database): Auth.RoleStore => ({
+export const makeRoleStore = (db: D1Database): Auth.RoleStoreShape => ({
   getUserRoles: (userId) =>
     d1All<RoleRow>(
       db,
@@ -353,7 +329,7 @@ const rowToRateLimit = (row: RateLimitRow): Auth.RateLimitEntry =>
 const upsertRateLimit = `INSERT INTO auth_rate_limits (key, count, reset_at, blocked_until) VALUES (?, ?, ?, ?)
   ON CONFLICT(key) DO UPDATE SET count = excluded.count, reset_at = excluded.reset_at, blocked_until = excluded.blocked_until`;
 
-export const makeRateLimitStore = (db: D1Database): Auth.RateLimitStore => {
+export const makeRateLimitStore = (db: D1Database): Auth.RateLimitStoreShape => {
   const readEntry = (key: string) =>
     d1First<RateLimitRow>(
       db,
@@ -420,7 +396,7 @@ const rowToEmailVerification = (row: EmailVerificationRow): Auth.EmailVerificati
   expiresAt: row.expires_at,
 });
 
-export const makeEmailVerificationStore = (db: D1Database): Auth.EmailVerificationStore => ({
+export const makeEmailVerificationStore = (db: D1Database): Auth.EmailVerificationStoreShape => ({
   create: (verification) =>
     d1Run(
       db,
@@ -472,7 +448,7 @@ const rowToChallenge = (row: ChallengeRow): Auth.WebAuthnChallenge =>
     ? { challenge: fromBase64(row.challenge), expiresAt: row.expires_at }
     : { challenge: fromBase64(row.challenge), expiresAt: row.expires_at, userId: row.user_id };
 
-export const makeChallengeStore = (db: D1Database): Auth.ChallengeStore => ({
+export const makeChallengeStore = (db: D1Database): Auth.ChallengeStoreShape => ({
   create: (challenge) =>
     d1Run(
       db,
@@ -486,14 +462,7 @@ export const makeChallengeStore = (db: D1Database): Auth.ChallengeStore => ({
       `SELECT * FROM auth_webauthn_challenges WHERE challenge = ?`,
       [toBase64(challenge)],
       "challenge.get",
-    ).pipe(
-      Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToChallenge(row))
-          : Effect.fail(new Auth.ChallengeNotFoundError({ message: "Challenge not found" })),
-      ),
-    ),
+    ).pipe(Effect.map((row) => (row ? rowToChallenge(row) : null))),
   delete: (challenge) =>
     d1Run(
       db,
@@ -538,7 +507,7 @@ const credentialParams = (credential: Auth.WebAuthnCredential): readonly unknown
   credential.transports ? JSON.stringify(credential.transports) : null,
 ];
 
-export const makeCredentialStore = (db: D1Database): Auth.CredentialStore => ({
+export const makeCredentialStore = (db: D1Database): Auth.CredentialStoreShape => ({
   create: (credential) =>
     d1Run(
       db,
@@ -555,13 +524,7 @@ export const makeCredentialStore = (db: D1Database): Auth.CredentialStore => ({
       "credential.get",
     ).pipe(
       Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToCredential(row))
-          : Effect.fail(
-              new Auth.CredentialNotFoundError({ message: "Credential not found", credentialId }),
-            ),
-      ),
+      Effect.map((row) => (row ? rowToCredential(row) : null)),
     ),
   update: (credential) =>
     d1Run(
@@ -588,12 +551,12 @@ export const makeCredentialStore = (db: D1Database): Auth.CredentialStore => ({
       [credentialId],
       "credential.delete",
     ).pipe(Effect.asVoid),
-  getByUserId: (userId) =>
+  listByUserId: (userId) =>
     d1All<CredentialRow>(
       db,
       `SELECT * FROM auth_webauthn_credentials WHERE user_id = ?`,
       [userId],
-      "credential.getByUserId",
+      "credential.listByUserId",
     ).pipe(Effect.map((rows) => rows.map(rowToCredential))),
 });
 
@@ -619,7 +582,7 @@ const rowToOAuthState = (row: OAuthStateRow): Auth.OAuthState => ({
   ...(row.return_to != null ? { returnTo: row.return_to } : {}),
 });
 
-export const makeOAuthStateStore = (db: D1Database): Auth.OAuthStateStore => ({
+export const makeOAuthStateStore = (db: D1Database): Auth.OAuthStateStoreShape => ({
   create: (state) =>
     d1Run(
       db,
@@ -641,13 +604,7 @@ export const makeOAuthStateStore = (db: D1Database): Auth.OAuthStateStore => ({
       `SELECT * FROM auth_oauth_states WHERE state = ?`,
       [state],
       "oauthState.get",
-    ).pipe(
-      Effect.flatMap((row) =>
-        row
-          ? Effect.succeed(rowToOAuthState(row))
-          : Effect.fail(new Auth.AuthError({ message: `OAuth state not found: ${state}` })),
-      ),
-    ),
+    ).pipe(Effect.map((row) => (row ? rowToOAuthState(row) : null))),
   delete: (state) =>
     d1Run(db, `DELETE FROM auth_oauth_states WHERE state = ?`, [state], "oauthState.delete").pipe(
       Effect.asVoid,
@@ -712,7 +669,7 @@ const upsertOAuthAccount = `INSERT INTO auth_oauth_accounts
     expires_at = excluded.expires_at,
     updated_at = excluded.updated_at`;
 
-export const makeOAuthAccountStore = (db: D1Database): Auth.OAuthAccountStore => ({
+export const makeOAuthAccountStore = (db: D1Database): Auth.OAuthAccountStoreShape => ({
   create: (account) =>
     d1Run(db, upsertOAuthAccount, oauthAccountParams(account), "oauthAccount.create").pipe(
       Effect.as(account),
@@ -762,7 +719,7 @@ export const makeOAuthAccountStore = (db: D1Database): Auth.OAuthAccountStore =>
 // OAuthUserStore (auth_users)
 // ---------------------------------------------------------------------------
 
-export const makeOAuthUserStore = (db: D1Database): Auth.OAuthUserStore => ({
+export const makeOAuthUserStore = (db: D1Database): Auth.OAuthUserStoreShape => ({
   getUser: (userId) =>
     d1First<UserRow>(
       db,
@@ -822,7 +779,7 @@ const rowToPasswordReset = (row: PasswordResetRow): Auth.PasswordResetToken => (
   expiresAt: row.expires_at,
 });
 
-export const makePasswordResetStore = (db: D1Database): Auth.PasswordResetStore => ({
+export const makePasswordResetStore = (db: D1Database): Auth.PasswordResetStoreShape => ({
   create: (reset) =>
     d1Run(
       db,

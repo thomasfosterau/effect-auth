@@ -1,32 +1,24 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import {
-  UsernameServiceLayer,
-  UsernameServiceTag,
-  UsernameStoreTag,
+  UsernameService,
+  UsernameStore,
   UsernameError,
   type UsernameConfig,
-  type UsernameService,
-  type UsernameStore,
+  type UsernameServiceShape,
+  type UsernameStoreShape,
 } from "./Username.js";
 import {
-  EmailPasswordServiceLayer,
-  EmailPasswordServiceTag,
-  EmailPasswordStoreTag,
-  SecondFactorGateTag,
-  type EmailPasswordStore,
-  type SecondFactorGate,
+  EmailPasswordService,
+  EmailPasswordStore,
+  SecondFactorGate,
+  type EmailPasswordStoreShape,
+  type SecondFactorGateShape,
 } from "./EmailPassword.js";
-import { PasswordHasherTag, makeScryptHasher } from "./Password.js";
-import {
-  SessionManagerLayer,
-  SessionManagerTag,
-  SessionStoreTag,
-  UserStoreTag,
-} from "./Session.js";
-import type { SessionStore, UserStore } from "./Session.js";
+import { PasswordHasher, makeScryptHasher } from "./Password.js";
+import { SessionManager, SessionStore, UserStore } from "./Session.js";
+import type { SessionStoreShape, UserStoreShape } from "./Session.js";
 import { Hooks } from "./Hooks.js";
-import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
 
 const hasher = makeScryptHasher({ cost: 16384 });
@@ -42,7 +34,7 @@ const passwordHashes = new Map<string, string>();
 const sessions = new Map<string, Types.Session>();
 let seq = 0;
 
-const usernameStore: UsernameStore = {
+const usernameStore: UsernameStoreShape = {
   getUserByUsername: (username) =>
     Effect.sync(() => {
       const id = usernameToId.get(username);
@@ -64,7 +56,7 @@ const usernameStore: UsernameStore = {
     }),
 };
 
-const emailPasswordStore: EmailPasswordStore = {
+const emailPasswordStore: EmailPasswordStoreShape = {
   getUserByEmail: (email) =>
     Effect.sync(() => {
       const id = userIdByEmail.get(email);
@@ -90,19 +82,13 @@ const emailPasswordStore: EmailPasswordStore = {
   setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
 };
 
-const sessionStore: SessionStore = {
+const sessionStore: SessionStoreShape = {
   create: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
       return session;
     }),
-  get: (sessionId) =>
-    Effect.suspend(() => {
-      const session = sessions.get(sessionId);
-      return session === undefined
-        ? Effect.fail(new SessionNotFoundError({ message: "not found", sessionId }))
-        : Effect.succeed(session);
-    }),
+  get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
   update: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -117,66 +103,54 @@ const sessionStore: SessionStore = {
     Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
 };
 
-const userStore: UserStore = {
-  get: (userId) =>
-    Effect.suspend(() => {
-      const user = usersById.get(userId);
-      return user === undefined
-        ? Effect.fail(new UserNotFoundError({ message: "not found", userId }))
-        : Effect.succeed(user);
-    }),
-  getCredentials: (userId) =>
-    Effect.suspend(() => {
-      const hash = passwordHashes.get(userId);
-      return hash === undefined
-        ? Effect.fail(new UserNotFoundError({ message: "no creds", userId }))
-        : Effect.succeed(hash);
-    }),
+const userStore: UserStoreShape = {
+  get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
+  getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
 };
 
 const baseDeps = Layer.mergeAll(
-  Layer.succeed(UsernameStoreTag)(usernameStore),
-  Layer.succeed(EmailPasswordStoreTag)(emailPasswordStore),
-  Layer.succeed(PasswordHasherTag)(hasher),
-  SessionManagerLayer(sessionConfig).pipe(
+  Layer.succeed(UsernameStore)(usernameStore),
+  Layer.succeed(EmailPasswordStore)(emailPasswordStore),
+  Layer.succeed(PasswordHasher)(hasher),
+  SessionManager.layer(sessionConfig).pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.succeed(SessionStoreTag)(sessionStore),
-        Layer.succeed(UserStoreTag)(userStore),
+        Layer.succeed(SessionStore)(sessionStore),
+        Layer.succeed(UserStore)(userStore),
       ),
     ),
   ),
-  EmailPasswordServiceLayer({}),
+  EmailPasswordService.layer({}),
   Hooks.Default,
 );
 
-const gate = (required: boolean): SecondFactorGate => ({
+const gate = (required: boolean): SecondFactorGateShape => ({
   required: () => Effect.succeed(required),
   begin: () => Effect.succeed({ token: "2fa-token", expiresAt: Date.now() + 60_000 }),
 });
 
 type UsernameDeps =
-  | UsernameStoreTag
-  | EmailPasswordServiceTag
-  | EmailPasswordStoreTag
-  | PasswordHasherTag
-  | SessionManagerTag
+  | UsernameStore
+  | EmailPasswordService
+  | EmailPasswordStore
+  | PasswordHasher
+  | SessionManager
   | Hooks;
 
 const run = <A, E>(
-  f: (svc: UsernameService) => Effect.Effect<A, E, UsernameDeps>,
-  opts?: { config?: UsernameConfig; gate?: SecondFactorGate },
+  f: (svc: UsernameServiceShape) => Effect.Effect<A, E, UsernameDeps>,
+  opts?: { config?: UsernameConfig; gate?: SecondFactorGateShape },
 ) => {
   const layer = opts?.gate
     ? Layer.mergeAll(
-        UsernameServiceLayer(opts.config),
+        UsernameService.layer(opts.config),
         baseDeps,
-        Layer.succeed(SecondFactorGateTag)(opts.gate),
+        Layer.succeed(SecondFactorGate)(opts.gate),
       )
-    : Layer.mergeAll(UsernameServiceLayer(opts?.config), baseDeps);
+    : Layer.mergeAll(UsernameService.layer(opts?.config), baseDeps);
   return Effect.runPromise(
     Effect.gen(function* () {
-      const svc = yield* UsernameServiceTag;
+      const svc = yield* UsernameService;
       return yield* f(svc);
     }).pipe(Effect.provide(layer)),
   );

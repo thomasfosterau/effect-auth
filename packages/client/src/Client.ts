@@ -90,8 +90,8 @@ export interface AuthClient {
   readonly getSession: () => Promise<SessionWithUserView | null>;
   readonly sendVerificationEmail: (payload: { email: string }) => Promise<StatusResponse>;
   readonly verifyEmail: (payload: { token: string }) => Promise<AuthSuccess>;
-  readonly requestPasswordReset: (payload: { email: string }) => Promise<StatusResponse>;
-  readonly resetPassword: (payload: {
+  readonly passwordResetRequest: (payload: { email: string }) => Promise<StatusResponse>;
+  readonly passwordResetConfirm: (payload: {
     token: string;
     newPassword: string;
   }) => Promise<StatusResponse>;
@@ -235,9 +235,10 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       request<StatusResponse>("POST", "/email-verification/send", payload),
     verifyEmail: (payload) =>
       mutating(() => request<AuthSuccess>("POST", "/email-verification/verify", payload)),
-    requestPasswordReset: (payload) =>
+    passwordResetRequest: (payload) =>
       request<StatusResponse>("POST", "/password-reset/request", payload),
-    resetPassword: (payload) => request<StatusResponse>("POST", "/password-reset/reset", payload),
+    passwordResetConfirm: (payload) =>
+      request<StatusResponse>("POST", "/password-reset/reset", payload),
     changePassword: (payload) => request<void>("POST", "/change-password", payload),
     updateUser: (payload) => mutating(() => request<UserView>("PATCH", "/user", payload)),
     listSessions: () => request<readonly SessionView[]>("GET", "/sessions"),

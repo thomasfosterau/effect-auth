@@ -150,7 +150,7 @@ export const decodeBase32 = (base32: string): Effect.Effect<Buffer, Errors.Hashi
 export const generateHOTP = (
   secret: string | Buffer,
   counter: number,
-  config?: HOTPConfig,
+  config: HOTPConfig = {},
 ): Effect.Effect<string, Errors.HashingError> =>
   Effect.gen(function* () {
     // Validate counter
@@ -233,7 +233,7 @@ export const verifyHOTP = (
   token: string,
   secret: string | Buffer,
   counter: number,
-  config?: HOTPConfig,
+  config: HOTPConfig = {},
 ): Effect.Effect<boolean, Errors.HashingError> =>
   Effect.gen(function* () {
     // Validate token: must be a non-empty string of digits
@@ -261,7 +261,7 @@ export const verifyHOTP = (
  */
 export const generateTOTP = (
   secret: string | Buffer,
-  config?: TOTPConfig,
+  config: TOTPConfig = {},
 ): Effect.Effect<string, Errors.HashingError> => {
   const period = config?.period ?? 30;
   const currentTime = Math.floor(Date.now() / 1000);
@@ -286,7 +286,7 @@ export const generateTOTP = (
 export const verifyTOTP = (
   token: string,
   secret: string | Buffer,
-  config?: TOTPConfig,
+  config: TOTPConfig = {},
 ): Effect.Effect<boolean, Errors.HashingError> =>
   Effect.gen(function* () {
     // Validate and normalize period

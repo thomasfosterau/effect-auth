@@ -15,20 +15,20 @@ Provide the service layer (with your email delivery) plus the two stores:
 import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
-declare const magicLinkStore: Auth.MagicLinkStore;
-declare const magicLinkUserStore: Auth.MagicLinkUserStore;
+declare const magicLinkStore: Auth.MagicLinkStoreShape;
+declare const magicLinkUserStore: Auth.MagicLinkUserStoreShape;
 declare const sendEmail: (email: string, url: string) => Effect.Effect<void>;
 
 const magicLink = Layer.mergeAll(
-  Auth.MagicLinkServiceLayer({
+  Auth.MagicLinkService.layer({
     expiresIn: 5 * 60 * 1000, // default 5 minutes
     sendMagicLink: (email, token) =>
       sendEmail(email, `https://app.example.com/magic?token=${token}`).pipe(
         Effect.mapError((e) => new Auth.MagicLinkError({ message: String(e) })),
       ),
   }),
-  Layer.succeed(Auth.MagicLinkStoreTag)(magicLinkStore),
-  Layer.succeed(Auth.MagicLinkUserStoreTag)(magicLinkUserStore),
+  Layer.succeed(Auth.MagicLinkStore)(magicLinkStore),
+  Layer.succeed(Auth.MagicLinkUserStore)(magicLinkUserStore),
 );
 ```
 
@@ -45,7 +45,7 @@ the endpoints come alive:
 import { Effect } from "effect";
 import * as Auth from "effect-auth";
 
-declare const service: Auth.MagicLinkService;
+declare const service: Auth.MagicLinkServiceShape;
 
 const flow = Effect.gen(function* () {
   yield* service.send("user@example.com");

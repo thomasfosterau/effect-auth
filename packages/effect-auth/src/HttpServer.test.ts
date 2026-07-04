@@ -4,87 +4,83 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
 import { makeAuthClient } from "./HttpClient.js";
 import {
-  SessionManagerLayer,
-  SessionStoreTag,
-  UserStoreTag,
-  type SessionStore,
-  type UserStore,
+  SessionStore,
+  UserStore,
+  type SessionStoreShape,
+  type UserStoreShape,
+  SessionManager,
 } from "./Session.js";
-import { AuthLifecycleServiceLayer } from "./AuthLifecycle.js";
-import { EmailPasswordStoreTag, type EmailPasswordStore } from "./EmailPassword.js";
-import { PasswordHasherTag, makeScryptHasher } from "./Password.js";
+import { AuthLifecycleService } from "./AuthLifecycle.js";
+import { EmailPasswordStore, type EmailPasswordStoreShape } from "./EmailPassword.js";
+import { PasswordHasher, makeScryptHasher } from "./Password.js";
 import {
-  EmailVerificationServiceLayer,
-  EmailVerificationStoreTag,
+  EmailVerificationStore,
   type EmailVerification,
-  type EmailVerificationStore,
+  type EmailVerificationStoreShape,
+  EmailVerificationService,
 } from "./EmailVerification.js";
 import {
-  PasswordResetServiceLayer,
-  PasswordResetStoreTag,
-  PasswordResetUserStoreTag,
-  type PasswordResetStore,
+  PasswordResetStore,
+  PasswordResetUserStore,
+  type PasswordResetStoreShape,
   type PasswordResetToken,
-  type PasswordResetUserStore,
+  type PasswordResetUserStoreShape,
+  PasswordResetService,
 } from "./PasswordReset.js";
-import { UserServiceLayer, UserServiceStoreTag, type UserServiceStore } from "./User.js";
+import { UserServiceStore, type UserServiceStoreShape, UserService } from "./User.js";
 import { Hooks } from "./Hooks.js";
 import {
-  MagicLinkServiceLayer,
-  MagicLinkStoreTag,
-  MagicLinkUserStoreTag,
-  type MagicLinkStore,
+  MagicLinkStore,
+  MagicLinkUserStore,
+  type MagicLinkStoreShape,
   type MagicLinkToken,
-  type MagicLinkUserStore,
+  type MagicLinkUserStoreShape,
+  MagicLinkService,
 } from "./MagicLink.js";
 import {
-  EmailOtpServiceLayer,
-  EmailOtpStoreTag,
-  EmailOtpUserStoreTag,
+  EmailOtpStore,
+  EmailOtpUserStore,
   type EmailOtpPurpose,
   type EmailOtpRecord,
-  type EmailOtpStore,
-  type EmailOtpUserStore,
+  type EmailOtpStoreShape,
+  type EmailOtpUserStoreShape,
+  EmailOtpService,
 } from "./EmailOtp.js";
 import {
-  PendingTwoFactorStoreTag,
+  PendingTwoFactorStore,
   TwoFactorGateLayer,
-  TwoFactorServiceLayer,
-  TwoFactorStoreTag,
+  TwoFactorStore,
   type PendingTwoFactor,
-  type PendingTwoFactorStore,
+  type PendingTwoFactorStoreShape,
   type TwoFactorRecord,
-  type TwoFactorStore,
+  type TwoFactorStoreShape,
+  TwoFactorService,
 } from "./TwoFactor.js";
 import {
-  AccountManagementServiceLayer,
-  AccountManagementStoreTag,
-  type AccountManagementStore,
+  AccountManagementStore,
+  type AccountManagementStoreShape,
   type AccountToken,
+  AccountManagementService,
 } from "./AccountManagement.js";
+import { AnonymousUserStore, type AnonymousUserStoreShape, AnonymousService } from "./Anonymous.js";
 import {
-  AnonymousServiceLayer,
-  AnonymousUserStoreTag,
-  type AnonymousUserStore,
-} from "./Anonymous.js";
-import {
-  PhoneOtpServiceLayer,
-  PhoneOtpStoreTag,
-  PhoneOtpUserStoreTag,
+  PhoneOtpStore,
+  PhoneOtpUserStore,
   type PhoneOtpPurpose,
   type PhoneOtpRecord,
-  type PhoneOtpStore,
-  type PhoneOtpUserStore,
+  type PhoneOtpStoreShape,
+  type PhoneOtpUserStoreShape,
+  PhoneOtpService,
 } from "./PhoneOtp.js";
-import { UsernameServiceLayer, UsernameStoreTag, type UsernameStore } from "./Username.js";
+import { UsernameStore, type UsernameStoreShape, UsernameService } from "./Username.js";
 import {
-  DeviceAuthorizationServiceLayer,
-  DeviceAuthorizationStoreTag,
+  DeviceAuthorizationStore,
   type DeviceAuthorizationRecord,
-  type DeviceAuthorizationStore,
+  type DeviceAuthorizationStoreShape,
+  DeviceAuthorizationService,
 } from "./DeviceAuthorization.js";
 import { generateTOTP } from "./Otp.js";
-import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
+import { UserNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -170,28 +166,19 @@ const makeFixture = (): Fixture => {
     return id === undefined ? null : (usersById.get(id) ?? null);
   };
 
-  const getUserById = (userId: string) =>
-    Effect.suspend(() => {
-      const user = usersById.get(userId);
-      return user === undefined
-        ? Effect.fail(new UserNotFoundError({ message: "User not found", userId }))
-        : Effect.succeed(user);
-    });
+  const getUserById = (userId: string) => Effect.sync(() => usersById.get(userId) ?? null);
 
   // --- core stores -----------------------------------------------------------
-  const sessionStore: SessionStore = {
+  const sessionStore: SessionStoreShape = {
     create: (session) =>
       Effect.sync(() => {
         sessions.set(session.id, session);
         return session;
       }),
     get: (sessionId) =>
-      Effect.suspend(() => {
+      Effect.sync(() => {
         sessionStoreReads++;
-        const session = sessions.get(sessionId);
-        return session === undefined
-          ? Effect.fail(new SessionNotFoundError({ message: "Session not found", sessionId }))
-          : Effect.succeed(session);
+        return sessions.get(sessionId) ?? null;
       }),
     update: (session) =>
       Effect.sync(() => {
@@ -207,25 +194,19 @@ const makeFixture = (): Fixture => {
       Effect.sync(() => [...sessions.values()].filter((session) => session.userId === userId)),
   };
 
-  const userStore: UserStore = {
+  const userStore: UserStoreShape = {
     get: getUserById,
-    getCredentials: (userId) =>
-      Effect.suspend(() => {
-        const hash = passwordHashes.get(userId);
-        return hash === undefined
-          ? Effect.fail(new UserNotFoundError({ message: "No credentials", userId }))
-          : Effect.succeed(hash);
-      }),
+    getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
   };
 
-  const emailPasswordStore: EmailPasswordStore = {
+  const emailPasswordStore: EmailPasswordStoreShape = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
 
-  const userServiceStore: UserServiceStore = {
+  const userServiceStore: UserServiceStoreShape = {
     get: getUserById,
     getByEmail: (email) => Effect.sync(() => userByEmail(email)),
     update: (user) =>
@@ -244,7 +225,7 @@ const makeFixture = (): Fixture => {
       }),
   };
 
-  const emailVerificationStore: EmailVerificationStore = {
+  const emailVerificationStore: EmailVerificationStoreShape = {
     create: (verification) =>
       Effect.sync(() => {
         verifications.set(verification.token, verification);
@@ -259,7 +240,7 @@ const makeFixture = (): Fixture => {
       }),
   };
 
-  const passwordResetStore: PasswordResetStore = {
+  const passwordResetStore: PasswordResetStoreShape = {
     create: (reset) =>
       Effect.sync(() => {
         resets.set(reset.token, reset);
@@ -273,39 +254,39 @@ const makeFixture = (): Fixture => {
       }),
   };
 
-  const passwordResetUserStore: PasswordResetUserStore = {
+  const passwordResetUserStore: PasswordResetUserStoreShape = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
 
   const storeLayer = Layer.mergeAll(
-    Layer.succeed(SessionStoreTag)(sessionStore),
-    Layer.succeed(UserStoreTag)(userStore),
-    Layer.succeed(EmailPasswordStoreTag)(emailPasswordStore),
-    Layer.succeed(PasswordHasherTag)(hasher),
-    Layer.succeed(EmailVerificationStoreTag)(emailVerificationStore),
-    Layer.succeed(PasswordResetStoreTag)(passwordResetStore),
-    Layer.succeed(PasswordResetUserStoreTag)(passwordResetUserStore),
-    Layer.succeed(UserServiceStoreTag)(userServiceStore),
+    Layer.succeed(SessionStore)(sessionStore),
+    Layer.succeed(UserStore)(userStore),
+    Layer.succeed(EmailPasswordStore)(emailPasswordStore),
+    Layer.succeed(PasswordHasher)(hasher),
+    Layer.succeed(EmailVerificationStore)(emailVerificationStore),
+    Layer.succeed(PasswordResetStore)(passwordResetStore),
+    Layer.succeed(PasswordResetUserStore)(passwordResetUserStore),
+    Layer.succeed(UserServiceStore)(userServiceStore),
     Hooks.Default,
   );
 
   const services: Layer.Layer<AuthServices> = Layer.mergeAll(
     storeLayer,
-    SessionManagerLayer(SESSION_CONFIG).pipe(Layer.provide(storeLayer)),
-    AuthLifecycleServiceLayer(),
-    EmailVerificationServiceLayer({
+    SessionManager.layer(SESSION_CONFIG).pipe(Layer.provide(storeLayer)),
+    AuthLifecycleService.layer(),
+    EmailVerificationService.layer({
       sendEmail: (_to, token) => Effect.sync(() => void sentVerificationTokens.push(token)),
     }),
-    PasswordResetServiceLayer({
+    PasswordResetService.layer({
       sendResetPassword: (_email, token) => Effect.sync(() => void sentResetTokens.push(token)),
     }),
-    UserServiceLayer(),
+    UserService.layer(),
   );
 
   // --- optional feature stores -----------------------------------------------
   const magicLinks = new Map<string, MagicLinkToken>();
-  const magicLinkStore: MagicLinkStore = {
+  const magicLinkStore: MagicLinkStoreShape = {
     create: (token) =>
       Effect.sync(() => {
         magicLinks.set(token.token, token);
@@ -318,14 +299,14 @@ const makeFixture = (): Fixture => {
         for (const [key, link] of magicLinks) if (link.email === email) magicLinks.delete(key);
       }),
   };
-  const magicLinkUserStore: MagicLinkUserStore = {
+  const magicLinkUserStore: MagicLinkUserStoreShape = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
   };
 
   const emailOtps = new Map<string, EmailOtpRecord>();
   const otpKey = (email: string, purpose: EmailOtpPurpose) => `${purpose}:${email}`;
-  const emailOtpStore: EmailOtpStore = {
+  const emailOtpStore: EmailOtpStoreShape = {
     upsert: (record) =>
       Effect.sync(() => {
         emailOtps.set(otpKey(record.email, record.purpose), record);
@@ -342,13 +323,13 @@ const makeFixture = (): Fixture => {
         return updated.attempts;
       }),
   };
-  const emailOtpUserStore: EmailOtpUserStore = {
+  const emailOtpUserStore: EmailOtpUserStoreShape = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
   };
 
   const twoFactorRecords = new Map<string, TwoFactorRecord>();
-  const twoFactorStore: TwoFactorStore = {
+  const twoFactorStore: TwoFactorStoreShape = {
     get: (userId) => Effect.sync(() => twoFactorRecords.get(userId) ?? null),
     upsert: (record) =>
       Effect.sync(() => {
@@ -358,7 +339,7 @@ const makeFixture = (): Fixture => {
     delete: (userId) => Effect.sync(() => void twoFactorRecords.delete(userId)),
   };
   const pendingTwoFactors = new Map<string, PendingTwoFactor>();
-  const pendingTwoFactorStore: PendingTwoFactorStore = {
+  const pendingTwoFactorStore: PendingTwoFactorStoreShape = {
     create: (pending) =>
       Effect.sync(() => {
         pendingTwoFactors.set(pending.token, pending);
@@ -369,13 +350,13 @@ const makeFixture = (): Fixture => {
   };
 
   const twoFactorLayer = Layer.mergeAll(
-    TwoFactorServiceLayer({ issuer: "effect-auth-test" }),
-    Layer.succeed(TwoFactorStoreTag)(twoFactorStore),
-    Layer.succeed(PendingTwoFactorStoreTag)(pendingTwoFactorStore),
+    TwoFactorService.layer({ issuer: "effect-auth-test" }),
+    Layer.succeed(TwoFactorStore)(twoFactorStore),
+    Layer.succeed(PendingTwoFactorStore)(pendingTwoFactorStore),
   );
 
   const accountTokens = new Map<string, AccountToken>();
-  const accountStore: AccountManagementStore = {
+  const accountStore: AccountManagementStoreShape = {
     create: (token) =>
       Effect.sync(() => {
         accountTokens.set(token.token, token);
@@ -392,7 +373,7 @@ const makeFixture = (): Fixture => {
   const phoneRecords = new Map<string, PhoneOtpRecord>();
   const phoneToUserId = new Map<string, string>();
   const phoneKey = (phone: string, purpose: PhoneOtpPurpose) => `${phone}:${purpose}`;
-  const phoneOtpStore: PhoneOtpStore = {
+  const phoneOtpStore: PhoneOtpStoreShape = {
     upsert: (record) =>
       Effect.sync(() => {
         phoneRecords.set(phoneKey(record.phoneNumber, record.purpose), record);
@@ -410,7 +391,7 @@ const makeFixture = (): Fixture => {
         return updated.attempts;
       }),
   };
-  const phoneOtpUserStore: PhoneOtpUserStore = {
+  const phoneOtpUserStore: PhoneOtpUserStoreShape = {
     getUserByPhoneNumber: (phone) =>
       Effect.sync(() => {
         const id = phoneToUserId.get(phone);
@@ -446,7 +427,7 @@ const makeFixture = (): Fixture => {
   };
 
   const deviceRecords = new Map<string, DeviceAuthorizationRecord>();
-  const deviceStore: DeviceAuthorizationStore = {
+  const deviceStore: DeviceAuthorizationStoreShape = {
     create: (record) =>
       Effect.sync(() => {
         deviceRecords.set(record.deviceCode, record);
@@ -464,7 +445,7 @@ const makeFixture = (): Fixture => {
   };
 
   const usernameToId = new Map<string, string>();
-  const usernameStore: UsernameStore = {
+  const usernameStore: UsernameStoreShape = {
     getUserByUsername: (username) =>
       Effect.sync(() => {
         const id = usernameToId.get(username);
@@ -479,7 +460,7 @@ const makeFixture = (): Fixture => {
   };
 
   let anonSeq = 0;
-  const anonymousUserStore: AnonymousUserStore = {
+  const anonymousUserStore: AnonymousUserStoreShape = {
     createAnonymousUser: () =>
       Effect.sync(() =>
         createUser({
@@ -499,41 +480,41 @@ const makeFixture = (): Fixture => {
 
   const featureServices: Layer.Layer<AuthServices> = Layer.mergeAll(
     services,
-    AnonymousServiceLayer(),
-    Layer.succeed(AnonymousUserStoreTag)(anonymousUserStore),
-    UsernameServiceLayer(),
-    Layer.succeed(UsernameStoreTag)(usernameStore),
-    DeviceAuthorizationServiceLayer({
+    AnonymousService.layer(),
+    Layer.succeed(AnonymousUserStore)(anonymousUserStore),
+    UsernameService.layer(),
+    Layer.succeed(UsernameStore)(usernameStore),
+    DeviceAuthorizationService.layer({
       verificationUri: "https://example.com/device",
       // interval 0 so back-to-back polls in a single test don't hit slow_down.
       interval: 0,
     }),
-    Layer.succeed(DeviceAuthorizationStoreTag)(deviceStore),
-    PhoneOtpServiceLayer({
+    Layer.succeed(DeviceAuthorizationStore)(deviceStore),
+    PhoneOtpService.layer({
       sendOtp: (phoneNumber, otp, purpose) =>
         Effect.sync(() => void sentPhoneOtps.push({ phoneNumber, otp, purpose })),
     }),
-    Layer.succeed(PhoneOtpStoreTag)(phoneOtpStore),
-    Layer.succeed(PhoneOtpUserStoreTag)(phoneOtpUserStore),
-    AccountManagementServiceLayer({
+    Layer.succeed(PhoneOtpStore)(phoneOtpStore),
+    Layer.succeed(PhoneOtpUserStore)(phoneOtpUserStore),
+    AccountManagementService.layer({
       sendChangeEmailVerification: ({ newEmail, token }) =>
         Effect.sync(() => void sentChangeEmail.push({ newEmail, token })),
       sendDeleteAccountVerification: ({ token }) =>
         Effect.sync(() => void sentDeleteTokens.push(token)),
       beforeDelete: (user) => Effect.sync(() => void beforeDeleteCalls.push(user.id)),
     }),
-    Layer.succeed(AccountManagementStoreTag)(accountStore),
-    MagicLinkServiceLayer({
+    Layer.succeed(AccountManagementStore)(accountStore),
+    MagicLinkService.layer({
       sendMagicLink: (_email, token) => Effect.sync(() => void sentMagicLinkTokens.push(token)),
     }),
-    Layer.succeed(MagicLinkStoreTag)(magicLinkStore),
-    Layer.succeed(MagicLinkUserStoreTag)(magicLinkUserStore),
-    EmailOtpServiceLayer({
+    Layer.succeed(MagicLinkStore)(magicLinkStore),
+    Layer.succeed(MagicLinkUserStore)(magicLinkUserStore),
+    EmailOtpService.layer({
       sendVerificationOtp: (email, otp, purpose) =>
         Effect.sync(() => void sentOtps.push({ email, otp, purpose })),
     }),
-    Layer.succeed(EmailOtpStoreTag)(emailOtpStore),
-    Layer.succeed(EmailOtpUserStoreTag)(emailOtpUserStore),
+    Layer.succeed(EmailOtpStore)(emailOtpStore),
+    Layer.succeed(EmailOtpUserStore)(emailOtpUserStore),
     twoFactorLayer,
     // The gate makes password sign-in return `secondFactor` for enrolled users.
     TwoFactorGateLayer.pipe(Layer.provide(twoFactorLayer)),

@@ -11,7 +11,7 @@ import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
 import type * as Types from "./Types.js";
-import { SessionManagerTag } from "./Session.js";
+import { SessionManager } from "./Session.js";
 import { Hooks, type HookError } from "./Hooks.js";
 
 /** Lifecycle status of a device authorization request. */
@@ -32,7 +32,7 @@ export interface DeviceAuthorizationRecord {
 }
 
 /** Persistence for device authorization requests. */
-export interface DeviceAuthorizationStore {
+export interface DeviceAuthorizationStoreShape {
   readonly create: (
     record: DeviceAuthorizationRecord,
   ) => Effect.Effect<DeviceAuthorizationRecord, Errors.AuthError>;
@@ -48,12 +48,10 @@ export interface DeviceAuthorizationStore {
   readonly delete: (deviceCode: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class DeviceAuthorizationStoreTag extends Context.Service<
-  DeviceAuthorizationStoreTag,
-  DeviceAuthorizationStore
+export class DeviceAuthorizationStore extends Context.Service<
+  DeviceAuthorizationStore,
+  DeviceAuthorizationStoreShape
 >()("@effect-auth/DeviceAuthorizationStore") {}
-
-export const DeviceAuthorizationStore = DeviceAuthorizationStoreTag;
 
 /** RFC 8628 polling errors, mapped to the standard OAuth `error` codes. */
 export class DevicePollError extends Data.TaggedError("DevicePollError")<{
@@ -92,12 +90,12 @@ export interface DevicePollResult {
   readonly session: Types.Session;
 }
 
-export interface DeviceAuthorizationService {
+export interface DeviceAuthorizationServiceShape {
   /** Start a device authorization request. */
   readonly begin: (options?: {
     readonly clientId?: string;
     readonly scopes?: readonly string[];
-  }) => Effect.Effect<DeviceBeginResult, Errors.AuthError, DeviceAuthorizationStoreTag>;
+  }) => Effect.Effect<DeviceBeginResult, Errors.AuthError, DeviceAuthorizationStore>;
 
   /**
    * Poll for completion. Returns a session once approved; otherwise fails with
@@ -114,27 +112,31 @@ export interface DeviceAuthorizationService {
     | Errors.SessionExpiredError
     | Errors.UserNotFoundError
     | HookError,
-    DeviceAuthorizationStoreTag | SessionManagerTag | Hooks
+    DeviceAuthorizationStore | SessionManager | Hooks
   >;
 
   /** Approve a user code (called from an authenticated verification page). */
   readonly approve: (
     userCode: string,
     userId: string,
-  ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStoreTag>;
+  ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStore>;
 
   /** Deny a user code. */
   readonly deny: (
     userCode: string,
-  ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStoreTag>;
+  ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStore>;
 }
 
-export class DeviceAuthorizationServiceTag extends Context.Service<
-  DeviceAuthorizationServiceTag,
-  DeviceAuthorizationService
->()("@effect-auth/DeviceAuthorizationService") {}
-
-export const DeviceAuthorizationService = DeviceAuthorizationServiceTag;
+export class DeviceAuthorizationService extends Context.Service<
+  DeviceAuthorizationService,
+  DeviceAuthorizationServiceShape
+>()("@effect-auth/DeviceAuthorizationService") {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = (config: DeviceAuthorizationConfig) =>
+    Layer.effect(DeviceAuthorizationService, makeDeviceAuthorizationService(config));
+}
 
 const DEFAULT_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ0123456789";
 
@@ -156,8 +158,8 @@ export const normalizeUserCode = (code: string): string =>
 
 export const makeDeviceAuthorizationService = (
   config: DeviceAuthorizationConfig,
-): Effect.Effect<DeviceAuthorizationService, never> =>
-  Effect.sync((): DeviceAuthorizationService => {
+): Effect.Effect<DeviceAuthorizationServiceShape, never> =>
+  Effect.sync((): DeviceAuthorizationServiceShape => {
     const expiresIn = config.expiresIn ?? 30 * 60 * 1000;
     const interval = config.interval ?? 5;
     const userCodeLength = config.userCodeLength ?? 8;
@@ -166,7 +168,7 @@ export const makeDeviceAuthorizationService = (
     return {
       begin: (options) =>
         Effect.gen(function* () {
-          const store = yield* DeviceAuthorizationStoreTag;
+          const store = yield* DeviceAuthorizationStore;
           const deviceCode = crypto.randomBytes(32).toString("base64url");
           const rawUserCode = randomCode(userCodeLength, alphabet);
           const userCode = formatUserCode(rawUserCode);
@@ -195,8 +197,8 @@ export const makeDeviceAuthorizationService = (
 
       poll: (deviceCode) =>
         Effect.gen(function* () {
-          const store = yield* DeviceAuthorizationStoreTag;
-          const sessionManager = yield* SessionManagerTag;
+          const store = yield* DeviceAuthorizationStore;
+          const sessionManager = yield* SessionManager;
 
           const record = yield* store.getByDeviceCode(deviceCode);
           const now = Date.now();
@@ -246,7 +248,7 @@ export const makeDeviceAuthorizationService = (
 
       approve: (userCode, userId) =>
         Effect.gen(function* () {
-          const store = yield* DeviceAuthorizationStoreTag;
+          const store = yield* DeviceAuthorizationStore;
           const record = yield* store.getByUserCode(normalizeUserCode(userCode));
           if (record === null || Date.now() > record.expiresAt) {
             return yield* new DeviceCodeError({ message: "Invalid or expired code" });
@@ -256,7 +258,7 @@ export const makeDeviceAuthorizationService = (
 
       deny: (userCode) =>
         Effect.gen(function* () {
-          const store = yield* DeviceAuthorizationStoreTag;
+          const store = yield* DeviceAuthorizationStore;
           const record = yield* store.getByUserCode(normalizeUserCode(userCode));
           if (record === null || Date.now() > record.expiresAt) {
             return yield* new DeviceCodeError({ message: "Invalid or expired code" });
@@ -265,6 +267,3 @@ export const makeDeviceAuthorizationService = (
         }),
     };
   });
-
-export const DeviceAuthorizationServiceLayer = (config: DeviceAuthorizationConfig) =>
-  Layer.effect(DeviceAuthorizationServiceTag, makeDeviceAuthorizationService(config));

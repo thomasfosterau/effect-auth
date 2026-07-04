@@ -12,17 +12,13 @@ description: "API reference for the PasswordReset module."
 - [utils](#utils)
   - [PasswordResetConfig (interface)](#passwordresetconfig-interface)
   - [PasswordResetResult (interface)](#passwordresetresult-interface)
-  - [PasswordResetService](#passwordresetservice)
-  - [PasswordResetService (interface)](#passwordresetservice-interface)
-  - [PasswordResetServiceLayer](#passwordresetservicelayer)
-  - [PasswordResetServiceTag (class)](#passwordresetservicetag-class)
-  - [PasswordResetStore](#passwordresetstore)
-  - [PasswordResetStore (interface)](#passwordresetstore-interface)
-  - [PasswordResetStoreTag (class)](#passwordresetstoretag-class)
+  - [PasswordResetService (class)](#passwordresetservice-class)
+  - [PasswordResetServiceShape (interface)](#passwordresetserviceshape-interface)
+  - [PasswordResetStore (class)](#passwordresetstore-class)
+  - [PasswordResetStoreShape (interface)](#passwordresetstoreshape-interface)
   - [PasswordResetToken (interface)](#passwordresettoken-interface)
-  - [PasswordResetUserStore](#passwordresetuserstore)
-  - [PasswordResetUserStore (interface)](#passwordresetuserstore-interface)
-  - [PasswordResetUserStoreTag (class)](#passwordresetuserstoretag-class)
+  - [PasswordResetUserStore (class)](#passwordresetuserstore-class)
+  - [PasswordResetUserStoreShape (interface)](#passwordresetuserstoreshape-interface)
   - [makePasswordResetService](#makepasswordresetservice)
 
 ---
@@ -58,26 +54,26 @@ export interface PasswordResetResult {
 }
 ```
 
-## PasswordResetService
+## PasswordResetService (class)
 
 **Signature**
 
 ```ts
-export declare const PasswordResetService: typeof PasswordResetServiceTag;
+export declare class PasswordResetService
 ```
 
-## PasswordResetService (interface)
+## PasswordResetServiceShape (interface)
 
 **Signature**
 
 ```ts
-export interface PasswordResetService {
+export interface PasswordResetServiceShape {
   readonly requestPasswordReset: (
     email: string,
   ) => Effect.Effect<
     void,
     Errors.AuthError | Errors.PasswordResetError | HookError,
-    PasswordResetStoreTag | PasswordResetUserStoreTag | Hooks
+    PasswordResetStore | PasswordResetUserStore | Hooks
   >;
 
   readonly resetPassword: (
@@ -86,47 +82,25 @@ export interface PasswordResetService {
   ) => Effect.Effect<
     PasswordResetResult,
     Errors.AuthError | Errors.PasswordResetError | Errors.HashingError | HookError,
-    | PasswordResetStoreTag
-    | PasswordResetUserStoreTag
-    | PasswordHasherTag
-    | SessionManagerTag
-    | Hooks
+    PasswordResetStore | PasswordResetUserStore | PasswordHasher | SessionManager | Hooks
   >;
 }
 ```
 
-## PasswordResetServiceLayer
+## PasswordResetStore (class)
 
 **Signature**
 
 ```ts
-export declare const PasswordResetServiceLayer: (
-  config: PasswordResetConfig,
-) => Layer.Layer<PasswordResetServiceTag, never, never>;
+export declare class PasswordResetStore
 ```
 
-## PasswordResetServiceTag (class)
+## PasswordResetStoreShape (interface)
 
 **Signature**
 
 ```ts
-export declare class PasswordResetServiceTag
-```
-
-## PasswordResetStore
-
-**Signature**
-
-```ts
-export declare const PasswordResetStore: typeof PasswordResetStoreTag;
-```
-
-## PasswordResetStore (interface)
-
-**Signature**
-
-```ts
-export interface PasswordResetStore {
+export interface PasswordResetStoreShape {
   readonly create: (
     reset: PasswordResetToken,
   ) => Effect.Effect<PasswordResetToken, Errors.AuthError>;
@@ -134,14 +108,6 @@ export interface PasswordResetStore {
   readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
   readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
 }
-```
-
-## PasswordResetStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class PasswordResetStoreTag
 ```
 
 ## PasswordResetToken (interface)
@@ -158,31 +124,23 @@ export interface PasswordResetToken {
 }
 ```
 
-## PasswordResetUserStore
+## PasswordResetUserStore (class)
 
 **Signature**
 
 ```ts
-export declare const PasswordResetUserStore: typeof PasswordResetUserStoreTag;
+export declare class PasswordResetUserStore
 ```
 
-## PasswordResetUserStore (interface)
+## PasswordResetUserStoreShape (interface)
 
 **Signature**
 
 ```ts
-export interface PasswordResetUserStore {
+export interface PasswordResetUserStoreShape {
   readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
   readonly setPasswordHash: (userId: string, hash: string) => Effect.Effect<void, Errors.AuthError>;
 }
-```
-
-## PasswordResetUserStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class PasswordResetUserStoreTag
 ```
 
 ## makePasswordResetService
@@ -192,5 +150,5 @@ export declare class PasswordResetUserStoreTag
 ```ts
 export declare const makePasswordResetService: (
   config: PasswordResetConfig,
-) => Effect.Effect<PasswordResetService, never>;
+) => Effect.Effect<PasswordResetServiceShape, never>;
 ```

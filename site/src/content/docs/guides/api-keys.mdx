@@ -14,14 +14,14 @@ quotas, arbitrary metadata, and an optional per-key rate limit.
 import { Layer } from "effect";
 import * as Auth from "effect-auth";
 
-declare const apiKeyStore: Auth.ApiKeyStore;
+declare const apiKeyStore: Auth.ApiKeyStoreShape;
 
 const apiKeys = Layer.mergeAll(
-  Auth.ApiKeyServiceLayer({
+  Auth.ApiKeyService.layer({
     defaultPrefix: "ak_", // default
     maxKeysPerUser: 10, // default
   }),
-  Layer.succeed(Auth.ApiKeyStoreTag)(apiKeyStore),
+  Layer.succeed(Auth.ApiKeyStore)(apiKeyStore),
 );
 ```
 
@@ -45,7 +45,7 @@ programmatic clients:
 import { Effect } from "effect";
 import * as Auth from "effect-auth";
 
-declare const service: Auth.ApiKeyService;
+declare const service: Auth.ApiKeyServiceShape;
 
 const authenticate = (plaintextKey: string) =>
   Effect.gen(function* () {

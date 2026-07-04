@@ -10,13 +10,10 @@ description: "API reference for the Authorization module."
 <h2 class="text-delta">Table of contents</h2>
 
 - [utils](#utils)
-  - [AuthorizationPolicy](#authorizationpolicy)
-  - [AuthorizationPolicy (interface)](#authorizationpolicy-interface)
-  - [AuthorizationPolicyLayer](#authorizationpolicylayer)
-  - [AuthorizationPolicyTag (class)](#authorizationpolicytag-class)
-  - [RoleStore](#rolestore)
-  - [RoleStore (interface)](#rolestore-interface)
-  - [RoleStoreTag (class)](#rolestoretag-class)
+  - [AuthorizationPolicy (class)](#authorizationpolicy-class)
+  - [AuthorizationPolicyShape (interface)](#authorizationpolicyshape-interface)
+  - [RoleStore (class)](#rolestore-class)
+  - [RoleStoreShape (interface)](#rolestoreshape-interface)
   - [allOf](#allof)
   - [allowAll](#allowall)
   - [anyOf](#anyof)
@@ -33,15 +30,17 @@ description: "API reference for the Authorization module."
 
 # utils
 
-## AuthorizationPolicy
+## AuthorizationPolicy (class)
+
+Tag for AuthorizationPolicy service
 
 **Signature**
 
 ```ts
-export declare const AuthorizationPolicy: typeof AuthorizationPolicyTag;
+export declare class AuthorizationPolicy
 ```
 
-## AuthorizationPolicy (interface)
+## AuthorizationPolicyShape (interface)
 
 Authorization policy interface
 Users should implement this to define their authorization rules
@@ -49,7 +48,7 @@ Users should implement this to define their authorization rules
 **Signature**
 
 ```ts
-export interface AuthorizationPolicy {
+export interface AuthorizationPolicyShape {
   /**
    * Check if a user has permission to perform an action on a resource
    */
@@ -61,37 +60,17 @@ export interface AuthorizationPolicy {
 }
 ```
 
-## AuthorizationPolicyLayer
+## RoleStore (class)
+
+Tag for RoleStore service
 
 **Signature**
 
 ```ts
-export declare const AuthorizationPolicyLayer: () => Layer.Layer<
-  AuthorizationPolicyTag,
-  never,
-  RoleStoreTag
->;
+export declare class RoleStore
 ```
 
-## AuthorizationPolicyTag (class)
-
-Tag for AuthorizationPolicy service
-
-**Signature**
-
-```ts
-export declare class AuthorizationPolicyTag
-```
-
-## RoleStore
-
-**Signature**
-
-```ts
-export declare const RoleStore: typeof RoleStoreTag;
-```
-
-## RoleStore (interface)
+## RoleStoreShape (interface)
 
 Simple role-based authorization policy
 This is a basic implementation that users can extend or replace
@@ -99,7 +78,7 @@ This is a basic implementation that users can extend or replace
 **Signature**
 
 ```ts
-export interface RoleStore {
+export interface RoleStoreShape {
   /**
    * Get roles for a user
    */
@@ -114,16 +93,6 @@ export interface RoleStore {
 }
 ```
 
-## RoleStoreTag (class)
-
-Tag for RoleStore service
-
-**Signature**
-
-```ts
-export declare class RoleStoreTag
-```
-
 ## allOf
 
 Combine policies with logical AND: permission is granted only if _every_
@@ -133,7 +102,9 @@ policies, grants (vacuously true).
 **Signature**
 
 ```ts
-export declare const allOf: (...policies: readonly AuthorizationPolicy[]) => AuthorizationPolicy;
+export declare const allOf: (
+  ...policies: readonly AuthorizationPolicyShape[]
+) => AuthorizationPolicyShape;
 ```
 
 ## allowAll
@@ -143,7 +114,7 @@ A policy that grants every permission.
 **Signature**
 
 ```ts
-export declare const allowAll: AuthorizationPolicy;
+export declare const allowAll: AuthorizationPolicyShape;
 ```
 
 ## anyOf
@@ -154,12 +125,14 @@ it. Evaluation short-circuits on the first grant. With no policies, denies.
 **Signature**
 
 ```ts
-export declare const anyOf: (...policies: readonly AuthorizationPolicy[]) => AuthorizationPolicy;
+export declare const anyOf: (
+  ...policies: readonly AuthorizationPolicyShape[]
+) => AuthorizationPolicyShape;
 ```
 
 ## can
 
-Check a permission against the {@link AuthorizationPolicy} in context,
+Check a permission against the {@link AuthorizationPolicyShape} in context,
 returning a boolean instead of failing.
 
 **Signature**
@@ -169,7 +142,7 @@ export declare const can: (
   userId: string,
   resource: string,
   action: string,
-) => Effect.Effect<boolean, never, AuthorizationPolicyTag>;
+) => Effect.Effect<boolean, never, AuthorizationPolicy>;
 ```
 
 ## denyAll
@@ -179,7 +152,7 @@ A policy that denies every permission.
 **Signature**
 
 ```ts
-export declare const denyAll: AuthorizationPolicy;
+export declare const denyAll: AuthorizationPolicyShape;
 ```
 
 ## fromPredicate
@@ -197,7 +170,7 @@ composed here with {@link allOf} / {@link anyOf}.
 ```ts
 export declare const fromPredicate: (
   check: (userId: string, resource: string, action: string) => Effect.Effect<boolean, never>,
-) => AuthorizationPolicy;
+) => AuthorizationPolicyShape;
 ```
 
 ## makeRoleBasedPolicy
@@ -208,9 +181,9 @@ Create a simple role-based authorization policy
 
 ```ts
 export declare const makeRoleBasedPolicy: () => Effect.Effect<
-  AuthorizationPolicy,
+  AuthorizationPolicyShape,
   never,
-  RoleStoreTag
+  RoleStore
 >;
 ```
 
@@ -221,7 +194,7 @@ Negate a policy: grants what the wrapped policy denies and vice versa.
 **Signature**
 
 ```ts
-export declare const not: (policy: AuthorizationPolicy) => AuthorizationPolicy;
+export declare const not: (policy: AuthorizationPolicyShape) => AuthorizationPolicyShape;
 ```
 
 ## requireAllPermissions
@@ -235,7 +208,7 @@ Require that the user has _all_ of the given permissions. Fails with
 export declare const requireAllPermissions: (
   userId: string,
   permissions: readonly PermissionRef[],
-) => Effect.Effect<void, Errors.PermissionDeniedError, AuthorizationPolicyTag>;
+) => Effect.Effect<void, Errors.PermissionDeniedError, AuthorizationPolicy>;
 ```
 
 ## requireAnyPermission
@@ -249,7 +222,7 @@ Require that the user has _at least one_ of the given permissions. Fails with
 export declare const requireAnyPermission: (
   userId: string,
   permissions: readonly PermissionRef[],
-) => Effect.Effect<void, Errors.PermissionDeniedError, AuthorizationPolicyTag>;
+) => Effect.Effect<void, Errors.PermissionDeniedError, AuthorizationPolicy>;
 ```
 
 ## requirePermission
@@ -264,5 +237,5 @@ export declare const requirePermission: (
   userId: string,
   resource: string,
   action: string,
-) => Effect.Effect<void, Errors.PermissionDeniedError, AuthorizationPolicyTag>;
+) => Effect.Effect<void, Errors.PermissionDeniedError, AuthorizationPolicy>;
 ```

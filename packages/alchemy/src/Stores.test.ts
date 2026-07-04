@@ -119,24 +119,22 @@ suite("@effect-auth/alchemy stores", () => {
     await Effect.runPromise(store.create(session));
 
     const fetched = await Effect.runPromise(store.get("s1"));
-    expect(fetched.userId).toBe("u1");
-    expect(fetched.attributes).toEqual({ ip: "127.0.0.1" });
-    expect(fetched.expiresAt.getTime()).toBe(session.expiresAt.getTime());
+    expect(fetched?.userId).toBe("u1");
+    expect(fetched?.attributes).toEqual({ ip: "127.0.0.1" });
+    expect(fetched?.expiresAt.getTime()).toBe(session.expiresAt.getTime());
 
     await Effect.runPromise(store.update({ ...session, attributes: { ip: "10.0.0.1" } }));
     const updated = await Effect.runPromise(store.get("s1"));
-    expect(updated.attributes).toEqual({ ip: "10.0.0.1" });
+    expect(updated?.attributes).toEqual({ ip: "10.0.0.1" });
 
     const listed = await Effect.runPromise(store.listByUserId("u1"));
     expect(listed.map((entry) => entry.id)).toEqual(["s1"]);
     expect(await Effect.runPromise(store.listByUserId("nobody"))).toEqual([]);
 
-    const missing = await Effect.runPromise(Effect.result(store.get("nope")));
-    expect(Result.isFailure(missing) && missing.failure._tag).toBe("SessionNotFoundError");
+    expect(await Effect.runPromise(store.get("nope"))).toBe(null);
 
     await Effect.runPromise(store.deleteByUserId("u1"));
-    const gone = await Effect.runPromise(Effect.result(store.get("s1")));
-    expect(Result.isFailure(gone)).toBe(true);
+    expect(await Effect.runPromise(store.get("s1"))).toBe(null);
     expect(await Effect.runPromise(store.listByUserId("u1"))).toEqual([]);
   });
 
@@ -157,21 +155,20 @@ suite("@effect-auth/alchemy stores", () => {
     expect(byEmail?.id).toBe(created.id);
 
     expect(await Effect.runPromise(emailPassword.getPasswordHash(created.id))).toBe(null);
-    expect(await Effect.runPromise(users.getCredentials(created.id))).toBe("");
+    expect(await Effect.runPromise(users.getCredentials(created.id))).toBe(null);
 
     await Effect.runPromise(emailPassword.setPasswordHash(created.id, "hash:123"));
     expect(await Effect.runPromise(emailPassword.getPasswordHash(created.id))).toBe("hash:123");
     expect(await Effect.runPromise(users.getCredentials(created.id))).toBe("hash:123");
 
     const user = await Effect.runPromise(users.get(created.id));
-    expect(user.email).toBe("a@b.com");
-    expect(user.name).toBe("Ada");
-    expect(user.attributes).toEqual({ plan: "pro" });
-    expect(user.createdAt.getTime()).toBe(created.createdAt.getTime());
-    expect(user.updatedAt.getTime()).toBe(created.updatedAt.getTime());
+    expect(user?.email).toBe("a@b.com");
+    expect(user?.name).toBe("Ada");
+    expect(user?.attributes).toEqual({ plan: "pro" });
+    expect(user?.createdAt.getTime()).toBe(created.createdAt.getTime());
+    expect(user?.updatedAt.getTime()).toBe(created.updatedAt.getTime());
 
-    const missing = await Effect.runPromise(Effect.result(users.get("nope")));
-    expect(Result.isFailure(missing) && missing.failure._tag).toBe("UserNotFoundError");
+    expect(await Effect.runPromise(users.get("nope"))).toBe(null);
   });
 
   it("user service store: getByEmail / update / delete", async () => {
@@ -191,15 +188,13 @@ suite("@effect-auth/alchemy stores", () => {
       }),
     );
     const updated = await Effect.runPromise(service.get(user.id));
-    expect(updated.email).toBe("new@d.com");
-    expect(updated.emailVerified).toBe(true);
-    expect(updated.attributes["role"]).toBe("x");
+    expect(updated?.email).toBe("new@d.com");
+    expect(updated?.emailVerified).toBe(true);
+    expect(updated?.attributes["role"]).toBe("x");
     expect(await Effect.runPromise(service.getByEmail("new@d.com"))).not.toBe(null);
 
     await Effect.runPromise(service.delete(user.id));
-    expect(Result.isFailure(await Effect.runPromise(Effect.result(service.get(user.id))))).toBe(
-      true,
-    );
+    expect(await Effect.runPromise(service.get(user.id))).toBe(null);
   });
 
   it("rate limit store: increment, set, get, delete", async () => {
@@ -248,12 +243,11 @@ suite("@effect-auth/alchemy stores", () => {
       challenges.create({ challenge: challengeBytes, expiresAt: Date.now() + 1_000, userId: "u1" }),
     );
     const fetched = await Effect.runPromise(challenges.get(challengeBytes));
-    expect(Array.from(fetched.challenge)).toEqual([1, 2, 3, 250, 255]);
-    expect(fetched.userId).toBe("u1");
+    expect(Array.from(fetched?.challenge ?? [])).toEqual([1, 2, 3, 250, 255]);
+    expect(fetched?.userId).toBe("u1");
 
     await Effect.runPromise(challenges.delete(challengeBytes));
-    const missing = await Effect.runPromise(Effect.result(challenges.get(challengeBytes)));
-    expect(Result.isFailure(missing) && missing.failure._tag).toBe("ChallengeNotFoundError");
+    expect(await Effect.runPromise(challenges.get(challengeBytes))).toBe(null);
 
     const credential: Auth.WebAuthnCredential = {
       id: "c1",
@@ -266,12 +260,12 @@ suite("@effect-auth/alchemy stores", () => {
     };
     await Effect.runPromise(credentials.create(credential));
     const gotCred = await Effect.runPromise(credentials.get("c1"));
-    expect(Array.from(gotCred.publicKey)).toEqual([9, 8, 7]);
-    expect(gotCred.transports).toEqual(["usb"]);
+    expect(Array.from(gotCred?.publicKey ?? [])).toEqual([9, 8, 7]);
+    expect(gotCred?.transports).toEqual(["usb"]);
 
     await Effect.runPromise(credentials.update({ ...credential, counter: 5 }));
-    expect((await Effect.runPromise(credentials.get("c1"))).counter).toBe(5);
-    expect((await Effect.runPromise(credentials.getByUserId("u1"))).length).toBe(1);
+    expect((await Effect.runPromise(credentials.get("c1")))?.counter).toBe(5);
+    expect((await Effect.runPromise(credentials.listByUserId("u1"))).length).toBe(1);
   });
 
   it("oauth account store: create / link / getByUserId / delete", async () => {
@@ -341,10 +335,9 @@ suite("@effect-auth/alchemy stores", () => {
     };
 
     await Effect.runPromise(store.create(state));
-    expect((await Effect.runPromise(store.get("st1"))).codeVerifier).toBe("v");
+    expect((await Effect.runPromise(store.get("st1")))?.codeVerifier).toBe("v");
 
-    const missing = await Effect.runPromise(Effect.result(store.get("nope")));
-    expect(Result.isFailure(missing) && missing.failure._tag).toBe("AuthError");
+    expect(await Effect.runPromise(store.get("nope"))).toBe(null);
   });
 
   it("password reset store: create / get / deleteByUserId", async () => {
@@ -400,7 +393,7 @@ suite("@effect-auth/alchemy stores", () => {
     });
 
     const result = await Effect.runPromise(program.pipe(Effect.provide(layer(db))));
-    expect(result.session.userId).toBe("u9");
+    expect(result.session?.userId).toBe("u9");
     expect(result.count).toBe(1);
     expect(result.user.email).toBe("layer@l.com");
   });

@@ -2,8 +2,10 @@
  * Effect Auth - Authentication and Authorization library for Effect
  *
  * A generic authentication and authorization library following guidelines from
- * Lucia, Copenhagen, and Oslo projects. Uses Effect's Request/Resolver pattern
- * for flexible, composable authentication flows.
+ * Lucia, Copenhagen, and Oslo projects. Built on Effect's `Context.Service` +
+ * `Layer` pattern: access a feature with `yield* Auth.X`, provide it with
+ * `Auth.X.layer(config)`, and bring your own stores. See DESIGN.md for the
+ * settled API conventions.
  */
 
 /** Core domain types. */
@@ -12,17 +14,11 @@ export * from "./Types.js";
 /** Tagged errors raised across the library. */
 export * from "./Errors.js";
 
-/** Effect `Request` definitions for auth operations. */
-export * from "./Requests.js";
-
 /** Password hashing (following Oslo patterns). */
 export * from "./Password.js";
 
 /** Session management (following Lucia/Copenhagen guidelines). */
 export * from "./Session.js";
-
-/** Request resolvers wiring stores to requests. */
-export * from "./Resolvers.js";
 
 /** Authorization primitives. */
 export * from "./Authorization.js";
@@ -130,14 +126,3 @@ export * from "./KeyValueStores.js";
  * Exposed under the `Http` namespace, e.g. `Auth.Http.makeAuthWebHandler`.
  */
 export * as Http from "./Http.js";
-
-export {
-  /** Re-export of `Effect` from `effect`. */
-  Effect,
-  /** Re-export of `Context` from `effect`. */
-  Context,
-  /** Re-export of `Layer` from `effect`. */
-  Layer,
-  /** Re-export of `RequestResolver` from `effect`. */
-  RequestResolver,
-} from "effect";

@@ -11,13 +11,10 @@ description: "API reference for the User module."
 
 - [utils](#utils)
   - [UpdateUserInput (interface)](#updateuserinput-interface)
-  - [UserService](#userservice)
-  - [UserService (interface)](#userservice-interface)
-  - [UserServiceLayer](#userservicelayer)
-  - [UserServiceStore](#userservicestore)
-  - [UserServiceStore (interface)](#userservicestore-interface)
-  - [UserServiceStoreTag (class)](#userservicestoretag-class)
-  - [UserServiceTag (class)](#userservicetag-class)
+  - [UserService (class)](#userservice-class)
+  - [UserServiceShape (interface)](#userserviceshape-interface)
+  - [UserServiceStore (class)](#userservicestore-class)
+  - [UserServiceStoreShape (interface)](#userservicestoreshape-interface)
   - [makeUserService](#makeuserservice)
 
 ---
@@ -37,71 +34,62 @@ export interface UpdateUserInput {
 }
 ```
 
-## UserService
+## UserService (class)
 
 **Signature**
 
 ```ts
-export declare const UserService: typeof UserServiceTag;
+export declare class UserService
 ```
 
-## UserService (interface)
+## UserServiceShape (interface)
 
 **Signature**
 
 ```ts
-export interface UserService {
+export interface UserServiceShape {
   readonly getUser: (
     userId: string,
-  ) => Effect.Effect<Types.User, Errors.UserNotFoundError, UserServiceStoreTag>;
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
   readonly getUserByEmail: (
     email: string,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
   readonly updateUserAttributes: (
     userId: string,
     attributes: Record<string, unknown>,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
   readonly updateUser: (
     userId: string,
     updates: UpdateUserInput,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
   readonly markEmailVerified: (
     userId: string,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStoreTag>;
+  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
-  readonly deleteUser: (
-    userId: string,
-  ) => Effect.Effect<void, Errors.AuthError, UserServiceStoreTag>;
+  readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError, UserServiceStore>;
 }
 ```
 
-## UserServiceLayer
+## UserServiceStore (class)
 
 **Signature**
 
 ```ts
-export declare const UserServiceLayer: () => Layer.Layer<UserServiceTag, never, never>;
+export declare class UserServiceStore
 ```
 
-## UserServiceStore
+## UserServiceStoreShape (interface)
 
 **Signature**
 
 ```ts
-export declare const UserServiceStore: typeof UserServiceStoreTag;
-```
-
-## UserServiceStore (interface)
-
-**Signature**
-
-```ts
-export interface UserServiceStore {
-  readonly get: (userId: string) => Effect.Effect<Types.User, Errors.UserNotFoundError>;
+export interface UserServiceStoreShape {
+  /** Get a user by ID, or `null` when no such user exists. */
+  readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
   readonly getByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
@@ -111,26 +99,10 @@ export interface UserServiceStore {
 }
 ```
 
-## UserServiceStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class UserServiceStoreTag
-```
-
-## UserServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class UserServiceTag
-```
-
 ## makeUserService
 
 **Signature**
 
 ```ts
-export declare const makeUserService: () => Effect.Effect<UserService, never>;
+export declare const makeUserService: () => Effect.Effect<UserServiceShape, never>;
 ```

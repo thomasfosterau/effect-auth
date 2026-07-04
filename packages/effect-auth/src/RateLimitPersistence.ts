@@ -1,5 +1,5 @@
 /**
- * A {@link RateLimiterTag} implementation backed by
+ * A {@link RateLimiter} implementation backed by
  * `effect/unstable/persistence`'s `RateLimiter`, so consumers keep the existing
  * `consumeToken`/`checkLimit` facade but gain the library's tested fixed-window
  * algorithm and pluggable storage backends (in-memory or Redis for
@@ -42,7 +42,7 @@
 import { Duration, Effect, Layer } from "effect";
 import { RateLimiter as PersistenceRateLimiter } from "effect/unstable/persistence";
 import { AuthError, RateLimitError } from "./Errors.js";
-import { RateLimiterTag, type RateLimitConfig, type RateLimiter } from "./RateLimit.js";
+import { RateLimiter, type RateLimitConfig, type RateLimiterShape } from "./RateLimit.js";
 
 /** Map the persistence limiter's error onto effect-auth's error channel. */
 const toError = (error: PersistenceRateLimiter.RateLimiterError): RateLimitError | AuthError => {
@@ -72,13 +72,13 @@ const consumeOptions = (key: string, config: RateLimitConfig) =>
  * store.
  */
 export const makeRateLimiterPersistence: Effect.Effect<
-  RateLimiter,
+  RateLimiterShape,
   never,
   PersistenceRateLimiter.RateLimiter
 > = Effect.gen(function* () {
   const limiter = yield* PersistenceRateLimiter.RateLimiter;
 
-  const impl: RateLimiter = {
+  const impl: RateLimiterShape = {
     consumeToken: (key, config) =>
       limiter
         .consume({ ...consumeOptions(key, config), onExceeded: "fail" })
@@ -111,4 +111,4 @@ export const makeRateLimiterPersistence: Effect.Effect<
  * `PersistenceRateLimiter.layer` plus a store (`layerStoreMemory` or a Redis
  * store) to obtain a runnable limiter (see the module docs for examples).
  */
-export const RateLimiterPersistenceLayer = Layer.effect(RateLimiterTag, makeRateLimiterPersistence);
+export const RateLimiterPersistenceLayer = Layer.effect(RateLimiter, makeRateLimiterPersistence);

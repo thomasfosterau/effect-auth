@@ -16,8 +16,8 @@ import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
 import type * as Types from "./Types.js";
-import { UserServiceStoreTag } from "./User.js";
-import { SessionManagerTag } from "./Session.js";
+import { UserServiceStore } from "./User.js";
+import { SessionManager } from "./Session.js";
 
 /** Which flow a pending token belongs to. */
 export type AccountTokenPurpose = "change-email" | "delete-account";
@@ -39,27 +39,20 @@ export interface AccountToken {
  * Persistence for pending account-management tokens. Implement over your
  * database; keys are the opaque token strings.
  */
-export interface AccountManagementStore {
+export interface AccountManagementStoreShape {
   readonly create: (token: AccountToken) => Effect.Effect<AccountToken, Errors.AuthError>;
   readonly get: (token: string) => Effect.Effect<AccountToken | null, Errors.AuthError>;
   readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
   readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class AccountManagementStoreTag extends Context.Service<
-  AccountManagementStoreTag,
-  AccountManagementStore
+export class AccountManagementStore extends Context.Service<
+  AccountManagementStore,
+  AccountManagementStoreShape
 >()("@effect-auth/AccountManagementStore") {}
-
-export const AccountManagementStore = AccountManagementStoreTag;
 
 /** Raised when a confirm token is missing, expired, or of the wrong purpose. */
 export class AccountTokenError extends Data.TaggedError("AccountTokenError")<{
-  readonly message: string;
-}> {}
-
-/** Raised by `requestEmailChange` when the target email is already in use. */
-export class EmailInUseError extends Data.TaggedError("EmailInUseError")<{
   readonly message: string;
 }> {}
 
@@ -103,7 +96,7 @@ export interface EmailChangeResult {
   readonly user: Types.User;
 }
 
-export interface AccountManagementService {
+export interface AccountManagementServiceShape {
   /**
    * Begin an email change: validate the new address is free, then issue a
    * token delivered to the new address. Returns the token (for the caller to
@@ -114,8 +107,8 @@ export interface AccountManagementService {
     newEmail: string,
   ) => Effect.Effect<
     { readonly token: string; readonly expiresAt: number },
-    Errors.AuthError | Errors.UserNotFoundError | EmailInUseError,
-    AccountManagementStoreTag | UserServiceStoreTag
+    Errors.AuthError | Errors.UserNotFoundError | Errors.EmailInUseError,
+    AccountManagementStore | UserServiceStore
   >;
 
   /** Confirm an email change by token: swaps the email and marks it verified. */
@@ -124,7 +117,7 @@ export interface AccountManagementService {
   ) => Effect.Effect<
     EmailChangeResult,
     Errors.AuthError | Errors.UserNotFoundError | AccountTokenError,
-    AccountManagementStoreTag | UserServiceStoreTag | SessionManagerTag
+    AccountManagementStore | UserServiceStore | SessionManager
   >;
 
   /** Begin account deletion: issue a token delivered to the user's address. */
@@ -133,7 +126,7 @@ export interface AccountManagementService {
   ) => Effect.Effect<
     { readonly token: string; readonly expiresAt: number },
     Errors.AuthError | Errors.UserNotFoundError,
-    AccountManagementStoreTag | UserServiceStoreTag
+    AccountManagementStore | UserServiceStore
   >;
 
   /** Confirm deletion by token: runs cleanup, revokes sessions, deletes user. */
@@ -142,16 +135,20 @@ export interface AccountManagementService {
   ) => Effect.Effect<
     { readonly userId: string },
     Errors.AuthError | Errors.UserNotFoundError | AccountTokenError,
-    AccountManagementStoreTag | UserServiceStoreTag | SessionManagerTag
+    AccountManagementStore | UserServiceStore | SessionManager
   >;
 }
 
-export class AccountManagementServiceTag extends Context.Service<
-  AccountManagementServiceTag,
-  AccountManagementService
->()("@effect-auth/AccountManagementService") {}
-
-export const AccountManagementService = AccountManagementServiceTag;
+export class AccountManagementService extends Context.Service<
+  AccountManagementService,
+  AccountManagementServiceShape
+>()("@effect-auth/AccountManagementService") {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = (config: AccountManagementConfig) =>
+    Layer.effect(AccountManagementService, makeAccountManagementService(config));
+}
 
 const generateToken = (): string => crypto.randomBytes(32).toString("base64url");
 
@@ -159,8 +156,8 @@ const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
 export const makeAccountManagementService = (
   config: AccountManagementConfig,
-): Effect.Effect<AccountManagementService, never> =>
-  Effect.sync((): AccountManagementService => {
+): Effect.Effect<AccountManagementServiceShape, never> =>
+  Effect.sync((): AccountManagementServiceShape => {
     const changeEmailExpiresIn = config.changeEmailExpiresIn ?? 60 * 60 * 1000;
     const deleteAccountExpiresIn = config.deleteAccountExpiresIn ?? 60 * 60 * 1000;
     const revokeSessionsOnEmailChange = config.revokeSessionsOnEmailChange ?? true;
@@ -168,16 +165,19 @@ export const makeAccountManagementService = (
     return {
       requestEmailChange: (userId, rawNewEmail) =>
         Effect.gen(function* () {
-          const users = yield* UserServiceStoreTag;
-          const store = yield* AccountManagementStoreTag;
+          const users = yield* UserServiceStore;
+          const store = yield* AccountManagementStore;
 
           const user = yield* users.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
           const newEmail = normalizeEmail(rawNewEmail);
 
           // Uniqueness: reject if another account already owns the address.
           const existing = yield* users.getByEmail(newEmail);
           if (existing !== null && existing.id !== userId) {
-            return yield* new EmailInUseError({ message: "Email already in use" });
+            return yield* new Errors.EmailInUseError({ message: "Email already in use" });
           }
 
           const token = generateToken();
@@ -198,9 +198,9 @@ export const makeAccountManagementService = (
 
       confirmEmailChange: (token) =>
         Effect.gen(function* () {
-          const users = yield* UserServiceStoreTag;
-          const store = yield* AccountManagementStoreTag;
-          const sessions = yield* SessionManagerTag;
+          const users = yield* UserServiceStore;
+          const store = yield* AccountManagementStore;
+          const sessions = yield* SessionManager;
 
           const record = yield* store.get(token);
           if (
@@ -216,6 +216,12 @@ export const makeAccountManagementService = (
           }
 
           const user = yield* users.get(record.userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({
+              message: "User not found",
+              userId: record.userId,
+            });
+          }
           const oldEmail = user.email;
           const newEmail = record.newEmail;
 
@@ -250,10 +256,13 @@ export const makeAccountManagementService = (
 
       requestAccountDeletion: (userId) =>
         Effect.gen(function* () {
-          const users = yield* UserServiceStoreTag;
-          const store = yield* AccountManagementStoreTag;
+          const users = yield* UserServiceStore;
+          const store = yield* AccountManagementStore;
 
           const user = yield* users.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
 
           const token = generateToken();
           const now = Date.now();
@@ -272,9 +281,9 @@ export const makeAccountManagementService = (
 
       confirmAccountDeletion: (token) =>
         Effect.gen(function* () {
-          const users = yield* UserServiceStoreTag;
-          const store = yield* AccountManagementStoreTag;
-          const sessions = yield* SessionManagerTag;
+          const users = yield* UserServiceStore;
+          const store = yield* AccountManagementStore;
+          const sessions = yield* SessionManager;
 
           const record = yield* store.get(token);
           if (record === null || record.purpose !== "delete-account") {
@@ -286,6 +295,12 @@ export const makeAccountManagementService = (
           }
 
           const user = yield* users.get(record.userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({
+              message: "User not found",
+              userId: record.userId,
+            });
+          }
 
           // App-data cleanup while the user still exists (a failure aborts).
           if (config.beforeDelete !== undefined) {
@@ -302,6 +317,3 @@ export const makeAccountManagementService = (
         }),
     };
   });
-
-export const AccountManagementServiceLayer = (config: AccountManagementConfig) =>
-  Layer.effect(AccountManagementServiceTag, makeAccountManagementService(config));

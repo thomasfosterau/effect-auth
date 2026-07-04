@@ -9,7 +9,7 @@ export const sessionConfig: Auth.SessionConfig = {
   },
 };
 
-export type AppServices = Auth.SessionStoreTag | Auth.UserStoreTag | Auth.PasswordHasherTag;
+export type AppServices = Auth.SessionStore | Auth.UserStore | Auth.PasswordHasher;
 
 const AppContext: Context.Context<AppServices> = Context.merge(
   Context.merge(

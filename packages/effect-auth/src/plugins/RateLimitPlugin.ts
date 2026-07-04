@@ -14,7 +14,7 @@
 import { Effect } from "effect";
 import type { SignInInput } from "../EmailPassword.js";
 import { makePlugin } from "../Hooks.js";
-import { RateLimitPresets, RateLimitStoreTag, RateLimiterTag } from "../RateLimit.js";
+import { RateLimitPresets, RateLimitStore, RateLimiter } from "../RateLimit.js";
 
 const normalize = (email: string): string => email.trim().toLowerCase();
 
@@ -26,14 +26,14 @@ const normalize = (email: string): string => email.trim().toLowerCase();
  */
 export const RateLimitPlugin = makePlugin(
   Effect.gen(function* () {
-    const rateLimiter = yield* RateLimiterTag;
-    const store = yield* RateLimitStoreTag;
+    const rateLimiter = yield* RateLimiter;
+    const store = yield* RateLimitStore;
 
     return {
       beforeSignIn: (input: SignInInput) =>
         rateLimiter
           .consumeToken(`signin:${normalize(input.email)}`, RateLimitPresets.login)
-          .pipe(Effect.provideService(RateLimitStoreTag, store), Effect.as(input)),
+          .pipe(Effect.provideService(RateLimitStore, store), Effect.as(input)),
     };
   }),
 );

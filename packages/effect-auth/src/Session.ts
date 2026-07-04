@@ -9,16 +9,16 @@ import { Hooks, type HookError } from "./Hooks.js";
  * Users should implement this interface with their preferred storage backend
  * (e.g., Redis, PostgreSQL, MongoDB, etc.)
  */
-export interface SessionStore {
+export interface SessionStoreShape {
   /**
    * Create a new session
    */
   readonly create: (session: Types.Session) => Effect.Effect<Types.Session, Errors.AuthError>;
 
   /**
-   * Get a session by ID
+   * Get a session by ID, or `null` when no such session exists.
    */
-  readonly get: (sessionId: string) => Effect.Effect<Types.Session, Errors.SessionNotFoundError>;
+  readonly get: (sessionId: string) => Effect.Effect<Types.Session | null, Errors.AuthError>;
 
   /**
    * Update a session
@@ -46,43 +46,38 @@ export interface SessionStore {
 /**
  * Tag for SessionStore service
  */
-export class SessionStoreTag extends Context.Service<SessionStoreTag, SessionStore>()(
+export class SessionStore extends Context.Service<SessionStore, SessionStoreShape>()(
   "@effect-auth/SessionStore",
 ) {}
-
-// Public ergonomic alias
-export const SessionStore = SessionStoreTag;
 
 /**
  * User store interface for managing user persistence
  * Users should implement this interface with their preferred storage backend
  */
-export interface UserStore {
+export interface UserStoreShape {
   /**
-   * Get a user by ID
+   * Get a user by ID, or `null` when no such user exists.
    */
-  readonly get: (userId: string) => Effect.Effect<Types.User, Errors.UserNotFoundError>;
+  readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
   /**
-   * Get user credentials (hashed password)
+   * Get user credentials (hashed password), or `null` when the user does not
+   * exist or has no password set.
    */
-  readonly getCredentials: (userId: string) => Effect.Effect<string, Errors.UserNotFoundError>;
+  readonly getCredentials: (userId: string) => Effect.Effect<string | null, Errors.AuthError>;
 }
 
 /**
  * Tag for UserStore service
  */
-export class UserStoreTag extends Context.Service<UserStoreTag, UserStore>()(
+export class UserStore extends Context.Service<UserStore, UserStoreShape>()(
   "@effect-auth/UserStore",
 ) {}
-
-// Public ergonomic alias
-export const UserStore = UserStoreTag;
 
 /**
  * Session manager service
  */
-export interface SessionManager {
+export interface SessionManagerShape {
   /**
    * Create a new session for a user
    */
@@ -144,12 +139,15 @@ export interface SessionManager {
 /**
  * Tag for SessionManager service
  */
-export class SessionManagerTag extends Context.Service<SessionManagerTag, SessionManager>()(
+export class SessionManager extends Context.Service<SessionManager, SessionManagerShape>()(
   "@effect-auth/SessionManager",
-) {}
-
-// Public ergonomic alias
-export const SessionManager = SessionManagerTag;
+) {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = (config: Types.SessionConfig) =>
+    Layer.effect(SessionManager, makeSessionManager(config));
+}
 
 /**
  * Generate a secure random session ID
@@ -166,10 +164,10 @@ const generateSessionId = (): string => {
  */
 export const makeSessionManager = (
   config: Types.SessionConfig,
-): Effect.Effect<SessionManager, never, SessionStoreTag | UserStoreTag> =>
+): Effect.Effect<SessionManagerShape, never, SessionStore | UserStore> =>
   Effect.gen(function* () {
-    const sessionStore = yield* SessionStoreTag;
-    const userStore = yield* UserStoreTag;
+    const sessionStore = yield* SessionStore;
+    const userStore = yield* UserStore;
 
     return {
       createSession: (rawUserId, rawAttributes = {}) =>
@@ -203,6 +201,12 @@ export const makeSessionManager = (
           const { sessionId } = yield* hooks.beforeValidateSession({ sessionId: rawSessionId });
 
           const session = yield* sessionStore.get(sessionId);
+          if (session === null) {
+            return yield* new Errors.SessionNotFoundError({
+              message: "Session not found",
+              sessionId,
+            });
+          }
 
           // Check if session is expired
           const now = new Date();
@@ -262,6 +266,12 @@ export const makeSessionManager = (
 
           // Get user
           const user = yield* userStore.get(session.userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({
+              message: "User not found",
+              userId: session.userId,
+            });
+          }
 
           return yield* hooks.afterValidateSession({
             session: updatedSession,
@@ -299,6 +309,12 @@ export const makeSessionManager = (
       setSessionAttributes: (sessionId, attributes) =>
         Effect.gen(function* () {
           const session = yield* sessionStore.get(sessionId);
+          if (session === null) {
+            return yield* new Errors.SessionNotFoundError({
+              message: "Session not found",
+              sessionId,
+            });
+          }
           const updated: Types.Session = {
             ...session,
             attributes: { ...session.attributes, ...attributes },
@@ -307,6 +323,3 @@ export const makeSessionManager = (
         }),
     };
   });
-
-export const SessionManagerLayer = (config: Types.SessionConfig) =>
-  Layer.effect(SessionManagerTag, makeSessionManager(config));

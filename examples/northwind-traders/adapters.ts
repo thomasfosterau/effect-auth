@@ -26,24 +26,13 @@ import { NorthwindRoles } from "./permissions.ts";
 // SessionStore + UserStore (consumed by SessionManager)
 // ---------------------------------------------------------------------------
 
-export const sessionStore: Auth.SessionStore = {
+export const sessionStore: Auth.SessionStoreShape = {
   create: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
       return session;
     }),
-  get: (sessionId) =>
-    Effect.suspend(() => {
-      const session = sessions.get(sessionId);
-      return session
-        ? Effect.succeed(session)
-        : Effect.fail(
-            new Auth.SessionNotFoundError({
-              message: "Session not found",
-              sessionId,
-            }),
-          );
-    }),
+  get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
   update: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -73,21 +62,13 @@ const employeeToUser = (employee: Employee): Auth.User => ({
   attributes: { ...employee.attributes },
 });
 
-export const userStore: Auth.UserStore = {
+export const userStore: Auth.UserStoreShape = {
   get: (userId) =>
-    Effect.suspend(() => {
+    Effect.sync(() => {
       const employee = employees.get(userId);
-      return employee
-        ? Effect.succeed(employeeToUser(employee))
-        : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId }));
+      return employee ? employeeToUser(employee) : null;
     }),
-  getCredentials: (userId) =>
-    Effect.suspend(() => {
-      const hash = passwords.get(userId);
-      return hash
-        ? Effect.succeed(hash)
-        : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId }));
-    }),
+  getCredentials: (userId) => Effect.sync(() => passwords.get(userId) ?? null),
 };
 
 // ---------------------------------------------------------------------------
@@ -119,13 +100,11 @@ const updateEmployeeFromUser = (user: Auth.User): Employee => {
   return updated;
 };
 
-export const userServiceStore: Auth.UserServiceStore = {
+export const userServiceStore: Auth.UserServiceStoreShape = {
   get: (userId) =>
-    Effect.suspend(() => {
+    Effect.sync(() => {
       const employee = employees.get(userId);
-      return employee
-        ? Effect.succeed(employeeToUser(employee))
-        : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId }));
+      return employee ? employeeToUser(employee) : null;
     }),
   getByEmail: (email) =>
     Effect.sync(() => {
@@ -149,7 +128,7 @@ export const userServiceStore: Auth.UserServiceStore = {
 // EmailPasswordStore (consumed by EmailPasswordService / AuthLifecycle)
 // ---------------------------------------------------------------------------
 
-export const emailPasswordStore: Auth.EmailPasswordStore = {
+export const emailPasswordStore: Auth.EmailPasswordStoreShape = {
   getUserByEmail: (email) =>
     Effect.sync(() => {
       const employee = findEmployeeByEmail(email);
@@ -188,7 +167,7 @@ export const emailPasswordStore: Auth.EmailPasswordStore = {
 // EmailVerificationStore
 // ---------------------------------------------------------------------------
 
-export const emailVerificationStore: Auth.EmailVerificationStore = {
+export const emailVerificationStore: Auth.EmailVerificationStoreShape = {
   create: (verification) =>
     Effect.sync(() => {
       emailVerifications.set(verification.token, verification);
@@ -211,7 +190,7 @@ export const emailVerificationStore: Auth.EmailVerificationStore = {
 // RateLimitStore
 // ---------------------------------------------------------------------------
 
-export const rateLimitStore: Auth.RateLimitStore = {
+export const rateLimitStore: Auth.RateLimitStoreShape = {
   get: (key) => Effect.succeed(rateLimits.get(key) ?? null),
   set: (key, entry, _ttl) =>
     Effect.sync(() => {
@@ -244,19 +223,13 @@ export const rateLimitStore: Auth.RateLimitStore = {
 // OAuth stores
 // ---------------------------------------------------------------------------
 
-export const oauthStateStore: Auth.OAuthStateStore = {
+export const oauthStateStore: Auth.OAuthStateStoreShape = {
   create: (state) =>
     Effect.sync(() => {
       oauthStates.set(state.state, state);
       return state;
     }),
-  get: (state) =>
-    Effect.suspend(() => {
-      const entry = oauthStates.get(state);
-      return entry
-        ? Effect.succeed(entry)
-        : Effect.fail(new Auth.AuthError({ message: `OAuth state not found: ${state}` }));
-    }),
+  get: (state) => Effect.sync(() => oauthStates.get(state) ?? null),
   delete: (state) =>
     Effect.sync(() => {
       oauthStates.delete(state);
@@ -265,7 +238,7 @@ export const oauthStateStore: Auth.OAuthStateStore = {
 
 const accountKey = (provider: string, providerId: string): string => `${provider}:${providerId}`;
 
-export const oauthAccountStore: Auth.OAuthAccountStore = {
+export const oauthAccountStore: Auth.OAuthAccountStoreShape = {
   create: (account) =>
     Effect.sync(() => {
       oauthAccounts.set(accountKey(account.provider, account.providerId), account);

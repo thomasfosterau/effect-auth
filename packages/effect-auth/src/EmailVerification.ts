@@ -29,7 +29,7 @@ export interface EmailVerificationResult {
 /**
  * Storage interface for email verifications
  */
-export interface EmailVerificationStore {
+export interface EmailVerificationStoreShape {
   readonly create: (verification: EmailVerification) => Effect.Effect<EmailVerification, AuthError>;
   readonly get: (token: string) => Effect.Effect<EmailVerification | null, AuthError>;
   readonly delete: (token: string) => Effect.Effect<void, AuthError>;
@@ -47,14 +47,14 @@ export interface EmailVerificationConfig {
 /**
  * Email verification service
  */
-export interface EmailVerificationService {
+export interface EmailVerificationServiceShape {
   readonly createVerification: (
     userId: string,
     email: string,
   ) => Effect.Effect<
     { token: string; expiresAt: number },
     AuthError | EmailVerificationError | HookError,
-    EmailVerificationStoreTag | Hooks
+    EmailVerificationStore | Hooks
   >;
 
   readonly verifyToken: (
@@ -62,7 +62,7 @@ export interface EmailVerificationService {
   ) => Effect.Effect<
     EmailVerificationResult,
     EmailVerificationError | AuthError | HookError,
-    EmailVerificationStoreTag | Hooks
+    EmailVerificationStore | Hooks
   >;
 
   /**
@@ -76,7 +76,7 @@ export interface EmailVerificationService {
   ) => Effect.Effect<
     { token: string; expiresAt: number },
     AuthError | RateLimitError | EmailVerificationError | HookError,
-    EmailVerificationStoreTag | Hooks
+    EmailVerificationStore | Hooks
   >;
 }
 
@@ -93,21 +93,21 @@ import * as crypto from "node:crypto";
 /**
  * Email verification store context tag
  */
-export class EmailVerificationStoreTag extends Context.Service<
-  EmailVerificationStoreTag,
-  EmailVerificationStore
+export class EmailVerificationStore extends Context.Service<
+  EmailVerificationStore,
+  EmailVerificationStoreShape
 >()("@effect-auth/EmailVerificationStore") {}
 
-// Public ergonomic alias
-export const EmailVerificationStore = EmailVerificationStoreTag;
-
-export class EmailVerificationServiceTag extends Context.Service<
-  EmailVerificationServiceTag,
-  EmailVerificationService
->()("@effect-auth/EmailVerificationService") {}
-
-// Public ergonomic alias
-export const EmailVerificationService = EmailVerificationServiceTag;
+export class EmailVerificationService extends Context.Service<
+  EmailVerificationService,
+  EmailVerificationServiceShape
+>()("@effect-auth/EmailVerificationService") {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = (config: EmailVerificationConfig) =>
+    Layer.effect(EmailVerificationService, makeEmailVerificationService(config));
+}
 
 /**
  * Generate a cryptographically secure verification token
@@ -120,7 +120,7 @@ export const generateVerificationToken = (): Effect.Effect<string, AuthError> =>
  */
 export const makeEmailVerificationService = (
   config: EmailVerificationConfig,
-): Effect.Effect<EmailVerificationService, never> => {
+): Effect.Effect<EmailVerificationServiceShape, never> => {
   const expiresIn = config.expiresIn ?? 24 * 60 * 60 * 1000; // 24 hours default
 
   const createVerification = (rawUserId: string, rawEmail: string) =>
@@ -131,7 +131,7 @@ export const makeEmailVerificationService = (
         email: rawEmail,
       });
 
-      const store = yield* EmailVerificationStoreTag;
+      const store = yield* EmailVerificationStore;
       const token = yield* generateVerificationToken();
 
       const verification: EmailVerification = {
@@ -163,7 +163,7 @@ export const makeEmailVerificationService = (
     });
 
   return Effect.sync(
-    (): EmailVerificationService => ({
+    (): EmailVerificationServiceShape => ({
       createVerification,
 
       verifyToken: (rawToken: string) =>
@@ -171,7 +171,7 @@ export const makeEmailVerificationService = (
           const hooks = yield* Hooks;
           const { token } = yield* hooks.beforeVerifyEmail({ token: rawToken });
 
-          const store = yield* EmailVerificationStoreTag;
+          const store = yield* EmailVerificationStore;
 
           const verification = yield* store.get(token);
 
@@ -207,7 +207,7 @@ export const makeEmailVerificationService = (
 
       resendVerification: (userId: string, email: string) =>
         Effect.gen(function* () {
-          const store = yield* EmailVerificationStoreTag;
+          const store = yield* EmailVerificationStore;
           // Invalidate outstanding tokens so only the latest one is usable.
           yield* store.deleteByUserId(userId);
           return yield* createVerification(userId, email);
@@ -215,6 +215,3 @@ export const makeEmailVerificationService = (
     }),
   );
 };
-
-export const EmailVerificationServiceLayer = (config: EmailVerificationConfig) =>
-  Layer.effect(EmailVerificationServiceTag, makeEmailVerificationService(config));

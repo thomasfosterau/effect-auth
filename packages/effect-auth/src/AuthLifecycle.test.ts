@@ -2,18 +2,17 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { Context, Effect } from "effect";
 import { Hooks } from "./Hooks.js";
 import { makeAuthLifecycleService } from "./AuthLifecycle.js";
-import { EmailPasswordStore } from "./EmailPassword.js";
 import {
   type EmailVerification,
-  EmailVerificationService,
-  EmailVerificationStore,
   makeEmailVerificationService,
+  EmailVerificationStore,
+  EmailVerificationService,
 } from "./EmailVerification.js";
 import { makePasswordHasher, PasswordHasherLive } from "./Password.js";
-import { makeSessionManager, SessionManager, SessionStore, UserStore } from "./Session.js";
-import { makeUserService, UserService, UserServiceStore } from "./User.js";
+import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
+import { makeUserService, UserServiceStore, UserService } from "./User.js";
 import type { Session, SessionConfig, User } from "./Types.js";
-import * as Errors from "./Errors.js";
+import { EmailPasswordStore } from "./EmailPassword.js";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
@@ -29,19 +28,7 @@ const sessionStore = {
       return session;
     }),
 
-  get: (sessionId: string) =>
-    Effect.gen(function* () {
-      const session = sessions.get(sessionId);
-      if (!session) {
-        return yield* Effect.fail(
-          new Errors.SessionNotFoundError({
-            message: "Session not found",
-            sessionId,
-          }),
-        );
-      }
-      return session;
-    }),
+  get: (sessionId: string) => Effect.sync(() => sessions.get(sessionId) ?? null),
 
   update: (session: Session) =>
     Effect.sync(() => {
@@ -68,33 +55,9 @@ const sessionStore = {
 };
 
 const userStore = {
-  get: (userId: string) =>
-    Effect.gen(function* () {
-      const user = users.get(userId);
-      if (!user) {
-        return yield* Effect.fail(
-          new Errors.UserNotFoundError({
-            message: "User not found",
-            userId,
-          }),
-        );
-      }
-      return user;
-    }),
+  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
 
-  getCredentials: (userId: string) =>
-    Effect.gen(function* () {
-      const hash = passwordHashes.get(userId);
-      if (!hash) {
-        return yield* Effect.fail(
-          new Errors.UserNotFoundError({
-            message: "User credentials not found",
-            userId,
-          }),
-        );
-      }
-      return hash;
-    }),
+  getCredentials: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
 };
 
 const emailPasswordStore = {
@@ -162,19 +125,7 @@ const emailVerificationStore = {
 };
 
 const userServiceStore = {
-  get: (userId: string) =>
-    Effect.gen(function* () {
-      const user = users.get(userId);
-      if (!user) {
-        return yield* Effect.fail(
-          new Errors.UserNotFoundError({
-            message: "User not found",
-            userId,
-          }),
-        );
-      }
-      return user;
-    }),
+  get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
 
   getByEmail: (email: string) =>
     Effect.sync(() => {

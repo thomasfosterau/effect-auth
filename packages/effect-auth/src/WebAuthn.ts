@@ -188,11 +188,11 @@ export const SUPPORTED_COSE_ALGORITHMS = [
  * WebAuthn challenge store interface
  * Implement this to store challenges in your database
  */
-export interface ChallengeStore {
+export interface ChallengeStoreShape {
   /** Store a challenge */
   create: (challenge: WebAuthnChallenge) => Effect.Effect<WebAuthnChallenge, Errors.AuthError>;
-  /** Get a challenge by its value */
-  get: (challenge: Uint8Array) => Effect.Effect<WebAuthnChallenge, Errors.ChallengeNotFoundError>;
+  /** Get a challenge by its value, or `null` when no such challenge exists. */
+  get: (challenge: Uint8Array) => Effect.Effect<WebAuthnChallenge | null, Errors.AuthError>;
   /** Delete a challenge */
   delete: (challenge: Uint8Array) => Effect.Effect<void, Errors.AuthError>;
 }
@@ -201,43 +201,37 @@ export interface ChallengeStore {
  * WebAuthn credential store interface
  * Implement this to store credentials in your database
  */
-export interface CredentialStore {
+export interface CredentialStoreShape {
   /** Store a credential */
   create: (credential: WebAuthnCredential) => Effect.Effect<WebAuthnCredential, Errors.AuthError>;
-  /** Get a credential by ID */
-  get: (credentialId: string) => Effect.Effect<WebAuthnCredential, Errors.CredentialNotFoundError>;
+  /** Get a credential by ID, or `null` when no such credential exists. */
+  get: (credentialId: string) => Effect.Effect<WebAuthnCredential | null, Errors.AuthError>;
   /** Update a credential (e.g., counter) */
   update: (credential: WebAuthnCredential) => Effect.Effect<WebAuthnCredential, Errors.AuthError>;
   /** Delete a credential */
   delete: (credentialId: string) => Effect.Effect<void, Errors.AuthError>;
-  /** Get all credentials for a user */
-  getByUserId: (userId: string) => Effect.Effect<readonly WebAuthnCredential[], Errors.AuthError>;
+  /** List all credentials for a user */
+  listByUserId: (userId: string) => Effect.Effect<readonly WebAuthnCredential[], Errors.AuthError>;
 }
 
 /**
  * Context tag for ChallengeStore
  */
-export class ChallengeStoreTag extends Context.Service<ChallengeStoreTag, ChallengeStore>()(
+export class ChallengeStore extends Context.Service<ChallengeStore, ChallengeStoreShape>()(
   "@effect-auth/ChallengeStore",
 ) {}
-
-// Public ergonomic alias
-export const ChallengeStore = ChallengeStoreTag;
 
 /**
  * Context tag for CredentialStore
  */
-export class CredentialStoreTag extends Context.Service<CredentialStoreTag, CredentialStore>()(
+export class CredentialStore extends Context.Service<CredentialStore, CredentialStoreShape>()(
   "@effect-auth/CredentialStore",
 ) {}
-
-// Public ergonomic alias
-export const CredentialStore = CredentialStoreTag;
 
 /**
  * WebAuthn service for managing passkey registration and authentication
  */
-export interface WebAuthnService {
+export interface WebAuthnServiceShape {
   /** Generate a challenge for registration */
   generateRegistrationChallenge: (
     user: WebAuthnUser,
@@ -278,22 +272,25 @@ export interface WebAuthnService {
   >;
 }
 
-export class WebAuthnServiceTag extends Context.Service<WebAuthnServiceTag, WebAuthnService>()(
+export class WebAuthnService extends Context.Service<WebAuthnService, WebAuthnServiceShape>()(
   "@effect-auth/WebAuthnService",
-) {}
-
-// Public ergonomic alias
-export const WebAuthnService = WebAuthnServiceTag;
+) {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = (config: WebAuthnConfig) =>
+    Layer.effect(WebAuthnService, makeWebAuthnService(config));
+}
 
 /**
  * Create a WebAuthn service
  */
 export const makeWebAuthnService = (
   config: WebAuthnConfig,
-): Effect.Effect<WebAuthnService, never, ChallengeStoreTag | CredentialStoreTag> =>
+): Effect.Effect<WebAuthnServiceShape, never, ChallengeStore | CredentialStore> =>
   Effect.gen(function* () {
-    const challengeStore = yield* ChallengeStoreTag;
-    const credentialStore = yield* CredentialStoreTag;
+    const challengeStore = yield* ChallengeStore;
+    const credentialStore = yield* CredentialStore;
 
     const challengeExpiresIn = config.challengeExpiresIn ?? 5 * 60 * 1000; // 5 minutes default
 
@@ -314,7 +311,7 @@ export const makeWebAuthnService = (
 
           // Exclude the user's existing credentials to prevent re-registering
           // the same authenticator.
-          const existing = yield* credentialStore.getByUserId(user.id);
+          const existing = yield* credentialStore.listByUserId(user.id);
           const excludeCredentials = existing.map(
             (c): PublicKeyCredentialDescriptor => ({
               type: "public-key",
@@ -346,6 +343,9 @@ export const makeWebAuthnService = (
         Effect.gen(function* () {
           // Get and verify challenge
           const storedChallenge = yield* challengeStore.get(challenge);
+          if (storedChallenge === null) {
+            return yield* new Errors.ChallengeNotFoundError({ message: "Challenge not found" });
+          }
 
           if (Date.now() > storedChallenge.expiresAt) {
             yield* challengeStore.delete(challenge);
@@ -510,6 +510,9 @@ export const makeWebAuthnService = (
         Effect.gen(function* () {
           // Get and verify challenge
           const storedChallenge = yield* challengeStore.get(challenge);
+          if (storedChallenge === null) {
+            return yield* new Errors.ChallengeNotFoundError({ message: "Challenge not found" });
+          }
 
           if (Date.now() > storedChallenge.expiresAt) {
             yield* challengeStore.delete(challenge);
@@ -523,6 +526,12 @@ export const makeWebAuthnService = (
           // Get credential
           const credentialId = base64UrlEncode(response.credentialId);
           const credential = yield* credentialStore.get(credentialId);
+          if (credential === null) {
+            return yield* new Errors.CredentialNotFoundError({
+              message: "Credential not found",
+              credentialId,
+            });
+          }
 
           // Parse client data JSON
           let clientData: ClientData;
@@ -646,9 +655,6 @@ export const makeWebAuthnService = (
         }),
     };
   });
-
-export const WebAuthnServiceLayer = (config: WebAuthnConfig) =>
-  Layer.effect(WebAuthnServiceTag, makeWebAuthnService(config));
 
 const b64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
 

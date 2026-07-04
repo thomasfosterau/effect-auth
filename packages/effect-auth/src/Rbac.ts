@@ -1,5 +1,5 @@
 /**
- * In-memory {@link RoleStore} builder for role-based access control (RBAC).
+ * In-memory {@link RoleStoreShape} builder for role-based access control (RBAC).
  *
  * This removes the boilerplate of hand-rolling a `RoleStore` from `Map`s and
  * adds optional role inheritance: a role can declare parent roles whose
@@ -10,7 +10,7 @@
  */
 
 import { Effect } from "effect";
-import type { RoleStore } from "./Authorization.js";
+import type { RoleStoreShape } from "./Authorization.js";
 import { formatPermission, type PermissionRef } from "./Permission.js";
 
 /**
@@ -37,7 +37,7 @@ const lookup = <V>(source: StringKeyed<V>, key: string): V | undefined =>
   source instanceof Map ? source.get(key) : (source as Record<string, V>)[key];
 
 /**
- * Create an in-memory {@link RoleStore} from static configuration.
+ * Create an in-memory {@link RoleStoreShape} from static configuration.
  *
  * The returned store is synchronous (its methods wrap results in
  * `Effect.succeed`). When `roleHierarchy` is provided, `getRolePermissions`
@@ -58,7 +58,7 @@ const lookup = <V>(source: StringKeyed<V>, key: string): V | undefined =>
  * })
  * ```
  */
-export const makeInMemoryRoleStore = (config: InMemoryRoleStoreConfig): RoleStore => {
+export const makeInMemoryRoleStore = (config: InMemoryRoleStoreConfig): RoleStoreShape => {
   const { userRoles, rolePermissions, roleHierarchy } = config;
 
   const directPermissions = (role: string): readonly PermissionRef[] =>

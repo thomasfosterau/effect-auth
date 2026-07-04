@@ -31,29 +31,23 @@ inherently timing-safe, and secret comparison re-hashes both sides before a
   - [OidcAuthorizeRequest (interface)](#oidcauthorizerequest-interface)
   - [OidcAuthorizeResult (type alias)](#oidcauthorizeresult-type-alias)
   - [OidcClient (interface)](#oidcclient-interface)
-  - [OidcClientStore](#oidcclientstore)
-  - [OidcClientStore (interface)](#oidcclientstore-interface)
-  - [OidcClientStoreTag (class)](#oidcclientstoretag-class)
-  - [OidcCodeStore](#oidccodestore)
-  - [OidcCodeStore (interface)](#oidccodestore-interface)
-  - [OidcCodeStoreTag (class)](#oidccodestoretag-class)
+  - [OidcClientStore (class)](#oidcclientstore-class)
+  - [OidcClientStoreShape (interface)](#oidcclientstoreshape-interface)
+  - [OidcCodeStore (class)](#oidccodestore-class)
+  - [OidcCodeStoreShape (interface)](#oidccodestoreshape-interface)
   - [OidcConsent (interface)](#oidcconsent-interface)
-  - [OidcConsentStore](#oidcconsentstore)
-  - [OidcConsentStore (interface)](#oidcconsentstore-interface)
-  - [OidcConsentStoreTag (class)](#oidcconsentstoretag-class)
+  - [OidcConsentStore (class)](#oidcconsentstore-class)
+  - [OidcConsentStoreShape (interface)](#oidcconsentstoreshape-interface)
   - [OidcProviderConfig (interface)](#oidcproviderconfig-interface)
   - [OidcProviderError (class)](#oidcprovidererror-class)
-  - [OidcProviderService](#oidcproviderservice)
-  - [OidcProviderService (interface)](#oidcproviderservice-interface)
-  - [OidcProviderServiceLayer](#oidcproviderservicelayer)
-  - [OidcProviderServiceTag (class)](#oidcproviderservicetag-class)
+  - [OidcProviderService (class)](#oidcproviderservice-class)
+  - [OidcProviderServiceShape (interface)](#oidcproviderserviceshape-interface)
   - [OidcToken (interface)](#oidctoken-interface)
   - [OidcTokenError (class)](#oidctokenerror-class)
   - [OidcTokenRequest (interface)](#oidctokenrequest-interface)
   - [OidcTokenResult (interface)](#oidctokenresult-interface)
-  - [OidcTokenStore](#oidctokenstore)
-  - [OidcTokenStore (interface)](#oidctokenstore-interface)
-  - [OidcTokenStoreTag (class)](#oidctokenstoretag-class)
+  - [OidcTokenStore (class)](#oidctokenstore-class)
+  - [OidcTokenStoreShape (interface)](#oidctokenstoreshape-interface)
   - [RegisterOidcClientInput (interface)](#registeroidcclientinput-interface)
   - [RegisteredOidcClient (interface)](#registeredoidcclient-interface)
   - [TrustedOidcClient (interface)](#trustedoidcclient-interface)
@@ -171,22 +165,22 @@ export interface OidcClient {
 }
 ```
 
-## OidcClientStore
+## OidcClientStore (class)
 
 **Signature**
 
 ```ts
-export declare const OidcClientStore: typeof OidcClientStoreTag;
+export declare class OidcClientStore
 ```
 
-## OidcClientStore (interface)
+## OidcClientStoreShape (interface)
 
 Persistent registry of OIDC clients.
 
 **Signature**
 
 ```ts
-export interface OidcClientStore {
+export interface OidcClientStoreShape {
   readonly create: (client: OidcClient) => Effect.Effect<OidcClient, AuthError>;
   readonly getByClientId: (clientId: string) => Effect.Effect<OidcClient | null, AuthError>;
   readonly update: (client: OidcClient) => Effect.Effect<OidcClient, AuthError>;
@@ -195,42 +189,26 @@ export interface OidcClientStore {
 }
 ```
 
-## OidcClientStoreTag (class)
+## OidcCodeStore (class)
 
 **Signature**
 
 ```ts
-export declare class OidcClientStoreTag
+export declare class OidcCodeStore
 ```
 
-## OidcCodeStore
-
-**Signature**
-
-```ts
-export declare const OidcCodeStore: typeof OidcCodeStoreTag;
-```
-
-## OidcCodeStore (interface)
+## OidcCodeStoreShape (interface)
 
 Ephemeral store for authorization codes and pending consent requests.
 
 **Signature**
 
 ```ts
-export interface OidcCodeStore {
+export interface OidcCodeStoreShape {
   readonly create: (code: OidcAuthorizationCode) => Effect.Effect<OidcAuthorizationCode, AuthError>;
   readonly get: (codeHash: string) => Effect.Effect<OidcAuthorizationCode | null, AuthError>;
   readonly delete: (codeHash: string) => Effect.Effect<void, AuthError>;
 }
-```
-
-## OidcCodeStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class OidcCodeStoreTag
 ```
 
 ## OidcConsent (interface)
@@ -250,34 +228,26 @@ export interface OidcConsent {
 }
 ```
 
-## OidcConsentStore
+## OidcConsentStore (class)
 
 **Signature**
 
 ```ts
-export declare const OidcConsentStore: typeof OidcConsentStoreTag;
+export declare class OidcConsentStore
 ```
 
-## OidcConsentStore (interface)
+## OidcConsentStoreShape (interface)
 
 Store for recorded user consents.
 
 **Signature**
 
 ```ts
-export interface OidcConsentStore {
+export interface OidcConsentStoreShape {
   readonly get: (userId: string, clientId: string) => Effect.Effect<OidcConsent | null, AuthError>;
   readonly upsert: (consent: OidcConsent) => Effect.Effect<OidcConsent, AuthError>;
   readonly delete: (userId: string, clientId: string) => Effect.Effect<void, AuthError>;
 }
-```
-
-## OidcConsentStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class OidcConsentStoreTag
 ```
 
 ## OidcProviderConfig (interface)
@@ -328,20 +298,20 @@ Failure to register a client or process an authorization request.
 export declare class OidcProviderError
 ```
 
-## OidcProviderService
+## OidcProviderService (class)
 
 **Signature**
 
 ```ts
-export declare const OidcProviderService: typeof OidcProviderServiceTag;
+export declare class OidcProviderService
 ```
 
-## OidcProviderService (interface)
+## OidcProviderServiceShape (interface)
 
 **Signature**
 
 ```ts
-export interface OidcProviderService {
+export interface OidcProviderServiceShape {
   /**
    * Register a client application. Generates the `client_id` and — for `web`
    * (confidential) clients — a secret returned in plaintext exactly once.
@@ -350,30 +320,26 @@ export interface OidcProviderService {
   readonly registerClient: (
     input: RegisterOidcClientInput,
     registrarUserId?: string,
-  ) => Effect.Effect<RegisteredOidcClient, OidcProviderError | AuthError, OidcClientStoreTag>;
+  ) => Effect.Effect<RegisteredOidcClient, OidcProviderError | AuthError, OidcClientStore>;
 
   /** Look up a client (trusted config clients first, then the store). */
   readonly getClient: (
     clientId: string,
-  ) => Effect.Effect<OidcClient | null, AuthError, OidcClientStoreTag>;
+  ) => Effect.Effect<OidcClient | null, AuthError, OidcClientStore>;
 
   /** List registered clients (store-backed only). */
-  readonly listClients: () => Effect.Effect<
-    ReadonlyArray<OidcClient>,
-    AuthError,
-    OidcClientStoreTag
-  >;
+  readonly listClients: () => Effect.Effect<ReadonlyArray<OidcClient>, AuthError, OidcClientStore>;
 
   /** Update a registered client. Trusted config clients cannot be updated. */
   readonly updateClient: (
     clientId: string,
     input: UpdateOidcClientInput,
-  ) => Effect.Effect<OidcClient, OidcProviderError | AuthError, OidcClientStoreTag>;
+  ) => Effect.Effect<OidcClient, OidcProviderError | AuthError, OidcClientStore>;
 
   /** Delete a registered client. */
   readonly deleteClient: (
     clientId: string,
-  ) => Effect.Effect<void, OidcProviderError | AuthError, OidcClientStoreTag>;
+  ) => Effect.Effect<void, OidcProviderError | AuthError, OidcClientStore>;
 
   /**
    * Process an authorization request for an authenticated user. Fails with
@@ -387,7 +353,7 @@ export interface OidcProviderService {
   ) => Effect.Effect<
     OidcAuthorizeResult,
     OidcProviderError | AuthError,
-    OidcClientStoreTag | OidcCodeStoreTag | OidcConsentStoreTag
+    OidcClientStore | OidcCodeStore | OidcConsentStore
   >;
 
   /**
@@ -402,7 +368,7 @@ export interface OidcProviderService {
   ) => Effect.Effect<
     { readonly redirectTo: string },
     OidcProviderError | AuthError,
-    OidcCodeStoreTag | OidcConsentStoreTag
+    OidcCodeStore | OidcConsentStore
   >;
 
   /**
@@ -416,12 +382,7 @@ export interface OidcProviderService {
   ) => Effect.Effect<
     OidcTokenResult,
     OidcTokenError | AuthError,
-    | OidcClientStoreTag
-    | OidcCodeStoreTag
-    | OidcTokenStoreTag
-    | UserStoreTag
-    | JwtServiceTag
-    | JwtKeyStoreTag
+    OidcClientStore | OidcCodeStore | OidcTokenStore | UserStore | JwtService | JwtKeyStore
   >;
 
   /**
@@ -434,7 +395,7 @@ export interface OidcProviderService {
   ) => Effect.Effect<
     Record<string, unknown>,
     OidcProviderError | AuthError,
-    OidcTokenStoreTag | UserStoreTag
+    OidcTokenStore | UserStore
   >;
 
   /** The OpenID Provider Metadata document (RFC 8414 / OIDC Discovery). */
@@ -447,24 +408,6 @@ export interface OidcProviderService {
    */
   readonly loginRedirect: (returnTo: string) => string;
 }
-```
-
-## OidcProviderServiceLayer
-
-**Signature**
-
-```ts
-export declare const OidcProviderServiceLayer: (
-  config: OidcProviderConfig,
-) => Layer.Layer<OidcProviderServiceTag, never, never>;
-```
-
-## OidcProviderServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class OidcProviderServiceTag
 ```
 
 ## OidcToken (interface)
@@ -536,39 +479,31 @@ export interface OidcTokenResult {
 }
 ```
 
-## OidcTokenStore
+## OidcTokenStore (class)
 
 **Signature**
 
 ```ts
-export declare const OidcTokenStore: typeof OidcTokenStoreTag;
+export declare class OidcTokenStore
 ```
 
-## OidcTokenStore (interface)
+## OidcTokenStoreShape (interface)
 
 Store for issued access and refresh tokens.
 
 **Signature**
 
 ```ts
-export interface OidcTokenStore {
+export interface OidcTokenStoreShape {
   readonly create: (token: OidcToken) => Effect.Effect<OidcToken, AuthError>;
   readonly get: (tokenHash: string) => Effect.Effect<OidcToken | null, AuthError>;
   readonly delete: (tokenHash: string) => Effect.Effect<void, AuthError>;
 }
 ```
 
-## OidcTokenStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class OidcTokenStoreTag
-```
-
 ## RegisterOidcClientInput (interface)
 
-Input to {@link OidcProviderService.registerClient}.
+Input to {@link OidcProviderServiceShape.registerClient}.
 
 **Signature**
 
@@ -618,7 +553,7 @@ export interface TrustedOidcClient {
 
 ## UpdateOidcClientInput (interface)
 
-Fields updatable via {@link OidcProviderService.updateClient}.
+Fields updatable via {@link OidcProviderServiceShape.updateClient}.
 
 **Signature**
 
@@ -649,5 +584,5 @@ export declare const hashOidcSecret: (value: string) => string;
 ```ts
 export declare const makeOidcProviderService: (
   config: OidcProviderConfig,
-) => Effect.Effect<OidcProviderService, never>;
+) => Effect.Effect<OidcProviderServiceShape, never>;
 ```

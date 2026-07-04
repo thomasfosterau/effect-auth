@@ -30,8 +30,8 @@ const banner = (title: string): void => {
 
 const signInWithRateLimit = (input: Auth.SignInInput) =>
   Effect.gen(function* () {
-    const rateLimiter = yield* Auth.RateLimiterTag;
-    const lifecycle = yield* Auth.AuthLifecycleServiceTag;
+    const rateLimiter = yield* Auth.RateLimiter;
+    const lifecycle = yield* Auth.AuthLifecycleService;
     yield* rateLimiter.consumeToken(`login:${input.email}`, Auth.RateLimitPresets.login);
     return yield* lifecycle.signIn(input);
   });
@@ -39,10 +39,10 @@ const signInWithRateLimit = (input: Auth.SignInInput) =>
 const scenario = Effect.gen(function* () {
   banner("Step 1 — Seed Northwind");
   seedNorthwind();
-  const hasher = yield* Auth.PasswordHasherTag;
+  const hasher = yield* Auth.PasswordHasher;
   const adminPassword = yield* hasher.hash("admin-pass-123");
   // Bypass the EmailPasswordStore here because the admin already exists from the seed.
-  const emailPasswordStore = yield* Auth.EmailPasswordStoreTag;
+  const emailPasswordStore = yield* Auth.EmailPasswordStore;
   yield* emailPasswordStore.setPasswordHash(ADMIN_EMPLOYEE_ID, adminPassword.hash);
   console.log(
     `Admin '${ADMIN_EMPLOYEE_ID}' seeded with roles: ${userRoles.get(ADMIN_EMPLOYEE_ID)?.join(", ")}`,
@@ -50,7 +50,7 @@ const scenario = Effect.gen(function* () {
   console.log(`Catalog has 3 products across 2 categories.`);
 
   banner("Step 2 — Sign up a new Sales Representative");
-  const lifecycle = yield* Auth.AuthLifecycleServiceTag;
+  const lifecycle = yield* Auth.AuthLifecycleService;
   const signUpResult = yield* lifecycle.signUp({
     email: "nancy.davolio@northwind.example",
     password: "totally-secret-2024",
@@ -74,7 +74,7 @@ const scenario = Effect.gen(function* () {
   console.log(`Verified. Session ${session.id.slice(0, 8)}… issued for ${verifyResult.user.email}`);
 
   banner("Step 4 — Validate session");
-  const sessionManager = yield* Auth.SessionManagerTag;
+  const sessionManager = yield* Auth.SessionManager;
   const validated = yield* sessionManager.validateSession(session.id);
   console.log(
     `Session valid for ${validated.user.name}, expires at ${validated.session.expiresAt.toISOString()}`,
@@ -122,7 +122,7 @@ const scenario = Effect.gen(function* () {
   console.log(`Admin discontinued product ${discontinued.id} (${discontinued.name})`);
 
   banner("Step 9 — Generate OAuth authorization URL (GitHub)");
-  const oauth = yield* Auth.OAuthServiceTag;
+  const oauth = yield* Auth.OAuthService;
   const { url, state } = yield* oauth.generateAuthorizationUrl("github", {
     scopes: ["user:email"],
   });

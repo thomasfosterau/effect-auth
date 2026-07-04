@@ -33,7 +33,7 @@
     "dev:site": "nx dev site",
     "build:site": "nx build site",
     "preview:site": "nx preview site",
-    "docs:api": "nx docs effect-auth && bun run --cwd site sync:api"
+    "docs:api": "nx docs effect-auth && bun run --cwd site sync:api && vp check --fix site/src/content/docs/reference/api"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",

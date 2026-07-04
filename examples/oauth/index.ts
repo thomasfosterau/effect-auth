@@ -16,29 +16,19 @@ import * as Auth from "effect-auth";
 const oauthStates = new Map<string, Auth.OAuthState>();
 const oauthAccounts = new Map<string, Auth.OAuthAccount>();
 
-const oauthStateStore: Auth.OAuthStateStore = {
+const oauthStateStore: Auth.OAuthStateStoreShape = {
   create: (state) => {
     oauthStates.set(state.state, state);
     return Effect.succeed(state);
   },
-  get: (stateStr) => {
-    const state = oauthStates.get(stateStr);
-    if (!state) {
-      return Effect.fail(
-        new Auth.AuthError({
-          message: `OAuth state not found: ${stateStr}`,
-        }),
-      );
-    }
-    return Effect.succeed(state);
-  },
+  get: (stateStr) => Effect.succeed(oauthStates.get(stateStr) ?? null),
   delete: (stateStr) => {
     oauthStates.delete(stateStr);
     return Effect.void;
   },
 };
 
-const oauthAccountStore: Auth.OAuthAccountStore = {
+const oauthAccountStore: Auth.OAuthAccountStoreShape = {
   create: (account) => {
     const key = `${account.provider}:${account.providerId}`;
     oauthAccounts.set(key, account);

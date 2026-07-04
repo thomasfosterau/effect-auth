@@ -2,16 +2,16 @@ import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
 import {
-  EmailPasswordStoreTag,
+  EmailPasswordStore,
   type SecondFactorChallenge,
   type SignInInput,
   type SignUpInput,
   makeEmailPasswordService,
 } from "./EmailPassword.js";
-import { EmailVerificationServiceTag, EmailVerificationStoreTag } from "./EmailVerification.js";
-import { PasswordHasherTag } from "./Password.js";
-import { SessionManagerTag } from "./Session.js";
-import { UserServiceStoreTag, UserServiceTag } from "./User.js";
+import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.js";
+import { PasswordHasher } from "./Password.js";
+import { SessionManager } from "./Session.js";
+import { UserServiceStore, UserService } from "./User.js";
 import type * as Types from "./Types.js";
 
 export interface AuthLifecycleConfig {
@@ -34,21 +34,22 @@ export interface VerifyEmailInput {
   readonly sessionAttributes?: Record<string, unknown>;
 }
 
-export interface AuthLifecycleService {
+export interface AuthLifecycleServiceShape {
   readonly signUp: (
     input: SignUpInput,
   ) => Effect.Effect<
     AuthLifecycleResult,
     | Errors.AuthError
+    | Errors.EmailInUseError
     | Errors.HashingError
     | Errors.EmailVerificationError
     | Errors.EmailNotVerifiedError
     | HookError,
-    | EmailPasswordStoreTag
-    | PasswordHasherTag
-    | SessionManagerTag
-    | EmailVerificationServiceTag
-    | EmailVerificationStoreTag
+    | EmailPasswordStore
+    | PasswordHasher
+    | SessionManager
+    | EmailVerificationService
+    | EmailVerificationStore
     | Hooks
   >;
 
@@ -61,11 +62,11 @@ export interface AuthLifecycleService {
     | Errors.InvalidCredentialsError
     | Errors.EmailVerificationError
     | HookError,
-    | EmailPasswordStoreTag
-    | PasswordHasherTag
-    | SessionManagerTag
-    | EmailVerificationServiceTag
-    | EmailVerificationStoreTag
+    | EmailPasswordStore
+    | PasswordHasher
+    | SessionManager
+    | EmailVerificationService
+    | EmailVerificationStore
     | Hooks
   >;
 
@@ -74,21 +75,25 @@ export interface AuthLifecycleService {
   ) => Effect.Effect<
     AuthLifecycleResult,
     Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError | HookError,
-    | UserServiceTag
-    | UserServiceStoreTag
-    | SessionManagerTag
-    | EmailVerificationServiceTag
-    | EmailVerificationStoreTag
+    | UserService
+    | UserServiceStore
+    | SessionManager
+    | EmailVerificationService
+    | EmailVerificationStore
     | Hooks
   >;
 }
 
-export class AuthLifecycleServiceTag extends Context.Service<
-  AuthLifecycleServiceTag,
-  AuthLifecycleService
->()("@effect-auth/AuthLifecycleService") {}
-
-export const AuthLifecycleService = AuthLifecycleServiceTag;
+export class AuthLifecycleService extends Context.Service<
+  AuthLifecycleService,
+  AuthLifecycleServiceShape
+>()("@effect-auth/AuthLifecycleService") {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = (config: AuthLifecycleConfig = {}) =>
+    Layer.effect(AuthLifecycleService, makeAuthLifecycleService(config));
+}
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
@@ -99,21 +104,21 @@ const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
 
 export const makeAuthLifecycleService = (
   config: AuthLifecycleConfig = {},
-): Effect.Effect<AuthLifecycleService, never> => {
+): Effect.Effect<AuthLifecycleServiceShape, never> => {
   const requireEmailVerification = config.requireEmailVerification ?? false;
   const sendOnSignUp = config.sendOnSignUp ?? requireEmailVerification;
   const sendOnSignIn = config.sendOnSignIn ?? false;
   const autoSignInAfterVerification = config.autoSignInAfterVerification ?? true;
 
   return Effect.sync(
-    (): AuthLifecycleService => ({
+    (): AuthLifecycleServiceShape => ({
       signUp: (input) =>
         Effect.gen(function* () {
           const emailPassword = yield* makeEmailPasswordService({
             requireEmailVerification,
             autoSignIn: true,
           });
-          const verification = yield* EmailVerificationServiceTag;
+          const verification = yield* EmailVerificationService;
 
           const result = yield* emailPassword.signUp(input);
           const email = getEmailFromUser(result.user);
@@ -136,14 +141,14 @@ export const makeAuthLifecycleService = (
             requireEmailVerification,
             autoSignIn: true,
           });
-          const verification = yield* EmailVerificationServiceTag;
+          const verification = yield* EmailVerificationService;
 
           const signInResult = yield* Effect.catchTag(
             emailPassword.signIn(input),
             "EmailNotVerifiedError",
             (error) =>
               Effect.gen(function* () {
-                const store = yield* EmailPasswordStoreTag;
+                const store = yield* EmailPasswordStore;
                 const user = yield* store.getUserByEmail(error.email);
 
                 if (!user) {
@@ -181,9 +186,9 @@ export const makeAuthLifecycleService = (
 
       verifyEmail: (input) =>
         Effect.gen(function* () {
-          const verification = yield* EmailVerificationServiceTag;
-          const userService = yield* UserServiceTag;
-          const sessionManager = yield* SessionManagerTag;
+          const verification = yield* EmailVerificationService;
+          const userService = yield* UserService;
+          const sessionManager = yield* SessionManager;
 
           const verificationResult = yield* verification.verifyToken(input.token);
           const user = yield* userService.markEmailVerified(verificationResult.userId);
@@ -209,6 +214,3 @@ export const makeAuthLifecycleService = (
     }),
   );
 };
-
-export const AuthLifecycleServiceLayer = (config: AuthLifecycleConfig = {}) =>
-  Layer.effect(AuthLifecycleServiceTag, makeAuthLifecycleService(config));

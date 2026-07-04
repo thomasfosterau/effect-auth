@@ -16,7 +16,7 @@
  */
 import { Effect } from "effect";
 import type { AuthResult } from "../EmailPassword.js";
-import { SessionManagerTag } from "../Session.js";
+import { SessionManager } from "../Session.js";
 import { Hooks, makePlugin } from "../Hooks.js";
 
 /**
@@ -27,7 +27,7 @@ import { Hooks, makePlugin } from "../Hooks.js";
 export const makeLastLoginMethodPlugin = () =>
   makePlugin(
     Effect.gen(function* () {
-      const sessionManager = yield* SessionManagerTag;
+      const sessionManager = yield* SessionManager;
       const record = (result: AuthResult) =>
         result.session !== undefined && result.method !== undefined
           ? sessionManager

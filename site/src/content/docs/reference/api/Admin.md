@@ -31,13 +31,10 @@ from validating sessions.
 - [utils](#utils)
   - [AdminConfig (interface)](#adminconfig-interface)
   - [AdminError (class)](#adminerror-class)
-  - [AdminService](#adminservice)
-  - [AdminService (interface)](#adminservice-interface)
-  - [AdminServiceLayer](#adminservicelayer)
-  - [AdminServiceTag (class)](#adminservicetag-class)
-  - [AdminUserStore](#adminuserstore)
-  - [AdminUserStore (interface)](#adminuserstore-interface)
-  - [AdminUserStoreTag (class)](#adminuserstoretag-class)
+  - [AdminService (class)](#adminservice-class)
+  - [AdminServiceShape (interface)](#adminserviceshape-interface)
+  - [AdminUserStore (class)](#adminuserstore-class)
+  - [AdminUserStoreShape (interface)](#adminuserstoreshape-interface)
   - [BanUserOptions (interface)](#banuseroptions-interface)
   - [BannedUserPlugin](#banneduserplugin)
   - [ListUsersQuery (interface)](#listusersquery-interface)
@@ -69,7 +66,7 @@ export interface AdminConfig {
   /**
    * Advisory lifetime of impersonation sessions in milliseconds (default:
    * 1 hour). Recorded on the session as `attributes.impersonationExpiresAt`;
-   * see {@link AdminService.impersonateUser}.
+   * see {@link AdminServiceShape.impersonateUser}.
    */
   readonly impersonationSessionDuration?: number;
 }
@@ -85,15 +82,15 @@ Admin error
 export declare class AdminError
 ```
 
-## AdminService
+## AdminService (class)
 
 **Signature**
 
 ```ts
-export declare const AdminService: typeof AdminServiceTag;
+export declare class AdminService
 ```
 
-## AdminService (interface)
+## AdminServiceShape (interface)
 
 Admin service. Every method takes the acting (already authenticated) user
 as its first argument and fails with `AdminError` unless
@@ -102,14 +99,14 @@ as its first argument and fails with `AdminError` unless
 **Signature**
 
 ```ts
-export interface AdminService {
+export interface AdminServiceShape {
   /**
    * List users with pagination and optional email search.
    */
   readonly listUsers: (
     actor: Types.User,
     query?: ListUsersQuery,
-  ) => Effect.Effect<ListUsersResult, AdminError | Errors.AuthError, AdminUserStoreTag>;
+  ) => Effect.Effect<ListUsersResult, AdminError | Errors.AuthError, AdminUserStore>;
 
   /**
    * Set a user's role (written to `attributes.role`).
@@ -121,7 +118,7 @@ export interface AdminService {
   ) => Effect.Effect<
     Types.User,
     AdminError | Errors.AuthError | Errors.UserNotFoundError,
-    UserServiceStoreTag
+    UserServiceStore
   >;
 
   /**
@@ -135,7 +132,7 @@ export interface AdminService {
   ) => Effect.Effect<
     Types.User,
     AdminError | Errors.AuthError | Errors.UserNotFoundError,
-    UserServiceStoreTag | SessionManagerTag
+    UserServiceStore | SessionManager
   >;
 
   /**
@@ -147,7 +144,7 @@ export interface AdminService {
   ) => Effect.Effect<
     Types.User,
     AdminError | Errors.AuthError | Errors.UserNotFoundError,
-    UserServiceStoreTag
+    UserServiceStore
   >;
 
   /**
@@ -157,7 +154,7 @@ export interface AdminService {
   readonly removeUser: (
     actor: Types.User,
     userId: string,
-  ) => Effect.Effect<void, AdminError | Errors.AuthError, UserServiceStoreTag | SessionManagerTag>;
+  ) => Effect.Effect<void, AdminError | Errors.AuthError, UserServiceStore | SessionManager>;
 
   /**
    * Revoke all sessions of a user.
@@ -165,7 +162,7 @@ export interface AdminService {
   readonly revokeUserSessions: (
     actor: Types.User,
     userId: string,
-  ) => Effect.Effect<void, AdminError | Errors.AuthError, SessionManagerTag>;
+  ) => Effect.Effect<void, AdminError | Errors.AuthError, SessionManager>;
 
   /**
    * Create a session for the target user marked with
@@ -183,38 +180,20 @@ export interface AdminService {
   ) => Effect.Effect<
     Types.Session,
     AdminError | Errors.AuthError | Errors.UserNotFoundError | HookError,
-    UserServiceStoreTag | SessionManagerTag | Hooks
+    UserServiceStore | SessionManager | Hooks
   >;
 }
 ```
 
-## AdminServiceLayer
+## AdminUserStore (class)
 
 **Signature**
 
 ```ts
-export declare const AdminServiceLayer: (
-  config?: AdminConfig,
-) => Layer.Layer<AdminServiceTag, never, never>;
+export declare class AdminUserStore
 ```
 
-## AdminServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class AdminServiceTag
-```
-
-## AdminUserStore
-
-**Signature**
-
-```ts
-export declare const AdminUserStore: typeof AdminUserStoreTag;
-```
-
-## AdminUserStore (interface)
+## AdminUserStoreShape (interface)
 
 Storage interface for admin-only user queries. The regular
 `UserServiceStore` (get/update/delete) is reused for everything else;
@@ -223,17 +202,9 @@ this store only adds listing, which per-user stores cannot express.
 **Signature**
 
 ```ts
-export interface AdminUserStore {
+export interface AdminUserStoreShape {
   readonly listUsers: (query: ListUsersQuery) => Effect.Effect<ListUsersResult, Errors.AuthError>;
 }
-```
-
-## AdminUserStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class AdminUserStoreTag
 ```
 
 ## BanUserOptions (interface)
@@ -330,5 +301,7 @@ Create an admin service
 **Signature**
 
 ```ts
-export declare const makeAdminService: (config?: AdminConfig) => Effect.Effect<AdminService, never>;
+export declare const makeAdminService: (
+  config?: AdminConfig,
+) => Effect.Effect<AdminServiceShape, never>;
 ```

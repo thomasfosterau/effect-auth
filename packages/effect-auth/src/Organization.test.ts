@@ -3,13 +3,12 @@ import { Context, Effect } from "effect";
 import {
   makeOrganizationService,
   OrganizationStore,
-  OrganizationStoreTag,
   defaultOrganizationRoles,
   type Invitation,
   type Member,
   type Organization,
   type OrganizationConfig,
-  type OrganizationService,
+  type OrganizationServiceShape,
 } from "./Organization.js";
 
 const organizations = new Map<string, Organization>();
@@ -125,7 +124,7 @@ const testContext = Context.make(OrganizationStore, organizationStore);
 
 const runService = <A, E>(
   config: OrganizationConfig,
-  program: (service: OrganizationService) => Effect.Effect<A, E, OrganizationStoreTag>,
+  program: (service: OrganizationServiceShape) => Effect.Effect<A, E, OrganizationStore>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.provide(

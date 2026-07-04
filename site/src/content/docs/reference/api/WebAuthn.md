@@ -16,12 +16,10 @@ Following Copenhagen/Oslo guidelines for WebAuthn implementation
   - [AuthenticationResponse (interface)](#authenticationresponse-interface)
   - [AuthenticationResult (interface)](#authenticationresult-interface)
   - [AuthenticatorSelectionCriteria (interface)](#authenticatorselectioncriteria-interface)
-  - [ChallengeStore](#challengestore)
-  - [ChallengeStore (interface)](#challengestore-interface)
-  - [ChallengeStoreTag (class)](#challengestoretag-class)
-  - [CredentialStore](#credentialstore)
-  - [CredentialStore (interface)](#credentialstore-interface)
-  - [CredentialStoreTag (class)](#credentialstoretag-class)
+  - [ChallengeStore (class)](#challengestore-class)
+  - [ChallengeStoreShape (interface)](#challengestoreshape-interface)
+  - [CredentialStore (class)](#credentialstore-class)
+  - [CredentialStoreShape (interface)](#credentialstoreshape-interface)
   - [PublicKeyCredentialDescriptor (interface)](#publickeycredentialdescriptor-interface)
   - [PublicKeyCredentialParameter (interface)](#publickeycredentialparameter-interface)
   - [RegistrationChallenge (interface)](#registrationchallenge-interface)
@@ -31,10 +29,8 @@ Following Copenhagen/Oslo guidelines for WebAuthn implementation
   - [WebAuthnChallenge (interface)](#webauthnchallenge-interface)
   - [WebAuthnConfig (interface)](#webauthnconfig-interface)
   - [WebAuthnCredential (interface)](#webauthncredential-interface)
-  - [WebAuthnService](#webauthnservice)
-  - [WebAuthnService (interface)](#webauthnservice-interface)
-  - [WebAuthnServiceLayer](#webauthnservicelayer)
-  - [WebAuthnServiceTag (class)](#webauthnservicetag-class)
+  - [WebAuthnService (class)](#webauthnservice-class)
+  - [WebAuthnServiceShape (interface)](#webauthnserviceshape-interface)
   - [WebAuthnUser (interface)](#webauthnuser-interface)
   - [base64UrlDecode](#base64urldecode)
   - [makeWebAuthnService](#makewebauthnservice)
@@ -91,15 +87,17 @@ export interface AuthenticatorSelectionCriteria {
 }
 ```
 
-## ChallengeStore
+## ChallengeStore (class)
+
+Context tag for ChallengeStore
 
 **Signature**
 
 ```ts
-export declare const ChallengeStore: typeof ChallengeStoreTag;
+export declare class ChallengeStore
 ```
 
-## ChallengeStore (interface)
+## ChallengeStoreShape (interface)
 
 WebAuthn challenge store interface
 Implement this to store challenges in your database
@@ -107,35 +105,27 @@ Implement this to store challenges in your database
 **Signature**
 
 ```ts
-export interface ChallengeStore {
+export interface ChallengeStoreShape {
   /** Store a challenge */
   create: (challenge: WebAuthnChallenge) => Effect.Effect<WebAuthnChallenge, Errors.AuthError>;
-  /** Get a challenge by its value */
-  get: (challenge: Uint8Array) => Effect.Effect<WebAuthnChallenge, Errors.ChallengeNotFoundError>;
+  /** Get a challenge by its value, or `null` when no such challenge exists. */
+  get: (challenge: Uint8Array) => Effect.Effect<WebAuthnChallenge | null, Errors.AuthError>;
   /** Delete a challenge */
   delete: (challenge: Uint8Array) => Effect.Effect<void, Errors.AuthError>;
 }
 ```
 
-## ChallengeStoreTag (class)
+## CredentialStore (class)
 
-Context tag for ChallengeStore
-
-**Signature**
-
-```ts
-export declare class ChallengeStoreTag
-```
-
-## CredentialStore
+Context tag for CredentialStore
 
 **Signature**
 
 ```ts
-export declare const CredentialStore: typeof CredentialStoreTag;
+export declare class CredentialStore
 ```
 
-## CredentialStore (interface)
+## CredentialStoreShape (interface)
 
 WebAuthn credential store interface
 Implement this to store credentials in your database
@@ -143,28 +133,18 @@ Implement this to store credentials in your database
 **Signature**
 
 ```ts
-export interface CredentialStore {
+export interface CredentialStoreShape {
   /** Store a credential */
   create: (credential: WebAuthnCredential) => Effect.Effect<WebAuthnCredential, Errors.AuthError>;
-  /** Get a credential by ID */
-  get: (credentialId: string) => Effect.Effect<WebAuthnCredential, Errors.CredentialNotFoundError>;
+  /** Get a credential by ID, or `null` when no such credential exists. */
+  get: (credentialId: string) => Effect.Effect<WebAuthnCredential | null, Errors.AuthError>;
   /** Update a credential (e.g., counter) */
   update: (credential: WebAuthnCredential) => Effect.Effect<WebAuthnCredential, Errors.AuthError>;
   /** Delete a credential */
   delete: (credentialId: string) => Effect.Effect<void, Errors.AuthError>;
-  /** Get all credentials for a user */
-  getByUserId: (userId: string) => Effect.Effect<readonly WebAuthnCredential[], Errors.AuthError>;
+  /** List all credentials for a user */
+  listByUserId: (userId: string) => Effect.Effect<readonly WebAuthnCredential[], Errors.AuthError>;
 }
-```
-
-## CredentialStoreTag (class)
-
-Context tag for CredentialStore
-
-**Signature**
-
-```ts
-export declare class CredentialStoreTag
 ```
 
 ## PublicKeyCredentialDescriptor (interface)
@@ -329,22 +309,22 @@ export interface WebAuthnCredential {
 }
 ```
 
-## WebAuthnService
+## WebAuthnService (class)
 
 **Signature**
 
 ```ts
-export declare const WebAuthnService: typeof WebAuthnServiceTag;
+export declare class WebAuthnService
 ```
 
-## WebAuthnService (interface)
+## WebAuthnServiceShape (interface)
 
 WebAuthn service for managing passkey registration and authentication
 
 **Signature**
 
 ```ts
-export interface WebAuthnService {
+export interface WebAuthnServiceShape {
   /** Generate a challenge for registration */
   generateRegistrationChallenge: (
     user: WebAuthnUser,
@@ -386,24 +366,6 @@ export interface WebAuthnService {
 }
 ```
 
-## WebAuthnServiceLayer
-
-**Signature**
-
-```ts
-export declare const WebAuthnServiceLayer: (
-  config: WebAuthnConfig,
-) => Layer.Layer<WebAuthnServiceTag, never, ChallengeStoreTag | CredentialStoreTag>;
-```
-
-## WebAuthnServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class WebAuthnServiceTag
-```
-
 ## WebAuthnUser (interface)
 
 User information for WebAuthn registration
@@ -440,5 +402,5 @@ Create a WebAuthn service
 ```ts
 export declare const makeWebAuthnService: (
   config: WebAuthnConfig,
-) => Effect.Effect<WebAuthnService, never, ChallengeStoreTag | CredentialStoreTag>;
+) => Effect.Effect<WebAuthnServiceShape, never, ChallengeStore | CredentialStore>;
 ```

@@ -30,17 +30,13 @@ only trims whitespace. Apps should plug a real E.164 normalizer via config.
   - [PhoneOtpError (class)](#phoneotperror-class)
   - [PhoneOtpPurpose (type alias)](#phoneotppurpose-type-alias)
   - [PhoneOtpRecord (interface)](#phoneotprecord-interface)
-  - [PhoneOtpService](#phoneotpservice)
-  - [PhoneOtpService (interface)](#phoneotpservice-interface)
-  - [PhoneOtpServiceLayer](#phoneotpservicelayer)
-  - [PhoneOtpServiceTag (class)](#phoneotpservicetag-class)
+  - [PhoneOtpService (class)](#phoneotpservice-class)
+  - [PhoneOtpServiceShape (interface)](#phoneotpserviceshape-interface)
   - [PhoneOtpSignInOptions (interface)](#phoneotpsigninoptions-interface)
-  - [PhoneOtpStore](#phoneotpstore)
-  - [PhoneOtpStore (interface)](#phoneotpstore-interface)
-  - [PhoneOtpStoreTag (class)](#phoneotpstoretag-class)
-  - [PhoneOtpUserStore](#phoneotpuserstore)
-  - [PhoneOtpUserStore (interface)](#phoneotpuserstore-interface)
-  - [PhoneOtpUserStoreTag (class)](#phoneotpuserstoretag-class)
+  - [PhoneOtpStore (class)](#phoneotpstore-class)
+  - [PhoneOtpStoreShape (interface)](#phoneotpstoreshape-interface)
+  - [PhoneOtpUserStore (class)](#phoneotpuserstore-class)
+  - [PhoneOtpUserStoreShape (interface)](#phoneotpuserstoreshape-interface)
   - [getPhoneNumber](#getphonenumber)
   - [makePhoneOtpService](#makephoneotpservice)
 
@@ -133,20 +129,20 @@ export interface PhoneOtpRecord {
 }
 ```
 
-## PhoneOtpService
+## PhoneOtpService (class)
 
 **Signature**
 
 ```ts
-export declare const PhoneOtpService: typeof PhoneOtpServiceTag;
+export declare class PhoneOtpService
 ```
 
-## PhoneOtpService (interface)
+## PhoneOtpServiceShape (interface)
 
 **Signature**
 
 ```ts
-export interface PhoneOtpService {
+export interface PhoneOtpServiceShape {
   /**
    * Generate an OTP for the given phone number + purpose (replacing any
    * outstanding one) and send it. Only a SHA-256 hash of the code is stored.
@@ -156,11 +152,7 @@ export interface PhoneOtpService {
   readonly send: (
     phoneNumber: string,
     purpose: PhoneOtpPurpose,
-  ) => Effect.Effect<
-    void,
-    PhoneOtpError | Errors.AuthError,
-    PhoneOtpStoreTag | PhoneOtpUserStoreTag
-  >;
+  ) => Effect.Effect<void, PhoneOtpError | Errors.AuthError, PhoneOtpStore | PhoneOtpUserStore>;
 
   /**
    * Verify a `sign-in` OTP (single use) and sign the user in, creating a new
@@ -173,7 +165,7 @@ export interface PhoneOtpService {
   ) => Effect.Effect<
     PhoneOtpAuthResult,
     PhoneOtpError | Errors.AuthError | HookError,
-    PhoneOtpStoreTag | PhoneOtpUserStoreTag | SessionManagerTag | Hooks
+    PhoneOtpStore | PhoneOtpUserStore | SessionManager | Hooks
   >;
 
   /**
@@ -187,27 +179,9 @@ export interface PhoneOtpService {
   ) => Effect.Effect<
     Types.User,
     PhoneOtpError | Errors.AuthError | Errors.UserNotFoundError,
-    PhoneOtpStoreTag | PhoneOtpUserStoreTag
+    PhoneOtpStore | PhoneOtpUserStore
   >;
 }
-```
-
-## PhoneOtpServiceLayer
-
-**Signature**
-
-```ts
-export declare const PhoneOtpServiceLayer: (
-  config: PhoneOtpConfig,
-) => Layer.Layer<PhoneOtpServiceTag, never, never>;
-```
-
-## PhoneOtpServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class PhoneOtpServiceTag
 ```
 
 ## PhoneOtpSignInOptions (interface)
@@ -220,15 +194,15 @@ export interface PhoneOtpSignInOptions {
 }
 ```
 
-## PhoneOtpStore
+## PhoneOtpStore (class)
 
 **Signature**
 
 ```ts
-export declare const PhoneOtpStore: typeof PhoneOtpStoreTag;
+export declare class PhoneOtpStore
 ```
 
-## PhoneOtpStore (interface)
+## PhoneOtpStoreShape (interface)
 
 Persistence for phone OTPs, keyed by the (normalized phoneNumber, purpose)
 pair; `upsert` replaces any existing record for the pair.
@@ -236,7 +210,7 @@ pair; `upsert` replaces any existing record for the pair.
 **Signature**
 
 ```ts
-export interface PhoneOtpStore {
+export interface PhoneOtpStoreShape {
   readonly upsert: (record: PhoneOtpRecord) => Effect.Effect<PhoneOtpRecord, Errors.AuthError>;
   readonly get: (
     phoneNumber: string,
@@ -253,23 +227,15 @@ export interface PhoneOtpStore {
 }
 ```
 
-## PhoneOtpStoreTag (class)
+## PhoneOtpUserStore (class)
 
 **Signature**
 
 ```ts
-export declare class PhoneOtpStoreTag
+export declare class PhoneOtpUserStore
 ```
 
-## PhoneOtpUserStore
-
-**Signature**
-
-```ts
-export declare const PhoneOtpUserStore: typeof PhoneOtpUserStoreTag;
-```
-
-## PhoneOtpUserStore (interface)
+## PhoneOtpUserStoreShape (interface)
 
 User lookup/creation keyed by phone number. Implementers store the number in
 `attributes.phoneNumber` and the verification flag in
@@ -278,7 +244,7 @@ User lookup/creation keyed by phone number. Implementers store the number in
 **Signature**
 
 ```ts
-export interface PhoneOtpUserStore {
+export interface PhoneOtpUserStoreShape {
   readonly getUserByPhoneNumber: (
     phoneNumber: string,
   ) => Effect.Effect<Types.User | null, Errors.AuthError>;
@@ -290,14 +256,6 @@ export interface PhoneOtpUserStore {
     phoneNumber: string,
   ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
 }
-```
-
-## PhoneOtpUserStoreTag (class)
-
-**Signature**
-
-```ts
-export declare class PhoneOtpUserStoreTag
 ```
 
 ## getPhoneNumber
@@ -317,5 +275,5 @@ export declare const getPhoneNumber: (user: Types.User) => string | null;
 ```ts
 export declare const makePhoneOtpService: (
   config: PhoneOtpConfig,
-) => Effect.Effect<PhoneOtpService, never>;
+) => Effect.Effect<PhoneOtpServiceShape, never>;
 ```

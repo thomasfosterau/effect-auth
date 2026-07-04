@@ -18,24 +18,24 @@ provide its layers too:
 import { Layer } from "effect";
 import * as Auth from "effect-auth";
 
-declare const clientStore: Auth.OidcClientStore;
-declare const codeStore: Auth.OidcCodeStore;
-declare const tokenStore: Auth.OidcTokenStore;
-declare const consentStore: Auth.OidcConsentStore;
-declare const jwtKeyStore: Auth.JwtKeyStore;
+declare const clientStore: Auth.OidcClientStoreShape;
+declare const codeStore: Auth.OidcCodeStoreShape;
+declare const tokenStore: Auth.OidcTokenStoreShape;
+declare const consentStore: Auth.OidcConsentStoreShape;
+declare const jwtKeyStore: Auth.JwtKeyStoreShape;
 
 const oidcProvider = Layer.mergeAll(
-  Auth.OidcProviderServiceLayer({
+  Auth.OidcProviderService.layer({
     issuer: "https://app.example.com/api/auth",
     loginPage: "https://app.example.com/login",
     consentPage: "https://app.example.com/consent",
   }),
-  Auth.JwtServiceLayer({ issuer: "https://app.example.com/api/auth" }),
-  Layer.succeed(Auth.OidcClientStoreTag)(clientStore),
-  Layer.succeed(Auth.OidcCodeStoreTag)(codeStore),
-  Layer.succeed(Auth.OidcTokenStoreTag)(tokenStore),
-  Layer.succeed(Auth.OidcConsentStoreTag)(consentStore),
-  Layer.succeed(Auth.JwtKeyStoreTag)(jwtKeyStore),
+  Auth.JwtService.layer({ issuer: "https://app.example.com/api/auth" }),
+  Layer.succeed(Auth.OidcClientStore)(clientStore),
+  Layer.succeed(Auth.OidcCodeStore)(codeStore),
+  Layer.succeed(Auth.OidcTokenStore)(tokenStore),
+  Layer.succeed(Auth.OidcConsentStore)(consentStore),
+  Layer.succeed(Auth.JwtKeyStore)(jwtKeyStore),
 );
 ```
 

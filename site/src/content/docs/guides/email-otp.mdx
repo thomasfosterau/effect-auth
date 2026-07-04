@@ -14,19 +14,19 @@ expire quickly, and allow a bounded number of attempts.
 import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
-declare const emailOtpStore: Auth.EmailOtpStore;
-declare const emailOtpUserStore: Auth.EmailOtpUserStore;
+declare const emailOtpStore: Auth.EmailOtpStoreShape;
+declare const emailOtpUserStore: Auth.EmailOtpUserStoreShape;
 declare const sendEmail: (email: string, body: string) => Effect.Effect<void, Auth.AuthError>;
 
 const emailOtp = Layer.mergeAll(
-  Auth.EmailOtpServiceLayer({
+  Auth.EmailOtpService.layer({
     otpLength: 6, // default
     expiresIn: 5 * 60 * 1000, // default 5 minutes
     maxAttempts: 3, // default
     sendVerificationOtp: (email, otp, purpose) => sendEmail(email, `Your ${purpose} code: ${otp}`),
   }),
-  Layer.succeed(Auth.EmailOtpStoreTag)(emailOtpStore),
-  Layer.succeed(Auth.EmailOtpUserStoreTag)(emailOtpUserStore),
+  Layer.succeed(Auth.EmailOtpStore)(emailOtpStore),
+  Layer.succeed(Auth.EmailOtpUserStore)(emailOtpUserStore),
 );
 ```
 

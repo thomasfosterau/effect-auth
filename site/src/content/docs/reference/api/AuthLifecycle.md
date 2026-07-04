@@ -12,10 +12,8 @@ description: "API reference for the AuthLifecycle module."
 - [utils](#utils)
   - [AuthLifecycleConfig (interface)](#authlifecycleconfig-interface)
   - [AuthLifecycleResult (interface)](#authlifecycleresult-interface)
-  - [AuthLifecycleService](#authlifecycleservice)
-  - [AuthLifecycleService (interface)](#authlifecycleservice-interface)
-  - [AuthLifecycleServiceLayer](#authlifecycleservicelayer)
-  - [AuthLifecycleServiceTag (class)](#authlifecycleservicetag-class)
+  - [AuthLifecycleService (class)](#authlifecycleservice-class)
+  - [AuthLifecycleServiceShape (interface)](#authlifecycleserviceshape-interface)
   - [VerifyEmailInput (interface)](#verifyemailinput-interface)
   - [makeAuthLifecycleService](#makeauthlifecycleservice)
 
@@ -50,34 +48,35 @@ export interface AuthLifecycleResult {
 }
 ```
 
-## AuthLifecycleService
+## AuthLifecycleService (class)
 
 **Signature**
 
 ```ts
-export declare const AuthLifecycleService: typeof AuthLifecycleServiceTag;
+export declare class AuthLifecycleService
 ```
 
-## AuthLifecycleService (interface)
+## AuthLifecycleServiceShape (interface)
 
 **Signature**
 
 ```ts
-export interface AuthLifecycleService {
+export interface AuthLifecycleServiceShape {
   readonly signUp: (
     input: SignUpInput,
   ) => Effect.Effect<
     AuthLifecycleResult,
     | Errors.AuthError
+    | Errors.EmailInUseError
     | Errors.HashingError
     | Errors.EmailVerificationError
     | Errors.EmailNotVerifiedError
     | HookError,
-    | EmailPasswordStoreTag
-    | PasswordHasherTag
-    | SessionManagerTag
-    | EmailVerificationServiceTag
-    | EmailVerificationStoreTag
+    | EmailPasswordStore
+    | PasswordHasher
+    | SessionManager
+    | EmailVerificationService
+    | EmailVerificationStore
     | Hooks
   >;
 
@@ -90,11 +89,11 @@ export interface AuthLifecycleService {
     | Errors.InvalidCredentialsError
     | Errors.EmailVerificationError
     | HookError,
-    | EmailPasswordStoreTag
-    | PasswordHasherTag
-    | SessionManagerTag
-    | EmailVerificationServiceTag
-    | EmailVerificationStoreTag
+    | EmailPasswordStore
+    | PasswordHasher
+    | SessionManager
+    | EmailVerificationService
+    | EmailVerificationStore
     | Hooks
   >;
 
@@ -103,32 +102,14 @@ export interface AuthLifecycleService {
   ) => Effect.Effect<
     AuthLifecycleResult,
     Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError | HookError,
-    | UserServiceTag
-    | UserServiceStoreTag
-    | SessionManagerTag
-    | EmailVerificationServiceTag
-    | EmailVerificationStoreTag
+    | UserService
+    | UserServiceStore
+    | SessionManager
+    | EmailVerificationService
+    | EmailVerificationStore
     | Hooks
   >;
 }
-```
-
-## AuthLifecycleServiceLayer
-
-**Signature**
-
-```ts
-export declare const AuthLifecycleServiceLayer: (
-  config?: AuthLifecycleConfig,
-) => Layer.Layer<AuthLifecycleServiceTag, never, never>;
-```
-
-## AuthLifecycleServiceTag (class)
-
-**Signature**
-
-```ts
-export declare class AuthLifecycleServiceTag
 ```
 
 ## VerifyEmailInput (interface)
@@ -149,5 +130,5 @@ export interface VerifyEmailInput {
 ```ts
 export declare const makeAuthLifecycleService: (
   config?: AuthLifecycleConfig,
-) => Effect.Effect<AuthLifecycleService, never>;
+) => Effect.Effect<AuthLifecycleServiceShape, never>;
 ```

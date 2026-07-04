@@ -1,8 +1,13 @@
 # Hooks / Plugin Architecture — Design Document
 
-**Status:** Proposed — awaiting review (Phase 1)
+**Status:** Implemented and shipped — kept as historical design rationale.
+The hooks system described here exists in `packages/effect-auth/src/Hooks.ts`
+(with first-party plugins under `src/plugins/`) on Effect v4; details below may
+diverge from the shipped code (e.g. the shipped plugin is `NormalizeEmailPlugin`,
+not `EmailNormalizePlugin`, and the service uses `Context.Service`, not the v3
+`Effect.Service` API). The current API conventions live in [DESIGN.md](./DESIGN.md).
 **Target package:** `packages/effect-auth`
-**Effect version:** v3.21.2 (resolved from `effect@^3.19.15`)
+**Effect version at time of writing:** v3.21.2 (resolved from `effect@^3.19.15`)
 
 ---
 

@@ -6,7 +6,7 @@
  * optionally, organization members) on first login. An SSO connection is, under
  * the hood, a dynamically-registered OAuth provider, so this module reuses the
  * OAuth machinery in {@link module:oauth} — {@link makeOAuthProvider},
- * {@link discoverOAuthEndpoints}, and the shared {@link OAuthStateStoreTag}.
+ * {@link discoverOAuthEndpoints}, and the shared {@link OAuthStateStore}.
  *
  * SAML is out of scope for now; the store shape carries a `protocol` field so a
  * SAML connection type can be added later without a migration.
@@ -16,13 +16,13 @@
 import { Context, Data, Effect, Layer } from "effect";
 import { AuthError } from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
-import { SessionManagerTag } from "./Session.js";
-import { OrganizationStoreTag, type Member } from "./Organization.js";
+import { SessionManager } from "./Session.js";
+import { OrganizationStore, type Member } from "./Organization.js";
 import {
   makeOAuthProvider,
   discoverOAuthEndpoints,
-  OAuthStateStoreTag,
-  OAuthUserStoreTag,
+  OAuthStateStore,
+  OAuthUserStore,
   type OAuthProviderConfig,
 } from "./OAuth.js";
 import * as crypto from "node:crypto";
@@ -64,21 +64,18 @@ export interface SsoProvider {
 }
 
 /** Persistent registry of SSO connections. */
-export interface SsoProviderStore {
+export interface SsoProviderStoreShape {
   readonly create: (provider: SsoProvider) => Effect.Effect<SsoProvider, AuthError>;
   readonly getById: (id: string) => Effect.Effect<SsoProvider | null, AuthError>;
   readonly getByDomain: (domain: string) => Effect.Effect<SsoProvider | null, AuthError>;
   readonly list: () => Effect.Effect<ReadonlyArray<SsoProvider>, AuthError>;
 }
 
-export class SsoProviderStoreTag extends Context.Service<SsoProviderStoreTag, SsoProviderStore>()(
+export class SsoProviderStore extends Context.Service<SsoProviderStore, SsoProviderStoreShape>()(
   "@effect-auth/SsoProviderStore",
 ) {}
 
-// Public ergonomic alias
-export const SsoProviderStore = SsoProviderStoreTag;
-
-/** Input to {@link SsoService.registerProvider}. */
+/** Input to {@link SsoServiceShape.registerProvider}. */
 export interface RegisterProviderInput {
   readonly issuer: string;
   readonly domain: string;
@@ -111,7 +108,7 @@ export interface SsoSignInSelector {
   readonly domain?: string;
 }
 
-export interface SsoService {
+export interface SsoServiceShape {
   /**
    * Register (or discover + register) an SSO connection. The registrar
    * (`registrarUserId`) is recorded on the connection; gate this behind an
@@ -120,7 +117,7 @@ export interface SsoService {
   readonly registerProvider: (
     registrarUserId: string,
     input: RegisterProviderInput,
-  ) => Effect.Effect<SsoProvider, SsoError | AuthError, SsoProviderStoreTag>;
+  ) => Effect.Effect<SsoProvider, SsoError | AuthError, SsoProviderStore>;
 
   /**
    * Resolve the connection an email address routes to, by domain. Returns
@@ -128,7 +125,7 @@ export interface SsoService {
    */
   readonly resolveProviderForEmail: (
     email: string,
-  ) => Effect.Effect<SsoProvider | null, AuthError, SsoProviderStoreTag>;
+  ) => Effect.Effect<SsoProvider | null, AuthError, SsoProviderStore>;
 
   /**
    * Begin an SSO sign-in: resolve the connection (by `providerId`, `domain`, or
@@ -139,7 +136,7 @@ export interface SsoService {
   ) => Effect.Effect<
     { readonly url: string; readonly state: string },
     SsoError | AuthError,
-    SsoProviderStoreTag | OAuthStateStoreTag
+    SsoProviderStore | OAuthStateStore
   >;
 
   /**
@@ -153,16 +150,19 @@ export interface SsoService {
   ) => Effect.Effect<
     SsoSignInResult,
     SsoError | AuthError | HookError,
-    SsoProviderStoreTag | OAuthStateStoreTag | OAuthUserStoreTag | SessionManagerTag | Hooks
+    SsoProviderStore | OAuthStateStore | OAuthUserStore | SessionManager | Hooks
   >;
 }
 
-export class SsoServiceTag extends Context.Service<SsoServiceTag, SsoService>()(
+export class SsoService extends Context.Service<SsoService, SsoServiceShape>()(
   "@effect-auth/SsoService",
-) {}
-
-// Public ergonomic alias
-export const SsoService = SsoServiceTag;
+) {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = (config: SsoConfig = {}) =>
+    Layer.effect(SsoService, makeSsoService(config));
+}
 
 /** Configuration for {@link makeSsoService}. */
 export interface SsoConfig {
@@ -198,13 +198,13 @@ const toOAuthConfig = (provider: SsoProvider): OAuthProviderConfig => ({
       }),
 });
 
-export const makeSsoService = (config: SsoConfig = {}): Effect.Effect<SsoService, never> => {
+export const makeSsoService = (config: SsoConfig = {}): Effect.Effect<SsoServiceShape, never> => {
   const defaultScopes = config.defaultScopes ?? ["openid", "email", "profile"];
   const defaultRole = config.defaultRole ?? "member";
 
   const resolveProvider = (selector: SsoSignInSelector) =>
     Effect.gen(function* () {
-      const store = yield* SsoProviderStoreTag;
+      const store = yield* SsoProviderStore;
       if (selector.providerId !== undefined) {
         const p = yield* store.getById(selector.providerId);
         if (p === null) {
@@ -231,7 +231,7 @@ export const makeSsoService = (config: SsoConfig = {}): Effect.Effect<SsoService
   return Effect.succeed({
     registerProvider: (registrarUserId, input) =>
       Effect.gen(function* () {
-        const store = yield* SsoProviderStoreTag;
+        const store = yield* SsoProviderStore;
 
         const discovered = input.discover
           ? yield* discoverOAuthEndpoints(input.issuer).pipe(
@@ -274,7 +274,7 @@ export const makeSsoService = (config: SsoConfig = {}): Effect.Effect<SsoService
 
     resolveProviderForEmail: (email) =>
       Effect.gen(function* () {
-        const store = yield* SsoProviderStoreTag;
+        const store = yield* SsoProviderStore;
         return yield* store.getByDomain(domainOf(email));
       }),
 
@@ -294,14 +294,17 @@ export const makeSsoService = (config: SsoConfig = {}): Effect.Effect<SsoService
 
     handleCallback: (state, code) =>
       Effect.gen(function* () {
-        const stateStore = yield* OAuthStateStoreTag;
-        const userStore = yield* OAuthUserStoreTag;
-        const sessionManager = yield* SessionManagerTag;
-        const providerStore = yield* SsoProviderStoreTag;
+        const stateStore = yield* OAuthStateStore;
+        const userStore = yield* OAuthUserStore;
+        const sessionManager = yield* SessionManager;
+        const providerStore = yield* SsoProviderStore;
 
         const stateEntry = yield* stateStore
           .get(state)
           .pipe(Effect.mapError(() => new SsoError({ message: "SSO state not found or expired" })));
+        if (stateEntry === null) {
+          return yield* new SsoError({ message: "SSO state not found or expired" });
+        }
         if (Date.now() > stateEntry.expiresAt) {
           yield* stateStore.delete(state);
           return yield* new SsoError({ message: "SSO state expired" });
@@ -352,7 +355,7 @@ export const makeSsoService = (config: SsoConfig = {}): Effect.Effect<SsoService
 
         // Provision organization membership on first login when configured.
         if (isNewUser && provider.organizationId !== undefined) {
-          const orgStore = yield* Effect.serviceOption(OrganizationStoreTag);
+          const orgStore = yield* Effect.serviceOption(OrganizationStore);
           if (orgStore._tag === "Some") {
             const existing = yield* orgStore.value.getMember(provider.organizationId, user.id);
             if (existing === null) {
@@ -371,8 +374,5 @@ export const makeSsoService = (config: SsoConfig = {}): Effect.Effect<SsoService
         const session = yield* sessionManager.createSession(user.id);
         return { user, session, isNewUser, provider };
       }),
-  } satisfies SsoService);
+  } satisfies SsoServiceShape);
 };
-
-export const SsoServiceLayer = (config: SsoConfig = {}) =>
-  Layer.effect(SsoServiceTag, makeSsoService(config));

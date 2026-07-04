@@ -18,7 +18,7 @@ import * as Auth from "effect-auth";
 
 const sessions = new Map<string, Auth.Session>();
 
-const sessionStore: Auth.SessionStore = {
+const sessionStore: Auth.SessionStoreShape = {
   create: (s) => Effect.sync(() => (sessions.set(s.id, s), s)),
   get: (id) =>
     Effect.suspend(() => {
@@ -37,7 +37,7 @@ const sessionStore: Auth.SessionStore = {
     Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
 };
 
-const layer = Layer.succeed(Auth.SessionStoreTag)(sessionStore);
+const layer = Layer.succeed(Auth.SessionStore)(sessionStore);
 ```
 
 ## 2. KV-backed layers for the ephemeral stores

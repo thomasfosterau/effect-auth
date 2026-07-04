@@ -2,23 +2,25 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect } from "effect";
 import {
   makePhoneOtpService,
-  PhoneOtpStore,
-  PhoneOtpUserStore,
+  type PhoneOtpStoreShape,
+  type PhoneOtpUserStoreShape,
   getPhoneNumber,
   type PhoneOtpRecord,
   type PhoneOtpPurpose,
+  PhoneOtpStore,
+  PhoneOtpUserStore,
 } from "./PhoneOtp.js";
 import { hashOtp } from "./EmailOtp.js";
 import {
   makeSessionManager,
-  SessionManager,
   SessionStore,
   UserStore,
-  type SessionStore as SessionStoreType,
-  type UserStore as UserStoreType,
+  SessionManager,
+  type SessionStoreShape,
+  type UserStoreShape,
 } from "./Session.js";
 import { Hooks } from "./Hooks.js";
-import { SessionNotFoundError, UserNotFoundError } from "./Errors.js";
+import { UserNotFoundError } from "./Errors.js";
 import type * as Types from "./Types.js";
 
 // --- in-memory state ---------------------------------------------------------
@@ -32,7 +34,7 @@ const sentOtps: Array<{ phoneNumber: string; otp: string; purpose: PhoneOtpPurpo
 
 const key = (phone: string, purpose: PhoneOtpPurpose) => `${phone}:${purpose}`;
 
-const phoneOtpStore: PhoneOtpStore = {
+const phoneOtpStore: PhoneOtpStoreShape = {
   upsert: (record) =>
     Effect.sync(() => {
       records.set(key(record.phoneNumber, record.purpose), record);
@@ -50,7 +52,7 @@ const phoneOtpStore: PhoneOtpStore = {
     }),
 };
 
-const phoneOtpUserStore: PhoneOtpUserStore = {
+const phoneOtpUserStore: PhoneOtpUserStoreShape = {
   getUserByPhoneNumber: (phone) =>
     Effect.sync(() => {
       const id = phoneToId.get(phone);
@@ -92,19 +94,13 @@ const phoneOtpUserStore: PhoneOtpUserStore = {
     }),
 };
 
-const sessionStore: SessionStoreType = {
+const sessionStore: SessionStoreShape = {
   create: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
       return session;
     }),
-  get: (sessionId) =>
-    Effect.suspend(() => {
-      const session = sessions.get(sessionId);
-      return session === undefined
-        ? Effect.fail(new SessionNotFoundError({ message: "not found", sessionId }))
-        : Effect.succeed(session);
-    }),
+  get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
   update: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -119,16 +115,9 @@ const sessionStore: SessionStoreType = {
     Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
 };
 
-const userStore: UserStoreType = {
-  get: (userId) =>
-    Effect.suspend(() => {
-      const user = users.get(userId);
-      return user === undefined
-        ? Effect.fail(new UserNotFoundError({ message: "not found", userId }))
-        : Effect.succeed(user);
-    }),
-  getCredentials: (userId) =>
-    Effect.fail(new UserNotFoundError({ message: "no credentials", userId })),
+const userStore: UserStoreShape = {
+  get: (userId) => Effect.sync(() => users.get(userId) ?? null),
+  getCredentials: (_userId) => Effect.succeed(null),
 };
 
 const sessionConfig: Types.SessionConfig = {

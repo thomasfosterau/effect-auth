@@ -3,7 +3,6 @@ import { Context, Effect } from "effect";
 import {
   generateKeyPair,
   JwtKeyStore,
-  JwtKeyStoreTag,
   makeJwtService,
   type JwtConfig,
   type JwtKeyPair,
@@ -40,7 +39,7 @@ const baseConfig: JwtConfig = {
   audience: "https://api.example.com",
 };
 
-const run = <A, E>(program: Effect.Effect<A, E, JwtKeyStoreTag>) =>
+const run = <A, E>(program: Effect.Effect<A, E, JwtKeyStore>) =>
   Effect.runPromise(Effect.provide(program, storeContext));
 
 describe("JwtService", () => {

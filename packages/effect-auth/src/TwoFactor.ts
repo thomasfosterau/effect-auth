@@ -16,14 +16,14 @@ import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.js";
 import {
-  EmailPasswordStoreTag,
-  SecondFactorGateTag,
-  type SecondFactorGate,
+  EmailPasswordStore,
+  SecondFactorGate,
+  type SecondFactorGateShape,
 } from "./EmailPassword.js";
 import { Hooks, type HookError } from "./Hooks.js";
 import { generateBase32Secret, generateOTPURI, verifyTOTP, type TOTPConfig } from "./Otp.js";
-import { PasswordHasherTag } from "./Password.js";
-import { SessionManagerTag, UserStoreTag } from "./Session.js";
+import { PasswordHasher } from "./Password.js";
+import { SessionManager, UserStore } from "./Session.js";
 import type * as Types from "./Types.js";
 
 /**
@@ -56,18 +56,15 @@ export interface TwoFactorRecord {
 /**
  * Storage interface for two-factor records
  */
-export interface TwoFactorStore {
+export interface TwoFactorStoreShape {
   readonly get: (userId: string) => Effect.Effect<TwoFactorRecord | null, Errors.AuthError>;
   readonly upsert: (record: TwoFactorRecord) => Effect.Effect<TwoFactorRecord, Errors.AuthError>;
   readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class TwoFactorStoreTag extends Context.Service<TwoFactorStoreTag, TwoFactorStore>()(
+export class TwoFactorStore extends Context.Service<TwoFactorStore, TwoFactorStoreShape>()(
   "@effect-auth/TwoFactorStore",
 ) {}
-
-// Public ergonomic alias
-export const TwoFactorStore = TwoFactorStoreTag;
 
 /**
  * Short-lived "password OK, awaiting second factor" state created by
@@ -83,19 +80,16 @@ export interface PendingTwoFactor {
 /**
  * Storage interface for pending two-factor challenges
  */
-export interface PendingTwoFactorStore {
+export interface PendingTwoFactorStoreShape {
   readonly create: (pending: PendingTwoFactor) => Effect.Effect<PendingTwoFactor, Errors.AuthError>;
   readonly get: (token: string) => Effect.Effect<PendingTwoFactor | null, Errors.AuthError>;
   readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export class PendingTwoFactorStoreTag extends Context.Service<
-  PendingTwoFactorStoreTag,
-  PendingTwoFactorStore
+export class PendingTwoFactorStore extends Context.Service<
+  PendingTwoFactorStore,
+  PendingTwoFactorStoreShape
 >()("@effect-auth/PendingTwoFactorStore") {}
-
-// Public ergonomic alias
-export const PendingTwoFactorStore = PendingTwoFactorStoreTag;
 
 /**
  * Two-factor service configuration
@@ -152,7 +146,7 @@ export interface TwoFactorVerifyOptions {
 /**
  * Two-factor authentication service
  */
-export interface TwoFactorService {
+export interface TwoFactorServiceShape {
   /**
    * Enable two-factor for a user. Verifies the user's password, generates a
    * TOTP secret plus backup codes, and stores the record (unverified unless
@@ -169,7 +163,7 @@ export interface TwoFactorService {
     | Errors.HashingError
     | Errors.AuthError
     | Errors.UserNotFoundError,
-    TwoFactorStoreTag | EmailPasswordStoreTag | PasswordHasherTag | UserStoreTag
+    TwoFactorStore | EmailPasswordStore | PasswordHasher | UserStore
   >;
 
   /**
@@ -179,11 +173,7 @@ export interface TwoFactorService {
   readonly confirmEnable: (
     userId: string,
     code: string,
-  ) => Effect.Effect<
-    void,
-    TwoFactorError | Errors.HashingError | Errors.AuthError,
-    TwoFactorStoreTag
-  >;
+  ) => Effect.Effect<void, TwoFactorError | Errors.HashingError | Errors.AuthError, TwoFactorStore>;
 
   /**
    * Disable two-factor after re-verifying the user's password.
@@ -194,15 +184,13 @@ export interface TwoFactorService {
   ) => Effect.Effect<
     void,
     Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
-    TwoFactorStoreTag | EmailPasswordStoreTag | PasswordHasherTag
+    TwoFactorStore | EmailPasswordStore | PasswordHasher
   >;
 
   /**
    * Whether the user has a verified two-factor record.
    */
-  readonly isEnabled: (
-    userId: string,
-  ) => Effect.Effect<boolean, Errors.AuthError, TwoFactorStoreTag>;
+  readonly isEnabled: (userId: string) => Effect.Effect<boolean, Errors.AuthError, TwoFactorStore>;
 
   /**
    * Start a second-factor challenge for a user whose first factor (e.g.
@@ -214,7 +202,7 @@ export interface TwoFactorService {
   ) => Effect.Effect<
     TwoFactorChallenge,
     TwoFactorError | Errors.AuthError,
-    TwoFactorStoreTag | PendingTwoFactorStoreTag
+    TwoFactorStore | PendingTwoFactorStore
   >;
 
   /**
@@ -228,7 +216,7 @@ export interface TwoFactorService {
   ) => Effect.Effect<
     TwoFactorVerifyResult,
     TwoFactorError | Errors.HashingError | Errors.AuthError | HookError,
-    TwoFactorStoreTag | PendingTwoFactorStoreTag | SessionManagerTag | Hooks
+    TwoFactorStore | PendingTwoFactorStore | SessionManager | Hooks
   >;
 
   /**
@@ -242,7 +230,7 @@ export interface TwoFactorService {
   ) => Effect.Effect<
     TwoFactorVerifyResult,
     TwoFactorError | Errors.AuthError | HookError,
-    TwoFactorStoreTag | PendingTwoFactorStoreTag | SessionManagerTag | Hooks
+    TwoFactorStore | PendingTwoFactorStore | SessionManager | Hooks
   >;
 
   /**
@@ -255,16 +243,19 @@ export interface TwoFactorService {
   ) => Effect.Effect<
     readonly string[],
     TwoFactorError | Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
-    TwoFactorStoreTag | EmailPasswordStoreTag | PasswordHasherTag
+    TwoFactorStore | EmailPasswordStore | PasswordHasher
   >;
 }
 
-export class TwoFactorServiceTag extends Context.Service<TwoFactorServiceTag, TwoFactorService>()(
+export class TwoFactorService extends Context.Service<TwoFactorService, TwoFactorServiceShape>()(
   "@effect-auth/TwoFactorService",
-) {}
-
-// Public ergonomic alias
-export const TwoFactorService = TwoFactorServiceTag;
+) {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = (config: TwoFactorConfig) =>
+    Layer.effect(TwoFactorService, makeTwoFactorService(config));
+}
 
 /**
  * Generate a cryptographically secure pending-challenge token
@@ -318,7 +309,7 @@ const findBackupCodeIndex = (hashes: readonly string[], candidateHash: string): 
  */
 export const makeTwoFactorService = (
   config: TwoFactorConfig,
-): Effect.Effect<TwoFactorService, never> => {
+): Effect.Effect<TwoFactorServiceShape, never> => {
   const backupCodeCount = config.backupCodeCount ?? 10;
   const pendingExpiresIn = config.pendingExpiresIn ?? 5 * 60 * 1000; // 5 minutes default
   const skipVerificationOnEnable = config.skipVerificationOnEnable ?? false;
@@ -329,8 +320,8 @@ export const makeTwoFactorService = (
    */
   const verifyPassword = (userId: string, password: string) =>
     Effect.gen(function* () {
-      const store = yield* EmailPasswordStoreTag;
-      const passwordHasher = yield* PasswordHasherTag;
+      const store = yield* EmailPasswordStore;
+      const passwordHasher = yield* PasswordHasher;
 
       const passwordHash = yield* store.getPasswordHash(userId);
       if (!passwordHash) {
@@ -358,7 +349,7 @@ export const makeTwoFactorService = (
    */
   const resolvePending = (pendingToken: string) =>
     Effect.gen(function* () {
-      const pendingStore = yield* PendingTwoFactorStoreTag;
+      const pendingStore = yield* PendingTwoFactorStore;
 
       const pending = yield* pendingStore.get(pendingToken);
       if (!pending) {
@@ -387,7 +378,7 @@ export const makeTwoFactorService = (
    */
   const getVerifiedRecord = (userId: string) =>
     Effect.gen(function* () {
-      const store = yield* TwoFactorStoreTag;
+      const store = yield* TwoFactorStore;
       const record = yield* store.get(userId);
       if (!record || !record.verified) {
         return yield* Effect.fail(
@@ -400,16 +391,19 @@ export const makeTwoFactorService = (
     });
 
   return Effect.sync(
-    (): TwoFactorService => ({
+    (): TwoFactorServiceShape => ({
       enable: (userId: string, password: string) =>
         Effect.gen(function* () {
           yield* verifyPassword(userId, password);
 
-          const store = yield* TwoFactorStoreTag;
-          const userStore = yield* UserStoreTag;
+          const store = yield* TwoFactorStore;
+          const userStore = yield* UserStore;
 
           // The otpauth:// label is the user's email
           const user = yield* userStore.get(userId);
+          if (user === null) {
+            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+          }
 
           const secret = yield* generateBase32Secret();
 
@@ -453,7 +447,7 @@ export const makeTwoFactorService = (
 
       confirmEnable: (userId: string, code: string) =>
         Effect.gen(function* () {
-          const store = yield* TwoFactorStoreTag;
+          const store = yield* TwoFactorStore;
 
           const record = yield* store.get(userId);
           if (!record) {
@@ -480,13 +474,13 @@ export const makeTwoFactorService = (
         Effect.gen(function* () {
           yield* verifyPassword(userId, password);
 
-          const store = yield* TwoFactorStoreTag;
+          const store = yield* TwoFactorStore;
           yield* store.delete(userId);
         }),
 
       isEnabled: (userId: string) =>
         Effect.gen(function* () {
-          const store = yield* TwoFactorStoreTag;
+          const store = yield* TwoFactorStore;
           const record = yield* store.get(userId);
           return record !== null && record.verified;
         }),
@@ -496,7 +490,7 @@ export const makeTwoFactorService = (
           // Only users with a verified record can be challenged
           yield* getVerifiedRecord(userId);
 
-          const pendingStore = yield* PendingTwoFactorStoreTag;
+          const pendingStore = yield* PendingTwoFactorStore;
           const token = yield* generatePendingToken();
 
           const pending: PendingTwoFactor = {
@@ -529,10 +523,10 @@ export const makeTwoFactorService = (
           }
 
           // Consume the pending token (one-time use)
-          const pendingStore = yield* PendingTwoFactorStoreTag;
+          const pendingStore = yield* PendingTwoFactorStore;
           yield* pendingStore.delete(pendingToken);
 
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
           const session = yield* sessionManager.createSession(
             pending.userId,
             options?.sessionAttributes,
@@ -559,17 +553,17 @@ export const makeTwoFactorService = (
           }
 
           // Remove the used code (single use)
-          const store = yield* TwoFactorStoreTag;
+          const store = yield* TwoFactorStore;
           yield* store.upsert({
             ...record,
             backupCodes: record.backupCodes.filter((_, i) => i !== index),
           });
 
           // Consume the pending token (one-time use)
-          const pendingStore = yield* PendingTwoFactorStoreTag;
+          const pendingStore = yield* PendingTwoFactorStore;
           yield* pendingStore.delete(pendingToken);
 
-          const sessionManager = yield* SessionManagerTag;
+          const sessionManager = yield* SessionManager;
           const session = yield* sessionManager.createSession(
             pending.userId,
             options?.sessionAttributes,
@@ -585,7 +579,7 @@ export const makeTwoFactorService = (
         Effect.gen(function* () {
           yield* verifyPassword(userId, password);
 
-          const store = yield* TwoFactorStoreTag;
+          const store = yield* TwoFactorStore;
           const record = yield* store.get(userId);
           if (!record) {
             return yield* Effect.fail(
@@ -608,11 +602,8 @@ export const makeTwoFactorService = (
   );
 };
 
-export const TwoFactorServiceLayer = (config: TwoFactorConfig) =>
-  Layer.effect(TwoFactorServiceTag, makeTwoFactorService(config));
-
 /**
- * Provides the {@link SecondFactorGateTag} seam so password sign-in returns a
+ * Provides the {@link SecondFactorGate} seam so password sign-in returns a
  * two-factor challenge (instead of a session) for enrolled users.
  *
  * The gate's methods are self-contained (`R = never`), so the two-factor
@@ -620,25 +611,25 @@ export const TwoFactorServiceLayer = (config: TwoFactorConfig) =>
  *
  * ```ts
  * const services = Layer.mergeAll(
- *   EmailPasswordServiceLayer(),
+ *   EmailPasswordService.layer(),
  *   TwoFactorGateLayer.pipe(
- *     Layer.provide(TwoFactorServiceLayer({ issuer: "MyApp" })),
+ *     Layer.provide(TwoFactorService.layer({ issuer: "MyApp" })),
  *     Layer.provide(twoFactorStores),
  *   ),
  * )
  * ```
  */
 export const TwoFactorGateLayer: Layer.Layer<
-  SecondFactorGateTag,
+  SecondFactorGate,
   never,
-  TwoFactorServiceTag | TwoFactorStoreTag | PendingTwoFactorStoreTag
+  TwoFactorService | TwoFactorStore | PendingTwoFactorStore
 > = Layer.effect(
-  SecondFactorGateTag,
+  SecondFactorGate,
   Effect.gen(function* () {
-    const twoFactor = yield* TwoFactorServiceTag;
-    const stores = yield* Effect.context<TwoFactorStoreTag | PendingTwoFactorStoreTag>();
+    const twoFactor = yield* TwoFactorService;
+    const stores = yield* Effect.context<TwoFactorStore | PendingTwoFactorStore>();
 
-    const gate: SecondFactorGate = {
+    const gate: SecondFactorGateShape = {
       required: (user) => twoFactor.isEnabled(user.id).pipe(Effect.provide(stores)),
       begin: (user) =>
         twoFactor.beginChallenge(user.id).pipe(

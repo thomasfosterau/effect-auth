@@ -4,7 +4,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 
 ## Features
 
-- 🔐 **Generic and Flexible**: Built with Effect's Request/Resolver pattern for maximum customization
+- 🔐 **Generic and Flexible**: Effect-native services and layers — provide only the features you need, swap any implementation
 - 🔒 **Secure by Default**: Following industry best practices for password hashing and session management
 - 🎯 **Type-Safe**: Full TypeScript support with comprehensive type inference
 - 🧩 **Composable**: Use Effect's powerful composition capabilities
@@ -36,12 +36,14 @@ A generic authentication and authorization library for [Effect](https://effect.w
 
 ## Packages
 
-| Package               | Purpose                                                           |
-| --------------------- | ----------------------------------------------------------------- |
-| `effect-auth`         | The core library: every module above, `node:crypto` only          |
-| `@effect-auth/client` | Browser client + React/Svelte/Vue bindings over the HTTP contract |
-| `@effect-auth/sql`    | Driver-agnostic SQL storage layers (`effect/unstable/sql`)        |
-| `@effect-auth/argon2` | Argon2id password hasher (prebuilt native bindings)               |
+| Package                | Purpose                                                           |
+| ---------------------- | ----------------------------------------------------------------- |
+| `effect-auth`          | The core library: every module above, `node:crypto` only          |
+| `@effect-auth/client`  | Browser client + React/Svelte/Vue bindings over the HTTP contract |
+| `@effect-auth/sql`     | Driver-agnostic SQL storage layers (`effect/unstable/sql`)        |
+| `@effect-auth/argon2`  | Argon2id password hasher (prebuilt native bindings)               |
+| `@effect-auth/alchemy` | Alchemy v2 infra resources + Cloudflare D1 storage layers         |
+| `@effect-auth/workos`  | Effect-native WorkOS SDK bindings                                 |
 
 ## Installation
 
@@ -59,7 +61,7 @@ This library follows best practices from multiple authentication frameworks:
 - **OAuth 2.0**: Social login with major providers (BetterAuth-inspired)
 - **Email Verification**: Secure verification flows with rate limiting (BetterAuth-inspired)
 - **Rate Limiting**: Protection against brute force attacks (BetterAuth-inspired)
-- **Request/Resolver Pattern**: Use Effect's Request/Resolver pattern for custom implementations
+- **Services & Layers**: Every feature is an Effect `Context.Service` provided via `X.layer(config)` — swap or extend any part
 - **Authorization**: Flexible permission checking and role-based access control
 
 ## Quick Start
@@ -73,7 +75,7 @@ import { Effect } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement session storage (e.g., Redis, PostgreSQL, etc.)
-const sessionStore: Auth.SessionStore = {
+const sessionStore: Auth.SessionStoreShape = {
   create: (session) => Effect.succeed(session), // Your implementation
   get: (sessionId) =>
     Effect.fail(new Auth.SessionNotFoundError({ message: "Not found", sessionId })),
@@ -86,7 +88,7 @@ const sessionStore: Auth.SessionStore = {
 // Implement user storage. Users carry first-class identity fields
 // (email, emailVerified, name, image, createdAt, updatedAt) plus an
 // `attributes` bag for app-specific data.
-const userStore: Auth.UserStore = {
+const userStore: Auth.UserStoreShape = {
   get: (userId) => Effect.fail(new Auth.UserNotFoundError({ message: "Not found", userId })),
   getCredentials: (userId) => Effect.succeed("hashed-password"),
 };
@@ -94,8 +96,10 @@ const userStore: Auth.UserStore = {
 
 ### 2. Create Session Manager
 
+Every service class exposes a static `layer` — the canonical way to provide it:
+
 ```typescript
-import { Effect, Context } from "effect";
+import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
 const sessionConfig: Auth.SessionConfig = {
@@ -105,31 +109,31 @@ const sessionConfig: Auth.SessionConfig = {
   },
 };
 
+const layer = Auth.SessionManager.layer(sessionConfig).pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(
+      Layer.succeed(Auth.SessionStore)(sessionStore),
+      Layer.succeed(Auth.UserStore)(userStore),
+      Auth.Hooks.Default, // no-op hooks; register plugins here instead as needed
+    ),
+  ),
+);
+
 const program = Effect.gen(function* () {
-  // Create session manager
-  const manager = yield* Auth.makeSessionManager(sessionConfig);
+  const sessions = yield* Auth.SessionManager;
 
   // Create a session
-  const session = yield* manager.createSession("user-123", {
+  const session = yield* sessions.createSession("user-123", {
     ip: "127.0.0.1",
   });
 
   // Validate session
-  const { session: validSession, user } = yield* manager.validateSession(session.id);
+  const { session: validSession, user } = yield* sessions.validateSession(session.id);
 
   return { session: validSession, user };
 });
 
-// Provide dependencies and run
-const result = await Effect.runPromise(
-  Effect.provide(
-    program,
-    Context.merge(
-      Context.make(Auth.SessionStore, sessionStore),
-      Context.make(Auth.UserStore, userStore),
-    ),
-  ),
-);
+const result = await Effect.runPromise(Effect.provide(program, layer));
 ```
 
 ### 3. Use Password Hashing
@@ -154,31 +158,27 @@ const program = Effect.gen(function* () {
 const isValid = await Effect.runPromise(Effect.provide(program, Auth.PasswordHasherLive));
 ```
 
-### 4. Use Request/Resolver Pattern
+### 4. Compose custom layers with the low-level constructors
 
-For more advanced use cases, use the Request/Resolver pattern:
+Each service's `makeX(config)` constructor is exported for embedding in your
+own layers when the static `X.layer(config)` isn't flexible enough:
 
 ```typescript
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
-// Create a session using a request
-const createSession = Effect.request(
-  Auth.CreateSessionRequest({ userId: "user-123" }),
-  Auth.makeCreateSessionResolver,
+const customSessionLayer = Layer.effect(
+  Auth.SessionManager,
+  Effect.gen(function* () {
+    // ...acquire resources, read config, etc.
+    return yield* Auth.makeSessionManager(sessionConfig);
+  }),
 );
-
-// Validate a session using a request
-const validateSession = (sessionId: string) =>
-  Effect.request(Auth.ValidateSessionRequest({ sessionId }), Auth.makeValidateSessionResolver);
-
-// Compose multiple requests
-const program = Effect.gen(function* () {
-  const session = yield* createSession;
-  const { user } = yield* validateSession(session.id);
-  return user;
-});
 ```
+
+> **Note**: the `Request`/`Resolver` exports (`CreateSessionRequest`,
+> `makeCreateSessionResolver`, ...) are deprecated and scheduled for removal
+> in 1.0 — call the services directly (see `DESIGN.md`, D6).
 
 ## Authorization
 
@@ -189,7 +189,7 @@ import { Effect, Context } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement your role store
-const roleStore: Auth.RoleStore = {
+const roleStore: Auth.RoleStoreShape = {
   getUserRoles: (userId) => Effect.succeed(["admin", "user"]),
   getRolePermissions: (role) =>
     Effect.succeed([
@@ -329,7 +329,7 @@ import { Effect, Context } from "effect"
 import * as Auth from "effect-auth"
 
 // Implement challenge store (temporary storage for challenges)
-const challengeStore: Auth.ChallengeStore = {
+const challengeStore: Auth.ChallengeStoreShape = {
   create: (challenge) =>
     Effect.succeed(challenge), // Store in Redis/memory
   get: (challenge) =>
@@ -339,7 +339,7 @@ const challengeStore: Auth.ChallengeStore = {
 }
 
 // Implement credential store (persistent storage for passkeys)
-const credentialStore: Auth.CredentialStore = {
+const credentialStore: Auth.CredentialStoreShape = {
   create: (credential) =>
     Effect.succeed(credential), // Store in database
   get: (credentialId) =>
@@ -438,7 +438,7 @@ import { Effect, Context } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement OAuth state store (temporary, Redis/memory recommended)
-const oauthStateStore: Auth.OAuthStateStore = {
+const oauthStateStore: Auth.OAuthStateStoreShape = {
   create: (state) => Effect.succeed(state), // Store in Redis with 10-minute TTL
   get: (stateStr) =>
     Effect.fail(
@@ -451,7 +451,7 @@ const oauthStateStore: Auth.OAuthStateStore = {
 };
 
 // Implement OAuth account store (persistent, database)
-const oauthAccountStore: Auth.OAuthAccountStore = {
+const oauthAccountStore: Auth.OAuthAccountStoreShape = {
   create: (account) => Effect.succeed(account), // Store in database
   get: (provider, providerId) => Effect.succeed(null), // Return account or null
   getByUserId: (userId) => Effect.succeed([]), // Return all user's OAuth accounts
@@ -568,7 +568,7 @@ import { Effect, Context } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement email verification store
-const emailVerificationStore: Auth.EmailVerificationStore = {
+const emailVerificationStore: Auth.EmailVerificationStoreShape = {
   create: (verification) => Effect.succeed(verification), // Store in database
   get: (token) => Effect.succeed(null), // Return verification or null
   delete: (token) => Effect.void,
@@ -637,7 +637,7 @@ import { Effect, Context } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement rate limit store (Redis recommended for distributed systems)
-const rateLimitStore: Auth.RateLimitStore = {
+const rateLimitStore: Auth.RateLimitStoreShape = {
   get: (key) => Effect.succeed(null), // Return entry or null from Redis
   set: (key, entry, ttl) => Effect.void, // Store in Redis with TTL
   increment: (key, ttl) => Effect.succeed(1), // Atomic increment in Redis
@@ -821,6 +821,9 @@ All OTP functions return Effect types for composability:
 - `generateOTPURI(params)`: Generate OTP URI for QR codes
 
 ### Requests
+
+> **Deprecated** — the Request/Resolver surface is scheduled for removal in
+> 1.0 (see `DESIGN.md`, D6). Call the service APIs directly.
 
 All requests follow the Effect Request/Resolver pattern:
 

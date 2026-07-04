@@ -158,6 +158,8 @@ description: "API reference for the HttpApiSchemas module."
   - [SsoUrlView (type alias)](#ssourlview-type-alias)
   - [StatusResponse](#statusresponse)
   - [StatusResponse (type alias)](#statusresponse-type-alias)
+  - [TooManyRequests (class)](#toomanyrequests-class)
+  - [TooManyRequestsError](#toomanyrequestserror)
   - [TwoFactorConfirmPayload](#twofactorconfirmpayload)
   - [TwoFactorConfirmPayload (type alias)](#twofactorconfirmpayload-type-alias)
   - [TwoFactorEnableView](#twofactorenableview)
@@ -1982,6 +1984,34 @@ export declare const StatusResponse: Schema.Struct<{ readonly status: Schema.Boo
 
 ```ts
 export type StatusResponse = typeof StatusResponse.Type;
+```
+
+## TooManyRequests (class)
+
+429 — rate limited; retry later.
+
+**Signature**
+
+```ts
+export declare class TooManyRequests
+```
+
+## TooManyRequestsError
+
+**Signature**
+
+```ts
+export declare const TooManyRequestsError: Schema.decodeTo<
+  Schema.declareConstructor<
+    TooManyRequests,
+    { readonly message: string; readonly _tag: "TooManyRequests" },
+    readonly [Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>],
+    { readonly message: string; readonly _tag: "TooManyRequests" }
+  >,
+  Schema.TaggedStruct<"TooManyRequests", { readonly message: Schema.String }>,
+  never,
+  never
+>;
 ```
 
 ## TwoFactorConfirmPayload

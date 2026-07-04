@@ -14,13 +14,13 @@ operation checks the actor's role.
 import { Layer } from "effect";
 import * as Auth from "effect-auth";
 
-declare const organizationStore: Auth.OrganizationStore;
+declare const organizationStore: Auth.OrganizationStoreShape;
 
 const organizations = Layer.mergeAll(
-  Auth.OrganizationServiceLayer({
+  Auth.OrganizationService.layer({
     // membershipLimit, invitationExpiresIn, creatorRole, ... all optional
   }),
-  Layer.succeed(Auth.OrganizationStoreTag)(organizationStore),
+  Layer.succeed(Auth.OrganizationStore)(organizationStore),
 );
 ```
 
@@ -55,7 +55,7 @@ queries to the session's active tenant without another lookup.
 import { Effect } from "effect";
 import * as Auth from "effect-auth";
 
-declare const service: Auth.OrganizationService;
+declare const service: Auth.OrganizationServiceShape;
 
 const program = Effect.gen(function* () {
   const org = yield* service.createOrganization("user-1", {

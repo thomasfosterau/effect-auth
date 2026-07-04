@@ -12,8 +12,8 @@
 import { Context, Data, Effect, Layer } from "effect";
 import type { AuthError } from "./Errors.js";
 import { Hooks, type HookError } from "./Hooks.js";
-import { SessionManagerTag } from "./Session.js";
-import { OAuthUserStoreTag, verifyIdToken } from "./OAuth.js";
+import { SessionManager } from "./Session.js";
+import { OAuthUserStore, verifyIdToken } from "./OAuth.js";
 import type * as Types from "./Types.js";
 
 /** Failure to verify a One Tap credential or complete the sign-in. */
@@ -47,7 +47,7 @@ export interface GoogleOneTapSignInResult {
   readonly claims: Record<string, unknown>;
 }
 
-export interface GoogleOneTapService {
+export interface GoogleOneTapServiceShape {
   /**
    * Verify a One Tap `credential` (id_token) and sign the user in:
    * find-or-create by the token's verified email, then issue a session.
@@ -57,29 +57,32 @@ export interface GoogleOneTapService {
   ) => Effect.Effect<
     GoogleOneTapSignInResult,
     GoogleOneTapError | AuthError | HookError,
-    OAuthUserStoreTag | SessionManagerTag | Hooks
+    OAuthUserStore | SessionManager | Hooks
   >;
 }
 
-export class GoogleOneTapServiceTag extends Context.Service<
-  GoogleOneTapServiceTag,
-  GoogleOneTapService
->()("@effect-auth/GoogleOneTapService") {}
-
-// Public ergonomic alias
-export const GoogleOneTapService = GoogleOneTapServiceTag;
+export class GoogleOneTapService extends Context.Service<
+  GoogleOneTapService,
+  GoogleOneTapServiceShape
+>()("@effect-auth/GoogleOneTapService") {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = (config: GoogleOneTapConfig) =>
+    Layer.effect(GoogleOneTapService, makeGoogleOneTapService(config));
+}
 
 export const makeGoogleOneTapService = (
   config: GoogleOneTapConfig,
-): Effect.Effect<GoogleOneTapService, never> => {
+): Effect.Effect<GoogleOneTapServiceShape, never> => {
   const jwksEndpoint = config.jwksEndpoint ?? GOOGLE_JWKS_ENDPOINT;
   const issuers = config.issuers ?? GOOGLE_ISSUERS;
 
   return Effect.succeed({
     signIn: (credential) =>
       Effect.gen(function* () {
-        const userStore = yield* OAuthUserStoreTag;
-        const sessionManager = yield* SessionManagerTag;
+        const userStore = yield* OAuthUserStore;
+        const sessionManager = yield* SessionManager;
 
         // Signature/aud/exp via the shared verifier; `iss` is checked here
         // because Google mints tokens under two issuer values.
@@ -115,8 +118,5 @@ export const makeGoogleOneTapService = (
         const session = yield* sessionManager.createSession(user.id);
         return { user, session, isNewUser, claims };
       }),
-  } satisfies GoogleOneTapService);
+  } satisfies GoogleOneTapServiceShape);
 };
-
-export const GoogleOneTapServiceLayer = (config: GoogleOneTapConfig) =>
-  Layer.effect(GoogleOneTapServiceTag, makeGoogleOneTapService(config));
