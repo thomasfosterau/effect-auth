@@ -28,7 +28,7 @@ export interface RateLimitEntry {
  * Storage interface for rate limiting
  */
 export interface RateLimitStoreShape {
-  readonly get: (key: string) => Effect.Effect<RateLimitEntry | null, never>;
+  readonly get: (key: string) => Effect.Effect<RateLimitEntry | null, AuthError>;
   readonly set: (key: string, entry: RateLimitEntry, ttl: number) => Effect.Effect<void, AuthError>;
   readonly increment: (key: string, ttl: number) => Effect.Effect<number, AuthError>;
   readonly delete: (key: string) => Effect.Effect<void, AuthError>;
@@ -53,7 +53,7 @@ export interface RateLimiterShape {
   readonly getRemainingTokens: (
     key: string,
     config: RateLimitConfig,
-  ) => Effect.Effect<number, never, RateLimitStore>;
+  ) => Effect.Effect<number, AuthError, RateLimitStore>;
 }
 
 /**

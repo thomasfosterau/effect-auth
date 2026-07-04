@@ -152,11 +152,11 @@ const userQueries = (sql: SqlClient.SqlClient) => {
 
   const requireById = (userId: string, label: string) =>
     getById(userId, label).pipe(
-      Effect.orDie,
-      Effect.flatMap((row) =>
-        row
-          ? rowToUser(row, label)
-          : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
+      Effect.flatMap(
+        (row): Effect.Effect<Auth.User, Auth.AuthError | Auth.UserNotFoundError> =>
+          row
+            ? rowToUser(row, label)
+            : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
       ),
     );
 
@@ -949,7 +949,7 @@ export const makeEmailOtpStore: Effect.Effect<Auth.EmailOtpStoreShape, never, Sq
           );
           const attempts = rows[0]?.attempts;
           if (attempts == null) {
-            return yield* Effect.fail(new Auth.AuthError({ message: "OTP record not found" }));
+            return yield* new Auth.AuthError({ message: "OTP record not found" });
           }
           return attempts;
         }),

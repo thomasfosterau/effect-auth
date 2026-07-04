@@ -765,10 +765,11 @@ export const makeOAuthUserStore = (db: D1Database): Auth.OAuthUserStoreShape => 
       [userId],
       "oauthUser.getUser",
     ).pipe(
-      Effect.flatMap((row) =>
-        row
-          ? rowToUser(row, "oauthUser.getUser")
-          : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
+      Effect.flatMap(
+        (row): Effect.Effect<Auth.User, Auth.AuthError | Auth.UserNotFoundError> =>
+          row
+            ? rowToUser(row, "oauthUser.getUser")
+            : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
       ),
     ),
   getUserByEmail: (email) =>
@@ -1011,7 +1012,7 @@ export const makeEmailOtpStore = (db: D1Database): Auth.EmailOtpStoreShape => {
           "emailOtp.incrementAttempts",
         );
         if (row == null) {
-          return yield* Effect.fail(new Auth.AuthError({ message: "OTP record not found" }));
+          return yield* new Auth.AuthError({ message: "OTP record not found" });
         }
         return row.attempts;
       }),
