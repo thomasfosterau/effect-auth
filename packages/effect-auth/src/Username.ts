@@ -17,6 +17,7 @@ import {
   EmailPasswordService,
   EmailPasswordStore,
   SecondFactorGate,
+  isEmailVerified,
   type AuthResult,
 } from "./EmailPassword.js";
 import { MultiAlgorithmVerifier, PasswordHasher } from "./Password.js";
@@ -54,6 +55,11 @@ export interface UsernameConfig {
    * Runs on the raw (pre-normalized) username.
    */
   readonly usernameValidator?: (username: string) => Effect.Effect<void, UsernameError>;
+  /**
+   * When true, sign-in is blocked until the user's email address has been
+   * verified. Mirrors the same policy on EmailPasswordConfig. Default false.
+   */
+  readonly requireEmailVerification?: boolean;
 }
 
 export interface UsernameSignUpInput {
@@ -99,6 +105,7 @@ export interface UsernameServiceShape {
     AuthResult,
     | UsernameError
     | Errors.InvalidCredentialsError
+    | Errors.EmailNotVerifiedError
     | Errors.HashingError
     | Errors.AuthError
     | HookError,
@@ -131,6 +138,7 @@ export const makeUsernameService = (
   Effect.sync((): UsernameServiceShape => {
     const minLength = config.minUsernameLength ?? 3;
     const maxLength = config.maxUsernameLength ?? 30;
+    const requireEmailVerification = config.requireEmailVerification ?? false;
 
     const validate = (raw: string): Effect.Effect<string, UsernameError> =>
       Effect.gen(function* () {
@@ -224,6 +232,15 @@ export const makeUsernameService = (
           );
           if (!isValid) {
             return yield* invalid();
+          }
+
+          if (requireEmailVerification && !isEmailVerified(user)) {
+            return yield* Effect.fail(
+              new Errors.EmailNotVerifiedError({
+                message: "Email must be verified before sign-in",
+                email: user.email,
+              }),
+            );
           }
 
           // Silently upgrade the stored hash when the current hasher considers it outdated.

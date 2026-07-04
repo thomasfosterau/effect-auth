@@ -234,6 +234,26 @@ describe("UsernameService", () => {
     expect(result.session).toBeUndefined();
   });
 
+  it("blocks sign-in when email is unverified and requireEmailVerification is enabled", async () => {
+    await run((svc) =>
+      svc.signUp({ username: "hector", email: "hector@example.com", password: "password-123" }),
+    );
+    const err = await run(
+      (svc) => Effect.flip(svc.signIn({ username: "hector", password: "password-123" })),
+      { config: { requireEmailVerification: true } },
+    );
+    expect(err._tag).toBe("EmailNotVerifiedError");
+
+    // Once the email is marked verified the same credentials succeed.
+    const userId = usernameToId.get("hector")!;
+    usersById.set(userId, { ...usersById.get(userId)!, emailVerified: true });
+    const result = await run(
+      (svc) => svc.signIn({ username: "hector", password: "password-123" }),
+      { config: { requireEmailVerification: true } },
+    );
+    expect(result.session).toBeDefined();
+  });
+
   it("updates a username with uniqueness enforced", async () => {
     const a = await run((svc) =>
       svc.signUp({ username: "frank", email: "frank@example.com", password: "password-123" }),

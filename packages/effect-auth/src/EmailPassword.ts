@@ -172,7 +172,7 @@ export class EmailPasswordService extends Context.Service<
     Layer.effect(EmailPasswordService, makeEmailPasswordService(config));
 }
 
-const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
+export const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
 
 const validatePasswordLength = (
   password: string,
