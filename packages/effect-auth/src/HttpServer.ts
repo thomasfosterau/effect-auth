@@ -664,7 +664,12 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           // so subsequent reads within `maxAge` skip the store.
           if (cfg.cache !== undefined && !cacheHit) {
             const cache = cfg.cache;
-            const value = encodeSessionCacheCookie(resolved, cache, Date.now());
+            const value = encodeSessionCacheCookie(
+              resolved,
+              cache,
+              Date.now(),
+              resolved.session.id,
+            );
             return yield* HttpServerResponse.json(body).pipe(
               Effect.flatMap((response) =>
                 HttpServerResponse.setCookie(
@@ -813,7 +818,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return { status: true };
         }),
       )
-      .handle("changeEmailConfirm", ({ payload }) =>
+      .handle("changeEmailConfirm", ({ payload, request: _r }) =>
         Effect.gen(function* () {
           const account = yield* resolveAccountManagement;
           yield* account.provideStores(account.service.confirmEmailChange(payload.token)).pipe(
@@ -823,7 +828,19 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
             }),
           );
-          return { status: true };
+          return yield* HttpServerResponse.json({ status: true }).pipe(
+            Effect.flatMap((response) =>
+              cfg.cache !== undefined
+                ? HttpServerResponse.setCookie(
+                    response,
+                    dataCookieName(cfg),
+                    "",
+                    clearCookieOptions(cfg),
+                  )
+                : Effect.succeed(response),
+            ),
+            Effect.orDie,
+          );
         }),
       )
       .handle("deleteUserRequest", ({ request }) =>
@@ -842,7 +859,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return { status: true };
         }),
       )
-      .handle("deleteUserConfirm", ({ payload }) =>
+      .handle("deleteUserConfirm", ({ payload, request: _r }) =>
         Effect.gen(function* () {
           const account = yield* resolveAccountManagement;
           yield* account.provideStores(account.service.confirmAccountDeletion(payload.token)).pipe(
@@ -852,7 +869,19 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
             }),
           );
-          return { status: true };
+          return yield* HttpServerResponse.json({ status: true }).pipe(
+            Effect.flatMap((response) =>
+              cfg.cache !== undefined
+                ? HttpServerResponse.setCookie(
+                    response,
+                    dataCookieName(cfg),
+                    "",
+                    clearCookieOptions(cfg),
+                  )
+                : Effect.succeed(response),
+            ),
+            Effect.orDie,
+          );
         }),
       )
       .handle("listSessions", ({ request }) =>
@@ -1044,6 +1073,16 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 sessionCookieOptions(cfg, resolved.session.expiresAt),
               ),
             ),
+            Effect.flatMap((response) =>
+              cfg.cache !== undefined
+                ? HttpServerResponse.setCookie(
+                    response,
+                    dataCookieName(cfg),
+                    "",
+                    clearCookieOptions(cfg),
+                  )
+                : Effect.succeed(response),
+            ),
             Effect.orDie,
           );
         }),
@@ -1078,6 +1117,14 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 "",
                 clearCookieOptions(cfg),
               );
+              if (cfg.cache !== undefined) {
+                response = yield* HttpServerResponse.setCookie(
+                  response,
+                  dataCookieName(cfg),
+                  "",
+                  clearCookieOptions(cfg),
+                );
+              }
             }
             return response;
           }).pipe(Effect.orDie);
@@ -1681,6 +1728,16 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             Effect.flatMap((response) =>
               HttpServerResponse.setCookie(response, cfg.name, "", clearCookieOptions(cfg)),
             ),
+            Effect.flatMap((response) =>
+              cfg.cache !== undefined
+                ? HttpServerResponse.setCookie(
+                    response,
+                    dataCookieName(cfg),
+                    "",
+                    clearCookieOptions(cfg),
+                  )
+                : Effect.succeed(response),
+            ),
             Effect.orDie,
           );
         }),
@@ -2175,10 +2232,13 @@ const resolveSession = (
 > =>
   Effect.gen(function* () {
     if (cfg.cache !== undefined) {
-      const cached = request.cookies[dataCookieName(cfg)];
-      if (cached !== undefined) {
-        const resolved = decodeSessionCacheCookie(cached, cfg.cache, Date.now());
-        if (resolved !== null) return { resolved, cacheHit: true };
+      const primaryId = sessionIdFromRequest(request, cfg);
+      if (primaryId !== undefined) {
+        const cached = request.cookies[dataCookieName(cfg)];
+        if (cached !== undefined) {
+          const resolved = decodeSessionCacheCookie(cached, cfg.cache, Date.now(), primaryId);
+          if (resolved !== null) return { resolved, cacheHit: true };
+        }
       }
     }
     const sessionId = sessionIdFromRequest(request, cfg);
