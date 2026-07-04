@@ -562,10 +562,22 @@ export type ApiKeyUpdatePayload = typeof ApiKeyUpdatePayload.Type;
 // Google One Tap
 // -----------------------------------------------------------------------------
 
+/** Response body for the nonce-generation endpoint. */
+export const GoogleOneTapNonceView = Schema.Struct({
+  /** The server-side nonce. Pass this to Google's One Tap library (`data-nonce`). */
+  nonce: Schema.String,
+});
+export type GoogleOneTapNonceView = typeof GoogleOneTapNonceView.Type;
+
 /** Request body for a Google One Tap sign-in. */
 export const GoogleOneTapPayload = Schema.Struct({
   /** The One Tap `credential` (a Google-signed id_token). */
   credential: Schema.String,
+  /**
+   * The **unhashed** nonce returned by `GET /sign-in/google-one-tap/nonce`.
+   * Must match the nonce claim embedded by Google in the id_token.
+   */
+  nonce: Schema.String,
 });
 export type GoogleOneTapPayload = typeof GoogleOneTapPayload.Type;
 

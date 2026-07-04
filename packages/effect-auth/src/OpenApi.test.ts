@@ -109,6 +109,7 @@ const EXPECTED_PATHS = [
   "/oauth2/userinfo",
   "/.well-known/openid-configuration",
   "/.well-known/jwks.json",
+  "/sign-in/google-one-tap/nonce",
   "/sign-in/google-one-tap",
 ];
 

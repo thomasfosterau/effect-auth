@@ -53,7 +53,7 @@ import {
 } from "./OidcProvider.js";
 import { SsoService, SsoProviderStore, type SsoProvider } from "./Sso.js";
 import { OAuthStateStore, OAuthUserStore } from "./OAuth.js";
-import { GoogleOneTapService } from "./GoogleOneTap.js";
+import { GoogleOneTapNonceStore, GoogleOneTapService } from "./GoogleOneTap.js";
 import {
   decodeSessionCacheCookie,
   encodeSessionCacheCookie,
@@ -436,15 +436,19 @@ const resolveSso = Effect.gen(function* () {
   return { service: service.value, provideStores };
 });
 
-/** Resolve the Google One Tap service + user store, or fail with 404. */
+/** Resolve the Google One Tap service + required stores, or fail with 404. */
 const resolveGoogleOneTap = Effect.gen(function* () {
   const service = yield* Effect.serviceOption(GoogleOneTapService);
   const userStore = yield* Effect.serviceOption(OAuthUserStore);
-  if (Option.isNone(service) || Option.isNone(userStore)) {
+  const nonceStore = yield* Effect.serviceOption(GoogleOneTapNonceStore);
+  if (Option.isNone(service) || Option.isNone(userStore) || Option.isNone(nonceStore)) {
     return yield* new S.NotFound({ message: "Google One Tap is not enabled" });
   }
   const provideStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(Effect.provideService(OAuthUserStore, userStore.value));
+    effect.pipe(
+      Effect.provideService(OAuthUserStore, userStore.value),
+      Effect.provideService(GoogleOneTapNonceStore, nonceStore.value),
+    );
   return { service: service.value, provideStores };
 });
 
@@ -2528,11 +2532,24 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         }),
       )
       // --- Google One Tap -------------------------------------------------------
+      .handle("getGoogleOneTapNonce", () =>
+        Effect.gen(function* () {
+          const oneTap = yield* resolveGoogleOneTap;
+          const nonce = yield* oneTap.provideStores(oneTap.service.createNonce()).pipe(
+            Effect.catchTags({
+              GoogleOneTapError: (e) =>
+                Effect.fail(new S.InternalServerError({ message: e.message })),
+              AuthError: (e) => Effect.fail(new S.InternalServerError({ message: e.message })),
+            }),
+          );
+          return { nonce };
+        }),
+      )
       .handle("signInGoogleOneTap", ({ payload }) =>
         Effect.gen(function* () {
           const oneTap = yield* resolveGoogleOneTap;
           const result = yield* oneTap
-            .provideStores(oneTap.service.signIn(payload.credential))
+            .provideStores(oneTap.service.signIn(payload.credential, payload.nonce))
             .pipe(
               Effect.catchTags({
                 GoogleOneTapError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
