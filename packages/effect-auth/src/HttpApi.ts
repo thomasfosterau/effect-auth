@@ -97,7 +97,7 @@ export const authGroup = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("magicLinkSend", "/magic-link/send", {
     payload: S.MagicLinkSendPayload,
     success: S.StatusResponse,
-    error: [S.NotFoundError, S.InternalError],
+    error: [S.NotFoundError, S.TooManyRequestsError, S.InternalError],
   }),
   // Invalid/expired/replayed magic link tokens -> 400 BadRequest.
   HttpApiEndpoint.post("magicLinkVerify", "/magic-link/verify", {
@@ -137,7 +137,7 @@ export const authGroup = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("emailOtpSend", "/email-otp/send", {
     payload: S.EmailOtpSendPayload,
     success: S.StatusResponse,
-    error: [S.NotFoundError, S.InternalError],
+    error: [S.NotFoundError, S.TooManyRequestsError, S.InternalError],
   }),
   // Invalid/expired OTPs and exhausted attempts -> 400 BadRequest.
   HttpApiEndpoint.post("signInEmailOtp", "/sign-in/email-otp", {
@@ -222,7 +222,7 @@ export const authGroup = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("phoneOtpSend", "/phone-otp/send", {
     payload: S.PhoneOtpSendPayload,
     success: S.StatusResponse,
-    error: [S.NotFoundError, S.InternalError],
+    error: [S.NotFoundError, S.TooManyRequestsError, S.InternalError],
   }),
   HttpApiEndpoint.post("signInPhoneOtp", "/sign-in/phone-otp", {
     payload: S.PhoneOtpSignInPayload,
