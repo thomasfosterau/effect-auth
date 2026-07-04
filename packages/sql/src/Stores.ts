@@ -806,6 +806,11 @@ export const makeMagicLinkStore: Effect.Effect<
         "magicLink.get",
         sql<MagicLinkRow>`SELECT * FROM auth_magic_links WHERE token = ${token}`,
       ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
+    getByEmail: (email) =>
+      firstRow(
+        "magicLink.getByEmail",
+        sql<MagicLinkRow>`SELECT * FROM auth_magic_links WHERE email = ${email}`,
+      ).pipe(Effect.map((row) => (row ? rowToMagicLink(row) : null))),
     delete: (token) =>
       asVoid("magicLink.delete", sql`DELETE FROM auth_magic_links WHERE token = ${token}`),
     deleteByEmail: (email) =>

@@ -103,6 +103,13 @@ export interface EmailOtpConfig {
   readonly expiresIn?: number; // Default: 5 minutes
   readonly maxAttempts?: number; // Default: 3
   readonly disableSignUp?: boolean; // Default: false
+  /**
+   * Minimum interval (ms) between successive send requests for the same email
+   * + purpose pair. When an outstanding OTP created within this window already
+   * exists, `send` fails with {@link Errors.ResendTooSoonError}. Off by
+   * default. Complements the global RateLimit.
+   */
+  readonly resendCooldown?: number;
   readonly sendVerificationOtp: (
     email: string,
     otp: string,
@@ -144,11 +151,19 @@ export interface EmailOtpServiceShape {
    * Anti-enumeration: for `"sign-in"` with sign-up disabled and no matching
    * user, and for `"forget-password"` with no matching user, this succeeds
    * silently without sending anything.
+   *
+   * When `resendCooldown` is configured and an outstanding OTP for the email +
+   * purpose was created within the cooldown window, fails with
+   * {@link Errors.ResendTooSoonError} containing the remaining wait time.
    */
   readonly send: (
     email: string,
     purpose: EmailOtpPurpose,
-  ) => Effect.Effect<void, Errors.AuthError | EmailOtpError, EmailOtpStore | EmailOtpUserStore>;
+  ) => Effect.Effect<
+    void,
+    Errors.AuthError | EmailOtpError | Errors.ResendTooSoonError,
+    EmailOtpStore | EmailOtpUserStore
+  >;
 
   /**
    * Verify a `"sign-in"` OTP and create a session. Users created here are
@@ -306,6 +321,24 @@ export const makeEmailOtpService = (
             const user = yield* userStore.getUserByEmail(email);
             if (!user) {
               return;
+            }
+          }
+
+          // Resend cooldown: reject if an outstanding OTP was created within
+          // the configured window. The identifier (email) is already known to
+          // the caller, so this is not an enumeration risk.
+          if (config.resendCooldown !== undefined) {
+            const existing = yield* store.get(email, purpose);
+            if (existing !== null) {
+              const elapsed = Date.now() - existing.createdAt;
+              if (elapsed < config.resendCooldown) {
+                return yield* Effect.fail(
+                  new Errors.ResendTooSoonError({
+                    message: "Please wait before requesting another OTP",
+                    retryAfter: config.resendCooldown - elapsed,
+                  }),
+                );
+              }
             }
           }
 

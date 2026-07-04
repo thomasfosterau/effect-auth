@@ -57,6 +57,7 @@ export const ErrorCode = {
 
   // Misc
   RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
+  RESEND_TOO_SOON: "RESEND_TOO_SOON",
   MAGIC_LINK_ERROR: "MAGIC_LINK_ERROR",
   PASSWORD_RESET_ERROR: "PASSWORD_RESET_ERROR",
 } as const;
@@ -477,6 +478,21 @@ export class OAuthNoRefreshTokenError extends Data.TaggedError("OAuthNoRefreshTo
 // ---------------------------------------------------------------------------
 // Misc
 // ---------------------------------------------------------------------------
+
+/**
+ * Resend requested before the per-identifier cooldown window has elapsed.
+ * `retryAfter` is the number of milliseconds the caller must wait before
+ * sending again. Raised by the passwordless send paths when `resendCooldown`
+ * is configured in the flow config.
+ */
+export class ResendTooSoonError extends Data.TaggedError("ResendTooSoonError")<{
+  readonly message: string;
+  readonly retryAfter: number;
+}> {
+  get code(): typeof ErrorCode.RESEND_TOO_SOON {
+    return ErrorCode.RESEND_TOO_SOON;
+  }
+}
 
 /**
  * Rate limit exceeded. `retryAfter` is the number of milliseconds before the
