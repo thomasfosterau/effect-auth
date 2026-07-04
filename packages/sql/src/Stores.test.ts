@@ -123,6 +123,7 @@ describe("@effect-auth/sql stores over a real SqlClient", () => {
     expect(tables).toEqual([
       "auth_email_otps",
       "auth_email_verifications",
+      "auth_identifiers",
       "auth_magic_links",
       "auth_oauth_accounts",
       "auth_oauth_states",
@@ -665,6 +666,69 @@ describe("@effect-auth/sql stores over a real SqlClient", () => {
     expect(result?.expiresAt.getTime()).toBe(FAR_FUTURE_MS);
     expect(result?.createdAt.getTime()).toBe(FAR_FUTURE_MS - 1000);
     expect(result?.lastActivityAt.getTime()).toBe(FAR_FUTURE_MS - 500);
+  });
+
+  it("IdentifierStore roundtrips create/getByValue/listByUser/setVerified/delete/deleteByUser", async () => {
+    const now = new Date("2026-07-04T00:00:00.000Z");
+    const emailId: Auth.Identifier = {
+      id: "ident-email",
+      userId: "user-ident",
+      type: "email",
+      value: "alice@example.com",
+      verified: false,
+      createdAt: now,
+    };
+    const usernameId: Auth.Identifier = {
+      id: "ident-username",
+      userId: "user-ident",
+      type: "username",
+      value: "alice",
+      verified: true,
+      verifiedAt: now,
+      createdAt: new Date(now.getTime() + 1000),
+    };
+    const result = await run(
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        yield* store.create(emailId);
+        yield* store.create(usernameId);
+        const byEmail = yield* store.getByValue("email", "alice@example.com");
+        const missing = yield* store.getByValue("email", "nobody@example.com");
+        const listed = yield* store.listByUser("user-ident");
+        const emptyList = yield* store.listByUser("no-such-user");
+        const verifiedAt = new Date("2026-07-04T12:00:00.000Z");
+        const verified = yield* store.setVerified("ident-email", verifiedAt);
+        const verifiedMissing = yield* store.setVerified("no-such-id", verifiedAt);
+        const afterVerify = yield* store.getByValue("email", "alice@example.com");
+        yield* store.delete("ident-username");
+        const afterDelete = yield* store.getByValue("username", "alice");
+        yield* store.deleteByUser("user-ident");
+        const afterDeleteUser = yield* store.listByUser("user-ident");
+        return {
+          byEmail,
+          missing,
+          listed,
+          emptyList,
+          verified,
+          verifiedMissing,
+          afterVerify,
+          afterDelete,
+          afterDeleteUser,
+        };
+      }),
+    );
+    expect(result.byEmail?.id).toBe("ident-email");
+    expect(result.byEmail?.verified).toBe(false);
+    expect(result.byEmail?.createdAt).toBeInstanceOf(Date);
+    expect(result.missing).toBeNull();
+    expect(result.listed.map((i) => i.id)).toEqual(["ident-email", "ident-username"]);
+    expect(result.emptyList).toEqual([]);
+    expect(result.verified?.verified).toBe(true);
+    expect(result.verified?.verifiedAt).toBeInstanceOf(Date);
+    expect(result.verifiedMissing).toBeNull();
+    expect(result.afterVerify?.verified).toBe(true);
+    expect(result.afterDelete).toBeNull();
+    expect(result.afterDeleteUser).toHaveLength(0);
   });
 
   it("integration: SessionManager runs over the aggregate layer", async () => {

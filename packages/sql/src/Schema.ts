@@ -186,6 +186,17 @@ export const schemaStatements: readonly string[] = [
     expires_at BIGINT NOT NULL,
     created_at BIGINT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS auth_identifiers (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    value TEXT NOT NULL,
+    verified INTEGER NOT NULL DEFAULT 0,
+    verified_at INTEGER,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS auth_identifiers_type_value_idx ON auth_identifiers (type, value)`,
+  `CREATE INDEX IF NOT EXISTS auth_identifiers_user_idx ON auth_identifiers (user_id)`,
 ];
 
 /**
