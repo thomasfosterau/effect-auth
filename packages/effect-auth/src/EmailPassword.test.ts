@@ -11,6 +11,7 @@ import {
   makePBKDF2Hasher,
   makeScryptHasher,
   makeMultiAlgorithmVerifier,
+  type PasswordHasherShape,
 } from "./Password.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 
@@ -277,6 +278,111 @@ describe("EmailPasswordService", () => {
     if (result._tag === "Failure") {
       expect(result.failure._tag).toBe("EmailNotVerifiedError");
     }
+  });
+});
+
+describe("EmailPasswordService constant-work sign-in", () => {
+  beforeEach(() => {
+    users.clear();
+    usersByEmail.clear();
+    passwordHashes.clear();
+    sessions.clear();
+  });
+
+  it("calls passwordHasher.verify even when the email does not exist", async () => {
+    let verifyCalls = 0;
+    const realHasher = makePBKDF2Hasher();
+    const spyHasher: PasswordHasherShape = {
+      algorithm: realHasher.algorithm,
+      hash: (password) => realHasher.hash(password),
+      verify: (password, hash) => {
+        verifyCalls++;
+        return realHasher.verify(password, hash);
+      },
+    };
+
+    const sessionManager = await Effect.runPromise(
+      Effect.provide(
+        makeSessionManager({ sessionExpiresIn: { activePeriod: 86400000, idlePeriod: 43200000 } }),
+        Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+      ),
+    );
+
+    const ctx = Context.merge(
+      Context.make(SessionManager, sessionManager),
+      Context.merge(
+        Context.make(EmailPasswordStore, emailPasswordStore),
+        Context.make(PasswordHasher, spyHasher),
+      ),
+    );
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeEmailPasswordService();
+      return yield* Effect.result(
+        service.signIn({ email: "ghost@example.com", password: "any-password" }),
+      );
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, ctx).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    expect(verifyCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it("calls passwordHasher.verify even when the user has no password hash", async () => {
+    let verifyCalls = 0;
+    const realHasher = makePBKDF2Hasher();
+    const spyHasher: PasswordHasherShape = {
+      algorithm: realHasher.algorithm,
+      hash: (password) => realHasher.hash(password),
+      verify: (password, hash) => {
+        verifyCalls++;
+        return realHasher.verify(password, hash);
+      },
+    };
+
+    const user: User = {
+      id: "user-nohash",
+      email: "nohash@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(user.id, user);
+    usersByEmail.set(user.email, user.id);
+    // Intentionally no password hash stored for this user.
+
+    const sessionManager = await Effect.runPromise(
+      Effect.provide(
+        makeSessionManager({ sessionExpiresIn: { activePeriod: 86400000, idlePeriod: 43200000 } }),
+        Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+      ),
+    );
+
+    const ctx = Context.merge(
+      Context.make(SessionManager, sessionManager),
+      Context.merge(
+        Context.make(EmailPasswordStore, emailPasswordStore),
+        Context.make(PasswordHasher, spyHasher),
+      ),
+    );
+
+    const program = Effect.gen(function* () {
+      const service = yield* makeEmailPasswordService();
+      return yield* Effect.result(
+        service.signIn({ email: "nohash@example.com", password: "any-password" }),
+      );
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, ctx).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    expect(verifyCalls).toBeGreaterThanOrEqual(1);
   });
 });
 

@@ -134,12 +134,25 @@ const DEFAULT_CHARSET = /^[a-zA-Z0-9_.]+$/;
 
 export const makeUsernameService = (
   config: UsernameConfig = {},
-): Effect.Effect<UsernameServiceShape, never> =>
-  Effect.sync((): UsernameServiceShape => {
-    const minLength = config.minUsernameLength ?? 3;
-    const maxLength = config.maxUsernameLength ?? 30;
-    const requireEmailVerification = config.requireEmailVerification ?? false;
+): Effect.Effect<UsernameServiceShape, never> => {
+  // Cached decoy hash — computed on first signIn call so that unknown-username
+  // attempts always perform the same hashing work as known-username ones.
+  let cachedDecoyHash: string | undefined;
+  const getDecoyHash: Effect.Effect<string, Errors.HashingError, PasswordHasher> = Effect.gen(
+    function* () {
+      if (cachedDecoyHash !== undefined) return cachedDecoyHash;
+      const hasher = yield* PasswordHasher;
+      const result = yield* hasher.hash("effect-auth-decoy");
+      cachedDecoyHash = result.hash;
+      return cachedDecoyHash;
+    },
+  );
 
+  const minLength = config.minUsernameLength ?? 3;
+  const maxLength = config.maxUsernameLength ?? 30;
+  const requireEmailVerification = config.requireEmailVerification ?? false;
+
+  return Effect.sync((): UsernameServiceShape => {
     const validate = (raw: string): Effect.Effect<string, UsernameError> =>
       Effect.gen(function* () {
         const trimmed = raw.trim();
@@ -212,25 +225,21 @@ export const makeUsernameService = (
           }
 
           const user = yield* store.getUserByUsername(username);
-          if (!user) {
-            return yield* invalid();
-          }
-
-          const passwordHash = yield* emailPasswordStore.getPasswordHash(user.id);
-          if (!passwordHash) {
-            return yield* invalid();
-          }
-
-          // Route through MultiAlgorithmVerifier when present (migration support).
-          // Convert HashingError (format/algorithm mismatch) → invalid credentials.
+          const passwordHash =
+            user !== null ? yield* emailPasswordStore.getPasswordHash(user.id) : null;
+          // Always verify against a real or decoy hash so timing is constant
+          // regardless of whether the account exists.  Route through
+          // MultiAlgorithmVerifier when present so that a hasher switch does not
+          // lock out existing users.
+          const hashToVerify = passwordHash ?? (yield* getDecoyHash);
           const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
           const verifyEffect = Option.isSome(multiVerifier)
-            ? multiVerifier.value.verify(input.password, passwordHash)
-            : passwordHasher.verify(input.password, passwordHash);
+            ? multiVerifier.value.verify(input.password, hashToVerify)
+            : passwordHasher.verify(input.password, hashToVerify);
           const isValid = yield* verifyEffect.pipe(
             Effect.catchTag("HashingError", () => Effect.succeed(false)),
           );
-          if (!isValid) {
+          if (user === null || passwordHash === null || !isValid) {
             return yield* invalid();
           }
 
@@ -244,7 +253,7 @@ export const makeUsernameService = (
           }
 
           // Silently upgrade the stored hash when the current hasher considers it outdated.
-          if (passwordHasher.needsRehash?.(passwordHash)) {
+          if (passwordHasher.needsRehash?.(passwordHash!)) {
             yield* passwordHasher.hash(input.password).pipe(
               Effect.flatMap((newHash) =>
                 emailPasswordStore.setPasswordHash(user.id, newHash.hash),
@@ -278,3 +287,4 @@ export const makeUsernameService = (
         }),
     };
   });
+};

@@ -482,7 +482,8 @@ const makeFixture = (): Fixture => {
     services,
     AnonymousService.layer(),
     Layer.succeed(AnonymousUserStore)(anonymousUserStore),
-    UsernameService.layer(),
+    // UsernameService.layer requires PasswordHasher at construction time (decoy hash).
+    UsernameService.layer().pipe(Layer.provide(Layer.succeed(PasswordHasher)(hasher))),
     Layer.succeed(UsernameStore)(usernameStore),
     DeviceAuthorizationService.layer({
       verificationUri: "https://example.com/device",

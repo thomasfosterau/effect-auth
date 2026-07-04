@@ -194,9 +194,13 @@ See [Oslo library](https://github.com/pilcrowonpaper/oslo) for MFA primitives.
 
 ### Timing Attacks
 
-**Mitigated**: All security-sensitive comparisons use `crypto.timingSafeEqual`
+**Mitigated**: Constant-work sign-in and timing-safe comparisons prevent user enumeration.
 
-- Password verification: ✓ Timing-safe
+- Password verification: ✓ Timing-safe (`crypto.timingSafeEqual` inside the hasher)
+- Sign-in constant work: ✓ A decoy hash is derived from the active `PasswordHasher` at
+  service construction. Every sign-in attempt — whether the account exists or not —
+  calls `passwordHasher.verify` against either the real stored hash or the decoy,
+  so the observable response time does not reveal account existence.
 - Session validation: ✓ Timing-safe
 - Token comparison: ✓ Timing-safe
 

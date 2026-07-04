@@ -211,6 +211,19 @@ export const makeEmailPasswordService = (
     autoSignIn: config.autoSignIn ?? true,
   };
 
+  // Cached decoy hash — computed on first signIn call so that unknown-user
+  // attempts always perform the same hashing work as known-user ones.
+  let cachedDecoyHash: string | undefined;
+  const getDecoyHash: Effect.Effect<string, Errors.HashingError, PasswordHasher> = Effect.gen(
+    function* () {
+      if (cachedDecoyHash !== undefined) return cachedDecoyHash;
+      const hasher = yield* PasswordHasher;
+      const result = yield* hasher.hash("effect-auth-decoy");
+      cachedDecoyHash = result.hash;
+      return cachedDecoyHash;
+    },
+  );
+
   return Effect.sync(
     (): EmailPasswordServiceShape => ({
       signUp: (rawInput) =>
@@ -307,37 +320,21 @@ export const makeEmailPasswordService = (
           }
 
           const user = yield* store.getUserByEmail(email);
-          if (!user) {
-            return yield* Effect.fail(
-              new Errors.InvalidCredentialsError({
-                message: "Invalid email or password",
-              }),
-            );
-          }
-
-          const passwordHash = yield* store.getPasswordHash(user.id);
-          if (!passwordHash) {
-            return yield* Effect.fail(
-              new Errors.InvalidCredentialsError({
-                message: "Invalid email or password",
-              }),
-            );
-          }
-
-          // Route through MultiAlgorithmVerifier when present in context so that
-          // a hasher switch (e.g. PBKDF2 → scrypt) does not lock out users whose
-          // hashes were produced with the previous algorithm.  Fall back to the
-          // current PasswordHasher when no verifier is configured.  In both
-          // cases, convert HashingError (format / algorithm mismatch) to false so
-          // sign-in always returns InvalidCredentialsError and never a 500.
+          const passwordHash = user !== null ? yield* store.getPasswordHash(user.id) : null;
+          // Always verify against a real or decoy hash so timing is constant
+          // regardless of whether the account exists.  Route through
+          // MultiAlgorithmVerifier when present so that a hasher switch does not
+          // lock out existing users.  Convert HashingError to false so sign-in
+          // always returns InvalidCredentialsError and never a 500.
+          const hashToVerify = passwordHash ?? (yield* getDecoyHash);
           const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
           const verifyEffect = Option.isSome(multiVerifier)
-            ? multiVerifier.value.verify(input.password, passwordHash)
-            : passwordHasher.verify(input.password, passwordHash);
+            ? multiVerifier.value.verify(input.password, hashToVerify)
+            : passwordHasher.verify(input.password, hashToVerify);
           const isValid = yield* verifyEffect.pipe(
             Effect.catchTag("HashingError", () => Effect.succeed(false)),
           );
-          if (!isValid) {
+          if (user === null || passwordHash === null || !isValid) {
             return yield* Effect.fail(
               new Errors.InvalidCredentialsError({
                 message: "Invalid email or password",
@@ -349,7 +346,7 @@ export const makeEmailPasswordService = (
           // it outdated (e.g. iteration count raised, algorithm switched).  A
           // failure here must never abort sign-in — the user is already
           // authenticated at this point.
-          if (passwordHasher.needsRehash?.(passwordHash)) {
+          if (passwordHasher.needsRehash?.(passwordHash!)) {
             yield* passwordHasher.hash(input.password).pipe(
               Effect.flatMap((newHash) => store.setPasswordHash(user.id, newHash.hash)),
               Effect.ignore,
