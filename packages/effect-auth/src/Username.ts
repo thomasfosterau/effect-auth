@@ -134,18 +134,25 @@ const DEFAULT_CHARSET = /^[a-zA-Z0-9_.]+$/;
 
 export const makeUsernameService = (
   config: UsernameConfig = {},
-): Effect.Effect<UsernameServiceShape, Errors.HashingError, PasswordHasher> =>
-  Effect.gen(function* () {
-    // Compute a decoy hash at construction time using the active hasher so that
-    // sign-in attempts for unknown usernames perform the same hashing work as real ones.
-    const initHasher = yield* PasswordHasher;
-    const decoyResult = yield* initHasher.hash("effect-auth-decoy");
-    const decoyHash = decoyResult.hash;
+): Effect.Effect<UsernameServiceShape, never> => {
+  // Cached decoy hash — computed on first signIn call so that unknown-username
+  // attempts always perform the same hashing work as known-username ones.
+  let cachedDecoyHash: string | undefined;
+  const getDecoyHash: Effect.Effect<string, Errors.HashingError, PasswordHasher> = Effect.gen(
+    function* () {
+      if (cachedDecoyHash !== undefined) return cachedDecoyHash;
+      const hasher = yield* PasswordHasher;
+      const result = yield* hasher.hash("effect-auth-decoy");
+      cachedDecoyHash = result.hash;
+      return cachedDecoyHash;
+    },
+  );
 
-    const minLength = config.minUsernameLength ?? 3;
-    const maxLength = config.maxUsernameLength ?? 30;
-    const requireEmailVerification = config.requireEmailVerification ?? false;
+  const minLength = config.minUsernameLength ?? 3;
+  const maxLength = config.maxUsernameLength ?? 30;
+  const requireEmailVerification = config.requireEmailVerification ?? false;
 
+  return Effect.sync((): UsernameServiceShape => {
     const validate = (raw: string): Effect.Effect<string, UsernameError> =>
       Effect.gen(function* () {
         const trimmed = raw.trim();
@@ -224,7 +231,7 @@ export const makeUsernameService = (
           // regardless of whether the account exists.  Route through
           // MultiAlgorithmVerifier when present so that a hasher switch does not
           // lock out existing users.
-          const hashToVerify = passwordHash ?? decoyHash;
+          const hashToVerify = passwordHash ?? (yield* getDecoyHash);
           const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
           const verifyEffect = Option.isSome(multiVerifier)
             ? multiVerifier.value.verify(input.password, hashToVerify)
@@ -280,3 +287,4 @@ export const makeUsernameService = (
         }),
     };
   });
+};

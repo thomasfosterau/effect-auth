@@ -11,6 +11,7 @@ import {
   makePBKDF2Hasher,
   makeScryptHasher,
   makeMultiAlgorithmVerifier,
+  type PasswordHasherShape,
 } from "./Password.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 

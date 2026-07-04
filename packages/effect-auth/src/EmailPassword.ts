@@ -202,7 +202,7 @@ const validatePasswordLength = (
 
 export const makeEmailPasswordService = (
   config: EmailPasswordConfig = {},
-): Effect.Effect<EmailPasswordServiceShape, Errors.HashingError, PasswordHasher> => {
+): Effect.Effect<EmailPasswordServiceShape, never> => {
   const resolved = {
     disableSignUp: config.disableSignUp ?? false,
     requireEmailVerification: config.requireEmailVerification ?? false,
@@ -211,14 +211,21 @@ export const makeEmailPasswordService = (
     autoSignIn: config.autoSignIn ?? true,
   };
 
-  return Effect.gen(function* () {
-    // Compute a decoy hash at construction time using the active hasher so that
-    // sign-in attempts for unknown users perform the same hashing work as real ones.
-    const initHasher = yield* PasswordHasher;
-    const decoyResult = yield* initHasher.hash("effect-auth-decoy");
-    const decoyHash = decoyResult.hash;
+  // Cached decoy hash — computed on first signIn call so that unknown-user
+  // attempts always perform the same hashing work as known-user ones.
+  let cachedDecoyHash: string | undefined;
+  const getDecoyHash: Effect.Effect<string, Errors.HashingError, PasswordHasher> = Effect.gen(
+    function* () {
+      if (cachedDecoyHash !== undefined) return cachedDecoyHash;
+      const hasher = yield* PasswordHasher;
+      const result = yield* hasher.hash("effect-auth-decoy");
+      cachedDecoyHash = result.hash;
+      return cachedDecoyHash;
+    },
+  );
 
-    return {
+  return Effect.sync(
+    (): EmailPasswordServiceShape => ({
       signUp: (rawInput) =>
         Effect.gen(function* () {
           const hooks = yield* Hooks;
@@ -319,7 +326,7 @@ export const makeEmailPasswordService = (
           // MultiAlgorithmVerifier when present so that a hasher switch does not
           // lock out existing users.  Convert HashingError to false so sign-in
           // always returns InvalidCredentialsError and never a 500.
-          const hashToVerify = passwordHash ?? decoyHash;
+          const hashToVerify = passwordHash ?? (yield* getDecoyHash);
           const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
           const verifyEffect = Option.isSome(multiVerifier)
             ? multiVerifier.value.verify(input.password, hashToVerify)
@@ -439,6 +446,6 @@ export const makeEmailPasswordService = (
           const hashedPassword = yield* passwordHasher.hash(newPassword);
           yield* store.setPasswordHash(userId, hashedPassword.hash);
         }),
-    };
-  });
+    }),
+  );
 };
