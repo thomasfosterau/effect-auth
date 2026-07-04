@@ -2,16 +2,9 @@
 
 ## Overview
 
-Effect Auth is a generic, type-safe authentication and authorization library for
-[Effect](https://effect.website/) v4, following best practices from Lucia, the
-Copenhagen Book, Oslo, and BetterAuth. It is a Bun-workspaces monorepo: the core
-library (`effect-auth`, ~44 modules) plus focused companion packages
-(`@effect-auth/client`, `@effect-auth/sql`, `@effect-auth/argon2`,
-`@effect-auth/alchemy`, `@effect-auth/workos`).
+Effect Auth is a generic, type-safe authentication and authorization library for [Effect](https://effect.website/) v4, following best practices from Lucia, the Copenhagen Book, Oslo, and BetterAuth. It is a Bun-workspaces monorepo: the core library (`effect-auth`, ~44 modules) plus focused companion packages (`@effect-auth/sql`, `@effect-auth/alchemy`).
 
-The settled API conventions — naming, export shapes, store contracts, error
-taxonomy — are recorded with rationale in [DESIGN.md](./DESIGN.md). This
-document describes how the pieces fit together.
+The settled API conventions — naming, export shapes, store contracts, error taxonomy — are recorded with rationale in [DESIGN.md](./DESIGN.md). This document describes how the pieces fit together.
 
 ## Core Principles
 
@@ -160,10 +153,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
   `Origin` header must match the request origin or the configured
   `trustedOrigins`; requests without one (curl, server-to-server) pass.
 - **Clients**: `HttpClient.ts` derives a full-parity Effect client from the
-  contract (`client.auth.<operationId>`); `@effect-auth/client` is a
-  hand-written, dependency-free browser client covering the
-  cookie-authenticated end-user flows, with an observable session store and
-  React/Svelte/Vue bindings (DESIGN.md D8).
+  contract (`client.auth.<operationId>`).
 
 ## Security Considerations
 

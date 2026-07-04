@@ -32,18 +32,14 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🅶 **Google One Tap**: Verify the One Tap credential against Google's JWKS and sign in by verified email
 - 🧠 **Last Login Method**: A hooks plugin + non-httpOnly cookie hint so login pages can highlight the user's previous sign-in method
 - 👥 **Multi-Session**: Several signed-in accounts per browser with list/switch/revoke endpoints
-- 📱 **Framework Clients**: `@effect-auth/client` — a small dependency-free browser client with an observable session store and React/Svelte/Vue bindings
 
 ## Packages
 
-| Package                | Purpose                                                           |
-| ---------------------- | ----------------------------------------------------------------- |
-| `effect-auth`          | The core library: every module above, `node:crypto` only          |
-| `@effect-auth/client`  | Browser client + React/Svelte/Vue bindings over the HTTP contract |
-| `@effect-auth/sql`     | Driver-agnostic SQL storage layers (`effect/unstable/sql`)        |
-| `@effect-auth/argon2`  | Argon2id password hasher (prebuilt native bindings)               |
-| `@effect-auth/alchemy` | Alchemy v2 infra resources + Cloudflare D1 storage layers         |
-| `@effect-auth/workos`  | Effect-native WorkOS SDK bindings                                 |
+| Package                | Purpose                                                    |
+| ---------------------- | ---------------------------------------------------------- |
+| `effect-auth`          | The core library: every module above, `node:crypto` only   |
+| `@effect-auth/sql`     | Driver-agnostic SQL storage layers (`effect/unstable/sql`) |
+| `@effect-auth/alchemy` | Alchemy v2 infra resources + Cloudflare D1 storage layers  |
 
 ## Installation
 

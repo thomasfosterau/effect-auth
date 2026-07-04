@@ -1,47 +1,69 @@
 {
-  "name": "effect-auth-monorepo",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Monorepo for effect-auth, an experimental Auth library for Effect.",
+  "name": "effect-auth",
+  "version": "0.1.0",
+  "description": "An experimental Auth library for Effect.",
+  "keywords": [
+    "auth",
+    "authentication",
+    "authorization",
+    "effect",
+    "session"
+  ],
   "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
   "bugs": {
     "url": "https://github.com/thomasfosterau/effect-auth/issues"
   },
   "license": "MIT",
-  "author": "",
+  "author": "Thomas Foster <me@thomasfoster.au>",
   "repository": {
     "type": "git",
     "url": "https://github.com/thomasfosterau/effect-auth.git"
   },
   "workspaces": [
-    "packages/*",
-    "examples/*",
-    "site"
+    "packages/*"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "scripts": {
-    "nx": "nx",
-    "build": "nx run-many -t build",
-    "test": "nx run-many -t test",
-    "typecheck": "nx run-many -t typecheck",
-    "test:watch": "nx run effect-auth:test --configuration=watch",
     "prepare": "vp config && bunx effect-language-service patch",
     "prepublishOnly": "nx run-many -t build,typecheck,test --projects effect-auth",
     "changeset": "nx changeset effect-auth",
     "version": "nx version effect-auth",
     "release": "nx run effect-auth:build && nx run effect-auth:release",
-    "dev:site": "nx dev site",
-    "build:site": "nx build site",
-    "preview:site": "nx preview site",
-    "docs:api": "nx docs effect-auth && bun run --cwd site sync:api && vp check --fix site/src/content/docs/reference/api"
+    "build": "tsc",
+    "test": "vp test run",
+    "typecheck": "tsc --noEmit && vp test --typecheck --run",
+    "docs": "docgen"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
+    "@oslojs/webauthn": "^1.0.0"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.29.8",
-    "@effect/language-service": "^0.86.2",
-    "@types/node": "^25.2.0",
-    "nx": "^22.5.4",
-    "typescript": "^5.9.3",
-    "vite-plus": "^0.1.22"
+    "@changesets/cli": "^2.31.0",
+    "@effect/docgen": "^0.5.2",
+    "@effect/language-service": "^0.86.4",
+    "@types/node": "^26.1.0",
+    "effect": ">=4.0.0-beta.93",
+    "tsx": "^4.19.0",
+    "typescript": "^6.0.3",
+    "vite-plus": "^0.2.2"
+  },
+  "peerDependencies": {
+    "effect": ">=4.0.0-beta.93"
   },
   "engines": {
     "bun": ">=1.2.0"
