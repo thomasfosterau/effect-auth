@@ -206,6 +206,15 @@ const sessionCookieOptions = (cfg: ResolvedCookieConfig, expiresAt: Date) =>
     expires: expiresAt,
   }) as const;
 
+/** Options for a browser-session cookie (cleared on browser close, no Max-Age/Expires). */
+const sessionOnlyCookieOptions = (cfg: ResolvedCookieConfig) =>
+  ({
+    httpOnly: true,
+    sameSite: "lax",
+    secure: cfg.secure,
+    path: cfg.path,
+  }) as const;
+
 const clearCookieOptions = (cfg: ResolvedCookieConfig) =>
   ({
     httpOnly: true,
@@ -652,6 +661,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               email: payload.email,
               password: payload.password,
               ...(payload.captchaToken !== undefined && { captchaToken: payload.captchaToken }),
+              ...(payload.rememberMe !== undefined && { rememberMe: payload.rememberMe }),
             })
             .pipe(
               Effect.catchTags({
@@ -694,7 +704,13 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             needsEmailVerification: result.needsEmailVerification,
             ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
           };
-          return yield* withSessionCookie(body, result.session, cfg, "email-password");
+          return yield* withSessionCookie(
+            body,
+            result.session,
+            cfg,
+            "email-password",
+            result.rememberMe,
+          );
         }),
       )
       .handle("signOut", ({ request }) =>
@@ -1264,7 +1280,11 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const username = yield* resolveUsername;
           const result = yield* username
             .provideStores(
-              username.service.signIn({ username: payload.username, password: payload.password }),
+              username.service.signIn({
+                username: payload.username,
+                password: payload.password,
+                ...(payload.rememberMe !== undefined && { rememberMe: payload.rememberMe }),
+              }),
             )
             .pipe(
               Effect.catchTags({
@@ -1307,7 +1327,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             needsEmailVerification: false,
             ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
           };
-          return yield* withSessionCookie(body, result.session, cfg, "username");
+          return yield* withSessionCookie(body, result.session, cfg, "username", result.rememberMe);
         }),
       )
       .handle("multiSessionList", ({ request }) =>
@@ -2728,22 +2748,27 @@ const requireSession = (
  * Attach the session cookie to a JSON `AuthSuccess` response when a session is
  * present. When the last-login-method hint is enabled and `method` is given,
  * also (re)writes the non-httpOnly `${name}_last_method` cookie.
+ *
+ * When `rememberMe` is `false`, a browser-session cookie is emitted (no
+ * `Max-Age`/`Expires`) so the cookie is cleared when the browser closes.
+ * The server-side session lifetime is unchanged; orphaned sessions expire via
+ * the normal idle/absolute-lifetime checks.
  */
 const withSessionCookie = (
   body: S.AuthSuccess,
   session: Types.Session | undefined,
   cfg: ResolvedCookieConfig,
   method?: string,
+  rememberMe?: boolean,
 ) =>
   Effect.gen(function* () {
     const json = yield* HttpServerResponse.json(body);
     if (session === undefined) return json;
-    let response = yield* HttpServerResponse.setCookie(
-      json,
-      cfg.name,
-      session.id,
-      sessionCookieOptions(cfg, session.expiresAt),
-    );
+    const cookieOpts =
+      rememberMe === false
+        ? sessionOnlyCookieOptions(cfg)
+        : sessionCookieOptions(cfg, session.expiresAt);
+    let response = yield* HttpServerResponse.setCookie(json, cfg.name, session.id, cookieOpts);
     // Multi-session: append the new session to the device's session list (the
     // primary cookie remains the active session), capped to `maximumSessions`.
     if (cfg.multiSession !== undefined) {
@@ -2754,7 +2779,7 @@ const withSessionCookie = (
         response,
         multiCookieName(cfg),
         ids.join("."),
-        sessionCookieOptions(cfg, session.expiresAt),
+        cookieOpts,
       );
     }
     // Last-login-method hint: a page-readable cookie login UIs use to

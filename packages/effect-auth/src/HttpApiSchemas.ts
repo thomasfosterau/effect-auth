@@ -63,6 +63,12 @@ export const SignInPayload = Schema.Struct({
   password: Schema.String,
   /** Optional captcha token consumed by the `CaptchaPlugin`. */
   captchaToken: Schema.optional(Schema.String),
+  /**
+   * When `false`, the response sets a browser-session cookie (no
+   * `Max-Age`/`Expires`) that is cleared when the browser is closed. Omit or
+   * pass `true` for a persistent cookie matching `session.expiresAt`.
+   */
+  rememberMe: Schema.optional(Schema.Boolean),
 });
 export type SignInPayload = typeof SignInPayload.Type;
 
@@ -245,6 +251,11 @@ export type DeviceUserCodePayload = typeof DeviceUserCodePayload.Type;
 export const UsernameSignInPayload = Schema.Struct({
   username: Schema.String,
   password: Schema.String,
+  /**
+   * When `false`, the response sets a browser-session cookie. See
+   * `SignInPayload.rememberMe` for details.
+   */
+  rememberMe: Schema.optional(Schema.Boolean),
 });
 export type UsernameSignInPayload = typeof UsernameSignInPayload.Type;
 
