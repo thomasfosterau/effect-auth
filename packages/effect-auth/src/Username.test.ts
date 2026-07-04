@@ -15,7 +15,7 @@ import {
   type EmailPasswordStoreShape,
   type SecondFactorGateShape,
 } from "./EmailPassword.js";
-import { PasswordHasher, makeScryptHasher } from "./Password.js";
+import { PasswordHasher, makeScryptHasher, type PasswordHasherShape } from "./Password.js";
 import { SessionManager, SessionStore, UserStore } from "./Session.js";
 import type { SessionStoreShape, UserStoreShape } from "./Session.js";
 import { Hooks } from "./Hooks.js";
@@ -108,10 +108,12 @@ const userStore: UserStoreShape = {
   getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
 };
 
+const hasherLayer = Layer.succeed(PasswordHasher)(hasher);
+
 const baseDeps = Layer.mergeAll(
   Layer.succeed(UsernameStore)(usernameStore),
   Layer.succeed(EmailPasswordStore)(emailPasswordStore),
-  Layer.succeed(PasswordHasher)(hasher),
+  hasherLayer,
   SessionManager.layer(sessionConfig).pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -120,7 +122,9 @@ const baseDeps = Layer.mergeAll(
       ),
     ),
   ),
-  EmailPasswordService.layer({}),
+  // EmailPasswordService.layer now requires PasswordHasher at construction (for the
+  // decoy hash). Layer.mergeAll does not auto-wire, so pipe Layer.provide explicitly.
+  EmailPasswordService.layer({}).pipe(Layer.provide(hasherLayer)),
   Hooks.Default,
 );
 
@@ -141,13 +145,11 @@ const run = <A, E>(
   f: (svc: UsernameServiceShape) => Effect.Effect<A, E, UsernameDeps>,
   opts?: { config?: UsernameConfig; gate?: SecondFactorGateShape },
 ) => {
+  // UsernameService.layer also requires PasswordHasher at construction time (decoy hash).
+  const usernameLayer = UsernameService.layer(opts?.config).pipe(Layer.provide(hasherLayer));
   const layer = opts?.gate
-    ? Layer.mergeAll(
-        UsernameService.layer(opts.config),
-        baseDeps,
-        Layer.succeed(SecondFactorGate)(opts.gate),
-      )
-    : Layer.mergeAll(UsernameService.layer(opts?.config), baseDeps);
+    ? Layer.mergeAll(usernameLayer, baseDeps, Layer.succeed(SecondFactorGate)(opts.gate))
+    : Layer.mergeAll(usernameLayer, baseDeps);
   return Effect.runPromise(
     Effect.gen(function* () {
       const svc = yield* UsernameService;
@@ -252,6 +254,51 @@ describe("UsernameService", () => {
       { config: { requireEmailVerification: true } },
     );
     expect(result.session).toBeDefined();
+  });
+
+  it("calls passwordHasher.verify even for an unknown username (constant-work)", async () => {
+    let verifyCalls = 0;
+    const realHasher = makeScryptHasher({ cost: 16384 });
+    const spyHasher: PasswordHasherShape = {
+      algorithm: realHasher.algorithm,
+      hash: (password) => realHasher.hash(password),
+      verify: (password, hash) => {
+        verifyCalls++;
+        return realHasher.verify(password, hash);
+      },
+    };
+
+    const spyHasherLayer = Layer.succeed(PasswordHasher)(spyHasher);
+
+    const spyDeps = Layer.mergeAll(
+      Layer.succeed(UsernameStore)(usernameStore),
+      Layer.succeed(EmailPasswordStore)(emailPasswordStore),
+      spyHasherLayer,
+      SessionManager.layer(sessionConfig).pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(SessionStore)(sessionStore),
+            Layer.succeed(UserStore)(userStore),
+          ),
+        ),
+      ),
+      EmailPasswordService.layer({}).pipe(Layer.provide(spyHasherLayer)),
+      Hooks.Default,
+    );
+
+    const err = await Effect.runPromise(
+      Effect.gen(function* () {
+        const svc = yield* UsernameService;
+        return yield* Effect.flip(svc.signIn({ username: "ghost", password: "any-password" }));
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(UsernameService.layer().pipe(Layer.provide(spyHasherLayer)), spyDeps),
+        ),
+      ),
+    );
+
+    expect(err._tag).toBe("InvalidCredentialsError");
+    expect(verifyCalls).toBeGreaterThanOrEqual(1);
   });
 
   it("updates a username with uniqueness enforced", async () => {

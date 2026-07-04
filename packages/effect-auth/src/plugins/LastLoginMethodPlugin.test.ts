@@ -82,10 +82,9 @@ const makeFixture = () => {
 describe("LastLoginMethodPlugin", () => {
   it("records the method into session.attributes on sign-up and sign-in", async () => {
     const { layer, sessions } = makeFixture();
-    const service = await Effect.runPromise(makeEmailPasswordService());
-
     const { signedUp, signedIn } = await Effect.runPromise(
       Effect.gen(function* () {
+        const service = yield* makeEmailPasswordService();
         const signedUp = yield* service.signUp({
           email: "alice@test.dev",
           password: "password-123",
