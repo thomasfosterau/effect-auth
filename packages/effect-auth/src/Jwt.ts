@@ -24,7 +24,7 @@
  * @module jwt
  */
 
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Deferred, Effect, Layer, Ref } from "effect";
 import * as crypto from "node:crypto";
 import { makeAes256GcmCipher } from "./Cipher.js";
 import type { TokenCipher } from "./Cipher.js";
@@ -95,6 +95,13 @@ export interface JwtConfig {
   /** Extra claims merged into every token's payload */
   readonly definePayload?: (user: Types.User) => Record<string, unknown>;
   /**
+   * Clock-skew tolerance in milliseconds applied to `exp` and `nbf` checks.
+   * A token expired by less than `clockSkewLeeway` ms is still accepted;
+   * a not-yet-valid token whose `nbf` is within `clockSkewLeeway` ms in the
+   * future is also accepted. Default: 0 (zero tolerance).
+   */
+  readonly clockSkewLeeway?: number;
+  /**
    * Opt-in encryption-at-rest for the PKCS#8 PEM private key stored in
    * {@link JwtKeyStore}. The store sees only ciphertext; plaintext is only
    * ever held in memory during signing.
@@ -143,7 +150,7 @@ export interface JwtServiceShape {
   /**
    * Verify a compact JWS and return its decoded payload. Validates the
    * signature against the stored key whose `kid` matches the header, then
-   * checks `exp`, `iss`, and (when configured) `aud`. Fails with
+   * checks `exp`, `nbf`, `iss`, and (when configured) `aud`. Fails with
    * {@link JwtError} on any mismatch.
    */
   readonly verify: (
@@ -227,20 +234,21 @@ const signBytes = (pair: JwtKeyPair, data: Buffer): Effect.Effect<Buffer, JwtErr
   });
 
 /**
- * Verify `signature` over `data` against the pair's public JWK.
+ * Verify `signature` over `data` against a public JWK.
  */
-const verifyBytes = (
-  pair: JwtKeyPair,
+const verifyBytesFromJwk = (
+  jwk: Record<string, unknown>,
+  algorithm: JwtAlgorithm,
   data: Buffer,
   signature: Buffer,
 ): Effect.Effect<boolean, JwtError> =>
   Effect.try({
     try: () => {
       const key = crypto.createPublicKey({
-        key: pair.publicKeyJwk as crypto.webcrypto.JsonWebKey,
+        key: jwk as crypto.webcrypto.JsonWebKey,
         format: "jwk",
       });
-      return pair.algorithm === "ES256"
+      return algorithm === "ES256"
         ? crypto.verify("sha256", data, { key, dsaEncoding: "ieee-p1363" }, signature)
         : crypto.verify(null, data, key, signature);
     },
@@ -273,40 +281,79 @@ const decodeJsonSegment = (
 /**
  * Create a JWT service
  */
-export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtServiceShape, never> => {
-  const expiresIn = config.expiresIn ?? 15 * 60 * 1000; // 15 minutes default
-  const algorithm = config.algorithm ?? "ES256";
-  const getSubject = config.getSubject ?? ((user: Types.User) => user.id);
+export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtServiceShape, never> =>
+  Effect.gen(function* () {
+    const expiresIn = config.expiresIn ?? 15 * 60 * 1000; // 15 minutes default
+    const algorithm = config.algorithm ?? "ES256";
+    const getSubject = config.getSubject ?? ((user: Types.User) => user.id);
+    const leewayMs = config.clockSkewLeeway ?? 0;
 
-  const cipher: TokenCipher | null = config.encryptPrivateKey
-    ? "cipher" in config.encryptPrivateKey
-      ? config.encryptPrivateKey.cipher
-      : makeAes256GcmCipher(config.encryptPrivateKey.secret)
-    : null;
+    const cipher: TokenCipher | null = config.encryptPrivateKey
+      ? "cipher" in config.encryptPrivateKey
+        ? config.encryptPrivateKey.cipher
+        : makeAes256GcmCipher(config.encryptPrivateKey.secret)
+      : null;
 
-  /**
-   * Fetch the active signing key, lazily generating and persisting one when
-   * the store is empty. Private key PEM is decrypted (when a cipher is
-   * configured) before returning, so callers always receive plaintext.
-   */
-  const getOrCreateActiveKey = Effect.gen(function* () {
-    const store = yield* JwtKeyStore;
-    const active = yield* store.getActive();
-    if (active) {
-      if (cipher === null) return active;
-      return { ...active, privateKeyPem: yield* cipher.decrypt(active.privateKeyPem) };
-    }
-    const pair = yield* generateKeyPair(algorithm);
-    const toStore =
-      cipher !== null
-        ? { ...pair, privateKeyPem: yield* cipher.encrypt(pair.privateKeyPem) }
-        : pair;
-    yield* store.create(toStore);
-    return pair; // always return plaintext pair
-  });
+    // Ref holding an in-progress key-creation Deferred; null when idle.
+    // Prevents duplicate active keys when concurrent fibers both call sign()
+    // before any key exists (both see getActive() → null).
+    type PendingDeferred = Deferred.Deferred<JwtKeyPair, JwtError | Errors.AuthError>;
+    const pendingCreate = yield* Ref.make<PendingDeferred | null>(null);
 
-  return Effect.sync(
-    (): JwtServiceShape => ({
+    /**
+     * Fetch the active signing key, lazily generating and persisting one when
+     * the store is empty. Private key PEM is decrypted (when a cipher is
+     * configured) before returning, so callers always receive plaintext.
+     * Concurrent first-call fibers are serialized through a Deferred so only
+     * one key is generated regardless of concurrency.
+     */
+    const getOrCreateActiveKey: Effect.Effect<
+      JwtKeyPair,
+      JwtError | Errors.AuthError,
+      JwtKeyStore
+    > = Effect.gen(function* () {
+      const store = yield* JwtKeyStore;
+      const active = yield* store.getActive();
+      if (active) {
+        if (cipher === null) return active;
+        return { ...active, privateKeyPem: yield* cipher.decrypt(active.privateKeyPem) };
+      }
+
+      const deferred = yield* Deferred.make<JwtKeyPair, JwtError | Errors.AuthError>();
+
+      // Atomically claim leadership or attach to an in-progress creation.
+      const existing: PendingDeferred | null = yield* Ref.modify(
+        pendingCreate,
+        (current): readonly [PendingDeferred | null, PendingDeferred | null] =>
+          current === null ? [null, deferred] : [current, current],
+      );
+
+      if (existing !== null) {
+        return yield* Deferred.await(existing);
+      }
+
+      // Leader: generate and persist the key
+      const pair = yield* Effect.gen(function* () {
+        const kp = yield* generateKeyPair(algorithm);
+        const toStore =
+          cipher !== null ? { ...kp, privateKeyPem: yield* cipher.encrypt(kp.privateKeyPem) } : kp;
+        yield* store.create(toStore);
+        return kp;
+      }).pipe(
+        Effect.onError((cause) =>
+          Effect.gen(function* () {
+            yield* Deferred.failCause(deferred, cause);
+            yield* Ref.set(pendingCreate, null);
+          }),
+        ),
+      );
+
+      yield* Deferred.succeed(deferred, pair);
+      yield* Ref.set(pendingCreate, null);
+      return pair;
+    });
+
+    return {
       sign: (user, extraClaims) =>
         Effect.gen(function* () {
           const pair = yield* getOrCreateActiveKey;
@@ -379,8 +426,9 @@ export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtServiceShape
             );
           }
 
-          const validSignature = yield* verifyBytes(
-            pair,
+          const validSignature = yield* verifyBytesFromJwk(
+            pair.publicKeyJwk,
+            pair.algorithm,
             Buffer.from(`${headerSegment}.${payloadSegment}`, "utf8"),
             base64UrlDecode(signatureSegment),
           );
@@ -395,10 +443,19 @@ export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtServiceShape
           const payload = yield* decodeJsonSegment(payloadSegment, "payload");
 
           const exp = payload["exp"];
-          if (typeof exp !== "number" || Date.now() >= exp * 1000) {
+          if (typeof exp !== "number" || Date.now() >= exp * 1000 + leewayMs) {
             return yield* Effect.fail(
               new JwtError({
                 message: "Token has expired",
+              }),
+            );
+          }
+
+          const nbf = payload["nbf"];
+          if (typeof nbf === "number" && Date.now() < nbf * 1000 - leewayMs) {
+            return yield* Effect.fail(
+              new JwtError({
+                message: "Token not yet valid",
               }),
             );
           }
@@ -442,6 +499,215 @@ export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtServiceShape
             })),
           } satisfies Jwks;
         }),
-    }),
-  );
-};
+    };
+  });
+
+// ---------------------------------------------------------------------------
+// Remote JWKS verification
+// ---------------------------------------------------------------------------
+
+/**
+ * Configuration for verifying JWTs against a remote JWKS endpoint.
+ * Intended for resource servers that receive tokens but do not hold private
+ * signing keys.
+ */
+export interface RemoteJwksConfig {
+  /** URL of the JWKS document, e.g. `https://auth.example.com/.well-known/jwks.json` */
+  readonly jwksUri: string;
+  /** Expected `iss` claim; verification requires an exact match */
+  readonly issuer: string;
+  /** Expected `aud` claim; when set, verification requires it */
+  readonly audience?: string;
+  /** How long to cache a fetched JWKS in milliseconds (default: 5 minutes) */
+  readonly cacheTtlMs?: number;
+  /**
+   * Clock-skew tolerance in milliseconds applied to `exp` and `nbf` checks
+   * (default: 0).
+   */
+  readonly clockSkewLeeway?: number;
+}
+
+/**
+ * A stand-alone JWT verifier backed by a remote JWKS document.
+ */
+export interface RemoteJwksVerifierShape {
+  /**
+   * Verify a compact JWS against the remote JWKS. On first call (or after
+   * cache expiry) the JWKS is fetched and cached. If the `kid` from the
+   * token header is absent in the cached JWKS, the cache is refreshed once to
+   * handle key rotation before failing.
+   */
+  readonly verify: (token: string) => Effect.Effect<Record<string, unknown>, JwtError>;
+}
+
+export class RemoteJwksVerifier extends Context.Service<
+  RemoteJwksVerifier,
+  RemoteJwksVerifierShape
+>()("@effect-auth/RemoteJwksVerifier") {
+  static readonly layer = (config: RemoteJwksConfig) =>
+    Layer.effect(RemoteJwksVerifier, makeRemoteJwksVerifier(config));
+}
+
+interface JwksCache {
+  readonly keys: readonly Record<string, unknown>[];
+  readonly fetchedAt: number;
+}
+
+const fetchJwks = (uri: string): Effect.Effect<JwksCache, JwtError> =>
+  Effect.tryPromise({
+    try: () =>
+      fetch(uri, { headers: { Accept: "application/json" } })
+        .then((res) => {
+          if (!res.ok) throw new Error(`JWKS endpoint returned HTTP ${res.status}`);
+          return res.json() as Promise<{ keys: Record<string, unknown>[] }>;
+        })
+        .then((data) => ({ keys: data.keys, fetchedAt: Date.now() })),
+    catch: (error) => new JwtError({ message: "Failed to fetch JWKS", cause: error }),
+  });
+
+/**
+ * Create a {@link RemoteJwksVerifierShape} that fetches the JWKS at
+ * `config.jwksUri`, caches it for `cacheTtlMs`, and verifies tokens against
+ * it. Concurrent fetch requests are deduplicated via a Deferred.
+ */
+export const makeRemoteJwksVerifier = (
+  config: RemoteJwksConfig,
+): Effect.Effect<RemoteJwksVerifierShape, never> =>
+  Effect.gen(function* () {
+    const cacheTtlMs = config.cacheTtlMs ?? 5 * 60 * 1000;
+    const leewayMs = config.clockSkewLeeway ?? 0;
+
+    const cacheRef = yield* Ref.make<JwksCache | null>(null);
+
+    // Deduplicates concurrent JWKS fetches — only one HTTP request in-flight.
+    type FetchDeferred = Deferred.Deferred<JwksCache, JwtError>;
+    const pendingFetch = yield* Ref.make<FetchDeferred | null>(null);
+
+    const getKeys = (
+      forceRefresh: boolean,
+    ): Effect.Effect<readonly Record<string, unknown>[], JwtError> =>
+      Effect.gen(function* () {
+        if (!forceRefresh) {
+          const cached = yield* Ref.get(cacheRef);
+          if (cached !== null && Date.now() - cached.fetchedAt < cacheTtlMs) {
+            return cached.keys;
+          }
+        }
+
+        const deferred = yield* Deferred.make<JwksCache, JwtError>();
+        const existing: FetchDeferred | null = yield* Ref.modify(
+          pendingFetch,
+          (current): readonly [FetchDeferred | null, FetchDeferred | null] =>
+            current === null ? [null, deferred] : [current, current],
+        );
+
+        if (existing !== null) {
+          const result = yield* Deferred.await(existing);
+          return result.keys;
+        }
+
+        // Leader: perform the fetch
+        const result = yield* fetchJwks(config.jwksUri).pipe(
+          Effect.onError((cause) =>
+            Effect.gen(function* () {
+              yield* Deferred.failCause(deferred, cause);
+              yield* Ref.set(pendingFetch, null);
+            }),
+          ),
+        );
+
+        yield* Ref.set(cacheRef, result);
+        yield* Deferred.succeed(deferred, result);
+        yield* Ref.set(pendingFetch, null);
+        return result.keys;
+      });
+
+    return {
+      verify: (token) =>
+        Effect.gen(function* () {
+          const segments = token.split(".");
+          if (segments.length !== 3) {
+            return yield* Effect.fail(
+              new JwtError({ message: "Malformed JWT: expected three dot-separated segments" }),
+            );
+          }
+          const [headerSegment, payloadSegment, signatureSegment] = segments as [
+            string,
+            string,
+            string,
+          ];
+
+          const header = yield* decodeJsonSegment(headerSegment, "header");
+
+          const alg = header["alg"];
+          if (alg !== "ES256" && alg !== "EdDSA") {
+            return yield* Effect.fail(
+              new JwtError({ message: `Unsupported or missing algorithm: ${String(alg)}` }),
+            );
+          }
+
+          const kid = header["kid"];
+
+          // Look up by kid; on miss, refresh once in case of key rotation.
+          let keys = yield* getKeys(false);
+          let matchedKey = keys.find((k) => k["kid"] === kid);
+
+          if (!matchedKey) {
+            keys = yield* getKeys(true);
+            matchedKey = keys.find((k) => k["kid"] === kid);
+          }
+
+          if (!matchedKey) {
+            return yield* Effect.fail(
+              new JwtError({ message: "Unknown signing key (kid not found in remote JWKS)" }),
+            );
+          }
+
+          // If the JWKS key carries an alg field it must match the header.
+          if (matchedKey["alg"] !== undefined && matchedKey["alg"] !== alg) {
+            return yield* Effect.fail(
+              new JwtError({ message: "Token algorithm does not match the signing key" }),
+            );
+          }
+
+          const validSignature = yield* verifyBytesFromJwk(
+            matchedKey,
+            alg as JwtAlgorithm,
+            Buffer.from(`${headerSegment}.${payloadSegment}`, "utf8"),
+            base64UrlDecode(signatureSegment),
+          );
+
+          if (!validSignature) {
+            return yield* Effect.fail(new JwtError({ message: "Invalid token signature" }));
+          }
+
+          const payload = yield* decodeJsonSegment(payloadSegment, "payload");
+
+          const exp = payload["exp"];
+          if (typeof exp !== "number" || Date.now() >= exp * 1000 + leewayMs) {
+            return yield* Effect.fail(new JwtError({ message: "Token has expired" }));
+          }
+
+          const nbf = payload["nbf"];
+          if (typeof nbf === "number" && Date.now() < nbf * 1000 - leewayMs) {
+            return yield* Effect.fail(new JwtError({ message: "Token not yet valid" }));
+          }
+
+          if (payload["iss"] !== config.issuer) {
+            return yield* Effect.fail(new JwtError({ message: "Token issuer mismatch" }));
+          }
+
+          if (config.audience !== undefined) {
+            const aud = payload["aud"];
+            const matches = Array.isArray(aud)
+              ? aud.includes(config.audience)
+              : aud === config.audience;
+            if (!matches) {
+              return yield* Effect.fail(new JwtError({ message: "Token audience mismatch" }));
+            }
+          }
+
+          return payload;
+        }),
+    };
+  });
