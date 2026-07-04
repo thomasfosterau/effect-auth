@@ -65,12 +65,21 @@ export interface AnonymousServiceShape {
 
   /**
    * Link an anonymous identity to a real account: run the `linkAccount`
-   * callback (app data migration), then delete the anonymous user.
+   * callback (app data migration), invalidate all anonymous user sessions,
+   * then delete the anonymous user.
+   *
+   * Rejects with `InvalidInputError` if `anonymousUser` is not an anonymous
+   * user or if `anonymousUser.id === newUser.id`. Idempotent: a second call
+   * for an already-linked user is a no-op.
    */
   readonly linkAccount: (
     anonymousUser: Types.User,
     newUser: Types.User,
-  ) => Effect.Effect<void, Errors.AuthError, AnonymousUserStore>;
+  ) => Effect.Effect<
+    void,
+    Errors.AuthError | Errors.InvalidInputError,
+    AnonymousUserStore | SessionManager
+  >;
 }
 
 export class AnonymousService extends Context.Service<AnonymousService, AnonymousServiceShape>()(
@@ -90,8 +99,14 @@ export const isAnonymousUser = (user: Types.User): boolean =>
 export const makeAnonymousService = (
   config: AnonymousConfig = {},
 ): Effect.Effect<AnonymousServiceShape, never> =>
-  Effect.sync(
-    (): AnonymousServiceShape => ({
+  Effect.sync((): AnonymousServiceShape => {
+    // Tracks IDs currently being linked (single-flight) and already linked
+    // (idempotency). Both are needed: inFlight prevents concurrent races;
+    // done prevents re-running a completed migration on a second call.
+    const inFlight = new Set<string>();
+    const done = new Set<string>();
+
+    return {
       signInAnonymous: (sessionAttributes) =>
         Effect.gen(function* () {
           const store = yield* AnonymousUserStore;
@@ -105,11 +120,46 @@ export const makeAnonymousService = (
 
       linkAccount: (anonymousUser, newUser) =>
         Effect.gen(function* () {
-          const store = yield* AnonymousUserStore;
-          if (config.linkAccount !== undefined) {
-            yield* config.linkAccount({ anonymousUser, newUser });
+          if (!isAnonymousUser(anonymousUser)) {
+            yield* Effect.fail(
+              new Errors.InvalidInputError({
+                message: "The provided user is not an anonymous user",
+                field: "anonymousUser",
+              }),
+            );
           }
-          yield* store.deleteUser(anonymousUser.id);
+
+          if (anonymousUser.id === newUser.id) {
+            yield* Effect.fail(
+              new Errors.InvalidInputError({
+                message: "Cannot link an anonymous account to itself",
+                field: "newUser",
+              }),
+            );
+          }
+
+          // Idempotent: already successfully linked.
+          if (done.has(anonymousUser.id)) return;
+
+          // Single-flight: another fiber is already migrating this user.
+          if (inFlight.has(anonymousUser.id)) return;
+
+          inFlight.add(anonymousUser.id);
+          try {
+            const store = yield* AnonymousUserStore;
+            const sessionManager = yield* SessionManager;
+
+            if (config.linkAccount !== undefined) {
+              yield* config.linkAccount({ anonymousUser, newUser });
+            }
+
+            yield* sessionManager.invalidateUserSessions(anonymousUser.id);
+            yield* store.deleteUser(anonymousUser.id);
+
+            done.add(anonymousUser.id);
+          } finally {
+            inFlight.delete(anonymousUser.id);
+          }
         }),
-    }),
-  );
+    };
+  });
