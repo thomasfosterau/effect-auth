@@ -201,7 +201,7 @@ export const makeTrustedDeviceService = (
         Effect.gen(function* () {
           const store = yield* TrustedDeviceStore;
           const rawToken = crypto.randomBytes(32).toString("base64url");
-          const hmac = computeHmac(config.secret, rawToken);
+          const hmac = computeHmac(Redacted.value(config.secret), rawToken);
           const tokenHash = hashToken(rawToken);
           const now = Date.now();
           const record: TrustedDeviceRecord = {
@@ -223,7 +223,7 @@ export const makeTrustedDeviceService = (
           if (!parsed) return null;
 
           // Verify HMAC before touching the DB (forgery protection)
-          const expectedHmac = computeHmac(config.secret, parsed.rawToken);
+          const expectedHmac = computeHmac(Redacted.value(config.secret), parsed.rawToken);
           if (!timingSafeHexEqual(expectedHmac, parsed.hmac)) return null;
 
           const store = yield* TrustedDeviceStore;
