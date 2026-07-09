@@ -2,7 +2,9 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
 import * as crypto from "node:crypto";
 import { Hooks } from "./Hooks.js";
-import { SessionStore, UserStore, type UserStoreShape, SessionManager } from "./Session.js";
+import { SessionStore } from "./SessionStore.js";
+import { UserStore } from "./UserStore.js";
+import { SessionService as SessionManager } from "./SessionService.js";
 import { hashToken } from "./TokenHash.js";
 import { UserServiceStore, UserService } from "./User.js";
 import { AuthLifecycleService } from "./AuthLifecycle.js";
@@ -66,6 +68,8 @@ const makeOidcStores = () => {
     create: (t) => Effect.sync(() => (tokens.set(t.tokenHash, t), t)),
     get: (hash) => Effect.succeed(tokens.get(hash) ?? null),
     delete: (hash) => Effect.sync(() => void tokens.delete(hash)),
+    listByFamily: (familyId) =>
+      Effect.succeed([...tokens.values()].filter((t) => t.familyId === familyId)),
   };
   const consentStore: OidcConsentStoreShape = {
     get: (userId, clientId) => Effect.succeed(consents.get(`${userId}:${clientId}`) ?? null),
@@ -271,6 +275,104 @@ describe("OidcProviderService", () => {
     expect(new URL(result.redirectTo).searchParams.get("error")).toBe("invalid_request");
   });
 
+  it("rejects redirect URIs that are not https or loopback http", async () => {
+    const { layer } = setup();
+    const service = await Effect.runPromise(makeOidcProviderService(config));
+
+    const bad = [
+      "javascript:alert(1)",
+      "data:text/html,hi",
+      "http://evil.example.com/cb",
+      "http://192.168.1.1/cb",
+      "ftp://example.com/cb",
+    ];
+    for (const uri of bad) {
+      const err = await Effect.runPromise(
+        Effect.flip(service.registerClient({ name: "x", redirectUris: [uri] })).pipe(
+          Effect.provide(layer),
+        ),
+      );
+      expect(err).toBeInstanceOf(OidcProviderError);
+      expect((err as OidcProviderError).message).toContain("https or loopback http");
+    }
+
+    const good = [
+      "https://app.example.com/cb",
+      "http://127.0.0.1:8080/cb",
+      "http://[::1]/cb",
+      "http://localhost/cb",
+    ];
+    for (const uri of good) {
+      const result = await Effect.runPromise(
+        service.registerClient({ name: "x", redirectUris: [uri] }).pipe(Effect.provide(layer)),
+      );
+      expect(result.client.redirectUris).toContain(uri);
+    }
+  });
+
+  it("returns interaction_required for prompt=none when consent is needed", async () => {
+    const { layer } = setup();
+    const service = await Effect.runPromise(makeOidcProviderService(config));
+    const user = makeUser("u1", "u1@test");
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { client } = yield* service.registerClient({
+          name: "App",
+          redirectUris: ["https://rp.test/callback"],
+          skipConsent: false,
+        });
+        return yield* service.authorize(user, {
+          responseType: "code",
+          clientId: client.clientId,
+          redirectUri: "https://rp.test/callback",
+          scope: "openid",
+          prompt: "none",
+          state: "s1",
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(result.type).toBe("error");
+    const url = new URL(result.redirectTo);
+    expect(url.searchParams.get("error")).toBe("interaction_required");
+    expect(url.searchParams.get("state")).toBe("s1");
+  });
+
+  it("prompt=none succeeds when consent has already been granted", async () => {
+    const { layer } = setup();
+    const service = await Effect.runPromise(makeOidcProviderService(config));
+    const user = makeUser("u1", "u1@test");
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { client } = yield* service.registerClient({
+          name: "App",
+          redirectUris: ["https://rp.test/callback"],
+          skipConsent: false,
+        });
+        // Grant consent first.
+        const consentStore = yield* OidcConsentStore;
+        yield* consentStore.upsert({
+          userId: user.id,
+          clientId: client.clientId,
+          scopes: ["openid"],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        return yield* service.authorize(user, {
+          responseType: "code",
+          clientId: client.clientId,
+          redirectUri: "https://rp.test/callback",
+          scope: "openid",
+          prompt: "none",
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(result.type).toBe("code");
+  });
+
   it("resolves trusted config clients without touching the store", async () => {
     const { layer } = setup();
     const service = await Effect.runPromise(
@@ -345,7 +447,7 @@ const makeHttpFixture = () => {
     return rawToken;
   };
 
-  const userStore: UserStoreShape = {
+  const userStore: UserStore = {
     get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
     getCredentials: (_userId) => Effect.succeed(null),
   };
@@ -414,6 +516,7 @@ const makeHttpFixture = () => {
   return {
     seedUser,
     makeSession,
+    oidcTokenStore: oidc.tokens,
     handler: makeAuthWebHandler({ services: withOidc, cookie: { secure: false } }).handler,
     handlerWithoutOidc: makeAuthWebHandler({ services: withoutOidc, cookie: { secure: false } })
       .handler,
@@ -851,6 +954,8 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(doc["token_endpoint"]).toBe(`${ISSUER}/oauth2/token`);
     expect(doc["userinfo_endpoint"]).toBe(`${ISSUER}/oauth2/userinfo`);
     expect(doc["jwks_uri"]).toBe(`${ISSUER}/.well-known/jwks.json`);
+    expect(doc["registration_endpoint"]).toBe(`${ISSUER}/oauth2/register`);
+    expect(doc["end_session_endpoint"]).toBe(`${ISSUER}/oauth2/logout`);
     expect(doc["code_challenge_methods_supported"]).toEqual(["S256"]);
   });
 
@@ -862,5 +967,302 @@ describe("HTTP OIDC provider endpoints", () => {
       post("/oauth2/token", { grant_type: "authorization_code" }),
     );
     expect(token.status).toBe(404);
+  });
+
+  it("detects refresh-token reuse and rejects the replayed token", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+    const userSid = fx.makeSession(fx.seedUser("reuse@idp.test"));
+
+    const registered = await fx.handler(
+      post(
+        "/oauth2/register",
+        { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
+        adminSid,
+      ),
+    );
+    const { client, clientSecret } = (await registered.json()) as {
+      client: { clientId: string };
+      clientSecret: string;
+    };
+
+    const pkce = await Effect.runPromise(generatePKCE());
+    const authorize = await fx.handler(
+      get(
+        "/oauth2/authorize",
+        {
+          response_type: "code",
+          client_id: client.clientId,
+          redirect_uri: "https://rp.test/cb",
+          scope: "openid offline_access",
+          code_challenge: pkce.codeChallenge,
+          code_challenge_method: "S256",
+        },
+        { sessionId: userSid },
+      ),
+    );
+    const code = new URL(authorize.headers.get("location")!).searchParams.get("code")!;
+
+    const tokenRes = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: "https://rp.test/cb",
+        code_verifier: pkce.codeVerifier,
+        client_id: client.clientId,
+        client_secret: clientSecret,
+      }),
+    );
+    const { refresh_token: rt1 } = (await tokenRes.json()) as { refresh_token: string };
+
+    // First rotation — consumes rt1, issues rt2.
+    const rot1 = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "refresh_token",
+        refresh_token: rt1,
+        client_id: client.clientId,
+        client_secret: clientSecret,
+      }),
+    );
+    expect(rot1.status).toBe(200);
+    const { refresh_token: rt2 } = (await rot1.json()) as { refresh_token: string };
+
+    // Second rotation — consumes rt2, issues rt3.
+    const rot2 = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "refresh_token",
+        refresh_token: rt2,
+        client_id: client.clientId,
+        client_secret: clientSecret,
+      }),
+    );
+    expect(rot2.status).toBe(200);
+    const { refresh_token: rt3 } = (await rot2.json()) as { refresh_token: string };
+
+    // Replay rt1 — already consumed → reuse detection fires, revokes family (rt3 should be gone).
+    const replay = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "refresh_token",
+        refresh_token: rt1,
+        client_id: client.clientId,
+        client_secret: clientSecret,
+      }),
+    );
+    expect(replay.status).toBe(400);
+
+    // rt3 must now be revoked too.
+    const afterRevoke = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "refresh_token",
+        refresh_token: rt3,
+        client_id: client.clientId,
+        client_secret: clientSecret,
+      }),
+    );
+    expect(afterRevoke.status).toBe(400);
+  });
+
+  it("enforces absolute (non-sliding) refresh token lifetime", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+    const userSid = fx.makeSession(fx.seedUser("expire@idp.test"));
+
+    const registered = await fx.handler(
+      post(
+        "/oauth2/register",
+        { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
+        adminSid,
+      ),
+    );
+    const { client, clientSecret } = (await registered.json()) as {
+      client: { clientId: string };
+      clientSecret: string;
+    };
+
+    const pkce = await Effect.runPromise(generatePKCE());
+    const authorize = await fx.handler(
+      get(
+        "/oauth2/authorize",
+        {
+          response_type: "code",
+          client_id: client.clientId,
+          redirect_uri: "https://rp.test/cb",
+          scope: "openid offline_access",
+          code_challenge: pkce.codeChallenge,
+          code_challenge_method: "S256",
+        },
+        { sessionId: userSid },
+      ),
+    );
+    const code = new URL(authorize.headers.get("location")!).searchParams.get("code")!;
+
+    const tokenRes = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: "https://rp.test/cb",
+        code_verifier: pkce.codeVerifier,
+        client_id: client.clientId,
+        client_secret: clientSecret,
+      }),
+    );
+    const { refresh_token: rt } = (await tokenRes.json()) as { refresh_token: string };
+
+    // Expire the token by mutating absoluteExpiresAt to the past.
+    const hash = hashOidcSecret(rt);
+    const stored = fx.oidcTokenStore.get(hash)!;
+    fx.oidcTokenStore.set(hash, {
+      ...stored,
+      absoluteExpiresAt: Date.now() - 1000,
+      expiresAt: Date.now() - 1000,
+    });
+
+    const expired = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "refresh_token",
+        refresh_token: rt,
+        client_id: client.clientId,
+        client_secret: clientSecret,
+      }),
+    );
+    expect(expired.status).toBe(400);
+    expect(((await expired.json()) as { message: string }).message).toBe("invalid_grant");
+  });
+
+  it("allows scope down-scoping on refresh token grant", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+    const userSid = fx.makeSession(fx.seedUser("scope@idp.test"));
+
+    const registered = await fx.handler(
+      post(
+        "/oauth2/register",
+        { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
+        adminSid,
+      ),
+    );
+    const { client, clientSecret } = (await registered.json()) as {
+      client: { clientId: string };
+      clientSecret: string;
+    };
+
+    const pkce = await Effect.runPromise(generatePKCE());
+    const authorize = await fx.handler(
+      get(
+        "/oauth2/authorize",
+        {
+          response_type: "code",
+          client_id: client.clientId,
+          redirect_uri: "https://rp.test/cb",
+          scope: "openid profile email offline_access",
+          code_challenge: pkce.codeChallenge,
+          code_challenge_method: "S256",
+        },
+        { sessionId: userSid },
+      ),
+    );
+    const code = new URL(authorize.headers.get("location")!).searchParams.get("code")!;
+
+    const tokenRes = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: "https://rp.test/cb",
+        code_verifier: pkce.codeVerifier,
+        client_id: client.clientId,
+        client_secret: clientSecret,
+      }),
+    );
+    const { refresh_token: rt } = (await tokenRes.json()) as { refresh_token: string };
+
+    // Down-scope to a subset (keep offline_access for rotation) — should succeed.
+    const downScoped = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "refresh_token",
+        refresh_token: rt,
+        client_id: client.clientId,
+        client_secret: clientSecret,
+        scope: "openid email offline_access",
+      }),
+    );
+    expect(downScoped.status).toBe(200);
+    const downScopedBody = (await downScoped.json()) as { scope: string; refresh_token: string };
+    expect(downScopedBody.scope).toBe("openid email offline_access");
+
+    // Up-scope is forbidden: original grant had "profile"; re-requesting it via the narrower token fails.
+    const rt2 = downScopedBody.refresh_token;
+    const upScoped = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "refresh_token",
+        refresh_token: rt2,
+        client_id: client.clientId,
+        client_secret: clientSecret,
+        scope: "openid email profile offline_access",
+      }),
+    );
+    expect(upScoped.status).toBe(400);
+    expect(((await upScoped.json()) as { message: string }).message).toBe("invalid_scope");
+  });
+
+  it("prompt=none on authorize returns login_required for unauthenticated users", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+
+    const registered = await fx.handler(
+      post(
+        "/oauth2/register",
+        { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
+        adminSid,
+      ),
+    );
+    const { client } = (await registered.json()) as { client: { clientId: string } };
+
+    const res = await fx.handler(
+      get("/oauth2/authorize", {
+        response_type: "code",
+        client_id: client.clientId,
+        redirect_uri: "https://rp.test/cb",
+        scope: "openid",
+        prompt: "none",
+        state: "s1",
+      }),
+    );
+    expect(res.status).toBe(302);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.origin + loc.pathname).toBe("https://rp.test/cb");
+    expect(loc.searchParams.get("error")).toBe("login_required");
+    expect(loc.searchParams.get("state")).toBe("s1");
+  });
+
+  it("prompt=login forces re-authentication even when a session exists", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+    const userSid = fx.makeSession(fx.seedUser("login@idp.test"));
+
+    const registered = await fx.handler(
+      post(
+        "/oauth2/register",
+        { name: "RP", redirectUris: ["https://rp.test/cb"], skipConsent: true },
+        adminSid,
+      ),
+    );
+    const { client } = (await registered.json()) as { client: { clientId: string } };
+
+    const res = await fx.handler(
+      get(
+        "/oauth2/authorize",
+        {
+          response_type: "code",
+          client_id: client.clientId,
+          redirect_uri: "https://rp.test/cb",
+          scope: "openid",
+          prompt: "login",
+        },
+        { sessionId: userSid },
+      ),
+    );
+    expect(res.status).toBe(302);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.origin + loc.pathname).toBe("http://idp.test/login");
   });
 });

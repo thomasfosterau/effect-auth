@@ -31,6 +31,9 @@ coverage
 # Dependency directories
 node_modules/
 
+# Example apps (contain only node_modules, no source to track)
+examples/
+
 # TypeScript cache
 *.tsbuildinfo
 

@@ -22,7 +22,7 @@ import * as crypto from "node:crypto";
 import type { AuthError } from "./Errors.ts";
 import { JwtService, JwtKeyStore } from "./Jwt.ts";
 import * as Obs from "./Observability.ts";
-import { UserStore } from "./Session.ts";
+import { UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 
@@ -125,6 +125,10 @@ export interface OidcToken {
   /** Epoch milliseconds. */
   readonly expiresAt: number;
   readonly createdAt: number;
+  /** Refresh-token rotation family (all tokens issued from the same authorization_code grant). */
+  readonly familyId?: string;
+  /** Absolute (non-sliding) expiry for the whole refresh family. Epoch milliseconds. */
+  readonly absoluteExpiresAt?: number;
 }
 
 /** Store for issued access and refresh tokens. */
@@ -132,6 +136,8 @@ export interface OidcTokenStoreShape {
   readonly create: (token: OidcToken) => Effect.Effect<OidcToken, AuthError>;
   readonly get: (tokenHash: string) => Effect.Effect<OidcToken | null, AuthError>;
   readonly delete: (tokenHash: string) => Effect.Effect<void, AuthError>;
+  /** Optional: list all tokens belonging to a rotation family. Used for reuse-detection revocation. */
+  readonly listByFamily?: (familyId: string) => Effect.Effect<ReadonlyArray<OidcToken>, AuthError>;
 }
 
 export class OidcTokenStore extends Context.Service<OidcTokenStore, OidcTokenStoreShape>()(
@@ -230,6 +236,8 @@ export interface OidcTokenRequest {
   /** Client credentials from the request body or the Basic Authorization header. */
   readonly clientId?: string;
   readonly clientSecret?: string;
+  /** Optional down-scoped scope list for the refresh_token grant (RFC 6749 §6). */
+  readonly scope?: string;
 }
 
 /** A successful token response (camelCase; the HTTP layer encodes snake_case). */
@@ -424,6 +432,25 @@ const parseScopes = (scope: string | undefined): readonly string[] =>
 
 export const DEFAULT_OIDC_SCOPES = ["openid", "profile", "email", "offline_access"] as const;
 
+/**
+ * Validates that a redirect URI is either https or loopback http.
+ * Blocks javascript:, data:, and non-loopback http URIs (RFC 8252 §7.3).
+ */
+const isAllowedRedirectUri = (uri: string): boolean => {
+  let parsed: URL;
+  try {
+    parsed = new URL(uri);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === "https:") return true;
+  if (parsed.protocol === "http:") {
+    const h = parsed.hostname;
+    return h === "127.0.0.1" || h === "[::1]" || h === "localhost";
+  }
+  return false;
+};
+
 // -----------------------------------------------------------------------------
 // Service implementation
 // -----------------------------------------------------------------------------
@@ -435,6 +462,20 @@ export const makeOidcProviderService = (
   const accessTokenExpiresIn = config.accessTokenExpiresIn ?? 60 * 60 * 1000;
   const refreshTokenExpiresIn = config.refreshTokenExpiresIn ?? 30 * 24 * 60 * 60 * 1000;
   const allowedScopes = config.allowedScopes ?? DEFAULT_OIDC_SCOPES;
+
+  /**
+   * In-process registry of consumed refresh-token hashes → their family.
+   * Lets us detect a reuse attack (RFC 6819 §6.1): if a hash appears here it
+   * was already rotated; presenting it again means a stolen token is in play.
+   * Entries are pruned once their absolute expiry passes.
+   */
+  const consumedRefreshTokens = new Map<string, { familyId: string; absoluteExpiresAt: number }>();
+  const pruneConsumed = () => {
+    const now = Date.now();
+    for (const [hash, entry] of consumedRefreshTokens) {
+      if (now > entry.absoluteExpiresAt) consumedRefreshTokens.delete(hash);
+    }
+  };
 
   /** Trusted config clients, normalized to the stored shape (secret hashed). */
   const trustedClients = new Map<string, OidcClient>(
@@ -504,37 +545,18 @@ export const makeOidcProviderService = (
     readonly userId: string;
     readonly scopes: readonly string[];
     readonly nonce?: string;
+    /** Rotation family ID carried through from the original grant. */
+    readonly familyId?: string;
+    /** Absolute (non-sliding) expiry for the whole refresh family. */
+    readonly absoluteExpiresAt?: number;
   }) =>
     Effect.gen(function* () {
       const tokenStore = yield* OidcTokenStore;
       const userStore = yield* UserStore;
       const now = Date.now();
 
-      const accessToken = randomToken();
-      yield* tokenStore.create({
-        tokenHash: hashOidcSecret(accessToken),
-        kind: "access",
-        clientId: grant.clientId,
-        userId: grant.userId,
-        scopes: grant.scopes,
-        expiresAt: now + accessTokenExpiresIn,
-        createdAt: now,
-      });
-
-      let refreshToken: string | undefined;
-      if (grant.scopes.includes("offline_access")) {
-        refreshToken = randomToken();
-        yield* tokenStore.create({
-          tokenHash: hashOidcSecret(refreshToken),
-          kind: "refresh",
-          clientId: grant.clientId,
-          userId: grant.userId,
-          scopes: grant.scopes,
-          expiresAt: now + refreshTokenExpiresIn,
-          createdAt: now,
-        });
-      }
-
+      // Mint the id_token FIRST — a signing failure here must not leave
+      // orphaned access/refresh tokens that can never be revoked.
       let idToken: string | undefined;
       if (grant.scopes.includes("openid")) {
         const user = yield* userStore
@@ -561,6 +583,36 @@ export const makeOidcProviderService = (
             ),
           );
         idToken = signed.token;
+      }
+
+      const accessToken = randomToken();
+      yield* tokenStore.create({
+        tokenHash: hashOidcSecret(accessToken),
+        kind: "access",
+        clientId: grant.clientId,
+        userId: grant.userId,
+        scopes: grant.scopes,
+        expiresAt: now + accessTokenExpiresIn,
+        createdAt: now,
+      });
+
+      let refreshToken: string | undefined;
+      if (grant.scopes.includes("offline_access")) {
+        refreshToken = randomToken();
+        const familyId = grant.familyId ?? randomToken();
+        const absoluteExpiresAt = grant.absoluteExpiresAt ?? now + refreshTokenExpiresIn;
+        yield* tokenStore.create({
+          tokenHash: hashOidcSecret(refreshToken),
+          kind: "refresh",
+          clientId: grant.clientId,
+          userId: grant.userId,
+          scopes: grant.scopes,
+          // Sliding window capped at the absolute lifetime.
+          expiresAt: Math.min(now + refreshTokenExpiresIn, absoluteExpiresAt),
+          createdAt: now,
+          familyId,
+          absoluteExpiresAt,
+        });
       }
 
       return {
@@ -617,8 +669,10 @@ export const makeOidcProviderService = (
           });
         }
         for (const uri of input.redirectUris) {
-          if (!URL.canParse(uri)) {
-            return yield* new OidcProviderError({ message: `Invalid redirect URI: ${uri}` });
+          if (!isAllowedRedirectUri(uri)) {
+            return yield* new OidcProviderError({
+              message: `Redirect URI must be https or loopback http: ${uri}`,
+            });
           }
         }
         const type = input.type ?? "web";
@@ -744,6 +798,12 @@ export const makeOidcProviderService = (
           if (existing !== null && scopes.every((s) => existing.scopes.includes(s))) {
             consentNeeded = false;
           }
+        }
+
+        // prompt=none: no UI may be shown — return immediately with an error
+        // if interaction is needed (RFC 6749 / OIDC Core §3.1.2.1).
+        if (request.prompt === "none" && consentNeeded) {
+          return errorRedirect("interaction_required");
         }
 
         if (consentNeeded) {
@@ -892,22 +952,65 @@ export const makeOidcProviderService = (
               description: "Missing refresh_token",
             });
           }
-          const record = yield* tokenStore.get(hashOidcSecret(request.refreshToken));
+
+          pruneConsumed();
+          const presentedHash = hashOidcSecret(request.refreshToken);
+          const record = yield* tokenStore.get(presentedHash);
+
           if (record === null || record.kind !== "refresh" || record.clientId !== client.clientId) {
+            // Check if this hash was already consumed — if so, it's a reuse attack.
+            const consumed = consumedRefreshTokens.get(presentedHash);
+            if (consumed !== undefined) {
+              // Revoke the entire family to protect the user (RFC 6819 §6.1).
+              yield* Effect.gen(function* () {
+                const listByFamily = tokenStore.listByFamily;
+                if (listByFamily === undefined) return;
+                const family = yield* listByFamily(consumed.familyId);
+                yield* Effect.forEach(family, (t) => tokenStore.delete(t.tokenHash), {
+                  concurrency: "unbounded",
+                });
+              });
+            }
             return yield* new OidcTokenError({ error: "invalid_grant" });
           }
-          // Rotation: the presented refresh token is consumed either way.
+
+          // Rotation: burn the presented token immediately.
           yield* tokenStore.delete(record.tokenHash);
-          if (Date.now() > record.expiresAt) {
+
+          // Carry the family lineage and absolute lifetime through all rotations.
+          const familyId = record.familyId ?? randomToken();
+          const absoluteExpiresAt = record.absoluteExpiresAt ?? record.expiresAt;
+
+          // Record as consumed for reuse detection.
+          consumedRefreshTokens.set(presentedHash, { familyId, absoluteExpiresAt });
+
+          // Absolute (non-sliding) lifetime check.
+          if (Date.now() > absoluteExpiresAt) {
             return yield* new OidcTokenError({
               error: "invalid_grant",
               description: "Refresh token expired",
             });
           }
+
+          // RFC 6749 §6: client may request a strict subset of original scopes.
+          let effectiveScopes = record.scopes;
+          if (request.scope !== undefined) {
+            const requested = parseScopes(request.scope);
+            if (requested.some((s) => !record.scopes.includes(s))) {
+              return yield* new OidcTokenError({
+                error: "invalid_scope",
+                description: "Requested scopes exceed those of the original grant",
+              });
+            }
+            effectiveScopes = requested;
+          }
+
           return yield* issueTokens({
             clientId: client.clientId,
             userId: record.userId,
-            scopes: record.scopes,
+            scopes: effectiveScopes,
+            familyId,
+            absoluteExpiresAt,
           });
         }
 
@@ -945,6 +1048,8 @@ export const makeOidcProviderService = (
       token_endpoint: `${config.issuer}/oauth2/token`,
       userinfo_endpoint: `${config.issuer}/oauth2/userinfo`,
       jwks_uri: `${config.issuer}/.well-known/jwks.json`,
+      registration_endpoint: `${config.issuer}/oauth2/register`,
+      end_session_endpoint: `${config.issuer}/oauth2/logout`,
       scopes_supported: [...allowedScopes],
       response_types_supported: ["code"],
       response_modes_supported: ["query"],
