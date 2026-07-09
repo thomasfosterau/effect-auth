@@ -2590,7 +2590,22 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const session = yield* resolveSession(request, cfg).pipe(
             Effect.catch(() => Effect.succeed(null)),
           );
-          if (session === null) {
+          if (session === null || query.prompt === "login") {
+            // prompt=none: must not show any UI — redirect back to the client with login_required.
+            if (session === null && query.prompt === "none" && query.redirect_uri !== undefined) {
+              const clientId = query.client_id;
+              if (clientId !== undefined) {
+                const client = yield* oidc
+                  .provideStores(oidc.service.getClient(clientId))
+                  .pipe(Effect.catchTag("AuthError", () => Effect.succeed(null)));
+                if (client !== null && client.redirectUris.includes(query.redirect_uri)) {
+                  const errUrl = new URL(query.redirect_uri);
+                  errUrl.searchParams.set("error", "login_required");
+                  if (query.state !== undefined) errUrl.searchParams.set("state", query.state);
+                  return HttpServerResponse.redirect(errUrl.toString(), { status: 302 });
+                }
+              }
+            }
             return HttpServerResponse.redirect(oidc.service.loginRedirect(request.url), {
               status: 302,
             });
@@ -2676,6 +2691,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 ...(payload.refresh_token !== undefined && {
                   refreshToken: payload.refresh_token,
                 }),
+                ...(payload.scope !== undefined && { scope: payload.scope }),
                 ...(clientId !== undefined && { clientId }),
                 ...(clientSecret !== undefined && { clientSecret }),
               }),
