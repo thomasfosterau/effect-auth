@@ -5,7 +5,7 @@
  * and related data structures.
  */
 
-import { Context, Effect, Layer, Redacted } from "effect";
+import { Config, Context, Effect, Layer, Redacted } from "effect";
 import { makeAes256GcmCipher } from "../Cipher.ts";
 import type { TokenCipher } from "../Cipher.ts";
 export type { TokenCipher } from "../Cipher.ts";
@@ -721,6 +721,21 @@ export class OAuthService extends Context.Service<OAuthService, OAuthServiceShap
     options: OAuthServiceOptions = {},
   ) => Layer.effect(OAuthService, makeOAuthService(providers, options));
 }
+
+/**
+ * Effect `Config` for {@link OAuthServiceOptions}.
+ *
+ * Optional env vars: `OAUTH_AUTO_LINK_BY_VERIFIED_EMAIL`, `OAUTH_ENCRYPT_TOKENS_SECRET`.
+ */
+export const oauthServiceOptionsConfig = Config.all({
+  autoLinkByVerifiedEmail: Config.boolean("OAUTH_AUTO_LINK_BY_VERIFIED_EMAIL").pipe(
+    Config.withDefault(true),
+  ),
+  encryptTokens: Config.redacted("OAUTH_ENCRYPT_TOKENS_SECRET").pipe(
+    Config.map((secret) => ({ secret }) as const),
+    Config.orElse(() => Config.succeed(undefined)),
+  ),
+});
 
 /**
  * Options controlling {@link OAuthServiceShape} behaviour.

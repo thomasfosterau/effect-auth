@@ -12,7 +12,7 @@
  * @module two-factor
  */
 
-import { Context, Data, Effect, Layer, Redacted } from "effect";
+import { Config, Context, Data, Effect, Layer, Redacted } from "effect";
 import * as crypto from "node:crypto";
 import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
@@ -267,7 +267,38 @@ export class TwoFactorService extends Context.Service<TwoFactorService, Multifac
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: TwoFactorConfig) => Layer.effect(TwoFactorService, make(config));
+
+  /**
+   * Construct a Layer from environment variables via {@link multiFactorConfig}.
+   *
+   * Required env vars: `TWO_FACTOR_ISSUER`.
+   * Optional: `TWO_FACTOR_ENCRYPT_SECRET`.
+   */
+  static readonly layerFromEnv = Layer.effect(
+    TwoFactorService,
+    Effect.gen(function* () {
+      const cfg = yield* multiFactorConfig;
+      return yield* make({
+        issuer: cfg.issuer,
+        ...(cfg.encryptSecret !== undefined && { encryptSecret: cfg.encryptSecret }),
+      });
+    }),
+  );
 }
+
+/**
+ * Effect `Config` for {@link TwoFactorConfig} (multifactor variant).
+ *
+ * Required env vars: `TWO_FACTOR_ISSUER`.
+ * Optional: `TWO_FACTOR_ENCRYPT_SECRET`.
+ */
+export const multiFactorConfig = Config.all({
+  issuer: Config.string("TWO_FACTOR_ISSUER"),
+  encryptSecret: Config.redacted("TWO_FACTOR_ENCRYPT_SECRET").pipe(
+    Config.map((secret) => ({ secret }) as const),
+    Config.orElse(() => Config.succeed(undefined)),
+  ),
+});
 
 /**
  * Generate a cryptographically secure pending-challenge token

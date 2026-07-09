@@ -29,7 +29,7 @@
  *
  * @module trusted-device
  */
-import { Context, Effect, Layer, Redacted } from "effect";
+import { Config, Context, Effect, Layer, Redacted } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import { SecondFactorGate, type SecondFactorGateShape } from "./EmailPassword.ts";
@@ -157,7 +157,34 @@ export class TrustedDeviceService extends Context.Service<
 >()("@effect-auth/TrustedDeviceService") {
   static readonly layer = (config: TrustedDeviceConfig) =>
     Layer.effect(TrustedDeviceService, makeTrustedDeviceService(config));
+
+  /**
+   * Construct a Layer from environment variables via {@link trustedDeviceConfig}.
+   *
+   * Required env vars: `TRUSTED_DEVICE_SECRET`.
+   * Optional: `TRUSTED_DEVICE_MAX_AGE_MS` (default: 30 days).
+   */
+  static readonly layerFromEnv = Layer.effect(
+    TrustedDeviceService,
+    Effect.gen(function* () {
+      const config = yield* trustedDeviceConfig;
+      return yield* makeTrustedDeviceService(config);
+    }),
+  );
 }
+
+/**
+ * Effect `Config` for {@link TrustedDeviceConfig}.
+ *
+ * Required env vars: `TRUSTED_DEVICE_SECRET`.
+ * Optional: `TRUSTED_DEVICE_MAX_AGE_MS` (default: 30 days in milliseconds).
+ */
+export const trustedDeviceConfig: Config.Config<TrustedDeviceConfig> = Config.all({
+  secret: Config.redacted("TRUSTED_DEVICE_SECRET"),
+  maxAge: Config.int("TRUSTED_DEVICE_MAX_AGE_MS").pipe(
+    Config.withDefault(30 * 24 * 60 * 60 * 1000),
+  ),
+});
 
 // ---------------------------------------------------------------------------
 // Implementation
