@@ -1,6 +1,12 @@
 # Effect source reference
 .reference/
 
+# NX build cache (monorepo tooling artifacts)
+.nx/
+
+# Orphaned example project stubs (removed from tracked sources in abd5d13)
+examples/
+
 # Logs
 logs
 *.log
