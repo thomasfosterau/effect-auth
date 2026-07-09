@@ -9,53 +9,49 @@ export * from "./Types.ts";
 export * from "./Errors.ts";
 export * from "./Hooks.ts";
 export * from "./TokenHash.ts";
-export * from "./Email/EmailAddress.ts";
+export * from "./email/EmailAddress.ts";
 export * from "./Identifier.ts";
 export * from "./Cipher.ts";
 export * from "./Messages.ts";
-export * from "./Permission.ts";
-export * from "./Rbac.ts";
+export * from "./authz/Permission.ts";
+export * from "./authz/RBAC.ts";
 
-// Session management (SessionManager = legacy alias for SessionService)
-export * from "./SessionService.ts";
-export * from "./SessionStore.ts";
-export * from "./UserStore.ts";
-// Compat: re-export SessionManager alias and makeSessionManager
-export { SessionService as SessionManager, make as makeSessionManager } from "./SessionService.ts";
-export type { SessionServiceShape as SessionManagerShape } from "./SessionService.ts";
+// Session management
+export * from "./session/SessionService.ts";
+export * from "./session/SessionStore.ts";
+export * from "./session/UserStore.ts";
 
 // Rate limiting
 export * from "./RateLimit.ts";
 export * from "./RateLimitPersistence.ts";
 
 // Authorization
-export * from "./Authorization.ts";
+export * from "./authz/Authorization.ts";
 
 // Password
-export * from "./Password.ts";
+export * from "./password/Password.ts";
 
 // OTP primitives
-export * from "./Otp.ts";
+export * from "./OTP.ts";
 
 // Key-value store adapters
 export * from "./KeyValueStores.ts";
 
 // Services
 export * from "./User.ts";
-export * from "./Email/EmailPassword.ts";
-export * from "./Email/EmailOtp.ts";
-export * from "./Email/EmailVerification.ts";
-export * from "./PasswordReset.ts";
-export * from "./PhoneOtp.ts";
+export * from "./email/EmailPassword.ts";
+export * from "./email/EmailOTP.ts";
+export * from "./email/EmailVerification.ts";
+export * from "./password/PasswordReset.ts";
+export * from "./PhoneOTP.ts";
 export * from "./MagicLink.ts";
 export * from "./Username.ts";
 export * from "./TwoFactor.ts";
 export * from "./WebAuthn.ts";
-export { WebAuthnService, type WebAuthnServiceShape } from "./WebAuthnService.ts";
-export * from "./ApiKey.ts";
-export * from "./Jwt.ts";
-export * from "./OAuth/OAuth.ts";
-export * from "./Sso.ts";
+export * from "./APIKey.ts";
+export * from "./JWT.ts";
+export * from "./oauth/OAuth.ts";
+export * from "./SSO.ts";
 export * from "./GoogleOneTap.ts";
 export * from "./Anonymous.ts";
 export * from "./Admin.ts";
@@ -63,8 +59,8 @@ export * from "./Organization.ts";
 export * from "./AccountManagement.ts";
 export * from "./DeviceAuthorization.ts";
 export * from "./AuthLifecycle.ts";
-export * from "./OidcProvider.ts";
-export * from "./ClientIp.ts";
+export * from "./OIDCProvider.ts";
+export * from "./ClientIP.ts";
 export * from "./SessionCookieCache.ts";
 export {
   type OneTimeTokenRecord,
@@ -84,20 +80,20 @@ export * from "./Observability.ts";
 
 // Plugins
 /** Structured audit logging of sign-up/sign-in/sign-out (tap hooks). */
-export * from "./AuditPlugin.ts";
+export * from "./plugins/Audit.ts";
 /** Lowercases and trims emails before sign-up/sign-in. */
-export * from "./NormalizeEmailPlugin.ts";
+export * from "./plugins/NormalizeEmail.ts";
 /** Rate-limits auth operations via the RateLimiter service. */
-export * from "./RateLimitPlugin.ts";
+export * from "./plugins/RateLimit.ts";
 /** OWASP-style account lockout after repeated failed sign-ins. */
-export * from "./AccountLockoutPlugin.ts";
+export * from "./plugins/AccountLockout.ts";
 /** Captcha verification (Turnstile / reCAPTCHA / hCaptcha) on sign-up/sign-in. */
-export * from "./CaptchaPlugin.ts";
+export * from "./plugins/Captcha.ts";
 /** Have-I-Been-Pwned compromised-password checks. */
-export * from "./HaveIBeenPwned.ts";
+export * from "./password/HaveIBeenPwned.ts";
 /** Records the sign-in method into session attributes (last-login-method). */
-export * from "./LastLoginMethodPlugin.ts";
-/** IP-keyed rate limiting (sign-in, sign-up, password-reset) using the ClientIp service. */
-export * from "./IpRateLimitPlugin.ts";
+export * from "./plugins/LastLoginMethod.ts";
+/** IP-keyed rate limiting (sign-in, sign-up, password-reset) using the ClientIP service. */
+export * from "./plugins/IPRateLimit.ts";
 /** HTTP layer: makeAuthWebHandler, makeAuthClient, wire types. */
-export * as Http from "./Http/Http.ts";
+export * as Http from "./http/Http.ts";

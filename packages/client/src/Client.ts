@@ -18,8 +18,8 @@ import type {
   ChangeEmailRequestPayload,
   ChangePasswordPayload,
   DeleteUserConfirmPayload,
-  EmailOtpPurpose,
-  JwtTokenView,
+  EmailOTPPurpose,
+  JWTTokenView,
   MultiSessionActionPayload,
   MultiSessionListView,
   SecondFactorChallengeView,
@@ -178,7 +178,7 @@ export interface AuthClient {
   readonly revokeSession: (sessionId: string) => Promise<void>;
   readonly revokeOtherSessions: () => Promise<void>;
   /** Fetch a signed JWT for the current session. 404 when unconfigured. */
-  readonly jwtToken: () => Promise<JwtTokenView>;
+  readonly jwtToken: () => Promise<JWTTokenView>;
 
   /** Verification-gated email change. 404 when unconfigured. */
   readonly changeEmail: {
@@ -204,10 +204,10 @@ export interface AuthClient {
     readonly verify: (payload: { token: string }) => Promise<AuthSuccess>;
   };
 
-  readonly emailOtp: {
+  readonly emailOTP: {
     readonly send: (payload: {
       email: string;
-      purpose: EmailOtpPurpose;
+      purpose: EmailOTPPurpose;
     }) => Promise<StatusResponse>;
     readonly signIn: (payload: { email: string; otp: string }) => Promise<AuthSuccess>;
   };
@@ -459,7 +459,7 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     revokeSession: (sessionId) =>
       request<void>("DELETE", `/sessions/${encodeURIComponent(sessionId)}`),
     revokeOtherSessions: () => request<void>("POST", "/sessions/revoke-others"),
-    jwtToken: () => request<JwtTokenView>("GET", "/token"),
+    jwtToken: () => request<JWTTokenView>("GET", "/token"),
 
     changeEmail: {
       request: (payload) => request<StatusResponse>("POST", "/change-email/request", payload),
@@ -486,7 +486,7 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         mutating(() => request<AuthSuccess>("POST", "/magic-link/verify", payload)),
     },
 
-    emailOtp: {
+    emailOTP: {
       send: (payload) => request<StatusResponse>("POST", "/email-otp/send", payload),
       signIn: (payload) =>
         mutating(() => request<AuthSuccess>("POST", "/sign-in/email-otp", payload)),
