@@ -134,7 +134,7 @@ export const makeServerFixture = () => {
 
   const services: Layer.Layer<Auth.Http.AuthServices> = Layer.mergeAll(
     storeLayer,
-    Auth.SessionManager.layer({
+    Auth.SessionService.layer({
       sessionExpiresIn: { activePeriod: HOUR, idlePeriod: HOUR },
     }).pipe(Layer.provide(storeLayer)),
     Auth.AuthLifecycleService.layer(),

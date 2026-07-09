@@ -4,28 +4,28 @@ import * as Auth from "./index.js";
 
 /**
  * D1 (DESIGN.md): every primary service class exposes a `static layer` — the
- * canonical construction `Auth.SessionManager.layer(...)`.
+ * canonical construction `Auth.SessionService.layer(...)`.
  */
 describe("static service layers", () => {
   it("exposes a static layer constructor on every primary service", () => {
     const services: ReadonlyArray<[string, { readonly layer: (...args: never[]) => unknown }]> = [
-      ["SessionManager", Auth.SessionManager],
+      ["SessionService", Auth.SessionService],
       ["RateLimiter", Auth.RateLimiter],
       ["AuthorizationPolicy", Auth.AuthorizationPolicy],
       ["UserService", Auth.UserService],
       ["EmailPasswordService", Auth.EmailPasswordService],
-      ["EmailOtpService", Auth.EmailOtpService],
-      ["PhoneOtpService", Auth.PhoneOtpService],
+      ["EmailOTPService", Auth.EmailOTPService],
+      ["PhoneOTPService", Auth.PhoneOTPService],
       ["MagicLinkService", Auth.MagicLinkService],
       ["EmailVerificationService", Auth.EmailVerificationService],
       ["PasswordResetService", Auth.PasswordResetService],
       ["UsernameService", Auth.UsernameService],
       ["TwoFactorService", Auth.TwoFactorService],
       ["WebAuthnService", Auth.WebAuthnService],
-      ["ApiKeyService", Auth.ApiKeyService],
-      ["JwtService", Auth.JwtService],
+      ["APIKeyService", Auth.APIKeyService],
+      ["JWTService", Auth.JWTService],
       ["OAuthService", Auth.OAuthService],
-      ["SsoService", Auth.SsoService],
+      ["SSOService", Auth.SSOService],
       ["GoogleOneTapService", Auth.GoogleOneTapService],
       ["AnonymousService", Auth.AnonymousService],
       ["AdminService", Auth.AdminService],
@@ -33,14 +33,14 @@ describe("static service layers", () => {
       ["AccountManagementService", Auth.AccountManagementService],
       ["DeviceAuthorizationService", Auth.DeviceAuthorizationService],
       ["AuthLifecycleService", Auth.AuthLifecycleService],
-      ["OidcProviderService", Auth.OidcProviderService],
+      ["OIDCProviderService", Auth.OIDCProviderService],
     ];
     for (const [name, service] of services) {
       expect(typeof service.layer, `${name}.layer`).toBe("function");
     }
   });
 
-  it("SessionManager.layer builds a working session manager", async () => {
+  it("SessionService.layer builds a working session manager", async () => {
     const sessions = new Map<string, Auth.Session>();
     const user: Auth.User = {
       id: "user-1",
@@ -82,13 +82,13 @@ describe("static service layers", () => {
     };
 
     const program = Effect.gen(function* () {
-      const manager = yield* Auth.SessionManager;
+      const manager = yield* Auth.SessionService;
       const session = yield* manager.createSession(user.id);
       const validated = yield* manager.validateSession(session.id);
       return validated;
     });
 
-    const layer = Auth.SessionManager.layer(config).pipe(
+    const layer = Auth.SessionService.layer(config).pipe(
       Layer.provideMerge(
         Layer.mergeAll(
           Layer.succeed(Auth.SessionStore)(sessionStore),

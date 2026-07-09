@@ -8,7 +8,8 @@ import {
   type AnonymousServiceShape,
   type AnonymousUserStoreShape,
 } from "./Anonymous.js";
-import { SessionManager, type SessionManagerShape } from "./Session.js";
+import { SessionService } from "./session/SessionService.js";
+import type { SessionServiceShape } from "./session/SessionService.js";
 import { Hooks } from "./Hooks.js";
 import type * as Types from "./Types.js";
 import { InvalidInputError } from "./Errors.js";
@@ -26,7 +27,7 @@ const makeSession = (userId: string): Types.Session => {
 };
 
 interface Harness {
-  readonly layer: Layer.Layer<AnonymousService | AnonymousUserStore | SessionManager | Hooks>;
+  readonly layer: Layer.Layer<AnonymousService | AnonymousUserStore | SessionService | Hooks>;
   readonly users: Map<string, Types.User>;
   readonly created: string[];
   readonly linkCalls: Array<{ anon: string; real: string }>;
@@ -60,7 +61,7 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
     deleteUser: (userId) => Effect.sync(() => void users.delete(userId)),
   };
 
-  const sessionManager: SessionManagerShape = {
+  const sessionManager: SessionServiceShape = {
     createSession: (userId) => Effect.sync(() => makeSession(userId)),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
@@ -83,7 +84,7 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
     Layer.provideMerge(
       Layer.mergeAll(
         Layer.succeed(AnonymousUserStore)(store),
-        Layer.succeed(SessionManager)(sessionManager),
+        Layer.succeed(SessionService)(sessionManager),
         Hooks.Default,
       ),
     ),
@@ -96,7 +97,7 @@ const run = <A, E>(
   h: Harness,
   f: (
     svc: AnonymousServiceShape,
-  ) => Effect.Effect<A, E, AnonymousUserStore | SessionManager | Hooks>,
+  ) => Effect.Effect<A, E, AnonymousUserStore | SessionService | Hooks>,
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -109,7 +110,7 @@ const runFail = <A, E>(
   h: Harness,
   f: (
     svc: AnonymousServiceShape,
-  ) => Effect.Effect<A, E, AnonymousUserStore | SessionManager | Hooks>,
+  ) => Effect.Effect<A, E, AnonymousUserStore | SessionService | Hooks>,
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {

@@ -10,12 +10,13 @@ import {
 } from "./AccountManagement.js";
 import { EmailInUseError } from "./Errors.js";
 import { UserServiceStore, type UserServiceStoreShape } from "./User.js";
-import { SessionManager, type SessionManagerShape } from "./Session.js";
+import { SessionService } from "./session/SessionService.js";
+import type { SessionServiceShape } from "./session/SessionService.js";
 import type * as Types from "./Types.js";
 
 interface Harness {
   readonly layer: Layer.Layer<
-    AccountManagementService | AccountManagementStore | UserServiceStore | SessionManager
+    AccountManagementService | AccountManagementStore | UserServiceStore | SessionService
   >;
   readonly users: Map<string, Types.User>;
   readonly tokens: Map<string, AccountToken>;
@@ -94,8 +95,8 @@ const makeHarness = (): Harness => {
       }),
   };
 
-  // Minimal SessionManager: only `invalidateUserSessions` is exercised.
-  const sessionManager: SessionManagerShape = {
+  // Minimal SessionService: only `invalidateUserSessions` is exercised.
+  const sessionManager: SessionServiceShape = {
     createSession: () => Effect.die("unused"),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
@@ -118,7 +119,7 @@ const makeHarness = (): Harness => {
       Layer.mergeAll(
         Layer.succeed(UserServiceStore)(userStore),
         Layer.succeed(AccountManagementStore)(tokenStore),
-        Layer.succeed(SessionManager)(sessionManager),
+        Layer.succeed(SessionService)(sessionManager),
       ),
     ),
   );
@@ -139,7 +140,7 @@ const run = <A, E>(
   h: Harness,
   f: (
     svc: AccountManagementServiceShape,
-  ) => Effect.Effect<A, E, AccountManagementStore | UserServiceStore | SessionManager>,
+  ) => Effect.Effect<A, E, AccountManagementStore | UserServiceStore | SessionService>,
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {

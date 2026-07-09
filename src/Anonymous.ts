@@ -19,7 +19,7 @@
 import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
-import { SessionManager } from "./Session.ts";
+import { SessionService } from "./session/SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 
 /**
@@ -60,7 +60,7 @@ export interface AnonymousServiceShape {
   ) => Effect.Effect<
     AnonymousResult,
     Errors.AuthError | HookError,
-    AnonymousUserStore | SessionManager | Hooks
+    AnonymousUserStore | SessionService | Hooks
   >;
 
   /**
@@ -78,7 +78,7 @@ export interface AnonymousServiceShape {
   ) => Effect.Effect<
     void,
     Errors.AuthError | Errors.InvalidInputError,
-    AnonymousUserStore | SessionManager
+    AnonymousUserStore | SessionService
   >;
 }
 
@@ -110,7 +110,7 @@ export const makeAnonymousService = (
       signInAnonymous: (sessionAttributes) =>
         Effect.gen(function* () {
           const store = yield* AnonymousUserStore;
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
 
           const user = yield* store.createAnonymousUser();
           const session = yield* sessionManager.createSession(user.id, sessionAttributes);
@@ -143,7 +143,7 @@ export const makeAnonymousService = (
           inFlight.add(anonymousUser.id);
           try {
             const store = yield* AnonymousUserStore;
-            const sessionManager = yield* SessionManager;
+            const sessionManager = yield* SessionService;
 
             if (config.linkAccount !== undefined) {
               yield* config.linkAccount({ anonymousUser, newUser });

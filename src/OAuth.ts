@@ -1,1 +1,1 @@
-export * from "./OAuth/index.ts";
+export * from "./oauth/index.ts";

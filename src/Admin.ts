@@ -26,8 +26,8 @@ import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import { Hooks, makePlugin, type HookError } from "./Hooks.ts";
 import { IdentifierStore, type IdentifierType } from "./Identifier.ts";
-import { PasswordHasher } from "./Password.ts";
-import { SessionManager } from "./Session.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import { SessionService } from "./session/SessionService.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 
@@ -206,7 +206,7 @@ export interface AdminServiceShape {
   ) => Effect.Effect<
     Types.User,
     AdminError | Errors.AuthError | Errors.UserNotFoundError,
-    UserServiceStore | SessionManager
+    UserServiceStore | SessionService
   >;
 
   /**
@@ -228,7 +228,7 @@ export interface AdminServiceShape {
   readonly removeUser: (
     actor: Types.User,
     userId: string,
-  ) => Effect.Effect<void, AdminError | Errors.AuthError, UserServiceStore | SessionManager>;
+  ) => Effect.Effect<void, AdminError | Errors.AuthError, UserServiceStore | SessionService>;
 
   /**
    * Revoke all sessions of a user.
@@ -236,14 +236,14 @@ export interface AdminServiceShape {
   readonly revokeUserSessions: (
     actor: Types.User,
     userId: string,
-  ) => Effect.Effect<void, AdminError | Errors.AuthError, SessionManager>;
+  ) => Effect.Effect<void, AdminError | Errors.AuthError, SessionService>;
 
   /**
    * Create a session for the target user marked with
    * `attributes.impersonatedBy = actor.id` and
    * `attributes.impersonationExpiresAt = now + impersonationSessionDuration`.
    *
-   * Note: `SessionManager.createSession` does not accept a custom expiry, so
+   * Note: `SessionService.createSession` does not accept a custom expiry, so
    * the session's actual lifetime follows the session configuration; the
    * `impersonationExpiresAt` attribute is advisory and can be enforced by the
    * application (e.g. via an `afterValidateSession` hook).
@@ -254,7 +254,7 @@ export interface AdminServiceShape {
   ) => Effect.Effect<
     Types.Session,
     AdminError | Errors.AuthError | Errors.UserNotFoundError | HookError,
-    UserServiceStore | SessionManager | Hooks
+    UserServiceStore | SessionService | Hooks
   >;
 
   /**
@@ -284,18 +284,18 @@ export interface AdminServiceShape {
   ) => Effect.Effect<
     void,
     AdminError | Errors.AuthError | Errors.HashingError | Errors.UserNotFoundError,
-    UserServiceStore | AdminUserStore | PasswordHasher | SessionManager
+    UserServiceStore | AdminUserStore | PasswordHasher | SessionService
   >;
 
   /**
    * List a user's non-expired sessions (the same view used by
-   * `SessionManager.listSessions`). Useful for an admin "see where this user
+   * `SessionService.listSessions`). Useful for an admin "see where this user
    * is signed in" view before deciding whether to call `revokeUserSessions`.
    */
   readonly listUserSessions: (
     actor: Types.User,
     userId: string,
-  ) => Effect.Effect<ReadonlyArray<Types.Session>, AdminError | Errors.AuthError, SessionManager>;
+  ) => Effect.Effect<ReadonlyArray<Types.Session>, AdminError | Errors.AuthError, SessionService>;
 }
 
 export class AdminService extends Context.Service<AdminService, AdminServiceShape>()(
@@ -391,7 +391,7 @@ export const makeAdminService = (
             attributes,
           });
 
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
           yield* sessionManager.invalidateUserSessions(userId);
 
           return banned;
@@ -431,7 +431,7 @@ export const makeAdminService = (
           }
 
           const userStore = yield* UserServiceStore;
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
 
           yield* sessionManager.invalidateUserSessions(userId);
           yield* userStore.delete(userId);
@@ -440,7 +440,7 @@ export const makeAdminService = (
       revokeUserSessions: (actor, userId) =>
         Effect.gen(function* () {
           yield* requireAdmin(actor);
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
           yield* sessionManager.invalidateUserSessions(userId);
         }),
 
@@ -454,7 +454,7 @@ export const makeAdminService = (
             return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
           }
 
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
           return yield* sessionManager.createSession(target.id, {
             impersonatedBy: actor.id,
             impersonationExpiresAt: Date.now() + impersonationSessionDuration,
@@ -525,7 +525,7 @@ export const makeAdminService = (
           yield* adminStore.setPasswordHash(userId, hashed.hash);
 
           if (options.revokeOtherSessions) {
-            const sessionManager = yield* SessionManager;
+            const sessionManager = yield* SessionService;
             yield* sessionManager.invalidateUserSessions(userId);
           }
         }),
@@ -533,7 +533,7 @@ export const makeAdminService = (
       listUserSessions: (actor, userId) =>
         Effect.gen(function* () {
           yield* requireAdmin(actor);
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
           return yield* sessionManager.listSessions(userId);
         }),
     }),
@@ -545,7 +545,7 @@ export const makeAdminService = (
  *
  * Fails `afterValidateSession` with `AuthError("User is banned")` when the
  * validated user {@link isBanned | is currently banned}, short-circuiting
- * `SessionManager.validateSession`. Lapsed bans (`banExpires` in the past)
+ * `SessionService.validateSession`. Lapsed bans (`banExpires` in the past)
  * pass through.
  *
  * Zero-dependency: compose it with the rest of your stack, e.g.

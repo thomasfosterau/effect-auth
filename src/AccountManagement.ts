@@ -17,7 +17,7 @@ import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
-import { SessionManager } from "./Session.ts";
+import { SessionService } from "./session/SessionService.ts";
 import { normalizeEmail } from "./utils.ts";
 
 /** Which flow a pending token belongs to. */
@@ -118,7 +118,7 @@ export interface AccountManagementServiceShape {
   ) => Effect.Effect<
     EmailChangeResult,
     Errors.AuthError | Errors.UserNotFoundError | AccountTokenError,
-    AccountManagementStore | UserServiceStore | SessionManager
+    AccountManagementStore | UserServiceStore | SessionService
   >;
 
   /** Begin account deletion: issue a token delivered to the user's address. */
@@ -136,7 +136,7 @@ export interface AccountManagementServiceShape {
   ) => Effect.Effect<
     { readonly userId: string },
     Errors.AuthError | Errors.UserNotFoundError | AccountTokenError,
-    AccountManagementStore | UserServiceStore | SessionManager
+    AccountManagementStore | UserServiceStore | SessionService
   >;
 }
 
@@ -199,7 +199,7 @@ export const makeAccountManagementService = (
         Effect.gen(function* () {
           const users = yield* UserServiceStore;
           const store = yield* AccountManagementStore;
-          const sessions = yield* SessionManager;
+          const sessions = yield* SessionService;
 
           const record = yield* store.get(token);
           if (
@@ -282,7 +282,7 @@ export const makeAccountManagementService = (
         Effect.gen(function* () {
           const users = yield* UserServiceStore;
           const store = yield* AccountManagementStore;
-          const sessions = yield* SessionManager;
+          const sessions = yield* SessionService;
 
           const record = yield* store.get(token);
           if (record === null || record.purpose !== "delete-account") {

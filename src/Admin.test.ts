@@ -12,8 +12,10 @@ import {
 } from "./Admin.js";
 import { Hooks } from "./Hooks.js";
 import { IdentifierStore, type Identifier } from "./Identifier.js";
-import { PasswordHasher, type PasswordHasherShape } from "./Password.js";
-import { makeSessionManager, SessionManager, SessionStore, UserStore } from "./Session.js";
+import { PasswordHasher, type PasswordHasherShape } from "./password/Password.js";
+import { make, SessionService } from "./session/SessionService.js";
+import { SessionStore } from "./session/SessionStore.js";
+import { UserStore } from "./session/UserStore.js";
 import { hashToken } from "./TokenHash.js";
 import type { Session, SessionConfig, User } from "./Types.js";
 import { UserServiceStore } from "./User.js";
@@ -58,7 +60,7 @@ const sessionStore = {
 
 const getUser = (userId: string) => Effect.sync(() => users.get(userId) ?? null);
 
-// Session's UserStore (used by SessionManager.validateSession)
+// Session's UserStore (used by SessionService.validateSession)
 const sessionUserStore = {
   get: getUser,
   getCredentials: (_userId: string) => Effect.succeed(null),
@@ -182,7 +184,7 @@ const sessionConfig: SessionConfig = {
 const makeTestContext = async () => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
-      makeSessionManager(sessionConfig),
+      make(sessionConfig),
       Context.merge(
         Context.make(SessionStore, sessionStore),
         Context.make(UserStore, sessionUserStore),
@@ -190,7 +192,7 @@ const makeTestContext = async () => {
     ),
   );
 
-  return Context.make(SessionManager, sessionManager).pipe(
+  return Context.make(SessionService, sessionManager).pipe(
     Context.add(SessionStore, sessionStore),
     Context.add(UserStore, sessionUserStore),
     Context.add(UserServiceStore, userServiceStore),
@@ -223,7 +225,7 @@ const runService = <A, E>(
   ) => Effect.Effect<
     A,
     E,
-    UserServiceStore | AdminUserStore | SessionManager | Hooks | IdentifierStore | PasswordHasher
+    UserServiceStore | AdminUserStore | SessionService | Hooks | IdentifierStore | PasswordHasher
   >,
 ): Promise<A> =>
   Effect.runPromise(
@@ -326,7 +328,7 @@ describe("AdminService", () => {
 
     const result = await runService(testContext, {}, (service) =>
       Effect.gen(function* () {
-        const sessionManager = yield* SessionManager;
+        const sessionManager = yield* SessionService;
         yield* sessionManager.createSession("user-1");
         yield* sessionManager.createSession("user-1");
         const sessionsBefore = sessions.size;
@@ -405,7 +407,7 @@ describe("AdminService", () => {
 
     const program = Effect.gen(function* () {
       const service = yield* makeAdminService({});
-      const sessionManager = yield* SessionManager;
+      const sessionManager = yield* SessionService;
 
       // Ban first (revokes existing sessions), then mint a fresh session to
       // prove the plugin blocks validation even when a session exists.
@@ -444,7 +446,7 @@ describe("AdminService", () => {
 
     const result = await runService(testContext, {}, (service) =>
       Effect.gen(function* () {
-        const sessionManager = yield* SessionManager;
+        const sessionManager = yield* SessionService;
         yield* sessionManager.createSession("user-1");
 
         const removeSelf = yield* Effect.result(service.removeUser(admin, "admin-1"));
@@ -468,7 +470,7 @@ describe("AdminService", () => {
 
     await runService(testContext, {}, (service) =>
       Effect.gen(function* () {
-        const sessionManager = yield* SessionManager;
+        const sessionManager = yield* SessionService;
         yield* sessionManager.createSession("user-1");
         yield* sessionManager.createSession("user-2");
         yield* service.revokeUserSessions(admin, "user-1");
@@ -593,7 +595,7 @@ describe("AdminService", () => {
 
     await runService(testContext, {}, (service) =>
       Effect.gen(function* () {
-        const sessionManager = yield* SessionManager;
+        const sessionManager = yield* SessionService;
         yield* sessionManager.createSession("user-1");
         yield* sessionManager.createSession("user-1");
         yield* sessionManager.createSession("user-2");
@@ -650,7 +652,7 @@ describe("AdminService", () => {
 
     const result = await runService(testContext, {}, (service) =>
       Effect.gen(function* () {
-        const sessionManager = yield* SessionManager;
+        const sessionManager = yield* SessionService;
         yield* sessionManager.createSession("user-1");
         yield* sessionManager.createSession("user-1");
         yield* sessionManager.createSession("user-2");

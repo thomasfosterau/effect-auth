@@ -9,20 +9,20 @@ import {
   EmailVerificationStoreKV,
   PasswordResetStoreKV,
   MagicLinkStoreKV,
-  EmailOtpStoreKV,
+  EmailOTPStoreKV,
   PendingTwoFactorStoreKV,
 } from "./KeyValueStores.js";
-import { OAuthStateStore, type OAuthState } from "./OAuth/OAuth.js";
+import { OAuthStateStore, type OAuthState } from "./oauth/OAuth.js";
 import { ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.js";
 import { RateLimitStore, type RateLimitEntry } from "./RateLimit.js";
 import {
   EmailVerificationStore,
   makeEmailVerificationService,
   type EmailVerification,
-} from "./Email/EmailVerification.js";
-import { PasswordResetStore, type PasswordResetToken } from "./PasswordReset.js";
+} from "./email/EmailVerification.js";
+import { PasswordResetStore, type PasswordResetToken } from "./password/PasswordReset.js";
 import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.js";
-import { EmailOtpStore, type EmailOtpRecord } from "./Email/EmailOtp.js";
+import { EmailOTPStore, type EmailOTPRecord } from "./email/EmailOTP.js";
 import { PendingTwoFactorStore, type PendingTwoFactor } from "./TwoFactor.js";
 import { Hooks } from "./Hooks.js";
 
@@ -39,7 +39,7 @@ const run = <A, E>(
     | EmailVerificationStore
     | PasswordResetStore
     | MagicLinkStore
-    | EmailOtpStore
+    | EmailOTPStore
     | PendingTwoFactorStore
   >,
 ): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(testLayer())) as Effect.Effect<A, E>);
@@ -52,7 +52,7 @@ describe("KeyValueStores", () => {
     expect(EmailVerificationStoreKV).toBeDefined();
     expect(PasswordResetStoreKV).toBeDefined();
     expect(MagicLinkStoreKV).toBeDefined();
-    expect(EmailOtpStoreKV).toBeDefined();
+    expect(EmailOTPStoreKV).toBeDefined();
     expect(PendingTwoFactorStoreKV).toBeDefined();
   });
 
@@ -278,8 +278,8 @@ describe("KeyValueStores", () => {
     });
   });
 
-  describe("EmailOtpStoreKV", () => {
-    const record: EmailOtpRecord = {
+  describe("EmailOTPStoreKV", () => {
+    const record: EmailOTPRecord = {
       email: "otp@example.com",
       otpHash: "hash",
       purpose: "sign-in",
@@ -291,7 +291,7 @@ describe("KeyValueStores", () => {
     it("upserts per email+purpose and increments attempts", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* EmailOtpStore;
+          const store = yield* EmailOTPStore;
           yield* store.upsert(record);
           // Same email, different purpose is a separate record.
           yield* store.upsert({ ...record, purpose: "forget-password", otpHash: "other" });

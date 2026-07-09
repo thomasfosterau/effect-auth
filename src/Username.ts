@@ -19,9 +19,9 @@ import {
   SecondFactorGate,
   isEmailVerified,
   type AuthResult,
-} from "./Email/EmailPassword.ts";
-import { MultiAlgorithmVerifier, PasswordHasher } from "./Password.ts";
-import { SessionManager } from "./Session.ts";
+} from "./email/EmailPassword.ts";
+import { MultiAlgorithmVerifier, PasswordHasher } from "./password/Password.ts";
+import { SessionService } from "./session/SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 
 /** Raised for invalid or already-taken usernames. */
@@ -100,7 +100,7 @@ export interface UsernameServiceShape {
     | EmailPasswordService
     | EmailPasswordStore
     | PasswordHasher
-    | SessionManager
+    | SessionService
     | Hooks
   >;
 
@@ -114,7 +114,7 @@ export interface UsernameServiceShape {
     | Errors.HashingError
     | Errors.AuthError
     | HookError,
-    UsernameStore | EmailPasswordStore | PasswordHasher | SessionManager | Hooks
+    UsernameStore | EmailPasswordStore | PasswordHasher | SessionService | Hooks
   >;
 
   readonly updateUsername: (
@@ -217,7 +217,7 @@ export const makeUsernameService = (
           const store = yield* UsernameStore;
           const emailPasswordStore = yield* EmailPasswordStore;
           const passwordHasher = yield* PasswordHasher;
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
 
           const invalid = () =>
             Effect.fail(

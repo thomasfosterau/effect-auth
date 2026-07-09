@@ -33,7 +33,7 @@
  *
  * ## Atomicity caveat
  *
- * `RateLimitStore.increment` (and `EmailOtpStore.incrementAttempts` / the
+ * `RateLimitStore.increment` (and `EmailOTPStore.incrementAttempts` / the
  * secondary index updates) are implemented as read-modify-write, which is not
  * atomic. Unlike a Redis `INCR`, two concurrent increments may both observe
  * the same count and only bump it once. This is acceptable for the KV
@@ -44,11 +44,11 @@ import { Effect, Layer } from "effect";
 import { KeyValueStore } from "effect/unstable/persistence";
 import * as Errors from "./Errors.ts";
 import {
-  type EmailOtpPurpose,
-  type EmailOtpRecord,
-  type EmailOtpStoreShape,
-  EmailOtpStore,
-} from "./Email/EmailOtp.ts";
+  type EmailOTPPurpose,
+  type EmailOTPRecord,
+  type EmailOTPStoreShape,
+  EmailOTPStore,
+} from "./email/EmailOTP.ts";
 import {
   type Identifier,
   IdentifierStore,
@@ -59,14 +59,14 @@ import {
   type EmailVerification,
   type EmailVerificationStoreShape,
   EmailVerificationStore,
-} from "./Email/EmailVerification.ts";
+} from "./email/EmailVerification.ts";
 import { type MagicLinkStoreShape, MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
-import { type OAuthState, type OAuthStateStoreShape, OAuthStateStore } from "./OAuth/OAuth.ts";
+import { type OAuthState, type OAuthStateStoreShape, OAuthStateStore } from "./oauth/OAuth.ts";
 import {
   type PasswordResetStoreShape,
   PasswordResetStore,
   type PasswordResetToken,
-} from "./PasswordReset.ts";
+} from "./password/PasswordReset.ts";
 import { type RateLimitEntry, type RateLimitStoreShape, RateLimitStore } from "./RateLimit.ts";
 import {
   type PendingTwoFactor,
@@ -493,20 +493,20 @@ export const MagicLinkStoreKV: Layer.Layer<MagicLinkStore, never, KeyValueStore.
   Layer.effect(MagicLinkStore, makeMagicLinkStoreKV);
 
 // ---------------------------------------------------------------------------
-// EmailOtpStore
+// EmailOTPStore
 // ---------------------------------------------------------------------------
 
-const emailOtpKey = (email: string, purpose: EmailOtpPurpose) => `email-otp:${purpose}:${email}`;
+const emailOTPKey = (email: string, purpose: EmailOTPPurpose) => `email-otp:${purpose}:${email}`;
 
 /**
- * Build an {@link EmailOtpStoreShape} over the ambient `KeyValueStore`.
+ * Build an {@link EmailOTPStoreShape} over the ambient `KeyValueStore`.
  *
  * There is at most one active OTP per email + purpose pair, so the pair is
  * the key itself and no secondary index is needed. `incrementAttempts` is
  * read-modify-write (see the module docs on atomicity).
  */
-export const makeEmailOtpStoreKV: Effect.Effect<
-  EmailOtpStoreShape,
+export const makeEmailOTPStoreKV: Effect.Effect<
+  EmailOTPStoreShape,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -514,31 +514,31 @@ export const makeEmailOtpStoreKV: Effect.Effect<
   return {
     upsert: (record) =>
       kv
-        .write(emailOtpKey(record.email, record.purpose), record, "emailOtp.upsert")
+        .write(emailOTPKey(record.email, record.purpose), record, "emailOTP.upsert")
         .pipe(Effect.as(record)),
-    get: (email, purpose) => kv.read<EmailOtpRecord>(emailOtpKey(email, purpose), "emailOtp.get"),
-    delete: (email, purpose) => kv.remove(emailOtpKey(email, purpose), "emailOtp.delete"),
+    get: (email, purpose) => kv.read<EmailOTPRecord>(emailOTPKey(email, purpose), "emailOTP.get"),
+    delete: (email, purpose) => kv.remove(emailOTPKey(email, purpose), "emailOTP.delete"),
     incrementAttempts: (email, purpose) =>
       Effect.gen(function* () {
-        const record = yield* kv.read<EmailOtpRecord>(
-          emailOtpKey(email, purpose),
-          "emailOtp.incrementAttempts",
+        const record = yield* kv.read<EmailOTPRecord>(
+          emailOTPKey(email, purpose),
+          "emailOTP.incrementAttempts",
         );
         if (record == null) {
           return yield* new Errors.AuthError({ message: "OTP record not found" });
         }
-        const updated: EmailOtpRecord = { ...record, attempts: record.attempts + 1 };
-        yield* kv.write(emailOtpKey(email, purpose), updated, "emailOtp.incrementAttempts");
+        const updated: EmailOTPRecord = { ...record, attempts: record.attempts + 1 };
+        yield* kv.write(emailOTPKey(email, purpose), updated, "emailOTP.incrementAttempts");
         return updated.attempts;
       }),
-  } satisfies EmailOtpStoreShape;
+  } satisfies EmailOTPStoreShape;
 });
 
 /**
- * `EmailOtpStore` layer backed by `KeyValueStore`.
+ * `EmailOTPStore` layer backed by `KeyValueStore`.
  */
-export const EmailOtpStoreKV: Layer.Layer<EmailOtpStore, never, KeyValueStore.KeyValueStore> =
-  Layer.effect(EmailOtpStore, makeEmailOtpStoreKV);
+export const EmailOTPStoreKV: Layer.Layer<EmailOTPStore, never, KeyValueStore.KeyValueStore> =
+  Layer.effect(EmailOTPStore, makeEmailOTPStoreKV);
 
 // ---------------------------------------------------------------------------
 // PendingTwoFactorStore
@@ -790,7 +790,7 @@ export const layerKV: Layer.Layer<
   | EmailVerificationStore
   | PasswordResetStore
   | MagicLinkStore
-  | EmailOtpStore
+  | EmailOTPStore
   | PendingTwoFactorStore,
   never,
   KeyValueStore.KeyValueStore
@@ -801,6 +801,6 @@ export const layerKV: Layer.Layer<
   EmailVerificationStoreKV,
   PasswordResetStoreKV,
   MagicLinkStoreKV,
-  EmailOtpStoreKV,
+  EmailOTPStoreKV,
   PendingTwoFactorStoreKV,
 );

@@ -8,7 +8,9 @@ import {
   MagicLinkStore,
   MagicLinkUserStore,
 } from "./MagicLink.js";
-import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
+import { make, SessionService } from "./session/SessionService.js";
+import { SessionStore } from "./session/SessionStore.js";
+import { UserStore } from "./session/UserStore.js";
 import { hashToken } from "./TokenHash.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 
@@ -127,13 +129,13 @@ const sessionConfig: SessionConfig = {
 const makeTestContext = async () => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
-      makeSessionManager(sessionConfig),
+      make(sessionConfig),
       Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
     ),
   );
 
   return Context.merge(
-    Context.make(SessionManager, sessionManager),
+    Context.make(SessionService, sessionManager),
     Context.merge(
       Context.make(MagicLinkStore, magicLinkStore),
       Context.make(MagicLinkUserStore, magicLinkUserStore),

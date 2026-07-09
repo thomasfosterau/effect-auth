@@ -2,13 +2,15 @@ import { describe, it, expect } from "vite-plus/test";
 import { Context, Effect, Layer } from "effect";
 import { Hooks, composePlugins, makePlugin } from "./Hooks.js";
 import * as Errors from "./Errors.js";
-import type { AuthResult, SignInInput } from "./Email/EmailPassword.js";
-import { EmailPasswordStore } from "./Email/EmailPassword.js";
-import { makeEmailPasswordService } from "./Email/EmailPassword.js";
-import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
-import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
+import type { AuthResult, SignInInput } from "./email/EmailPassword.js";
+import { EmailPasswordStore } from "./email/EmailPassword.js";
+import { makeEmailPasswordService } from "./email/EmailPassword.js";
+import { PasswordHasher, makePBKDF2Hasher } from "./password/Password.js";
+import { make, SessionService } from "./session/SessionService.js";
+import { SessionStore } from "./session/SessionStore.js";
+import { UserStore } from "./session/UserStore.js";
 import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.js";
-import { RateLimitPlugin } from "./RateLimitPlugin.js";
+import { RateLimitPlugin } from "./plugins/RateLimit.js";
 import type { Session, SessionConfig, User } from "./Types.js";
 
 const signIn = (email: string): SignInInput => ({ email, password: "secret" });
@@ -400,13 +402,13 @@ describe("Hooks - integration with EmailPasswordService", () => {
 
     const sessionManager = await Effect.runPromise(
       Effect.provide(
-        makeSessionManager(sessionConfig),
+        make(sessionConfig),
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
       ),
     );
 
     const testContext = Context.merge(
-      Context.make(SessionManager, sessionManager),
+      Context.make(SessionService, sessionManager),
       Context.merge(
         Context.make(EmailPasswordStore, emailPasswordStore),
         Context.make(PasswordHasher, makePBKDF2Hasher()),

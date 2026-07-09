@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect, Redacted } from "effect";
 import { Hooks } from "./Hooks.js";
-import { SessionService, make as makeSessionService } from "./SessionService.js";
-import { SessionStore } from "./SessionStore.js";
-import { UserStore } from "./UserStore.js";
+import { SessionService, make as makeSessionService } from "./session/SessionService.js";
+import { SessionStore } from "./session/SessionStore.js";
+import { UserStore } from "./session/UserStore.js";
 import {
   makeTwoFactorService,
   type PendingTwoFactor,
@@ -12,9 +12,9 @@ import {
   PendingTwoFactorStore,
 } from "./TwoFactor.js";
 import { makeAes256GcmCipher } from "./Cipher.js";
-import { type CreateUserInput, EmailPasswordStore } from "./Email/EmailPassword.js";
-import { generateTOTP } from "./Otp.js";
-import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
+import { type CreateUserInput, EmailPasswordStore } from "./email/EmailPassword.js";
+import { generateTOTP } from "./OTP.js";
+import { PasswordHasher, makePBKDF2Hasher } from "./password/Password.js";
 import type { Session, User, SessionConfig } from "./Types.js";
 
 const users = new Map<string, User>();

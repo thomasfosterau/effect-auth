@@ -37,13 +37,13 @@ export interface TokenCipher {
  * ```ts
  * const cipher = makeAes256GcmCipher(process.env.ENCRYPTION_SECRET!)
  * // JWT private key at rest
- * const jwtLayer = JwtService.layer({ issuer: "...", encryptPrivateKey: { cipher } })
+ * const jwtLayer = JWTService.layer({ issuer: "...", encryptPrivateKey: { cipher } })
  * // TOTP secret at rest
  * const totpLayer = TwoFactorService.layer({ issuer: "...", encryptSecret: { cipher } })
  * // OAuth tokens at rest
  * const oauthLayer = OAuthService.layer(providers, { encryptTokens: { cipher } })
  * // or use the shorthand (each option accepts { secret } instead of { cipher }):
- * const jwtLayer = JwtService.layer({
+ * const jwtLayer = JWTService.layer({
  *   issuer: "...",
  *   encryptPrivateKey: { secret: process.env.ENCRYPTION_SECRET! },
  * })

@@ -30,8 +30,8 @@ import * as crypto from "node:crypto";
 import { Context, Data, Effect, Layer } from "effect";
 import type { AuthError } from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
-import { SessionManager } from "./Session.ts";
-import { OAuthUserStore, generateNonce, verifyIdToken } from "./OAuth/OAuth.ts";
+import { SessionService } from "./session/SessionService.ts";
+import { OAuthUserStore, generateNonce, verifyIdToken } from "./oauth/OAuth.ts";
 import type * as Types from "./Types.ts";
 
 /** Failure to verify a One Tap credential or complete the sign-in. */
@@ -132,7 +132,7 @@ export interface GoogleOneTapServiceShape {
   ) => Effect.Effect<
     GoogleOneTapSignInResult,
     GoogleOneTapError | AuthError | HookError,
-    OAuthUserStore | SessionManager | Hooks | GoogleOneTapNonceStore
+    OAuthUserStore | SessionService | Hooks | GoogleOneTapNonceStore
   >;
 }
 
@@ -180,7 +180,7 @@ export const makeGoogleOneTapService = (
       Effect.gen(function* () {
         const nonceStore = yield* GoogleOneTapNonceStore;
         const userStore = yield* OAuthUserStore;
-        const sessionManager = yield* SessionManager;
+        const sessionManager = yield* SessionService;
 
         // --- Nonce lifecycle: verify present, unexpired, then consume --------
         const entry = yield* nonceStore

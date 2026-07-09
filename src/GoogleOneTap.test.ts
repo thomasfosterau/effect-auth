@@ -3,19 +3,22 @@ import { Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import { UserNotFoundError } from "./Errors.js";
 import { Hooks } from "./Hooks.js";
-import { SessionManager, SessionStore, UserStore, type SessionManagerShape } from "./Session.js";
+import { SessionService } from "./session/SessionService.js";
+import { SessionStore } from "./session/SessionStore.js";
+import { UserStore } from "./session/UserStore.js";
+import type { SessionServiceShape } from "./session/SessionService.js";
 import { UserServiceStore, UserService } from "./User.js";
 import { AuthLifecycleService } from "./AuthLifecycle.js";
-import { EmailPasswordStore } from "./Email/EmailPassword.js";
-import { PasswordHasher } from "./Password.js";
-import { EmailVerificationService, EmailVerificationStore } from "./Email/EmailVerification.js";
+import { EmailPasswordStore } from "./email/EmailPassword.js";
+import { PasswordHasher } from "./password/Password.js";
+import { EmailVerificationService, EmailVerificationStore } from "./email/EmailVerification.js";
 import {
   PasswordResetService,
   PasswordResetStore,
   PasswordResetUserStore,
-} from "./PasswordReset.js";
-import { makeAuthWebHandler, type AuthServices } from "./Http/HttpServer.js";
-import { OAuthUserStore, type OAuthUserStoreShape } from "./OAuth/OAuth.js";
+} from "./password/PasswordReset.js";
+import { makeAuthWebHandler, type AuthServices } from "./http/HTTPServer.js";
+import { OAuthUserStore, type OAuthUserStoreShape } from "./oauth/OAuth.js";
 import {
   makeGoogleOneTapService,
   GoogleOneTapError,
@@ -130,7 +133,7 @@ const makeStores = () => {
         return user;
       }),
   };
-  const sessionManager: SessionManagerShape = {
+  const sessionManager: SessionServiceShape = {
     createSession: (userId) =>
       Effect.succeed({
         id: `s-${userId}`,
@@ -152,7 +155,7 @@ const makeStores = () => {
 
   const layer = Layer.mergeAll(
     Layer.succeed(OAuthUserStore)(userStore),
-    Layer.succeed(SessionManager)(sessionManager),
+    Layer.succeed(SessionService)(sessionManager),
     Layer.succeed(GoogleOneTapNonceStore)(nonceStore),
     Hooks.Default,
   );
@@ -385,7 +388,7 @@ const makeHttpFixture = () => {
   const nonceStore = makeMemoryNonceStore();
 
   const base = Layer.mergeAll(
-    SessionManager.layer({
+    SessionService.layer({
       sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
     }).pipe(
       Layer.provide(
