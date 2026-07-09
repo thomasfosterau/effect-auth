@@ -3,8 +3,8 @@
  */
 
 import { Context, Effect, Layer } from "effect";
-import { AuthError, EmailVerificationError, type RateLimitError } from "./Errors.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
+import { AuthError, EmailVerificationError, type RateLimitError } from "../Errors.ts";
+import { Hooks, type HookError } from "../Hooks.ts";
 
 /**
  * Email verification token
@@ -121,7 +121,7 @@ export interface EmailVerificationServiceShape {
  * @module email-verification
  */
 import * as crypto from "node:crypto";
-import { hashToken } from "./TokenHash.ts";
+import { hashToken } from "../TokenHash.ts";
 
 /**
  * Email verification store context tag

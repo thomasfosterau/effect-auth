@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { HttpApiSchema } from "effect/unstable/httpapi";
-import type * as Types from "./Types.ts";
+import type * as Types from "../Types.ts";
 
 /**
  * HTTP wire schemas for the auth protocol.

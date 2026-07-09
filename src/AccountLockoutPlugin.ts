@@ -14,7 +14,7 @@
  * @module plugins/account-lockout
  */
 import { Context, Effect } from "effect";
-import type { SignInInput, AuthResult } from "./EmailPassword.ts";
+import type { SignInInput, AuthResult } from "./Email/EmailPassword.ts";
 import * as Errors from "./Errors.ts";
 import { makePlugin } from "./Hooks.ts";
 

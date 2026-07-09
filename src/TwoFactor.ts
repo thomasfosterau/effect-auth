@@ -12,8 +12,7 @@
  * @module two-factor
  */
 
-import { Config, Context, Data, Effect, Layer, Redacted } from "effect";
-import * as crypto from "node:crypto";
+import { Config, Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
 import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
@@ -22,12 +21,13 @@ import {
   EmailPasswordStore,
   SecondFactorGate,
   type SecondFactorGateShape,
-} from "./EmailPassword.ts";
+} from "./Email/EmailPassword.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { generateBase32Secret, generateOTPURI, verifyTOTP, type TOTPConfig } from "./Otp.ts";
 import { PasswordHasher } from "./Password.ts";
-import { SessionManager, UserStore } from "./Session.ts";
 import type * as Types from "./Types.ts";
+import { UserStore } from "./UserStore.ts";
+import { SessionService } from "./SessionService.ts";
 
 /**
  * Two-factor error
@@ -234,7 +234,7 @@ export interface TwoFactorServiceShape {
   ) => Effect.Effect<
     TwoFactorVerifyResult,
     TwoFactorError | Errors.HashingError | Errors.AuthError | HookError,
-    TwoFactorStore | PendingTwoFactorStore | SessionManager | Hooks
+    TwoFactorStore | PendingTwoFactorStore | SessionService | Hooks
   >;
 
   /**
@@ -248,7 +248,7 @@ export interface TwoFactorServiceShape {
   ) => Effect.Effect<
     TwoFactorVerifyResult,
     TwoFactorError | Errors.AuthError | HookError,
-    TwoFactorStore | PendingTwoFactorStore | SessionManager | Hooks
+    TwoFactorStore | PendingTwoFactorStore | SessionService | Hooks
   >;
 
   /**
@@ -309,17 +309,20 @@ export const twoFactorConfig = Config.all({
 /**
  * Generate a cryptographically secure pending-challenge token
  */
-const generatePendingToken = (): Effect.Effect<string, Errors.AuthError> =>
-  Effect.sync(() => crypto.randomBytes(32).toString("base64url"));
+const generatePendingToken = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
+  return crypto.randomBytes(32).toString("base64url");
+});
 
 /**
  * Generate a single plaintext backup code: 10 crypto-random hex characters
  * formatted as `xxxxx-xxxxx`.
  */
-const generateBackupCode = (): string => {
+const generateBackupCode = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
   const raw = crypto.randomBytes(5).toString("hex");
   return `${raw.slice(0, 5)}-${raw.slice(5)}`;
-};
+});
 
 /**
  * Normalize a backup code for hashing/comparison (strip separators and
@@ -330,8 +333,10 @@ const normalizeBackupCode = (code: string): string => code.replace(/[\s-]/g, "")
 /**
  * sha256 hex digest of a normalized backup code
  */
-export const hashBackupCode = (code: string): string =>
-  crypto.createHash("sha256").update(normalizeBackupCode(code)).digest("hex");
+export const hashBackupCode = Effect.fn("")(function* (code: string) {
+  const crypto = yield* Crypto.Crypto;
+  return crypto.createHash("sha256").update(normalizeBackupCode(code)).digest("hex");
+});
 
 /**
  * Find the index of a backup-code hash using timing-safe comparison.
@@ -463,12 +468,12 @@ export const makeTwoFactorService = (
           const secret = yield* generateBase32Secret();
           const storedSecret = cipher !== null ? yield* cipher.encrypt(secret) : secret;
 
-          const backupCodes = Array.from({ length: backupCodeCount }, () => generateBackupCode());
+          const backupCodes = Array.from({ length: backupCodeCount }, () => yield* generateBackupCode());
 
           const record: TwoFactorRecord = {
             userId,
             secret: storedSecret,
-            backupCodes: backupCodes.map(hashBackupCode),
+            backupCodes: backupCodes.map((code) => yield* hashBackupCode(code)),
             verified: skipVerificationOnEnable,
             createdAt: Date.now(),
           };
@@ -589,7 +594,7 @@ export const makeTwoFactorService = (
           const pendingStore = yield* PendingTwoFactorStore;
           yield* pendingStore.delete(pendingToken);
 
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
           const session = yield* sessionManager.createSession(
             pending.userId,
             options?.sessionAttributes,
@@ -610,7 +615,7 @@ export const makeTwoFactorService = (
           const pending = yield* resolvePending(pendingToken);
           const record = yield* getVerifiedRecord(pending.userId);
 
-          const index = findBackupCodeIndex(record.backupCodes, hashBackupCode(code));
+          const index = findBackupCodeIndex(record.backupCodes, yield*hashBackupCode(code));
           if (index === -1) {
             return yield* Effect.fail(
               new TwoFactorError({
@@ -630,7 +635,7 @@ export const makeTwoFactorService = (
           const pendingStore = yield* PendingTwoFactorStore;
           yield* pendingStore.delete(pendingToken);
 
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
           const session = yield* sessionManager.createSession(
             pending.userId,
             options?.sessionAttributes,

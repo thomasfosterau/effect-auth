@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect } from "effect";
-import { Hooks } from "./Hooks.js";
+import { Hooks } from "../Hooks.js";
 import {
   makeEmailOtpService,
   type EmailOtpCreateUserInput,
@@ -9,10 +9,10 @@ import {
   EmailOtpStore,
   EmailOtpUserStore,
 } from "./EmailOtp.js";
-import { hashToken } from "./TokenHash.js";
+import { hashToken } from "../TokenHash.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
-import type { Session, User, SessionConfig } from "./Types.js";
-import * as Errors from "./Errors.js";
+import type { Session, User, SessionConfig } from "../Types.js";
+import * as Errors from "../Errors.js";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();

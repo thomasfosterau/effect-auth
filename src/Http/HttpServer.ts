@@ -1,5 +1,5 @@
 import { Context, Effect, FileSystem, Layer, Option, Path } from "effect";
-import { resolveMessage } from "./Messages.ts";
+import { resolveMessage } from "../Messages.ts";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import {
   Etag,
@@ -9,37 +9,37 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http";
 import { AuthApi, getOpenApiSpec } from "./HttpApi.ts";
-import { ClientIp, resolveClientIp, type TrustedProxyConfig } from "./ClientIp.ts";
-import { RateLimiter, RateLimitStore, type RateLimitConfig } from "./RateLimit.ts";
+import { ClientIp, resolveClientIp, type TrustedProxyConfig } from "../ClientIp.ts";
+import { RateLimiter, RateLimitStore, type RateLimitConfig } from "../RateLimit.ts";
 import * as S from "./HttpApiSchemas.ts";
-import { AuthLifecycleService } from "./AuthLifecycle.ts";
-import { Hooks } from "./Hooks.ts";
-import { SessionManager, UserStore } from "./Session.ts";
+import { AuthLifecycleService } from "../AuthLifecycle.ts";
+import { Hooks } from "../Hooks.ts";
+import { SessionManager, UserStore } from "../Session.ts";
 import {
   EmailPasswordService,
   EmailPasswordStore,
   makeEmailPasswordService,
-} from "./EmailPassword.ts";
-import { MagicLinkService, MagicLinkStore, MagicLinkUserStore } from "./MagicLink.ts";
-import { AccountManagementService, AccountManagementStore } from "./AccountManagement.ts";
-import { AnonymousService, AnonymousUserStore } from "./Anonymous.ts";
-import { PhoneOtpService, PhoneOtpStore, PhoneOtpUserStore } from "./PhoneOtp.ts";
-import { UsernameService, UsernameStore } from "./Username.ts";
+} from "../Email/EmailPassword.ts";
+import { MagicLinkService, MagicLinkStore, MagicLinkUserStore } from "../MagicLink.ts";
+import { AccountManagementService, AccountManagementStore } from "../AccountManagement.ts";
+import { AnonymousService, AnonymousUserStore } from "../Anonymous.ts";
+import { PhoneOtpService, PhoneOtpStore, PhoneOtpUserStore } from "../PhoneOtp.ts";
+import { UsernameService, UsernameStore } from "../Username.ts";
 import {
   DeviceAuthorizationService,
   DeviceAuthorizationStore,
   normalizeUserCode,
-} from "./DeviceAuthorization.ts";
-import { EmailOtpService, EmailOtpStore, EmailOtpUserStore } from "./EmailOtp.ts";
-import { PendingTwoFactorStore, TwoFactorService, TwoFactorStore } from "./TwoFactor.ts";
-import { PasswordHasher } from "./Password.ts";
-import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.ts";
+} from "../DeviceAuthorization.ts";
+import { EmailOtpService, EmailOtpStore, EmailOtpUserStore } from "../Email/EmailOtp.ts";
+import { PendingTwoFactorStore, TwoFactorService, TwoFactorStore } from "../TwoFactor.ts";
+import { PasswordHasher } from "../Password.ts";
+import { EmailVerificationService, EmailVerificationStore } from "../Email/EmailVerification.ts";
 import {
   PasswordResetService,
   PasswordResetStore,
   PasswordResetUserStore,
-} from "./PasswordReset.ts";
-import { UserServiceStore, UserService } from "./User.ts";
+} from "../PasswordReset.ts";
+import { UserServiceStore, UserService } from "../User.ts";
 import {
   OrganizationService,
   OrganizationStore,
@@ -47,10 +47,10 @@ import {
   type Member,
   type Invitation,
   type FullOrganization,
-} from "./Organization.ts";
-import { AdminService, AdminUserStore, isAdmin } from "./Admin.ts";
-import { ApiKeyService, ApiKeyStore, type ApiKey } from "./ApiKey.ts";
-import { JwtService, JwtKeyStore } from "./Jwt.ts";
+} from "../Organization.ts";
+import { AdminService, AdminUserStore, isAdmin } from "../Admin.ts";
+import { ApiKeyService, ApiKeyStore, type ApiKey } from "../ApiKey.ts";
+import { JwtService, JwtKeyStore } from "../Jwt.ts";
 import {
   OidcProviderService,
   OidcClientStore,
@@ -58,19 +58,19 @@ import {
   OidcTokenStore,
   OidcConsentStore,
   type OidcClient,
-} from "./OidcProvider.ts";
-import { SsoService, SsoProviderStore, type SsoProvider } from "./Sso.ts";
-import { OAuthStateStore, OAuthUserStore } from "./OAuth/OAuth.ts";
-import { hashToken } from "./TokenHash.ts";
-import { GoogleOneTapNonceStore, GoogleOneTapService } from "./GoogleOneTap.ts";
+} from "../OidcProvider.ts";
+import { SsoService, SsoProviderStore, type SsoProvider } from "../Sso.ts";
+import { OAuthStateStore, OAuthUserStore } from "../OAuth/OAuth.ts";
+import { hashToken } from "../TokenHash.ts";
+import { GoogleOneTapNonceStore, GoogleOneTapService } from "../GoogleOneTap.ts";
 import {
   decodeSessionCacheCookie,
   encodeSessionCacheCookie,
   resolveSessionCache,
   type ResolvedSessionCache,
   type SessionCacheConfig,
-} from "./SessionCookieCache.ts";
-import type * as Types from "./Types.ts";
+} from "../SessionCookieCache.ts";
+import type * as Types from "../Types.ts";
 
 /**
  * The services the auth handlers require. Your `services` layer must provide

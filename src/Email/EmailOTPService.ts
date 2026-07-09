@@ -9,13 +9,13 @@
  * @module email-otp
  */
 import { randomInt } from "node:crypto";
-import { Context, Data, Effect, Layer } from "effect";
-import * as Errors from "./Errors.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
-import { SessionManager } from "./Session.ts";
-import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
-import type * as Types from "./Types.ts";
-import { normalizeEmail } from "./utils.ts";
+import { Context, Data, Effect } from "effect";
+import * as Errors from "../Errors.ts";
+import { Hooks, type HookError } from "../Hooks.ts";
+import { SessionManager } from "../Session.ts";
+import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
+import type * as Types from "../Types.ts";
+import { normalizeEmail } from "../utils.ts";
 
 /**
  * Email OTP error
@@ -143,7 +143,7 @@ export interface EmailOtpCheckResult {
 /**
  * Email OTP service
  */
-export interface EmailOtpServiceShape {
+export interface EmailOTPService {
   /**
    * Generate an OTP for the given email + purpose (replacing any outstanding
    * one) and send it. Only a SHA-256 hash of the code is stored.
@@ -191,14 +191,7 @@ export interface EmailOtpServiceShape {
   ) => Effect.Effect<EmailOtpCheckResult, EmailOtpError | Errors.AuthError, EmailOtpStore>;
 }
 
-export class EmailOtpService extends Context.Service<EmailOtpService, EmailOtpServiceShape>()(
-  "@effect-auth/EmailOtpService",
-) {
-  /**
-   * Construct a Layer providing this service.
-   */
-  static readonly layer = (config: EmailOtpConfig) => Layer.effect(EmailOtpService, make(config));
-}
+export const EmailOTPService: Context.Service<EmailOTPService, EmailOTPService> = Context.Service<EmailOTPService>("@effect-auth/EmailOtpService");
 
 /** @deprecated Use {@link hashToken} from `"effect-auth"` instead. */
 export const hashOtp = hashToken;

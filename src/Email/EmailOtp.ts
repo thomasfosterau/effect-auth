@@ -10,11 +10,11 @@
  */
 import { randomInt } from "node:crypto";
 import { Context, Data, Effect, Layer } from "effect";
-import * as Errors from "./Errors.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
+import * as Errors from "../Errors.ts";
+import { Hooks, type HookError } from "../Hooks.ts";
 import { SessionManager } from "./Session.ts";
-import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
-import type * as Types from "./Types.ts";
+import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
+import type * as Types from "../Types.ts";
 import { normalizeEmail } from "./utils.ts";
 
 /**

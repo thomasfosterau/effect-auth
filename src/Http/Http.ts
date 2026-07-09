@@ -15,7 +15,7 @@ export * from "./HttpApi.ts";
 export * from "./HttpServer.ts";
 
 /** Signed session-data cookie cache (config + codec). */
-export * from "./SessionCookieCache.ts";
+export * from "../SessionCookieCache.ts";
 
 /** Typed, Effect-native client. */
 export * from "./HttpClient.ts";

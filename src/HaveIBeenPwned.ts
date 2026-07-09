@@ -15,7 +15,7 @@
 import { Effect } from "effect";
 import * as nodeCrypto from "node:crypto";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
-import type { SignUpInput } from "./EmailPassword.ts";
+import type { SignUpInput } from "./Email/EmailPassword.ts";
 import { makePlugin, type ResetPasswordArgs } from "./Hooks.ts";
 import { AuthError, PwnedPasswordError } from "./Errors.ts";
 
