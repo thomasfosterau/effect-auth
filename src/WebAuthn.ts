@@ -248,7 +248,7 @@ export function base64UrlDecode(str: string): Uint8Array {
  */
 export const makeWebAuthnService = (
   config: WebAuthnConfig,
-): Effect.Effect<WebAuthnServiceShape, never, ChallengeStore | CredentialStore> =>
+): Effect.Effect<typeof WebAuthnService.Service, never, ChallengeStore | CredentialStore> =>
   Effect.gen(function* () {
     const challengeStore = yield* ChallengeStore;
     const credentialStore = yield* CredentialStore;
@@ -676,9 +676,74 @@ export const makeWebAuthnService = (
     };
   });
 
-export class WebAuthnService extends Context.Service<WebAuthnService, WebAuthnServiceShape>()(
-  "@effect-auth/WebAuthnService",
-) {
+/**
+ * WebAuthn service for managing passkey registration and authentication
+ */
+export class WebAuthnService extends Context.Service<
+  WebAuthnService,
+  {
+    /** Generate a challenge for registration */
+    generateRegistrationChallenge: (
+      user: WebAuthnUser,
+    ) => Effect.Effect<RegistrationChallenge, Errors.AuthError>;
+
+    /** Verify registration response from client */
+    verifyRegistration: (
+      challenge: Uint8Array,
+      response: RegistrationResponse,
+    ) => Effect.Effect<
+      RegistrationResult,
+      | Errors.WebAuthnVerificationError
+      | Errors.ChallengeNotFoundError
+      | Errors.ChallengeExpiredError
+      | Errors.AuthError
+    >;
+
+    /**
+     * Generate a challenge for authentication.
+     * Pass `userId` for a bound challenge (known user); omit for a
+     * discoverable/usernameless challenge.
+     */
+    generateAuthenticationChallenge: (userId?: string) => Effect.Effect<
+      {
+        challenge: Uint8Array;
+        expiresAt: number;
+      },
+      Errors.AuthError
+    >;
+
+    /** Verify authentication response from client */
+    verifyAuthentication: (
+      challenge: Uint8Array,
+      response: AuthenticationResponse,
+    ) => Effect.Effect<
+      AuthenticationResult,
+      | Errors.WebAuthnVerificationError
+      | Errors.CredentialNotFoundError
+      | Errors.ChallengeNotFoundError
+      | Errors.ChallengeExpiredError
+      | Errors.AuthError
+    >;
+
+    /** List all passkeys registered for a user */
+    listCredentials: (
+      userId: string,
+    ) => Effect.Effect<readonly WebAuthnCredential[], Errors.AuthError>;
+
+    /** Delete a passkey; fails if the credential does not belong to `userId` */
+    deleteCredential: (
+      userId: string,
+      credentialId: string,
+    ) => Effect.Effect<void, Errors.CredentialNotFoundError | Errors.AuthError>;
+
+    /** Rename a passkey; fails if the credential does not belong to `userId` */
+    renameCredential: (
+      userId: string,
+      credentialId: string,
+      name: string,
+    ) => Effect.Effect<WebAuthnCredential, Errors.CredentialNotFoundError | Errors.AuthError>;
+  }
+>()("@effect-auth/WebAuthnService") {
   static readonly layer = (config: WebAuthnConfig) =>
     Layer.effect(WebAuthnService, makeWebAuthnService(config));
 }

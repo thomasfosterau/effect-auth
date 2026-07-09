@@ -153,32 +153,6 @@ export interface OAuthCallbackResult {
 }
 
 /**
- * Storage interface for OAuth state (temporary, Redis/memory)
- */
-export interface OAuthStateStoreShape {
-  readonly create: (state: OAuthState) => Effect.Effect<OAuthState, AuthError>;
-  /** Get a pending state entry, or `null` when unknown/expired-and-purged. */
-  readonly get: (state: string) => Effect.Effect<OAuthState | null, AuthError>;
-  readonly delete: (state: string) => Effect.Effect<void, AuthError>;
-}
-
-/**
- * Storage interface for OAuth accounts (persistent, database)
- */
-export interface OAuthAccountStoreShape {
-  readonly create: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
-  readonly get: (
-    provider: string,
-    providerId: string,
-  ) => Effect.Effect<OAuthAccount | null, AuthError>;
-  readonly getByUserId: (userId: string) => Effect.Effect<readonly OAuthAccount[], AuthError>;
-  readonly update: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
-  readonly linkToUser: (userId: string, account: OAuthAccount) => Effect.Effect<void, AuthError>;
-  readonly unlinkFromUser: (userId: string, provider: string) => Effect.Effect<void, AuthError>;
-  readonly delete: (provider: string, providerId: string) => Effect.Effect<void, AuthError>;
-}
-
-/**
  * Input for creating a user from an OAuth provider profile.
  */
 export interface OAuthCreateUserInput {
@@ -186,16 +160,6 @@ export interface OAuthCreateUserInput {
   readonly emailVerified: boolean;
   readonly name?: string;
   readonly image?: string;
-}
-
-/**
- * Minimal user store the OAuth sign-in flow needs to create or look up users
- * from provider profiles. Implement alongside {@link OAuthAccountStoreShape}.
- */
-export interface OAuthUserStoreShape {
-  readonly getUser: (userId: string) => Effect.Effect<Types.User, AuthError | UserNotFoundError>;
-  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, AuthError>;
-  readonly createUser: (input: OAuthCreateUserInput) => Effect.Effect<Types.User, AuthError>;
 }
 
 /**
@@ -248,25 +212,54 @@ export interface OAuthProvider {
 import * as crypto from "node:crypto";
 
 /**
- * OAuth state store context tag
+ * Storage interface for OAuth state (temporary, Redis/memory)
  */
-export class OAuthStateStore extends Context.Service<OAuthStateStore, OAuthStateStoreShape>()(
-  "@effect-auth/OAuthStateStore",
-) {}
+export class OAuthStateStore extends Context.Service<
+  OAuthStateStore,
+  {
+    readonly create: (state: OAuthState) => Effect.Effect<OAuthState, AuthError>;
+    /** Get a pending state entry, or `null` when unknown/expired-and-purged. */
+    readonly get: (state: string) => Effect.Effect<OAuthState | null, AuthError>;
+    readonly delete: (state: string) => Effect.Effect<void, AuthError>;
+  }
+>()("@effect-auth/OAuthStateStore") {}
 
 /**
- * OAuth account store context tag
+ * Storage interface for OAuth accounts (persistent, database)
  */
-export class OAuthAccountStore extends Context.Service<OAuthAccountStore, OAuthAccountStoreShape>()(
-  "@effect-auth/OAuthAccountStore",
-) {}
+export class OAuthAccountStore extends Context.Service<
+  OAuthAccountStore,
+  {
+    readonly create: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
+    readonly get: (
+      provider: string,
+      providerId: string,
+    ) => Effect.Effect<OAuthAccount | null, AuthError>;
+    readonly getByUserId: (userId: string) => Effect.Effect<readonly OAuthAccount[], AuthError>;
+    readonly update: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
+    readonly linkToUser: (userId: string, account: OAuthAccount) => Effect.Effect<void, AuthError>;
+    readonly unlinkFromUser: (
+      userId: string,
+      provider: string,
+    ) => Effect.Effect<void, AuthError>;
+    readonly delete: (provider: string, providerId: string) => Effect.Effect<void, AuthError>;
+  }
+>()("@effect-auth/OAuthAccountStore") {}
 
 /**
- * OAuth user store context tag
+ * Minimal user store the OAuth sign-in flow needs to create or look up users
+ * from provider profiles. Implement alongside `typeof OAuthAccountStore.Service`.
  */
-export class OAuthUserStore extends Context.Service<OAuthUserStore, OAuthUserStoreShape>()(
-  "@effect-auth/OAuthUserStore",
-) {}
+export class OAuthUserStore extends Context.Service<
+  OAuthUserStore,
+  {
+    readonly getUser: (
+      userId: string,
+    ) => Effect.Effect<Types.User, AuthError | UserNotFoundError>;
+    readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, AuthError>;
+    readonly createUser: (input: OAuthCreateUserInput) => Effect.Effect<Types.User, AuthError>;
+  }
+>()("@effect-auth/OAuthUserStore") {}
 
 /**
  * Generate a cryptographically secure random state parameter

@@ -44,21 +44,24 @@ export interface PhoneOTPRecord {
  * Persistence for phone OTPs, keyed by the (normalized phoneNumber, purpose)
  * pair; `upsert` replaces any existing record for the pair.
  */
-export interface PhoneOTPStoreShape {
-  readonly upsert: (record: PhoneOTPRecord) => Effect.Effect<PhoneOTPRecord, Errors.AuthError>;
-  readonly get: (
-    phoneNumber: string,
-    purpose: PhoneOTPPurpose,
-  ) => Effect.Effect<PhoneOTPRecord | null, Errors.AuthError>;
-  readonly delete: (
-    phoneNumber: string,
-    purpose: PhoneOTPPurpose,
-  ) => Effect.Effect<void, Errors.AuthError>;
-  readonly incrementAttempts: (
-    phoneNumber: string,
-    purpose: PhoneOTPPurpose,
-  ) => Effect.Effect<number, Errors.AuthError>;
-}
+export class PhoneOTPStore extends Context.Service<
+  PhoneOTPStore,
+  {
+    readonly upsert: (record: PhoneOTPRecord) => Effect.Effect<PhoneOTPRecord, Errors.AuthError>;
+    readonly get: (
+      phoneNumber: string,
+      purpose: PhoneOTPPurpose,
+    ) => Effect.Effect<PhoneOTPRecord | null, Errors.AuthError>;
+    readonly delete: (
+      phoneNumber: string,
+      purpose: PhoneOTPPurpose,
+    ) => Effect.Effect<void, Errors.AuthError>;
+    readonly incrementAttempts: (
+      phoneNumber: string,
+      purpose: PhoneOTPPurpose,
+    ) => Effect.Effect<number, Errors.AuthError>;
+  }
+>()("@effect-auth/PhoneOTPStore") {}
 
 /** Input for creating a user from a verified phone number. */
 export interface PhoneOTPCreateUserInput {
@@ -72,26 +75,21 @@ export interface PhoneOTPCreateUserInput {
  * `attributes.phoneNumber` and the verification flag in
  * `attributes.phoneNumberVerified`.
  */
-export interface PhoneOTPUserStoreShape {
-  readonly getUserByPhoneNumber: (
-    phoneNumber: string,
-  ) => Effect.Effect<Types.User | null, Errors.AuthError>;
-  readonly createUser: (
-    input: PhoneOTPCreateUserInput,
-  ) => Effect.Effect<Types.User, Errors.AuthError>;
-  readonly setPhoneNumberVerified: (
-    userId: string,
-    phoneNumber: string,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
-}
-
-export class PhoneOTPStore extends Context.Service<PhoneOTPStore, PhoneOTPStoreShape>()(
-  "@effect-auth/PhoneOtpStore",
-) {}
-
-export class PhoneOTPUserStore extends Context.Service<PhoneOTPUserStore, PhoneOTPUserStoreShape>()(
-  "@effect-auth/PhoneOtpUserStore",
-) {}
+export class PhoneOTPUserStore extends Context.Service<
+  PhoneOTPUserStore,
+  {
+    readonly getUserByPhoneNumber: (
+      phoneNumber: string,
+    ) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly createUser: (
+      input: PhoneOTPCreateUserInput,
+    ) => Effect.Effect<Types.User, Errors.AuthError>;
+    readonly setPhoneNumberVerified: (
+      userId: string,
+      phoneNumber: string,
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
+  }
+>()("@effect-auth/PhoneOTPUserStore") {}
 
 export interface PhoneOTPConfig {
   readonly otpLength?: number; // Default: 6 digits
