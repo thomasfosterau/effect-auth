@@ -102,7 +102,6 @@ export interface WebAuthnServiceShape {
   ) => Effect.Effect<WebAuthnCredential, Errors.CredentialNotFoundError | Errors.AuthError>;
 }
 
-
 /**
  * Create a WebAuthn service
  */
