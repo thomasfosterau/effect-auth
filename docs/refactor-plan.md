@@ -27,7 +27,7 @@ in `src/`.
 | `email/`    | EmailAddress, EmailOTP (was EmailOtp), EmailOTPService, EmailPassword, EmailVerification + tests                                                                         |
 | `http/`     | Http, HTTPApi, HTTPApiSchemas, HTTPClient, HTTPServer, HTTPMiddleware (from src root), OpenApi.test + tests                                                              |
 | `oauth/`    | as today (OAuth, index)                                                                                                                                                  |
-| `session/`  | SessionService, SessionStore, UserStore + tests. `Session.ts` compat barrel is **deleted** (clean break)                                                                 |
+| `session/`  | SessionService, SessionStore, UserStore, MultiSession, TrustedDevice + tests. `Session.ts` compat barrel is **deleted** (clean break)                                    |
 | `password/` | Password, PasswordReset, PasswordTraits, Argon2, HaveIBeenPwned                                                                                                          |
 | `plugins/`  | AccountLockout, Audit, Captcha, IPRateLimit, LastLoginMethod, NormalizeEmail, RateLimit plugin, AbusePlugins.test (drop the `Plugin` file-name suffix inside `plugins/`) |
 | `authz/`    | Authorization, Permission, RBAC                                                                                                                                          |
@@ -149,12 +149,16 @@ Green = `vp check`, `tsc --noEmit`, `vp test --typecheck --run`, and
 5. **Crypto adoption** — Effect `Crypto` service + node:crypto corral (§5, depends on 4).
 6. **Conventions sweep** — import extensions, `make`/`layer` naming, leftovers (§7).
 
-## Open questions (resolve during issue drafting)
+## Module consolidations (part of issue 1)
 
-- `EmailOtp.ts` vs `EmailOTPService.ts` are two parallel email-OTP
-  implementations (the former is wired into HTTPServer). Consolidate into
-  one module in issue 1 or 3?
-- Do `MultiSession`, `TrustedDevice` belong in `session/`?
-- Does `WebAuthnService.ts` merge into `WebAuthn.ts`?
+- `email/EmailOtp.ts` + `email/EmailOTPService.ts` → one `email/EmailOTP.ts`.
+  The HTTPServer-wired implementation (currently `EmailOtp.ts`) is the
+  survivor; fold in anything unique from `EmailOTPService.ts` (diff
+  feature-by-feature first), then delete it. Final class name
+  `EmailOTPService`.
+- `WebAuthnService.ts` merges into `WebAuthn.ts` — one module per feature.
+
+## Deferred
+
 - Second-factor cluster (`TwoFactor`, `OtpSecondFactor`, `MultiFactorService`,
-  `WebAuthn`, `Otp`) deferred — revisit after the core four land.
+  `WebAuthn`, `Otp`) — revisit after the core clusters land.
