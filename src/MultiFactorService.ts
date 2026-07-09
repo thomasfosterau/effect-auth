@@ -55,15 +55,14 @@ export interface TwoFactorRecord {
 /**
  * Storage interface for two-factor records
  */
-export interface TwoFactorStoreShape {
-  readonly get: (userId: string) => Effect.Effect<TwoFactorRecord | null, Errors.AuthError>;
-  readonly upsert: (record: TwoFactorRecord) => Effect.Effect<TwoFactorRecord, Errors.AuthError>;
-  readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
-export class TwoFactorStore extends Context.Service<TwoFactorStore, TwoFactorStoreShape>()(
-  "@effect-auth/TwoFactorStore",
-) {}
+export class TwoFactorStore extends Context.Service<
+  TwoFactorStore,
+  {
+    readonly get: (userId: string) => Effect.Effect<TwoFactorRecord | null, Errors.AuthError>;
+    readonly upsert: (record: TwoFactorRecord) => Effect.Effect<TwoFactorRecord, Errors.AuthError>;
+    readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+  }
+>()("@effect-auth/TwoFactorStore") {}
 
 /**
  * Short-lived "password OK, awaiting second factor" state created by
@@ -79,15 +78,15 @@ export interface PendingTwoFactor {
 /**
  * Storage interface for pending two-factor challenges
  */
-export interface PendingTwoFactorStoreShape {
-  readonly create: (pending: PendingTwoFactor) => Effect.Effect<PendingTwoFactor, Errors.AuthError>;
-  readonly get: (token: string) => Effect.Effect<PendingTwoFactor | null, Errors.AuthError>;
-  readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
 export class PendingTwoFactorStore extends Context.Service<
   PendingTwoFactorStore,
-  PendingTwoFactorStoreShape
+  {
+    readonly create: (
+      pending: PendingTwoFactor,
+    ) => Effect.Effect<PendingTwoFactor, Errors.AuthError>;
+    readonly get: (token: string) => Effect.Effect<PendingTwoFactor | null, Errors.AuthError>;
+    readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
+  }
 >()("@effect-auth/PendingTwoFactorStore") {}
 
 /**
@@ -160,110 +159,113 @@ export interface TwoFactorVerifyOptions {
 /**
  * Two-factor authentication service
  */
-export interface MultifactorService {
-  /**
-   * Enable two-factor for a user. Verifies the user's password, generates a
-   * TOTP secret plus backup codes, and stores the record (unverified unless
-   * `skipVerificationOnEnable`). Returns the plaintext secret, otpauth:// URI
-   * (labelled with the user's email) and plaintext backup codes — shown once.
-   */
-  readonly enable: (
-    userId: string,
-    password: string,
-  ) => Effect.Effect<
-    TwoFactorEnableResult,
-    | TwoFactorError
-    | Errors.InvalidCredentialsError
-    | Errors.HashingError
-    | Errors.AuthError
-    | Errors.UserNotFoundError,
-    TwoFactorStore | EmailPasswordStore | PasswordHasher | UserStore
-  >;
+export class TwoFactorService extends Context.Service<
+  TwoFactorService,
+  {
+    /**
+     * Enable two-factor for a user. Verifies the user's password, generates a
+     * TOTP secret plus backup codes, and stores the record (unverified unless
+     * `skipVerificationOnEnable`). Returns the plaintext secret, otpauth:// URI
+     * (labelled with the user's email) and plaintext backup codes — shown once.
+     */
+    readonly enable: (
+      userId: string,
+      password: string,
+    ) => Effect.Effect<
+      TwoFactorEnableResult,
+      | TwoFactorError
+      | Errors.InvalidCredentialsError
+      | Errors.HashingError
+      | Errors.AuthError
+      | Errors.UserNotFoundError,
+      TwoFactorStore | EmailPasswordStore | PasswordHasher | UserStore
+    >;
 
-  /**
-   * Confirm enrollment with a TOTP code generated from the stored secret.
-   * Marks the record verified; two-factor is only enforced once verified.
-   */
-  readonly confirmEnable: (
-    userId: string,
-    code: string,
-  ) => Effect.Effect<void, TwoFactorError | Errors.HashingError | Errors.AuthError, TwoFactorStore>;
+    /**
+     * Confirm enrollment with a TOTP code generated from the stored secret.
+     * Marks the record verified; two-factor is only enforced once verified.
+     */
+    readonly confirmEnable: (
+      userId: string,
+      code: string,
+    ) => Effect.Effect<
+      void,
+      TwoFactorError | Errors.HashingError | Errors.AuthError,
+      TwoFactorStore
+    >;
 
-  /**
-   * Disable two-factor after re-verifying the user's password.
-   */
-  readonly disable: (
-    userId: string,
-    password: string,
-  ) => Effect.Effect<
-    void,
-    Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
-    TwoFactorStore | EmailPasswordStore | PasswordHasher
-  >;
+    /**
+     * Disable two-factor after re-verifying the user's password.
+     */
+    readonly disable: (
+      userId: string,
+      password: string,
+    ) => Effect.Effect<
+      void,
+      Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
+      TwoFactorStore | EmailPasswordStore | PasswordHasher
+    >;
 
-  /**
-   * Whether the user has a verified two-factor record.
-   */
-  readonly isEnabled: (userId: string) => Effect.Effect<boolean, Errors.AuthError, TwoFactorStore>;
+    /**
+     * Whether the user has a verified two-factor record.
+     */
+    readonly isEnabled: (userId: string) => Effect.Effect<boolean, Errors.AuthError, TwoFactorStore>;
 
-  /**
-   * Start a second-factor challenge for a user whose first factor (e.g.
-   * password) already checked out. Returns a one-time pending token to be
-   * redeemed with `verifyTotp` or `verifyBackupCode`.
-   */
-  readonly beginChallenge: (
-    userId: string,
-  ) => Effect.Effect<
-    TwoFactorChallenge,
-    TwoFactorError | Errors.AuthError,
-    TwoFactorStore | PendingTwoFactorStore
-  >;
+    /**
+     * Start a second-factor challenge for a user whose first factor (e.g.
+     * password) already checked out. Returns a one-time pending token to be
+     * redeemed with `verifyTotp` or `verifyBackupCode`.
+     */
+    readonly beginChallenge: (
+      userId: string,
+    ) => Effect.Effect<
+      TwoFactorChallenge,
+      TwoFactorError | Errors.AuthError,
+      TwoFactorStore | PendingTwoFactorStore
+    >;
 
-  /**
-   * Redeem a pending challenge with a TOTP code. On success the pending
-   * token is consumed (one-time use) and a session is created.
-   */
-  readonly verifyTotp: (
-    pendingToken: string,
-    code: string,
-    options?: TwoFactorVerifyOptions,
-  ) => Effect.Effect<
-    TwoFactorVerifyResult,
-    TwoFactorError | Errors.HashingError | Errors.AuthError | HookError,
-    TwoFactorStore | PendingTwoFactorStore | SessionService | Hooks
-  >;
+    /**
+     * Redeem a pending challenge with a TOTP code. On success the pending
+     * token is consumed (one-time use) and a session is created.
+     */
+    readonly verifyTotp: (
+      pendingToken: string,
+      code: string,
+      options?: TwoFactorVerifyOptions,
+    ) => Effect.Effect<
+      TwoFactorVerifyResult,
+      TwoFactorError | Errors.HashingError | Errors.AuthError | HookError,
+      TwoFactorStore | PendingTwoFactorStore | SessionService | Hooks
+    >;
 
-  /**
-   * Redeem a pending challenge with a backup code. The matched code is
-   * removed from the record (single use) and a session is created.
-   */
-  readonly verifyBackupCode: (
-    pendingToken: string,
-    code: string,
-    options?: TwoFactorVerifyOptions,
-  ) => Effect.Effect<
-    TwoFactorVerifyResult,
-    TwoFactorError | Errors.AuthError | HookError,
-    TwoFactorStore | PendingTwoFactorStore | SessionService | Hooks
-  >;
+    /**
+     * Redeem a pending challenge with a backup code. The matched code is
+     * removed from the record (single use) and a session is created.
+     */
+    readonly verifyBackupCode: (
+      pendingToken: string,
+      code: string,
+      options?: TwoFactorVerifyOptions,
+    ) => Effect.Effect<
+      TwoFactorVerifyResult,
+      TwoFactorError | Errors.AuthError | HookError,
+      TwoFactorStore | PendingTwoFactorStore | SessionService | Hooks
+    >;
 
-  /**
-   * Replace all backup codes after re-verifying the user's password.
-   * Returns the new plaintext codes (shown once); old codes are invalidated.
-   */
-  readonly regenerateBackupCodes: (
-    userId: string,
-    password: string,
-  ) => Effect.Effect<
-    readonly string[],
-    TwoFactorError | Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
-    TwoFactorStore | EmailPasswordStore | PasswordHasher
-  >;
-}
-
-export class TwoFactorService extends Context.Service<TwoFactorService, MultifactorService>()(
-  "@effect-auth/TwoFactorService",
-) {
+    /**
+     * Replace all backup codes after re-verifying the user's password.
+     * Returns the new plaintext codes (shown once); old codes are invalidated.
+     */
+    readonly regenerateBackupCodes: (
+      userId: string,
+      password: string,
+    ) => Effect.Effect<
+      readonly string[],
+      TwoFactorError | Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
+      TwoFactorStore | EmailPasswordStore | PasswordHasher
+    >;
+  }
+>()("@effect-auth/TwoFactorService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -351,7 +353,7 @@ const findBackupCodeIndex = (hashes: readonly string[], candidateHash: string): 
 /**
  * Create a two-factor service
  */
-export const make = (config: TwoFactorConfig): Effect.Effect<MultifactorService, never> => {
+export const make = (config: TwoFactorConfig): Effect.Effect<typeof TwoFactorService.Service, never> => {
   const backupCodeCount = config.backupCodeCount ?? 10;
   const pendingExpiresIn = config.pendingExpiresIn ?? 5 * 60 * 1000; // 5 minutes default
   const skipVerificationOnEnable = config.skipVerificationOnEnable ?? false;
@@ -439,7 +441,7 @@ export const make = (config: TwoFactorConfig): Effect.Effect<MultifactorService,
     });
 
   return Effect.sync(
-    (): MultifactorService => ({
+    (): typeof TwoFactorService.Service => ({
       enable: (userId: string, password: string) =>
         Effect.gen(function* () {
           yield* verifyPassword(userId, password);

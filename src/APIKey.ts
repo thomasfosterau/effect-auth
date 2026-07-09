@@ -84,18 +84,17 @@ export interface APIKey {
 /**
  * Storage interface for API keys
  */
-export interface APIKeyStoreShape {
-  readonly create: (apiKey: APIKey) => Effect.Effect<APIKey, Errors.AuthError>;
-  readonly get: (id: string) => Effect.Effect<APIKey | null, Errors.AuthError>;
-  readonly getByHash: (keyHash: string) => Effect.Effect<APIKey | null, Errors.AuthError>;
-  readonly update: (apiKey: APIKey) => Effect.Effect<APIKey, Errors.AuthError>;
-  readonly delete: (id: string) => Effect.Effect<void, Errors.AuthError>;
-  readonly listByUserId: (userId: string) => Effect.Effect<readonly APIKey[], Errors.AuthError>;
-}
-
-export class APIKeyStore extends Context.Service<APIKeyStore, APIKeyStoreShape>()(
-  "@effect-auth/ApiKeyStore",
-) {}
+export class APIKeyStore extends Context.Service<
+  APIKeyStore,
+  {
+    readonly create: (apiKey: APIKey) => Effect.Effect<APIKey, Errors.AuthError>;
+    readonly get: (id: string) => Effect.Effect<APIKey | null, Errors.AuthError>;
+    readonly getByHash: (keyHash: string) => Effect.Effect<APIKey | null, Errors.AuthError>;
+    readonly update: (apiKey: APIKey) => Effect.Effect<APIKey, Errors.AuthError>;
+    readonly delete: (id: string) => Effect.Effect<void, Errors.AuthError>;
+    readonly listByUserId: (userId: string) => Effect.Effect<readonly APIKey[], Errors.AuthError>;
+  }
+>()("@effect-auth/APIKeyStore") {}
 
 /**
  * API key service configuration
@@ -180,89 +179,88 @@ export interface APIKeyUpdate {
 /**
  * API key service
  */
-export interface APIKeyServiceShape {
-  /**
-   * Create a new API key for a user. Returns the plaintext key (shown once)
-   * alongside the stored record. Fails with {@link APIKeyError} when the
-   * user already holds `maxKeysPerUser` keys.
-   */
-  readonly create: (
-    userId: string,
-    options?: APIKeyCreateOptions,
-  ) => Effect.Effect<APIKeyCreateResult, APIKeyError | Errors.AuthError, APIKeyStore>;
+export class APIKeyService extends Context.Service<
+  APIKeyService,
+  {
+    /**
+     * Create a new API key for a user. Returns the plaintext key (shown once)
+     * alongside the stored record. Fails with {@link APIKeyError} when the
+     * user already holds `maxKeysPerUser` keys.
+     */
+    readonly create: (
+      userId: string,
+      options?: APIKeyCreateOptions,
+    ) => Effect.Effect<APIKeyCreateResult, APIKeyError | Errors.AuthError, APIKeyStore>;
 
-  /**
-   * Verify a plaintext API key: sha256 hash lookup, then enabled / expiry /
-   * remaining-uses / permission checks. On success `remaining` is
-   * decremented (when set) and `lastUsedAt` is updated. `requiredPermissions`
-   * maps resource → actions; every listed action must be granted on the key.
-   */
-  readonly verify: (
-    plaintextKey: string,
-    requiredPermissions?: Record<string, readonly string[]>,
-  ) => Effect.Effect<APIKeyVerifyResult, Errors.AuthError, APIKeyStore>;
+    /**
+     * Verify a plaintext API key: sha256 hash lookup, then enabled / expiry /
+     * remaining-uses / permission checks. On success `remaining` is
+     * decremented (when set) and `lastUsedAt` is updated. `requiredPermissions`
+     * maps resource → actions; every listed action must be granted on the key.
+     */
+    readonly verify: (
+      plaintextKey: string,
+      requiredPermissions?: Record<string, readonly string[]>,
+    ) => Effect.Effect<APIKeyVerifyResult, Errors.AuthError, APIKeyStore>;
 
-  /**
-   * Like `verify`, but when the key carries a `rateLimit` configuration a
-   * token is consumed from the {@link RateLimiter} bucket keyed
-   * `api-key:${apiKey.id}` before the remaining checks run. When the limit
-   * is exhausted the result is `{ valid: false, error: "Rate limit exceeded" }`.
-   */
-  readonly verifyWithRateLimit: (
-    plaintextKey: string,
-    requiredPermissions?: Record<string, readonly string[]>,
-  ) => Effect.Effect<
-    APIKeyVerifyResult,
-    Errors.AuthError,
-    APIKeyStore | RateLimiter | RateLimitStore
-  >;
+    /**
+     * Like `verify`, but when the key carries a `rateLimit` configuration a
+     * token is consumed from the {@link RateLimiter} bucket keyed
+     * `api-key:${apiKey.id}` before the remaining checks run. When the limit
+     * is exhausted the result is `{ valid: false, error: "Rate limit exceeded" }`.
+     */
+    readonly verifyWithRateLimit: (
+      plaintextKey: string,
+      requiredPermissions?: Record<string, readonly string[]>,
+    ) => Effect.Effect<
+      APIKeyVerifyResult,
+      Errors.AuthError,
+      APIKeyStore | RateLimiter | RateLimitStore
+    >;
 
-  /**
-   * Fetch a key by id, failing with {@link APIKeyError} when it does not exist.
-   */
-  readonly get: (
-    keyId: string,
-  ) => Effect.Effect<APIKey, APIKeyError | Errors.AuthError, APIKeyStore>;
+    /**
+     * Fetch a key by id, failing with {@link APIKeyError} when it does not exist.
+     */
+    readonly get: (
+      keyId: string,
+    ) => Effect.Effect<APIKey, APIKeyError | Errors.AuthError, APIKeyStore>;
 
-  /**
-   * List all keys belonging to a user.
-   */
-  readonly list: (
-    userId: string,
-  ) => Effect.Effect<readonly APIKey[], Errors.AuthError, APIKeyStore>;
+    /**
+     * List all keys belonging to a user.
+     */
+    readonly list: (
+      userId: string,
+    ) => Effect.Effect<readonly APIKey[], Errors.AuthError, APIKeyStore>;
 
-  /**
-   * Update a key on behalf of a user. Fails with {@link APIKeyError} when the
-   * key does not exist or belongs to a different user.
-   */
-  readonly update: (
-    userId: string,
-    keyId: string,
-    updates: APIKeyUpdate,
-  ) => Effect.Effect<APIKey, APIKeyError | Errors.AuthError, APIKeyStore>;
+    /**
+     * Update a key on behalf of a user. Fails with {@link APIKeyError} when the
+     * key does not exist or belongs to a different user.
+     */
+    readonly update: (
+      userId: string,
+      keyId: string,
+      updates: APIKeyUpdate,
+    ) => Effect.Effect<APIKey, APIKeyError | Errors.AuthError, APIKeyStore>;
 
-  /**
-   * Delete a key on behalf of a user. Fails with {@link APIKeyError} when the
-   * key does not exist or belongs to a different user.
-   */
-  readonly delete: (
-    userId: string,
-    keyId: string,
-  ) => Effect.Effect<void, APIKeyError | Errors.AuthError, APIKeyStore>;
+    /**
+     * Delete a key on behalf of a user. Fails with {@link APIKeyError} when the
+     * key does not exist or belongs to a different user.
+     */
+    readonly delete: (
+      userId: string,
+      keyId: string,
+    ) => Effect.Effect<void, APIKeyError | Errors.AuthError, APIKeyStore>;
 
-  /**
-   * Delete every key of a user whose `expiresAt` is in the past. Returns the
-   * number of keys removed. (The store enumerates per user, so run this per
-   * user; a store-level sweep job is the right tool for global cleanup.)
-   */
-  readonly deleteAllExpired: (
-    userId: string,
-  ) => Effect.Effect<number, Errors.AuthError, APIKeyStore>;
-}
-
-export class APIKeyService extends Context.Service<APIKeyService, APIKeyServiceShape>()(
-  "@effect-auth/ApiKeyService",
-) {
+    /**
+     * Delete every key of a user whose `expiresAt` is in the past. Returns the
+     * number of keys removed. (The store enumerates per user, so run this per
+     * user; a store-level sweep job is the right tool for global cleanup.)
+     */
+    readonly deleteAllExpired: (
+      userId: string,
+    ) => Effect.Effect<number, Errors.AuthError, APIKeyStore>;
+  }
+>()("@effect-auth/APIKeyService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -307,7 +305,7 @@ const hasRequiredPermissions = (
  */
 export const makeAPIKeyService = (
   config: APIKeyConfig = {},
-): Effect.Effect<APIKeyServiceShape, never> => {
+): Effect.Effect<typeof APIKeyService.Service, never> => {
   const defaultPrefix = config?.defaultPrefix ?? "ak_";
   const keyLength = config?.keyLength ?? 32;
   const defaultExpiresIn = config?.defaultExpiresIn;
@@ -408,7 +406,7 @@ export const makeAPIKeyService = (
     });
 
   return Effect.sync(
-    (): APIKeyServiceShape => ({
+    (): typeof APIKeyService.Service => ({
       create: (userId, options) =>
         Effect.gen(function* () {
           const store = yield* APIKeyStore;

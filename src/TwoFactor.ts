@@ -60,15 +60,16 @@ export interface TwoFactorRecord {
 /**
  * Storage interface for two-factor records
  */
-export interface TwoFactorStoreShape {
-  readonly get: (userId: string) => Effect.Effect<TwoFactorRecord | null, Errors.AuthError>;
-  readonly upsert: (record: TwoFactorRecord) => Effect.Effect<TwoFactorRecord, Errors.AuthError>;
-  readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
-export class TwoFactorStore extends Context.Service<TwoFactorStore, TwoFactorStoreShape>()(
-  "@effect-auth/TwoFactorStore",
-) {}
+export class TwoFactorStore extends Context.Service<
+  TwoFactorStore,
+  {
+    readonly get: (userId: string) => Effect.Effect<TwoFactorRecord | null, Errors.AuthError>;
+    readonly upsert: (
+      record: TwoFactorRecord,
+    ) => Effect.Effect<TwoFactorRecord, Errors.AuthError>;
+    readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+  }
+>()("@effect-auth/TwoFactorStore") {}
 
 /**
  * Short-lived "password OK, awaiting second factor" state created by

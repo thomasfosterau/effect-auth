@@ -12,7 +12,7 @@
  *
  * Account linking is triggered explicitly by the app/HTTP layer (hooks operate
  * on input values and cannot see the current session): after a guest signs up
- * for a real account, call {@link AnonymousServiceShape.linkAccount} with the
+ * for a real account, call {@link AnonymousService.linkAccount} with the
  * anonymous user and the freshly-created user; the `linkAccount` config
  * callback migrates any data, then the anonymous user is deleted.
  */
@@ -26,20 +26,18 @@ import { Hooks, type HookError } from "./Hooks.ts";
  * Persistence for anonymous users. The implementer generates an id and a
  * placeholder email, and sets `attributes.isAnonymous: true`.
  */
-export interface AnonymousUserStoreShape {
-  readonly createAnonymousUser: () => Effect.Effect<Types.User, Errors.AuthError>;
-  readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
 export class AnonymousUserStore extends Context.Service<
   AnonymousUserStore,
-  AnonymousUserStoreShape
+  {
+    readonly createAnonymousUser: () => Effect.Effect<Types.User, Errors.AuthError>;
+    readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+  }
 >()("@effect-auth/AnonymousUserStore") {}
 
 export interface AnonymousConfig {
   /**
    * Migrate data from the anonymous user to the newly-created real user during
-   * {@link AnonymousServiceShape.linkAccount}. Runs before the anonymous user is
+   * {@link AnonymousService.linkAccount}. Runs before the anonymous user is
    * deleted, so related rows can still be resolved.
    */
   readonly linkAccount?: (params: {
@@ -53,38 +51,37 @@ export interface AnonymousResult {
   readonly session: Types.Session;
 }
 
-export interface AnonymousServiceShape {
-  /** Create an anonymous user and an authenticated session for them. */
-  readonly signInAnonymous: (
-    sessionAttributes?: Record<string, unknown>,
-  ) => Effect.Effect<
-    AnonymousResult,
-    Errors.AuthError | HookError,
-    AnonymousUserStore | SessionService | Hooks
-  >;
+export class AnonymousService extends Context.Service<
+  AnonymousService,
+  {
+    /** Create an anonymous user and an authenticated session for them. */
+    readonly signInAnonymous: (
+      sessionAttributes?: Record<string, unknown>,
+    ) => Effect.Effect<
+      AnonymousResult,
+      Errors.AuthError | HookError,
+      AnonymousUserStore | SessionService | Hooks
+    >;
 
-  /**
-   * Link an anonymous identity to a real account: run the `linkAccount`
-   * callback (app data migration), invalidate all anonymous user sessions,
-   * then delete the anonymous user.
-   *
-   * Rejects with `InvalidInputError` if `anonymousUser` is not an anonymous
-   * user or if `anonymousUser.id === newUser.id`. Idempotent: a second call
-   * for an already-linked user is a no-op.
-   */
-  readonly linkAccount: (
-    anonymousUser: Types.User,
-    newUser: Types.User,
-  ) => Effect.Effect<
-    void,
-    Errors.AuthError | Errors.InvalidInputError,
-    AnonymousUserStore | SessionService
-  >;
-}
-
-export class AnonymousService extends Context.Service<AnonymousService, AnonymousServiceShape>()(
-  "@effect-auth/AnonymousService",
-) {
+    /**
+     * Link an anonymous identity to a real account: run the `linkAccount`
+     * callback (app data migration), invalidate all anonymous user sessions,
+     * then delete the anonymous user.
+     *
+     * Rejects with `InvalidInputError` if `anonymousUser` is not an anonymous
+     * user or if `anonymousUser.id === newUser.id`. Idempotent: a second call
+     * for an already-linked user is a no-op.
+     */
+    readonly linkAccount: (
+      anonymousUser: Types.User,
+      newUser: Types.User,
+    ) => Effect.Effect<
+      void,
+      Errors.AuthError | Errors.InvalidInputError,
+      AnonymousUserStore | SessionService
+    >;
+  }
+>()("@effect-auth/AnonymousService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -98,8 +95,8 @@ export const isAnonymousUser = (user: Types.User): boolean =>
 
 export const makeAnonymousService = (
   config: AnonymousConfig = {},
-): Effect.Effect<AnonymousServiceShape, never> =>
-  Effect.sync((): AnonymousServiceShape => {
+): Effect.Effect<typeof AnonymousService.Service, never> =>
+  Effect.sync((): typeof AnonymousService.Service => {
     // Tracks IDs currently being linked (single-flight) and already linked
     // (idempotency). Both are needed: inFlight prevents concurrent races;
     // done prevents re-running a completed migration on a second call.

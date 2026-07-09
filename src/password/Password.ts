@@ -13,53 +13,41 @@ import type * as Types from "../Types.ts";
 import * as Errors from "../Errors.ts";
 
 /**
+ * Tag for PasswordHasher service
+ *
  * Core password hashing interface (trait)
  * Implement this interface to support custom password hashing algorithms
  */
-export interface PasswordHasherShape {
-  /**
-   * Unique identifier for this algorithm (used in PHC format)
-   */
-  readonly algorithm: string;
+export class PasswordHasher extends Context.Service<
+  PasswordHasher,
+  {
+    /**
+     * Unique identifier for this algorithm (used in PHC format)
+     */
+    readonly algorithm: string;
 
-  /**
-   * Hash a password using this algorithm
-   */
-  readonly hash: (password: string) => Effect.Effect<Types.HashedPassword, Errors.HashingError>;
+    /**
+     * Hash a password using this algorithm
+     */
+    readonly hash: (password: string) => Effect.Effect<Types.HashedPassword, Errors.HashingError>;
 
-  /**
-   * Verify a password against a hash using this algorithm
-   */
-  readonly verify: (password: string, hash: string) => Effect.Effect<boolean, Errors.HashingError>;
+    /**
+     * Verify a password against a hash using this algorithm
+     */
+    readonly verify: (
+      password: string,
+      hash: string,
+    ) => Effect.Effect<boolean, Errors.HashingError>;
 
-  /**
-   * Returns true when the stored hash should be re-hashed using the current
-   * algorithm and parameters (e.g. after upgrading iteration count or switching
-   * algorithm). When present in `signIn`, the stored hash is silently upgraded
-   * on a successful login so users are migrated without any downtime.
-   */
-  readonly needsRehash?: (hash: string) => boolean;
-}
-
-/**
- * Multi-algorithm password verifier
- * Supports verifying passwords against different hash formats,
- * enabling seamless migration between algorithms
- */
-export interface MultiAlgorithmVerifierShape {
-  /**
-   * Verify a password against a hash, automatically detecting the algorithm
-   * from the PHC format string
-   */
-  readonly verify: (password: string, hash: string) => Effect.Effect<boolean, Errors.HashingError>;
-}
-
-/**
- * Tag for PasswordHasher service
- */
-export class PasswordHasher extends Context.Service<PasswordHasher, PasswordHasherShape>()(
-  "@effect-auth/PasswordHasher",
-) {
+    /**
+     * Returns true when the stored hash should be re-hashed using the current
+     * algorithm and parameters (e.g. after upgrading iteration count or switching
+     * algorithm). When present in `signIn`, the stored hash is silently upgraded
+     * on a successful login so users are migrated without any downtime.
+     */
+    readonly needsRehash?: (hash: string) => boolean;
+  }
+>()("@effect-auth/PasswordHasher") {
   /**
    * Layer providing the default hasher: PBKDF2-SHA256 with OWASP parameters
    * (see {@link makePBKDF2Hasher}).
@@ -79,16 +67,29 @@ export class PasswordHasher extends Context.Service<PasswordHasher, PasswordHash
 
 /**
  * Tag for MultiAlgorithmVerifier service
+ *
+ * Multi-algorithm password verifier
+ * Supports verifying passwords against different hash formats,
+ * enabling seamless migration between algorithms
  */
 export class MultiAlgorithmVerifier extends Context.Service<
   MultiAlgorithmVerifier,
-  MultiAlgorithmVerifierShape
+  {
+    /**
+     * Verify a password against a hash, automatically detecting the algorithm
+     * from the PHC format string
+     */
+    readonly verify: (
+      password: string,
+      hash: string,
+    ) => Effect.Effect<boolean, Errors.HashingError>;
+  }
 >()("@effect-auth/MultiAlgorithmVerifier") {
   /**
    * Layer that verifies passwords against any of the given hashers, sniffing
    * the algorithm from the PHC-format hash (see {@link makeMultiAlgorithmVerifier}).
    */
-  static readonly layer = (hashers: readonly PasswordHasherShape[]) =>
+  static readonly layer = (hashers: readonly (typeof PasswordHasher.Service)[]) =>
     Layer.succeed(MultiAlgorithmVerifier, makeMultiAlgorithmVerifier(hashers));
 }
 
@@ -132,8 +133,8 @@ const parseAlgorithm = (hash: string): Effect.Effect<string, Errors.HashingError
  * ```
  */
 export const makeMultiAlgorithmVerifier = (
-  hashers: readonly PasswordHasherShape[],
-): MultiAlgorithmVerifierShape => {
+  hashers: readonly (typeof PasswordHasher.Service)[],
+): typeof MultiAlgorithmVerifier.Service => {
   const hasherMap = new Map(hashers.map((h) => [h.algorithm, h]));
 
   return {
@@ -183,7 +184,7 @@ export type {
  * PBKDF2 Password Hasher implementing the PasswordHasher trait
  * Following OWASP guidelines for secure password hashing
  */
-export const makePBKDF2Hasher = (): PasswordHasherShape => {
+export const makePBKDF2Hasher = (): typeof PasswordHasher.Service => {
   const ALGORITHM = "pbkdf2-sha256";
   // OWASP recommended minimum for SHA-256: 600,000 iterations (2023)
   const ITERATIONS = 600000;
@@ -349,7 +350,7 @@ export const makeScryptHasher = (options?: {
   readonly cost?: number;
   readonly blockSize?: number;
   readonly parallelization?: number;
-}): PasswordHasherShape => {
+}): typeof PasswordHasher.Service => {
   const ALGORITHM = "scrypt";
   const COST = options?.cost ?? 131072; // 2^17, OWASP recommended
   const BLOCK_SIZE = options?.blockSize ?? 8;

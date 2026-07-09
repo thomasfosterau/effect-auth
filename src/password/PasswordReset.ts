@@ -16,28 +16,29 @@ export interface PasswordResetToken {
   readonly expiresAt: number;
 }
 
-export interface PasswordResetStoreShape {
-  readonly create: (
-    reset: PasswordResetToken,
-  ) => Effect.Effect<PasswordResetToken, Errors.AuthError>;
-  readonly get: (token: string) => Effect.Effect<PasswordResetToken | null, Errors.AuthError>;
-  readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
-  readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
-export interface PasswordResetUserStoreShape {
-  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
-  readonly setPasswordHash: (userId: string, hash: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
 export class PasswordResetStore extends Context.Service<
   PasswordResetStore,
-  PasswordResetStoreShape
+  {
+    readonly create: (
+      reset: PasswordResetToken,
+    ) => Effect.Effect<PasswordResetToken, Errors.AuthError>;
+    readonly get: (token: string) => Effect.Effect<PasswordResetToken | null, Errors.AuthError>;
+    readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
+    readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+  }
 >()("@effect-auth/PasswordResetStore") {}
 
 export class PasswordResetUserStore extends Context.Service<
   PasswordResetUserStore,
-  PasswordResetUserStoreShape
+  {
+    readonly getUserByEmail: (
+      email: string,
+    ) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly setPasswordHash: (
+      userId: string,
+      hash: string,
+    ) => Effect.Effect<void, Errors.AuthError>;
+  }
 >()("@effect-auth/PasswordResetUserStore") {}
 
 export interface PasswordResetConfig {
@@ -57,28 +58,26 @@ export interface PasswordResetResult {
   readonly reset: true;
 }
 
-export interface PasswordResetServiceShape {
-  readonly requestPasswordReset: (
-    email: string,
-  ) => Effect.Effect<
-    void,
-    Errors.AuthError | Errors.PasswordResetError | HookError,
-    PasswordResetStore | PasswordResetUserStore | Hooks
-  >;
-
-  readonly resetPassword: (
-    token: string,
-    newPassword: string,
-  ) => Effect.Effect<
-    PasswordResetResult,
-    Errors.AuthError | Errors.PasswordResetError | Errors.HashingError | HookError,
-    PasswordResetStore | PasswordResetUserStore | PasswordHasher | SessionService | Hooks
-  >;
-}
-
 export class PasswordResetService extends Context.Service<
   PasswordResetService,
-  PasswordResetServiceShape
+  {
+    readonly requestPasswordReset: (
+      email: string,
+    ) => Effect.Effect<
+      void,
+      Errors.AuthError | Errors.PasswordResetError | HookError,
+      PasswordResetStore | PasswordResetUserStore | Hooks
+    >;
+
+    readonly resetPassword: (
+      token: string,
+      newPassword: string,
+    ) => Effect.Effect<
+      PasswordResetResult,
+      Errors.AuthError | Errors.PasswordResetError | Errors.HashingError | HookError,
+      PasswordResetStore | PasswordResetUserStore | PasswordHasher | SessionService | Hooks
+    >;
+  }
 >()("@effect-auth/PasswordResetService") {
   /**
    * Construct a Layer providing this service.
@@ -115,14 +114,14 @@ const validatePasswordLength = (
 
 export const makePasswordResetService = (
   config: PasswordResetConfig,
-): Effect.Effect<PasswordResetServiceShape, never> => {
+): Effect.Effect<typeof PasswordResetService.Service, never> => {
   const expiresIn = config.expiresIn ?? 60 * 60 * 1000;
   const minPasswordLength = config.minPasswordLength ?? 8;
   const maxPasswordLength = config.maxPasswordLength ?? 128;
   const revokeSessionsOnPasswordReset = config.revokeSessionsOnPasswordReset ?? true;
 
   return Effect.sync(
-    (): PasswordResetServiceShape => ({
+    (): typeof PasswordResetService.Service => ({
       requestPasswordReset: (rawEmail: string) =>
         Effect.gen(function* () {
           const hooks = yield* Hooks;

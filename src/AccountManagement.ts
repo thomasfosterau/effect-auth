@@ -40,16 +40,14 @@ export interface AccountToken {
  * Persistence for pending account-management tokens. Implement over your
  * database; keys are the opaque token strings.
  */
-export interface AccountManagementStoreShape {
-  readonly create: (token: AccountToken) => Effect.Effect<AccountToken, Errors.AuthError>;
-  readonly get: (token: string) => Effect.Effect<AccountToken | null, Errors.AuthError>;
-  readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
-  readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
 export class AccountManagementStore extends Context.Service<
   AccountManagementStore,
-  AccountManagementStoreShape
+  {
+    readonly create: (token: AccountToken) => Effect.Effect<AccountToken, Errors.AuthError>;
+    readonly get: (token: string) => Effect.Effect<AccountToken | null, Errors.AuthError>;
+    readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
+    readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+  }
 >()("@effect-auth/AccountManagementStore") {}
 
 /** Raised when a confirm token is missing, expired, or of the wrong purpose. */
@@ -97,52 +95,50 @@ export interface EmailChangeResult {
   readonly user: Types.User;
 }
 
-export interface AccountManagementServiceShape {
-  /**
-   * Begin an email change: validate the new address is free, then issue a
-   * token delivered to the new address. Returns the token (for the caller to
-   * decide delivery/anti-enumeration; the HTTP layer answers `{ status: true }`).
-   */
-  readonly requestEmailChange: (
-    userId: string,
-    newEmail: string,
-  ) => Effect.Effect<
-    { readonly token: string; readonly expiresAt: number },
-    Errors.AuthError | Errors.UserNotFoundError | Errors.EmailInUseError,
-    AccountManagementStore | UserServiceStore
-  >;
-
-  /** Confirm an email change by token: swaps the email and marks it verified. */
-  readonly confirmEmailChange: (
-    token: string,
-  ) => Effect.Effect<
-    EmailChangeResult,
-    Errors.AuthError | Errors.UserNotFoundError | AccountTokenError,
-    AccountManagementStore | UserServiceStore | SessionService
-  >;
-
-  /** Begin account deletion: issue a token delivered to the user's address. */
-  readonly requestAccountDeletion: (
-    userId: string,
-  ) => Effect.Effect<
-    { readonly token: string; readonly expiresAt: number },
-    Errors.AuthError | Errors.UserNotFoundError,
-    AccountManagementStore | UserServiceStore
-  >;
-
-  /** Confirm deletion by token: runs cleanup, revokes sessions, deletes user. */
-  readonly confirmAccountDeletion: (
-    token: string,
-  ) => Effect.Effect<
-    { readonly userId: string },
-    Errors.AuthError | Errors.UserNotFoundError | AccountTokenError,
-    AccountManagementStore | UserServiceStore | SessionService
-  >;
-}
-
 export class AccountManagementService extends Context.Service<
   AccountManagementService,
-  AccountManagementServiceShape
+  {
+    /**
+     * Begin an email change: validate the new address is free, then issue a
+     * token delivered to the new address. Returns the token (for the caller to
+     * decide delivery/anti-enumeration; the HTTP layer answers `{ status: true }`).
+     */
+    readonly requestEmailChange: (
+      userId: string,
+      newEmail: string,
+    ) => Effect.Effect<
+      { readonly token: string; readonly expiresAt: number },
+      Errors.AuthError | Errors.UserNotFoundError | Errors.EmailInUseError,
+      AccountManagementStore | UserServiceStore
+    >;
+
+    /** Confirm an email change by token: swaps the email and marks it verified. */
+    readonly confirmEmailChange: (
+      token: string,
+    ) => Effect.Effect<
+      EmailChangeResult,
+      Errors.AuthError | Errors.UserNotFoundError | AccountTokenError,
+      AccountManagementStore | UserServiceStore | SessionService
+    >;
+
+    /** Begin account deletion: issue a token delivered to the user's address. */
+    readonly requestAccountDeletion: (
+      userId: string,
+    ) => Effect.Effect<
+      { readonly token: string; readonly expiresAt: number },
+      Errors.AuthError | Errors.UserNotFoundError,
+      AccountManagementStore | UserServiceStore
+    >;
+
+    /** Confirm deletion by token: runs cleanup, revokes sessions, deletes user. */
+    readonly confirmAccountDeletion: (
+      token: string,
+    ) => Effect.Effect<
+      { readonly userId: string },
+      Errors.AuthError | Errors.UserNotFoundError | AccountTokenError,
+      AccountManagementStore | UserServiceStore | SessionService
+    >;
+  }
 >()("@effect-auth/AccountManagementService") {
   /**
    * Construct a Layer providing this service.
@@ -155,8 +151,8 @@ const generateToken = (): string => crypto.randomBytes(32).toString("base64url")
 
 export const makeAccountManagementService = (
   config: AccountManagementConfig,
-): Effect.Effect<AccountManagementServiceShape, never> =>
-  Effect.sync((): AccountManagementServiceShape => {
+): Effect.Effect<typeof AccountManagementService.Service, never> =>
+  Effect.sync((): typeof AccountManagementService.Service => {
     const changeEmailExpiresIn = config.changeEmailExpiresIn ?? 60 * 60 * 1000;
     const deleteAccountExpiresIn = config.deleteAccountExpiresIn ?? 60 * 60 * 1000;
     const revokeSessionsOnEmailChange = config.revokeSessionsOnEmailChange ?? true;

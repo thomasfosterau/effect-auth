@@ -26,38 +26,6 @@ export interface RateLimitEntry {
 }
 
 /**
- * Storage interface for rate limiting
- */
-export interface RateLimitStoreShape {
-  readonly get: (key: string) => Effect.Effect<RateLimitEntry | null, AuthError>;
-  readonly set: (key: string, entry: RateLimitEntry, ttl: number) => Effect.Effect<void, AuthError>;
-  readonly increment: (key: string, ttl: number) => Effect.Effect<number, AuthError>;
-  readonly delete: (key: string) => Effect.Effect<void, AuthError>;
-}
-
-/**
- * Rate limiter service
- */
-export interface RateLimiterShape {
-  readonly checkLimit: (
-    key: string,
-    config: RateLimitConfig,
-  ) => Effect.Effect<boolean, RateLimitError | AuthError, RateLimitStore>;
-
-  readonly consumeToken: (
-    key: string,
-    config: RateLimitConfig,
-  ) => Effect.Effect<void, RateLimitError | AuthError, RateLimitStore>;
-
-  readonly resetLimit: (key: string) => Effect.Effect<void, AuthError, RateLimitStore>;
-
-  readonly getRemainingTokens: (
-    key: string,
-    config: RateLimitConfig,
-  ) => Effect.Effect<number, AuthError, RateLimitStore>;
-}
-
-/**
  * Rate limiting implementation
  *
  * Provides fixed-window counter-based rate limiting with configurable
@@ -67,15 +35,48 @@ export interface RateLimiterShape {
  */
 
 /**
+ * Storage interface for rate limiting
+ *
  * Rate limit store context tag
  */
-export class RateLimitStore extends Context.Service<RateLimitStore, RateLimitStoreShape>()(
-  "@effect-auth/RateLimitStore",
-) {}
+export class RateLimitStore extends Context.Service<
+  RateLimitStore,
+  {
+    readonly get: (key: string) => Effect.Effect<RateLimitEntry | null, AuthError>;
+    readonly set: (
+      key: string,
+      entry: RateLimitEntry,
+      ttl: number,
+    ) => Effect.Effect<void, AuthError>;
+    readonly increment: (key: string, ttl: number) => Effect.Effect<number, AuthError>;
+    readonly delete: (key: string) => Effect.Effect<void, AuthError>;
+  }
+>()("@effect-auth/RateLimitStore") {}
 
-export class RateLimiter extends Context.Service<RateLimiter, RateLimiterShape>()(
-  "@effect-auth/RateLimiter",
-) {
+/**
+ * Rate limiter service
+ */
+export class RateLimiter extends Context.Service<
+  RateLimiter,
+  {
+    readonly checkLimit: (
+      key: string,
+      config: RateLimitConfig,
+    ) => Effect.Effect<boolean, RateLimitError | AuthError, RateLimitStore>;
+
+    readonly consumeToken: (
+      key: string,
+      config: RateLimitConfig,
+    ) => Effect.Effect<void, RateLimitError | AuthError, RateLimitStore>;
+
+    readonly resetLimit: (key: string) => Effect.Effect<void, AuthError, RateLimitStore>;
+
+    readonly getRemainingTokens: (
+      key: string,
+      config: RateLimitConfig,
+    ) => Effect.Effect<number, AuthError, RateLimitStore>;
+  }
+>()("@effect-auth/RateLimiter") {
   /**
    * Construct a Layer providing this service.
    */
@@ -85,9 +86,9 @@ export class RateLimiter extends Context.Service<RateLimiter, RateLimiterShape>(
 /**
  * Create a rate limiter service
  */
-export const makeRateLimiter = (): Effect.Effect<RateLimiterShape, never> =>
+export const makeRateLimiter = (): Effect.Effect<typeof RateLimiter.Service, never> =>
   Effect.sync(
-    (): RateLimiterShape => ({
+    (): typeof RateLimiter.Service => ({
       checkLimit: (key, config) =>
         Effect.gen(function* () {
           const store = yield* RateLimitStore;
