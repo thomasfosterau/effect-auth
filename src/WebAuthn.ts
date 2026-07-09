@@ -2,6 +2,7 @@
  * WebAuthn types for passkey authentication
  * Following Copenhagen/Oslo guidelines for WebAuthn implementation
  */
+export { make as makeWebAuthnService } from "./WebAuthnService.ts";
 
 /**
  * Represents a WebAuthn challenge used during registration and authentication

@@ -102,13 +102,18 @@ export interface WebAuthnServiceShape {
   ) => Effect.Effect<WebAuthnCredential, Errors.CredentialNotFoundError | Errors.AuthError>;
 }
 
+export class WebAuthnService extends Context.Service<WebAuthnService, WebAuthnService>()(
+  "@effect-auth/WebAuthnService",
+) {
+  static readonly layer = (config: WebAuthnConfig) => Layer.effect(WebAuthnService, make(config));
+}
 
 /**
  * Create a WebAuthn service
  */
 export const make = (
   config: WebAuthnConfig,
-): Effect.Effect<WebAuthnServiceShape, never, ChallengeStore | CredentialStore> =>
+): Effect.Effect<WebAuthnService, never, ChallengeStore | CredentialStore> =>
   Effect.gen(function* () {
     const challengeStore = yield* ChallengeStore;
     const credentialStore = yield* CredentialStore;
