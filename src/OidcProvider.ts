@@ -17,7 +17,7 @@
  *
  * @module oidc-provider
  */
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer, Redacted } from "effect";
 import * as crypto from "node:crypto";
 import type { AuthError } from "./Errors.ts";
 import { JwtService, JwtKeyStore } from "./Jwt.ts";
@@ -246,7 +246,7 @@ export interface OidcTokenResult {
 export interface TrustedOidcClient {
   readonly clientId: string;
   /** Plaintext secret (hashed at service creation); omit for public clients. */
-  readonly clientSecret?: string;
+  readonly clientSecret?: Redacted.Redacted<string>;
   readonly name: string;
   readonly redirectUris: readonly string[];
   readonly type?: "web" | "native";
@@ -441,7 +441,9 @@ export const makeOidcProviderService = (
       c.clientId,
       {
         clientId: c.clientId,
-        ...(c.clientSecret !== undefined && { clientSecretHash: hashOidcSecret(c.clientSecret) }),
+        ...(c.clientSecret !== undefined && {
+          clientSecretHash: hashOidcSecret(Redacted.value(c.clientSecret)),
+        }),
         name: c.name,
         redirectUris: c.redirectUris,
         type: c.type ?? "web",

@@ -29,7 +29,7 @@
  *
  * @module trusted-device
  */
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Redacted } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import { SecondFactorGate, type SecondFactorGateShape } from "./EmailPassword.ts";
@@ -108,7 +108,7 @@ export interface TrustedDeviceConfig {
    * HMAC-SHA256 signing secret. Keep server-side and rotate periodically.
    * Rotating the secret automatically invalidates all outstanding device tokens.
    */
-  readonly secret: string;
+  readonly secret: Redacted.Redacted<string>;
 }
 
 export interface TrustedDeviceIssueResult {
@@ -166,8 +166,8 @@ export class TrustedDeviceService extends Context.Service<
 /** Separator between rawToken and HMAC in the cookie value. */
 const COOKIE_SEPARATOR = ".";
 
-const computeHmac = (secret: string, rawToken: string): string =>
-  crypto.createHmac("sha256", secret).update(rawToken).digest("hex");
+const computeHmac = (secret: Redacted.Redacted<string>, rawToken: string): string =>
+  crypto.createHmac("sha256", Redacted.value(secret)).update(rawToken).digest("hex");
 
 /** Constant-time comparison of two hex strings of equal expected length. */
 const timingSafeHexEqual = (a: string, b: string): boolean => {
@@ -301,7 +301,7 @@ export const makeTrustedDeviceGateShape = (
  * const services = Layer.mergeAll(
  *   EmailPasswordService.layer(),
  *   TrustedDeviceWithTwoFactorGateLayer.pipe(
- *     Layer.provide(TrustedDeviceService.layer({ secret: "..." })),
+ *     Layer.provide(TrustedDeviceService.layer({ secret: Redacted.make("...") })),
  *     Layer.provide(trustedDeviceStore),
  *     Layer.provide(TwoFactorService.layer({ issuer: "MyApp" })),
  *     Layer.provide(twoFactorStores),

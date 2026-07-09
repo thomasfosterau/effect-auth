@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Effect } from "effect";
+import { Context, Effect, Redacted } from "effect";
 import { AuthError } from "./Errors.js";
 import { Hooks } from "./Hooks.js";
 import {
@@ -43,7 +43,7 @@ const deviceStore = {
 
 const storeCtx = Context.make(TrustedDeviceStore, deviceStore);
 
-const testConfig = { secret: "test-hmac-secret-32bytes-exactly!!" };
+const testConfig = { secret: Redacted.make("test-hmac-secret-32bytes-exactly!!") };
 
 const testUser: User = {
   id: "user-td-1",

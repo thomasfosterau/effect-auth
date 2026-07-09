@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vite-plus/test";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { Context, Effect } from "effect";
+import { Context, Effect, Redacted } from "effect";
 import {
   generateKeyPair,
   JwtKeyStore,
@@ -409,7 +409,7 @@ describe("JwtService with private key encryption", () => {
       Effect.gen(function* () {
         const service = yield* makeJwtService({
           ...baseConfig,
-          encryptPrivateKey: { secret: "test-encryption-secret-32-bytes!!" },
+          encryptPrivateKey: { secret: Redacted.make("test-encryption-secret-32-bytes!!") },
         });
         const signed = yield* service.sign(user);
         const payload = yield* service.verify(signed.token);
@@ -433,7 +433,7 @@ describe("JwtService with private key encryption", () => {
         const service = yield* makeJwtService({
           ...baseConfig,
           algorithm: "EdDSA",
-          encryptPrivateKey: { secret: "test-encryption-secret-32-bytes!!" },
+          encryptPrivateKey: { secret: Redacted.make("test-encryption-secret-32-bytes!!") },
         });
         const signed = yield* service.sign(user);
         const payload = yield* service.verify(signed.token);
@@ -470,7 +470,7 @@ describe("JwtService with private key encryption", () => {
       Effect.gen(function* () {
         const service = yield* makeJwtService({
           ...baseConfig,
-          encryptPrivateKey: { secret: "test-encryption-secret-32-bytes!!" },
+          encryptPrivateKey: { secret: Redacted.make("test-encryption-secret-32-bytes!!") },
         });
         yield* service.sign(user);
         yield* service.sign(user);
@@ -489,7 +489,7 @@ describe("JwtService with private key encryption", () => {
       Effect.gen(function* () {
         const service = yield* makeJwtService({
           ...baseConfig,
-          encryptPrivateKey: { secret: "test-encryption-secret-32-bytes!!" },
+          encryptPrivateKey: { secret: Redacted.make("test-encryption-secret-32-bytes!!") },
         });
 
         const { token } = yield* service.sign(user);

@@ -5,7 +5,7 @@
  * and related data structures.
  */
 
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Redacted } from "effect";
 import { makeAes256GcmCipher } from "../Cipher.ts";
 import type { TokenCipher } from "../Cipher.ts";
 export type { TokenCipher } from "../Cipher.ts";
@@ -32,7 +32,7 @@ import { normalizeEmail } from "../utils.ts";
  */
 export interface OAuthProviderConfig {
   readonly clientId: string;
-  readonly clientSecret: string;
+  readonly clientSecret: Redacted.Redacted<string>;
   readonly redirectUri: string;
   readonly authorizationEndpoint: string;
   readonly tokenEndpoint: string;
@@ -556,7 +556,7 @@ export const makeOAuthProvider = (
           redirect_uri: config.redirectUri,
         });
         if (!useBasic) {
-          params.set("client_secret", config.clientSecret);
+          params.set("client_secret", Redacted.value(config.clientSecret));
         }
 
         if (codeVerifier) {
@@ -572,7 +572,7 @@ export const makeOAuthProvider = (
                 Accept: "application/json",
                 ...(useBasic && {
                   Authorization: `Basic ${Buffer.from(
-                    `${config.clientId}:${config.clientSecret}`,
+                    `${config.clientId}:${Redacted.value(config.clientSecret)}`,
                   ).toString("base64")}`,
                 }),
               },
@@ -748,7 +748,9 @@ export interface OAuthServiceOptions {
    * relational database or any store that does not encrypt at the column level.
    * Rotation requires re-encrypting every stored token with the new key.
    */
-  readonly encryptTokens?: { readonly secret: string } | { readonly cipher: TokenCipher };
+  readonly encryptTokens?:
+    | { readonly secret: Redacted.Redacted<string> }
+    | { readonly cipher: TokenCipher };
 }
 
 /**
@@ -763,7 +765,7 @@ export const makeOAuthService = (
   const cipher: TokenCipher | null = options.encryptTokens
     ? "cipher" in options.encryptTokens
       ? options.encryptTokens.cipher
-      : makeAes256GcmCipher(options.encryptTokens.secret)
+      : makeAes256GcmCipher(Redacted.value(options.encryptTokens.secret))
     : null;
 
   const encryptAccount = (account: OAuthAccount): Effect.Effect<OAuthAccount, AuthError> => {
@@ -1237,7 +1239,7 @@ export const makeOAuthService = (
             refresh_token: plainAccount.refreshToken!,
           });
           if (!rUseBasic) {
-            params.set("client_secret", rConfig.clientSecret);
+            params.set("client_secret", Redacted.value(rConfig.clientSecret));
           }
 
           const response = yield* Effect.tryPromise({
@@ -1248,7 +1250,7 @@ export const makeOAuthService = (
                   "Content-Type": "application/x-www-form-urlencoded",
                   ...(rUseBasic && {
                     Authorization: `Basic ${Buffer.from(
-                      `${rConfig.clientId}:${rConfig.clientSecret}`,
+                      `${rConfig.clientId}:${Redacted.value(rConfig.clientSecret)}`,
                     ).toString("base64")}`,
                   }),
                 },
@@ -1299,7 +1301,7 @@ export const makeOAuthService = (
 
 export const GoogleProvider = (config: {
   clientId: string;
-  clientSecret: string;
+  clientSecret: Redacted.Redacted<string>;
   redirectUri: string;
 }): OAuthProvider =>
   makeOAuthProvider(
@@ -1316,7 +1318,7 @@ export const GoogleProvider = (config: {
 
 export const GitHubProvider = (config: {
   clientId: string;
-  clientSecret: string;
+  clientSecret: Redacted.Redacted<string>;
   redirectUri: string;
 }): OAuthProvider =>
   makeOAuthProvider(
@@ -1333,7 +1335,7 @@ export const GitHubProvider = (config: {
 
 export const DiscordProvider = (config: {
   clientId: string;
-  clientSecret: string;
+  clientSecret: Redacted.Redacted<string>;
   redirectUri: string;
 }): OAuthProvider =>
   makeOAuthProvider(
@@ -1350,7 +1352,7 @@ export const DiscordProvider = (config: {
 
 export const MicrosoftProvider = (config: {
   clientId: string;
-  clientSecret: string;
+  clientSecret: Redacted.Redacted<string>;
   redirectUri: string;
   tenant?: string;
 }): OAuthProvider =>
@@ -1369,7 +1371,7 @@ export const MicrosoftProvider = (config: {
 /** The `{ clientId, clientSecret, redirectUri }` triple every provider needs. */
 export interface OAuthClientConfig {
   readonly clientId: string;
-  readonly clientSecret: string;
+  readonly clientSecret: Redacted.Redacted<string>;
   readonly redirectUri: string;
 }
 
@@ -1474,7 +1476,7 @@ export const makeAppleClientSecret = (params: {
   readonly clientId: string;
   readonly keyId: string;
   /** PKCS#8 PEM of the private key downloaded from Apple. */
-  readonly privateKey: string;
+  readonly privateKey: Redacted.Redacted<string>;
   /** Lifetime in seconds (default 6 months, Apple's maximum). */
   readonly expiresIn?: number;
   readonly now?: number;
@@ -1494,7 +1496,7 @@ export const makeAppleClientSecret = (params: {
       const encode = (obj: unknown): string =>
         Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
       const signingInput = `${encode(header)}.${encode(payload)}`;
-      const key = crypto.createPrivateKey(params.privateKey);
+      const key = crypto.createPrivateKey(Redacted.value(params.privateKey));
       const signature = crypto
         .sign("sha256", Buffer.from(signingInput), { key, dsaEncoding: "ieee-p1363" })
         .toString("base64url");

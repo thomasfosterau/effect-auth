@@ -12,7 +12,7 @@
  * @module two-factor
  */
 
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer, Redacted } from "effect";
 import * as crypto from "node:crypto";
 import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
@@ -118,7 +118,9 @@ export interface TwoFactorConfig {
    * Strongly recommended in production. Backup codes are already SHA-256
    * hashed and are unaffected by this option.
    */
-  readonly encryptSecret?: { readonly secret: string } | { readonly cipher: TokenCipher };
+  readonly encryptSecret?:
+    | { readonly secret: Redacted.Redacted<string> }
+    | { readonly cipher: TokenCipher };
 }
 
 /**
@@ -325,7 +327,7 @@ export const make = (config: TwoFactorConfig): Effect.Effect<MultifactorService,
   const cipher: TokenCipher | null = config.encryptSecret
     ? "cipher" in config.encryptSecret
       ? config.encryptSecret.cipher
-      : makeAes256GcmCipher(config.encryptSecret.secret)
+      : makeAes256GcmCipher(Redacted.value(config.encryptSecret.secret))
     : null;
 
   /**

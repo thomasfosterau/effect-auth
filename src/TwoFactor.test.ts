@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Effect } from "effect";
+import { Context, Effect, Redacted } from "effect";
 import { Hooks } from "./Hooks.js";
 import { SessionStore } from "./SessionStore.js";
 import { UserStore } from "./UserStore.js";
@@ -533,7 +533,7 @@ describe("TwoFactorService with TOTP secret encryption", () => {
       const service = yield* makeTwoFactorService({
         issuer: "TestApp",
         skipVerificationOnEnable: false,
-        encryptSecret: { secret: "totp-encryption-secret-32-bytes!!" },
+        encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
       });
 
       const enableResult = yield* service.enable("user-enc-1", "correct-password");
@@ -605,7 +605,7 @@ describe("TwoFactorService with TOTP secret encryption", () => {
     const program = Effect.gen(function* () {
       const service = yield* makeTwoFactorService({
         issuer: "TestApp",
-        encryptSecret: { secret: "totp-encryption-secret-32-bytes!!" },
+        encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
       });
       return yield* service.enable("user-enc-3", "correct-password");
     });
@@ -629,7 +629,7 @@ describe("TwoFactorService with TOTP secret encryption", () => {
       const service = yield* makeTwoFactorService({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
-        encryptSecret: { secret: "totp-encryption-secret-32-bytes!!" },
+        encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
       });
 
       const { backupCodes } = yield* service.enable("user-enc-4", "correct-password");
