@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Context } from "effect";
-import { make as makeWebAuthnService } from "./WebAuthnService.js";
 import { base64UrlDecode, ChallengeStore, CredentialStore } from "./WebAuthn.js";
+import { make } from "./WebAuthnService.js";
 import type {
   WebAuthnChallenge,
   WebAuthnCredential,
@@ -13,6 +13,8 @@ import {
   ChallengeNotFoundError,
   ChallengeExpiredError,
   WebAuthnVerificationError,
+  CredentialNotFoundError,
+  AuthError,
 } from "./Errors.js";
 import * as crypto from "node:crypto";
 
@@ -50,6 +52,9 @@ const mockCredentialStore = {
     }),
 
   get: (credentialId: string) =>
+    Effect.sync(() => mockCredentialStore.credentials.get(credentialId) ?? null),
+
+  getByCredentialId: (credentialId: string) =>
     Effect.sync(() => mockCredentialStore.credentials.get(credentialId) ?? null),
 
   update: (credential: WebAuthnCredential) =>
@@ -99,7 +104,7 @@ describe("WebAuthn Service", () => {
 
   it("should generate a registration challenge", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeWebAuthnService(config);
+      const service = yield* make(config);
       const result = yield* service.generateRegistrationChallenge(testUser);
 
       expect(result.challenge).toBeInstanceOf(Uint8Array);
@@ -115,7 +120,7 @@ describe("WebAuthn Service", () => {
 
   it("should generate unique challenges", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeWebAuthnService(config);
+      const service = yield* make(config);
       const result1 = yield* service.generateRegistrationChallenge(testUser);
       const result2 = yield* service.generateRegistrationChallenge(testUser);
 
@@ -128,7 +133,7 @@ describe("WebAuthn Service", () => {
 
   it("should generate an authentication challenge", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeWebAuthnService(config);
+      const service = yield* make(config);
       const result = yield* service.generateAuthenticationChallenge(testUser.id);
 
       expect(result.challenge).toBeInstanceOf(Uint8Array);
@@ -143,6 +148,22 @@ describe("WebAuthn Service", () => {
     await Effect.runPromise(Effect.provide(program, dependencies));
   });
 
+  it("should generate a usernameless authentication challenge (no userId)", async () => {
+    const program = Effect.gen(function* () {
+      const service = yield* make(config);
+      const result = yield* service.generateAuthenticationChallenge();
+
+      expect(result.challenge).toBeInstanceOf(Uint8Array);
+      expect(result.challenge.length).toBe(32);
+
+      // Verify challenge was stored WITHOUT userId
+      const stored = Array.from(mockChallengeStore.challenges.values())[0];
+      expect(stored.userId).toBeUndefined();
+    });
+
+    await Effect.runPromise(Effect.provide(program, dependencies));
+  });
+
   it("should fail to verify with expired challenge", async () => {
     const expiredConfig: WebAuthnConfig = {
       ...config,
@@ -150,7 +171,7 @@ describe("WebAuthn Service", () => {
     };
 
     const program = Effect.gen(function* () {
-      const service = yield* makeWebAuthnService(expiredConfig);
+      const service = yield* make(expiredConfig);
       const { challenge } = yield* service.generateRegistrationChallenge(testUser);
 
       // Try to verify with expired challenge
@@ -170,7 +191,7 @@ describe("WebAuthn Service", () => {
 
   it("should fail to verify with non-existent challenge", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeWebAuthnService(config);
+      const service = yield* make(config);
       const fakeChallenge = crypto.randomBytes(32);
 
       const mockResponse: RegistrationResponse = {
@@ -206,7 +227,7 @@ describe("WebAuthn Service", () => {
     };
 
     const program = Effect.gen(function* () {
-      const service = yield* makeWebAuthnService(expiredConfig);
+      const service = yield* make(expiredConfig);
       const { challenge } = yield* service.generateRegistrationChallenge(testUser);
 
       expect(mockChallengeStore.challenges.size).toBe(1);
@@ -231,7 +252,7 @@ describe("WebAuthn Service", () => {
 
   it("should store credential with correct user ID", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeWebAuthnService(config);
+      const service = yield* make(config);
       yield* service.generateRegistrationChallenge(testUser);
 
       // Create a mock credential
@@ -310,7 +331,7 @@ describe("WebAuthn Service", () => {
 
   it("advertises ES256, RS256, and EdDSA in the registration challenge", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeWebAuthnService({ ...config, residentKey: "required" });
+      const service = yield* make({ ...config, residentKey: "required" });
       const result = yield* service.generateRegistrationChallenge(testUser);
       return result;
     });
@@ -322,6 +343,138 @@ describe("WebAuthn Service", () => {
       userVerification: "preferred",
     });
     expect(result.excludeCredentials).toEqual([]);
+  });
+
+  // --- Credential management tests ------------------------------------------
+
+  it("listCredentials returns all passkeys for a user", async () => {
+    const program = Effect.gen(function* () {
+      const service = yield* make(config);
+
+      // Pre-populate two credentials for testUser and one for another user.
+      const cred1: WebAuthnCredential = {
+        id: "cred-a",
+        userId: testUser.id,
+        publicKey: crypto.randomBytes(65),
+        algorithm: -7,
+        counter: 0,
+        createdAt: Date.now(),
+      };
+      const cred2: WebAuthnCredential = {
+        id: "cred-b",
+        userId: testUser.id,
+        publicKey: crypto.randomBytes(65),
+        algorithm: -7,
+        counter: 0,
+        createdAt: Date.now(),
+      };
+      const other: WebAuthnCredential = {
+        id: "cred-c",
+        userId: "other-user",
+        publicKey: crypto.randomBytes(65),
+        algorithm: -7,
+        counter: 0,
+        createdAt: Date.now(),
+      };
+      yield* mockCredentialStore.create(cred1);
+      yield* mockCredentialStore.create(cred2);
+      yield* mockCredentialStore.create(other);
+
+      const list = yield* service.listCredentials(testUser.id);
+      expect(list.length).toBe(2);
+      expect(list.map((c) => c.id).sort()).toEqual(["cred-a", "cred-b"]);
+    });
+    await Effect.runPromise(Effect.provide(program, dependencies));
+  });
+
+  it("deleteCredential removes the passkey when the owner calls it", async () => {
+    const program = Effect.gen(function* () {
+      const service = yield* make(config);
+      const cred: WebAuthnCredential = {
+        id: "del-cred",
+        userId: testUser.id,
+        publicKey: crypto.randomBytes(65),
+        algorithm: -7,
+        counter: 0,
+        createdAt: Date.now(),
+      };
+      yield* mockCredentialStore.create(cred);
+
+      yield* service.deleteCredential(testUser.id, cred.id);
+
+      const after = yield* mockCredentialStore.get(cred.id);
+      expect(after).toBeNull();
+    });
+    await Effect.runPromise(Effect.provide(program, dependencies));
+  });
+
+  it("deleteCredential fails with CredentialNotFoundError for an unknown id", async () => {
+    const program = Effect.gen(function* () {
+      const service = yield* make(config);
+      return yield* Effect.flip(service.deleteCredential(testUser.id, "nonexistent"));
+    });
+    const err = await Effect.runPromise(Effect.provide(program, dependencies));
+    expect(err).toBeInstanceOf(CredentialNotFoundError);
+  });
+
+  it("deleteCredential fails with AuthError when another user tries to delete", async () => {
+    const program = Effect.gen(function* () {
+      const service = yield* make(config);
+      const cred: WebAuthnCredential = {
+        id: "other-owned",
+        userId: "owner-user",
+        publicKey: crypto.randomBytes(65),
+        algorithm: -7,
+        counter: 0,
+        createdAt: Date.now(),
+      };
+      yield* mockCredentialStore.create(cred);
+
+      return yield* Effect.flip(service.deleteCredential(testUser.id, cred.id));
+    });
+    const err = await Effect.runPromise(Effect.provide(program, dependencies));
+    expect(err).toBeInstanceOf(AuthError);
+  });
+
+  it("renameCredential updates the name when the owner calls it", async () => {
+    const program = Effect.gen(function* () {
+      const service = yield* make(config);
+      const cred: WebAuthnCredential = {
+        id: "rename-cred",
+        userId: testUser.id,
+        publicKey: crypto.randomBytes(65),
+        algorithm: -7,
+        counter: 0,
+        createdAt: Date.now(),
+      };
+      yield* mockCredentialStore.create(cred);
+
+      const updated = yield* service.renameCredential(testUser.id, cred.id, "My YubiKey");
+      expect(updated.name).toBe("My YubiKey");
+
+      const stored = yield* mockCredentialStore.get(cred.id);
+      expect(stored?.name).toBe("My YubiKey");
+    });
+    await Effect.runPromise(Effect.provide(program, dependencies));
+  });
+
+  it("renameCredential fails with AuthError when another user tries to rename", async () => {
+    const program = Effect.gen(function* () {
+      const service = yield* make(config);
+      const cred: WebAuthnCredential = {
+        id: "rename-protected",
+        userId: "owner-user",
+        publicKey: crypto.randomBytes(65),
+        algorithm: -7,
+        counter: 0,
+        createdAt: Date.now(),
+      };
+      yield* mockCredentialStore.create(cred);
+
+      return yield* Effect.flip(service.renameCredential(testUser.id, cred.id, "Hijacked"));
+    });
+    const err = await Effect.runPromise(Effect.provide(program, dependencies));
+    expect(err).toBeInstanceOf(AuthError);
   });
 });
 
@@ -491,7 +644,7 @@ describe.each<{ name: string; alg: Alg }>([
     const credentialId = crypto.randomBytes(20);
 
     const program = Effect.gen(function* () {
-      const service = yield* makeWebAuthnService(config);
+      const service = yield* make(config);
 
       // Registration.
       const reg = yield* service.generateRegistrationChallenge(testUser);
@@ -526,7 +679,7 @@ describe.each<{ name: string; alg: Alg }>([
     const credentialId = crypto.randomBytes(20);
 
     const program = Effect.gen(function* () {
-      const service = yield* makeWebAuthnService(config);
+      const service = yield* make(config);
       const reg = yield* service.generateRegistrationChallenge(testUser);
       yield* service.verifyRegistration(reg.challenge, {
         credentialId,
@@ -544,6 +697,77 @@ describe.each<{ name: string; alg: Alg }>([
           authenticatorData,
           clientDataJSON: clientData,
           signature: signAssertion(alg, wrong.privateKey, authenticatorData, clientData),
+        }),
+      );
+    });
+
+    const err = await Effect.runPromise(Effect.provide(program, dependencies));
+    expect(err).toBeInstanceOf(WebAuthnVerificationError);
+  });
+
+  it("completes a usernameless (discoverable) register+login round trip", async () => {
+    const { privateKey, cose } = buildKey(alg);
+    const credentialId = crypto.randomBytes(20);
+
+    const program = Effect.gen(function* () {
+      const service = yield* make(config);
+
+      // Registration (bound challenge — userId known at registration time).
+      const reg = yield* service.generateRegistrationChallenge(testUser);
+      const registration = yield* service.verifyRegistration(reg.challenge, {
+        credentialId,
+        attestationObject: attestationObject(cose, credentialId),
+        clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+      });
+      expect(registration.credential.userId).toBe(testUser.id);
+
+      // Usernameless authentication — no userId passed.
+      const auth = yield* service.generateAuthenticationChallenge();
+      const storedChallenge = Array.from(mockChallengeStore.challenges.values())[0];
+      expect(storedChallenge?.userId).toBeUndefined();
+
+      const authenticatorData = concatBytes(rpIdHash, new Uint8Array([0x05]), signCounter(1));
+      const clientData = clientDataJSON("webauthn.get", auth.challenge);
+      const result = yield* service.verifyAuthentication(auth.challenge, {
+        credentialId,
+        authenticatorData,
+        clientDataJSON: clientData,
+        signature: signAssertion(alg, privateKey, authenticatorData, clientData),
+      });
+
+      // The service resolves the user from the stored credential.
+      expect(result.credential.userId).toBe(testUser.id);
+      expect(result.newCounter).toBe(1);
+    });
+
+    await Effect.runPromise(Effect.provide(program, dependencies));
+  });
+
+  it("rejects a usernameless assertion when the credential is from a different user", async () => {
+    const { cose } = buildKey(alg);
+    const credentialId = crypto.randomBytes(20);
+
+    const program = Effect.gen(function* () {
+      const service = yield* make(config);
+
+      // Register under testUser, then try a bound challenge for a DIFFERENT user.
+      const reg = yield* service.generateRegistrationChallenge(testUser);
+      yield* service.verifyRegistration(reg.challenge, {
+        credentialId,
+        attestationObject: attestationObject(cose, credentialId),
+        clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+      });
+
+      // Bound challenge for a different user.
+      const auth = yield* service.generateAuthenticationChallenge("other-user-999");
+      const authenticatorData = concatBytes(rpIdHash, new Uint8Array([0x05]), signCounter(1));
+      const clientData = clientDataJSON("webauthn.get", auth.challenge);
+      return yield* Effect.flip(
+        service.verifyAuthentication(auth.challenge, {
+          credentialId,
+          authenticatorData,
+          clientDataJSON: clientData,
+          signature: signAssertion(alg, buildKey(alg).privateKey, authenticatorData, clientData),
         }),
       );
     });

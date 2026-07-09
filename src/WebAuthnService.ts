@@ -1,6 +1,5 @@
 /**
- * WebAuthn types for passkey authentication
- * Following Copenhagen/Oslo guidelines for WebAuthn implementation
+ * WebAuthn service for managing passkey registration and authentication
  */
 
 import { Context, Effect, Layer } from "effect";
@@ -58,8 +57,12 @@ export interface WebAuthnServiceShape {
     | Errors.AuthError
   >;
 
-  /** Generate a challenge for authentication */
-  generateAuthenticationChallenge: (userId: string) => Effect.Effect<
+  /**
+   * Generate a challenge for authentication.
+   * Pass `userId` for a bound challenge (known user); omit for a
+   * discoverable/usernameless challenge.
+   */
+  generateAuthenticationChallenge: (userId?: string) => Effect.Effect<
     {
       challenge: Uint8Array;
       expiresAt: number;
@@ -79,7 +82,26 @@ export interface WebAuthnServiceShape {
     | Errors.ChallengeExpiredError
     | Errors.AuthError
   >;
+
+  /** List all passkeys registered for a user */
+  listCredentials: (
+    userId: string,
+  ) => Effect.Effect<readonly WebAuthnCredential[], Errors.AuthError>;
+
+  /** Delete a passkey; fails if the credential does not belong to `userId` */
+  deleteCredential: (
+    userId: string,
+    credentialId: string,
+  ) => Effect.Effect<void, Errors.CredentialNotFoundError | Errors.AuthError>;
+
+  /** Rename a passkey; fails if the credential does not belong to `userId` */
+  renameCredential: (
+    userId: string,
+    credentialId: string,
+    name: string,
+  ) => Effect.Effect<WebAuthnCredential, Errors.CredentialNotFoundError | Errors.AuthError>;
 }
+
 
 /**
  * Create a WebAuthn service
@@ -293,7 +315,7 @@ export const make = (
           Effect.tapError(() => Obs.recordWebAuthnRegistration("failure")),
         ),
 
-      generateAuthenticationChallenge: (userId: string) =>
+      generateAuthenticationChallenge: (userId?: string) =>
         Effect.gen(function* () {
           const challenge: Uint8Array = crypto.randomBytes(32);
           const expiresAt = Date.now() + challengeExpiresIn;
@@ -301,7 +323,7 @@ export const make = (
           const challengeData: WebAuthnChallenge = {
             challenge,
             expiresAt,
-            userId,
+            ...(userId !== undefined ? { userId } : {}),
           };
 
           yield* challengeStore.create(challengeData);
@@ -328,14 +350,29 @@ export const make = (
             );
           }
 
-          // Get credential
+          // Get credential — on the usernameless path the credentialId is the
+          // lookup key; on the bound path we use the same route for consistency.
           const credentialId = base64UrlEncode(response.credentialId);
           const credential = yield* credentialStore.get(credentialId);
           if (credential === null) {
-            return yield* new Errors.CredentialNotFoundError({
-              message: "Credential not found",
-              credentialId,
-            });
+            return yield* Effect.fail(
+              new Errors.CredentialNotFoundError({
+                message: "Credential not found",
+                credentialId,
+              }),
+            );
+          }
+
+          // Bound challenge: verify the credential belongs to the expected user.
+          if (
+            storedChallenge.userId !== undefined &&
+            credential.userId !== storedChallenge.userId
+          ) {
+            return yield* Effect.fail(
+              new Errors.WebAuthnVerificationError({
+                message: "Credential does not belong to the expected user",
+              }),
+            );
           }
 
           // Parse client data JSON
@@ -462,6 +499,40 @@ export const make = (
           Effect.tap(() => Obs.recordWebAuthnAuthentication("success")),
           Effect.tapError(() => Obs.recordWebAuthnAuthentication("failure")),
         ),
+
+      listCredentials: (userId: string) => credentialStore.listByUserId(userId),
+
+      deleteCredential: (userId: string, credentialId: string) =>
+        Effect.gen(function* () {
+          const credential = yield* credentialStore.get(credentialId);
+          if (credential === null) {
+            return yield* Effect.fail(
+              new Errors.CredentialNotFoundError({ message: "Credential not found", credentialId }),
+            );
+          }
+          if (credential.userId !== userId) {
+            return yield* Effect.fail(
+              new Errors.AuthError({ message: "Not authorized to delete this credential" }),
+            );
+          }
+          yield* credentialStore.delete(credentialId);
+        }),
+
+      renameCredential: (userId: string, credentialId: string, name: string) =>
+        Effect.gen(function* () {
+          const credential = yield* credentialStore.get(credentialId);
+          if (credential === null) {
+            return yield* Effect.fail(
+              new Errors.CredentialNotFoundError({ message: "Credential not found", credentialId }),
+            );
+          }
+          if (credential.userId !== userId) {
+            return yield* Effect.fail(
+              new Errors.AuthError({ message: "Not authorized to rename this credential" }),
+            );
+          }
+          return yield* credentialStore.update({ ...credential, name });
+        }),
     };
   });
 
