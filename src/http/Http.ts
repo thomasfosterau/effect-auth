@@ -1,8 +1,9 @@
 /**
  * HTTP protocol for effect-auth (optional; requires `effect/unstable/httpapi`).
  *
- * Re-exported from the package root under the `Http` namespace, e.g.
- * `Auth.Http.AuthApi`, `Auth.Http.makeAuthWebHandler`, `Auth.Http.makeAuthClient`.
+ * Re-exported from the package root under the `HTTP` namespace, e.g.
+ * `Auth.HTTP.AuthApi`, `Auth.HTTP.makeAuthWebHandler`, `Auth.HTTP.makeAuthClient`.
+ * Also available as the `effect-auth/http` subpath export.
  */
 
 /** Wire schemas, views, encoders, and HTTP error types. */
