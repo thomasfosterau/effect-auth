@@ -139,8 +139,8 @@ type UsernameDeps =
   | Hooks;
 
 const run = <A, E>(
-  f: (svc: UsernameServiceShape) => Effect.Effect<A, E, UsernameDeps>,
-  opts?: { config?: UsernameConfig; gate?: SecondFactorGateShape },
+  f: (svc: typeof UsernameService.Service) => Effect.Effect<A, E, UsernameDeps>,
+  opts?: { config?: UsernameConfig; gate?: typeof SecondFactorGate.Service },
 ) => {
   // UsernameService.layer also requires PasswordHasher at construction time (decoy hash).
   const usernameLayer = UsernameService.layer(opts?.config).pipe(Layer.provide(hasherLayer));
@@ -256,7 +256,7 @@ describe("UsernameService", () => {
   it("calls passwordHasher.verify even for an unknown username (constant-work)", async () => {
     let verifyCalls = 0;
     const realHasher = makeScryptHasher({ cost: 16384 });
-    const spyHasher: PasswordHasherShape = {
+    const spyHasher: typeof PasswordHasher.Service = {
       algorithm: realHasher.algorithm,
       hash: (password) => realHasher.hash(password),
       verify: (password, hash) => {

@@ -5,39 +5,28 @@ import { makeAuthWebHandler, BEARER_TOKEN_HEADER, type AuthServices } from "./HT
 import { makeAuthClient } from "./HTTPClient.js";
 import { SessionStore } from "../session/SessionStore.js";
 import { UserStore } from "../session/UserStore.js";
-import type { SessionStoreShape } from "../session/SessionStore.js";
-import type { UserStoreShape } from "../session/UserStore.js";
 import { SessionService } from "../session/SessionService.js";
 import { AuthLifecycleService } from "../AuthLifecycle.js";
-import {
-  EmailPasswordService,
-  EmailPasswordStore,
-  type EmailPasswordStoreShape,
-} from "../email/EmailPassword.js";
+import { EmailPasswordService, EmailPasswordStore } from "../email/EmailPassword.js";
 import { PasswordHasher, makeScryptHasher } from "../password/Password.js";
 import {
   EmailVerificationStore,
   type EmailVerification,
-  type EmailVerificationStoreShape,
   EmailVerificationService,
 } from "../email/EmailVerification.js";
 import {
   PasswordResetStore,
   PasswordResetUserStore,
-  type PasswordResetStoreShape,
   type PasswordResetToken,
-  type PasswordResetUserStoreShape,
   PasswordResetService,
 } from "../password/PasswordReset.js";
-import { UserServiceStore, type UserServiceStoreShape, UserService } from "../User.js";
+import { UserServiceStore, UserService } from "../User.js";
 import { hashToken } from "../TokenHash.js";
 import { Hooks } from "../Hooks.js";
 import {
   MagicLinkStore,
   MagicLinkUserStore,
-  type MagicLinkStoreShape,
   type MagicLinkToken,
-  type MagicLinkUserStoreShape,
   MagicLinkService,
 } from "../MagicLink.js";
 import {
@@ -45,8 +34,6 @@ import {
   EmailOTPUserStore,
   type EmailOTPPurpose,
   type EmailOTPRecord,
-  type EmailOTPStoreShape,
-  type EmailOTPUserStoreShape,
   EmailOTPService,
 } from "../email/EmailOTP.js";
 import {
@@ -54,36 +41,26 @@ import {
   TwoFactorGateLayer,
   TwoFactorStore,
   type PendingTwoFactor,
-  type PendingTwoFactorStoreShape,
   type TwoFactorRecord,
-  type TwoFactorStoreShape,
   TwoFactorService,
 } from "../TwoFactor.js";
 import {
   AccountManagementStore,
-  type AccountManagementStoreShape,
   type AccountToken,
   AccountManagementService,
 } from "../AccountManagement.js";
-import {
-  AnonymousUserStore,
-  type AnonymousUserStoreShape,
-  AnonymousService,
-} from "../Anonymous.js";
+import { AnonymousUserStore, AnonymousService } from "../Anonymous.js";
 import {
   PhoneOTPStore,
   PhoneOTPUserStore,
   type PhoneOTPPurpose,
   type PhoneOTPRecord,
-  type PhoneOTPStoreShape,
-  type PhoneOTPUserStoreShape,
   PhoneOTPService,
 } from "../PhoneOTP.js";
-import { UsernameStore, type UsernameStoreShape, UsernameService } from "../Username.js";
+import { UsernameStore, UsernameService } from "../Username.js";
 import {
   DeviceAuthorizationStore,
   type DeviceAuthorizationRecord,
-  type DeviceAuthorizationStoreShape,
   DeviceAuthorizationService,
 } from "../DeviceAuthorization.js";
 import { generateTOTP } from "../OTP.js";
@@ -176,7 +153,7 @@ const makeFixture = (): Fixture => {
   const getUserById = (userId: string) => Effect.sync(() => usersById.get(userId) ?? null);
 
   // --- core stores -----------------------------------------------------------
-  const sessionStore: SessionStoreShape = {
+  const sessionStore: typeof SessionStore.Service = {
     create: (session) =>
       Effect.sync(() => {
         sessions.set(session.id, session);
@@ -201,19 +178,19 @@ const makeFixture = (): Fixture => {
       Effect.sync(() => [...sessions.values()].filter((session) => session.userId === userId)),
   };
 
-  const userStore: UserStoreShape = {
+  const userStore: typeof UserStore.Service = {
     get: getUserById,
     getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
   };
 
-  const emailPasswordStore: EmailPasswordStoreShape = {
+  const emailPasswordStore: typeof EmailPasswordStore.Service = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
 
-  const userServiceStore: UserServiceStoreShape = {
+  const userServiceStore: typeof UserServiceStore.Service = {
     get: getUserById,
     getByEmail: (email) => Effect.sync(() => userByEmail(email)),
     update: (user) =>
@@ -232,7 +209,7 @@ const makeFixture = (): Fixture => {
       }),
   };
 
-  const emailVerificationStore: EmailVerificationStoreShape = {
+  const emailVerificationStore: typeof EmailVerificationStore.Service = {
     create: (verification) =>
       Effect.sync(() => {
         verifications.set(verification.token, verification);
@@ -247,7 +224,7 @@ const makeFixture = (): Fixture => {
       }),
   };
 
-  const passwordResetStore: PasswordResetStoreShape = {
+  const passwordResetStore: typeof PasswordResetStore.Service = {
     create: (reset) =>
       Effect.sync(() => {
         resets.set(reset.token, reset);
@@ -261,7 +238,7 @@ const makeFixture = (): Fixture => {
       }),
   };
 
-  const passwordResetUserStore: PasswordResetUserStoreShape = {
+  const passwordResetUserStore: typeof PasswordResetUserStore.Service = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
@@ -294,7 +271,7 @@ const makeFixture = (): Fixture => {
 
   // --- optional feature stores -----------------------------------------------
   const magicLinks = new Map<string, MagicLinkToken>();
-  const magicLinkStore: MagicLinkStoreShape = {
+  const magicLinkStore: typeof MagicLinkStore.Service = {
     create: (token) =>
       Effect.sync(() => {
         magicLinks.set(token.token, token);
@@ -312,14 +289,14 @@ const makeFixture = (): Fixture => {
         for (const [key, link] of magicLinks) if (link.email === email) magicLinks.delete(key);
       }),
   };
-  const magicLinkUserStore: MagicLinkUserStoreShape = {
+  const magicLinkUserStore: typeof MagicLinkUserStore.Service = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
   };
 
   const emailOTPs = new Map<string, EmailOTPRecord>();
   const otpKey = (email: string, purpose: EmailOTPPurpose) => `${purpose}:${email}`;
-  const emailOTPStore: EmailOTPStoreShape = {
+  const emailOTPStore: typeof EmailOTPStore.Service = {
     upsert: (record) =>
       Effect.sync(() => {
         emailOTPs.set(otpKey(record.email, record.purpose), record);
@@ -336,13 +313,13 @@ const makeFixture = (): Fixture => {
         return updated.attempts;
       }),
   };
-  const emailOTPUserStore: EmailOTPUserStoreShape = {
+  const emailOTPUserStore: typeof EmailOTPUserStore.Service = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
   };
 
   const twoFactorRecords = new Map<string, TwoFactorRecord>();
-  const twoFactorStore: TwoFactorStoreShape = {
+  const twoFactorStore: typeof TwoFactorStore.Service = {
     get: (userId) => Effect.sync(() => twoFactorRecords.get(userId) ?? null),
     upsert: (record) =>
       Effect.sync(() => {
@@ -352,7 +329,7 @@ const makeFixture = (): Fixture => {
     delete: (userId) => Effect.sync(() => void twoFactorRecords.delete(userId)),
   };
   const pendingTwoFactors = new Map<string, PendingTwoFactor>();
-  const pendingTwoFactorStore: PendingTwoFactorStoreShape = {
+  const pendingTwoFactorStore: typeof PendingTwoFactorStore.Service = {
     create: (pending) =>
       Effect.sync(() => {
         pendingTwoFactors.set(pending.token, pending);
@@ -369,7 +346,7 @@ const makeFixture = (): Fixture => {
   );
 
   const accountTokens = new Map<string, AccountToken>();
-  const accountStore: AccountManagementStoreShape = {
+  const accountStore: typeof AccountManagementStore.Service = {
     create: (token) =>
       Effect.sync(() => {
         accountTokens.set(token.token, token);
@@ -386,7 +363,7 @@ const makeFixture = (): Fixture => {
   const phoneRecords = new Map<string, PhoneOTPRecord>();
   const phoneToUserId = new Map<string, string>();
   const phoneKey = (phone: string, purpose: PhoneOTPPurpose) => `${phone}:${purpose}`;
-  const phoneOTPStore: PhoneOTPStoreShape = {
+  const phoneOTPStore: typeof PhoneOTPStore.Service = {
     upsert: (record) =>
       Effect.sync(() => {
         phoneRecords.set(phoneKey(record.phoneNumber, record.purpose), record);
@@ -404,7 +381,7 @@ const makeFixture = (): Fixture => {
         return updated.attempts;
       }),
   };
-  const phoneOTPUserStore: PhoneOTPUserStoreShape = {
+  const phoneOTPUserStore: typeof PhoneOTPUserStore.Service = {
     getUserByPhoneNumber: (phone) =>
       Effect.sync(() => {
         const id = phoneToUserId.get(phone);
@@ -440,7 +417,7 @@ const makeFixture = (): Fixture => {
   };
 
   const deviceRecords = new Map<string, DeviceAuthorizationRecord>();
-  const deviceStore: DeviceAuthorizationStoreShape = {
+  const deviceStore: typeof DeviceAuthorizationStore.Service = {
     create: (record) =>
       Effect.sync(() => {
         deviceRecords.set(record.deviceCode, record);
@@ -465,7 +442,7 @@ const makeFixture = (): Fixture => {
   };
 
   const usernameToId = new Map<string, string>();
-  const usernameStore: UsernameStoreShape = {
+  const usernameStore: typeof UsernameStore.Service = {
     getUserByUsername: (username) =>
       Effect.sync(() => {
         const id = usernameToId.get(username);
@@ -480,7 +457,7 @@ const makeFixture = (): Fixture => {
   };
 
   let anonSeq = 0;
-  const anonymousUserStore: AnonymousUserStoreShape = {
+  const anonymousUserStore: typeof AnonymousUserStore.Service = {
     createAnonymousUser: () =>
       Effect.sync(() =>
         createUser({

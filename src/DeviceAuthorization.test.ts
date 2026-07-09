@@ -7,15 +7,11 @@ import {
   DeviceCodeError,
   normalizeUserCode,
   type DeviceAuthorizationRecord,
-  type DeviceAuthorizationServiceShape,
-  type DeviceAuthorizationStoreShape,
 } from "./DeviceAuthorization.js";
 import { hashToken } from "./TokenHash.js";
 import { SessionStore } from "./session/SessionStore.js";
 import { UserStore } from "./session/UserStore.js";
 import { SessionService } from "./session/SessionService.js";
-import type { SessionStoreShape } from "./session/SessionStore.js";
-import type { UserStoreShape } from "./session/UserStore.js";
 import { Hooks } from "./Hooks.js";
 import type * as Types from "./Types.js";
 
@@ -23,7 +19,7 @@ const records = new Map<string, DeviceAuthorizationRecord>();
 const sessions = new Map<string, Types.Session>();
 const users = new Map<string, Types.User>();
 
-const store: DeviceAuthorizationStoreShape = {
+const store: typeof DeviceAuthorizationStore.Service = {
   create: (record) =>
     Effect.sync(() => {
       // record.deviceCode and record.userCode are already hashed by the service.
@@ -49,7 +45,7 @@ const store: DeviceAuthorizationStoreShape = {
     }),
 };
 
-const sessionStore: SessionStoreShape = {
+const sessionStore: typeof SessionStore.Service = {
   create: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -70,7 +66,7 @@ const sessionStore: SessionStoreShape = {
     Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
 };
 
-const userStore: UserStoreShape = {
+const userStore: typeof UserStore.Service = {
   get: (userId) => Effect.sync(() => users.get(userId) ?? null),
   getCredentials: (_userId) => Effect.succeed(null),
 };
@@ -99,7 +95,7 @@ const layer = Layer.mergeAll(
 
 const run = <A, E>(
   f: (
-    svc: DeviceAuthorizationServiceShape,
+    svc: typeof DeviceAuthorizationService.Service,
   ) => Effect.Effect<A, E, DeviceAuthorizationStore | SessionService | Hooks>,
 ) =>
   Effect.runPromise(

@@ -136,7 +136,7 @@ const makeHarness = (): Harness => {
 const run = <A, E>(
   h: Harness,
   f: (
-    svc: AccountManagementServiceShape,
+    svc: typeof AccountManagementService.Service,
   ) => Effect.Effect<A, E, AccountManagementStore | UserServiceStore | SessionService>,
 ) =>
   Effect.runPromise(
