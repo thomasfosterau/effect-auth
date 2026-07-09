@@ -195,7 +195,8 @@ export interface MultiSessionConfig {
   readonly maximumSessions?: number;
 }
 
-interface ResolvedCookieConfig {
+/** @internal */
+export interface ResolvedCookieConfig {
   readonly name: string;
   readonly secure: boolean;
   readonly path: string;
@@ -205,7 +206,8 @@ interface ResolvedCookieConfig {
   readonly bearerMode: "always" | "opt-in" | false;
 }
 
-const resolveCookieConfig = (
+/** @internal */
+export const resolveCookieConfig = (
   config?: CookieConfig,
   multiSession?: MultiSessionConfig,
 ): ResolvedCookieConfig => {
@@ -268,8 +270,8 @@ const readDeviceSessionIds = (
   return raw.split(".").filter((id) => id.length > 0);
 };
 
-/** Name of the companion cache cookie. */
-const dataCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_data`;
+/** @internal Name of the companion cache cookie. */
+export const dataCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_data`;
 
 const dataCookieOptions = (cfg: ResolvedCookieConfig, cache: ResolvedSessionCache) =>
   ({
@@ -311,7 +313,8 @@ const clearCookieOptions = (cfg: ResolvedCookieConfig) =>
 // Session resolution (Authorization header, then cookie)
 // -----------------------------------------------------------------------------
 
-const sessionIdFromRequest = (
+/** @internal */
+export const sessionIdFromRequest = (
   request: HttpServerRequest.HttpServerRequest,
   cfg: ResolvedCookieConfig,
 ): string | undefined => {
