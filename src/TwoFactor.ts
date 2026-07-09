@@ -60,9 +60,7 @@ export class TwoFactorStore extends Context.Service<
   TwoFactorStore,
   {
     readonly get: (userId: string) => Effect.Effect<TwoFactorRecord | null, Errors.AuthError>;
-    readonly upsert: (
-      record: TwoFactorRecord,
-    ) => Effect.Effect<TwoFactorRecord, Errors.AuthError>;
+    readonly upsert: (record: TwoFactorRecord) => Effect.Effect<TwoFactorRecord, Errors.AuthError>;
     readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/TwoFactorStore") {}
@@ -448,232 +446,228 @@ export const makeTwoFactorService = (
       return record;
     });
 
-  return Effect.sync(
-    (): typeof TwoFactorService.Service => ({
-      enable: (userId: string, password: string) =>
-        Effect.gen(function* () {
-          yield* verifyPassword(userId, password);
+  return Effect.sync((): typeof TwoFactorService.Service => ({
+    enable: (userId: string, password: string) =>
+      Effect.gen(function* () {
+        yield* verifyPassword(userId, password);
 
-          const store = yield* TwoFactorStore;
-          const userStore = yield* UserStore;
+        const store = yield* TwoFactorStore;
+        const userStore = yield* UserStore;
 
-          // The otpauth:// label is the user's email
-          const user = yield* userStore.get(userId);
-          if (user === null) {
-            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
-          }
+        // The otpauth:// label is the user's email
+        const user = yield* userStore.get(userId);
+        if (user === null) {
+          return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+        }
 
-          const secret = yield* generateBase32Secret();
-          const storedSecret = cipher !== null ? yield* cipher.encrypt(secret) : secret;
+        const secret = yield* generateBase32Secret();
+        const storedSecret = cipher !== null ? yield* cipher.encrypt(secret) : secret;
 
-          const backupCodes = Array.from({ length: backupCodeCount }, () => generateBackupCode());
+        const backupCodes = Array.from({ length: backupCodeCount }, () => generateBackupCode());
 
-          const record: TwoFactorRecord = {
-            userId,
-            secret: storedSecret,
-            backupCodes: backupCodes.map((code) => hashBackupCode(code)),
-            verified: skipVerificationOnEnable,
-            createdAt: Date.now(),
-          };
+        const record: TwoFactorRecord = {
+          userId,
+          secret: storedSecret,
+          backupCodes: backupCodes.map((code) => hashBackupCode(code)),
+          verified: skipVerificationOnEnable,
+          createdAt: Date.now(),
+        };
 
-          yield* store.upsert(record);
+        yield* store.upsert(record);
 
-          const totp = config.totp;
-          const totpUri = yield* Effect.try({
-            try: () =>
-              generateOTPURI({
-                type: "totp",
-                label: user.email,
-                issuer: config.issuer,
-                secret, // always use plaintext for URI generation
-                ...(totp?.period !== undefined && { period: totp.period }),
-                ...(totp?.digits !== undefined && { digits: totp.digits }),
-                ...(totp?.algorithm !== undefined && { algorithm: totp.algorithm }),
-              }),
-            catch: (error) =>
-              new TwoFactorError({
-                message: "Failed to generate otpauth URI",
-                cause: error,
-              }),
-          });
+        const totp = config.totp;
+        const totpUri = yield* Effect.try({
+          try: () =>
+            generateOTPURI({
+              type: "totp",
+              label: user.email,
+              issuer: config.issuer,
+              secret, // always use plaintext for URI generation
+              ...(totp?.period !== undefined && { period: totp.period }),
+              ...(totp?.digits !== undefined && { digits: totp.digits }),
+              ...(totp?.algorithm !== undefined && { algorithm: totp.algorithm }),
+            }),
+          catch: (error) =>
+            new TwoFactorError({
+              message: "Failed to generate otpauth URI",
+              cause: error,
+            }),
+        });
 
-          return {
-            secret, // always return plaintext secret
-            totpUri,
-            backupCodes,
-          } satisfies TwoFactorEnableResult;
-        }),
+        return {
+          secret, // always return plaintext secret
+          totpUri,
+          backupCodes,
+        } satisfies TwoFactorEnableResult;
+      }),
 
-      confirmEnable: (userId: string, code: string) =>
-        Effect.gen(function* () {
-          const store = yield* TwoFactorStore;
+    confirmEnable: (userId: string, code: string) =>
+      Effect.gen(function* () {
+        const store = yield* TwoFactorStore;
 
-          const record = yield* store.get(userId);
-          if (!record) {
-            return yield* Effect.fail(
-              new TwoFactorError({
-                message: "Two-factor authentication has not been set up for this user",
-              }),
-            );
-          }
-
-          const plainSecret =
-            cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
-          const isValid = yield* verifyTOTP(code, plainSecret, config.totp);
-          if (!isValid) {
-            return yield* Effect.fail(
-              new TwoFactorError({
-                message: "Invalid two-factor code",
-              }),
-            );
-          }
-
-          yield* store.upsert({ ...record, verified: true });
-        }),
-
-      disable: (userId: string, password: string) =>
-        Effect.gen(function* () {
-          yield* verifyPassword(userId, password);
-
-          const store = yield* TwoFactorStore;
-          yield* store.delete(userId);
-        }),
-
-      isEnabled: (userId: string) =>
-        Effect.gen(function* () {
-          const store = yield* TwoFactorStore;
-          const record = yield* store.get(userId);
-          return record !== null && record.verified;
-        }),
-
-      beginChallenge: (userId: string) =>
-        Effect.gen(function* () {
-          // Only users with a verified record can be challenged
-          yield* getVerifiedRecord(userId);
-
-          const pendingStore = yield* PendingTwoFactorStore;
-          const token = yield* generatePendingToken();
-
-          const pending: PendingTwoFactor = {
-            token,
-            userId,
-            createdAt: Date.now(),
-            expiresAt: Date.now() + pendingExpiresIn,
-          };
-
-          yield* pendingStore.create(pending);
-
-          return {
-            token,
-            expiresAt: pending.expiresAt,
-          } satisfies TwoFactorChallenge;
-        }).pipe(
-          Effect.withSpan("effect-auth.2fa.challenge"),
-          Effect.tap(() => Obs.recordTwoFactorChallenge()),
-        ),
-
-      verifyTotp: (pendingToken: string, code: string, options?: TwoFactorVerifyOptions) =>
-        Effect.gen(function* () {
-          const pending = yield* resolvePending(pendingToken);
-          const record = yield* getVerifiedRecord(pending.userId);
-
-          const plainSecret =
-            cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
-          const isValid = yield* verifyTOTP(code, plainSecret, config.totp);
-          if (!isValid) {
-            return yield* Effect.fail(
-              new TwoFactorError({
-                message: "Invalid two-factor code",
-              }),
-            );
-          }
-
-          // Consume the pending token (one-time use)
-          const pendingStore = yield* PendingTwoFactorStore;
-          yield* pendingStore.delete(pendingToken);
-
-          const sessionManager = yield* SessionService;
-          const session = yield* sessionManager.createSession(
-            pending.userId,
-            options?.sessionAttributes,
+        const record = yield* store.get(userId);
+        if (!record) {
+          return yield* Effect.fail(
+            new TwoFactorError({
+              message: "Two-factor authentication has not been set up for this user",
+            }),
           );
+        }
 
-          return {
-            userId: pending.userId,
-            session,
-          } satisfies TwoFactorVerifyResult;
-        }).pipe(
-          Effect.withSpan("effect-auth.2fa.verify", { attributes: { type: "totp" } }),
-          Effect.tap(() => Obs.recordTwoFactorVerification("totp", "success")),
-          Effect.tapError(() => Obs.recordTwoFactorVerification("totp", "failure")),
-        ),
-
-      verifyBackupCode: (pendingToken: string, code: string, options?: TwoFactorVerifyOptions) =>
-        Effect.gen(function* () {
-          const pending = yield* resolvePending(pendingToken);
-          const record = yield* getVerifiedRecord(pending.userId);
-
-          const index = findBackupCodeIndex(record.backupCodes, hashBackupCode(code));
-          if (index === -1) {
-            return yield* Effect.fail(
-              new TwoFactorError({
-                message: "Invalid backup code",
-              }),
-            );
-          }
-
-          // Remove the used code (single use)
-          const store = yield* TwoFactorStore;
-          yield* store.upsert({
-            ...record,
-            backupCodes: record.backupCodes.filter((_, i) => i !== index),
-          });
-
-          // Consume the pending token (one-time use)
-          const pendingStore = yield* PendingTwoFactorStore;
-          yield* pendingStore.delete(pendingToken);
-
-          const sessionManager = yield* SessionService;
-          const session = yield* sessionManager.createSession(
-            pending.userId,
-            options?.sessionAttributes,
+        const plainSecret = cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
+        const isValid = yield* verifyTOTP(code, plainSecret, config.totp);
+        if (!isValid) {
+          return yield* Effect.fail(
+            new TwoFactorError({
+              message: "Invalid two-factor code",
+            }),
           );
+        }
 
-          return {
-            userId: pending.userId,
-            session,
-          } satisfies TwoFactorVerifyResult;
-        }).pipe(
-          Effect.withSpan("effect-auth.2fa.verify", { attributes: { type: "backup-code" } }),
-          Effect.tap(() => Obs.recordTwoFactorVerification("backup-code", "success")),
-          Effect.tapError(() => Obs.recordTwoFactorVerification("backup-code", "failure")),
-        ),
+        yield* store.upsert({ ...record, verified: true });
+      }),
 
-      regenerateBackupCodes: (userId: string, password: string) =>
-        Effect.gen(function* () {
-          yield* verifyPassword(userId, password);
+    disable: (userId: string, password: string) =>
+      Effect.gen(function* () {
+        yield* verifyPassword(userId, password);
 
-          const store = yield* TwoFactorStore;
-          const record = yield* store.get(userId);
-          if (!record) {
-            return yield* Effect.fail(
-              new TwoFactorError({
-                message: "Two-factor authentication is not enabled for this user",
-              }),
-            );
-          }
+        const store = yield* TwoFactorStore;
+        yield* store.delete(userId);
+      }),
 
-          const backupCodes = Array.from({ length: backupCodeCount }, () => generateBackupCode());
+    isEnabled: (userId: string) =>
+      Effect.gen(function* () {
+        const store = yield* TwoFactorStore;
+        const record = yield* store.get(userId);
+        return record !== null && record.verified;
+      }),
 
-          yield* store.upsert({
-            ...record,
-            backupCodes: backupCodes.map(hashBackupCode),
-          });
+    beginChallenge: (userId: string) =>
+      Effect.gen(function* () {
+        // Only users with a verified record can be challenged
+        yield* getVerifiedRecord(userId);
 
-          return backupCodes;
-        }),
-    }),
-  );
+        const pendingStore = yield* PendingTwoFactorStore;
+        const token = yield* generatePendingToken();
+
+        const pending: PendingTwoFactor = {
+          token,
+          userId,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + pendingExpiresIn,
+        };
+
+        yield* pendingStore.create(pending);
+
+        return {
+          token,
+          expiresAt: pending.expiresAt,
+        } satisfies TwoFactorChallenge;
+      }).pipe(
+        Effect.withSpan("effect-auth.2fa.challenge"),
+        Effect.tap(() => Obs.recordTwoFactorChallenge()),
+      ),
+
+    verifyTotp: (pendingToken: string, code: string, options?: TwoFactorVerifyOptions) =>
+      Effect.gen(function* () {
+        const pending = yield* resolvePending(pendingToken);
+        const record = yield* getVerifiedRecord(pending.userId);
+
+        const plainSecret = cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
+        const isValid = yield* verifyTOTP(code, plainSecret, config.totp);
+        if (!isValid) {
+          return yield* Effect.fail(
+            new TwoFactorError({
+              message: "Invalid two-factor code",
+            }),
+          );
+        }
+
+        // Consume the pending token (one-time use)
+        const pendingStore = yield* PendingTwoFactorStore;
+        yield* pendingStore.delete(pendingToken);
+
+        const sessionManager = yield* SessionService;
+        const session = yield* sessionManager.createSession(
+          pending.userId,
+          options?.sessionAttributes,
+        );
+
+        return {
+          userId: pending.userId,
+          session,
+        } satisfies TwoFactorVerifyResult;
+      }).pipe(
+        Effect.withSpan("effect-auth.2fa.verify", { attributes: { type: "totp" } }),
+        Effect.tap(() => Obs.recordTwoFactorVerification("totp", "success")),
+        Effect.tapError(() => Obs.recordTwoFactorVerification("totp", "failure")),
+      ),
+
+    verifyBackupCode: (pendingToken: string, code: string, options?: TwoFactorVerifyOptions) =>
+      Effect.gen(function* () {
+        const pending = yield* resolvePending(pendingToken);
+        const record = yield* getVerifiedRecord(pending.userId);
+
+        const index = findBackupCodeIndex(record.backupCodes, hashBackupCode(code));
+        if (index === -1) {
+          return yield* Effect.fail(
+            new TwoFactorError({
+              message: "Invalid backup code",
+            }),
+          );
+        }
+
+        // Remove the used code (single use)
+        const store = yield* TwoFactorStore;
+        yield* store.upsert({
+          ...record,
+          backupCodes: record.backupCodes.filter((_, i) => i !== index),
+        });
+
+        // Consume the pending token (one-time use)
+        const pendingStore = yield* PendingTwoFactorStore;
+        yield* pendingStore.delete(pendingToken);
+
+        const sessionManager = yield* SessionService;
+        const session = yield* sessionManager.createSession(
+          pending.userId,
+          options?.sessionAttributes,
+        );
+
+        return {
+          userId: pending.userId,
+          session,
+        } satisfies TwoFactorVerifyResult;
+      }).pipe(
+        Effect.withSpan("effect-auth.2fa.verify", { attributes: { type: "backup-code" } }),
+        Effect.tap(() => Obs.recordTwoFactorVerification("backup-code", "success")),
+        Effect.tapError(() => Obs.recordTwoFactorVerification("backup-code", "failure")),
+      ),
+
+    regenerateBackupCodes: (userId: string, password: string) =>
+      Effect.gen(function* () {
+        yield* verifyPassword(userId, password);
+
+        const store = yield* TwoFactorStore;
+        const record = yield* store.get(userId);
+        if (!record) {
+          return yield* Effect.fail(
+            new TwoFactorError({
+              message: "Two-factor authentication is not enabled for this user",
+            }),
+          );
+        }
+
+        const backupCodes = Array.from({ length: backupCodeCount }, () => generateBackupCode());
+
+        yield* store.upsert({
+          ...record,
+          backupCodes: backupCodes.map(hashBackupCode),
+        });
+
+        return backupCodes;
+      }),
+  }));
 };
 
 /**

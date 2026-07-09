@@ -135,61 +135,59 @@ export const make = (
 ): Effect.Effect<typeof OneTimeTokenService.Service, never> => {
   const defaultExpiresIn = config.expiresIn ?? 15 * 60 * 1000;
 
-  return Effect.sync(
-    (): typeof OneTimeTokenService.Service => ({
-      generate: (subject: string, options?: OneTimeTokenGenerateOptions) =>
-        Effect.gen(function* () {
-          const store = yield* OneTimeTokenStore;
-          const rawToken = yield* Effect.sync(() => crypto.randomBytes(32).toString("base64url"));
-          const expiresIn = options?.expiresIn ?? defaultExpiresIn;
-          const now = Date.now();
-          const record: OneTimeTokenRecord = {
-            token: hashToken(rawToken),
-            subject,
-            ...(options?.metadata !== undefined ? { metadata: options.metadata } : {}),
-            createdAt: now,
-            expiresAt: now + expiresIn,
-          };
-          yield* store.create(record);
-          return rawToken;
-        }),
+  return Effect.sync((): typeof OneTimeTokenService.Service => ({
+    generate: (subject: string, options?: OneTimeTokenGenerateOptions) =>
+      Effect.gen(function* () {
+        const store = yield* OneTimeTokenStore;
+        const rawToken = yield* Effect.sync(() => crypto.randomBytes(32).toString("base64url"));
+        const expiresIn = options?.expiresIn ?? defaultExpiresIn;
+        const now = Date.now();
+        const record: OneTimeTokenRecord = {
+          token: hashToken(rawToken),
+          subject,
+          ...(options?.metadata !== undefined ? { metadata: options.metadata } : {}),
+          createdAt: now,
+          expiresAt: now + expiresIn,
+        };
+        yield* store.create(record);
+        return rawToken;
+      }),
 
-      verify: (rawToken: string) =>
-        Effect.gen(function* () {
-          const store = yield* OneTimeTokenStore;
+    verify: (rawToken: string) =>
+      Effect.gen(function* () {
+        const store = yield* OneTimeTokenStore;
 
-          if (!rawToken) {
-            return yield* Effect.fail(
-              new Errors.OneTimeTokenError({ message: "Invalid or expired token" }),
-            );
-          }
+        if (!rawToken) {
+          return yield* Effect.fail(
+            new Errors.OneTimeTokenError({ message: "Invalid or expired token" }),
+          );
+        }
 
-          const tokenHash = hashToken(rawToken);
-          const record = yield* store.get(tokenHash);
-          if (!record) {
-            return yield* Effect.fail(
-              new Errors.OneTimeTokenError({ message: "Invalid or expired token" }),
-            );
-          }
+        const tokenHash = hashToken(rawToken);
+        const record = yield* store.get(tokenHash);
+        if (!record) {
+          return yield* Effect.fail(
+            new Errors.OneTimeTokenError({ message: "Invalid or expired token" }),
+          );
+        }
 
-          // Consume the token immediately — delete before the expiry check so
-          // the timing difference between "found-but-expired" and "not found"
-          // does not leak whether the hash exists in the store.
-          yield* store.delete(tokenHash);
+        // Consume the token immediately — delete before the expiry check so
+        // the timing difference between "found-but-expired" and "not found"
+        // does not leak whether the hash exists in the store.
+        yield* store.delete(tokenHash);
 
-          if (Date.now() > record.expiresAt) {
-            return yield* Effect.fail(
-              new Errors.OneTimeTokenError({ message: "Invalid or expired token" }),
-            );
-          }
+        if (Date.now() > record.expiresAt) {
+          return yield* Effect.fail(
+            new Errors.OneTimeTokenError({ message: "Invalid or expired token" }),
+          );
+        }
 
-          return {
-            subject: record.subject,
-            ...(record.metadata !== undefined ? { metadata: record.metadata } : {}),
-          } satisfies OneTimeTokenVerifyResult;
-        }),
-    }),
-  );
+        return {
+          subject: record.subject,
+          ...(record.metadata !== undefined ? { metadata: record.metadata } : {}),
+        } satisfies OneTimeTokenVerifyResult;
+      }),
+  }));
 };
 
 // ---------------------------------------------------------------------------

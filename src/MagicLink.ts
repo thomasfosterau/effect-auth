@@ -46,9 +46,7 @@ export class MagicLinkStore extends Context.Service<
   {
     readonly create: (token: MagicLinkToken) => Effect.Effect<MagicLinkToken, Errors.AuthError>;
     readonly get: (token: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
-    readonly getByEmail: (
-      email: string,
-    ) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
+    readonly getByEmail: (email: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
     readonly deleteByEmail: (email: string) => Effect.Effect<void, Errors.AuthError>;
   }
@@ -62,9 +60,7 @@ export class MagicLinkStore extends Context.Service<
 export class MagicLinkUserStore extends Context.Service<
   MagicLinkUserStore,
   {
-    readonly getUserByEmail: (
-      email: string,
-    ) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
     readonly createUser: (
       input: MagicLinkCreateUserInput,
     ) => Effect.Effect<Types.User, Errors.AuthError>;
@@ -168,132 +164,130 @@ export const makeMagicLinkService = (
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
   const disableSignUp = config.disableSignUp ?? false;
 
-  return Effect.sync(
-    (): typeof MagicLinkService.Service => ({
-      send: (rawEmail: string) =>
-        Effect.gen(function* () {
-          const store = yield* MagicLinkStore;
-          const userStore = yield* MagicLinkUserStore;
+  return Effect.sync((): typeof MagicLinkService.Service => ({
+    send: (rawEmail: string) =>
+      Effect.gen(function* () {
+        const store = yield* MagicLinkStore;
+        const userStore = yield* MagicLinkUserStore;
 
-          const email = normalizeEmail(rawEmail);
-          if (!email) {
+        const email = normalizeEmail(rawEmail);
+        if (!email) {
+          return;
+        }
+
+        // Do not reveal whether the user exists to reduce email enumeration
+        // risk: when sign-up is disabled and there is no matching account,
+        // succeed silently without sending anything. When sign-up is enabled
+        // the link is always sent (the user is created at verify time).
+        if (disableSignUp) {
+          const user = yield* userStore.getUserByEmail(email);
+          if (!user) {
             return;
           }
+        }
 
-          // Do not reveal whether the user exists to reduce email enumeration
-          // risk: when sign-up is disabled and there is no matching account,
-          // succeed silently without sending anything. When sign-up is enabled
-          // the link is always sent (the user is created at verify time).
-          if (disableSignUp) {
-            const user = yield* userStore.getUserByEmail(email);
-            if (!user) {
-              return;
-            }
-          }
-
-          // Resend cooldown: reject if an outstanding token was created within
-          // the configured window. The identifier (email) is already known to
-          // the caller, so this is not an enumeration risk.
-          if (config.resendCooldown !== undefined) {
-            const existing = yield* store.getByEmail(email);
-            if (existing !== null) {
-              const elapsed = Date.now() - existing.createdAt;
-              if (elapsed < config.resendCooldown) {
-                return yield* Effect.fail(
-                  new Errors.ResendTooSoonError({
-                    message: "Please wait before requesting another magic link",
-                    retryAfter: config.resendCooldown - elapsed,
-                  }),
-                );
-              }
-            }
-          }
-
-          // Invalidate outstanding tokens so only the latest link is usable.
-          yield* store.deleteByEmail(email);
-
-          const rawToken = yield* generateMagicLinkToken();
-          const magicLink: MagicLinkToken = {
-            // Store the hash — the raw token is delivered to the user via sendMagicLink.
-            token: hashToken(rawToken),
-            email,
-            createdAt: Date.now(),
-            expiresAt: Date.now() + expiresIn,
-          };
-
-          yield* store.create(magicLink);
-
-          yield* Effect.catch(config.sendMagicLink(email, rawToken), (error) =>
-            Effect.fail(
-              new Errors.MagicLinkError({
-                message: `Failed to send magic link to ${email}`,
-                cause: error,
-              }),
-            ),
-          );
-        }),
-
-      verify: (rawToken: string, options?: MagicLinkVerifyOptions) =>
-        Effect.gen(function* () {
-          const store = yield* MagicLinkStore;
-          const userStore = yield* MagicLinkUserStore;
-          const sessionManager = yield* SessionService;
-
-          if (!rawToken) {
-            return yield* Effect.fail(
-              new Errors.MagicLinkError({
-                message: "Invalid or expired magic link token",
-              }),
-            );
-          }
-
-          const tokenHash = hashToken(rawToken);
-          const magicLink = yield* store.get(tokenHash);
-          if (!magicLink) {
-            return yield* Effect.fail(
-              new Errors.MagicLinkError({
-                message: "Invalid or expired magic link token",
-              }),
-            );
-          }
-
-          // Check expiration
-          if (Date.now() > magicLink.expiresAt) {
-            yield* store.delete(tokenHash);
-            return yield* Effect.fail(
-              new Errors.MagicLinkError({
-                message: "Magic link token has expired",
-              }),
-            );
-          }
-
-          // Consume the token (one-time use)
-          yield* store.delete(tokenHash);
-
-          let user = yield* userStore.getUserByEmail(magicLink.email);
-          if (!user) {
-            if (disableSignUp) {
+        // Resend cooldown: reject if an outstanding token was created within
+        // the configured window. The identifier (email) is already known to
+        // the caller, so this is not an enumeration risk.
+        if (config.resendCooldown !== undefined) {
+          const existing = yield* store.getByEmail(email);
+          if (existing !== null) {
+            const elapsed = Date.now() - existing.createdAt;
+            if (elapsed < config.resendCooldown) {
               return yield* Effect.fail(
-                new Errors.MagicLinkError({
-                  message: "Sign-up is disabled",
+                new Errors.ResendTooSoonError({
+                  message: "Please wait before requesting another magic link",
+                  retryAfter: config.resendCooldown - elapsed,
                 }),
               );
             }
+          }
+        }
 
-            // A verified magic link proves ownership of the email.
-            user = yield* userStore.createUser({
-              email: magicLink.email,
-              emailVerified: true,
-            });
+        // Invalidate outstanding tokens so only the latest link is usable.
+        yield* store.deleteByEmail(email);
+
+        const rawToken = yield* generateMagicLinkToken();
+        const magicLink: MagicLinkToken = {
+          // Store the hash — the raw token is delivered to the user via sendMagicLink.
+          token: hashToken(rawToken),
+          email,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + expiresIn,
+        };
+
+        yield* store.create(magicLink);
+
+        yield* Effect.catch(config.sendMagicLink(email, rawToken), (error) =>
+          Effect.fail(
+            new Errors.MagicLinkError({
+              message: `Failed to send magic link to ${email}`,
+              cause: error,
+            }),
+          ),
+        );
+      }),
+
+    verify: (rawToken: string, options?: MagicLinkVerifyOptions) =>
+      Effect.gen(function* () {
+        const store = yield* MagicLinkStore;
+        const userStore = yield* MagicLinkUserStore;
+        const sessionManager = yield* SessionService;
+
+        if (!rawToken) {
+          return yield* Effect.fail(
+            new Errors.MagicLinkError({
+              message: "Invalid or expired magic link token",
+            }),
+          );
+        }
+
+        const tokenHash = hashToken(rawToken);
+        const magicLink = yield* store.get(tokenHash);
+        if (!magicLink) {
+          return yield* Effect.fail(
+            new Errors.MagicLinkError({
+              message: "Invalid or expired magic link token",
+            }),
+          );
+        }
+
+        // Check expiration
+        if (Date.now() > magicLink.expiresAt) {
+          yield* store.delete(tokenHash);
+          return yield* Effect.fail(
+            new Errors.MagicLinkError({
+              message: "Magic link token has expired",
+            }),
+          );
+        }
+
+        // Consume the token (one-time use)
+        yield* store.delete(tokenHash);
+
+        let user = yield* userStore.getUserByEmail(magicLink.email);
+        if (!user) {
+          if (disableSignUp) {
+            return yield* Effect.fail(
+              new Errors.MagicLinkError({
+                message: "Sign-up is disabled",
+              }),
+            );
           }
 
-          const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);
+          // A verified magic link proves ownership of the email.
+          user = yield* userStore.createUser({
+            email: magicLink.email,
+            emailVerified: true,
+          });
+        }
 
-          return {
-            user,
-            session,
-          } satisfies MagicLinkResult;
-        }),
-    }),
-  );
+        const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);
+
+        return {
+          user,
+          session,
+        } satisfies MagicLinkResult;
+      }),
+  }));
 };

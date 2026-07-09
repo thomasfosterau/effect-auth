@@ -405,158 +405,156 @@ export const makeAPIKeyService = (
       return yield* store.getByHash(hashAPIKey(plaintextKey));
     });
 
-  return Effect.sync(
-    (): typeof APIKeyService.Service => ({
-      create: (userId, options) =>
-        Effect.gen(function* () {
-          const store = yield* APIKeyStore;
+  return Effect.sync((): typeof APIKeyService.Service => ({
+    create: (userId, options) =>
+      Effect.gen(function* () {
+        const store = yield* APIKeyStore;
 
-          const existing = yield* store.listByUserId(userId);
-          if (existing.length >= maxKeysPerUser) {
-            return yield* Effect.fail(
-              new APIKeyError({
-                message: `User already has the maximum of ${maxKeysPerUser} API keys`,
-              }),
-            );
-          }
-
-          const prefix = options?.prefix ?? defaultPrefix;
-          const secret = crypto.randomBytes(keyLength).toString("base64url");
-          const key = `${prefix}${secret}`;
-
-          const now = Date.now();
-          const expiresIn = options?.expiresIn ?? defaultExpiresIn;
-
-          const hasRefill =
-            options?.refillAmount !== undefined && options?.refillInterval !== undefined;
-
-          const apiKey: APIKey = {
-            id: crypto.randomUUID(),
-            ...(options?.name !== undefined && { name: options.name }),
-            prefix,
-            start: secret.slice(0, 6),
-            keyHash: hashAPIKey(key),
-            userId,
-            enabled: true,
-            ...(expiresIn !== undefined && { expiresAt: now + expiresIn }),
-            ...(options?.permissions !== undefined && { permissions: options.permissions }),
-            metadata: options?.metadata ?? {},
-            ...(options?.remaining !== undefined && { remaining: options.remaining }),
-            ...(hasRefill && { refillAmount: options!.refillAmount }),
-            ...(hasRefill && { refillInterval: options!.refillInterval }),
-            ...(hasRefill && {
-              lastRefillAt: now,
-              ...(options?.remaining !== undefined && {
-                refillMax: options.refillMax ?? options.remaining,
-              }),
+        const existing = yield* store.listByUserId(userId);
+        if (existing.length >= maxKeysPerUser) {
+          return yield* Effect.fail(
+            new APIKeyError({
+              message: `User already has the maximum of ${maxKeysPerUser} API keys`,
             }),
-            ...(options?.rateLimit !== undefined && { rateLimit: options.rateLimit }),
-            createdAt: now,
-            updatedAt: now,
-          };
+          );
+        }
 
-          const created = yield* store.create(apiKey);
+        const prefix = options?.prefix ?? defaultPrefix;
+        const secret = crypto.randomBytes(keyLength).toString("base64url");
+        const key = `${prefix}${secret}`;
 
-          return { key, apiKey: created } satisfies APIKeyCreateResult;
-        }),
+        const now = Date.now();
+        const expiresIn = options?.expiresIn ?? defaultExpiresIn;
 
-      verify: (plaintextKey, requiredPermissions) =>
-        Effect.gen(function* () {
-          const apiKey = yield* lookup(plaintextKey);
-          if (!apiKey) {
-            return { valid: false, error: "Invalid API key" } satisfies APIKeyVerifyResult;
-          }
-          return yield* verifyRecord(apiKey, requiredPermissions);
-        }),
+        const hasRefill =
+          options?.refillAmount !== undefined && options?.refillInterval !== undefined;
 
-      verifyWithRateLimit: (plaintextKey, requiredPermissions) =>
-        Effect.gen(function* () {
-          const apiKey = yield* lookup(plaintextKey);
-          if (!apiKey) {
-            return { valid: false, error: "Invalid API key" } satisfies APIKeyVerifyResult;
-          }
+        const apiKey: APIKey = {
+          id: crypto.randomUUID(),
+          ...(options?.name !== undefined && { name: options.name }),
+          prefix,
+          start: secret.slice(0, 6),
+          keyHash: hashAPIKey(key),
+          userId,
+          enabled: true,
+          ...(expiresIn !== undefined && { expiresAt: now + expiresIn }),
+          ...(options?.permissions !== undefined && { permissions: options.permissions }),
+          metadata: options?.metadata ?? {},
+          ...(options?.remaining !== undefined && { remaining: options.remaining }),
+          ...(hasRefill && { refillAmount: options!.refillAmount }),
+          ...(hasRefill && { refillInterval: options!.refillInterval }),
+          ...(hasRefill && {
+            lastRefillAt: now,
+            ...(options?.remaining !== undefined && {
+              refillMax: options.refillMax ?? options.remaining,
+            }),
+          }),
+          ...(options?.rateLimit !== undefined && { rateLimit: options.rateLimit }),
+          createdAt: now,
+          updatedAt: now,
+        };
 
-          if (apiKey.rateLimit) {
-            const rateLimiter = yield* RateLimiter;
-            const limited = yield* rateLimiter
-              .consumeToken(`api-key:${apiKey.id}`, apiKey.rateLimit satisfies RateLimitConfig)
-              .pipe(
-                Effect.as(false),
-                Effect.catchTag("RateLimitError", () => Effect.succeed(true)),
-              );
-            if (limited) {
-              return { valid: false, error: "Rate limit exceeded" } satisfies APIKeyVerifyResult;
-            }
-          }
+        const created = yield* store.create(apiKey);
 
-          return yield* verifyRecord(apiKey, requiredPermissions);
-        }),
+        return { key, apiKey: created } satisfies APIKeyCreateResult;
+      }),
 
-      get: (keyId) =>
-        Effect.gen(function* () {
-          const store = yield* APIKeyStore;
-          const apiKey = yield* store.get(keyId);
-          if (!apiKey) {
-            return yield* Effect.fail(
-              new APIKeyError({
-                message: "API key not found",
-              }),
+    verify: (plaintextKey, requiredPermissions) =>
+      Effect.gen(function* () {
+        const apiKey = yield* lookup(plaintextKey);
+        if (!apiKey) {
+          return { valid: false, error: "Invalid API key" } satisfies APIKeyVerifyResult;
+        }
+        return yield* verifyRecord(apiKey, requiredPermissions);
+      }),
+
+    verifyWithRateLimit: (plaintextKey, requiredPermissions) =>
+      Effect.gen(function* () {
+        const apiKey = yield* lookup(plaintextKey);
+        if (!apiKey) {
+          return { valid: false, error: "Invalid API key" } satisfies APIKeyVerifyResult;
+        }
+
+        if (apiKey.rateLimit) {
+          const rateLimiter = yield* RateLimiter;
+          const limited = yield* rateLimiter
+            .consumeToken(`api-key:${apiKey.id}`, apiKey.rateLimit satisfies RateLimitConfig)
+            .pipe(
+              Effect.as(false),
+              Effect.catchTag("RateLimitError", () => Effect.succeed(true)),
             );
+          if (limited) {
+            return { valid: false, error: "Rate limit exceeded" } satisfies APIKeyVerifyResult;
           }
-          return apiKey;
-        }),
+        }
 
-      list: (userId) =>
-        Effect.gen(function* () {
-          const store = yield* APIKeyStore;
-          return yield* store.listByUserId(userId);
-        }),
+        return yield* verifyRecord(apiKey, requiredPermissions);
+      }),
 
-      update: (userId, keyId, updates) =>
-        Effect.gen(function* () {
-          const apiKey = yield* getOwned(userId, keyId);
-          const store = yield* APIKeyStore;
+    get: (keyId) =>
+      Effect.gen(function* () {
+        const store = yield* APIKeyStore;
+        const apiKey = yield* store.get(keyId);
+        if (!apiKey) {
+          return yield* Effect.fail(
+            new APIKeyError({
+              message: "API key not found",
+            }),
+          );
+        }
+        return apiKey;
+      }),
 
-          return yield* store.update({
-            ...apiKey,
-            ...(updates.name !== undefined && { name: updates.name }),
-            ...(updates.enabled !== undefined && { enabled: updates.enabled }),
-            ...(updates.expiresAt !== undefined && { expiresAt: updates.expiresAt }),
-            ...(updates.permissions !== undefined && { permissions: updates.permissions }),
-            ...(updates.metadata !== undefined && { metadata: updates.metadata }),
-            ...(updates.remaining !== undefined && { remaining: updates.remaining }),
-            ...(updates.refillAmount !== undefined && { refillAmount: updates.refillAmount }),
-            ...(updates.refillInterval !== undefined && { refillInterval: updates.refillInterval }),
-            ...(updates.refillMax !== undefined && { refillMax: updates.refillMax }),
-            ...(updates.lastRefillAt !== undefined && { lastRefillAt: updates.lastRefillAt }),
-            ...(updates.rateLimit !== undefined && { rateLimit: updates.rateLimit }),
-            updatedAt: Date.now(),
-          });
-        }),
+    list: (userId) =>
+      Effect.gen(function* () {
+        const store = yield* APIKeyStore;
+        return yield* store.listByUserId(userId);
+      }),
 
-      delete: (userId, keyId) =>
-        Effect.gen(function* () {
-          const apiKey = yield* getOwned(userId, keyId);
-          const store = yield* APIKeyStore;
-          yield* store.delete(apiKey.id);
-        }),
+    update: (userId, keyId, updates) =>
+      Effect.gen(function* () {
+        const apiKey = yield* getOwned(userId, keyId);
+        const store = yield* APIKeyStore;
 
-      deleteAllExpired: (userId) =>
-        Effect.gen(function* () {
-          const store = yield* APIKeyStore;
-          const now = Date.now();
+        return yield* store.update({
+          ...apiKey,
+          ...(updates.name !== undefined && { name: updates.name }),
+          ...(updates.enabled !== undefined && { enabled: updates.enabled }),
+          ...(updates.expiresAt !== undefined && { expiresAt: updates.expiresAt }),
+          ...(updates.permissions !== undefined && { permissions: updates.permissions }),
+          ...(updates.metadata !== undefined && { metadata: updates.metadata }),
+          ...(updates.remaining !== undefined && { remaining: updates.remaining }),
+          ...(updates.refillAmount !== undefined && { refillAmount: updates.refillAmount }),
+          ...(updates.refillInterval !== undefined && { refillInterval: updates.refillInterval }),
+          ...(updates.refillMax !== undefined && { refillMax: updates.refillMax }),
+          ...(updates.lastRefillAt !== undefined && { lastRefillAt: updates.lastRefillAt }),
+          ...(updates.rateLimit !== undefined && { rateLimit: updates.rateLimit }),
+          updatedAt: Date.now(),
+        });
+      }),
 
-          const candidates = yield* store.listByUserId(userId);
+    delete: (userId, keyId) =>
+      Effect.gen(function* () {
+        const apiKey = yield* getOwned(userId, keyId);
+        const store = yield* APIKeyStore;
+        yield* store.delete(apiKey.id);
+      }),
 
-          let deleted = 0;
-          for (const apiKey of candidates) {
-            if (apiKey.expiresAt !== undefined && now > apiKey.expiresAt) {
-              yield* store.delete(apiKey.id);
-              deleted += 1;
-            }
+    deleteAllExpired: (userId) =>
+      Effect.gen(function* () {
+        const store = yield* APIKeyStore;
+        const now = Date.now();
+
+        const candidates = yield* store.listByUserId(userId);
+
+        let deleted = 0;
+        for (const apiKey of candidates) {
+          if (apiKey.expiresAt !== undefined && now > apiKey.expiresAt) {
+            yield* store.delete(apiKey.id);
+            deleted += 1;
           }
-          return deleted;
-        }),
-    }),
-  );
+        }
+        return deleted;
+      }),
+  }));
 };

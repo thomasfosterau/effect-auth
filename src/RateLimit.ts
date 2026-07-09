@@ -87,140 +87,138 @@ export class RateLimiter extends Context.Service<
  * Create a rate limiter service
  */
 export const makeRateLimiter = (): Effect.Effect<typeof RateLimiter.Service, never> =>
-  Effect.sync(
-    (): typeof RateLimiter.Service => ({
-      checkLimit: (key, config) =>
-        Effect.gen(function* () {
-          const store = yield* RateLimitStore;
-          const entry = yield* store.get(key);
+  Effect.sync((): typeof RateLimiter.Service => ({
+    checkLimit: (key, config) =>
+      Effect.gen(function* () {
+        const store = yield* RateLimitStore;
+        const entry = yield* store.get(key);
 
-          const now = Date.now();
+        const now = Date.now();
 
-          // Check if blocked
-          if (entry?.blockedUntil && now < entry.blockedUntil) {
-            return yield* Effect.fail(
-              new RateLimitError({
-                message: `Rate limit exceeded for ${key}`,
-                key,
-                retryAfter: Math.ceil((entry.blockedUntil - now) / 1000),
-              }),
-            );
-          }
-
-          // Check if window expired
-          if (!entry || now >= entry.resetAt) {
-            // Window expired or no entry, allow request
-            return true;
-          }
-
-          // Check if limit exceeded
-          if (entry.count >= config.maxRequests) {
-            // Block if configured
-            if (config.blockDurationMs) {
-              const blockedEntry: RateLimitEntry = {
-                ...entry,
-                blockedUntil: now + config.blockDurationMs,
-              };
-              yield* store.set(key, blockedEntry, Math.ceil(config.blockDurationMs / 1000));
-            }
-
-            return yield* Effect.fail(
-              new RateLimitError({
-                message: `Rate limit exceeded for ${key}`,
-                key,
-                retryAfter: Math.ceil((entry.resetAt - now) / 1000),
-              }),
-            );
-          }
-
-          return true;
-        }).pipe(
-          Effect.tapError((e) =>
-            e._tag === "RateLimitError"
-              ? Obs.recordRateLimitHit(key.split(":")[0] ?? key)
-              : Effect.void,
-          ),
-        ),
-
-      consumeToken: (key, config) =>
-        Effect.gen(function* () {
-          const store = yield* RateLimitStore;
-          const now = Date.now();
-
-          const entry = yield* store.get(key);
-
-          // Check if window expired or no entry
-          if (!entry || now >= entry.resetAt) {
-            // Start new window
-            const newEntry: RateLimitEntry = {
+        // Check if blocked
+        if (entry?.blockedUntil && now < entry.blockedUntil) {
+          return yield* Effect.fail(
+            new RateLimitError({
+              message: `Rate limit exceeded for ${key}`,
               key,
-              count: 1,
-              resetAt: now + config.windowMs,
+              retryAfter: Math.ceil((entry.blockedUntil - now) / 1000),
+            }),
+          );
+        }
+
+        // Check if window expired
+        if (!entry || now >= entry.resetAt) {
+          // Window expired or no entry, allow request
+          return true;
+        }
+
+        // Check if limit exceeded
+        if (entry.count >= config.maxRequests) {
+          // Block if configured
+          if (config.blockDurationMs) {
+            const blockedEntry: RateLimitEntry = {
+              ...entry,
+              blockedUntil: now + config.blockDurationMs,
             };
-            yield* store.set(key, newEntry, Math.ceil(config.windowMs / 1000));
-            return;
+            yield* store.set(key, blockedEntry, Math.ceil(config.blockDurationMs / 1000));
           }
 
-          // Check if blocked
-          if (entry.blockedUntil && now < entry.blockedUntil) {
-            return yield* Effect.fail(
-              new RateLimitError({
-                message: `Rate limit exceeded for ${key}`,
-                key,
-                retryAfter: Math.ceil((entry.blockedUntil - now) / 1000),
-              }),
-            );
-          }
+          return yield* Effect.fail(
+            new RateLimitError({
+              message: `Rate limit exceeded for ${key}`,
+              key,
+              retryAfter: Math.ceil((entry.resetAt - now) / 1000),
+            }),
+          );
+        }
 
-          // Increment counter
-          if (entry.count >= config.maxRequests) {
-            // Apply block if configured
-            if (config.blockDurationMs) {
-              const blockedEntry: RateLimitEntry = {
-                ...entry,
-                blockedUntil: now + config.blockDurationMs,
-              };
-              yield* store.set(key, blockedEntry, Math.ceil(config.blockDurationMs / 1000));
-            }
-
-            return yield* Effect.fail(
-              new RateLimitError({
-                message: `Rate limit exceeded for ${key}`,
-                key,
-                retryAfter: Math.ceil((entry.resetAt - now) / 1000),
-              }),
-            );
-          }
-
-          // Increment
-          yield* store.increment(key, Math.ceil(config.windowMs / 1000));
-        }).pipe(
-          Effect.tapError((e) =>
-            e._tag === "RateLimitError"
-              ? Obs.recordRateLimitHit(key.split(":")[0] ?? key)
-              : Effect.void,
-          ),
+        return true;
+      }).pipe(
+        Effect.tapError((e) =>
+          e._tag === "RateLimitError"
+            ? Obs.recordRateLimitHit(key.split(":")[0] ?? key)
+            : Effect.void,
         ),
+      ),
 
-      resetLimit: (key) =>
-        Effect.gen(function* () {
-          const store = yield* RateLimitStore;
-          yield* store.delete(key);
-        }),
+    consumeToken: (key, config) =>
+      Effect.gen(function* () {
+        const store = yield* RateLimitStore;
+        const now = Date.now();
 
-      getRemainingTokens: (key, config) =>
-        Effect.gen(function* () {
-          const store = yield* RateLimitStore;
-          const entry = yield* store.get(key);
+        const entry = yield* store.get(key);
 
-          if (!entry || Date.now() >= entry.resetAt) {
-            return config.maxRequests;
+        // Check if window expired or no entry
+        if (!entry || now >= entry.resetAt) {
+          // Start new window
+          const newEntry: RateLimitEntry = {
+            key,
+            count: 1,
+            resetAt: now + config.windowMs,
+          };
+          yield* store.set(key, newEntry, Math.ceil(config.windowMs / 1000));
+          return;
+        }
+
+        // Check if blocked
+        if (entry.blockedUntil && now < entry.blockedUntil) {
+          return yield* Effect.fail(
+            new RateLimitError({
+              message: `Rate limit exceeded for ${key}`,
+              key,
+              retryAfter: Math.ceil((entry.blockedUntil - now) / 1000),
+            }),
+          );
+        }
+
+        // Increment counter
+        if (entry.count >= config.maxRequests) {
+          // Apply block if configured
+          if (config.blockDurationMs) {
+            const blockedEntry: RateLimitEntry = {
+              ...entry,
+              blockedUntil: now + config.blockDurationMs,
+            };
+            yield* store.set(key, blockedEntry, Math.ceil(config.blockDurationMs / 1000));
           }
 
-          return Math.max(0, config.maxRequests - entry.count);
-        }),
-    }),
-  );
+          return yield* Effect.fail(
+            new RateLimitError({
+              message: `Rate limit exceeded for ${key}`,
+              key,
+              retryAfter: Math.ceil((entry.resetAt - now) / 1000),
+            }),
+          );
+        }
+
+        // Increment
+        yield* store.increment(key, Math.ceil(config.windowMs / 1000));
+      }).pipe(
+        Effect.tapError((e) =>
+          e._tag === "RateLimitError"
+            ? Obs.recordRateLimitHit(key.split(":")[0] ?? key)
+            : Effect.void,
+        ),
+      ),
+
+    resetLimit: (key) =>
+      Effect.gen(function* () {
+        const store = yield* RateLimitStore;
+        yield* store.delete(key);
+      }),
+
+    getRemainingTokens: (key, config) =>
+      Effect.gen(function* () {
+        const store = yield* RateLimitStore;
+        const entry = yield* store.get(key);
+
+        if (!entry || Date.now() >= entry.resetAt) {
+          return config.maxRequests;
+        }
+
+        return Math.max(0, config.maxRequests - entry.count);
+      }),
+  }));
 
 /**
  * Common rate limit configurations

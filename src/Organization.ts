@@ -512,307 +512,297 @@ export const makeOrganizationService = (
       return invitation;
     });
 
-  return Effect.sync(
-    (): typeof OrganizationService.Service => ({
-      createOrganization: (userId, input) =>
-        Effect.gen(function* () {
-          if (!allowUserToCreateOrganization) {
-            return yield* Effect.fail(
-              new OrganizationError({
-                message: "Users are not allowed to create organizations",
-              }),
-            );
-          }
+  return Effect.sync((): typeof OrganizationService.Service => ({
+    createOrganization: (userId, input) =>
+      Effect.gen(function* () {
+        if (!allowUserToCreateOrganization) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "Users are not allowed to create organizations",
+            }),
+          );
+        }
 
-          const store = yield* OrganizationStore;
+        const store = yield* OrganizationStore;
 
-          const memberships = yield* store.listMembersByUser(userId);
-          if (memberships.length >= organizationLimit) {
-            return yield* Effect.fail(
-              new OrganizationError({
-                message: `You have reached the maximum of ${organizationLimit} organizations`,
-              }),
-            );
-          }
+        const memberships = yield* store.listMembersByUser(userId);
+        if (memberships.length >= organizationLimit) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: `You have reached the maximum of ${organizationLimit} organizations`,
+            }),
+          );
+        }
 
-          const existing = yield* store.getOrganizationBySlug(input.slug);
+        const existing = yield* store.getOrganizationBySlug(input.slug);
+        if (existing) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: `An organization with slug '${input.slug}' already exists`,
+            }),
+          );
+        }
+
+        const organization: Organization = {
+          id: generateId(),
+          name: input.name,
+          slug: input.slug,
+          ...(input.logo !== undefined && { logo: input.logo }),
+          metadata: input.metadata ?? {},
+          createdAt: Date.now(),
+        };
+
+        const created = yield* store.createOrganization(organization);
+        yield* createMembership(created.id, userId, creatorRole);
+        return created;
+      }),
+
+    updateOrganization: (userId, organizationId, updates) =>
+      Effect.gen(function* () {
+        yield* requireMemberPermission(userId, organizationId, "organization:update");
+
+        const store = yield* OrganizationStore;
+        const organization = yield* getOrganizationOrFail(organizationId);
+
+        if (updates.slug !== undefined && updates.slug !== organization.slug) {
+          const existing = yield* store.getOrganizationBySlug(updates.slug);
           if (existing) {
             return yield* Effect.fail(
               new OrganizationError({
-                message: `An organization with slug '${input.slug}' already exists`,
+                message: `An organization with slug '${updates.slug}' already exists`,
               }),
             );
           }
+        }
 
-          const organization: Organization = {
-            id: generateId(),
-            name: input.name,
-            slug: input.slug,
-            ...(input.logo !== undefined && { logo: input.logo }),
-            metadata: input.metadata ?? {},
-            createdAt: Date.now(),
-          };
+        const updated: Organization = {
+          ...organization,
+          ...(updates.name !== undefined && { name: updates.name }),
+          ...(updates.slug !== undefined && { slug: updates.slug }),
+          ...(updates.logo !== undefined && { logo: updates.logo }),
+          ...(updates.metadata !== undefined && { metadata: updates.metadata }),
+        };
 
-          const created = yield* store.createOrganization(organization);
-          yield* createMembership(created.id, userId, creatorRole);
-          return created;
-        }),
+        return yield* store.updateOrganization(updated);
+      }),
 
-      updateOrganization: (userId, organizationId, updates) =>
-        Effect.gen(function* () {
-          yield* requireMemberPermission(userId, organizationId, "organization:update");
+    deleteOrganization: (userId, organizationId) =>
+      Effect.gen(function* () {
+        yield* requireMemberPermission(userId, organizationId, "organization:delete");
+        yield* getOrganizationOrFail(organizationId);
 
-          const store = yield* OrganizationStore;
-          const organization = yield* getOrganizationOrFail(organizationId);
+        const store = yield* OrganizationStore;
+        yield* store.deleteOrganization(organizationId);
+      }),
 
-          if (updates.slug !== undefined && updates.slug !== organization.slug) {
-            const existing = yield* store.getOrganizationBySlug(updates.slug);
-            if (existing) {
-              return yield* Effect.fail(
-                new OrganizationError({
-                  message: `An organization with slug '${updates.slug}' already exists`,
-                }),
-              );
-            }
+    getFullOrganization: (organizationId) =>
+      Effect.gen(function* () {
+        const store = yield* OrganizationStore;
+        const organization = yield* getOrganizationOrFail(organizationId);
+        const members = yield* store.listMembersByOrganization(organizationId);
+        return { organization, members } satisfies FullOrganization;
+      }),
+
+    listOrganizations: (userId) =>
+      Effect.gen(function* () {
+        const store = yield* OrganizationStore;
+        const memberships = yield* store.listMembersByUser(userId);
+        const organizations = yield* Effect.forEach(memberships, (membership) =>
+          store.getOrganizationById(membership.organizationId),
+        );
+        return organizations.filter(
+          (organization): organization is Organization => organization !== null,
+        );
+      }),
+
+    inviteMember: (inviterId, organizationId, input) =>
+      Effect.gen(function* () {
+        yield* requireMemberPermission(inviterId, organizationId, "invitation:create");
+        const organization = yield* getOrganizationOrFail(organizationId);
+        yield* ensureMembershipCapacity(organizationId);
+
+        const store = yield* OrganizationStore;
+        const email = normalizeEmail(input.email);
+
+        const existingInvitations = yield* store.listInvitationsByEmail(email);
+        const now = Date.now();
+        const duplicate = existingInvitations.find(
+          (invitation) =>
+            invitation.organizationId === organizationId &&
+            invitation.status === "pending" &&
+            invitation.expiresAt > now,
+        );
+        if (duplicate) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "A pending invitation already exists for this email",
+            }),
+          );
+        }
+
+        const invitation: Invitation = {
+          id: generateId(),
+          organizationId,
+          email,
+          role: input.role,
+          status: "pending",
+          inviterId,
+          expiresAt: now + invitationExpiresIn,
+          createdAt: now,
+        };
+
+        const created = yield* store.createInvitation(invitation);
+
+        if (config.sendInvitationEmail) {
+          yield* config.sendInvitationEmail(created, organization);
+        }
+
+        return created;
+      }),
+
+    acceptInvitation: (userId, invitationId, userEmail) =>
+      Effect.gen(function* () {
+        const store = yield* OrganizationStore;
+        const invitation = yield* getPendingInvitationFor(invitationId, userEmail);
+
+        const existingMember = yield* store.getMember(invitation.organizationId, userId);
+        if (existingMember) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "You are already a member of this organization",
+            }),
+          );
+        }
+
+        yield* ensureMembershipCapacity(invitation.organizationId);
+
+        const member = yield* createMembership(invitation.organizationId, userId, invitation.role);
+        yield* store.updateInvitation({ ...invitation, status: "accepted" });
+        return member;
+      }),
+
+    rejectInvitation: (invitationId, userEmail) =>
+      Effect.gen(function* () {
+        const store = yield* OrganizationStore;
+        const invitation = yield* getPendingInvitationFor(invitationId, userEmail);
+        return yield* store.updateInvitation({ ...invitation, status: "rejected" });
+      }),
+
+    cancelInvitation: (cancelerId, invitationId) =>
+      Effect.gen(function* () {
+        const store = yield* OrganizationStore;
+
+        const invitation = yield* store.getInvitation(invitationId);
+        if (!invitation) {
+          return yield* Effect.fail(new OrganizationError({ message: "Invitation not found" }));
+        }
+        if (invitation.status !== "pending") {
+          return yield* Effect.fail(
+            new OrganizationError({ message: "Invitation is no longer pending" }),
+          );
+        }
+
+        yield* requireMemberPermission(cancelerId, invitation.organizationId, "invitation:cancel");
+
+        return yield* store.updateInvitation({ ...invitation, status: "canceled" });
+      }),
+
+    listInvitations: (organizationId) =>
+      Effect.gen(function* () {
+        const store = yield* OrganizationStore;
+        return yield* store.listInvitationsByOrganization(organizationId);
+      }),
+
+    listUserInvitations: (email) =>
+      Effect.gen(function* () {
+        const store = yield* OrganizationStore;
+        const invitations = yield* store.listInvitationsByEmail(email);
+        const now = Date.now();
+        return invitations.filter(
+          (invitation) => invitation.status === "pending" && invitation.expiresAt > now,
+        );
+      }),
+
+    addMember: (actorId, organizationId, userId, role) =>
+      Effect.gen(function* () {
+        yield* requireMemberPermission(actorId, organizationId, "member:create");
+        yield* getOrganizationOrFail(organizationId);
+
+        const store = yield* OrganizationStore;
+        const existing = yield* store.getMember(organizationId, userId);
+        if (existing) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "User is already a member of this organization",
+            }),
+          );
+        }
+
+        yield* ensureMembershipCapacity(organizationId);
+        return yield* createMembership(organizationId, userId, role);
+      }),
+
+    removeMember: (actorId, organizationId, memberUserId) =>
+      Effect.gen(function* () {
+        const actor = yield* requireMemberPermission(actorId, organizationId, "member:delete");
+
+        const store = yield* OrganizationStore;
+        const target = yield* store.getMember(organizationId, memberUserId);
+        if (!target) {
+          return yield* Effect.fail(new OrganizationError({ message: "Member not found" }));
+        }
+
+        if (target.role === creatorRole) {
+          if (actor.role !== creatorRole) {
+            return yield* Effect.fail(
+              new OrganizationError({ message: "Only an owner can remove another owner" }),
+            );
           }
-
-          const updated: Organization = {
-            ...organization,
-            ...(updates.name !== undefined && { name: updates.name }),
-            ...(updates.slug !== undefined && { slug: updates.slug }),
-            ...(updates.logo !== undefined && { logo: updates.logo }),
-            ...(updates.metadata !== undefined && { metadata: updates.metadata }),
-          };
-
-          return yield* store.updateOrganization(updated);
-        }),
-
-      deleteOrganization: (userId, organizationId) =>
-        Effect.gen(function* () {
-          yield* requireMemberPermission(userId, organizationId, "organization:delete");
-          yield* getOrganizationOrFail(organizationId);
-
-          const store = yield* OrganizationStore;
-          yield* store.deleteOrganization(organizationId);
-        }),
-
-      getFullOrganization: (organizationId) =>
-        Effect.gen(function* () {
-          const store = yield* OrganizationStore;
-          const organization = yield* getOrganizationOrFail(organizationId);
-          const members = yield* store.listMembersByOrganization(organizationId);
-          return { organization, members } satisfies FullOrganization;
-        }),
-
-      listOrganizations: (userId) =>
-        Effect.gen(function* () {
-          const store = yield* OrganizationStore;
-          const memberships = yield* store.listMembersByUser(userId);
-          const organizations = yield* Effect.forEach(memberships, (membership) =>
-            store.getOrganizationById(membership.organizationId),
-          );
-          return organizations.filter(
-            (organization): organization is Organization => organization !== null,
-          );
-        }),
-
-      inviteMember: (inviterId, organizationId, input) =>
-        Effect.gen(function* () {
-          yield* requireMemberPermission(inviterId, organizationId, "invitation:create");
-          const organization = yield* getOrganizationOrFail(organizationId);
-          yield* ensureMembershipCapacity(organizationId);
-
-          const store = yield* OrganizationStore;
-          const email = normalizeEmail(input.email);
-
-          const existingInvitations = yield* store.listInvitationsByEmail(email);
-          const now = Date.now();
-          const duplicate = existingInvitations.find(
-            (invitation) =>
-              invitation.organizationId === organizationId &&
-              invitation.status === "pending" &&
-              invitation.expiresAt > now,
-          );
-          if (duplicate) {
+          const owners = yield* countOwners(organizationId);
+          if (owners <= 1) {
             return yield* Effect.fail(
               new OrganizationError({
-                message: "A pending invitation already exists for this email",
+                message: "The last owner of an organization cannot be removed",
               }),
             );
           }
+        }
 
-          const invitation: Invitation = {
-            id: generateId(),
-            organizationId,
-            email,
-            role: input.role,
-            status: "pending",
-            inviterId,
-            expiresAt: now + invitationExpiresIn,
-            createdAt: now,
-          };
+        yield* store.deleteMember(target.id);
+      }),
 
-          const created = yield* store.createInvitation(invitation);
+    updateMemberRole: (actorId, organizationId, memberUserId, role) =>
+      Effect.gen(function* () {
+        yield* requireMemberPermission(actorId, organizationId, "member:update");
 
-          if (config.sendInvitationEmail) {
-            yield* config.sendInvitationEmail(created, organization);
-          }
+        const store = yield* OrganizationStore;
+        const target = yield* store.getMember(organizationId, memberUserId);
+        if (!target) {
+          return yield* Effect.fail(new OrganizationError({ message: "Member not found" }));
+        }
 
-          return created;
-        }),
-
-      acceptInvitation: (userId, invitationId, userEmail) =>
-        Effect.gen(function* () {
-          const store = yield* OrganizationStore;
-          const invitation = yield* getPendingInvitationFor(invitationId, userEmail);
-
-          const existingMember = yield* store.getMember(invitation.organizationId, userId);
-          if (existingMember) {
+        if (target.role === creatorRole && role !== creatorRole) {
+          const owners = yield* countOwners(organizationId);
+          if (owners <= 1) {
             return yield* Effect.fail(
               new OrganizationError({
-                message: "You are already a member of this organization",
+                message: "The last owner of an organization cannot be demoted",
               }),
             );
           }
+        }
 
-          yield* ensureMembershipCapacity(invitation.organizationId);
+        return yield* store.updateMember({ ...target, role });
+      }),
 
-          const member = yield* createMembership(
-            invitation.organizationId,
-            userId,
-            invitation.role,
-          );
-          yield* store.updateInvitation({ ...invitation, status: "accepted" });
-          return member;
-        }),
+    checkPermission: (userId, organizationId, permission) =>
+      Effect.gen(function* () {
+        const store = yield* OrganizationStore;
+        const member = yield* store.getMember(organizationId, userId);
+        return member !== null && roleHasPermission(member.role, permission);
+      }),
 
-      rejectInvitation: (invitationId, userEmail) =>
-        Effect.gen(function* () {
-          const store = yield* OrganizationStore;
-          const invitation = yield* getPendingInvitationFor(invitationId, userEmail);
-          return yield* store.updateInvitation({ ...invitation, status: "rejected" });
-        }),
-
-      cancelInvitation: (cancelerId, invitationId) =>
-        Effect.gen(function* () {
-          const store = yield* OrganizationStore;
-
-          const invitation = yield* store.getInvitation(invitationId);
-          if (!invitation) {
-            return yield* Effect.fail(new OrganizationError({ message: "Invitation not found" }));
-          }
-          if (invitation.status !== "pending") {
-            return yield* Effect.fail(
-              new OrganizationError({ message: "Invitation is no longer pending" }),
-            );
-          }
-
-          yield* requireMemberPermission(
-            cancelerId,
-            invitation.organizationId,
-            "invitation:cancel",
-          );
-
-          return yield* store.updateInvitation({ ...invitation, status: "canceled" });
-        }),
-
-      listInvitations: (organizationId) =>
-        Effect.gen(function* () {
-          const store = yield* OrganizationStore;
-          return yield* store.listInvitationsByOrganization(organizationId);
-        }),
-
-      listUserInvitations: (email) =>
-        Effect.gen(function* () {
-          const store = yield* OrganizationStore;
-          const invitations = yield* store.listInvitationsByEmail(email);
-          const now = Date.now();
-          return invitations.filter(
-            (invitation) => invitation.status === "pending" && invitation.expiresAt > now,
-          );
-        }),
-
-      addMember: (actorId, organizationId, userId, role) =>
-        Effect.gen(function* () {
-          yield* requireMemberPermission(actorId, organizationId, "member:create");
-          yield* getOrganizationOrFail(organizationId);
-
-          const store = yield* OrganizationStore;
-          const existing = yield* store.getMember(organizationId, userId);
-          if (existing) {
-            return yield* Effect.fail(
-              new OrganizationError({
-                message: "User is already a member of this organization",
-              }),
-            );
-          }
-
-          yield* ensureMembershipCapacity(organizationId);
-          return yield* createMembership(organizationId, userId, role);
-        }),
-
-      removeMember: (actorId, organizationId, memberUserId) =>
-        Effect.gen(function* () {
-          const actor = yield* requireMemberPermission(actorId, organizationId, "member:delete");
-
-          const store = yield* OrganizationStore;
-          const target = yield* store.getMember(organizationId, memberUserId);
-          if (!target) {
-            return yield* Effect.fail(new OrganizationError({ message: "Member not found" }));
-          }
-
-          if (target.role === creatorRole) {
-            if (actor.role !== creatorRole) {
-              return yield* Effect.fail(
-                new OrganizationError({ message: "Only an owner can remove another owner" }),
-              );
-            }
-            const owners = yield* countOwners(organizationId);
-            if (owners <= 1) {
-              return yield* Effect.fail(
-                new OrganizationError({
-                  message: "The last owner of an organization cannot be removed",
-                }),
-              );
-            }
-          }
-
-          yield* store.deleteMember(target.id);
-        }),
-
-      updateMemberRole: (actorId, organizationId, memberUserId, role) =>
-        Effect.gen(function* () {
-          yield* requireMemberPermission(actorId, organizationId, "member:update");
-
-          const store = yield* OrganizationStore;
-          const target = yield* store.getMember(organizationId, memberUserId);
-          if (!target) {
-            return yield* Effect.fail(new OrganizationError({ message: "Member not found" }));
-          }
-
-          if (target.role === creatorRole && role !== creatorRole) {
-            const owners = yield* countOwners(organizationId);
-            if (owners <= 1) {
-              return yield* Effect.fail(
-                new OrganizationError({
-                  message: "The last owner of an organization cannot be demoted",
-                }),
-              );
-            }
-          }
-
-          return yield* store.updateMember({ ...target, role });
-        }),
-
-      checkPermission: (userId, organizationId, permission) =>
-        Effect.gen(function* () {
-          const store = yield* OrganizationStore;
-          const member = yield* store.getMember(organizationId, userId);
-          return member !== null && roleHasPermission(member.role, permission);
-        }),
-
-      requirePermission: (userId, organizationId, permission) =>
-        requireMemberPermission(userId, organizationId, permission).pipe(Effect.asVoid),
-    }),
-  );
+    requirePermission: (userId, organizationId, permission) =>
+      requireMemberPermission(userId, organizationId, permission).pipe(Effect.asVoid),
+  }));
 };

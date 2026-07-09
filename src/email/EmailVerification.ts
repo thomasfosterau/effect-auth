@@ -191,91 +191,89 @@ export const makeEmailVerificationService = (
       };
     });
 
-  return Effect.sync(
-    (): typeof EmailVerificationService.Service => ({
-      createVerification,
+  return Effect.sync((): typeof EmailVerificationService.Service => ({
+    createVerification,
 
-      verifyToken: (rawToken: string) =>
-        Effect.gen(function* () {
-          const hooks = yield* Hooks;
-          // Hook receives the raw token from the URL; hash after any hook transform.
-          const { token } = yield* hooks.beforeVerifyEmail({ token: rawToken });
+    verifyToken: (rawToken: string) =>
+      Effect.gen(function* () {
+        const hooks = yield* Hooks;
+        // Hook receives the raw token from the URL; hash after any hook transform.
+        const { token } = yield* hooks.beforeVerifyEmail({ token: rawToken });
 
-          const store = yield* EmailVerificationStore;
-          const tokenHash = hashToken(token);
+        const store = yield* EmailVerificationStore;
+        const tokenHash = hashToken(token);
 
-          const verification = yield* store.get(tokenHash);
+        const verification = yield* store.get(tokenHash);
 
-          if (!verification) {
-            return yield* Effect.fail(
-              new EmailVerificationError({
-                message: "Invalid or expired verification token",
-              }),
-            );
-          }
+        if (!verification) {
+          return yield* Effect.fail(
+            new EmailVerificationError({
+              message: "Invalid or expired verification token",
+            }),
+          );
+        }
 
-          // Check expiration
-          if (Date.now() > verification.expiresAt) {
-            yield* store.delete(tokenHash);
-            return yield* Effect.fail(
-              new EmailVerificationError({
-                message: "Verification token has expired",
-              }),
-            );
-          }
-
-          // Delete token after successful verification (one-time use)
+        // Check expiration
+        if (Date.now() > verification.expiresAt) {
           yield* store.delete(tokenHash);
+          return yield* Effect.fail(
+            new EmailVerificationError({
+              message: "Verification token has expired",
+            }),
+          );
+        }
 
-          const result = {
-            userId: verification.userId,
-            email: verification.email,
-            verified: true,
-          } satisfies EmailVerificationResult;
+        // Delete token after successful verification (one-time use)
+        yield* store.delete(tokenHash);
 
-          return yield* hooks.afterVerifyEmail(result);
-        }),
+        const result = {
+          userId: verification.userId,
+          email: verification.email,
+          verified: true,
+        } satisfies EmailVerificationResult;
 
-      peekToken: (rawToken: string) =>
-        Effect.gen(function* () {
-          const hooks = yield* Hooks;
-          const { token } = yield* hooks.beforeVerifyEmail({ token: rawToken });
-          const store = yield* EmailVerificationStore;
-          const tokenHash = hashToken(token);
-          const verification = yield* store.get(tokenHash);
-          if (!verification) {
-            return yield* Effect.fail(
-              new EmailVerificationError({
-                message: "Invalid or expired verification token",
-              }),
-            );
-          }
-          if (Date.now() > verification.expiresAt) {
-            yield* store.delete(tokenHash);
-            return yield* Effect.fail(
-              new EmailVerificationError({
-                message: "Verification token has expired",
-              }),
-            );
-          }
-          return verification;
-        }),
+        return yield* hooks.afterVerifyEmail(result);
+      }),
 
-      burnToken: (token: string, result: EmailVerificationResult) =>
-        Effect.gen(function* () {
-          const store = yield* EmailVerificationStore;
-          yield* store.delete(token);
-          const hooks = yield* Hooks;
-          return yield* hooks.afterVerifyEmail(result);
-        }),
+    peekToken: (rawToken: string) =>
+      Effect.gen(function* () {
+        const hooks = yield* Hooks;
+        const { token } = yield* hooks.beforeVerifyEmail({ token: rawToken });
+        const store = yield* EmailVerificationStore;
+        const tokenHash = hashToken(token);
+        const verification = yield* store.get(tokenHash);
+        if (!verification) {
+          return yield* Effect.fail(
+            new EmailVerificationError({
+              message: "Invalid or expired verification token",
+            }),
+          );
+        }
+        if (Date.now() > verification.expiresAt) {
+          yield* store.delete(tokenHash);
+          return yield* Effect.fail(
+            new EmailVerificationError({
+              message: "Verification token has expired",
+            }),
+          );
+        }
+        return verification;
+      }),
 
-      resendVerification: (userId: string, email: string) =>
-        Effect.gen(function* () {
-          const store = yield* EmailVerificationStore;
-          // Invalidate outstanding tokens so only the latest one is usable.
-          yield* store.deleteByUserId(userId);
-          return yield* createVerification(userId, email);
-        }),
-    }),
-  );
+    burnToken: (token: string, result: EmailVerificationResult) =>
+      Effect.gen(function* () {
+        const store = yield* EmailVerificationStore;
+        yield* store.delete(token);
+        const hooks = yield* Hooks;
+        return yield* hooks.afterVerifyEmail(result);
+      }),
+
+    resendVerification: (userId: string, email: string) =>
+      Effect.gen(function* () {
+        const store = yield* EmailVerificationStore;
+        // Invalidate outstanding tokens so only the latest one is usable.
+        yield* store.deleteByUserId(userId);
+        return yield* createVerification(userId, email);
+      }),
+  }));
 };

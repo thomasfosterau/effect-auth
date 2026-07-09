@@ -93,9 +93,7 @@ export interface AdminCreateUserInput {
 export class AdminUserStore extends Context.Service<
   AdminUserStore,
   {
-    readonly listUsers: (
-      query: ListUsersQuery,
-    ) => Effect.Effect<ListUsersResult, Errors.AuthError>;
+    readonly listUsers: (query: ListUsersQuery) => Effect.Effect<ListUsersResult, Errors.AuthError>;
 
     /** Create a new user record. The store is responsible for assigning `id` and timestamps. */
     readonly createUser: (input: {
@@ -302,11 +300,7 @@ export class AdminService extends Context.Service<
     readonly listUserSessions: (
       actor: Types.User,
       userId: string,
-    ) => Effect.Effect<
-      ReadonlyArray<Types.Session>,
-      AdminError | Errors.AuthError,
-      SessionService
-    >;
+    ) => Effect.Effect<ReadonlyArray<Types.Session>, AdminError | Errors.AuthError, SessionService>;
   }
 >()("@effect-auth/AdminService") {
   /**
@@ -331,221 +325,217 @@ export const makeAdminService = (
       ? Effect.void
       : Effect.fail(new AdminError({ message: "Forbidden: administrator privileges required" }));
 
-  return Effect.sync(
-    (): typeof AdminService.Service => ({
-      listUsers: (actor, query = {}) =>
-        Effect.gen(function* () {
-          yield* requireAdmin(actor);
-          const store = yield* AdminUserStore;
-          return yield* store.listUsers(query);
-        }),
+  return Effect.sync((): typeof AdminService.Service => ({
+    listUsers: (actor, query = {}) =>
+      Effect.gen(function* () {
+        yield* requireAdmin(actor);
+        const store = yield* AdminUserStore;
+        return yield* store.listUsers(query);
+      }),
 
-      setRole: (actor, userId, role) =>
-        Effect.gen(function* () {
-          yield* requireAdmin(actor);
+    setRole: (actor, userId, role) =>
+      Effect.gen(function* () {
+        yield* requireAdmin(actor);
 
-          const userStore = yield* UserServiceStore;
-          const user = yield* userStore.get(userId);
-          if (user === null) {
-            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+        const userStore = yield* UserServiceStore;
+        const user = yield* userStore.get(userId);
+        if (user === null) {
+          return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+        }
+
+        return yield* userStore.update({
+          ...user,
+          updatedAt: new Date(),
+          attributes: { ...user.attributes, role },
+        });
+      }),
+
+    banUser: (actor, userId, options = {}) =>
+      Effect.gen(function* () {
+        yield* requireAdmin(actor);
+
+        if (userId === actor.id) {
+          return yield* Effect.fail(new AdminError({ message: "You cannot ban yourself" }));
+        }
+
+        const userStore = yield* UserServiceStore;
+        const user = yield* userStore.get(userId);
+        if (user === null) {
+          return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+        }
+
+        if (isAdmin(user, config)) {
+          return yield* Effect.fail(new AdminError({ message: "Administrators cannot be banned" }));
+        }
+
+        const expiresIn = options.expiresIn ?? config.defaultBanExpiresIn;
+
+        // Rebuild ban attributes from scratch so a stale `banExpires` from a
+        // previous (temporary) ban cannot leak into a new permanent ban.
+        const attributes: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(user.attributes)) {
+          if (key !== "banned" && key !== "banReason" && key !== "banExpires") {
+            attributes[key] = value;
           }
+        }
+        attributes["banned"] = true;
+        attributes["banReason"] = options.reason ?? defaultBanReason;
+        if (expiresIn !== undefined) {
+          attributes["banExpires"] = Date.now() + expiresIn;
+        }
 
-          return yield* userStore.update({
-            ...user,
-            updatedAt: new Date(),
-            attributes: { ...user.attributes, role },
-          });
-        }),
+        const banned = yield* userStore.update({
+          ...user,
+          updatedAt: new Date(),
+          attributes,
+        });
 
-      banUser: (actor, userId, options = {}) =>
-        Effect.gen(function* () {
-          yield* requireAdmin(actor);
+        const sessionManager = yield* SessionService;
+        yield* sessionManager.invalidateUserSessions(userId);
 
-          if (userId === actor.id) {
-            return yield* Effect.fail(new AdminError({ message: "You cannot ban yourself" }));
+        return banned;
+      }),
+
+    unbanUser: (actor, userId) =>
+      Effect.gen(function* () {
+        yield* requireAdmin(actor);
+
+        const userStore = yield* UserServiceStore;
+        const user = yield* userStore.get(userId);
+        if (user === null) {
+          return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+        }
+
+        const attributes: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(user.attributes)) {
+          if (key !== "banned" && key !== "banReason" && key !== "banExpires") {
+            attributes[key] = value;
           }
+        }
+        attributes["banned"] = false;
 
-          const userStore = yield* UserServiceStore;
-          const user = yield* userStore.get(userId);
-          if (user === null) {
-            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+        return yield* userStore.update({
+          ...user,
+          updatedAt: new Date(),
+          attributes,
+        });
+      }),
+
+    removeUser: (actor, userId) =>
+      Effect.gen(function* () {
+        yield* requireAdmin(actor);
+
+        if (userId === actor.id) {
+          return yield* Effect.fail(new AdminError({ message: "You cannot remove yourself" }));
+        }
+
+        const userStore = yield* UserServiceStore;
+        const sessionManager = yield* SessionService;
+
+        yield* sessionManager.invalidateUserSessions(userId);
+        yield* userStore.delete(userId);
+      }),
+
+    revokeUserSessions: (actor, userId) =>
+      Effect.gen(function* () {
+        yield* requireAdmin(actor);
+        const sessionManager = yield* SessionService;
+        yield* sessionManager.invalidateUserSessions(userId);
+      }),
+
+    impersonateUser: (actor, userId) =>
+      Effect.gen(function* () {
+        yield* requireAdmin(actor);
+
+        const userStore = yield* UserServiceStore;
+        const target = yield* userStore.get(userId);
+        if (target === null) {
+          return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+        }
+
+        const sessionManager = yield* SessionService;
+        return yield* sessionManager.createSession(target.id, {
+          impersonatedBy: actor.id,
+          impersonationExpiresAt: Date.now() + impersonationSessionDuration,
+        });
+      }),
+
+    createUser: (actor, input) =>
+      Effect.gen(function* () {
+        yield* requireAdmin(actor);
+
+        const adminStore = yield* AdminUserStore;
+
+        const attributes: Record<string, unknown> = { ...input.attributes };
+        if (input.role !== undefined) {
+          attributes["role"] = input.role;
+        }
+
+        const createInput: {
+          email: string;
+          name?: string;
+          image?: string;
+          attributes?: Record<string, unknown>;
+        } = { email: input.email, attributes };
+        if (input.name !== undefined) createInput.name = input.name;
+        if (input.image !== undefined) createInput.image = input.image;
+
+        const user = yield* adminStore.createUser(createInput);
+
+        if (input.identifiers && input.identifiers.length > 0) {
+          const identifierStore = yield* IdentifierStore;
+          const now = new Date();
+          for (const ident of input.identifiers) {
+            yield* identifierStore.create({
+              id: crypto.randomUUID(),
+              userId: user.id,
+              type: ident.type,
+              value: ident.value,
+              verified: ident.verified ?? false,
+              verifiedAt: ident.verified ? now : undefined,
+              createdAt: now,
+            });
           }
+        }
 
-          if (isAdmin(user, config)) {
-            return yield* Effect.fail(
-              new AdminError({ message: "Administrators cannot be banned" }),
-            );
-          }
-
-          const expiresIn = options.expiresIn ?? config.defaultBanExpiresIn;
-
-          // Rebuild ban attributes from scratch so a stale `banExpires` from a
-          // previous (temporary) ban cannot leak into a new permanent ban.
-          const attributes: Record<string, unknown> = {};
-          for (const [key, value] of Object.entries(user.attributes)) {
-            if (key !== "banned" && key !== "banReason" && key !== "banExpires") {
-              attributes[key] = value;
-            }
-          }
-          attributes["banned"] = true;
-          attributes["banReason"] = options.reason ?? defaultBanReason;
-          if (expiresIn !== undefined) {
-            attributes["banExpires"] = Date.now() + expiresIn;
-          }
-
-          const banned = yield* userStore.update({
-            ...user,
-            updatedAt: new Date(),
-            attributes,
-          });
-
-          const sessionManager = yield* SessionService;
-          yield* sessionManager.invalidateUserSessions(userId);
-
-          return banned;
-        }),
-
-      unbanUser: (actor, userId) =>
-        Effect.gen(function* () {
-          yield* requireAdmin(actor);
-
-          const userStore = yield* UserServiceStore;
-          const user = yield* userStore.get(userId);
-          if (user === null) {
-            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
-          }
-
-          const attributes: Record<string, unknown> = {};
-          for (const [key, value] of Object.entries(user.attributes)) {
-            if (key !== "banned" && key !== "banReason" && key !== "banExpires") {
-              attributes[key] = value;
-            }
-          }
-          attributes["banned"] = false;
-
-          return yield* userStore.update({
-            ...user,
-            updatedAt: new Date(),
-            attributes,
-          });
-        }),
-
-      removeUser: (actor, userId) =>
-        Effect.gen(function* () {
-          yield* requireAdmin(actor);
-
-          if (userId === actor.id) {
-            return yield* Effect.fail(new AdminError({ message: "You cannot remove yourself" }));
-          }
-
-          const userStore = yield* UserServiceStore;
-          const sessionManager = yield* SessionService;
-
-          yield* sessionManager.invalidateUserSessions(userId);
-          yield* userStore.delete(userId);
-        }),
-
-      revokeUserSessions: (actor, userId) =>
-        Effect.gen(function* () {
-          yield* requireAdmin(actor);
-          const sessionManager = yield* SessionService;
-          yield* sessionManager.invalidateUserSessions(userId);
-        }),
-
-      impersonateUser: (actor, userId) =>
-        Effect.gen(function* () {
-          yield* requireAdmin(actor);
-
-          const userStore = yield* UserServiceStore;
-          const target = yield* userStore.get(userId);
-          if (target === null) {
-            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
-          }
-
-          const sessionManager = yield* SessionService;
-          return yield* sessionManager.createSession(target.id, {
-            impersonatedBy: actor.id,
-            impersonationExpiresAt: Date.now() + impersonationSessionDuration,
-          });
-        }),
-
-      createUser: (actor, input) =>
-        Effect.gen(function* () {
-          yield* requireAdmin(actor);
-
-          const adminStore = yield* AdminUserStore;
-
-          const attributes: Record<string, unknown> = { ...input.attributes };
-          if (input.role !== undefined) {
-            attributes["role"] = input.role;
-          }
-
-          const createInput: {
-            email: string;
-            name?: string;
-            image?: string;
-            attributes?: Record<string, unknown>;
-          } = { email: input.email, attributes };
-          if (input.name !== undefined) createInput.name = input.name;
-          if (input.image !== undefined) createInput.image = input.image;
-
-          const user = yield* adminStore.createUser(createInput);
-
-          if (input.identifiers && input.identifiers.length > 0) {
-            const identifierStore = yield* IdentifierStore;
-            const now = new Date();
-            for (const ident of input.identifiers) {
-              yield* identifierStore.create({
-                id: crypto.randomUUID(),
-                userId: user.id,
-                type: ident.type,
-                value: ident.value,
-                verified: ident.verified ?? false,
-                verifiedAt: ident.verified ? now : undefined,
-                createdAt: now,
-              });
-            }
-          }
-
-          if (input.password !== undefined) {
-            const hasher = yield* PasswordHasher;
-            const hashed = yield* hasher.hash(input.password);
-            yield* adminStore.setPasswordHash(user.id, hashed.hash);
-          }
-
-          return user;
-        }),
-
-      setUserPassword: (actor, userId, newPassword, options = {}) =>
-        Effect.gen(function* () {
-          yield* requireAdmin(actor);
-
-          const userStore = yield* UserServiceStore;
-          const user = yield* userStore.get(userId);
-          if (user === null) {
-            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
-          }
-
+        if (input.password !== undefined) {
           const hasher = yield* PasswordHasher;
-          const hashed = yield* hasher.hash(newPassword);
+          const hashed = yield* hasher.hash(input.password);
+          yield* adminStore.setPasswordHash(user.id, hashed.hash);
+        }
 
-          const adminStore = yield* AdminUserStore;
-          yield* adminStore.setPasswordHash(userId, hashed.hash);
+        return user;
+      }),
 
-          if (options.revokeOtherSessions) {
-            const sessionManager = yield* SessionService;
-            yield* sessionManager.invalidateUserSessions(userId);
-          }
-        }),
+    setUserPassword: (actor, userId, newPassword, options = {}) =>
+      Effect.gen(function* () {
+        yield* requireAdmin(actor);
 
-      listUserSessions: (actor, userId) =>
-        Effect.gen(function* () {
-          yield* requireAdmin(actor);
+        const userStore = yield* UserServiceStore;
+        const user = yield* userStore.get(userId);
+        if (user === null) {
+          return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+        }
+
+        const hasher = yield* PasswordHasher;
+        const hashed = yield* hasher.hash(newPassword);
+
+        const adminStore = yield* AdminUserStore;
+        yield* adminStore.setPasswordHash(userId, hashed.hash);
+
+        if (options.revokeOtherSessions) {
           const sessionManager = yield* SessionService;
-          return yield* sessionManager.listSessions(userId);
-        }),
-    }),
-  );
+          yield* sessionManager.invalidateUserSessions(userId);
+        }
+      }),
+
+    listUserSessions: (actor, userId) =>
+      Effect.gen(function* () {
+        yield* requireAdmin(actor);
+        const sessionManager = yield* SessionService;
+        return yield* sessionManager.listSessions(userId);
+      }),
+  }));
 };
 
 /**

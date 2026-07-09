@@ -45,26 +45,14 @@ import { KeyValueStore } from "effect/unstable/persistence";
 import * as Errors from "./Errors.ts";
 import { type EmailOTPPurpose, type EmailOTPRecord, EmailOTPStore } from "./email/EmailOTP.ts";
 import { type Identifier, IdentifierStore, type IdentifierType } from "./Identifier.ts";
-import {
-  type EmailVerification,
-  EmailVerificationStore,
-} from "./email/EmailVerification.ts";
+import { type EmailVerification, EmailVerificationStore } from "./email/EmailVerification.ts";
 import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
 import { type OAuthState, OAuthStateStore } from "./oauth/OAuth.ts";
-import {
-  PasswordResetStore,
-  type PasswordResetToken,
-} from "./password/PasswordReset.ts";
+import { PasswordResetStore, type PasswordResetToken } from "./password/PasswordReset.ts";
 import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
-import {
-  type PendingTwoFactor,
-  PendingTwoFactorStore,
-} from "./TwoFactor.ts";
+import { type PendingTwoFactor, PendingTwoFactorStore } from "./TwoFactor.ts";
 import { ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.ts";
-import {
-  type GoogleOneTapNonceEntry,
-  GoogleOneTapNonceStore,
-} from "./GoogleOneTap.ts";
+import { type GoogleOneTapNonceEntry, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 
 // ---------------------------------------------------------------------------
 // Codecs & helpers

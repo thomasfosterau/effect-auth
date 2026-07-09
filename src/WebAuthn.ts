@@ -208,9 +208,7 @@ export class CredentialStore extends Context.Service<
   CredentialStore,
   {
     /** Store a credential */
-    create: (
-      credential: WebAuthnCredential,
-    ) => Effect.Effect<WebAuthnCredential, Errors.AuthError>;
+    create: (credential: WebAuthnCredential) => Effect.Effect<WebAuthnCredential, Errors.AuthError>;
     /** Get a credential by ID, or `null` when no such credential exists. */
     get: (credentialId: string) => Effect.Effect<WebAuthnCredential | null, Errors.AuthError>;
     /** Resolve a credential by its raw credential ID (base64url-encoded); used on the discoverable/usernameless login path. */
@@ -218,9 +216,7 @@ export class CredentialStore extends Context.Service<
       credentialId: string,
     ) => Effect.Effect<WebAuthnCredential | null, Errors.AuthError>;
     /** Update a credential (e.g., counter) */
-    update: (
-      credential: WebAuthnCredential,
-    ) => Effect.Effect<WebAuthnCredential, Errors.AuthError>;
+    update: (credential: WebAuthnCredential) => Effect.Effect<WebAuthnCredential, Errors.AuthError>;
     /** Delete a credential */
     delete: (credentialId: string) => Effect.Effect<void, Errors.AuthError>;
     /** List all credentials for a user */

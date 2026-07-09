@@ -220,65 +220,63 @@ export const makeTrustedDeviceService = (
 ): Effect.Effect<typeof TrustedDeviceService.Service, never> => {
   const maxAge = config.maxAge ?? 30 * 24 * 60 * 60 * 1000;
 
-  return Effect.sync(
-    (): typeof TrustedDeviceService.Service => ({
-      issue: (userId) =>
-        Effect.gen(function* () {
-          const store = yield* TrustedDeviceStore;
-          const rawToken = crypto.randomBytes(32).toString("base64url");
-          const hmac = computeHmac(config.secret, rawToken);
-          const tokenHash = hashToken(rawToken);
-          const now = Date.now();
-          const record: TrustedDeviceRecord = {
-            tokenHash,
-            userId,
-            createdAt: now,
-            expiresAt: now + maxAge,
-          };
-          yield* store.upsert(record);
-          return {
-            cookieValue: `${rawToken}${COOKIE_SEPARATOR}${hmac}`,
-            expiresAt: record.expiresAt,
-          };
-        }),
+  return Effect.sync((): typeof TrustedDeviceService.Service => ({
+    issue: (userId) =>
+      Effect.gen(function* () {
+        const store = yield* TrustedDeviceStore;
+        const rawToken = crypto.randomBytes(32).toString("base64url");
+        const hmac = computeHmac(config.secret, rawToken);
+        const tokenHash = hashToken(rawToken);
+        const now = Date.now();
+        const record: TrustedDeviceRecord = {
+          tokenHash,
+          userId,
+          createdAt: now,
+          expiresAt: now + maxAge,
+        };
+        yield* store.upsert(record);
+        return {
+          cookieValue: `${rawToken}${COOKIE_SEPARATOR}${hmac}`,
+          expiresAt: record.expiresAt,
+        };
+      }),
 
-      verify: (cookieValue) =>
-        Effect.gen(function* () {
-          const parsed = parseCookie(cookieValue);
-          if (!parsed) return null;
+    verify: (cookieValue) =>
+      Effect.gen(function* () {
+        const parsed = parseCookie(cookieValue);
+        if (!parsed) return null;
 
-          // Verify HMAC before touching the DB (forgery protection)
-          const expectedHmac = computeHmac(config.secret, parsed.rawToken);
-          if (!timingSafeHexEqual(expectedHmac, parsed.hmac)) return null;
+        // Verify HMAC before touching the DB (forgery protection)
+        const expectedHmac = computeHmac(config.secret, parsed.rawToken);
+        if (!timingSafeHexEqual(expectedHmac, parsed.hmac)) return null;
 
-          const store = yield* TrustedDeviceStore;
-          const tokenHash = hashToken(parsed.rawToken);
-          const record = yield* store.getByTokenHash(tokenHash);
-          if (!record) return null;
+        const store = yield* TrustedDeviceStore;
+        const tokenHash = hashToken(parsed.rawToken);
+        const record = yield* store.getByTokenHash(tokenHash);
+        if (!record) return null;
 
-          if (Date.now() > record.expiresAt) {
-            yield* store.delete(tokenHash);
-            return null;
-          }
+        if (Date.now() > record.expiresAt) {
+          yield* store.delete(tokenHash);
+          return null;
+        }
 
-          return record.userId;
-        }),
+        return record.userId;
+      }),
 
-      revoke: (cookieValue) =>
-        Effect.gen(function* () {
-          const parsed = parseCookie(cookieValue);
-          if (!parsed) return;
-          const store = yield* TrustedDeviceStore;
-          yield* store.delete(hashToken(parsed.rawToken));
-        }),
+    revoke: (cookieValue) =>
+      Effect.gen(function* () {
+        const parsed = parseCookie(cookieValue);
+        if (!parsed) return;
+        const store = yield* TrustedDeviceStore;
+        yield* store.delete(hashToken(parsed.rawToken));
+      }),
 
-      revokeAll: (userId) =>
-        Effect.gen(function* () {
-          const store = yield* TrustedDeviceStore;
-          yield* store.deleteByUserId(userId);
-        }),
-    }),
-  );
+    revokeAll: (userId) =>
+      Effect.gen(function* () {
+        const store = yield* TrustedDeviceStore;
+        yield* store.deleteByUserId(userId);
+      }),
+  }));
 };
 
 // ---------------------------------------------------------------------------

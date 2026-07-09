@@ -58,7 +58,9 @@ const lookup = <V>(source: StringKeyed<V>, key: string): V | undefined =>
  * })
  * ```
  */
-export const makeInMemoryRoleStore = (config: InMemoryRoleStoreConfig): typeof RoleStore.Service => {
+export const makeInMemoryRoleStore = (
+  config: InMemoryRoleStoreConfig,
+): typeof RoleStore.Service => {
   const { userRoles, rolePermissions, roleHierarchy } = config;
 
   const directPermissions = (role: string): readonly PermissionRef[] =>

@@ -1,11 +1,6 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import {
-  UsernameService,
-  UsernameStore,
-  UsernameError,
-  type UsernameConfig,
-} from "./Username.js";
+import { UsernameService, UsernameStore, UsernameError, type UsernameConfig } from "./Username.js";
 import {
   EmailPasswordService,
   EmailPasswordStore,
