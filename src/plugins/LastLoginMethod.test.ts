@@ -3,13 +3,11 @@ import { Effect, Layer } from "effect";
 import { composePlugins, Hooks } from "../Hooks.js";
 import { makeLastLoginMethodPlugin } from "./LastLoginMethod.js";
 import { makeEmailPasswordService } from "../email/EmailPassword.js";
-import { EmailPasswordStore, type EmailPasswordStoreShape } from "../email/EmailPassword.js";
+import { EmailPasswordStore } from "../email/EmailPassword.js";
 import { PasswordHasher, makeScryptHasher } from "../password/Password.js";
 import { SessionService } from "../session/SessionService.js";
 import { SessionStore } from "../session/SessionStore.js";
 import { UserStore } from "../session/UserStore.js";
-import type { SessionStoreShape } from "../session/SessionStore.js";
-import type { UserStoreShape } from "../session/UserStore.js";
 import { hashToken } from "../TokenHash.js";
 import type * as Types from "../Types.js";
 
@@ -22,7 +20,7 @@ const makeFixture = () => {
   const sessions = new Map<string, Types.Session>();
   let userSeq = 0;
 
-  const emailPasswordStore: EmailPasswordStoreShape = {
+  const emailPasswordStore: typeof EmailPasswordStore.Service = {
     getUserByEmail: (email) =>
       Effect.sync(() => {
         const id = userIdByEmail.get(email);
@@ -46,7 +44,7 @@ const makeFixture = () => {
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
-  const sessionStore: SessionStoreShape = {
+  const sessionStore: typeof SessionStore.Service = {
     create: (s) => Effect.sync(() => (sessions.set(s.id, s), s)),
     get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
     update: (s) => Effect.sync(() => (sessions.set(s.id, s), s)),
@@ -54,7 +52,7 @@ const makeFixture = () => {
     deleteByUserId: () => Effect.void,
     listByUserId: () => Effect.succeed([]),
   };
-  const userStore: UserStoreShape = {
+  const userStore: typeof UserStore.Service = {
     get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
     getCredentials: (_userId) => Effect.succeed(null),
   };
