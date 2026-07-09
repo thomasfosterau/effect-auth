@@ -14,19 +14,20 @@ export interface CreateUserInput {
   readonly attributes?: Record<string, unknown>;
 }
 
-export interface EmailPasswordStoreShape {
-  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
-
-  readonly createUser: (input: CreateUserInput) => Effect.Effect<Types.User, Errors.AuthError>;
-
-  readonly getPasswordHash: (userId: string) => Effect.Effect<string | null, Errors.AuthError>;
-
-  readonly setPasswordHash: (userId: string, hash: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
 export class EmailPasswordStore extends Context.Service<
   EmailPasswordStore,
-  EmailPasswordStoreShape
+  {
+    readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
+
+    readonly createUser: (input: CreateUserInput) => Effect.Effect<Types.User, Errors.AuthError>;
+
+    readonly getPasswordHash: (userId: string) => Effect.Effect<string | null, Errors.AuthError>;
+
+    readonly setPasswordHash: (
+      userId: string,
+      hash: string,
+    ) => Effect.Effect<void, Errors.AuthError>;
+  }
 >()("@effect-auth/EmailPasswordStore") {}
 
 export interface EmailPasswordConfig {
@@ -79,14 +80,13 @@ export interface SecondFactorChallenge {
  * TwoFactor module) and `required` reports true, sign-in returns a
  * {@link SecondFactorChallenge} instead of a session.
  */
-export interface SecondFactorGateShape {
-  readonly required: (user: Types.User) => Effect.Effect<boolean, Errors.AuthError>;
-  readonly begin: (user: Types.User) => Effect.Effect<SecondFactorChallenge, Errors.AuthError>;
-}
-
-export class SecondFactorGate extends Context.Service<SecondFactorGate, SecondFactorGateShape>()(
-  "@effect-auth/SecondFactorGate",
-) {}
+export class SecondFactorGate extends Context.Service<
+  SecondFactorGate,
+  {
+    readonly required: (user: Types.User) => Effect.Effect<boolean, Errors.AuthError>;
+    readonly begin: (user: Types.User) => Effect.Effect<SecondFactorChallenge, Errors.AuthError>;
+  }
+>()("@effect-auth/SecondFactorGate") {}
 
 export interface AuthResult {
   readonly user: Types.User;
@@ -115,69 +115,67 @@ export interface ChangePasswordInput {
   readonly currentSessionId?: string;
 }
 
-export interface EmailPasswordServiceShape {
-  readonly signUp: (
-    input: SignUpInput,
-  ) => Effect.Effect<
-    AuthResult,
-    | Errors.AuthError
-    | Errors.EmailInUseError
-    | Errors.HashingError
-    | Errors.EmailNotVerifiedError
-    | Errors.PasswordPolicyError
-    | Errors.SignUpDisabledError
-    | Errors.InvalidInputError
-    | HookError,
-    EmailPasswordStore | PasswordHasher | SessionService | Hooks
-  >;
-
-  readonly signIn: (
-    input: SignInInput,
-  ) => Effect.Effect<
-    AuthResult,
-    | Errors.InvalidCredentialsError
-    | Errors.HashingError
-    | Errors.AuthError
-    | Errors.EmailNotVerifiedError
-    | HookError,
-    EmailPasswordStore | PasswordHasher | SessionService | Hooks
-  >;
-
-  /**
-   * Change the password of a user that already has one, verifying the current
-   * password first. Optionally revokes the user's other sessions.
-   */
-  readonly changePassword: (
-    input: ChangePasswordInput,
-  ) => Effect.Effect<
-    void,
-    | Errors.InvalidCredentialsError
-    | Errors.HashingError
-    | Errors.AuthError
-    | Errors.PasswordPolicyError,
-    EmailPasswordStore | PasswordHasher | SessionService
-  >;
-
-  /**
-   * Set a password for a user that does not have one yet (e.g. an account
-   * created via OAuth). Fails if a password is already set.
-   */
-  readonly setPassword: (
-    userId: string,
-    newPassword: string,
-  ) => Effect.Effect<
-    void,
-    | Errors.HashingError
-    | Errors.AuthError
-    | Errors.PasswordPolicyError
-    | Errors.PasswordAlreadySetError,
-    EmailPasswordStore | PasswordHasher
-  >;
-}
-
 export class EmailPasswordService extends Context.Service<
   EmailPasswordService,
-  EmailPasswordServiceShape
+  {
+    readonly signUp: (
+      input: SignUpInput,
+    ) => Effect.Effect<
+      AuthResult,
+      | Errors.AuthError
+      | Errors.EmailInUseError
+      | Errors.HashingError
+      | Errors.EmailNotVerifiedError
+      | Errors.PasswordPolicyError
+      | Errors.SignUpDisabledError
+      | Errors.InvalidInputError
+      | HookError,
+      EmailPasswordStore | PasswordHasher | SessionService | Hooks
+    >;
+
+    readonly signIn: (
+      input: SignInInput,
+    ) => Effect.Effect<
+      AuthResult,
+      | Errors.InvalidCredentialsError
+      | Errors.HashingError
+      | Errors.AuthError
+      | Errors.EmailNotVerifiedError
+      | HookError,
+      EmailPasswordStore | PasswordHasher | SessionService | Hooks
+    >;
+
+    /**
+     * Change the password of a user that already has one, verifying the current
+     * password first. Optionally revokes the user's other sessions.
+     */
+    readonly changePassword: (
+      input: ChangePasswordInput,
+    ) => Effect.Effect<
+      void,
+      | Errors.InvalidCredentialsError
+      | Errors.HashingError
+      | Errors.AuthError
+      | Errors.PasswordPolicyError,
+      EmailPasswordStore | PasswordHasher | SessionService
+    >;
+
+    /**
+     * Set a password for a user that does not have one yet (e.g. an account
+     * created via OAuth). Fails if a password is already set.
+     */
+    readonly setPassword: (
+      userId: string,
+      newPassword: string,
+    ) => Effect.Effect<
+      void,
+      | Errors.HashingError
+      | Errors.AuthError
+      | Errors.PasswordPolicyError
+      | Errors.PasswordAlreadySetError,
+      EmailPasswordStore | PasswordHasher
+    >;
+  }
 >()("@effect-auth/EmailPasswordService") {
   /**
    * Construct a Layer providing this service.
@@ -216,7 +214,7 @@ const validatePasswordLength = (
 
 export const makeEmailPasswordService = (
   config: EmailPasswordConfig = {},
-): Effect.Effect<EmailPasswordServiceShape, never> => {
+): Effect.Effect<typeof EmailPasswordService.Service, never> => {
   const resolved = {
     disableSignUp: config.disableSignUp ?? false,
     requireEmailVerification: config.requireEmailVerification ?? false,
@@ -239,7 +237,7 @@ export const makeEmailPasswordService = (
   );
 
   return Effect.sync(
-    (): EmailPasswordServiceShape => ({
+    (): typeof EmailPasswordService.Service => ({
       signUp: (rawInput) =>
         Effect.gen(function* () {
           const hooks = yield* Hooks;

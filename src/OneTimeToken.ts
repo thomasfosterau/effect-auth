@@ -41,22 +41,21 @@ export interface OneTimeTokenRecord {
 // Store shape + Context tag
 // ---------------------------------------------------------------------------
 
-export interface OneTimeTokenStoreShape {
-  readonly create: (
-    record: OneTimeTokenRecord,
-  ) => Effect.Effect<OneTimeTokenRecord, Errors.AuthError>;
-  readonly get: (token: string) => Effect.Effect<OneTimeTokenRecord | null, Errors.AuthError>;
-  readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
 /**
  * Bring-your-own store for one-time tokens.
  *
  * Provide via `Layer.succeed(OneTimeTokenStore)(impl)`.
  */
-export class OneTimeTokenStore extends Context.Service<OneTimeTokenStore, OneTimeTokenStoreShape>()(
-  "@effect-auth/OneTimeTokenStore",
-) {}
+export class OneTimeTokenStore extends Context.Service<
+  OneTimeTokenStore,
+  {
+    readonly create: (
+      record: OneTimeTokenRecord,
+    ) => Effect.Effect<OneTimeTokenRecord, Errors.AuthError>;
+    readonly get: (token: string) => Effect.Effect<OneTimeTokenRecord | null, Errors.AuthError>;
+    readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
+  }
+>()("@effect-auth/OneTimeTokenStore") {}
 
 // ---------------------------------------------------------------------------
 // Config
@@ -83,42 +82,40 @@ export interface OneTimeTokenVerifyResult {
   readonly metadata?: Record<string, unknown>;
 }
 
-export interface OneTimeTokenServiceShape {
-  /**
-   * Generate a cryptographically random single-use token for `subject`.
-   *
-   * Returns the raw (unhashed) token. Deliver it to the end user via email,
-   * SMS, URL, QR code, or any out-of-band channel — only its SHA-256 digest
-   * is persisted.
-   */
-  readonly generate: (
-    subject: string,
-    options?: OneTimeTokenGenerateOptions,
-  ) => Effect.Effect<string, Errors.AuthError, OneTimeTokenStore>;
-
-  /**
-   * Verify and consume a raw token. On success returns `{ subject, metadata }`.
-   *
-   * The token is deleted from the store on the first lookup (single-use
-   * guarantee). Anti-enumeration: invalid, already-used, and expired tokens
-   * all surface the same `OneTimeTokenError` with a generic message.
-   */
-  readonly verify: (
-    token: string,
-  ) => Effect.Effect<
-    OneTimeTokenVerifyResult,
-    Errors.OneTimeTokenError | Errors.AuthError,
-    OneTimeTokenStore
-  >;
-}
-
 // ---------------------------------------------------------------------------
 // Service class + Layer
 // ---------------------------------------------------------------------------
 
 export class OneTimeTokenService extends Context.Service<
   OneTimeTokenService,
-  OneTimeTokenServiceShape
+  {
+    /**
+     * Generate a cryptographically random single-use token for `subject`.
+     *
+     * Returns the raw (unhashed) token. Deliver it to the end user via email,
+     * SMS, URL, QR code, or any out-of-band channel — only its SHA-256 digest
+     * is persisted.
+     */
+    readonly generate: (
+      subject: string,
+      options?: OneTimeTokenGenerateOptions,
+    ) => Effect.Effect<string, Errors.AuthError, OneTimeTokenStore>;
+
+    /**
+     * Verify and consume a raw token. On success returns `{ subject, metadata }`.
+     *
+     * The token is deleted from the store on the first lookup (single-use
+     * guarantee). Anti-enumeration: invalid, already-used, and expired tokens
+     * all surface the same `OneTimeTokenError` with a generic message.
+     */
+    readonly verify: (
+      token: string,
+    ) => Effect.Effect<
+      OneTimeTokenVerifyResult,
+      Errors.OneTimeTokenError | Errors.AuthError,
+      OneTimeTokenStore
+    >;
+  }
 >()("@effect-auth/OneTimeTokenService") {
   /**
    * Construct a Layer providing this service.
@@ -135,11 +132,11 @@ export class OneTimeTokenService extends Context.Service<
 
 export const make = (
   config: OneTimeTokenConfig,
-): Effect.Effect<OneTimeTokenServiceShape, never> => {
+): Effect.Effect<typeof OneTimeTokenService.Service, never> => {
   const defaultExpiresIn = config.expiresIn ?? 15 * 60 * 1000;
 
   return Effect.sync(
-    (): OneTimeTokenServiceShape => ({
+    (): typeof OneTimeTokenService.Service => ({
       generate: (subject: string, options?: OneTimeTokenGenerateOptions) =>
         Effect.gen(function* () {
           const store = yield* OneTimeTokenStore;

@@ -57,21 +57,19 @@ export interface TrustedDeviceRecord {
  * Persistence interface for trusted-device tokens. Keyed by `tokenHash`
  * (SHA-256 of the raw token half of the cookie).
  */
-export interface TrustedDeviceStoreShape {
-  readonly upsert: (
-    record: TrustedDeviceRecord,
-  ) => Effect.Effect<TrustedDeviceRecord, Errors.AuthError>;
-  readonly getByTokenHash: (
-    tokenHash: string,
-  ) => Effect.Effect<TrustedDeviceRecord | null, Errors.AuthError>;
-  readonly delete: (tokenHash: string) => Effect.Effect<void, Errors.AuthError>;
-  /** Revoke every device token for a user (password change, 2FA disable, etc.). */
-  readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
 export class TrustedDeviceStore extends Context.Service<
   TrustedDeviceStore,
-  TrustedDeviceStoreShape
+  {
+    readonly upsert: (
+      record: TrustedDeviceRecord,
+    ) => Effect.Effect<TrustedDeviceRecord, Errors.AuthError>;
+    readonly getByTokenHash: (
+      tokenHash: string,
+    ) => Effect.Effect<TrustedDeviceRecord | null, Errors.AuthError>;
+    readonly delete: (tokenHash: string) => Effect.Effect<void, Errors.AuthError>;
+    /** Revoke every device token for a user (password change, 2FA disable, etc.). */
+    readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+  }
 >()("@effect-auth/TrustedDeviceStore") {}
 
 // ---------------------------------------------------------------------------
@@ -117,43 +115,43 @@ export interface TrustedDeviceIssueResult {
   readonly expiresAt: number;
 }
 
-export interface TrustedDeviceServiceShape {
-  /**
-   * Issue a new trusted-device token for a user. Returns the value to
-   * store in a `Set-Cookie` header (`HttpOnly; Secure; SameSite=Strict`
-   * recommended).
-   */
-  readonly issue: (
-    userId: string,
-  ) => Effect.Effect<TrustedDeviceIssueResult, Errors.AuthError, TrustedDeviceStore>;
-
-  /**
-   * Verify a device cookie value. Returns the associated `userId` if the
-   * token is valid (HMAC matches, not expired, not revoked), or `null`
-   * otherwise. Never throws on invalid tokens — returns `null` instead.
-   */
-  readonly verify: (
-    cookieValue: string,
-  ) => Effect.Effect<string | null, Errors.AuthError, TrustedDeviceStore>;
-
-  /**
-   * Revoke a single device token by its cookie value.
-   * Use when the user explicitly signs out on one device.
-   */
-  readonly revoke: (
-    cookieValue: string,
-  ) => Effect.Effect<void, Errors.AuthError, TrustedDeviceStore>;
-
-  /**
-   * Revoke all trusted-device tokens for a user.
-   * **Must** be called on: password change, 2FA disable, sign-out-everywhere.
-   */
-  readonly revokeAll: (userId: string) => Effect.Effect<void, Errors.AuthError, TrustedDeviceStore>;
-}
-
 export class TrustedDeviceService extends Context.Service<
   TrustedDeviceService,
-  TrustedDeviceServiceShape
+  {
+    /**
+     * Issue a new trusted-device token for a user. Returns the value to
+     * store in a `Set-Cookie` header (`HttpOnly; Secure; SameSite=Strict`
+     * recommended).
+     */
+    readonly issue: (
+      userId: string,
+    ) => Effect.Effect<TrustedDeviceIssueResult, Errors.AuthError, TrustedDeviceStore>;
+
+    /**
+     * Verify a device cookie value. Returns the associated `userId` if the
+     * token is valid (HMAC matches, not expired, not revoked), or `null`
+     * otherwise. Never throws on invalid tokens — returns `null` instead.
+     */
+    readonly verify: (
+      cookieValue: string,
+    ) => Effect.Effect<string | null, Errors.AuthError, TrustedDeviceStore>;
+
+    /**
+     * Revoke a single device token by its cookie value.
+     * Use when the user explicitly signs out on one device.
+     */
+    readonly revoke: (
+      cookieValue: string,
+    ) => Effect.Effect<void, Errors.AuthError, TrustedDeviceStore>;
+
+    /**
+     * Revoke all trusted-device tokens for a user.
+     * **Must** be called on: password change, 2FA disable, sign-out-everywhere.
+     */
+    readonly revokeAll: (
+      userId: string,
+    ) => Effect.Effect<void, Errors.AuthError, TrustedDeviceStore>;
+  }
 >()("@effect-auth/TrustedDeviceService") {
   static readonly layer = (config: TrustedDeviceConfig) =>
     Layer.effect(TrustedDeviceService, makeTrustedDeviceService(config));
@@ -219,11 +217,11 @@ const parseCookie = (cookieValue: string): { rawToken: string; hmac: string } | 
 
 export const makeTrustedDeviceService = (
   config: TrustedDeviceConfig,
-): Effect.Effect<TrustedDeviceServiceShape, never> => {
+): Effect.Effect<typeof TrustedDeviceService.Service, never> => {
   const maxAge = config.maxAge ?? 30 * 24 * 60 * 60 * 1000;
 
   return Effect.sync(
-    (): TrustedDeviceServiceShape => ({
+    (): typeof TrustedDeviceService.Service => ({
       issue: (userId) =>
         Effect.gen(function* () {
           const store = yield* TrustedDeviceStore;
@@ -297,7 +295,7 @@ export const makeTrustedDeviceService = (
  * All deps are pre-provided in closures so the returned shape has R = never.
  */
 export const makeTrustedDeviceGateShape = (
-  service: TrustedDeviceServiceShape,
+  service: typeof TrustedDeviceService.Service,
   stores: Context.Context<TrustedDeviceStore>,
   inner: SecondFactorGateShape,
 ): SecondFactorGateShape => ({

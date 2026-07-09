@@ -64,23 +64,21 @@ export interface OTPSecondFactorRecord {
   readonly expiresAt: number;
 }
 
-export interface OTPSecondFactorStoreShape {
-  readonly create: (
-    record: OTPSecondFactorRecord,
-  ) => Effect.Effect<OTPSecondFactorRecord, Errors.AuthError>;
-  readonly get: (
-    pendingToken: string,
-  ) => Effect.Effect<OTPSecondFactorRecord | null, Errors.AuthError>;
-  readonly update: (
-    record: OTPSecondFactorRecord,
-  ) => Effect.Effect<OTPSecondFactorRecord, Errors.AuthError>;
-  readonly delete: (pendingToken: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
 export class OTPSecondFactorStore extends Context.Service<
   OTPSecondFactorStore,
-  OTPSecondFactorStoreShape
->()("@effect-auth/OtpSecondFactorStore") {}
+  {
+    readonly create: (
+      record: OTPSecondFactorRecord,
+    ) => Effect.Effect<OTPSecondFactorRecord, Errors.AuthError>;
+    readonly get: (
+      pendingToken: string,
+    ) => Effect.Effect<OTPSecondFactorRecord | null, Errors.AuthError>;
+    readonly update: (
+      record: OTPSecondFactorRecord,
+    ) => Effect.Effect<OTPSecondFactorRecord, Errors.AuthError>;
+    readonly delete: (pendingToken: string) => Effect.Effect<void, Errors.AuthError>;
+  }
+>()("@effect-auth/OTPSecondFactorStore") {}
 
 // ---------------------------------------------------------------------------
 // Config + Service
@@ -111,39 +109,37 @@ export interface OTPSecondFactorVerifyResult {
   readonly session: Types.Session;
 }
 
-export interface OTPSecondFactorServiceShape {
-  /**
-   * Begin a second-factor OTP challenge. Generates an OTP, stores it
-   * (hashed), sends it via `sendOTP`, and returns a `SecondFactorChallenge`
-   * with the pending token for the client to submit alongside the OTP.
-   */
-  readonly begin: (
-    user: Types.User,
-  ) => Effect.Effect<
-    SecondFactorChallenge,
-    OTPSecondFactorError | Errors.AuthError,
-    OTPSecondFactorStore
-  >;
-
-  /**
-   * Verify the OTP for a pending challenge. On success: consumes the
-   * challenge (one-time use) and creates a session.
-   */
-  readonly verify: (
-    pendingToken: string,
-    otp: string,
-    options?: OTPSecondFactorVerifyOptions,
-  ) => Effect.Effect<
-    OTPSecondFactorVerifyResult,
-    OTPSecondFactorError | Errors.AuthError | HookError,
-    OTPSecondFactorStore | SessionService | Hooks
-  >;
-}
-
 export class OTPSecondFactorService extends Context.Service<
   OTPSecondFactorService,
-  OTPSecondFactorServiceShape
->()("@effect-auth/OtpSecondFactorService") {
+  {
+    /**
+     * Begin a second-factor OTP challenge. Generates an OTP, stores it
+     * (hashed), sends it via `sendOTP`, and returns a `SecondFactorChallenge`
+     * with the pending token for the client to submit alongside the OTP.
+     */
+    readonly begin: (
+      user: Types.User,
+    ) => Effect.Effect<
+      SecondFactorChallenge,
+      OTPSecondFactorError | Errors.AuthError,
+      OTPSecondFactorStore
+    >;
+
+    /**
+     * Verify the OTP for a pending challenge. On success: consumes the
+     * challenge (one-time use) and creates a session.
+     */
+    readonly verify: (
+      pendingToken: string,
+      otp: string,
+      options?: OTPSecondFactorVerifyOptions,
+    ) => Effect.Effect<
+      OTPSecondFactorVerifyResult,
+      OTPSecondFactorError | Errors.AuthError | HookError,
+      OTPSecondFactorStore | SessionService | Hooks
+    >;
+  }
+>()("@effect-auth/OTPSecondFactorService") {
   static readonly layer = (config: OTPSecondFactorConfig) =>
     Layer.effect(OTPSecondFactorService, makeOTPSecondFactorService(config));
 }
@@ -154,7 +150,7 @@ export class OTPSecondFactorService extends Context.Service<
 
 export const makeOTPSecondFactorService = (
   config: OTPSecondFactorConfig,
-): Effect.Effect<OTPSecondFactorServiceShape, never> => {
+): Effect.Effect<typeof OTPSecondFactorService.Service, never> => {
   const otpLength = config.otpLength ?? 6;
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000;
   const maxAttempts = config.maxAttempts ?? 3;
@@ -163,7 +159,7 @@ export const makeOTPSecondFactorService = (
     Effect.fail(new OTPSecondFactorError({ message: "Invalid or expired OTP" }));
 
   return Effect.sync(
-    (): OTPSecondFactorServiceShape => ({
+    (): typeof OTPSecondFactorService.Service => ({
       begin: (user: Types.User) =>
         Effect.gen(function* () {
           const store = yield* OTPSecondFactorStore;

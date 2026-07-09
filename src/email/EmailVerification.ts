@@ -27,16 +27,6 @@ export interface EmailVerificationResult {
 }
 
 /**
- * Storage interface for email verifications
- */
-export interface EmailVerificationStoreShape {
-  readonly create: (verification: EmailVerification) => Effect.Effect<EmailVerification, AuthError>;
-  readonly get: (token: string) => Effect.Effect<EmailVerification | null, AuthError>;
-  readonly delete: (token: string) => Effect.Effect<void, AuthError>;
-  readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
-}
-
-/**
  * Email verification service configuration
  */
 export interface EmailVerificationConfig {

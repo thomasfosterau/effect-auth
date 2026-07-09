@@ -29,18 +29,16 @@ export interface AccountLockoutRecord {
  * Implement over your database, or reuse an in-memory map for single-instance
  * deployments. Entries can safely expire after `lockoutDurationMs`.
  */
-export interface AccountLockoutStoreShape {
-  readonly get: (key: string) => Effect.Effect<AccountLockoutRecord | null, Errors.AuthError>;
-  readonly set: (
-    key: string,
-    record: AccountLockoutRecord,
-  ) => Effect.Effect<void, Errors.AuthError>;
-  readonly delete: (key: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
 export class AccountLockoutStore extends Context.Service<
   AccountLockoutStore,
-  AccountLockoutStoreShape
+  {
+    readonly get: (key: string) => Effect.Effect<AccountLockoutRecord | null, Errors.AuthError>;
+    readonly set: (
+      key: string,
+      record: AccountLockoutRecord,
+    ) => Effect.Effect<void, Errors.AuthError>;
+    readonly delete: (key: string) => Effect.Effect<void, Errors.AuthError>;
+  }
 >()("@effect-auth/AccountLockoutStore") {}
 
 export interface AccountLockoutConfig {

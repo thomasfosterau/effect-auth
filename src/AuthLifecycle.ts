@@ -44,64 +44,62 @@ export interface VerifyEmailInput {
   readonly sessionAttributes?: Record<string, unknown>;
 }
 
-export interface AuthLifecycleServiceShape {
-  readonly signUp: (
-    input: SignUpInput,
-  ) => Effect.Effect<
-    AuthLifecycleResult,
-    | Errors.AuthError
-    | Errors.EmailInUseError
-    | Errors.HashingError
-    | Errors.EmailVerificationError
-    | Errors.EmailNotVerifiedError
-    | Errors.PasswordPolicyError
-    | Errors.SignUpDisabledError
-    | Errors.InvalidInputError
-    | HookError,
-    | EmailPasswordService
-    | EmailPasswordStore
-    | PasswordHasher
-    | SessionService
-    | EmailVerificationService
-    | EmailVerificationStore
-    | Hooks
-  >;
-
-  readonly signIn: (
-    input: SignInInput,
-  ) => Effect.Effect<
-    AuthLifecycleResult,
-    | Errors.AuthError
-    | Errors.HashingError
-    | Errors.InvalidCredentialsError
-    | Errors.EmailVerificationError
-    | HookError,
-    | EmailPasswordService
-    | EmailPasswordStore
-    | PasswordHasher
-    | SessionService
-    | EmailVerificationService
-    | EmailVerificationStore
-    | Hooks
-  >;
-
-  readonly verifyEmail: (
-    input: VerifyEmailInput,
-  ) => Effect.Effect<
-    AuthLifecycleResult,
-    Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError | HookError,
-    | UserService
-    | UserServiceStore
-    | SessionService
-    | EmailVerificationService
-    | EmailVerificationStore
-    | Hooks
-  >;
-}
-
 export class AuthLifecycleService extends Context.Service<
   AuthLifecycleService,
-  AuthLifecycleServiceShape
+  {
+    readonly signUp: (
+      input: SignUpInput,
+    ) => Effect.Effect<
+      AuthLifecycleResult,
+      | Errors.AuthError
+      | Errors.EmailInUseError
+      | Errors.HashingError
+      | Errors.EmailVerificationError
+      | Errors.EmailNotVerifiedError
+      | Errors.PasswordPolicyError
+      | Errors.SignUpDisabledError
+      | Errors.InvalidInputError
+      | HookError,
+      | EmailPasswordService
+      | EmailPasswordStore
+      | PasswordHasher
+      | SessionService
+      | EmailVerificationService
+      | EmailVerificationStore
+      | Hooks
+    >;
+
+    readonly signIn: (
+      input: SignInInput,
+    ) => Effect.Effect<
+      AuthLifecycleResult,
+      | Errors.AuthError
+      | Errors.HashingError
+      | Errors.InvalidCredentialsError
+      | Errors.EmailVerificationError
+      | HookError,
+      | EmailPasswordService
+      | EmailPasswordStore
+      | PasswordHasher
+      | SessionService
+      | EmailVerificationService
+      | EmailVerificationStore
+      | Hooks
+    >;
+
+    readonly verifyEmail: (
+      input: VerifyEmailInput,
+    ) => Effect.Effect<
+      AuthLifecycleResult,
+      Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError | HookError,
+      | UserService
+      | UserServiceStore
+      | SessionService
+      | EmailVerificationService
+      | EmailVerificationStore
+      | Hooks
+    >;
+  }
 >()("@effect-auth/AuthLifecycleService") {
   /**
    * Construct a Layer providing this service.
@@ -117,14 +115,14 @@ const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
 
 export const makeAuthLifecycleService = (
   config: AuthLifecycleConfig = {},
-): Effect.Effect<AuthLifecycleServiceShape, never> => {
+): Effect.Effect<typeof AuthLifecycleService.Service, never> => {
   const requireEmailVerification = config.requireEmailVerification ?? false;
   const sendOnSignUp = config.sendOnSignUp ?? requireEmailVerification;
   const sendOnSignIn = config.sendOnSignIn ?? false;
   const autoSignInAfterVerification = config.autoSignInAfterVerification ?? true;
 
   return Effect.sync(
-    (): AuthLifecycleServiceShape => ({
+    (): typeof AuthLifecycleService.Service => ({
       signUp: (input) =>
         Effect.gen(function* () {
           // FIX 1: consume the app-configured EmailPasswordService from context

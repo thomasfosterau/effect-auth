@@ -172,7 +172,7 @@ export class OIDCConsentStore extends Context.Service<
 // Service types
 // -----------------------------------------------------------------------------
 
-/** Input to {@link OIDCProviderServiceShape.registerClient}. */
+/** Input to {@link OIDCProviderService.registerClient}. */
 export interface RegisterOIDCClientInput {
   readonly name: string;
   readonly redirectUris: readonly string[];
@@ -190,7 +190,7 @@ export interface RegisteredOIDCClient {
   readonly clientSecret?: string;
 }
 
-/** Fields updatable via {@link OIDCProviderServiceShape.updateClient}. */
+/** Fields updatable via {@link OIDCProviderService.updateClient}. */
 export interface UpdateOIDCClientInput {
   readonly name?: string;
   readonly redirectUris?: readonly string[];
@@ -462,7 +462,7 @@ const isAllowedRedirectUri = (uri: string): boolean => {
 
 export const makeOIDCProviderService = (
   config: OIDCProviderConfig,
-): Effect.Effect<OIDCProviderServiceShape, never> => {
+): Effect.Effect<typeof OIDCProviderService.Service, never> => {
   const codeExpiresIn = config.codeExpiresIn ?? 10 * 60 * 1000;
   const accessTokenExpiresIn = config.accessTokenExpiresIn ?? 60 * 60 * 1000;
   const refreshTokenExpiresIn = config.refreshTokenExpiresIn ?? 30 * 24 * 60 * 60 * 1000;
@@ -1067,5 +1067,5 @@ export const makeOIDCProviderService = (
     }),
 
     loginRedirect: (returnTo) => buildRedirect(config.loginPage, { redirect_to: returnTo }),
-  } satisfies OIDCProviderServiceShape);
+  } satisfies typeof OIDCProviderService.Service);
 };

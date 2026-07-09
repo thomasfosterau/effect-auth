@@ -3,20 +3,19 @@ import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
 
-export interface UserServiceStoreShape {
-  /** Get a user by ID, or `null` when no such user exists. */
-  readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
+export class UserServiceStore extends Context.Service<
+  UserServiceStore,
+  {
+    /** Get a user by ID, or `null` when no such user exists. */
+    readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
-  readonly getByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly getByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
-  readonly update: (user: Types.User) => Effect.Effect<Types.User, Errors.AuthError>;
+    readonly update: (user: Types.User) => Effect.Effect<Types.User, Errors.AuthError>;
 
-  readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
-export class UserServiceStore extends Context.Service<UserServiceStore, UserServiceStoreShape>()(
-  "@effect-auth/UserServiceStore",
-) {}
+    readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+  }
+>()("@effect-auth/UserServiceStore") {}
 
 /** Partial update of a user's first-class profile fields. */
 export interface UpdateUserInput {
@@ -24,35 +23,36 @@ export interface UpdateUserInput {
   readonly image?: string;
 }
 
-export interface UserServiceShape {
-  readonly getUser: (
-    userId: string,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+export class UserService extends Context.Service<
+  UserService,
+  {
+    readonly getUser: (
+      userId: string,
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
-  readonly getUserByEmail: (
-    email: string,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    readonly getUserByEmail: (
+      email: string,
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
-  readonly updateUserAttributes: (
-    userId: string,
-    attributes: Record<string, unknown>,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    readonly updateUserAttributes: (
+      userId: string,
+      attributes: Record<string, unknown>,
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
-  readonly updateUser: (
-    userId: string,
-    updates: UpdateUserInput,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    readonly updateUser: (
+      userId: string,
+      updates: UpdateUserInput,
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
-  readonly markEmailVerified: (
-    userId: string,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    readonly markEmailVerified: (
+      userId: string,
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
-  readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError, UserServiceStore>;
-}
-
-export class UserService extends Context.Service<UserService, UserServiceShape>()(
-  "@effect-auth/UserService",
-) {
+    readonly deleteUser: (
+      userId: string,
+    ) => Effect.Effect<void, Errors.AuthError, UserServiceStore>;
+  }
+>()("@effect-auth/UserService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -61,7 +61,7 @@ export class UserService extends Context.Service<UserService, UserServiceShape>(
 
 /** Fetch a user from the store, failing with `UserNotFoundError` on a miss. */
 const getUserOrFail = (
-  store: UserServiceStoreShape,
+  store: typeof UserServiceStore.Service,
   userId: string,
 ): Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError> =>
   Effect.flatMap(store.get(userId), (user) =>
@@ -70,9 +70,9 @@ const getUserOrFail = (
       : Effect.succeed(user),
   );
 
-export const makeUserService = (): Effect.Effect<UserServiceShape, never> =>
+export const makeUserService = (): Effect.Effect<typeof UserService.Service, never> =>
   Effect.sync(
-    (): UserServiceShape => ({
+    (): typeof UserService.Service => ({
       getUser: (userId: string) =>
         Effect.gen(function* () {
           const store = yield* UserServiceStore;

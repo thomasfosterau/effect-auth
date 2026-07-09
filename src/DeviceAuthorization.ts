@@ -33,35 +33,33 @@ export interface DeviceAuthorizationRecord {
 }
 
 /** Persistence for device authorization requests. */
-export interface DeviceAuthorizationStoreShape {
-  readonly create: (
-    record: DeviceAuthorizationRecord,
-  ) => Effect.Effect<DeviceAuthorizationRecord, Errors.AuthError>;
-  readonly getByDeviceCode: (
-    deviceCode: string,
-  ) => Effect.Effect<DeviceAuthorizationRecord | null, Errors.AuthError>;
-  readonly getByUserCode: (
-    userCode: string,
-  ) => Effect.Effect<DeviceAuthorizationRecord | null, Errors.AuthError>;
-  readonly update: (
-    record: DeviceAuthorizationRecord,
-  ) => Effect.Effect<DeviceAuthorizationRecord, Errors.AuthError>;
-  readonly delete: (deviceCode: string) => Effect.Effect<void, Errors.AuthError>;
-  /**
-   * Atomically consume an approved record: if the record exists and its status
-   * is `"approved"`, delete it and return it; otherwise return `null`.
-   * Implementations must make the read-then-delete atomic (e.g. a conditional
-   * delete or compare-and-swap) so that two concurrent polls on the same
-   * approved code each see at most one win.
-   */
-  readonly claimApproval: (
-    deviceCode: string,
-  ) => Effect.Effect<DeviceAuthorizationRecord | null, Errors.AuthError>;
-}
-
 export class DeviceAuthorizationStore extends Context.Service<
   DeviceAuthorizationStore,
-  DeviceAuthorizationStoreShape
+  {
+    readonly create: (
+      record: DeviceAuthorizationRecord,
+    ) => Effect.Effect<DeviceAuthorizationRecord, Errors.AuthError>;
+    readonly getByDeviceCode: (
+      deviceCode: string,
+    ) => Effect.Effect<DeviceAuthorizationRecord | null, Errors.AuthError>;
+    readonly getByUserCode: (
+      userCode: string,
+    ) => Effect.Effect<DeviceAuthorizationRecord | null, Errors.AuthError>;
+    readonly update: (
+      record: DeviceAuthorizationRecord,
+    ) => Effect.Effect<DeviceAuthorizationRecord, Errors.AuthError>;
+    readonly delete: (deviceCode: string) => Effect.Effect<void, Errors.AuthError>;
+    /**
+     * Atomically consume an approved record: if the record exists and its status
+     * is `"approved"`, delete it and return it; otherwise return `null`.
+     * Implementations must make the read-then-delete atomic (e.g. a conditional
+     * delete or compare-and-swap) so that two concurrent polls on the same
+     * approved code each see at most one win.
+     */
+    readonly claimApproval: (
+      deviceCode: string,
+    ) => Effect.Effect<DeviceAuthorizationRecord | null, Errors.AuthError>;
+  }
 >()("@effect-auth/DeviceAuthorizationStore") {}
 
 /** RFC 8628 polling errors, mapped to the standard OAuth `error` codes. */
@@ -101,46 +99,44 @@ export interface DevicePollResult {
   readonly session: Types.Session;
 }
 
-export interface DeviceAuthorizationServiceShape {
-  /** Start a device authorization request. */
-  readonly begin: (options?: {
-    readonly clientId?: string;
-    readonly scopes?: readonly string[];
-  }) => Effect.Effect<DeviceBeginResult, Errors.AuthError, DeviceAuthorizationStore>;
-
-  /**
-   * Poll for completion. Returns a session once approved; otherwise fails with
-   * the RFC 8628 error (`authorization_pending`, `slow_down`, `expired_token`,
-   * `access_denied`).
-   */
-  readonly poll: (
-    deviceCode: string,
-  ) => Effect.Effect<
-    DevicePollResult,
-    | DevicePollError
-    | Errors.AuthError
-    | Errors.SessionNotFoundError
-    | Errors.SessionExpiredError
-    | Errors.UserNotFoundError
-    | HookError,
-    DeviceAuthorizationStore | SessionService | Hooks
-  >;
-
-  /** Approve a user code (called from an authenticated verification page). */
-  readonly approve: (
-    userCode: string,
-    userId: string,
-  ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStore>;
-
-  /** Deny a user code. */
-  readonly deny: (
-    userCode: string,
-  ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStore>;
-}
-
 export class DeviceAuthorizationService extends Context.Service<
   DeviceAuthorizationService,
-  DeviceAuthorizationServiceShape
+  {
+    /** Start a device authorization request. */
+    readonly begin: (options?: {
+      readonly clientId?: string;
+      readonly scopes?: readonly string[];
+    }) => Effect.Effect<DeviceBeginResult, Errors.AuthError, DeviceAuthorizationStore>;
+
+    /**
+     * Poll for completion. Returns a session once approved; otherwise fails with
+     * the RFC 8628 error (`authorization_pending`, `slow_down`, `expired_token`,
+     * `access_denied`).
+     */
+    readonly poll: (
+      deviceCode: string,
+    ) => Effect.Effect<
+      DevicePollResult,
+      | DevicePollError
+      | Errors.AuthError
+      | Errors.SessionNotFoundError
+      | Errors.SessionExpiredError
+      | Errors.UserNotFoundError
+      | HookError,
+      DeviceAuthorizationStore | SessionService | Hooks
+    >;
+
+    /** Approve a user code (called from an authenticated verification page). */
+    readonly approve: (
+      userCode: string,
+      userId: string,
+    ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStore>;
+
+    /** Deny a user code. */
+    readonly deny: (
+      userCode: string,
+    ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStore>;
+  }
 >()("@effect-auth/DeviceAuthorizationService") {
   /**
    * Construct a Layer providing this service.
@@ -169,8 +165,8 @@ export const normalizeUserCode = (code: string): string =>
 
 export const makeDeviceAuthorizationService = (
   config: DeviceAuthorizationConfig,
-): Effect.Effect<DeviceAuthorizationServiceShape, never> =>
-  Effect.sync((): DeviceAuthorizationServiceShape => {
+): Effect.Effect<typeof DeviceAuthorizationService.Service, never> =>
+  Effect.sync((): typeof DeviceAuthorizationService.Service => {
     const expiresIn = config.expiresIn ?? 30 * 60 * 1000;
     const interval = config.interval ?? 5;
     const userCodeLength = config.userCodeLength ?? 8;

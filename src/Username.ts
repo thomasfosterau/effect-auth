@@ -33,17 +33,19 @@ export class UsernameError extends Data.TaggedError("UsernameError")<{
  * Username lookup / reservation. Keys are the normalized (trimmed, lowercased)
  * username; implementers persist it in `attributes.username`.
  */
-export interface UsernameStoreShape {
-  readonly getUserByUsername: (
-    username: string,
-  ) => Effect.Effect<Types.User | null, Errors.AuthError>;
-  readonly isUsernameTaken: (username: string) => Effect.Effect<boolean, Errors.AuthError>;
-  readonly setUsername: (userId: string, username: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
-export class UsernameStore extends Context.Service<UsernameStore, UsernameStoreShape>()(
-  "@effect-auth/UsernameStore",
-) {}
+export class UsernameStore extends Context.Service<
+  UsernameStore,
+  {
+    readonly getUserByUsername: (
+      username: string,
+    ) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly isUsernameTaken: (username: string) => Effect.Effect<boolean, Errors.AuthError>;
+    readonly setUsername: (
+      userId: string,
+      username: string,
+    ) => Effect.Effect<void, Errors.AuthError>;
+  }
+>()("@effect-auth/UsernameStore") {}
 
 export interface UsernameConfig {
   /** Minimum username length. Default 3. */
@@ -82,50 +84,49 @@ export interface UsernameSignInInput {
   readonly rememberMe?: boolean;
 }
 
-export interface UsernameServiceShape {
-  readonly signUp: (
-    input: UsernameSignUpInput,
-  ) => Effect.Effect<
-    AuthResult,
-    | UsernameError
-    | Errors.AuthError
-    | Errors.EmailInUseError
-    | Errors.HashingError
-    | Errors.EmailNotVerifiedError
-    | Errors.PasswordPolicyError
-    | Errors.SignUpDisabledError
-    | Errors.InvalidInputError
-    | HookError,
-    | UsernameStore
-    | EmailPasswordService
-    | EmailPasswordStore
-    | PasswordHasher
-    | SessionService
-    | Hooks
-  >;
+export class UsernameService extends Context.Service<
+  UsernameService,
+  {
+    readonly signUp: (
+      input: UsernameSignUpInput,
+    ) => Effect.Effect<
+      AuthResult,
+      | UsernameError
+      | Errors.AuthError
+      | Errors.EmailInUseError
+      | Errors.HashingError
+      | Errors.EmailNotVerifiedError
+      | Errors.PasswordPolicyError
+      | Errors.SignUpDisabledError
+      | Errors.InvalidInputError
+      | HookError,
+      | UsernameStore
+      | EmailPasswordService
+      | EmailPasswordStore
+      | PasswordHasher
+      | SessionService
+      | Hooks
+    >;
 
-  readonly signIn: (
-    input: UsernameSignInInput,
-  ) => Effect.Effect<
-    AuthResult,
-    | UsernameError
-    | Errors.InvalidCredentialsError
-    | Errors.EmailNotVerifiedError
-    | Errors.HashingError
-    | Errors.AuthError
-    | HookError,
-    UsernameStore | EmailPasswordStore | PasswordHasher | SessionService | Hooks
-  >;
+    readonly signIn: (
+      input: UsernameSignInInput,
+    ) => Effect.Effect<
+      AuthResult,
+      | UsernameError
+      | Errors.InvalidCredentialsError
+      | Errors.EmailNotVerifiedError
+      | Errors.HashingError
+      | Errors.AuthError
+      | HookError,
+      UsernameStore | EmailPasswordStore | PasswordHasher | SessionService | Hooks
+    >;
 
-  readonly updateUsername: (
-    userId: string,
-    username: string,
-  ) => Effect.Effect<void, UsernameError | Errors.AuthError, UsernameStore>;
-}
-
-export class UsernameService extends Context.Service<UsernameService, UsernameServiceShape>()(
-  "@effect-auth/UsernameService",
-) {
+    readonly updateUsername: (
+      userId: string,
+      username: string,
+    ) => Effect.Effect<void, UsernameError | Errors.AuthError, UsernameStore>;
+  }
+>()("@effect-auth/UsernameService") {
   /**
    * Construct a Layer providing this service.
    */

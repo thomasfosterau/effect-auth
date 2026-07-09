@@ -27,16 +27,6 @@ export interface MagicLinkToken {
   readonly expiresAt: number;
 }
 
-/**
- * Storage interface for magic link tokens
- */
-export interface MagicLinkStoreShape {
-  readonly create: (token: MagicLinkToken) => Effect.Effect<MagicLinkToken, Errors.AuthError>;
-  readonly get: (token: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
-  readonly getByEmail: (email: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
-  readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
-  readonly deleteByEmail: (email: string) => Effect.Effect<void, Errors.AuthError>;
-}
 
 /**
  * Input for creating a user during magic link verification
@@ -48,28 +38,38 @@ export interface MagicLinkCreateUserInput {
 }
 
 /**
- * User store interface for magic link sign-in
- */
-export interface MagicLinkUserStoreShape {
-  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
-  readonly createUser: (
-    input: MagicLinkCreateUserInput,
-  ) => Effect.Effect<Types.User, Errors.AuthError>;
-}
-
-/**
+ * Storage interface for magic link tokens
+ *
  * Magic link store context tag
  */
-export class MagicLinkStore extends Context.Service<MagicLinkStore, MagicLinkStoreShape>()(
-  "@effect-auth/MagicLinkStore",
-) {}
+export class MagicLinkStore extends Context.Service<
+  MagicLinkStore,
+  {
+    readonly create: (token: MagicLinkToken) => Effect.Effect<MagicLinkToken, Errors.AuthError>;
+    readonly get: (token: string) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
+    readonly getByEmail: (
+      email: string,
+    ) => Effect.Effect<MagicLinkToken | null, Errors.AuthError>;
+    readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
+    readonly deleteByEmail: (email: string) => Effect.Effect<void, Errors.AuthError>;
+  }
+>()("@effect-auth/MagicLinkStore") {}
 
 /**
+ * User store interface for magic link sign-in
+ *
  * Magic link user store context tag
  */
 export class MagicLinkUserStore extends Context.Service<
   MagicLinkUserStore,
-  MagicLinkUserStoreShape
+  {
+    readonly getUserByEmail: (
+      email: string,
+    ) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly createUser: (
+      input: MagicLinkCreateUserInput,
+    ) => Effect.Effect<Types.User, Errors.AuthError>;
+  }
 >()("@effect-auth/MagicLinkUserStore") {}
 
 /**
@@ -109,45 +109,44 @@ export interface MagicLinkResult {
 /**
  * Magic link service
  */
-export interface MagicLinkServiceShape {
-  /**
-   * Request a magic link for the given email. Outstanding tokens for the
-   * email are invalidated first so only the latest link is usable.
-   *
-   * Anti-enumeration: when sign-up is enabled the link is always sent (the
-   * user is created at verification time); when sign-up is disabled and no
-   * user exists this succeeds silently without sending anything.
-   *
-   * When `resendCooldown` is configured and an outstanding token for the email
-   * was created within the cooldown window, fails with
-   * {@link Errors.ResendTooSoonError} containing the remaining wait time.
-   */
-  readonly send: (
-    email: string,
-  ) => Effect.Effect<
-    void,
-    Errors.AuthError | Errors.MagicLinkError | Errors.ResendTooSoonError,
-    MagicLinkStore | MagicLinkUserStore
-  >;
+export class MagicLinkService extends Context.Service<
+  MagicLinkService,
+  {
+    /**
+     * Request a magic link for the given email. Outstanding tokens for the
+     * email are invalidated first so only the latest link is usable.
+     *
+     * Anti-enumeration: when sign-up is enabled the link is always sent (the
+     * user is created at verification time); when sign-up is disabled and no
+     * user exists this succeeds silently without sending anything.
+     *
+     * When `resendCooldown` is configured and an outstanding token for the email
+     * was created within the cooldown window, fails with
+     * {@link Errors.ResendTooSoonError} containing the remaining wait time.
+     */
+    readonly send: (
+      email: string,
+    ) => Effect.Effect<
+      void,
+      Errors.AuthError | Errors.MagicLinkError | Errors.ResendTooSoonError,
+      MagicLinkStore | MagicLinkUserStore
+    >;
 
-  /**
-   * Verify a magic link token (single use) and sign the user in. A
-   * successfully verified link proves ownership of the email, so users
-   * created here are marked `emailVerified: true`.
-   */
-  readonly verify: (
-    token: string,
-    options?: MagicLinkVerifyOptions,
-  ) => Effect.Effect<
-    MagicLinkResult,
-    Errors.MagicLinkError | Errors.AuthError | HookError,
-    MagicLinkStore | MagicLinkUserStore | SessionService | Hooks
-  >;
-}
-
-export class MagicLinkService extends Context.Service<MagicLinkService, MagicLinkServiceShape>()(
-  "@effect-auth/MagicLinkService",
-) {
+    /**
+     * Verify a magic link token (single use) and sign the user in. A
+     * successfully verified link proves ownership of the email, so users
+     * created here are marked `emailVerified: true`.
+     */
+    readonly verify: (
+      token: string,
+      options?: MagicLinkVerifyOptions,
+    ) => Effect.Effect<
+      MagicLinkResult,
+      Errors.MagicLinkError | Errors.AuthError | HookError,
+      MagicLinkStore | MagicLinkUserStore | SessionService | Hooks
+    >;
+  }
+>()("@effect-auth/MagicLinkService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -166,12 +165,12 @@ export const generateMagicLinkToken = (): Effect.Effect<string, Errors.AuthError
  */
 export const makeMagicLinkService = (
   config: MagicLinkConfig,
-): Effect.Effect<MagicLinkServiceShape, never> => {
+): Effect.Effect<typeof MagicLinkService.Service, never> => {
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
   const disableSignUp = config.disableSignUp ?? false;
 
   return Effect.sync(
-    (): MagicLinkServiceShape => ({
+    (): typeof MagicLinkService.Service => ({
       send: (rawEmail: string) =>
         Effect.gen(function* () {
           const store = yield* MagicLinkStore;
