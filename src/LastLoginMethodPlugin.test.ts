@@ -2,8 +2,8 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import { composePlugins, Hooks } from "./Hooks.js";
 import { makeLastLoginMethodPlugin } from "./LastLoginMethodPlugin.js";
-import { makeEmailPasswordService } from "./EmailPassword.js";
-import { EmailPasswordStore, type EmailPasswordStoreShape } from "./EmailPassword.js";
+import { makeEmailPasswordService } from "./Email/EmailPassword.js";
+import { EmailPasswordStore, type EmailPasswordStoreShape } from "./Email/EmailPassword.js";
 import { PasswordHasher, makeScryptHasher } from "./Password.js";
 import {
   SessionManager,

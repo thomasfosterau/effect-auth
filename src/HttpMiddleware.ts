@@ -67,7 +67,7 @@ import { HttpServerRequest } from "effect/unstable/http";
 import { Hooks } from "./Hooks.ts";
 import { SessionService } from "./SessionService.ts";
 import { resolveMessage } from "./Messages.ts";
-import * as S from "./HttpApiSchemas.ts";
+import * as S from "./Http/HttpApiSchemas.ts";
 import type * as Types from "./Types.ts";
 import {
   dataCookieName,
@@ -75,7 +75,7 @@ import {
   sessionIdFromRequest,
   type CookieConfig,
   type ResolvedCookieConfig,
-} from "./HttpServer.ts";
+} from "./Http/HttpServer.ts";
 import { decodeSessionCacheCookie } from "./SessionCookieCache.ts";
 
 // =============================================================================

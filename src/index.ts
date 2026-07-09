@@ -9,7 +9,7 @@ export * from "./Types.ts";
 export * from "./Errors.ts";
 export * from "./Hooks.ts";
 export * from "./TokenHash.ts";
-export * from "./EmailAddress.ts";
+export * from "./Email/EmailAddress.ts";
 export * from "./Identifier.ts";
 export * from "./Cipher.ts";
 export * from "./Messages.ts";
@@ -42,9 +42,9 @@ export * from "./KeyValueStores.ts";
 
 // Services
 export * from "./User.ts";
-export * from "./EmailPassword.ts";
-export * from "./EmailOtp.ts";
-export * from "./EmailVerification.ts";
+export * from "./Email/EmailPassword.ts";
+export * from "./Email/EmailOtp.ts";
+export * from "./Email/EmailVerification.ts";
 export * from "./PasswordReset.ts";
 export * from "./PhoneOtp.ts";
 export * from "./MagicLink.ts";
@@ -100,4 +100,4 @@ export * from "./LastLoginMethodPlugin.ts";
 /** IP-keyed rate limiting (sign-in, sign-up, password-reset) using the ClientIp service. */
 export * from "./IpRateLimitPlugin.ts";
 /** HTTP layer: makeAuthWebHandler, makeAuthClient, wire types. */
-export * as Http from "./Http.ts";
+export * as Http from "./Http/Http.ts";

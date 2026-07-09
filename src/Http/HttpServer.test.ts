@@ -9,20 +9,20 @@ import {
   type SessionStoreShape,
   type UserStoreShape,
   SessionManager,
-} from "./Session.js";
-import { AuthLifecycleService } from "./AuthLifecycle.js";
+} from "../Session.js";
+import { AuthLifecycleService } from "../AuthLifecycle.js";
 import {
   EmailPasswordService,
   EmailPasswordStore,
   type EmailPasswordStoreShape,
-} from "./EmailPassword.js";
-import { PasswordHasher, makeScryptHasher } from "./Password.js";
+} from "../Email/EmailPassword.js";
+import { PasswordHasher, makeScryptHasher } from "../Password.js";
 import {
   EmailVerificationStore,
   type EmailVerification,
   type EmailVerificationStoreShape,
   EmailVerificationService,
-} from "./EmailVerification.js";
+} from "../Email/EmailVerification.js";
 import {
   PasswordResetStore,
   PasswordResetUserStore,
@@ -30,10 +30,10 @@ import {
   type PasswordResetToken,
   type PasswordResetUserStoreShape,
   PasswordResetService,
-} from "./PasswordReset.js";
-import { UserServiceStore, type UserServiceStoreShape, UserService } from "./User.js";
-import { hashToken } from "./TokenHash.js";
-import { Hooks } from "./Hooks.js";
+} from "../PasswordReset.js";
+import { UserServiceStore, type UserServiceStoreShape, UserService } from "../User.js";
+import { hashToken } from "../TokenHash.js";
+import { Hooks } from "../Hooks.js";
 import {
   MagicLinkStore,
   MagicLinkUserStore,
@@ -41,7 +41,7 @@ import {
   type MagicLinkToken,
   type MagicLinkUserStoreShape,
   MagicLinkService,
-} from "./MagicLink.js";
+} from "../MagicLink.js";
 import {
   EmailOtpStore,
   EmailOtpUserStore,
@@ -50,7 +50,7 @@ import {
   type EmailOtpStoreShape,
   type EmailOtpUserStoreShape,
   EmailOtpService,
-} from "./EmailOtp.js";
+} from "../Email/EmailOtp.js";
 import {
   PendingTwoFactorStore,
   TwoFactorGateLayer,
@@ -60,14 +60,18 @@ import {
   type TwoFactorRecord,
   type TwoFactorStoreShape,
   TwoFactorService,
-} from "./TwoFactor.js";
+} from "../TwoFactor.js";
 import {
   AccountManagementStore,
   type AccountManagementStoreShape,
   type AccountToken,
   AccountManagementService,
-} from "./AccountManagement.js";
-import { AnonymousUserStore, type AnonymousUserStoreShape, AnonymousService } from "./Anonymous.js";
+} from "../AccountManagement.js";
+import {
+  AnonymousUserStore,
+  type AnonymousUserStoreShape,
+  AnonymousService,
+} from "../Anonymous.js";
 import {
   PhoneOtpStore,
   PhoneOtpUserStore,
@@ -76,17 +80,17 @@ import {
   type PhoneOtpStoreShape,
   type PhoneOtpUserStoreShape,
   PhoneOtpService,
-} from "./PhoneOtp.js";
-import { UsernameStore, type UsernameStoreShape, UsernameService } from "./Username.js";
+} from "../PhoneOtp.js";
+import { UsernameStore, type UsernameStoreShape, UsernameService } from "../Username.js";
 import {
   DeviceAuthorizationStore,
   type DeviceAuthorizationRecord,
   type DeviceAuthorizationStoreShape,
   DeviceAuthorizationService,
-} from "./DeviceAuthorization.js";
-import { generateTOTP } from "./Otp.js";
-import { UserNotFoundError } from "./Errors.js";
-import type * as Types from "./Types.js";
+} from "../DeviceAuthorization.js";
+import { generateTOTP } from "../Otp.js";
+import { UserNotFoundError } from "../Errors.js";
+import type * as Types from "../Types.js";
 
 const HOUR = 60 * 60 * 1000;
 const SESSION_CONFIG: Types.SessionConfig = {

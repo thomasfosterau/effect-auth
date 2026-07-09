@@ -19,10 +19,10 @@ import {
   EmailVerificationStore,
   makeEmailVerificationService,
   type EmailVerification,
-} from "./EmailVerification.js";
+} from "./Email/EmailVerification.js";
 import { PasswordResetStore, type PasswordResetToken } from "./PasswordReset.js";
 import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.js";
-import { EmailOtpStore, type EmailOtpRecord } from "./EmailOtp.js";
+import { EmailOtpStore, type EmailOtpRecord } from "./Email/EmailOtp.js";
 import { PendingTwoFactorStore, type PendingTwoFactor } from "./TwoFactor.js";
 import { Hooks } from "./Hooks.js";
 

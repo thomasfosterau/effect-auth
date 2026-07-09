@@ -8,12 +8,12 @@ import {
   type SecondFactorChallenge,
   type SignInInput,
   type SignUpInput,
-} from "./EmailPassword.ts";
+} from "./Email/EmailPassword.ts";
 import {
   type EmailVerificationResult,
   EmailVerificationService,
   EmailVerificationStore,
-} from "./EmailVerification.ts";
+} from "./Email/EmailVerification.ts";
 import { PasswordHasher } from "./Password.ts";
 import { SessionManager } from "./Session.ts";
 import { UserServiceStore, UserService } from "./User.ts";

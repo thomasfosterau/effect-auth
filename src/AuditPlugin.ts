@@ -9,7 +9,7 @@
  * @module plugins/audit
  */
 import { Effect } from "effect";
-import type { AuthResult } from "./EmailPassword.ts";
+import type { AuthResult } from "./Email/EmailPassword.ts";
 import { Hooks, makePlugin, type SessionRef } from "./Hooks.ts";
 
 /**

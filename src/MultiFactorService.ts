@@ -17,7 +17,7 @@ import * as crypto from "node:crypto";
 import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
-import { EmailPasswordStore } from "./EmailPassword.ts";
+import { EmailPasswordStore } from "./Email/EmailPassword.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { generateBase32Secret, generateOTPURI, verifyTOTP, type TOTPConfig } from "./Otp.ts";
 import { PasswordHasher } from "./Password.ts";

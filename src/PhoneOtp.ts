@@ -18,8 +18,8 @@ import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
-import { SessionManager } from "./Session.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
+import { SessionService } from "./SessionService.ts";
 
 /** Error raised by phone OTP verification failures. */
 export class PhoneOtpError extends Data.TaggedError("PhoneOtpError")<{
@@ -158,7 +158,7 @@ export interface PhoneOtpServiceShape {
   ) => Effect.Effect<
     PhoneOtpAuthResult,
     PhoneOtpError | Errors.AuthError | HookError,
-    PhoneOtpStore | PhoneOtpUserStore | SessionManager | Hooks
+    PhoneOtpStore | PhoneOtpUserStore | SessionService | Hooks
   >;
 
   /**
@@ -316,7 +316,7 @@ export const makePhoneOtpService = (
       signIn: (rawPhoneNumber, otp, options) =>
         Effect.gen(function* () {
           const userStore = yield* PhoneOtpUserStore;
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
 
           const phoneNumber = yield* normalize(rawPhoneNumber);
 

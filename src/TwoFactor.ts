@@ -22,12 +22,13 @@ import {
   EmailPasswordStore,
   SecondFactorGate,
   type SecondFactorGateShape,
-} from "./EmailPassword.ts";
+} from "./Email/EmailPassword.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { generateBase32Secret, generateOTPURI, verifyTOTP, type TOTPConfig } from "./Otp.ts";
 import { PasswordHasher } from "./Password.ts";
-import { SessionManager, UserStore } from "./Session.ts";
 import type * as Types from "./Types.ts";
+import { UserStore } from "./UserStore.ts";
+import { SessionService } from "./SessionService.ts";
 
 /**
  * Two-factor error
@@ -234,7 +235,7 @@ export interface TwoFactorServiceShape {
   ) => Effect.Effect<
     TwoFactorVerifyResult,
     TwoFactorError | Errors.HashingError | Errors.AuthError | HookError,
-    TwoFactorStore | PendingTwoFactorStore | SessionManager | Hooks
+    TwoFactorStore | PendingTwoFactorStore | SessionService | Hooks
   >;
 
   /**
@@ -248,7 +249,7 @@ export interface TwoFactorServiceShape {
   ) => Effect.Effect<
     TwoFactorVerifyResult,
     TwoFactorError | Errors.AuthError | HookError,
-    TwoFactorStore | PendingTwoFactorStore | SessionManager | Hooks
+    TwoFactorStore | PendingTwoFactorStore | SessionService | Hooks
   >;
 
   /**
@@ -468,7 +469,7 @@ export const makeTwoFactorService = (
           const record: TwoFactorRecord = {
             userId,
             secret: storedSecret,
-            backupCodes: backupCodes.map(hashBackupCode),
+            backupCodes: backupCodes.map((code) => hashBackupCode(code)),
             verified: skipVerificationOnEnable,
             createdAt: Date.now(),
           };
@@ -589,7 +590,7 @@ export const makeTwoFactorService = (
           const pendingStore = yield* PendingTwoFactorStore;
           yield* pendingStore.delete(pendingToken);
 
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
           const session = yield* sessionManager.createSession(
             pending.userId,
             options?.sessionAttributes,
@@ -630,7 +631,7 @@ export const makeTwoFactorService = (
           const pendingStore = yield* PendingTwoFactorStore;
           yield* pendingStore.delete(pendingToken);
 
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
           const session = yield* sessionManager.createSession(
             pending.userId,
             options?.sessionAttributes,

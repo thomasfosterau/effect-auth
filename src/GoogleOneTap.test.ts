@@ -6,15 +6,15 @@ import { Hooks } from "./Hooks.js";
 import { SessionManager, SessionStore, UserStore, type SessionManagerShape } from "./Session.js";
 import { UserServiceStore, UserService } from "./User.js";
 import { AuthLifecycleService } from "./AuthLifecycle.js";
-import { EmailPasswordStore } from "./EmailPassword.js";
+import { EmailPasswordStore } from "./Email/EmailPassword.js";
 import { PasswordHasher } from "./Password.js";
-import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.js";
+import { EmailVerificationService, EmailVerificationStore } from "./Email/EmailVerification.js";
 import {
   PasswordResetService,
   PasswordResetStore,
   PasswordResetUserStore,
 } from "./PasswordReset.js";
-import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
+import { makeAuthWebHandler, type AuthServices } from "./Http/HttpServer.js";
 import { OAuthUserStore, type OAuthUserStoreShape } from "./OAuth/OAuth.js";
 import {
   makeGoogleOneTapService,

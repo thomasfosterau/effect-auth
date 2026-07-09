@@ -2,30 +2,30 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
-import { SessionStore, UserStore, SessionManager } from "./Session.js";
-import { hashToken } from "./TokenHash.js";
-import { UserServiceStore, UserService } from "./User.js";
-import { Hooks } from "./Hooks.js";
-import { AuthLifecycleService } from "./AuthLifecycle.js";
-import { EmailPasswordStore } from "./EmailPassword.js";
-import { PasswordHasher } from "./Password.js";
-import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.js";
+import { SessionStore, UserStore, SessionManager } from "../Session.js";
+import { hashToken } from "../TokenHash.js";
+import { UserServiceStore, UserService } from "../User.js";
+import { Hooks } from "../Hooks.js";
+import { AuthLifecycleService } from "../AuthLifecycle.js";
+import { EmailPasswordStore } from "../Email/EmailPassword.js";
+import { PasswordHasher } from "../Password.js";
+import { EmailVerificationService, EmailVerificationStore } from "../Email/EmailVerification.js";
 import {
   PasswordResetService,
   PasswordResetStore,
   PasswordResetUserStore,
-} from "./PasswordReset.js";
+} from "../PasswordReset.js";
 import {
   OrganizationStore,
   type Organization,
   type Member,
   type Invitation,
   OrganizationService,
-} from "./Organization.js";
-import { AdminUserStore, AdminService } from "./Admin.js";
-import { ApiKeyStore, type ApiKey, ApiKeyService } from "./ApiKey.js";
-import { JwtKeyStore, type JwtKeyPair, JwtService } from "./Jwt.js";
-import type * as Types from "./Types.js";
+} from "../Organization.js";
+import { AdminUserStore, AdminService } from "../Admin.js";
+import { ApiKeyStore, type ApiKey, ApiKeyService } from "../ApiKey.js";
+import { JwtKeyStore, type JwtKeyPair, JwtService } from "../Jwt.js";
+import type * as Types from "../Types.js";
 
 const HOUR = 60 * 60 * 1000;
 

@@ -14,7 +14,7 @@ import {
   SecondFactorGate,
   type EmailPasswordStoreShape,
   type SecondFactorGateShape,
-} from "./EmailPassword.js";
+} from "./Email/EmailPassword.js";
 import { PasswordHasher, makeScryptHasher, type PasswordHasherShape } from "./Password.js";
 import { SessionManager, SessionStore, UserStore } from "./Session.js";
 import type { SessionStoreShape, UserStoreShape } from "./Session.js";

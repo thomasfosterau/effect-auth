@@ -8,15 +8,15 @@ import { SessionService as SessionManager } from "./SessionService.js";
 import { hashToken } from "./TokenHash.js";
 import { UserServiceStore, UserService } from "./User.js";
 import { AuthLifecycleService } from "./AuthLifecycle.js";
-import { EmailPasswordStore } from "./EmailPassword.js";
+import { EmailPasswordStore } from "./Email/EmailPassword.js";
 import { PasswordHasher } from "./Password.js";
-import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.js";
+import { EmailVerificationService, EmailVerificationStore } from "./Email/EmailVerification.js";
 import {
   PasswordResetService,
   PasswordResetStore,
   PasswordResetUserStore,
 } from "./PasswordReset.js";
-import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
+import { makeAuthWebHandler, type AuthServices } from "./Http/HttpServer.js";
 import { JwtKeyStore, type JwtKeyPair, type JwtKeyStoreShape, JwtService } from "./Jwt.js";
 import { generatePKCE, verifyIdToken } from "./OAuth/OAuth.js";
 import {

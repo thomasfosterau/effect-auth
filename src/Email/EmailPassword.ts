@@ -1,11 +1,11 @@
 import { Context, Effect, Layer, Option } from "effect";
-import * as Errors from "./Errors.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
-import { MultiAlgorithmVerifier, PasswordHasher } from "./Password.ts";
-import type * as Types from "./Types.ts";
-import { normalizeEmail } from "./utils.ts";
-import { SessionManager } from "./Session.ts";
-import * as Obs from "./Observability.ts";
+import * as Errors from "../Errors.ts";
+import { Hooks, type HookError } from "../Hooks.ts";
+import { MultiAlgorithmVerifier, PasswordHasher } from "../Password.ts";
+import type * as Types from "../Types.ts";
+import { normalizeEmail } from "../utils.ts";
+import { SessionManager } from "../Session.ts";
+import * as Obs from "../Observability.ts";
 
 export interface CreateUserInput {
   readonly email: string;

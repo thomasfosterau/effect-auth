@@ -8,7 +8,7 @@ import {
   type AccountLockoutStoreShape,
 } from "./AccountLockoutPlugin.js";
 import { AccountLockedError } from "./Errors.js";
-import type { SignInInput, AuthResult } from "./EmailPassword.js";
+import type { SignInInput, AuthResult } from "./Email/EmailPassword.js";
 import type * as Types from "./Types.js";
 
 const signIn = (email: string): SignInInput => ({ email, password: "pw" });

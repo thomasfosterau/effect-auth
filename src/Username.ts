@@ -19,7 +19,7 @@ import {
   SecondFactorGate,
   isEmailVerified,
   type AuthResult,
-} from "./EmailPassword.ts";
+} from "./Email/EmailPassword.ts";
 import { MultiAlgorithmVerifier, PasswordHasher } from "./Password.ts";
 import { SessionManager } from "./Session.ts";
 import { Hooks, type HookError } from "./Hooks.ts";

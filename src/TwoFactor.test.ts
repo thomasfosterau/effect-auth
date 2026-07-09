@@ -12,7 +12,7 @@ import {
   PendingTwoFactorStore,
 } from "./TwoFactor.js";
 import { makeAes256GcmCipher } from "./Cipher.js";
-import { type CreateUserInput, EmailPasswordStore } from "./EmailPassword.js";
+import { type CreateUserInput, EmailPasswordStore } from "./Email/EmailPassword.js";
 import { generateTOTP } from "./Otp.js";
 import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 import type { Session, User, SessionConfig } from "./Types.js";

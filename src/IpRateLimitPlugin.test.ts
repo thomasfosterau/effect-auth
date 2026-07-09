@@ -2,7 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import { ClientIp } from "./ClientIp.js";
 import { Hooks } from "./Hooks.js";
-import type { SignInInput } from "./EmailPassword.js";
+import type { SignInInput } from "./Email/EmailPassword.js";
 import { RateLimitError } from "./Errors.js";
 import {
   RateLimiter,

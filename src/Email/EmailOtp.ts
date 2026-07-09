@@ -10,12 +10,12 @@
  */
 import { randomInt } from "node:crypto";
 import { Context, Data, Effect, Layer } from "effect";
-import * as Errors from "./Errors.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
-import { SessionManager } from "./Session.ts";
-import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
-import type * as Types from "./Types.ts";
-import { normalizeEmail } from "./utils.ts";
+import * as Errors from "../Errors.ts";
+import { Hooks, type HookError } from "../Hooks.ts";
+import { SessionManager } from "../Session.ts";
+import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
+import type * as Types from "../Types.ts";
+import { normalizeEmail } from "../utils.ts";
 
 /**
  * Email OTP error
@@ -197,7 +197,8 @@ export class EmailOtpService extends Context.Service<EmailOtpService, EmailOtpSe
   /**
    * Construct a Layer providing this service.
    */
-  static readonly layer = (config: EmailOtpConfig) => Layer.effect(EmailOtpService, make(config));
+  static readonly layer = (config: EmailOtpConfig) =>
+    Layer.effect(EmailOtpService, makeEmailOtpService(config));
 }
 
 /** @deprecated Use {@link hashToken} from `"effect-auth"` instead. */
@@ -219,7 +220,9 @@ export const generateOtp = (length: number): Effect.Effect<string, Errors.AuthEr
 /**
  * Create an email OTP service
  */
-export const make = (config: EmailOtpConfig): Effect.Effect<EmailOtpServiceShape, never> => {
+export const makeEmailOtpService = (
+  config: EmailOtpConfig,
+): Effect.Effect<EmailOtpServiceShape, never> => {
   const otpLength = config.otpLength ?? 6;
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
   const maxAttempts = config.maxAttempts ?? 3;

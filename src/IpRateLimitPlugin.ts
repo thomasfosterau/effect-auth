@@ -23,7 +23,7 @@
  */
 import { Effect, Option } from "effect";
 import { ClientIp } from "./ClientIp.ts";
-import type { SignInInput, SignUpInput } from "./EmailPassword.ts";
+import type { SignInInput, SignUpInput } from "./Email/EmailPassword.ts";
 import { makePlugin } from "./Hooks.ts";
 import {
   type RateLimitConfig,

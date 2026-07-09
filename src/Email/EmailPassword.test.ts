@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect, Layer } from "effect";
 import * as nodeCrypto from "node:crypto";
-import { Hooks, makePlugin, composePlugins } from "./Hooks.js";
-import * as Errors from "./Errors.js";
+import { Hooks, makePlugin, composePlugins } from "../Hooks.js";
+import * as Errors from "../Errors.js";
 import { makeEmailPasswordService, EmailPasswordStore } from "./EmailPassword.js";
-import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
-import { hashToken } from "./TokenHash.js";
+import { makeSessionManager, SessionStore, UserStore, SessionManager } from "../Session.js";
+import { hashToken } from "../TokenHash.js";
 import {
   MultiAlgorithmVerifier,
   PasswordHasher,
@@ -13,8 +13,8 @@ import {
   makeScryptHasher,
   makeMultiAlgorithmVerifier,
   type PasswordHasherShape,
-} from "./Password.js";
-import type { Session, User, SessionConfig } from "./Types.js";
+} from "../Password.js";
+import type { Session, User, SessionConfig } from "../Types.js";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();

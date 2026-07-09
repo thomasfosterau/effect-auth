@@ -19,12 +19,12 @@
 import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
-import { generateOtp } from "./EmailOtp.ts";
+import { generateOtp } from "./Email/EmailOtp.ts";
 import {
   SecondFactorGate,
   type SecondFactorChallenge,
   type SecondFactorGateShape,
-} from "./EmailPassword.ts";
+} from "./Email/EmailPassword.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { SessionManager } from "./Session.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";

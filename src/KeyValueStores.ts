@@ -48,7 +48,7 @@ import {
   type EmailOtpRecord,
   type EmailOtpStoreShape,
   EmailOtpStore,
-} from "./EmailOtp.ts";
+} from "./Email/EmailOtp.ts";
 import {
   type Identifier,
   IdentifierStore,
@@ -59,7 +59,7 @@ import {
   type EmailVerification,
   type EmailVerificationStoreShape,
   EmailVerificationStore,
-} from "./EmailVerification.ts";
+} from "./Email/EmailVerification.ts";
 import { type MagicLinkStoreShape, MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
 import { type OAuthState, type OAuthStateStoreShape, OAuthStateStore } from "./OAuth/OAuth.ts";
 import {

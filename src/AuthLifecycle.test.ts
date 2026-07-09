@@ -7,7 +7,7 @@ import {
   makeEmailVerificationService,
   EmailVerificationStore,
   EmailVerificationService,
-} from "./EmailVerification.js";
+} from "./Email/EmailVerification.js";
 import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
 import { makeUserService, UserServiceStore, UserService } from "./User.js";
@@ -17,7 +17,7 @@ import {
   EmailPasswordStore,
   makeEmailPasswordService,
   type EmailPasswordConfig,
-} from "./EmailPassword.js";
+} from "./Email/EmailPassword.js";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();

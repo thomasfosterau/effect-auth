@@ -32,7 +32,7 @@
 import { Config, Context, Effect, Layer, Redacted } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
-import { SecondFactorGate, type SecondFactorGateShape } from "./EmailPassword.ts";
+import { SecondFactorGate, type SecondFactorGateShape } from "./Email/EmailPassword.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { PendingTwoFactorStore, TwoFactorService, TwoFactorStore } from "./TwoFactor.ts";

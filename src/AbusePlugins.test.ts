@@ -6,7 +6,7 @@ import { Hooks, type HookDefs } from "./Hooks.js";
 import { HaveIBeenPwnedPlugin } from "./HaveIBeenPwned.js";
 import { CaptchaPlugin } from "./CaptchaPlugin.js";
 import { PwnedPasswordError, CaptchaError } from "./Errors.js";
-import type { SignInInput, SignUpInput } from "./EmailPassword.js";
+import type { SignInInput, SignUpInput } from "./Email/EmailPassword.js";
 
 /** A stubbed HttpClient that answers every request with `respond(request)`. */
 const stubHttpClient = (respond: (url: string) => Response) =>

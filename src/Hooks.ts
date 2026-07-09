@@ -33,8 +33,8 @@
  */
 import { Context, Effect, Layer } from "effect";
 import type * as Errors from "./Errors.ts";
-import type { AuthResult, SignInInput, SignUpInput } from "./EmailPassword.ts";
-import type { EmailVerificationResult } from "./EmailVerification.ts";
+import type { AuthResult, SignInInput, SignUpInput } from "./Email/EmailPassword.ts";
+import type { EmailVerificationResult } from "./Email/EmailVerification.ts";
 import type { PasswordResetResult } from "./PasswordReset.ts";
 import type * as Types from "./Types.ts";
 

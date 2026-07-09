@@ -728,7 +728,7 @@ export const makeOrganizationService = (
       listUserInvitations: (email) =>
         Effect.gen(function* () {
           const store = yield* OrganizationStore;
-          const invitations = yield* store.listInvitationsByEmail(normalizeEmail(email));
+          const invitations = yield* store.listInvitationsByEmail(email);
           const now = Date.now();
           return invitations.filter(
             (invitation) => invitation.status === "pending" && invitation.expiresAt > now,
