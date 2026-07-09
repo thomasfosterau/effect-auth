@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
+import { makeAuthWebHandler, BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.js";
 import { makeAuthClient } from "./HttpClient.js";
 import {
   SessionStore,
@@ -557,6 +557,7 @@ const handlerFor = (
     readonly multiSession?: { readonly maximumSessions?: number };
     readonly maxBodySize?: number;
     readonly secure?: boolean;
+    readonly bearerMode?: boolean | "opt-in";
   },
 ): Handler =>
   makeAuthWebHandler({
@@ -571,6 +572,7 @@ const handlerFor = (
           ...(options.cache.maxAge !== undefined && { maxAge: options.cache.maxAge }),
         },
       }),
+      ...(options?.bearerMode !== undefined && { bearerMode: options.bearerMode }),
     },
     ...(options?.prefix !== undefined && { prefix: options.prefix }),
     ...(options?.trustedOrigins !== undefined && { trustedOrigins: options.trustedOrigins }),
@@ -1876,5 +1878,126 @@ describe("rememberMe cookie behaviour", () => {
     expect(res.status).toBe(200);
     const directives = parseCookieDirectives(res, "conduit_session");
     expect(directives["expires"]).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bearer mode
+// ---------------------------------------------------------------------------
+
+describe("bearer mode", () => {
+  it("opt-in: sign-in without x-use-bearer does NOT emit set-auth-token", async () => {
+    const handler = handlerFor(makeFixture(), { bearerMode: "opt-in" });
+    await handler(jsonRequest("/sign-up", { email: "bearer@test.com", password: PW }));
+    const res = await handler(jsonRequest("/sign-in", { email: "bearer@test.com", password: PW }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get(BEARER_TOKEN_HEADER)).toBeNull();
+    // Cookie still set in opt-in mode when x-use-bearer absent
+    expect(res.headers.get("set-cookie")).toContain("conduit_session=");
+  });
+
+  it("opt-in: sign-in with x-use-bearer: 1 emits set-auth-token header", async () => {
+    const handler = handlerFor(makeFixture(), { bearerMode: "opt-in" });
+    await handler(jsonRequest("/sign-up", { email: "bearer@test.com", password: PW }));
+    const res = await handler(
+      jsonRequest("/sign-in", { email: "bearer@test.com", password: PW }, { "x-use-bearer": "1" }),
+    );
+    expect(res.status).toBe(200);
+    const token = res.headers.get(BEARER_TOKEN_HEADER);
+    expect(typeof token).toBe("string");
+    expect(token!.length).toBeGreaterThan(0);
+  });
+
+  it("opt-in: token from set-auth-token can be used as Authorization: Bearer", async () => {
+    const handler = handlerFor(makeFixture(), { bearerMode: "opt-in" });
+    await handler(jsonRequest("/sign-up", { email: "bearer@test.com", password: PW }));
+    const signInRes = await handler(
+      jsonRequest("/sign-in", { email: "bearer@test.com", password: PW }, { "x-use-bearer": "1" }),
+    );
+    expect(signInRes.status).toBe(200);
+    const rawToken = signInRes.headers.get(BEARER_TOKEN_HEADER)!;
+
+    const sessionRes = await handler(
+      getRequest("/session", { authorization: `Bearer ${rawToken}` }),
+    );
+    expect(sessionRes.status).toBe(200);
+    const body = (await sessionRes.json()) as { user: { email: string } };
+    expect(body.user.email).toBe("bearer@test.com");
+  });
+
+  it("opt-in: sign-up with x-use-bearer: 1 also emits set-auth-token", async () => {
+    const handler = handlerFor(makeFixture(), { bearerMode: "opt-in" });
+    const res = await handler(
+      jsonRequest("/sign-up", { email: "bearer2@test.com", password: PW }, { "x-use-bearer": "1" }),
+    );
+    expect(res.status).toBe(200);
+    const token = res.headers.get(BEARER_TOKEN_HEADER);
+    expect(typeof token).toBe("string");
+    expect(token!.length).toBeGreaterThan(0);
+  });
+
+  it("always mode: every session-issuing response carries set-auth-token", async () => {
+    const handler = handlerFor(makeFixture(), { bearerMode: true });
+
+    const signUpRes = await handler(
+      jsonRequest("/sign-up", { email: "always@test.com", password: PW }),
+    );
+    expect(signUpRes.status).toBe(200);
+    const signUpToken = signUpRes.headers.get(BEARER_TOKEN_HEADER);
+    expect(typeof signUpToken).toBe("string");
+    expect(signUpToken!.length).toBeGreaterThan(0);
+
+    // Token from sign-up is usable as a bearer token
+    const sessionRes = await handler(
+      getRequest("/session", { authorization: `Bearer ${signUpToken}` }),
+    );
+    expect(sessionRes.status).toBe(200);
+    const body = (await sessionRes.json()) as { user: { email: string } };
+    expect(body.user.email).toBe("always@test.com");
+  });
+
+  it("always mode: set-auth-token is present without x-use-bearer header", async () => {
+    const handler = handlerFor(makeFixture(), { bearerMode: true });
+    const res = await handler(jsonRequest("/sign-up", { email: "always2@test.com", password: PW }));
+    expect(res.status).toBe(200);
+    // No x-use-bearer sent — header still present in "always" mode
+    expect(res.headers.get(BEARER_TOKEN_HEADER)).not.toBeNull();
+  });
+
+  it("bearerMode false (default): no set-auth-token header even with x-use-bearer", async () => {
+    const handler = handlerFor(makeFixture());
+    const res = await handler(
+      jsonRequest("/sign-up", { email: "nobear@test.com", password: PW }, { "x-use-bearer": "1" }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get(BEARER_TOKEN_HEADER)).toBeNull();
+  });
+
+  it("opt-in: magic-link verify with x-use-bearer emits set-auth-token", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture, { features: true, bearerMode: "opt-in" });
+
+    // Register user
+    await handler(jsonRequest("/sign-up", { email: "ml@test.com", password: PW }));
+    // Send magic link
+    await handler(jsonRequest("/magic-link/send", { email: "ml@test.com" }));
+    const token = fixture.sentMagicLinkTokens.at(-1)!;
+
+    // Verify with x-use-bearer
+    const verifyRes = await handler(
+      jsonRequest("/magic-link/verify", { token }, { "x-use-bearer": "1" }),
+    );
+    expect(verifyRes.status).toBe(200);
+    const bearerToken = verifyRes.headers.get(BEARER_TOKEN_HEADER);
+    expect(typeof bearerToken).toBe("string");
+    expect(bearerToken!.length).toBeGreaterThan(0);
+
+    // Use the bearer token to fetch session
+    const sessionRes = await handler(
+      getRequest("/session", { authorization: `Bearer ${bearerToken}` }),
+    );
+    expect(sessionRes.status).toBe(200);
+    const body = (await sessionRes.json()) as { user: { email: string } };
+    expect(body.user.email).toBe("ml@test.com");
   });
 });

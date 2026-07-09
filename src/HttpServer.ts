@@ -94,6 +94,19 @@ export type AuthServices =
  */
 
 // -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
+/**
+ * Response header name used by bearer mode to deliver the raw session token.
+ *
+ * When `bearerMode` is enabled, every session-issuing response carries this
+ * header so native/mobile/CLI clients can store the token and present it as
+ * `Authorization: Bearer <token>` on subsequent requests.
+ */
+export const BEARER_TOKEN_HEADER = "set-auth-token" as const;
+
+// -----------------------------------------------------------------------------
 // Cookie configuration
 // -----------------------------------------------------------------------------
 
@@ -130,6 +143,41 @@ export interface CookieConfig {
    * also record the method into `session.attributes.method` server-side.
    */
   readonly lastLoginMethod?: boolean | { readonly maxAge?: number };
+  /**
+   * Issue the raw session token in a `set-auth-token` response header on
+   * every session-issuing endpoint (sign-in, sign-up, magic-link verify,
+   * OTP verify, OAuth callback, …) in addition to the normal `Set-Cookie`.
+   *
+   * - `false` (default): sessions are issued only via httpOnly cookies.
+   *   The httpOnly flag prevents client-side JavaScript from reading the
+   *   token — the strongest option for browser clients.
+   *
+   * - `true` / `"always"`: every session-issuing response also carries
+   *   `set-auth-token: <raw-token>`. The client **must** store this token
+   *   in secure platform storage (iOS Keychain,
+   *   Android EncryptedSharedPreferences, OS credential store) and present
+   *   it as `Authorization: Bearer <token>` on subsequent requests.
+   *   ⚠ The token is exposed outside the httpOnly boundary — suitable for
+   *   native mobile/desktop/CLI clients where httpOnly cookies are
+   *   unavailable. Do not use for browser clients without understanding the
+   *   XSS exposure.
+   *
+   * - `"opt-in"`: same as `"always"`, but only when the incoming request
+   *   includes an `x-use-bearer: 1` header. A single server can serve both
+   *   browser (cookie) and native (bearer) clients without a separate
+   *   deployment.
+   *
+   * CSRF note: bearer-token clients that omit the `Origin` or `Referer`
+   * header bypass the CSRF origin check and are implicitly allowed. This is
+   * safe because bearer tokens are not vulnerable to CSRF — a cross-site
+   * request cannot attach a custom `Authorization` header.
+   *
+   * CORS note: if you serve browser-based native clients (e.g. Electron or
+   * Capacitor) across origins, add `Access-Control-Expose-Headers:
+   * set-auth-token` in your CORS middleware so JavaScript can read the
+   * header from cross-origin responses.
+   */
+  readonly bearerMode?: boolean | "always" | "opt-in";
 }
 
 /** Multiple concurrent accounts per client (device-scoped session list). */
@@ -145,6 +193,7 @@ interface ResolvedCookieConfig {
   readonly cache: ResolvedSessionCache | undefined;
   readonly multiSession: { readonly maximumSessions: number } | undefined;
   readonly lastLoginMethod: { readonly maxAge: number } | undefined;
+  readonly bearerMode: "always" | "opt-in" | false;
 }
 
 const resolveCookieConfig = (
@@ -160,6 +209,7 @@ const resolveCookieConfig = (
   const effectiveName = useHostPrefix && secureCookies ? `__Host-${baseName}` : baseName;
   // __Host- cookies must have Path=/; override whatever path was configured.
   const effectivePath = useHostPrefix && secureCookies ? "/" : configuredPath;
+  const bm = config?.bearerMode;
   return {
     name: effectiveName,
     secure: secureCookies,
@@ -177,6 +227,7 @@ const resolveCookieConfig = (
               (config.lastLoginMethod === true ? undefined : config.lastLoginMethod.maxAge) ??
               30 * 24 * 60 * 60 * 1000,
           },
+    bearerMode: bm === true || bm === "always" ? "always" : bm === "opt-in" ? "opt-in" : false,
   };
 };
 
@@ -2815,6 +2866,20 @@ const withSessionCookie = (
         method,
         lastMethodCookieOptions(cfg, cfg.lastLoginMethod.maxAge),
       );
+    }
+    // Bearer mode: emit the raw session token in a response header so
+    // native/mobile/CLI clients can obtain it without cookie support.
+    // "always" → every session-issuing response carries the header.
+    // "opt-in" → only when the client sent x-use-bearer: 1.
+    if (cfg.bearerMode !== false) {
+      let emitBearer = cfg.bearerMode === "always";
+      if (!emitBearer) {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        emitBearer = request.headers["x-use-bearer"] === "1";
+      }
+      if (emitBearer) {
+        response = HttpServerResponse.setHeader(response, "set-auth-token", session.id);
+      }
     }
     return response;
   }).pipe(Effect.orDie);
