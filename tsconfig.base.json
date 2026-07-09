@@ -6,6 +6,7 @@
     "moduleResolution": "NodeNext",
     "moduleDetection": "force",
     "lib": ["ESNext"],
+    "types": ["node"],
     "strict": true,
     "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,

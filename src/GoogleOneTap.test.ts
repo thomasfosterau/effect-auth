@@ -15,7 +15,7 @@ import {
   PasswordResetUserStore,
 } from "./PasswordReset.js";
 import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
-import { OAuthUserStore, type OAuthUserStoreShape } from "./OAuth.js";
+import { OAuthUserStore, type OAuthUserStoreShape } from "./OAuth/OAuth.js";
 import {
   makeGoogleOneTapService,
   GoogleOneTapError,

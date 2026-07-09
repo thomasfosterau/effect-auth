@@ -1,7 +1,7 @@
 # Protocol-server plugins out of scope; token primitives in
 
 Given the headless boundary (ADR-0001), better-auth plugins whose entire purpose is to expose a
-standardized protocol *endpoint* deliver ~10% of their value as headless logic. We scope them out
+standardized protocol _endpoint_ deliver ~10% of their value as headless logic. We scope them out
 for now: **OIDC Provider**, **OAuth 2.1 Provider**, **SSO** (SAML/OIDC consumer), **SCIM**, **MCP
 Provider**, **Device Authorization** grant.
 

@@ -1,7 +1,7 @@
 # Effect Auth
 
 A headless, storage-agnostic toolkit of composable Effect primitives for authentication and
-authorization. It aims to match the *capabilities* of better-auth while staying a library of
+authorization. It aims to match the _capabilities_ of better-auth while staying a library of
 pieces you assemble yourself — not a configured server instance.
 
 Every entity in this library belongs to exactly one of three categories, organised by the
@@ -19,7 +19,7 @@ fields (not buried in opaque attributes). A User authenticates by presenting a C
 matching Verification.
 _Avoid_: Customer, member, profile.
 
-### Credentials — *persistent registered means of authenticating*
+### Credentials — _persistent registered means of authenticating_
 
 #### Primary Credentials (sufficient alone)
 
@@ -49,11 +49,11 @@ _Avoid_: TwoFactorAccount, OTPAccount, "TOTP credential."
 
 **TrustedDevice**:
 A device on which a User has completed 2FA, allowing the prompt to be skipped for a configured
-window. A *negative* sign-in modifier (skip a factor) — still a Credential because it's a
+window. A _negative_ sign-in modifier (skip a factor) — still a Credential because it's a
 long-lived registered fact about the User's auth setup.
 _Avoid_: putting trusted-device state in Session attributes.
 
-### Verifications — *single-use artifacts proving possession or control*
+### Verifications — _single-use artifacts proving possession or control_
 
 Every Verification stores its value as a hash (ADR-0004). The plaintext is delivered once and
 never persisted.
@@ -82,14 +82,14 @@ _Avoid_: storing codes as a JSON array on the enrollment record.
 Never seen by the user — round-tripped via redirect.
 **WebAuthnChallenge**: single-use freshness proof for a WebAuthn assertion. Server-side only.
 
-### Auth state — *record of having authenticated*
+### Auth state — _record of having authenticated_
 
 **Session**: stateful auth state — a server-stored row with active and idle expiry, identified
 by a secure random id.
 **Jwt**: stateless auth state — issued to a holder, verified by signature against JWKS, no
 server-side row.
 
-### Feature-local state entities — *opt-in entities augmenting a canonical entity with feature state*
+### Feature-local state entities — _opt-in entities augmenting a canonical entity with feature state_
 
 Per ADR-0015, opt-in feature state lives in its own entity with its own store rather than as a
 column on the canonical entity. Don't provide the store → don't get the feature.
@@ -109,8 +109,8 @@ The source that vouches for a Credential on an Account. The built-in `credential
 email+password; social Providers are Google, GitHub, etc.
 
 **Credential** vs **`credential`**:
-*Capitalised* is the category (any entity in the Credentials section above).
-*Lowercase* is the providerId string for the email+password Account.
+_Capitalised_ is the category (any entity in the Credentials section above).
+_Lowercase_ is the providerId string for the email+password Account.
 
 ## Organization language
 
@@ -123,7 +123,7 @@ multi-tenancy concerns), but ships in the same package — see ADR-0008 for why.
 **Organization**:
 A workspace, tenant, or team-as-a-billing-unit. The thing a Member belongs to and an owned User
 belongs to. Stable id, name, slug, optional logo and metadata.
-_Avoid_: Workspace, Tenant. "Team" is *not* a synonym — a Team is a sub-grouping **within** an
+_Avoid_: Workspace, Tenant. "Team" is _not_ a synonym — a Team is a sub-grouping **within** an
 Organization (see below).
 
 **Member**:
@@ -134,7 +134,7 @@ _Avoid_: saying "the org's users" when you mean Member records — a Member is t
 not a User. Also avoid "the user's org" — a User may have many Memberships.
 
 **Invitation**:
-A pending request to join an Organization, addressed to an email. A *Verification* entity (see
+A pending request to join an Organization, addressed to an email. A _Verification_ entity (see
 the Verifications section above) with extra fields `organizationId`, `invitedEmail`,
 `proposedRole`, `inviterUserId`. Hashed at rest per ADR-0004; consumed by acceptance which
 creates the `Member` row.
@@ -156,7 +156,7 @@ synonyms.
 **TeamMembership**:
 The Member-to-Team relationship. Joined to `Member`, not `User` directly — being on a Team
 requires being a Member of the Team's Organization. Explicit per node: being on a parent Team
-does *not* implicitly add you to its sub-Teams.
+does _not_ implicitly add you to its sub-Teams.
 _Avoid_: implying that parent-team membership cascades to children.
 
 ### Role and permission terms
@@ -169,7 +169,7 @@ _Avoid_: per-org role storage (deferred feature; ADR-0009).
 
 **PermissionStatement**:
 `Record<resource, readonly action[]>` describing which actions on which resources a role permits.
-Permission checks intersect a *required* statement against the role's statement.
+Permission checks intersect a _required_ statement against the role's statement.
 _Avoid_: free-form permission strings; the resource/action structure is required.
 
 ### Ownership
@@ -207,7 +207,7 @@ doesn't dictate how membership in the role is stored.
 _Avoid_: hardcoding a single admin User; the role is a check, not an identity.
 
 **Impersonation**:
-The state where a system-admin is signed in *as* a target User for support purposes. Carried as
+The state where a system-admin is signed in _as_ a target User for support purposes. Carried as
 `Session.impersonatedBy: string` (the admin's userId). A security-critical signal that lives on
 Session by exception to ADR-0015 — see ADR-0014.
 
@@ -216,10 +216,10 @@ Session by exception to ADR-0015 — see ADR-0014.
 Things that look like they belong in the typology but don't. Don't add them.
 
 - **Foundational User fields** (`email`, `emailVerified`, `createdAt`, `image`, `name`) —
-  properties of the User, not entities. Feature flags like "is anonymous" or "is banned" do *not*
+  properties of the User, not entities. Feature flags like "is anonymous" or "is banned" do _not_
   live here per ADR-0015 — they get their own entities (`AnonymousMarker`, `Ban`).
-- **Organization domain entities** are *authorization* — a separate bounded context with its own
-  glossary section above. They are explicitly out of the *credential/verification typology*: when
+- **Organization domain entities** are _authorization_ — a separate bounded context with its own
+  glossary section above. They are explicitly out of the _credential/verification typology_: when
   someone asks "which of the three categories does Organization go in?" the answer is "none, it's
   a different context."
 - **System infrastructure** (JWT signing keys, rate-limit storage, hasher state, OAuth provider
@@ -230,10 +230,10 @@ Things that look like they belong in the typology but don't. Don't add them.
 
 - **"Account"** previously meant only OAuth links (`OAuthAccount`). It now also holds the password
   credential. When someone says "account," confirm they mean the unified record, not just social.
-- **"Credentials"** was overloaded: a `Credentials` type *and* a `getCredentials => hash` method.
+- **"Credentials"** was overloaded: a `Credentials` type _and_ a `getCredentials => hash` method.
   Both are deprecated in favour of the `password` field on a credential Account.
 - **"Verification"** is a category, not a single entity. better-auth has one `verification` table;
-  effect-auth has one entity *per* token-based feature. If someone says "the verification table,"
+  effect-auth has one entity _per_ token-based feature. If someone says "the verification table,"
   ask which token type they mean.
 - **"Factor"** covers both positive modifiers (require an additional code) and negative modifiers
   (`TrustedDevice` — skip a factor on this device). MFA literature uses the term that way.
@@ -247,7 +247,7 @@ Things that look like they belong in the typology but don't. Don't add them.
 
 > **Dev:** A user signs up with email and password — does that create a User and nothing else?
 >
-> **Domain:** It creates a User *and* an Account with `providerId: "credential"`, with the hashed
+> **Domain:** It creates a User _and_ an Account with `providerId: "credential"`, with the hashed
 > password on that Account. The email isn't verified yet.
 >
 > **Dev:** So when they later "sign in with Google," that's a second Account on the same User?
@@ -271,7 +271,7 @@ Things that look like they belong in the typology but don't. Don't add them.
 >
 > **Domain:** No. The TOTP secret is a Credential (`TwoFactorEnrollment`); the backup codes are
 > Verifications. Each `BackupCode` is single-use — consuming one is a row delete. The codes
-> *back up* the TOTP credential, but they're not credentials themselves.
+> _back up_ the TOTP credential, but they're not credentials themselves.
 >
 > **Dev:** If I add a user to an organisation, do I get a new User?
 >

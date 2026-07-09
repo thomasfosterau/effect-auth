@@ -258,14 +258,13 @@ export interface MultifactorService {
   >;
 }
 
-export class TwoFactorService extends Context.Service<TwoFactorService, TwoFactorServiceShape>()(
+export class TwoFactorService extends Context.Service<TwoFactorService, MultifactorService>()(
   "@effect-auth/TwoFactorService",
 ) {
   /**
    * Construct a Layer providing this service.
    */
-  static readonly layer = (config: TwoFactorConfig) =>
-    Layer.effect(TwoFactorService, makeTwoFactorService(config));
+  static readonly layer = (config: TwoFactorConfig) => Layer.effect(TwoFactorService, make(config));
 }
 
 /**
@@ -406,7 +405,7 @@ export const make = (config: TwoFactorConfig): Effect.Effect<MultifactorService,
     });
 
   return Effect.sync(
-    (): TwoFactorServiceShape => ({
+    (): MultifactorService => ({
       enable: (userId: string, password: string) =>
         Effect.gen(function* () {
           yield* verifyPassword(userId, password);

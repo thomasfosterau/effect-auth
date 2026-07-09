@@ -36,7 +36,7 @@ deployments to enable it accidentally.
 - `LinkableToExistingUser` — verified-email match on a different provider, but the trust policy
   did not auto-link. Caller prompts the user, forces sign-in to the existing account first, or
   treats as collision — the toolkit does not make that UX decision.
-- `Blocked` — the provider account is already linked to a *different* User (genuine collision /
+- `Blocked` — the provider account is already linked to a _different_ User (genuine collision /
   potential takeover attempt). Never auto-resolved.
 
 The trade-off: callers handle more shapes than they did before, and the `LinkableToExistingUser`

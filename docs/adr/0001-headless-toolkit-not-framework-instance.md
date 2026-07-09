@@ -4,7 +4,7 @@ When asked to "match better-auth's functionality," we deliberately scoped effect
 **toolkit of composable Effect primitives** rather than a `betterAuth()`-style instance. There is
 no central instance, no plugin runtime, no auto-mounted HTTP routes, no shipped client, no
 framework integrations, no schema-migration CLI, and no cookie/CSRF helpers. effect-auth provides
-the server-side auth *logic* — Stores, Services, Layers, and free Effect functions — and the
+the server-side auth _logic_ — Stores, Services, Layers, and free Effect functions — and the
 consumer assembles their own app.
 
 The trade-off is real: better-auth's value is largely the integrated runtime and the typed client.

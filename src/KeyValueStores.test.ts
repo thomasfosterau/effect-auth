@@ -12,7 +12,7 @@ import {
   EmailOtpStoreKV,
   PendingTwoFactorStoreKV,
 } from "./KeyValueStores.js";
-import { OAuthStateStore, type OAuthState } from "./OAuth.js";
+import { OAuthStateStore, type OAuthState } from "./OAuth/OAuth.js";
 import { ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.js";
 import { RateLimitStore, type RateLimitEntry } from "./RateLimit.js";
 import {

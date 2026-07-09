@@ -11,6 +11,6 @@ The trade-off: a leaked database now leaks only hashes, not live tokens. The cos
 operators cannot inspect or recover tokens from the store; that's the point. This applies
 uniformly across all token-bearing feature entities (`EmailVerificationToken`,
 `PasswordResetToken`, `MagicLink`, `EmailOtp`, `PhoneOtp`, `ApiKey`, `OneTimeToken`). Token
-*Account* fields holding upstream OAuth `accessToken`/`refreshToken` are outside this rule — those
+_Account_ fields holding upstream OAuth `accessToken`/`refreshToken` are outside this rule — those
 need to remain usable against the upstream provider; they are encrypted-at-rest concerns, not
 hashing concerns.

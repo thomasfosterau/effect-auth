@@ -4,13 +4,13 @@ import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { hashToken } from "./TokenHash.ts";
-import type { SessionStore } from "./SessionStore.ts";
-import type { UserStore } from "./UserStore.ts";
+import { SessionStore } from "./SessionStore.ts";
+import { UserStore } from "./UserStore.ts";
 
 /**
  * Session manager service
  */
-export interface SessionService {
+export interface SessionServiceShape {
   /**
    * Create a new session for a user
    */
@@ -69,41 +69,20 @@ export interface SessionService {
   ) => Effect.Effect<Types.Session, Errors.SessionNotFoundError | Errors.AuthError>;
 }
 
-/**
- * Tag for SessionManager service
- */
-export class SessionService extends Context.Service<SessionService, SessionService>()(
-  "@effect-auth/SessionService",
-) {
-  /**
-   * Construct a Layer providing this service.
-   */
-  static readonly layer = (config: Types.SessionConfig) =>
-    Layer.effect(SessionService, make(config));
-}
-
-/**
- * Generate a secure random session ID
- * Following Copenhagen guidelines for session tokens
- */
-const generateSessionId = (): string => {
-  // Generate 20 random bytes (160 bits) for session ID
-  // This provides sufficient entropy to prevent brute force attacks
-  return crypto.randomBytes(20).toString("hex");
-};
+const generateSessionId = (): string => crypto.randomBytes(20).toString("hex");
 
 /**
  * Create a SessionManager implementation
  */
 export const make = (
   config: Types.SessionConfig,
-): Effect.Effect<SessionService, never, SessionStore | UserStore> =>
+): Effect.Effect<SessionServiceShape, never, SessionStore | UserStore> =>
   Effect.gen(function* () {
     const sessionStore = yield* SessionStore;
     const userStore = yield* UserStore;
 
     return {
-      createSession: (rawUserId, rawAttributes = {}) =>
+      createSession: (rawUserId: string, rawAttributes: Record<string, unknown> = {}) =>
         Effect.gen(function* () {
           const hooks = yield* Hooks;
           const args = yield* hooks.beforeCreateSession({
@@ -270,3 +249,14 @@ export const make = (
         }),
     };
   });
+
+/**
+ * Tag for SessionManager service
+ */
+export class SessionService extends Context.Service<SessionService, SessionServiceShape>()(
+  "@effect-auth/SessionService",
+) {
+  static readonly make = make;
+  static readonly layer = (config: Types.SessionConfig) =>
+    Layer.effect(SessionService, make(config));
+}

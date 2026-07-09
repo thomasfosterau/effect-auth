@@ -9,6 +9,7 @@
  * @module email-otp
  */
 import { Context, Data, Effect, Layer } from "effect";
+import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { SessionManager } from "./Session.ts";
@@ -218,7 +219,7 @@ export const generateOtp = (length: number): Effect.Effect<string, Errors.AuthEr
 /**
  * Create an email OTP service
  */
-export const make = (config: EmailOtpConfig): Effect.Effect<EmailOTPService, never> => {
+export const make = (config: EmailOtpConfig): Effect.Effect<EmailOtpServiceShape, never> => {
   const otpLength = config.otpLength ?? 6;
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
   const maxAttempts = config.maxAttempts ?? 3;
