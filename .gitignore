@@ -94,3 +94,6 @@ examples/*/.output/
 examples/*/.nuxt/
 examples/*/.svelte-kit/
 examples/*/.react-router/
+
+# Removed workspace directories (still present on disk)
+site/
