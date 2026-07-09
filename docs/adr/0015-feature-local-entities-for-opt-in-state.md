@@ -5,28 +5,28 @@ User (or another canonical entity) — "is this user anonymous," "is this user b
 method did they last sign in with." The default placement for such state is a **feature-local
 entity** with its own store, not a column on the canonical entity.
 
-Three patterns were considered. *Optional fields on the canonical entity*
+Three patterns were considered. _Optional fields on the canonical entity_
 (`User.isAnonymous?`, `User.bannedAt?`) is simplest and matches better-auth, but the columns are
 always present in the type and schema even for deployments that never use the feature — "optional"
-only at the data level, not structurally. *Type mixins per feature* is composable at the type
-level but TypeScript-heavy and doesn't address the schema. *Feature-local entities*
+only at the data level, not structurally. _Type mixins per feature_ is composable at the type
+level but TypeScript-heavy and doesn't address the schema. _Feature-local entities_
 (`AnonymousMarker { userId, createdAt }`, `Ban { userId, reason, expiresAt }`,
 `LastLoginRecord { userId, method, at }`) each have their own store: don't provide the store, don't
 get the feature.
 
 We pick feature-local entities. It matches ADR-0002's per-feature philosophy (we already chose
-per-feature entities over a generic verification table); it makes opt-in *structural* rather than
+per-feature entities over a generic verification table); it makes opt-in _structural_ rather than
 presentational; it keeps the canonical `User` type minimal so future features don't bloat it; and
 it tree-shakes cleanly at the type level. Specifically, `AnonymousMarker`, `LastLoginRecord`, and
 `Ban` (revising ADR-0014) all become feature-local entities rather than User columns.
 
 Three exception classes exist where state stays on a canonical entity, justified case-by-case:
 
-- *Foundational* fields: `User.email`, `User.emailVerified`, `User.createdAt` — every User has
+- _Foundational_ fields: `User.email`, `User.emailVerified`, `User.createdAt` — every User has
   them; not a feature.
-- *Cross-domain pointers*: `User.ownedByOrganizationId`, `Account.ownedByOrganizationId` (ADR-0010)
+- _Cross-domain pointers_: `User.ownedByOrganizationId`, `Account.ownedByOrganizationId` (ADR-0010)
   — explicit relationships to another bounded context with no opt-in alternative.
-- *Security-critical signals*: `Session.impersonatedBy` (ADR-0014) — must be visible at every
+- _Security-critical signals_: `Session.impersonatedBy` (ADR-0014) — must be visible at every
   auth check; a separate entity would force a join on every authorisation decision and is the
   wrong shape for a signal this load-bearing.
 

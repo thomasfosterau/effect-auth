@@ -17,7 +17,7 @@ import {
 } from "./PasswordReset.js";
 import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
 import { OrganizationStore, type Member, type SsoProvider } from "./index.js";
-import { OAuthStateStore, OAuthUserStore, type OAuthState } from "./OAuth.js";
+import { OAuthStateStore, OAuthUserStore, type OAuthState } from "./OAuth/OAuth.js";
 import {
   makeSsoService,
   SsoProviderStore,

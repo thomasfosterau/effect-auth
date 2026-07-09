@@ -3,7 +3,7 @@
  * Following Copenhagen/Oslo guidelines for WebAuthn implementation
  */
 
-import { Context, Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import {
   parseAttestationObject,
   parseClientDataJSON,
@@ -19,13 +19,22 @@ import {
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import type { Uint8Array } from "effect/Schema";
-import type {
-  AuthenticationResponse,
-  AuthenticationResult,
-  RegistrationChallenge,
-  RegistrationResponse,
-  RegistrationResult,
-  WebAuthnUser,
+import {
+  ChallengeStore,
+  CredentialStore,
+  SUPPORTED_COSE_ALGORITHMS,
+  type AuthenticationResponse,
+  type AuthenticationResult,
+  type AuthenticatorSelectionCriteria,
+  type PublicKeyCredentialDescriptor,
+  type PublicKeyCredentialParameter,
+  type RegistrationChallenge,
+  type RegistrationResponse,
+  type RegistrationResult,
+  type WebAuthnChallenge,
+  type WebAuthnConfig,
+  type WebAuthnCredential,
+  type WebAuthnUser,
 } from "./WebAuthn.ts";
 
 /**
@@ -72,16 +81,18 @@ export interface WebAuthnService {
   >;
 }
 
-export const WebAuthnService: Context.Service<WebAuthnService, WebAuthnService> = Context.Service(
+export class WebAuthnService extends Context.Service<WebAuthnService, WebAuthnService>()(
   "@effect-auth/WebAuthnService",
-);
+) {
+  static readonly layer = (config: WebAuthnConfig) => Layer.effect(WebAuthnService, make(config));
+}
 
 /**
  * Create a WebAuthn service
  */
 export const make = (
   config: WebAuthnConfig,
-): Effect.Effect<WebAuthnServiceShape, never, ChallengeStore | CredentialStore> =>
+): Effect.Effect<WebAuthnService, never, ChallengeStore | CredentialStore> =>
   Effect.gen(function* () {
     const challengeStore = yield* ChallengeStore;
     const credentialStore = yield* CredentialStore;

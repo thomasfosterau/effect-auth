@@ -60,6 +60,7 @@ export const ErrorCode = {
   RESEND_TOO_SOON: "RESEND_TOO_SOON",
   MAGIC_LINK_ERROR: "MAGIC_LINK_ERROR",
   PASSWORD_RESET_ERROR: "PASSWORD_RESET_ERROR",
+  ONE_TIME_TOKEN_ERROR: "ONE_TIME_TOKEN_ERROR",
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -529,5 +530,20 @@ export class PasswordResetError extends Data.TaggedError("PasswordResetError")<{
 }> {
   get code(): typeof ErrorCode.PASSWORD_RESET_ERROR {
     return ErrorCode.PASSWORD_RESET_ERROR;
+  }
+}
+
+/**
+ * One-time token verification failure (invalid, expired, or already used).
+ *
+ * Anti-enumeration: all failure cases surface the same generic message so
+ * callers cannot distinguish between a token that never existed and one that
+ * has already been consumed.
+ */
+export class OneTimeTokenError extends Data.TaggedError("OneTimeTokenError")<{
+  readonly message: string;
+}> {
+  get code(): typeof ErrorCode.ONE_TIME_TOKEN_ERROR {
+    return ErrorCode.ONE_TIME_TOKEN_ERROR;
   }
 }

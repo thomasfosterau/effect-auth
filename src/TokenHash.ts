@@ -11,6 +11,7 @@
  *
  * @module token-hash
  */
+import * as crypto from "node:crypto";
 
 /**
  * SHA-256 hex digest of a token string.

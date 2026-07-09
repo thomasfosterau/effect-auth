@@ -1,26 +1,26 @@
 # Credential/Verification typology
 
 We organise every entity in effect-auth under a single principle borrowed from cryptography: the
-**key–signature duality**, generalised. Every authentication mechanism pairs a *persistent,
-registered* thing (the credential) with a *single-use, ephemeral* artifact whose successful
+**key–signature duality**, generalised. Every authentication mechanism pairs a _persistent,
+registered_ thing (the credential) with a _single-use, ephemeral_ artifact whose successful
 consumption proves possession or control of that credential — or of some flow's integrity. That
 pair is structural, not optional.
 
 The library has exactly three top-level categories:
 
 1. **Credentials** — persistent registered facts that authenticate or modify authentication.
-   - *Primary* (sufficient alone): `Account`, `Passkey`, `ApiKey`.
-   - *Secondary* (modify a primary sign-in): `TwoFactorEnrollment`, `TrustedDevice`.
+   - _Primary_ (sufficient alone): `Account`, `Passkey`, `ApiKey`.
+   - _Secondary_ (modify a primary sign-in): `TwoFactorEnrollment`, `TrustedDevice`.
 2. **Verifications** — single-use artifacts whose consumption proves something.
-   - *Issued-on-demand, user-facing*: `EmailVerificationToken`, `PasswordResetToken`, `MagicLink`,
+   - _Issued-on-demand, user-facing_: `EmailVerificationToken`, `PasswordResetToken`, `MagicLink`,
      `EmailOtp`, `PhoneOtp`, `OneTimeToken`.
-   - *Pre-issued, user-facing*: `BackupCode`.
-   - *System-internal*: `OAuthState`, `WebAuthnChallenge`.
+   - _Pre-issued, user-facing_: `BackupCode`.
+   - _System-internal_: `OAuthState`, `WebAuthnChallenge`.
 3. **Auth state** — record of having authenticated.
-   - *Stateful*: `Session`.
-   - *Stateless*: `Jwt`.
+   - _Stateful_: `Session`.
+   - _Stateless_: `Jwt`.
 
-The placement rule this gives us: ask first what *role* the entity plays (which of the three
+The placement rule this gives us: ask first what _role_ the entity plays (which of the three
 categories), then ask whether its shape can be shared with anything already in that category. If
 yes, share an entity (that's how `Account` covers password and every OAuth provider). If no, give
 it its own entity in the same category (that's how `Passkey` sits beside `Account`).
@@ -36,7 +36,7 @@ the same machinery as `EmailVerificationToken`; what differs is the terminal act
 
 **Explicit out-of-typology list** (to prevent drift): User attributes (`email`, `emailVerified`,
 `isAnonymous`, `image`, `name`); the Organization domain (`Organization`, `Member`, `Team`,
-`Invitation` — those are *authorization*, a separate bounded context); system infrastructure (JWT
+`Invitation` — those are _authorization_, a separate bounded context); system infrastructure (JWT
 signing keys, rate-limit storage, hasher state, OAuth provider client secrets); RBAC data
 (Role definitions, Permission grants).
 

@@ -10,8 +10,9 @@ import {
   PhoneOtpStore,
   PhoneOtpUserStore,
 } from "./PhoneOtp.js";
-import * as SessionStore from "./SessionStore.js";
-import * as SessionService from "./SessionService.js";
+import { SessionStore } from "./SessionStore.js";
+import { SessionService } from "./SessionService.js";
+import { UserStore, type UserStore as UserStoreShape } from "./UserStore.js";
 import { hashToken } from "./TokenHash.js";
 import { Hooks } from "./Hooks.js";
 import { UserNotFoundError } from "./Errors.js";

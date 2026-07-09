@@ -11,7 +11,7 @@ into a graph walk, cycle prevention into a topological sort, and "where does thi
 into a non-deterministic question. DAG semantics can be added later if real demand appears;
 reversing from DAG back to tree is much harder.
 
-**Membership is explicit per node — no cascade down.** Being on team Engineering does *not*
+**Membership is explicit per node — no cascade down.** Being on team Engineering does _not_
 implicitly make you a Member of its sub-team Backend. The hierarchy's value is permission cascade,
 not membership cascade. Auto-cascading membership makes roster queries ambiguous, inflates lists
 silently, and turns deletes into propagation puzzles.
@@ -19,7 +19,7 @@ silently, and turns deletes into propagation puzzles.
 **Permission cascade is narrow: only `team`-resource permissions cascade down ancestors.** A
 Member whose role grants `team: ["manage", "view-roster"]` on team Engineering automatically has
 those `team` actions on every descendant. Non-`team` resources (`document`, `issue`, etc.) are
-*not* automatically team-scoped just because hierarchy exists — they remain Org-level unless the
+_not_ automatically team-scoped just because hierarchy exists — they remain Org-level unless the
 consumer composes team-scoped checks on top. This keeps hierarchy semantics narrow and
 predictable: ancestors manage their subtree, nothing more.
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
+import * as crypto from "node:crypto";
 import { AuthError } from "../Errors.js";
 import {
   makeOAuthProvider,

@@ -8,7 +8,7 @@ import { makeEmailPasswordService } from "./EmailPassword.js";
 import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
 import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.js";
-import { RateLimitPlugin } from "./plugins/RateLimitPlugin.js";
+import { RateLimitPlugin } from "./RateLimitPlugin.js";
 import type { Session, SessionConfig, User } from "./Types.js";
 
 const signIn = (email: string): SignInInput => ({ email, password: "secret" });

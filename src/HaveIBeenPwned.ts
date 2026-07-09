@@ -12,7 +12,8 @@
  *
  * @module plugins/hibp
  */
-import { Effect, Crypto } from "effect";
+import { Effect } from "effect";
+import * as nodeCrypto from "node:crypto";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import type { SignUpInput } from "./EmailPassword.ts";
 import { makePlugin, type ResetPasswordArgs } from "./Hooks.ts";
@@ -27,10 +28,8 @@ export interface HibpConfig {
 
 const RANGE_URL = "https://api.pwnedpasswords.com/range";
 
-const sha1Upper = Effect.fn("")(function* (password: string): string {
-  const crypto = yield* Crypto.Crypto;
-  return crypto.createHash("SHA-1").update(password).digest("hex").toUpperCase();
-});
+const sha1Upper = (password: string): string =>
+  nodeCrypto.createHash("sha1").update(password).digest("hex").toUpperCase();
 
 /**
  * Build the HIBP plugin. The resulting layer is

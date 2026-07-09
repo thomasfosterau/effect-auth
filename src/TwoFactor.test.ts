@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect } from "effect";
 import { Hooks } from "./Hooks.js";
+import { SessionStore } from "./SessionStore.js";
+import { UserStore } from "./UserStore.js";
+import { SessionService } from "./SessionService.js";
 import {
   makeTwoFactorService,
   type PendingTwoFactor,
