@@ -232,3 +232,5 @@ export function base64UrlDecode(str: string): Uint8Array {
   }
   return new Uint8Array(Buffer.from(base64, "base64"));
 }
+
+export { make as makeWebAuthnService } from "./WebAuthnService.ts";

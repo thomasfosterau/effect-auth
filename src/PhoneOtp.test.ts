@@ -89,7 +89,7 @@ const phoneOtpUserStore: PhoneOtpUserStoreShape = {
     }),
 };
 
-const sessionStore: SessionStoreShape = {
+const sessionStore: SessionStore = {
   create: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -110,7 +110,7 @@ const sessionStore: SessionStoreShape = {
     Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
 };
 
-const userStore: UserStoreShape = {
+const userStore: UserStore = {
   get: (userId) => Effect.sync(() => users.get(userId) ?? null),
   getCredentials: (_userId) => Effect.succeed(null),
 };

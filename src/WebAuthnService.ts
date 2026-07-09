@@ -108,7 +108,7 @@ export interface WebAuthnServiceShape {
  */
 export const make = (
   config: WebAuthnConfig,
-): Effect.Effect<WebAuthnServiceShape, never, ChallengeStore | CredentialStore> =>
+): Effect.Effect<WebAuthnService, never, ChallengeStore | CredentialStore> =>
   Effect.gen(function* () {
     const challengeStore = yield* ChallengeStore;
     const credentialStore = yield* CredentialStore;

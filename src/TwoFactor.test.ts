@@ -16,6 +16,9 @@ import { type CreateUserInput, EmailPasswordStore } from "./EmailPassword.js";
 import { generateTOTP } from "./Otp.js";
 import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 import type { Session, User, SessionConfig } from "./Types.js";
+import { SessionService, make as makeSessionService } from "./SessionService.js";
+import { SessionStore } from "./SessionStore.js";
+import { UserStore } from "./UserStore.js";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
