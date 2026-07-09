@@ -178,7 +178,8 @@ export const makeAuthLifecycleService = (
 
           return {
             user: result.user,
-            ...(result.session !== undefined && { session: result.session }),
+            ...(!needsEmailVerification &&
+              result.session !== undefined && { session: result.session }),
             needsEmailVerification,
           } satisfies AuthLifecycleResult;
         }),
