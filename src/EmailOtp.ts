@@ -8,8 +8,8 @@
  *
  * @module email-otp
  */
+import { randomInt } from "node:crypto";
 import { Context, Data, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { SessionManager } from "./Session.ts";
@@ -212,7 +212,7 @@ export const generateOtp = (length: number): Effect.Effect<string, Errors.AuthEr
   Effect.sync(() => {
     let otp = "";
     for (let i = 0; i < length; i++) {
-      otp += crypto.randomInt(0, 10).toString();
+      otp += randomInt(0, 10).toString();
     }
     return otp;
   });

@@ -11,7 +11,11 @@ import {
   SessionManager,
 } from "./Session.js";
 import { AuthLifecycleService } from "./AuthLifecycle.js";
-import { EmailPasswordStore, type EmailPasswordStoreShape } from "./EmailPassword.js";
+import {
+  EmailPasswordService,
+  EmailPasswordStore,
+  type EmailPasswordStoreShape,
+} from "./EmailPassword.js";
 import { PasswordHasher, makeScryptHasher } from "./Password.js";
 import {
   EmailVerificationStore,
@@ -276,6 +280,7 @@ const makeFixture = (): Fixture => {
     storeLayer,
     SessionManager.layer(SESSION_CONFIG).pipe(Layer.provide(storeLayer)),
     AuthLifecycleService.layer(),
+    EmailPasswordService.layer(),
     EmailVerificationService.layer({
       sendEmail: (_to, token) => Effect.sync(() => void sentVerificationTokens.push(token)),
     }),

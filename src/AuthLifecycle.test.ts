@@ -12,7 +12,12 @@ import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
 import { makeUserService, UserServiceStore, UserService } from "./User.js";
 import type { Session, SessionConfig, User } from "./Types.js";
-import { EmailPasswordStore } from "./EmailPassword.js";
+import {
+  EmailPasswordService,
+  EmailPasswordStore,
+  makeEmailPasswordService,
+  type EmailPasswordConfig,
+} from "./EmailPassword.js";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
@@ -152,7 +157,7 @@ const sessionConfig: SessionConfig = {
   },
 };
 
-const makeTestContext = async () => {
+const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       makeSessionManager(sessionConfig),
@@ -169,6 +174,10 @@ const makeTestContext = async () => {
     }),
   );
 
+  const emailPasswordService = await Effect.runPromise(
+    makeEmailPasswordService(emailPasswordConfig),
+  );
+
   const userService = await Effect.runPromise(makeUserService());
 
   return Context.merge(
@@ -178,16 +187,19 @@ const makeTestContext = async () => {
       Context.merge(
         Context.make(UserStore, userStore),
         Context.merge(
-          Context.make(EmailPasswordStore, emailPasswordStore),
+          Context.make(EmailPasswordService, emailPasswordService),
           Context.merge(
-            Context.make(EmailVerificationStore, emailVerificationStore),
+            Context.make(EmailPasswordStore, emailPasswordStore),
             Context.merge(
-              Context.make(EmailVerificationService, emailVerificationService),
+              Context.make(EmailVerificationStore, emailVerificationStore),
               Context.merge(
-                Context.make(UserServiceStore, userServiceStore),
+                Context.make(EmailVerificationService, emailVerificationService),
                 Context.merge(
-                  Context.make(UserService, userService),
-                  Context.make(PasswordHasher, makePBKDF2Hasher()),
+                  Context.make(UserServiceStore, userServiceStore),
+                  Context.merge(
+                    Context.make(UserService, userService),
+                    Context.make(PasswordHasher, makePBKDF2Hasher()),
+                  ),
                 ),
               ),
             ),
@@ -234,7 +246,7 @@ describe("AuthLifecycleService", () => {
   });
 
   it("should return verification-needed on sign-in and resend when enabled", async () => {
-    const testContext = await makeTestContext();
+    const testContext = await makeTestContext({ requireEmailVerification: true });
 
     const hasher = makePBKDF2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("password-123"));

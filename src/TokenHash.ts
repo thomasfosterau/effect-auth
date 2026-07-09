@@ -11,8 +11,6 @@
  *
  * @module token-hash
  */
-import * as crypto from "node:crypto";
-
 /**
  * SHA-256 hex digest of a token string.
  *
@@ -20,8 +18,10 @@ import * as crypto from "node:crypto";
  * OTPs, API keys, OIDC codes). The same input always produces the same
  * output, so this can be used as a deterministic store key.
  */
+import { createHash, timingSafeEqual } from "node:crypto";
+
 export const hashToken = (token: string): string =>
-  crypto.createHash("sha256").update(token).digest("hex");
+  createHash("sha256").update(token).digest("hex");
 
 /**
  * Constant-time comparison of two hex-encoded SHA-256 digests.
@@ -33,5 +33,5 @@ export const constantTimeHashEqual = (a: string, b: string): boolean => {
   const bufA = Buffer.from(a, "hex");
   const bufB = Buffer.from(b, "hex");
   if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
+  return timingSafeEqual(bufA, bufB);
 };
