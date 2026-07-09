@@ -76,7 +76,7 @@ await Effect.runPromise(Effect.provide(program, layer));
 - **Platform features**: `Organization.ts`, `Admin.ts`, `ApiKey.ts`, `Jwt.ts` (ES256/EdDSA + JWKS), `OidcProvider.ts` (act as an OIDC identity provider), `RateLimit.ts`/`RateLimitPersistence.ts`.
 - **Extension**: `Hooks.ts` (typed hooks/plugin system; see [HOOKS_DESIGN.md](./HOOKS_DESIGN.md) for the original design rationale) and `plugins/` (audit, email normalization, rate limiting, account lockout, captcha, Have-I-Been-Pwned, last-login-method).
 - **Storage helpers**: `KeyValueStores.ts` — layers implementing the ephemeral stores (OAuth state, WebAuthn challenges, rate limits, tokens/OTPs, pending two-factor) over `effect/unstable/persistence` `KeyValueStore` (in-memory, file system, Redis, …).
-- **HTTP** (exported as the `Auth.Http` namespace): `HttpApiSchemas.ts` (wire schemas + HTTP error types), `HttpApi.ts` (the typed `AuthApi` contract), `HttpServer.ts` (handlers + mountable web handler), `SessionCookieCache.ts` (signed session-data cookie), `HttpClient.ts` (typed Effect client derived from the contract).
+- **HTTP** (exported as the `Auth.HTTP` namespace, also `effect-auth/http`): `HttpApiSchemas.ts` (wire schemas + HTTP error types), `HttpApi.ts` (the typed `AuthApi` contract), `HttpServer.ts` (handlers + mountable web handler), `SessionCookieCache.ts` (signed session-data cookie), `HttpClient.ts` (typed Effect client derived from the contract).
 
 ## Stores
 

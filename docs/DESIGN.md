@@ -42,7 +42,7 @@ const app = Effect.gen(function* () {
 - **Errors:** tagged errors, `AuthError` for infrastructure failure, specific tags
   for flow outcomes; lookups that can legitimately miss return `X | null` from
   stores and surface typed errors from services.
-- **HTTP:** the `AuthApi` contract under `Auth.Http`, one flat `auth` group,
+- **HTTP:** the `AuthApi` contract under `Auth.HTTP`, one flat `auth` group,
   404-until-configured for optional features, trusted-origin CSRF gate.
 
 ---
@@ -425,6 +425,13 @@ has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`
 **Risk.** None (additive).
 
 ## D9. Barrel & module boundaries
+
+> **Superseded** by `docs/refactor-plan.md` §6: `effect-auth` now also
+> publishes per-cluster subpath exports (`effect-auth/email`, `/http`,
+> `/oauth`, `/session`, `/password`, `/plugins`, `/authz`) alongside the root
+> barrel, with matching `Auth.Email` / `Auth.HTTP` / `Auth.OAuth` / ...
+> namespace re-exports from the root. The status quo/decision below reflects
+> the pre-refactor state.
 
 **Status quo.** `effect-auth` exports **only the root barrel** (package.json
 `exports: {"."}`), with HTTP under `Auth.Http`. The barrel flattens in

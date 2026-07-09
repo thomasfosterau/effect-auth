@@ -11,15 +11,15 @@ import { Effect, Layer } from "effect";
 const HOUR = 60 * 60 * 1000;
 
 // Low scrypt cost keeps the suite fast while exercising real hashing.
-const hasher = Auth.makeScryptHasher({ cost: 16384 });
+const hasher = Auth.Password.makeScryptHasher({ cost: 16384 });
 
 export const makeServerFixture = () => {
   const usersById = new Map<string, Auth.User>();
   const userIdByEmail = new Map<string, string>();
   const passwordHashes = new Map<string, string>();
   const sessions = new Map<string, Auth.Session>();
-  const verifications = new Map<string, Auth.EmailVerification>();
-  const resets = new Map<string, Auth.PasswordResetToken>();
+  const verifications = new Map<string, Auth.Email.EmailVerification>();
+  const resets = new Map<string, Auth.Password.PasswordResetToken>();
   let userSeq = 0;
 
   const createUser = (input: {
@@ -68,7 +68,7 @@ export const makeServerFixture = () => {
     getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
   };
 
-  const emailPasswordStore: Auth.EmailPasswordStoreShape = {
+  const emailPasswordStore: Auth.Email.EmailPasswordStoreShape = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
@@ -94,7 +94,7 @@ export const makeServerFixture = () => {
       }),
   };
 
-  const emailVerificationStore: Auth.EmailVerificationStoreShape = {
+  const emailVerificationStore: Auth.Email.EmailVerificationStoreShape = {
     create: (v) => Effect.sync(() => (verifications.set(v.token, v), v)),
     get: (token) => Effect.sync(() => verifications.get(token) ?? null),
     delete: (token) => Effect.sync(() => void verifications.delete(token)),
@@ -105,7 +105,7 @@ export const makeServerFixture = () => {
       }),
   };
 
-  const passwordResetStore: Auth.PasswordResetStoreShape = {
+  const passwordResetStore: Auth.Password.PasswordResetStoreShape = {
     create: (reset) => Effect.sync(() => (resets.set(reset.token, reset), reset)),
     get: (token) => Effect.sync(() => resets.get(token) ?? null),
     delete: (token) => Effect.sync(() => void resets.delete(token)),
@@ -115,7 +115,7 @@ export const makeServerFixture = () => {
       }),
   };
 
-  const passwordResetUserStore: Auth.PasswordResetUserStoreShape = {
+  const passwordResetUserStore: Auth.Password.PasswordResetUserStoreShape = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
@@ -123,28 +123,28 @@ export const makeServerFixture = () => {
   const storeLayer = Layer.mergeAll(
     Layer.succeed(Auth.SessionStore)(sessionStore),
     Layer.succeed(Auth.UserStore)(userStore),
-    Layer.succeed(Auth.EmailPasswordStore)(emailPasswordStore),
-    Layer.succeed(Auth.PasswordHasher)(hasher),
-    Layer.succeed(Auth.EmailVerificationStore)(emailVerificationStore),
-    Layer.succeed(Auth.PasswordResetStore)(passwordResetStore),
-    Layer.succeed(Auth.PasswordResetUserStore)(passwordResetUserStore),
+    Layer.succeed(Auth.Email.EmailPasswordStore)(emailPasswordStore),
+    Layer.succeed(Auth.Password.PasswordHasher)(hasher),
+    Layer.succeed(Auth.Email.EmailVerificationStore)(emailVerificationStore),
+    Layer.succeed(Auth.Password.PasswordResetStore)(passwordResetStore),
+    Layer.succeed(Auth.Password.PasswordResetUserStore)(passwordResetUserStore),
     Layer.succeed(Auth.UserServiceStore)(userServiceStore),
     Auth.Hooks.Default,
   );
 
-  const services: Layer.Layer<Auth.Http.AuthServices> = Layer.mergeAll(
+  const services: Layer.Layer<Auth.HTTP.AuthServices> = Layer.mergeAll(
     storeLayer,
     Auth.SessionService.layer({
       sessionExpiresIn: { activePeriod: HOUR, idlePeriod: HOUR },
     }).pipe(Layer.provide(storeLayer)),
     Auth.AuthLifecycleService.layer(),
-    Auth.EmailPasswordService.layer(),
-    Auth.EmailVerificationService.layer({ sendEmail: () => Effect.void }),
-    Auth.PasswordResetService.layer({ sendResetPassword: () => Effect.void }),
+    Auth.Email.EmailPasswordService.layer(),
+    Auth.Email.EmailVerificationService.layer({ sendEmail: () => Effect.void }),
+    Auth.Password.PasswordResetService.layer({ sendResetPassword: () => Effect.void }),
     Auth.UserService.layer(),
-  ) as Layer.Layer<Auth.Http.AuthServices>;
+  ) as Layer.Layer<Auth.HTTP.AuthServices>;
 
-  const { handler } = Auth.Http.makeAuthWebHandler({
+  const { handler } = Auth.HTTP.makeAuthWebHandler({
     services,
     cookie: { secure: false },
   });
