@@ -17,7 +17,7 @@ import {
   PasswordResetUserStore,
 } from "./password/PasswordReset.js";
 import { makeAuthWebHandler, type AuthServices } from "./http/HTTPServer.js";
-import { JWTKeyStore, type JWTKeyPair, type JWTKeyStoreShape, JWTService } from "./JWT.js";
+import { JWTKeyStore, type JWTKeyPair, JWTService } from "./JWT.js";
 import { generatePKCE, verifyIdToken } from "./oauth/OAuth.js";
 import {
   makeOIDCProviderService,
@@ -29,12 +29,8 @@ import {
   hashOIDCSecret,
   type OIDCAuthorizationCode,
   type OIDCClient,
-  type OIDCClientStoreShape,
-  type OIDCCodeStoreShape,
   type OIDCConsent,
-  type OIDCConsentStoreShape,
   type OIDCToken,
-  type OIDCTokenStoreShape,
   OIDCProviderService,
 } from "./OIDCProvider.js";
 import type * as Types from "./Types.js";

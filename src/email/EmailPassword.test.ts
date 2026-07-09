@@ -14,7 +14,6 @@ import {
   makePBKDF2Hasher,
   makeScryptHasher,
   makeMultiAlgorithmVerifier,
-  type PasswordHasherShape,
 } from "../password/Password.js";
 import type { Session, User, SessionConfig } from "../Types.js";
 
@@ -295,7 +294,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
   it("calls passwordHasher.verify even when the email does not exist", async () => {
     let verifyCalls = 0;
     const realHasher = makePBKDF2Hasher();
-    const spyHasher: PasswordHasherShape = {
+    const spyHasher: typeof PasswordHasher.Service = {
       algorithm: realHasher.algorithm,
       hash: (password) => realHasher.hash(password),
       verify: (password, hash) => {
@@ -337,7 +336,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
   it("calls passwordHasher.verify even when the user has no password hash", async () => {
     let verifyCalls = 0;
     const realHasher = makePBKDF2Hasher();
-    const spyHasher: PasswordHasherShape = {
+    const spyHasher: typeof PasswordHasher.Service = {
       algorithm: realHasher.algorithm,
       hash: (password) => realHasher.hash(password),
       verify: (password, hash) => {

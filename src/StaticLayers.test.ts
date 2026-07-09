@@ -51,7 +51,7 @@ describe("static service layers", () => {
       attributes: {},
     };
 
-    const sessionStore: Auth.SessionStoreShape = {
+    const sessionStore: typeof Auth.SessionStore.Service = {
       create: (session) =>
         Effect.sync(() => {
           sessions.set(session.id, session);
@@ -69,7 +69,7 @@ describe("static service layers", () => {
         Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
     };
 
-    const userStore: Auth.UserStoreShape = {
+    const userStore: typeof Auth.UserStore.Service = {
       get: (userId) => Effect.succeed(userId === user.id ? user : null),
       getCredentials: () => Effect.succeed(null),
     };
@@ -114,7 +114,7 @@ describe("static service layers", () => {
       updatedAt: new Date(),
       attributes: {},
     };
-    const store: Auth.UserServiceStoreShape = {
+    const store: typeof Auth.UserServiceStore.Service = {
       get: (userId) => Effect.succeed(userId === user.id ? user : null),
       getByEmail: () => Effect.succeed(null),
       update: (u) => Effect.succeed(u),

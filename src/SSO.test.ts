@@ -6,7 +6,6 @@ import { Hooks } from "./Hooks.js";
 import { SessionService } from "./session/SessionService.js";
 import { SessionStore } from "./session/SessionStore.js";
 import { UserStore } from "./session/UserStore.js";
-import type { SessionServiceShape } from "./session/SessionService.js";
 import { hashToken } from "./TokenHash.js";
 import { UserServiceStore, UserService } from "./User.js";
 import { AuthLifecycleService } from "./AuthLifecycle.js";
@@ -21,13 +20,7 @@ import {
 import { makeAuthWebHandler, type AuthServices } from "./http/HTTPServer.js";
 import { OrganizationStore, type Member, type SSOProvider } from "./index.js";
 import { OAuthStateStore, OAuthUserStore, type OAuthState } from "./oauth/OAuth.js";
-import {
-  makeSSOService,
-  SSOProviderStore,
-  SSOError,
-  type SSOProviderStoreShape,
-  SSOService,
-} from "./SSO.js";
+import { makeSSOService, SSOProviderStore, SSOError, SSOService } from "./SSO.js";
 import type * as Types from "./Types.js";
 
 /** Swap `globalThis.fetch` for a route handler while `thunk` runs. */
@@ -59,7 +52,7 @@ const makeStores = () => {
   const members: Member[] = [];
   let userSeq = 0;
 
-  const ssoStore: SSOProviderStoreShape = {
+  const ssoStore: typeof SSOProviderStore.Service = {
     create: (p) => Effect.sync(() => (providers.set(p.id, p), p)),
     getById: (id) => Effect.succeed(providers.get(id) ?? null),
     getByDomain: (domain) =>
@@ -98,7 +91,7 @@ const makeStores = () => {
     delete: (state: string) => Effect.sync(() => void states.delete(state)),
   };
 
-  const sessionManager: SessionServiceShape = {
+  const sessionManager: typeof SessionService.Service = {
     createSession: (userId) =>
       Effect.succeed({
         id: `s-${userId}`,
@@ -387,7 +380,7 @@ const makeHttpFixture = () => {
         return user;
       }),
   };
-  const ssoStore: SSOProviderStoreShape = {
+  const ssoStore: typeof SSOProviderStore.Service = {
     create: (p) => Effect.sync(() => (providers.set(p.id, p), p)),
     getById: (id) => Effect.succeed(providers.get(id) ?? null),
     getByDomain: (domain) =>
