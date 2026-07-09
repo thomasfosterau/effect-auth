@@ -1,3 +1,4 @@
+import { resolve } from "path";
 import { defineConfig } from "vite-plus";
 
 export default defineConfig({
@@ -13,6 +14,13 @@ export default defineConfig({
     // Keeping it out of lint avoids a single cross-repo program mis-resolving
     // per-project types (e.g. @types/node globals).
     options: { typeAware: false, typeCheck: false },
+  },
+  resolve: {
+    alias: {
+      // packages/*/dist/ is gitignored; resolve effect-auth to source so
+      // packages/client tests work in CI without a separate build step.
+      "effect-auth": resolve(__dirname, "src/index.ts"),
+    },
   },
   test: {
     globals: true,

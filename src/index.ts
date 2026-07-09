@@ -95,3 +95,5 @@ export * from "./HaveIBeenPwned.ts";
 export * from "./LastLoginMethodPlugin.ts";
 /** IP-keyed rate limiting (sign-in, sign-up, password-reset) using the ClientIp service. */
 export * from "./IpRateLimitPlugin.ts";
+/** HTTP layer: makeAuthWebHandler, makeAuthClient, wire types. */
+export * as Http from "./Http.ts";
