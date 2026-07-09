@@ -8,14 +8,14 @@ import {
   type SecondFactorChallenge,
   type SignInInput,
   type SignUpInput,
-} from "./Email/EmailPassword.ts";
+} from "./email/EmailPassword.ts";
 import {
   type EmailVerificationResult,
   EmailVerificationService,
   EmailVerificationStore,
-} from "./Email/EmailVerification.ts";
-import { PasswordHasher } from "./Password.ts";
-import { SessionManager } from "./Session.ts";
+} from "./email/EmailVerification.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import { SessionService } from "./session/SessionService.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import type * as Types from "./Types.ts";
 
@@ -61,7 +61,7 @@ export interface AuthLifecycleServiceShape {
     | EmailPasswordService
     | EmailPasswordStore
     | PasswordHasher
-    | SessionManager
+    | SessionService
     | EmailVerificationService
     | EmailVerificationStore
     | Hooks
@@ -79,7 +79,7 @@ export interface AuthLifecycleServiceShape {
     | EmailPasswordService
     | EmailPasswordStore
     | PasswordHasher
-    | SessionManager
+    | SessionService
     | EmailVerificationService
     | EmailVerificationStore
     | Hooks
@@ -92,7 +92,7 @@ export interface AuthLifecycleServiceShape {
     Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError | HookError,
     | UserService
     | UserServiceStore
-    | SessionManager
+    | SessionService
     | EmailVerificationService
     | EmailVerificationStore
     | Hooks
@@ -238,7 +238,7 @@ export const makeAuthLifecycleService = (
         Effect.gen(function* () {
           const verification = yield* EmailVerificationService;
           const userService = yield* UserService;
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
 
           // FIX 4: peekToken validates and returns the record without burning it,
           // so a failure in markEmailVerified leaves the token valid for retry.

@@ -11,7 +11,7 @@ import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
-import { SessionManager } from "./Session.ts";
+import { SessionService } from "./session/SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { hashToken } from "./TokenHash.ts";
 
@@ -123,7 +123,7 @@ export interface DeviceAuthorizationServiceShape {
     | Errors.SessionExpiredError
     | Errors.UserNotFoundError
     | HookError,
-    DeviceAuthorizationStore | SessionManager | Hooks
+    DeviceAuthorizationStore | SessionService | Hooks
   >;
 
   /** Approve a user code (called from an authenticated verification page). */
@@ -212,7 +212,7 @@ export const makeDeviceAuthorizationService = (
       poll: (deviceCode) =>
         Effect.gen(function* () {
           const store = yield* DeviceAuthorizationStore;
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
 
           const record = yield* store.getByDeviceCode(hashToken(deviceCode));
           const now = Date.now();

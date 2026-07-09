@@ -22,13 +22,13 @@ import {
   EmailPasswordStore,
   SecondFactorGate,
   type SecondFactorGateShape,
-} from "./Email/EmailPassword.ts";
+} from "./email/EmailPassword.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
-import { generateBase32Secret, generateOTPURI, verifyTOTP, type TOTPConfig } from "./Otp.ts";
-import { PasswordHasher } from "./Password.ts";
+import { generateBase32Secret, generateOTPURI, verifyTOTP, type TOTPConfig } from "./OTP.ts";
+import { PasswordHasher } from "./password/Password.ts";
 import type * as Types from "./Types.ts";
-import { UserStore } from "./UserStore.ts";
-import { SessionService } from "./SessionService.ts";
+import { UserStore } from "./session/UserStore.ts";
+import { SessionService } from "./session/SessionService.ts";
 
 /**
  * Two-factor error

@@ -7,9 +7,11 @@ import {
   makeEmailVerificationService,
   EmailVerificationStore,
   EmailVerificationService,
-} from "./Email/EmailVerification.js";
-import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
-import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
+} from "./email/EmailVerification.js";
+import { PasswordHasher, makePBKDF2Hasher } from "./password/Password.js";
+import { make, SessionService } from "./session/SessionService.js";
+import { SessionStore } from "./session/SessionStore.js";
+import { UserStore } from "./session/UserStore.js";
 import { makeUserService, UserServiceStore, UserService } from "./User.js";
 import type { Session, SessionConfig, User } from "./Types.js";
 import {
@@ -17,7 +19,7 @@ import {
   EmailPasswordStore,
   makeEmailPasswordService,
   type EmailPasswordConfig,
-} from "./Email/EmailPassword.js";
+} from "./email/EmailPassword.js";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
@@ -160,7 +162,7 @@ const sessionConfig: SessionConfig = {
 const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
-      makeSessionManager(sessionConfig),
+      make(sessionConfig),
       Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
     ),
   );
@@ -181,7 +183,7 @@ const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) =>
   const userService = await Effect.runPromise(makeUserService());
 
   return Context.merge(
-    Context.make(SessionManager, sessionManager),
+    Context.make(SessionService, sessionManager),
     Context.merge(
       Context.make(SessionStore, sessionStore),
       Context.merge(

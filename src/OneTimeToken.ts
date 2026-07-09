@@ -17,7 +17,7 @@ import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { hashToken } from "./TokenHash.ts";
-import { SessionService } from "./SessionService.ts";
+import { SessionService } from "./session/SessionService.ts";
 import type * as Types from "./Types.ts";
 
 // ---------------------------------------------------------------------------

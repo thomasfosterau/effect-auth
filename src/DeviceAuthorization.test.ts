@@ -11,13 +11,11 @@ import {
   type DeviceAuthorizationStoreShape,
 } from "./DeviceAuthorization.js";
 import { hashToken } from "./TokenHash.js";
-import {
-  SessionStore,
-  UserStore,
-  SessionManager,
-  type SessionStoreShape,
-  type UserStoreShape,
-} from "./Session.js";
+import { SessionStore } from "./session/SessionStore.js";
+import { UserStore } from "./session/UserStore.js";
+import { SessionService } from "./session/SessionService.js";
+import type { SessionStoreShape } from "./session/SessionStore.js";
+import type { UserStoreShape } from "./session/UserStore.js";
 import { Hooks } from "./Hooks.js";
 import type * as Types from "./Types.js";
 
@@ -87,7 +85,7 @@ const layer = Layer.mergeAll(
     interval: 5,
   }),
   Layer.succeed(DeviceAuthorizationStore)(store),
-  SessionManager.layer(sessionConfig).pipe(
+  SessionService.layer(sessionConfig).pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(SessionStore)(sessionStore),
@@ -102,7 +100,7 @@ const layer = Layer.mergeAll(
 const run = <A, E>(
   f: (
     svc: DeviceAuthorizationServiceShape,
-  ) => Effect.Effect<A, E, DeviceAuthorizationStore | SessionManager | Hooks>,
+  ) => Effect.Effect<A, E, DeviceAuthorizationStore | SessionService | Hooks>,
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {

@@ -14,10 +14,13 @@ import {
   SecondFactorGate,
   type EmailPasswordStoreShape,
   type SecondFactorGateShape,
-} from "./Email/EmailPassword.js";
-import { PasswordHasher, makeScryptHasher, type PasswordHasherShape } from "./Password.js";
-import { SessionManager, SessionStore, UserStore } from "./Session.js";
-import type { SessionStoreShape, UserStoreShape } from "./Session.js";
+} from "./email/EmailPassword.js";
+import { PasswordHasher, makeScryptHasher, type PasswordHasherShape } from "./password/Password.js";
+import { SessionService } from "./session/SessionService.js";
+import { SessionStore } from "./session/SessionStore.js";
+import { UserStore } from "./session/UserStore.js";
+import type { SessionStoreShape } from "./session/SessionStore.js";
+import type { UserStoreShape } from "./session/UserStore.js";
 import { Hooks } from "./Hooks.js";
 import type * as Types from "./Types.js";
 
@@ -114,7 +117,7 @@ const baseDeps = Layer.mergeAll(
   Layer.succeed(UsernameStore)(usernameStore),
   Layer.succeed(EmailPasswordStore)(emailPasswordStore),
   hasherLayer,
-  SessionManager.layer(sessionConfig).pipe(
+  SessionService.layer(sessionConfig).pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(SessionStore)(sessionStore),
@@ -138,7 +141,7 @@ type UsernameDeps =
   | EmailPasswordService
   | EmailPasswordStore
   | PasswordHasher
-  | SessionManager
+  | SessionService
   | Hooks;
 
 const run = <A, E>(
@@ -274,7 +277,7 @@ describe("UsernameService", () => {
       Layer.succeed(UsernameStore)(usernameStore),
       Layer.succeed(EmailPasswordStore)(emailPasswordStore),
       spyHasherLayer,
-      SessionManager.layer(sessionConfig).pipe(
+      SessionService.layer(sessionConfig).pipe(
         Layer.provide(
           Layer.mergeAll(
             Layer.succeed(SessionStore)(sessionStore),

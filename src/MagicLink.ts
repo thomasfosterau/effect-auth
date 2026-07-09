@@ -12,7 +12,7 @@ import { Context, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
-import { SessionManager } from "./Session.ts";
+import { SessionService } from "./session/SessionService.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
@@ -141,7 +141,7 @@ export interface MagicLinkServiceShape {
   ) => Effect.Effect<
     MagicLinkResult,
     Errors.MagicLinkError | Errors.AuthError | HookError,
-    MagicLinkStore | MagicLinkUserStore | SessionManager | Hooks
+    MagicLinkStore | MagicLinkUserStore | SessionService | Hooks
   >;
 }
 
@@ -239,7 +239,7 @@ export const makeMagicLinkService = (
         Effect.gen(function* () {
           const store = yield* MagicLinkStore;
           const userStore = yield* MagicLinkUserStore;
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
 
           if (!rawToken) {
             return yield* Effect.fail(

@@ -158,7 +158,7 @@ export const recordWebAuthnRegistration = (outcome: "success" | "failure"): Effe
 export const recordWebAuthnAuthentication = (outcome: "success" | "failure"): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(webauthnAuthentications, { outcome }), 1);
 
-export const recordOidcTokenRequest = (
+export const recordOIDCTokenRequest = (
   grant: string,
   outcome: "success" | "failure",
 ): Effect.Effect<void> =>
