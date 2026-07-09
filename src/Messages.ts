@@ -35,23 +35,24 @@ import { ErrorCode } from "./Errors.ts";
 // Service interface
 // ---------------------------------------------------------------------------
 
-export interface MessagesShape {
-  /**
-   * Resolve `code` to a human-readable string.
-   *
-   * @param code   - Stable error code (e.g. `"PASSWORD_TOO_SHORT"`).
-   * @param locale - BCP-47 locale tag (e.g. `"en"`, `"fr"`). Callers may pass
-   *                 `undefined`; the default catalog ignores it.
-   * @param params - Interpolation parameters specific to the error.
-   */
-  readonly resolve: (code: string, locale?: string, params?: Record<string, unknown>) => string;
-}
-
 // ---------------------------------------------------------------------------
 // Service class
 // ---------------------------------------------------------------------------
 
-export class Messages extends Context.Service<Messages, MessagesShape>()("@effect-auth/Messages") {
+export class Messages extends Context.Service<
+  Messages,
+  {
+    /**
+     * Resolve `code` to a human-readable string.
+     *
+     * @param code   - Stable error code (e.g. `"PASSWORD_TOO_SHORT"`).
+     * @param locale - BCP-47 locale tag (e.g. `"en"`, `"fr"`). Callers may pass
+     *                 `undefined`; the default catalog ignores it.
+     * @param params - Interpolation parameters specific to the error.
+     */
+    readonly resolve: (code: string, locale?: string, params?: Record<string, unknown>) => string;
+  }
+>()("@effect-auth/Messages") {
   /** Default English catalog – no setup required. */
   static readonly Default: Layer.Layer<Messages> = Layer.succeed(Messages, {
     resolve: defaultResolve,

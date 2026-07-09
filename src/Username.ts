@@ -140,7 +140,7 @@ const DEFAULT_CHARSET = /^[a-zA-Z0-9_.]+$/;
 
 export const makeUsernameService = (
   config: UsernameConfig = {},
-): Effect.Effect<UsernameServiceShape, never> => {
+): Effect.Effect<typeof UsernameService.Service, never> => {
   // Cached decoy hash — computed on first signIn call so that unknown-username
   // attempts always perform the same hashing work as known-username ones.
   let cachedDecoyHash: string | undefined;
@@ -158,7 +158,7 @@ export const makeUsernameService = (
   const maxLength = config.maxUsernameLength ?? 30;
   const requireEmailVerification = config.requireEmailVerification ?? false;
 
-  return Effect.sync((): UsernameServiceShape => {
+  return Effect.sync((): typeof UsernameService.Service => {
     const validate = (raw: string): Effect.Effect<string, UsernameError> =>
       Effect.gen(function* () {
         const trimmed = raw.trim();

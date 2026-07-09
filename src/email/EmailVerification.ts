@@ -35,74 +35,6 @@ export interface EmailVerificationConfig {
 }
 
 /**
- * Email verification service
- */
-export interface EmailVerificationServiceShape {
-  readonly createVerification: (
-    userId: string,
-    email: string,
-  ) => Effect.Effect<
-    { token: string; expiresAt: number },
-    AuthError | EmailVerificationError | HookError,
-    EmailVerificationStore | Hooks
-  >;
-
-  readonly verifyToken: (
-    token: string,
-  ) => Effect.Effect<
-    EmailVerificationResult,
-    EmailVerificationError | AuthError | HookError,
-    EmailVerificationStore | Hooks
-  >;
-
-  /**
-   * Validate a token (run `beforeVerifyEmail` hook, check expiry) without
-   * burning it. Returns the raw `EmailVerification` record so callers can
-   * perform additional checks (e.g. email-change guard) before committing the
-   * durable state change. Call `burnToken` afterward to complete the flow.
-   */
-  readonly peekToken: (
-    rawToken: string,
-  ) => Effect.Effect<
-    EmailVerification,
-    EmailVerificationError | AuthError | HookError,
-    EmailVerificationStore | Hooks
-  >;
-
-  /**
-   * Delete the token from the store and fire the `afterVerifyEmail` hook.
-   * Intended to be called AFTER the durable state change (e.g.
-   * `markEmailVerified`) has succeeded, so a store failure before that point
-   * leaves the token valid and the user can retry.
-   *
-   * The `token` parameter is the stored hash, as returned in
-   * `EmailVerification.token` by `peekToken`.
-   */
-  readonly burnToken: (
-    token: string,
-    result: EmailVerificationResult,
-  ) => Effect.Effect<
-    EmailVerificationResult,
-    AuthError | HookError,
-    EmailVerificationStore | Hooks
-  >;
-
-  /**
-   * Invalidate any outstanding verification tokens for the user and send a
-   * fresh one. Combine with the rate-limiter (e.g.
-   * `RateLimitPresets.emailVerification`) to prevent abuse.
-   */
-  readonly resendVerification: (
-    userId: string,
-    email: string,
-  ) => Effect.Effect<
-    { token: string; expiresAt: number },
-    AuthError | RateLimitError | EmailVerificationError | HookError,
-    EmailVerificationStore | Hooks
-  >;
-}
-
-/**
  * Email verification service implementation
  *
  * Provides token-based email verification with secure random tokens,
@@ -114,16 +46,89 @@ import * as crypto from "node:crypto";
 import { hashToken } from "../TokenHash.ts";
 
 /**
- * Email verification store context tag
+ * Storage interface for email verifications
  */
 export class EmailVerificationStore extends Context.Service<
   EmailVerificationStore,
-  EmailVerificationStoreShape
+  {
+    readonly create: (
+      verification: EmailVerification,
+    ) => Effect.Effect<EmailVerification, AuthError>;
+    readonly get: (token: string) => Effect.Effect<EmailVerification | null, AuthError>;
+    readonly delete: (token: string) => Effect.Effect<void, AuthError>;
+    readonly deleteByUserId: (userId: string) => Effect.Effect<void, AuthError>;
+  }
 >()("@effect-auth/EmailVerificationStore") {}
 
+/**
+ * Email verification service
+ */
 export class EmailVerificationService extends Context.Service<
   EmailVerificationService,
-  EmailVerificationServiceShape
+  {
+    readonly createVerification: (
+      userId: string,
+      email: string,
+    ) => Effect.Effect<
+      { token: string; expiresAt: number },
+      AuthError | EmailVerificationError | HookError,
+      EmailVerificationStore | Hooks
+    >;
+
+    readonly verifyToken: (
+      token: string,
+    ) => Effect.Effect<
+      EmailVerificationResult,
+      EmailVerificationError | AuthError | HookError,
+      EmailVerificationStore | Hooks
+    >;
+
+    /**
+     * Validate a token (run `beforeVerifyEmail` hook, check expiry) without
+     * burning it. Returns the raw `EmailVerification` record so callers can
+     * perform additional checks (e.g. email-change guard) before committing the
+     * durable state change. Call `burnToken` afterward to complete the flow.
+     */
+    readonly peekToken: (
+      rawToken: string,
+    ) => Effect.Effect<
+      EmailVerification,
+      EmailVerificationError | AuthError | HookError,
+      EmailVerificationStore | Hooks
+    >;
+
+    /**
+     * Delete the token from the store and fire the `afterVerifyEmail` hook.
+     * Intended to be called AFTER the durable state change (e.g.
+     * `markEmailVerified`) has succeeded, so a store failure before that point
+     * leaves the token valid and the user can retry.
+     *
+     * The `token` parameter is the stored hash, as returned in
+     * `EmailVerification.token` by `peekToken`.
+     */
+    readonly burnToken: (
+      token: string,
+      result: EmailVerificationResult,
+    ) => Effect.Effect<
+      EmailVerificationResult,
+      AuthError | HookError,
+      EmailVerificationStore | Hooks
+    >;
+
+    /**
+     * Invalidate any outstanding verification tokens for the user and send a
+     * fresh one. Combine with the rate-limiter (e.g.
+     * `RateLimitPresets.emailVerification`) to prevent abuse.
+     */
+    readonly resendVerification: (
+      userId: string,
+      email: string,
+    ) => Effect.Effect<
+      { token: string; expiresAt: number },
+      AuthError | RateLimitError | EmailVerificationError | HookError,
+      EmailVerificationStore | Hooks
+    >;
+  }
 >()("@effect-auth/EmailVerificationService") {
   /**
    * Construct a Layer providing this service.
@@ -143,7 +148,7 @@ export const generateVerificationToken = (): Effect.Effect<string, AuthError> =>
  */
 export const makeEmailVerificationService = (
   config: EmailVerificationConfig,
-): Effect.Effect<EmailVerificationServiceShape, never> => {
+): Effect.Effect<typeof EmailVerificationService.Service, never> => {
   const expiresIn = config.expiresIn ?? 24 * 60 * 60 * 1000; // 24 hours default
 
   const createVerification = (rawUserId: string, rawEmail: string) =>
@@ -187,7 +192,7 @@ export const makeEmailVerificationService = (
     });
 
   return Effect.sync(
-    (): EmailVerificationServiceShape => ({
+    (): typeof EmailVerificationService.Service => ({
       createVerification,
 
       verifyToken: (rawToken: string) =>

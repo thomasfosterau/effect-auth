@@ -27,7 +27,6 @@ export interface MagicLinkToken {
   readonly expiresAt: number;
 }
 
-
 /**
  * Input for creating a user during magic link verification
  */

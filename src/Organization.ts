@@ -123,58 +123,57 @@ export const defaultOrganizationRoles: Record<string, ReadonlyArray<string>> = {
  * Note: `deleteOrganization` should cascade - implementations are expected
  * to remove the organization's members and invitations as well.
  */
-export interface OrganizationStoreShape {
-  readonly createOrganization: (
-    organization: Organization,
-  ) => Effect.Effect<Organization, Errors.AuthError>;
-  readonly getOrganizationById: (
-    organizationId: string,
-  ) => Effect.Effect<Organization | null, Errors.AuthError>;
-  readonly getOrganizationBySlug: (
-    slug: string,
-  ) => Effect.Effect<Organization | null, Errors.AuthError>;
-  readonly updateOrganization: (
-    organization: Organization,
-  ) => Effect.Effect<Organization, Errors.AuthError>;
-  readonly deleteOrganization: (organizationId: string) => Effect.Effect<void, Errors.AuthError>;
+export class OrganizationStore extends Context.Service<
+  OrganizationStore,
+  {
+    readonly createOrganization: (
+      organization: Organization,
+    ) => Effect.Effect<Organization, Errors.AuthError>;
+    readonly getOrganizationById: (
+      organizationId: string,
+    ) => Effect.Effect<Organization | null, Errors.AuthError>;
+    readonly getOrganizationBySlug: (
+      slug: string,
+    ) => Effect.Effect<Organization | null, Errors.AuthError>;
+    readonly updateOrganization: (
+      organization: Organization,
+    ) => Effect.Effect<Organization, Errors.AuthError>;
+    readonly deleteOrganization: (organizationId: string) => Effect.Effect<void, Errors.AuthError>;
 
-  readonly createMember: (member: Member) => Effect.Effect<Member, Errors.AuthError>;
-  readonly getMember: (
-    organizationId: string,
-    userId: string,
-  ) => Effect.Effect<Member | null, Errors.AuthError>;
-  readonly updateMember: (member: Member) => Effect.Effect<Member, Errors.AuthError>;
-  readonly deleteMember: (memberId: string) => Effect.Effect<void, Errors.AuthError>;
-  readonly listMembersByOrganization: (
-    organizationId: string,
-  ) => Effect.Effect<ReadonlyArray<Member>, Errors.AuthError>;
-  readonly listMembersByUser: (
-    userId: string,
-  ) => Effect.Effect<ReadonlyArray<Member>, Errors.AuthError>;
-  readonly countMembersByOrganization: (
-    organizationId: string,
-  ) => Effect.Effect<number, Errors.AuthError>;
+    readonly createMember: (member: Member) => Effect.Effect<Member, Errors.AuthError>;
+    readonly getMember: (
+      organizationId: string,
+      userId: string,
+    ) => Effect.Effect<Member | null, Errors.AuthError>;
+    readonly updateMember: (member: Member) => Effect.Effect<Member, Errors.AuthError>;
+    readonly deleteMember: (memberId: string) => Effect.Effect<void, Errors.AuthError>;
+    readonly listMembersByOrganization: (
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<Member>, Errors.AuthError>;
+    readonly listMembersByUser: (
+      userId: string,
+    ) => Effect.Effect<ReadonlyArray<Member>, Errors.AuthError>;
+    readonly countMembersByOrganization: (
+      organizationId: string,
+    ) => Effect.Effect<number, Errors.AuthError>;
 
-  readonly createInvitation: (
-    invitation: Invitation,
-  ) => Effect.Effect<Invitation, Errors.AuthError>;
-  readonly getInvitation: (
-    invitationId: string,
-  ) => Effect.Effect<Invitation | null, Errors.AuthError>;
-  readonly updateInvitation: (
-    invitation: Invitation,
-  ) => Effect.Effect<Invitation, Errors.AuthError>;
-  readonly listInvitationsByOrganization: (
-    organizationId: string,
-  ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
-  readonly listInvitationsByEmail: (
-    email: string,
-  ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
-}
-
-export class OrganizationStore extends Context.Service<OrganizationStore, OrganizationStoreShape>()(
-  "@effect-auth/OrganizationStore",
-) {}
+    readonly createInvitation: (
+      invitation: Invitation,
+    ) => Effect.Effect<Invitation, Errors.AuthError>;
+    readonly getInvitation: (
+      invitationId: string,
+    ) => Effect.Effect<Invitation | null, Errors.AuthError>;
+    readonly updateInvitation: (
+      invitation: Invitation,
+    ) => Effect.Effect<Invitation, Errors.AuthError>;
+    readonly listInvitationsByOrganization: (
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
+    readonly listInvitationsByEmail: (
+      email: string,
+    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
+  }
+>()("@effect-auth/OrganizationStore") {}
 
 /**
  * Organization service configuration
@@ -240,160 +239,158 @@ export interface FullOrganization {
 /**
  * Organization service
  */
-export interface OrganizationServiceShape {
-  /**
-   * Create an organization. Enforces `allowUserToCreateOrganization`,
-   * `organizationLimit` (organizations the user already belongs to) and slug
-   * uniqueness. The creator becomes a member with `creatorRole`.
-   */
-  readonly createOrganization: (
-    userId: string,
-    input: CreateOrganizationInput,
-  ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError, OrganizationStore>;
-
-  /**
-   * Update an organization's fields. Requires the `organization:update`
-   * permission. Slug changes are checked for uniqueness.
-   */
-  readonly updateOrganization: (
-    userId: string,
-    organizationId: string,
-    updates: UpdateOrganizationInput,
-  ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError, OrganizationStore>;
-
-  /**
-   * Delete an organization. Requires the `organization:delete` permission.
-   */
-  readonly deleteOrganization: (
-    userId: string,
-    organizationId: string,
-  ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStore>;
-
-  /**
-   * Fetch an organization together with all of its members.
-   */
-  readonly getFullOrganization: (
-    organizationId: string,
-  ) => Effect.Effect<FullOrganization, OrganizationError | Errors.AuthError, OrganizationStore>;
-
-  /**
-   * List the organizations a user belongs to.
-   */
-  readonly listOrganizations: (
-    userId: string,
-  ) => Effect.Effect<ReadonlyArray<Organization>, Errors.AuthError, OrganizationStore>;
-
-  /**
-   * Invite a user (by email) to the organization. Requires the
-   * `invitation:create` permission. Rejects duplicate pending invitations for
-   * the same email + organization and enforces `membershipLimit`. When
-   * `sendInvitationEmail` is configured it is invoked with the created
-   * invitation.
-   */
-  readonly inviteMember: (
-    inviterId: string,
-    organizationId: string,
-    input: InviteMemberInput,
-  ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStore>;
-
-  /**
-   * Accept a pending invitation. Validates that the invitation is pending,
-   * unexpired, and addressed to `userEmail`. Creates the membership and marks
-   * the invitation accepted.
-   */
-  readonly acceptInvitation: (
-    userId: string,
-    invitationId: string,
-    userEmail: string,
-  ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStore>;
-
-  /**
-   * Reject a pending invitation addressed to `userEmail`.
-   */
-  readonly rejectInvitation: (
-    invitationId: string,
-    userEmail: string,
-  ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStore>;
-
-  /**
-   * Cancel a pending invitation. The canceler needs the `invitation:cancel`
-   * permission in the invitation's organization.
-   */
-  readonly cancelInvitation: (
-    cancelerId: string,
-    invitationId: string,
-  ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStore>;
-
-  /**
-   * List all invitations for an organization (any status).
-   */
-  readonly listInvitations: (
-    organizationId: string,
-  ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError, OrganizationStore>;
-
-  /**
-   * List pending, unexpired invitations addressed to an email.
-   */
-  readonly listUserInvitations: (
-    email: string,
-  ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError, OrganizationStore>;
-
-  /**
-   * Add a user to the organization directly (no invitation). Requires the
-   * `member:create` permission and enforces `membershipLimit`.
-   */
-  readonly addMember: (
-    actorId: string,
-    organizationId: string,
-    userId: string,
-    role: string,
-  ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStore>;
-
-  /**
-   * Remove a member. Requires the `member:delete` permission. An owner can
-   * only be removed by another owner, and the last owner can never be removed.
-   */
-  readonly removeMember: (
-    actorId: string,
-    organizationId: string,
-    memberUserId: string,
-  ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStore>;
-
-  /**
-   * Change a member's role. Requires the `member:update` permission. The last
-   * owner cannot be demoted.
-   */
-  readonly updateMemberRole: (
-    actorId: string,
-    organizationId: string,
-    memberUserId: string,
-    role: string,
-  ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStore>;
-
-  /**
-   * Whether the user's role in the organization grants the given
-   * `"resource:action"` permission. Non-members simply get `false`.
-   */
-  readonly checkPermission: (
-    userId: string,
-    organizationId: string,
-    permission: string,
-  ) => Effect.Effect<boolean, Errors.AuthError, OrganizationStore>;
-
-  /**
-   * Like {@link checkPermission} but fails with `OrganizationError` when the
-   * permission is not granted.
-   */
-  readonly requirePermission: (
-    userId: string,
-    organizationId: string,
-    permission: string,
-  ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStore>;
-}
-
 export class OrganizationService extends Context.Service<
   OrganizationService,
-  OrganizationServiceShape
+  {
+    /**
+     * Create an organization. Enforces `allowUserToCreateOrganization`,
+     * `organizationLimit` (organizations the user already belongs to) and slug
+     * uniqueness. The creator becomes a member with `creatorRole`.
+     */
+    readonly createOrganization: (
+      userId: string,
+      input: CreateOrganizationInput,
+    ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError, OrganizationStore>;
+
+    /**
+     * Update an organization's fields. Requires the `organization:update`
+     * permission. Slug changes are checked for uniqueness.
+     */
+    readonly updateOrganization: (
+      userId: string,
+      organizationId: string,
+      updates: UpdateOrganizationInput,
+    ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError, OrganizationStore>;
+
+    /**
+     * Delete an organization. Requires the `organization:delete` permission.
+     */
+    readonly deleteOrganization: (
+      userId: string,
+      organizationId: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStore>;
+
+    /**
+     * Fetch an organization together with all of its members.
+     */
+    readonly getFullOrganization: (
+      organizationId: string,
+    ) => Effect.Effect<FullOrganization, OrganizationError | Errors.AuthError, OrganizationStore>;
+
+    /**
+     * List the organizations a user belongs to.
+     */
+    readonly listOrganizations: (
+      userId: string,
+    ) => Effect.Effect<ReadonlyArray<Organization>, Errors.AuthError, OrganizationStore>;
+
+    /**
+     * Invite a user (by email) to the organization. Requires the
+     * `invitation:create` permission. Rejects duplicate pending invitations for
+     * the same email + organization and enforces `membershipLimit`. When
+     * `sendInvitationEmail` is configured it is invoked with the created
+     * invitation.
+     */
+    readonly inviteMember: (
+      inviterId: string,
+      organizationId: string,
+      input: InviteMemberInput,
+    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStore>;
+
+    /**
+     * Accept a pending invitation. Validates that the invitation is pending,
+     * unexpired, and addressed to `userEmail`. Creates the membership and marks
+     * the invitation accepted.
+     */
+    readonly acceptInvitation: (
+      userId: string,
+      invitationId: string,
+      userEmail: string,
+    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStore>;
+
+    /**
+     * Reject a pending invitation addressed to `userEmail`.
+     */
+    readonly rejectInvitation: (
+      invitationId: string,
+      userEmail: string,
+    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStore>;
+
+    /**
+     * Cancel a pending invitation. The canceler needs the `invitation:cancel`
+     * permission in the invitation's organization.
+     */
+    readonly cancelInvitation: (
+      cancelerId: string,
+      invitationId: string,
+    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStore>;
+
+    /**
+     * List all invitations for an organization (any status).
+     */
+    readonly listInvitations: (
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError, OrganizationStore>;
+
+    /**
+     * List pending, unexpired invitations addressed to an email.
+     */
+    readonly listUserInvitations: (
+      email: string,
+    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError, OrganizationStore>;
+
+    /**
+     * Add a user to the organization directly (no invitation). Requires the
+     * `member:create` permission and enforces `membershipLimit`.
+     */
+    readonly addMember: (
+      actorId: string,
+      organizationId: string,
+      userId: string,
+      role: string,
+    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStore>;
+
+    /**
+     * Remove a member. Requires the `member:delete` permission. An owner can
+     * only be removed by another owner, and the last owner can never be removed.
+     */
+    readonly removeMember: (
+      actorId: string,
+      organizationId: string,
+      memberUserId: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStore>;
+
+    /**
+     * Change a member's role. Requires the `member:update` permission. The last
+     * owner cannot be demoted.
+     */
+    readonly updateMemberRole: (
+      actorId: string,
+      organizationId: string,
+      memberUserId: string,
+      role: string,
+    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStore>;
+
+    /**
+     * Whether the user's role in the organization grants the given
+     * `"resource:action"` permission. Non-members simply get `false`.
+     */
+    readonly checkPermission: (
+      userId: string,
+      organizationId: string,
+      permission: string,
+    ) => Effect.Effect<boolean, Errors.AuthError, OrganizationStore>;
+
+    /**
+     * Like {@link checkPermission} but fails with `OrganizationError` when the
+     * permission is not granted.
+     */
+    readonly requirePermission: (
+      userId: string,
+      organizationId: string,
+      permission: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStore>;
+  }
 >()("@effect-auth/OrganizationService") {
   /**
    * Construct a Layer providing this service.
@@ -412,7 +409,7 @@ const generateId = (): string => crypto.randomBytes(16).toString("hex");
  */
 export const makeOrganizationService = (
   config: OrganizationConfig = {},
-): Effect.Effect<OrganizationServiceShape, never> => {
+): Effect.Effect<typeof OrganizationService.Service, never> => {
   const allowUserToCreateOrganization = config.allowUserToCreateOrganization ?? true;
   const organizationLimit = config.organizationLimit ?? 5;
   const membershipLimit = config.membershipLimit ?? 100;
@@ -516,7 +513,7 @@ export const makeOrganizationService = (
     });
 
   return Effect.sync(
-    (): OrganizationServiceShape => ({
+    (): typeof OrganizationService.Service => ({
       createOrganization: (userId, input) =>
         Effect.gen(function* () {
           if (!allowUserToCreateOrganization) {
