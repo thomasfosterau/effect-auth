@@ -66,6 +66,38 @@ export interface EmailVerificationServiceShape {
   >;
 
   /**
+   * Validate a token (run `beforeVerifyEmail` hook, check expiry) without
+   * burning it. Returns the raw `EmailVerification` record so callers can
+   * perform additional checks (e.g. email-change guard) before committing the
+   * durable state change. Call `burnToken` afterward to complete the flow.
+   */
+  readonly peekToken: (
+    rawToken: string,
+  ) => Effect.Effect<
+    EmailVerification,
+    EmailVerificationError | AuthError | HookError,
+    EmailVerificationStore | Hooks
+  >;
+
+  /**
+   * Delete the token from the store and fire the `afterVerifyEmail` hook.
+   * Intended to be called AFTER the durable state change (e.g.
+   * `markEmailVerified`) has succeeded, so a store failure before that point
+   * leaves the token valid and the user can retry.
+   *
+   * The `token` parameter is the stored hash, as returned in
+   * `EmailVerification.token` by `peekToken`.
+   */
+  readonly burnToken: (
+    token: string,
+    result: EmailVerificationResult,
+  ) => Effect.Effect<
+    EmailVerificationResult,
+    AuthError | HookError,
+    EmailVerificationStore | Hooks
+  >;
+
+  /**
    * Invalidate any outstanding verification tokens for the user and send a
    * fresh one. Combine with the rate-limiter (e.g.
    * `RateLimitPresets.emailVerification`) to prevent abuse.
@@ -206,6 +238,39 @@ export const makeEmailVerificationService = (
             verified: true,
           } satisfies EmailVerificationResult;
 
+          return yield* hooks.afterVerifyEmail(result);
+        }),
+
+      peekToken: (rawToken: string) =>
+        Effect.gen(function* () {
+          const hooks = yield* Hooks;
+          const { token } = yield* hooks.beforeVerifyEmail({ token: rawToken });
+          const store = yield* EmailVerificationStore;
+          const tokenHash = hashToken(token);
+          const verification = yield* store.get(tokenHash);
+          if (!verification) {
+            return yield* Effect.fail(
+              new EmailVerificationError({
+                message: "Invalid or expired verification token",
+              }),
+            );
+          }
+          if (Date.now() > verification.expiresAt) {
+            yield* store.delete(tokenHash);
+            return yield* Effect.fail(
+              new EmailVerificationError({
+                message: "Verification token has expired",
+              }),
+            );
+          }
+          return verification;
+        }),
+
+      burnToken: (token: string, result: EmailVerificationResult) =>
+        Effect.gen(function* () {
+          const store = yield* EmailVerificationStore;
+          yield* store.delete(token);
+          const hooks = yield* Hooks;
           return yield* hooks.afterVerifyEmail(result);
         }),
 

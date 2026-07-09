@@ -3,13 +3,17 @@ import * as Errors from "./Errors.ts";
 import { normalizeEmail } from "./utils.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import {
+  EmailPasswordService,
   EmailPasswordStore,
   type SecondFactorChallenge,
   type SignInInput,
   type SignUpInput,
-  makeEmailPasswordService,
 } from "./EmailPassword.ts";
-import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.ts";
+import {
+  type EmailVerificationResult,
+  EmailVerificationService,
+  EmailVerificationStore,
+} from "./EmailVerification.ts";
 import { PasswordHasher } from "./Password.ts";
 import { SessionManager } from "./Session.ts";
 import { UserServiceStore, UserService } from "./User.ts";
@@ -54,6 +58,7 @@ export interface AuthLifecycleServiceShape {
     | Errors.SignUpDisabledError
     | Errors.InvalidInputError
     | HookError,
+    | EmailPasswordService
     | EmailPasswordStore
     | PasswordHasher
     | SessionManager
@@ -71,6 +76,7 @@ export interface AuthLifecycleServiceShape {
     | Errors.InvalidCredentialsError
     | Errors.EmailVerificationError
     | HookError,
+    | EmailPasswordService
     | EmailPasswordStore
     | PasswordHasher
     | SessionManager
@@ -121,13 +127,48 @@ export const makeAuthLifecycleService = (
     (): AuthLifecycleServiceShape => ({
       signUp: (input) =>
         Effect.gen(function* () {
-          const emailPassword = yield* makeEmailPasswordService({
-            requireEmailVerification,
-            autoSignIn: true,
-          });
+          // FIX 1: consume the app-configured EmailPasswordService from context
+          // rather than reconstructing inline (which silently dropped disableSignUp,
+          // minPasswordLength, maxPasswordLength, etc.).
+          const emailPassword = yield* EmailPasswordService;
           const verification = yield* EmailVerificationService;
 
-          const result = yield* emailPassword.signUp(input);
+          // FIX 3: catch EmailInUseError to handle the atomicity gap — if
+          // createVerification fails after the user+password are written, a retry
+          // hits EmailInUseError for an unverified account. Re-issue the
+          // verification token so the user can complete sign-up without needing
+          // a support intervention.
+          const outcome = yield* emailPassword.signUp(input).pipe(
+            Effect.map((r) => ({ recovered: false as const, result: r })),
+            Effect.catchTag("EmailInUseError", (e) =>
+              Effect.gen(function* () {
+                const store = yield* EmailPasswordStore;
+                const existing = yield* store.getUserByEmail(normalizeEmail(input.email));
+
+                if (!existing || existing.emailVerified) {
+                  return yield* Effect.fail(e);
+                }
+
+                // Unverified duplicate: resend (also invalidates stale tokens,
+                // matching FIX 5 behaviour).
+                const email = getEmailFromUser(existing);
+                if (sendOnSignUp && email) {
+                  yield* verification.resendVerification(existing.id, email);
+                }
+
+                return { recovered: true as const, user: existing };
+              }),
+            ),
+          );
+
+          if (outcome.recovered) {
+            return {
+              user: outcome.user,
+              needsEmailVerification: true,
+            } satisfies AuthLifecycleResult;
+          }
+
+          const result = outcome.result;
           const email = getEmailFromUser(result.user);
           const needsEmailVerification = requireEmailVerification && !isEmailVerified(result.user);
 
@@ -144,10 +185,8 @@ export const makeAuthLifecycleService = (
 
       signIn: (input) =>
         Effect.gen(function* () {
-          const emailPassword = yield* makeEmailPasswordService({
-            requireEmailVerification,
-            autoSignIn: true,
-          });
+          // FIX 1: consume the app-configured EmailPasswordService from context.
+          const emailPassword = yield* EmailPasswordService;
           const verification = yield* EmailVerificationService;
 
           const signInResult = yield* Effect.catchTag(
@@ -166,8 +205,10 @@ export const makeAuthLifecycleService = (
                   );
                 }
 
+                // FIX 5: use resendVerification (which invalidates prior tokens
+                // via deleteByUserId) instead of createVerification.
                 if (sendOnSignIn) {
-                  yield* verification.createVerification(user.id, error.email);
+                  yield* verification.resendVerification(user.id, error.email);
                 }
 
                 return {
@@ -198,23 +239,46 @@ export const makeAuthLifecycleService = (
           const userService = yield* UserService;
           const sessionManager = yield* SessionManager;
 
-          const verificationResult = yield* verification.verifyToken(input.token);
-          const user = yield* userService.markEmailVerified(verificationResult.userId);
+          // FIX 4: peekToken validates and returns the record without burning it,
+          // so a failure in markEmailVerified leaves the token valid for retry.
+          const verificationRecord = yield* verification.peekToken(input.token);
+
+          // FIX 2: reject if the token's email no longer matches the current user
+          // — a stale token for a since-changed address must not verify the new one.
+          const currentUser = yield* userService.getUser(verificationRecord.userId);
+          if (normalizeEmail(verificationRecord.email) !== normalizeEmail(currentUser.email)) {
+            return yield* Effect.fail(
+              new Errors.EmailVerificationError({
+                message: "Verification token is no longer valid for this email address",
+              }),
+            );
+          }
+
+          // FIX 4: durable state change BEFORE burning the token.
+          const verifiedUser = yield* userService.markEmailVerified(verificationRecord.userId);
+
+          // burnToken deletes the token and fires the afterVerifyEmail hook.
+          const verificationResult = {
+            userId: verificationRecord.userId,
+            email: verificationRecord.email,
+            verified: true,
+          } satisfies EmailVerificationResult;
+          yield* verification.burnToken(verificationRecord.token, verificationResult);
 
           if (!autoSignInAfterVerification) {
             return {
-              user,
+              user: verifiedUser,
               needsEmailVerification: false,
             } satisfies AuthLifecycleResult;
           }
 
           const session = yield* sessionManager.createSession(
-            verificationResult.userId,
+            verificationRecord.userId,
             input.sessionAttributes,
           );
 
           return {
-            user,
+            user: verifiedUser,
             session,
             needsEmailVerification: false,
           } satisfies AuthLifecycleResult;

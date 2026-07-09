@@ -15,7 +15,11 @@ import * as S from "./HttpApiSchemas.ts";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
 import { Hooks } from "./Hooks.ts";
 import { SessionManager, UserStore } from "./Session.ts";
-import { EmailPasswordStore, makeEmailPasswordService } from "./EmailPassword.ts";
+import {
+  EmailPasswordService,
+  EmailPasswordStore,
+  makeEmailPasswordService,
+} from "./EmailPassword.ts";
 import { MagicLinkService, MagicLinkStore, MagicLinkUserStore } from "./MagicLink.ts";
 import { AccountManagementService, AccountManagementStore } from "./AccountManagement.ts";
 import { AnonymousService, AnonymousUserStore } from "./Anonymous.ts";
@@ -73,6 +77,7 @@ import type * as Types from "./Types.ts";
 export type AuthServices =
   | AuthLifecycleService
   | SessionManager
+  | EmailPasswordService
   | EmailPasswordStore
   | PasswordHasher
   | EmailVerificationService
