@@ -1,6 +1,9 @@
 # Effect source reference
 .reference/
 
+# Build output
+dist/
+
 # Logs
 logs
 *.log
