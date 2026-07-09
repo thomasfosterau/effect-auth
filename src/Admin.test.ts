@@ -7,12 +7,12 @@ import {
   isBanned,
   makeAdminService,
   type AdminConfig,
-  type AdminServiceShape,
+  type AdminService,
   type ListUsersQuery,
 } from "./Admin.js";
 import { Hooks } from "./Hooks.js";
 import { IdentifierStore, type Identifier } from "./Identifier.js";
-import { PasswordHasher, type PasswordHasherShape } from "./password/Password.js";
+import { PasswordHasher } from "./password/Password.js";
 import { make, SessionService } from "./session/SessionService.js";
 import { SessionStore } from "./session/SessionStore.js";
 import { UserStore } from "./session/UserStore.js";
@@ -167,7 +167,7 @@ const identifierStore = {
 };
 
 /** Fast test-only password hasher (not cryptographically secure). */
-const testHasher: PasswordHasherShape = {
+const testHasher: typeof PasswordHasher.Service = {
   algorithm: "test",
   hash: (password: string) =>
     Effect.succeed({ hash: `test$${password}`, algorithm: "test" as const }),
@@ -221,7 +221,7 @@ const runService = <A, E>(
   testContext: TestContext,
   config: AdminConfig,
   program: (
-    service: AdminServiceShape,
+    service: typeof AdminService.Service,
   ) => Effect.Effect<
     A,
     E,

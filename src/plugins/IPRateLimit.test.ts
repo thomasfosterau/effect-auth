@@ -4,12 +4,7 @@ import { ClientIP } from "../ClientIP.js";
 import { Hooks } from "../Hooks.js";
 import type { SignInInput } from "../email/EmailPassword.js";
 import { RateLimitError } from "../Errors.js";
-import {
-  RateLimiter,
-  RateLimitStore,
-  type RateLimitEntry,
-  type RateLimitStoreShape,
-} from "../RateLimit.js";
+import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.js";
 import { IPRateLimitPlugin } from "./IPRateLimit.js";
 
 // ---------------------------------------------------------------------------
@@ -17,7 +12,7 @@ import { IPRateLimitPlugin } from "./IPRateLimit.js";
 // ---------------------------------------------------------------------------
 
 /** In-memory rate-limit store backed by a simple Map. */
-const makeMemStore = (): RateLimitStoreShape => {
+const makeMemStore = (): typeof RateLimitStore.Service => {
   const store = new Map<string, RateLimitEntry>();
   return {
     get: (key) => Effect.succeed(store.get(key) ?? null),

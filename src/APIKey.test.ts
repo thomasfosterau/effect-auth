@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect } from "effect";
 import {
+  type APIKeyService,
   APIKeyStore,
   hashAPIKey,
   makeAPIKeyService,
   type APIKey,
   type APIKeyConfig,
-  type APIKeyServiceShape,
   type APIKeyVerifyResult,
 } from "./APIKey.js";
 import { makeRateLimiter, type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.js";
@@ -86,7 +86,7 @@ const makeRateLimitContext = async () => {
 };
 
 const runService = <A, E>(
-  program: (service: APIKeyServiceShape) => Effect.Effect<A, E, APIKeyStore>,
+  program: (service: typeof APIKeyService.Service) => Effect.Effect<A, E, APIKeyStore>,
   config?: APIKeyConfig,
 ) =>
   Effect.runPromise(

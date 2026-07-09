@@ -50,7 +50,7 @@ export const makeServerFixture = () => {
 
   const getUserById = (userId: string) => Effect.sync(() => usersById.get(userId) ?? null);
 
-  const sessionStore: Auth.SessionStoreShape = {
+  const sessionStore: typeof Auth.SessionStore.Service = {
     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
     get: (sessionId) => Effect.sync(() => sessions.get(sessionId) ?? null),
     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
@@ -63,19 +63,19 @@ export const makeServerFixture = () => {
       Effect.sync(() => [...sessions.values()].filter((session) => session.userId === userId)),
   };
 
-  const userStore: Auth.UserStoreShape = {
+  const userStore: typeof Auth.UserStore.Service = {
     get: getUserById,
     getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
   };
 
-  const emailPasswordStore: Auth.Email.EmailPasswordStoreShape = {
+  const emailPasswordStore: typeof Auth.Email.EmailPasswordStore.Service = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
 
-  const userServiceStore: Auth.UserServiceStoreShape = {
+  const userServiceStore: typeof Auth.UserServiceStore.Service = {
     get: getUserById,
     getByEmail: (email) => Effect.sync(() => userByEmail(email)),
     update: (user) =>
@@ -94,7 +94,7 @@ export const makeServerFixture = () => {
       }),
   };
 
-  const emailVerificationStore: Auth.Email.EmailVerificationStoreShape = {
+  const emailVerificationStore: typeof Auth.Email.EmailVerificationStore.Service = {
     create: (v) => Effect.sync(() => (verifications.set(v.token, v), v)),
     get: (token) => Effect.sync(() => verifications.get(token) ?? null),
     delete: (token) => Effect.sync(() => void verifications.delete(token)),
@@ -105,7 +105,7 @@ export const makeServerFixture = () => {
       }),
   };
 
-  const passwordResetStore: Auth.Password.PasswordResetStoreShape = {
+  const passwordResetStore: typeof Auth.Password.PasswordResetStore.Service = {
     create: (reset) => Effect.sync(() => (resets.set(reset.token, reset), reset)),
     get: (token) => Effect.sync(() => resets.get(token) ?? null),
     delete: (token) => Effect.sync(() => void resets.delete(token)),
@@ -115,7 +115,7 @@ export const makeServerFixture = () => {
       }),
   };
 
-  const passwordResetUserStore: Auth.Password.PasswordResetUserStoreShape = {
+  const passwordResetUserStore: typeof Auth.Password.PasswordResetUserStore.Service = {
     getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
