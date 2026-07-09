@@ -219,7 +219,7 @@ export const generateOtp = (length: number): Effect.Effect<string, Errors.AuthEr
 /**
  * Create an email OTP service
  */
-export const make = (config: EmailOtpConfig): Effect.Effect<EmailOTPService, never> => {
+export const make = (config: EmailOtpConfig): Effect.Effect<EmailOtpServiceShape, never> => {
   const otpLength = config.otpLength ?? 6;
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
   const maxAttempts = config.maxAttempts ?? 3;

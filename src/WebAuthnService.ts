@@ -18,7 +18,6 @@ import {
 } from "@oslojs/webauthn";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
-import type { Uint8Array } from "effect/Schema";
 import {
   ChallengeStore,
   CredentialStore,
@@ -40,7 +39,7 @@ import {
 /**
  * WebAuthn service for managing passkey registration and authentication
  */
-export interface WebAuthnService {
+export interface WebAuthnServiceShape {
   /** Generate a challenge for registration */
   generateRegistrationChallenge: (
     user: WebAuthnUser,
@@ -81,18 +80,12 @@ export interface WebAuthnService {
   >;
 }
 
-export class WebAuthnService extends Context.Service<WebAuthnService, WebAuthnService>()(
-  "@effect-auth/WebAuthnService",
-) {
-  static readonly layer = (config: WebAuthnConfig) => Layer.effect(WebAuthnService, make(config));
-}
-
 /**
  * Create a WebAuthn service
  */
 export const make = (
   config: WebAuthnConfig,
-): Effect.Effect<WebAuthnService, never, ChallengeStore | CredentialStore> =>
+): Effect.Effect<WebAuthnServiceShape, never, ChallengeStore | CredentialStore> =>
   Effect.gen(function* () {
     const challengeStore = yield* ChallengeStore;
     const credentialStore = yield* CredentialStore;
@@ -103,7 +96,7 @@ export const make = (
       generateRegistrationChallenge: (user: WebAuthnUser) =>
         Effect.gen(function* () {
           // Generate random challenge (32 bytes = 256 bits)
-          const challenge = crypto.randomBytes(32);
+          const challenge: Uint8Array = crypto.randomBytes(32);
           const expiresAt = Date.now() + challengeExpiresIn;
 
           const challengeData: WebAuthnChallenge = {
@@ -297,7 +290,7 @@ export const make = (
 
       generateAuthenticationChallenge: (userId: string) =>
         Effect.gen(function* () {
-          const challenge = crypto.randomBytes(32);
+          const challenge: Uint8Array = crypto.randomBytes(32);
           const expiresAt = Date.now() + challengeExpiresIn;
 
           const challengeData: WebAuthnChallenge = {
@@ -463,6 +456,12 @@ export const make = (
     };
   });
 
+export class WebAuthnService extends Context.Service<WebAuthnService, WebAuthnServiceShape>()(
+  "@effect-auth/WebAuthnService",
+) {
+  static readonly layer = (config: WebAuthnConfig) => Layer.effect(WebAuthnService, make(config));
+}
+
 const b64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
 
 /**
@@ -572,17 +571,4 @@ function compareUint8Arrays(a: Uint8Array, b: Uint8Array): boolean {
 function base64UrlEncode(buffer: Uint8Array): string {
   const base64 = Buffer.from(buffer).toString("base64");
   return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-}
-
-/**
- * Helper to decode base64url to Uint8Array
- */
-export function base64UrlDecode(str: string): Uint8Array {
-  // Convert base64url to base64
-  let base64 = str.replace(/-/g, "+").replace(/_/g, "/");
-  // Add padding if needed
-  while (base64.length % 4 !== 0) {
-    base64 += "=";
-  }
-  return new Uint8Array(Buffer.from(base64, "base64"));
 }

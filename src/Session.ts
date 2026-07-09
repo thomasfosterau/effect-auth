@@ -8,6 +8,6 @@
  * @module session
  */
 export { SessionService as SessionManager, make as makeSessionManager } from "./SessionService.ts";
-export type { SessionService as SessionManagerShape } from "./SessionService.ts";
+export type { SessionServiceShape as SessionManagerShape } from "./SessionService.ts";
 export { SessionStore } from "./SessionStore.ts";
 export { UserStore } from "./UserStore.ts";

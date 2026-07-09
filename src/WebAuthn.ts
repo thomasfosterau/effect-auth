@@ -160,7 +160,6 @@ export interface AuthenticationResult {
 import { Context, Effect } from "effect";
 import { coseAlgorithmES256, coseAlgorithmRS256, coseAlgorithmEdDSA } from "@oslojs/webauthn";
 import * as Errors from "./Errors.ts";
-import type { Uint8Array } from "effect/Schema";
 
 /**
  * COSE algorithm identifiers this service can register and verify:

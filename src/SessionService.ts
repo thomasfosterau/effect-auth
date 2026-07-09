@@ -10,7 +10,7 @@ import { UserStore } from "./UserStore.ts";
 /**
  * Session manager service
  */
-export interface SessionService {
+export interface SessionServiceShape {
   /**
    * Create a new session for a user
    */
@@ -76,13 +76,13 @@ const generateSessionId = (): string => crypto.randomBytes(20).toString("hex");
  */
 export const make = (
   config: Types.SessionConfig,
-): Effect.Effect<SessionService, never, SessionStore | UserStore> =>
+): Effect.Effect<SessionServiceShape, never, SessionStore | UserStore> =>
   Effect.gen(function* () {
     const sessionStore = yield* SessionStore;
     const userStore = yield* UserStore;
 
     return {
-      createSession: (rawUserId, rawAttributes = {}) =>
+      createSession: (rawUserId: string, rawAttributes: Record<string, unknown> = {}) =>
         Effect.gen(function* () {
           const hooks = yield* Hooks;
           const args = yield* hooks.beforeCreateSession({
@@ -253,7 +253,7 @@ export const make = (
 /**
  * Tag for SessionManager service
  */
-export class SessionService extends Context.Service<SessionService, SessionService>()(
+export class SessionService extends Context.Service<SessionService, SessionServiceShape>()(
   "@effect-auth/SessionService",
 ) {
   static readonly make = make;

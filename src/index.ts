@@ -22,7 +22,7 @@ export * from "./SessionStore.ts";
 export * from "./UserStore.ts";
 // Compat: re-export SessionManager alias and makeSessionManager
 export { SessionService as SessionManager, make as makeSessionManager } from "./SessionService.ts";
-export type { SessionService as SessionManagerShape } from "./SessionService.ts";
+export type { SessionServiceShape as SessionManagerShape } from "./SessionService.ts";
 
 // Rate limiting
 export * from "./RateLimit.ts";
@@ -51,7 +51,7 @@ export * from "./MagicLink.ts";
 export * from "./Username.ts";
 export * from "./TwoFactor.ts";
 export * from "./WebAuthn.ts";
-export * from "./WebAuthnService.ts";
+export { WebAuthnService, type WebAuthnServiceShape } from "./WebAuthnService.ts";
 export * from "./ApiKey.ts";
 export * from "./Jwt.ts";
 export * from "./OAuth/OAuth.ts";
@@ -66,8 +66,17 @@ export * from "./AuthLifecycle.ts";
 export * from "./OidcProvider.ts";
 export * from "./ClientIp.ts";
 export * from "./SessionCookieCache.ts";
-export * from "./Http.ts";
-export * from "./OneTimeToken.ts";
+export {
+  type OneTimeTokenRecord,
+  OneTimeTokenStore,
+  type OneTimeTokenStoreShape,
+  type OneTimeTokenConfig,
+  type OneTimeTokenGenerateOptions,
+  type OneTimeTokenVerifyResult,
+  type OneTimeTokenServiceShape,
+  OneTimeTokenService,
+  redeemOneTimeTokenForSession,
+} from "./OneTimeToken.ts";
 
 // Plugins
 /** Structured audit logging of sign-up/sign-in/sign-out (tap hooks). */
