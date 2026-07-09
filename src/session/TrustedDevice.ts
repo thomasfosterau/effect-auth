@@ -32,7 +32,7 @@
 import { Config, Context, Effect, Layer, Redacted } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "../Errors.ts";
-import { SecondFactorGate, type SecondFactorGateShape } from "../email/EmailPassword.ts";
+import { SecondFactorGate } from "../email/EmailPassword.ts";
 import { hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { PendingTwoFactorStore, TwoFactorService, TwoFactorStore } from "../TwoFactor.ts";
@@ -286,7 +286,7 @@ export const makeTrustedDeviceService = (
 // ---------------------------------------------------------------------------
 
 /**
- * Wrap any `SecondFactorGateShape` with a trusted-device short-circuit.
+ * Wrap any `SecondFactorGate` implementation with a trusted-device short-circuit.
  *
  * `required(user)` reads `TrustedDeviceCookieRef` — if a valid, non-expired,
  * non-revoked token for this exact user is present, it returns `false` (skip
@@ -297,8 +297,8 @@ export const makeTrustedDeviceService = (
 export const makeTrustedDeviceGateShape = (
   service: typeof TrustedDeviceService.Service,
   stores: Context.Context<TrustedDeviceStore>,
-  inner: SecondFactorGateShape,
-): SecondFactorGateShape => ({
+  inner: typeof SecondFactorGate.Service,
+): typeof SecondFactorGate.Service => ({
   required: (user: Types.User) =>
     Effect.gen(function* () {
       const cookie = yield* TrustedDeviceCookieRef;
@@ -353,7 +353,7 @@ export const TrustedDeviceWithTwoFactorGateLayer: Layer.Layer<
     const tdStores = yield* Effect.context<TrustedDeviceStore>();
     const tfStores = yield* Effect.context<TwoFactorStore | PendingTwoFactorStore>();
 
-    const totpGate: SecondFactorGateShape = {
+    const totpGate: typeof SecondFactorGate.Service = {
       required: (user) => twoFactor.isEnabled(user.id).pipe(Effect.provide(tfStores)),
       begin: (user) =>
         twoFactor.beginChallenge(user.id).pipe(

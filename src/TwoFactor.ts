@@ -18,11 +18,7 @@ import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
 import * as Obs from "./Observability.ts";
-import {
-  EmailPasswordStore,
-  SecondFactorGate,
-  type SecondFactorGateShape,
-} from "./email/EmailPassword.ts";
+import { EmailPasswordStore, SecondFactorGate } from "./email/EmailPassword.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { generateBase32Secret, generateOTPURI, verifyTOTP, type TOTPConfig } from "./OTP.ts";
 import { PasswordHasher } from "./password/Password.ts";
@@ -707,7 +703,7 @@ export const TwoFactorGateLayer: Layer.Layer<
     const twoFactor = yield* TwoFactorService;
     const stores = yield* Effect.context<TwoFactorStore | PendingTwoFactorStore>();
 
-    const gate: SecondFactorGateShape = {
+    const gate: typeof SecondFactorGate.Service = {
       required: (user) => twoFactor.isEnabled(user.id).pipe(Effect.provide(stores)),
       begin: (user) =>
         twoFactor.beginChallenge(user.id).pipe(

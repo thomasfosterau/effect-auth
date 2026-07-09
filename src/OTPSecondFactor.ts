@@ -20,11 +20,7 @@ import { Context, Data, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import { generateOTP } from "./email/EmailOTP.ts";
-import {
-  SecondFactorGate,
-  type SecondFactorChallenge,
-  type SecondFactorGateShape,
-} from "./email/EmailPassword.ts";
+import { SecondFactorGate, type SecondFactorChallenge } from "./email/EmailPassword.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
@@ -277,7 +273,7 @@ export const OTPSecondFactorGateLayer: Layer.Layer<
     const service = yield* OTPSecondFactorService;
     const stores = yield* Effect.context<OTPSecondFactorStore>();
 
-    const gate: SecondFactorGateShape = {
+    const gate: typeof SecondFactorGate.Service = {
       required: (_user) => Effect.succeed(true),
       begin: (user) =>
         service.begin(user).pipe(
@@ -326,7 +322,7 @@ export const TrustedDeviceWithOTPSecondFactorGateLayer: Layer.Layer<
     const tdStores = yield* Effect.context<TrustedDeviceStore>();
     const otpStores = yield* Effect.context<OTPSecondFactorStore>();
 
-    const otpGate: SecondFactorGateShape = {
+    const otpGate: typeof SecondFactorGate.Service = {
       required: (_user) => Effect.succeed(true),
       begin: (user) =>
         otpService.begin(user).pipe(

@@ -64,11 +64,9 @@ export * from "./SessionCookieCache.ts";
 export {
   type OneTimeTokenRecord,
   OneTimeTokenStore,
-  type OneTimeTokenStoreShape,
   type OneTimeTokenConfig,
   type OneTimeTokenGenerateOptions,
   type OneTimeTokenVerifyResult,
-  type OneTimeTokenServiceShape,
   OneTimeTokenService,
   redeemOneTimeTokenForSession,
 } from "./OneTimeToken.ts";

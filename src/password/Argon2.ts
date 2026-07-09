@@ -13,7 +13,7 @@
  */
 import { Effect, Layer } from "effect";
 import { hash as argon2Hash, verify as argon2Verify } from "@node-rs/argon2";
-import { PasswordHasher, type HashedPassword, type PasswordHasherShape } from "./Password.ts";
+import { PasswordHasher, type HashedPassword } from "./Password.ts";
 import { HashingError } from "../Errors.ts";
 
 /** PHC/`parseAlgorithm` identifier for the hashes this hasher produces. */
@@ -45,7 +45,7 @@ export interface Argon2Options {
  * const layer = Argon2HasherLayer({ timeCost: 3 });
  * ```
  */
-export const makeArgon2Hasher = (options?: Argon2Options): PasswordHasherShape => {
+export const makeArgon2Hasher = (options?: Argon2Options): typeof PasswordHasher.Service => {
   // Omit `algorithm`/`version`: the binding already defaults to Argon2id / 0x13.
   const params = {
     memoryCost: options?.memoryCost ?? 19456,
