@@ -17,6 +17,7 @@ import * as crypto from "node:crypto";
 import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
+import * as Obs from "./Observability.ts";
 import {
   EmailPasswordStore,
   SecondFactorGate,
@@ -532,7 +533,10 @@ export const makeTwoFactorService = (
             token,
             expiresAt: pending.expiresAt,
           } satisfies TwoFactorChallenge;
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.2fa.challenge"),
+          Effect.tap(() => Obs.recordTwoFactorChallenge()),
+        ),
 
       verifyTotp: (pendingToken: string, code: string, options?: TwoFactorVerifyOptions) =>
         Effect.gen(function* () {
@@ -564,7 +568,11 @@ export const makeTwoFactorService = (
             userId: pending.userId,
             session,
           } satisfies TwoFactorVerifyResult;
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.2fa.verify", { attributes: { type: "totp" } }),
+          Effect.tap(() => Obs.recordTwoFactorVerification("totp", "success")),
+          Effect.tapError(() => Obs.recordTwoFactorVerification("totp", "failure")),
+        ),
 
       verifyBackupCode: (pendingToken: string, code: string, options?: TwoFactorVerifyOptions) =>
         Effect.gen(function* () {
@@ -601,7 +609,11 @@ export const makeTwoFactorService = (
             userId: pending.userId,
             session,
           } satisfies TwoFactorVerifyResult;
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.2fa.verify", { attributes: { type: "backup-code" } }),
+          Effect.tap(() => Obs.recordTwoFactorVerification("backup-code", "success")),
+          Effect.tapError(() => Obs.recordTwoFactorVerification("backup-code", "failure")),
+        ),
 
       regenerateBackupCodes: (userId: string, password: string) =>
         Effect.gen(function* () {

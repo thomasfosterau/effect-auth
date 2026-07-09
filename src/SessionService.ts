@@ -4,6 +4,7 @@ import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { hashToken } from "./TokenHash.ts";
+import * as Obs from "./Observability.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 
@@ -106,7 +107,10 @@ export const make = (
           yield* sessionStore.create(session);
           // Return the raw token as session.id so the HTTP layer can set it as the cookie value.
           return yield* hooks.afterCreateSession({ ...session, id: rawToken });
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.create-session"),
+          Effect.tap(() => Obs.recordSessionCreated()),
+        ),
 
       validateSession: (rawSessionId) =>
         Effect.gen(function* () {
@@ -198,7 +202,17 @@ export const make = (
             session: { ...updatedSession, id: rawToken },
             user,
           });
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.validate-session"),
+          Effect.tap(() => Obs.recordSessionValidated("success")),
+          Effect.tapError((e) =>
+            "_tag" in e && e._tag === "SessionNotFoundError"
+              ? Obs.recordSessionValidated("not_found")
+              : "_tag" in e && e._tag === "SessionExpiredError"
+                ? Obs.recordSessionValidated("expired")
+                : Effect.void,
+          ),
+        ),
 
       invalidateSession: (rawSessionId) =>
         Effect.gen(function* () {
@@ -206,7 +220,10 @@ export const make = (
           const { sessionId: rawToken } = yield* hooks.beforeSignOut({ sessionId: rawSessionId });
           yield* sessionStore.delete(hashToken(rawToken));
           yield* hooks.afterSignOut({ sessionId: rawToken });
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.sign-out"),
+          Effect.tap(() => Obs.recordSessionInvalidated()),
+        ),
 
       invalidateUserSessions: (userId) => sessionStore.deleteByUserId(userId),
 

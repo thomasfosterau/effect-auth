@@ -252,7 +252,9 @@ export const makePBKDF2Hasher = (): PasswordHasherShape => {
           hash,
           algorithm: ALGORITHM,
         };
-      }),
+      }).pipe(
+        Effect.withSpan("effect-auth.password.hash", { attributes: { algorithm: ALGORITHM } }),
+      ),
 
     verify: (password: string, hash: string) =>
       Effect.gen(function* () {
@@ -327,7 +329,9 @@ export const makePBKDF2Hasher = (): PasswordHasherShape => {
 
         // Use timing-safe comparison
         return crypto.timingSafeEqual(derivedKey, expectedHash);
-      }),
+      }).pipe(
+        Effect.withSpan("effect-auth.password.verify", { attributes: { algorithm: ALGORITHM } }),
+      ),
   };
 };
 
@@ -424,7 +428,9 @@ export const makeScryptHasher = (options?: {
           hash,
           algorithm: ALGORITHM,
         };
-      }),
+      }).pipe(
+        Effect.withSpan("effect-auth.password.hash", { attributes: { algorithm: ALGORITHM } }),
+      ),
 
     verify: (password: string, hash: string) =>
       Effect.gen(function* () {
@@ -489,6 +495,8 @@ export const makeScryptHasher = (options?: {
 
         // Use timing-safe comparison
         return crypto.timingSafeEqual(derivedKey, expectedHash);
-      }),
+      }).pipe(
+        Effect.withSpan("effect-auth.password.verify", { attributes: { algorithm: ALGORITHM } }),
+      ),
   };
 };

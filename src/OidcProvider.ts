@@ -21,6 +21,7 @@ import { Context, Data, Effect, Layer, Redacted } from "effect";
 import * as crypto from "node:crypto";
 import type { AuthError } from "./Errors.ts";
 import { JwtService, JwtKeyStore } from "./Jwt.ts";
+import * as Obs from "./Observability.ts";
 import { UserStore } from "./Session.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
@@ -771,7 +772,7 @@ export const makeOidcProviderService = (
             ...(request.state !== undefined && { state: request.state }),
           }),
         } satisfies OidcAuthorizeResult;
-      }),
+      }).pipe(Effect.withSpan("effect-auth.oidc.authorize")),
 
     consent: (userId, consentCode, accept) =>
       Effect.gen(function* () {
@@ -818,7 +819,7 @@ export const makeOidcProviderService = (
             ...(pending.state !== undefined && { state: pending.state }),
           }),
         };
-      }),
+      }).pipe(Effect.withSpan("effect-auth.oidc.consent")),
 
     token: (request) =>
       Effect.gen(function* () {
@@ -911,7 +912,11 @@ export const makeOidcProviderService = (
         }
 
         return yield* new OidcTokenError({ error: "unsupported_grant_type" });
-      }),
+      }).pipe(
+        Effect.withSpan("effect-auth.oidc.token", { attributes: { grant: request.grantType } }),
+        Effect.tap(() => Obs.recordOidcTokenRequest(request.grantType, "success")),
+        Effect.tapError(() => Obs.recordOidcTokenRequest(request.grantType, "failure")),
+      ),
 
     userinfo: (accessToken) =>
       Effect.gen(function* () {
@@ -932,7 +937,7 @@ export const makeOidcProviderService = (
           return yield* new OidcProviderError({ message: "Invalid or expired access token" });
         }
         return claimsFor(user, record.scopes);
-      }),
+      }).pipe(Effect.withSpan("effect-auth.oidc.userinfo")),
 
     getMetadata: () => ({
       issuer: config.issuer,
