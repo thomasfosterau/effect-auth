@@ -47,6 +47,16 @@ export interface DeviceAuthorizationStoreShape {
     record: DeviceAuthorizationRecord,
   ) => Effect.Effect<DeviceAuthorizationRecord, Errors.AuthError>;
   readonly delete: (deviceCode: string) => Effect.Effect<void, Errors.AuthError>;
+  /**
+   * Atomically consume an approved record: if the record exists and its status
+   * is `"approved"`, delete it and return it; otherwise return `null`.
+   * Implementations must make the read-then-delete atomic (e.g. a conditional
+   * delete or compare-and-swap) so that two concurrent polls on the same
+   * approved code each see at most one win.
+   */
+  readonly claimApproval: (
+    deviceCode: string,
+  ) => Effect.Effect<DeviceAuthorizationRecord | null, Errors.AuthError>;
 }
 
 export class DeviceAuthorizationStore extends Context.Service<
@@ -217,8 +227,12 @@ export const makeDeviceAuthorizationService = (
           }
 
           // Enforce the minimum polling interval (RFC 8628 slow_down).
+          // Don't update lastPolledAt on rejection: a slightly-too-fast client
+          // would otherwise continually reset its own window and never progress.
+          // Instead, escalate the stored interval by 5 s per RFC 8628 §3.5 so
+          // subsequent valid polls are gated by the new minimum.
           if (record.lastPolledAt !== 0 && now - record.lastPolledAt < record.interval * 1000) {
-            yield* store.update({ ...record, lastPolledAt: now });
+            yield* store.update({ ...record, interval: record.interval + 5 });
             return yield* new DevicePollError({
               error: "slow_down",
               message: "Polling too frequently",
@@ -241,12 +255,22 @@ export const makeDeviceAuthorizationService = (
             });
           }
 
-          // Approved: mint a session and consume the request (one-time). The
-          // user is resolved through the session manager so this flow needs no
+          // Atomically consume the approved record before minting a session.
+          // claimApproval does a conditional delete so that only one concurrent
+          // poll wins; a second poll racing the same approval sees null here and
+          // gets expired_token instead of minting a duplicate session.
+          const claimed = yield* store.claimApproval(record.deviceCode);
+          if (claimed === null || claimed.userId === undefined) {
+            return yield* new DevicePollError({
+              error: "expired_token",
+              message: "The device code has already been consumed",
+            });
+          }
+
+          // User is resolved through the session manager so this flow needs no
           // direct user-store dependency (it isn't part of `AuthServices`).
-          const session = yield* sessionManager.createSession(record.userId);
+          const session = yield* sessionManager.createSession(claimed.userId);
           const { user } = yield* sessionManager.validateSession(session.id);
-          yield* store.delete(record.deviceCode);
 
           return { user, session };
         }),

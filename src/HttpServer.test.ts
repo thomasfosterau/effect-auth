@@ -448,6 +448,13 @@ const makeFixture = (): Fixture => {
         return record;
       }),
     delete: (deviceCode) => Effect.sync(() => void deviceRecords.delete(deviceCode)),
+    claimApproval: (deviceCode) =>
+      Effect.sync(() => {
+        const record = deviceRecords.get(deviceCode);
+        if (record === undefined || record.status !== "approved") return null;
+        deviceRecords.delete(deviceCode);
+        return record;
+      }),
   };
 
   const usernameToId = new Map<string, string>();
