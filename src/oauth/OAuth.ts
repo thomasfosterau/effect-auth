@@ -634,79 +634,78 @@ export const makeOAuthProvider = (
 /**
  * OAuth service for managing OAuth flows
  */
-export interface OAuthServiceShape {
-  readonly generateAuthorizationUrl: (
-    provider: string,
-    options?: { scopes?: readonly string[]; returnTo?: string },
-  ) => Effect.Effect<AuthorizationUrlResult, AuthError | OAuthProviderError, OAuthStateStore>;
+export class OAuthService extends Context.Service<
+  OAuthService,
+  {
+    readonly generateAuthorizationUrl: (
+      provider: string,
+      options?: { scopes?: readonly string[]; returnTo?: string },
+    ) => Effect.Effect<AuthorizationUrlResult, AuthError | OAuthProviderError, OAuthStateStore>;
 
-  readonly handleCallback: (
-    state: string,
-    code: string,
-    options?: { linkToUserId?: string },
-  ) => Effect.Effect<
-    OAuthCallbackResult,
-    AuthError | OAuthProviderError | OAuthStateNotFoundError | OAuthStateExpiredError,
-    OAuthStateStore | OAuthAccountStore
-  >;
+    readonly handleCallback: (
+      state: string,
+      code: string,
+      options?: { linkToUserId?: string },
+    ) => Effect.Effect<
+      OAuthCallbackResult,
+      AuthError | OAuthProviderError | OAuthStateNotFoundError | OAuthStateExpiredError,
+      OAuthStateStore | OAuthAccountStore
+    >;
 
-  /**
-   * Complete OAuth sign-in: verifies the callback, resolves or creates the
-   * user (auto-linking to an existing user when the provider reports a
-   * verified email, unless disabled), links the account, and issues a session.
-   *
-   * This is the recommended high-level entrypoint; use {@link handleCallback}
-   * only when managing users yourself.
-   */
-  readonly signInWithCallback: (
-    state: string,
-    code: string,
-  ) => Effect.Effect<
-    OAuthSignInResult,
-    | AuthError
-    | OAuthProviderError
-    | OAuthStateNotFoundError
-    | OAuthStateExpiredError
-    | OAuthAccountNotLinkedError
-    | OAuthMissingEmailError
-    | UserNotFoundError
-    | HookError,
-    OAuthStateStore | OAuthAccountStore | OAuthUserStore | SessionService | Hooks
-  >;
+    /**
+     * Complete OAuth sign-in: verifies the callback, resolves or creates the
+     * user (auto-linking to an existing user when the provider reports a
+     * verified email, unless disabled), links the account, and issues a session.
+     *
+     * This is the recommended high-level entrypoint; use {@link handleCallback}
+     * only when managing users yourself.
+     */
+    readonly signInWithCallback: (
+      state: string,
+      code: string,
+    ) => Effect.Effect<
+      OAuthSignInResult,
+      | AuthError
+      | OAuthProviderError
+      | OAuthStateNotFoundError
+      | OAuthStateExpiredError
+      | OAuthAccountNotLinkedError
+      | OAuthMissingEmailError
+      | UserNotFoundError
+      | HookError,
+      OAuthStateStore | OAuthAccountStore | OAuthUserStore | SessionService | Hooks
+    >;
 
-  readonly linkAccount: (
-    userId: string,
-    provider: string,
-    code: string,
-    state: string,
-  ) => Effect.Effect<
-    OAuthAccount,
-    | AuthError
-    | OAuthProviderError
-    | OAuthStateNotFoundError
-    | OAuthStateExpiredError
-    | OAuthAccountConflictError,
-    OAuthStateStore | OAuthAccountStore
-  >;
+    readonly linkAccount: (
+      userId: string,
+      provider: string,
+      code: string,
+      state: string,
+    ) => Effect.Effect<
+      OAuthAccount,
+      | AuthError
+      | OAuthProviderError
+      | OAuthStateNotFoundError
+      | OAuthStateExpiredError
+      | OAuthAccountConflictError,
+      OAuthStateStore | OAuthAccountStore
+    >;
 
-  readonly unlinkAccount: (
-    userId: string,
-    provider: string,
-  ) => Effect.Effect<void, AuthError | OAuthAccountNotFoundError, OAuthAccountStore>;
+    readonly unlinkAccount: (
+      userId: string,
+      provider: string,
+    ) => Effect.Effect<void, AuthError | OAuthAccountNotFoundError, OAuthAccountStore>;
 
-  readonly refreshAccessToken: (
-    userId: string,
-    provider: string,
-  ) => Effect.Effect<
-    string,
-    AuthError | OAuthProviderError | OAuthAccountNotFoundError | OAuthNoRefreshTokenError,
-    OAuthAccountStore
-  >;
-}
-
-export class OAuthService extends Context.Service<OAuthService, OAuthServiceShape>()(
-  "@effect-auth/OAuthService",
-) {
+    readonly refreshAccessToken: (
+      userId: string,
+      provider: string,
+    ) => Effect.Effect<
+      string,
+      AuthError | OAuthProviderError | OAuthAccountNotFoundError | OAuthNoRefreshTokenError,
+      OAuthAccountStore
+    >;
+  }
+>()("@effect-auth/OAuthService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -732,7 +731,7 @@ export const oauthServiceOptionsConfig = Config.all({
 });
 
 /**
- * Options controlling {@link OAuthServiceShape} behaviour.
+ * Options controlling `typeof OAuthService.Service` behaviour.
  */
 export interface OAuthServiceOptions {
   /**
@@ -768,7 +767,7 @@ export interface OAuthServiceOptions {
 export const makeOAuthService = (
   providers: Record<string, OAuthProvider>,
   options: OAuthServiceOptions = {},
-): Effect.Effect<OAuthServiceShape, never> => {
+): Effect.Effect<typeof OAuthService.Service, never> => {
   const autoLinkByVerifiedEmail = options.autoLinkByVerifiedEmail ?? true;
 
   const cipher: TokenCipher | null = options.encryptTokens
@@ -852,7 +851,7 @@ export const makeOAuthService = (
     });
 
   return Effect.sync(
-    (): OAuthServiceShape => ({
+    (): typeof OAuthService.Service => ({
       generateAuthorizationUrl: (provider, options) =>
         Effect.gen(function* () {
           const providerInstance = providers[provider];

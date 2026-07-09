@@ -125,58 +125,57 @@ export interface PhoneOTPAuthResult {
   readonly session: Types.Session;
 }
 
-export interface PhoneOTPServiceShape {
-  /**
-   * Generate an OTP for the given phone number + purpose (replacing any
-   * outstanding one) and send it. Only a SHA-256 hash of the code is stored.
-   * Anti-enumeration: for `sign-in` with sign-up disabled and no user, this
-   * succeeds silently without sending.
-   *
-   * When `resendCooldown` is configured and an outstanding OTP for the phone +
-   * purpose was created within the cooldown window, fails with
-   * {@link Errors.ResendTooSoonError} containing the remaining wait time.
-   */
-  readonly send: (
-    phoneNumber: string,
-    purpose: PhoneOTPPurpose,
-  ) => Effect.Effect<
-    void,
-    PhoneOTPError | Errors.AuthError | Errors.ResendTooSoonError,
-    PhoneOTPStore | PhoneOTPUserStore
-  >;
+export class PhoneOTPService extends Context.Service<
+  PhoneOTPService,
+  {
+    /**
+     * Generate an OTP for the given phone number + purpose (replacing any
+     * outstanding one) and send it. Only a SHA-256 hash of the code is stored.
+     * Anti-enumeration: for `sign-in` with sign-up disabled and no user, this
+     * succeeds silently without sending.
+     *
+     * When `resendCooldown` is configured and an outstanding OTP for the phone +
+     * purpose was created within the cooldown window, fails with
+     * {@link Errors.ResendTooSoonError} containing the remaining wait time.
+     */
+    readonly send: (
+      phoneNumber: string,
+      purpose: PhoneOTPPurpose,
+    ) => Effect.Effect<
+      void,
+      PhoneOTPError | Errors.AuthError | Errors.ResendTooSoonError,
+      PhoneOTPStore | PhoneOTPUserStore
+    >;
 
-  /**
-   * Verify a `sign-in` OTP (single use) and sign the user in, creating a new
-   * `phoneNumberVerified: true` user when none exists (unless `disableSignUp`).
-   */
-  readonly signIn: (
-    phoneNumber: string,
-    otp: string,
-    options?: PhoneOTPSignInOptions,
-  ) => Effect.Effect<
-    PhoneOTPAuthResult,
-    PhoneOTPError | Errors.AuthError | HookError,
-    PhoneOTPStore | PhoneOTPUserStore | SessionService | Hooks
-  >;
+    /**
+     * Verify a `sign-in` OTP (single use) and sign the user in, creating a new
+     * `phoneNumberVerified: true` user when none exists (unless `disableSignUp`).
+     */
+    readonly signIn: (
+      phoneNumber: string,
+      otp: string,
+      options?: PhoneOTPSignInOptions,
+    ) => Effect.Effect<
+      PhoneOTPAuthResult,
+      PhoneOTPError | Errors.AuthError | HookError,
+      PhoneOTPStore | PhoneOTPUserStore | SessionService | Hooks
+    >;
 
-  /**
-   * Verify a `phone-verification` OTP (single use) for an existing user and
-   * mark their phone number verified.
-   */
-  readonly verifyPhoneNumber: (
-    userId: string,
-    phoneNumber: string,
-    otp: string,
-  ) => Effect.Effect<
-    Types.User,
-    PhoneOTPError | Errors.AuthError | Errors.UserNotFoundError,
-    PhoneOTPStore | PhoneOTPUserStore
-  >;
-}
-
-export class PhoneOTPService extends Context.Service<PhoneOTPService, PhoneOTPServiceShape>()(
-  "@effect-auth/PhoneOtpService",
-) {
+    /**
+     * Verify a `phone-verification` OTP (single use) for an existing user and
+     * mark their phone number verified.
+     */
+    readonly verifyPhoneNumber: (
+      userId: string,
+      phoneNumber: string,
+      otp: string,
+    ) => Effect.Effect<
+      Types.User,
+      PhoneOTPError | Errors.AuthError | Errors.UserNotFoundError,
+      PhoneOTPStore | PhoneOTPUserStore
+    >;
+  }
+>()("@effect-auth/PhoneOTPService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -200,7 +199,7 @@ const generateOTP = (length: number): Effect.Effect<string, Errors.AuthError> =>
 
 export const makePhoneOTPService = (
   config: PhoneOTPConfig,
-): Effect.Effect<PhoneOTPServiceShape, never> => {
+): Effect.Effect<typeof PhoneOTPService.Service, never> => {
   const otpLength = config.otpLength ?? 6;
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000;
   const maxAttempts = config.maxAttempts ?? 3;
@@ -254,7 +253,7 @@ export const makePhoneOTPService = (
     });
 
   return Effect.sync(
-    (): PhoneOTPServiceShape => ({
+    (): typeof PhoneOTPService.Service => ({
       send: (rawPhoneNumber, purpose) =>
         Effect.gen(function* () {
           const store = yield* PhoneOTPStore;
