@@ -5,6 +5,7 @@ import { MultiAlgorithmVerifier, PasswordHasher } from "./Password.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
 import { SessionManager } from "./Session.ts";
+import * as Obs from "./Observability.ts";
 
 export interface CreateUserInput {
   readonly email: string;
@@ -312,7 +313,11 @@ export const makeEmailPasswordService = (
                 ).pipe(Effect.as(signUpResult)),
               ),
             );
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.sign-up", { attributes: { method: "email-password" } }),
+          Effect.tap(() => Obs.recordSignUp("email-password", "success")),
+          Effect.tapError(() => Obs.recordSignUp("email-password", "failure")),
+        ),
 
       signIn: (rawInput) =>
         Effect.gen(function* () {
@@ -405,7 +410,11 @@ export const makeEmailPasswordService = (
                 ).pipe(Effect.as(signInResult)),
               ),
             );
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.sign-in", { attributes: { method: "email-password" } }),
+          Effect.tap(() => Obs.recordSignIn("email-password", "success")),
+          Effect.tapError(() => Obs.recordSignIn("email-password", "failure")),
+        ),
 
       changePassword: (input) =>
         Effect.gen(function* () {

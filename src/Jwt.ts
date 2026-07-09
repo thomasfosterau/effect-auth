@@ -30,6 +30,7 @@ import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import type * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
+import * as Obs from "./Observability.ts";
 
 /**
  * JWT error
@@ -389,7 +390,7 @@ export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtServiceShape
             token: `${signingInput}.${base64UrlEncode(signature)}`,
             expiresAt: exp * 1000,
           } satisfies JwtSignResult;
-        }),
+        }).pipe(Effect.withSpan("effect-auth.token.sign")),
 
       verify: (token) =>
         Effect.gen(function* () {
@@ -485,7 +486,11 @@ export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtServiceShape
           }
 
           return payload;
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.token.verify", { attributes: { type: "jwt" } }),
+          Effect.tap(() => Obs.recordTokenVerification("jwt", "success")),
+          Effect.tapError(() => Obs.recordTokenVerification("jwt", "failure")),
+        ),
 
       getJwks: () =>
         Effect.gen(function* () {

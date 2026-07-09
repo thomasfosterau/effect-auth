@@ -4,6 +4,7 @@
 
 import { Context, Effect, Layer } from "effect";
 import { RateLimitError, type AuthError } from "./Errors.ts";
+import * as Obs from "./Observability.ts";
 
 /**
  * Rate limit configuration
@@ -132,7 +133,13 @@ export const makeRateLimiter = (): Effect.Effect<RateLimiterShape, never> =>
           }
 
           return true;
-        }),
+        }).pipe(
+          Effect.tapError((e) =>
+            e._tag === "RateLimitError"
+              ? Obs.recordRateLimitHit(key.split(":")[0] ?? key)
+              : Effect.void,
+          ),
+        ),
 
       consumeToken: (key, config) =>
         Effect.gen(function* () {
@@ -186,7 +193,13 @@ export const makeRateLimiter = (): Effect.Effect<RateLimiterShape, never> =>
 
           // Increment
           yield* store.increment(key, Math.ceil(config.windowMs / 1000));
-        }),
+        }).pipe(
+          Effect.tapError((e) =>
+            e._tag === "RateLimitError"
+              ? Obs.recordRateLimitHit(key.split(":")[0] ?? key)
+              : Effect.void,
+          ),
+        ),
 
       resetLimit: (key) =>
         Effect.gen(function* () {

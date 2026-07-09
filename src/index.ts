@@ -78,6 +78,10 @@ export {
   redeemOneTimeTokenForSession,
 } from "./OneTimeToken.ts";
 
+// Observability
+/** Metrics counters and record helpers for tracing and observability. */
+export * from "./Observability.ts";
+
 // Plugins
 /** Structured audit logging of sign-up/sign-in/sign-out (tap hooks). */
 export * from "./AuditPlugin.ts";

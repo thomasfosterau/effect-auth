@@ -7,6 +7,7 @@
 
 import { Context, Effect, Layer, Redacted } from "effect";
 import { makeAes256GcmCipher } from "../Cipher.ts";
+import * as Obs from "../Observability.ts";
 import type { TokenCipher } from "../Cipher.ts";
 export type { TokenCipher } from "../Cipher.ts";
 export { makeAes256GcmCipher } from "../Cipher.ts";
@@ -874,7 +875,7 @@ export const makeOAuthService = (
           }
 
           return result;
-        }),
+        }).pipe(Effect.withSpan("effect-auth.oauth.authorize", { attributes: { provider } })),
 
       handleCallback: (state, code, options) =>
         Effect.gen(function* () {
@@ -1079,7 +1080,11 @@ export const makeOAuthService = (
             isNewUser,
             ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
           } satisfies OAuthSignInResult;
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.oauth.callback"),
+          Effect.tap(() => Obs.recordOAuthCallback("success")),
+          Effect.tapError(() => Obs.recordOAuthCallback("failure")),
+        ),
 
       linkAccount: (userId, provider, code, state) =>
         Effect.gen(function* () {
@@ -1290,7 +1295,11 @@ export const makeOAuthService = (
           yield* accountStore.update(yield* encryptAccount(updatedAccount));
 
           return data.access_token;
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.oauth.refresh", { attributes: { provider } }),
+          Effect.tap(() => Obs.recordOAuthRefresh(provider, "success")),
+          Effect.tapError(() => Obs.recordOAuthRefresh(provider, "failure")),
+        ),
     }),
   );
 };

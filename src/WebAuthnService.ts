@@ -4,6 +4,7 @@
  */
 
 import { Context, Effect, Layer } from "effect";
+import * as Obs from "./Observability.ts";
 import {
   parseAttestationObject,
   parseClientDataJSON,
@@ -286,7 +287,11 @@ export const make = (
             credential,
             verified: authenticatorData.userVerified,
           };
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.webauthn.register"),
+          Effect.tap(() => Obs.recordWebAuthnRegistration("success")),
+          Effect.tapError(() => Obs.recordWebAuthnRegistration("failure")),
+        ),
 
       generateAuthenticationChallenge: (userId: string) =>
         Effect.gen(function* () {
@@ -452,7 +457,11 @@ export const make = (
             credential: updatedCredential,
             newCounter: authenticatorData.signatureCounter,
           };
-        }),
+        }).pipe(
+          Effect.withSpan("effect-auth.webauthn.authenticate"),
+          Effect.tap(() => Obs.recordWebAuthnAuthentication("success")),
+          Effect.tapError(() => Obs.recordWebAuthnAuthentication("failure")),
+        ),
     };
   });
 
