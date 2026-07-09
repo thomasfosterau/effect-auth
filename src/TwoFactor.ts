@@ -12,7 +12,8 @@
  * @module two-factor
  */
 
-import { Config, Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
+import { Config, Context, Data, Effect, Layer, Redacted } from "effect";
+import * as crypto from "node:crypto";
 import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
@@ -309,20 +310,17 @@ export const twoFactorConfig = Config.all({
 /**
  * Generate a cryptographically secure pending-challenge token
  */
-const generatePendingToken = Effect.gen(function* () {
-  const crypto = yield* Crypto.Crypto;
-  return crypto.randomBytes(32).toString("base64url");
-});
+const generatePendingToken = (): Effect.Effect<string, Errors.AuthError> =>
+  Effect.sync(() => crypto.randomBytes(32).toString("base64url"));
 
 /**
  * Generate a single plaintext backup code: 10 crypto-random hex characters
  * formatted as `xxxxx-xxxxx`.
  */
-const generateBackupCode = Effect.gen(function* () {
-  const crypto = yield* Crypto.Crypto;
+const generateBackupCode = (): string => {
   const raw = crypto.randomBytes(5).toString("hex");
   return `${raw.slice(0, 5)}-${raw.slice(5)}`;
-});
+};
 
 /**
  * Normalize a backup code for hashing/comparison (strip separators and
@@ -333,10 +331,8 @@ const normalizeBackupCode = (code: string): string => code.replace(/[\s-]/g, "")
 /**
  * sha256 hex digest of a normalized backup code
  */
-export const hashBackupCode = Effect.fn("")(function* (code: string) {
-  const crypto = yield* Crypto.Crypto;
-  return crypto.createHash("sha256").update(normalizeBackupCode(code)).digest("hex");
-});
+export const hashBackupCode = (code: string): string =>
+  crypto.createHash("sha256").update(normalizeBackupCode(code)).digest("hex");
 
 /**
  * Find the index of a backup-code hash using timing-safe comparison.
@@ -468,12 +464,12 @@ export const makeTwoFactorService = (
           const secret = yield* generateBase32Secret();
           const storedSecret = cipher !== null ? yield* cipher.encrypt(secret) : secret;
 
-          const backupCodes = Array.from({ length: backupCodeCount }, () => yield* generateBackupCode());
+          const backupCodes = Array.from({ length: backupCodeCount }, () => generateBackupCode());
 
           const record: TwoFactorRecord = {
             userId,
             secret: storedSecret,
-            backupCodes: backupCodes.map((code) => yield* hashBackupCode(code)),
+            backupCodes: backupCodes.map((code) => hashBackupCode(code)),
             verified: skipVerificationOnEnable,
             createdAt: Date.now(),
           };
@@ -615,7 +611,7 @@ export const makeTwoFactorService = (
           const pending = yield* resolvePending(pendingToken);
           const record = yield* getVerifiedRecord(pending.userId);
 
-          const index = findBackupCodeIndex(record.backupCodes, yield*hashBackupCode(code));
+          const index = findBackupCodeIndex(record.backupCodes, hashBackupCode(code));
           if (index === -1) {
             return yield* Effect.fail(
               new TwoFactorError({

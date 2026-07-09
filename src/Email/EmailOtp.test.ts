@@ -10,7 +10,7 @@ import {
   EmailOtpUserStore,
 } from "./EmailOtp.js";
 import { hashToken } from "../TokenHash.js";
-import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
+import { makeSessionManager, SessionStore, UserStore, SessionManager } from "../Session.js";
 import type { Session, User, SessionConfig } from "../Types.js";
 import * as Errors from "../Errors.js";
 

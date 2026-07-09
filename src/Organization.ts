@@ -18,8 +18,10 @@
  * @module organization
  */
 
-import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
+import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
+import { normalizeEmail } from "./utils.ts";
 
 /**
  * Organization error
@@ -403,10 +405,7 @@ export class OrganizationService extends Context.Service<
 /**
  * Generate a random identifier for organizations, members, and invitations
  */
-const generateId = Effect.gen(function * () {
-  const crypto = yield* Crypto.Crypto;
-  return crypto.randomBytes(16).toString("hex");
-});
+const generateId = (): string => crypto.randomBytes(16).toString("hex");
 
 /**
  * Create an organization service
@@ -646,7 +645,7 @@ export const makeOrganizationService = (
           }
 
           const invitation: Invitation = {
-            id: yield* generateId,
+            id: generateId(),
             organizationId,
             email,
             role: input.role,
@@ -729,7 +728,7 @@ export const makeOrganizationService = (
       listUserInvitations: (email) =>
         Effect.gen(function* () {
           const store = yield* OrganizationStore;
-          const invitations = yield* store.listInvitationsByEmail((email));
+          const invitations = yield* store.listInvitationsByEmail(email);
           const now = Date.now();
           return invitations.filter(
             (invitation) => invitation.status === "pending" && invitation.expiresAt > now,

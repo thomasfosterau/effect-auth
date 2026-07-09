@@ -2,14 +2,14 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
-import { SessionStore, UserStore, SessionManager } from "./Session.js";
+import { SessionStore, UserStore, SessionManager } from "../Session.js";
 import { hashToken } from "../TokenHash.js";
 import { UserServiceStore, UserService } from "../User.js";
 import { Hooks } from "../Hooks.js";
 import { AuthLifecycleService } from "../AuthLifecycle.js";
-import { EmailPasswordStore } from "./EmailPassword.js";
+import { EmailPasswordStore } from "../Email/EmailPassword.js";
 import { PasswordHasher } from "../Password.js";
-import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.js";
+import { EmailVerificationService, EmailVerificationStore } from "../Email/EmailVerification.js";
 import {
   PasswordResetService,
   PasswordResetStore,

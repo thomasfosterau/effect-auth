@@ -50,7 +50,7 @@ import {
   type EmailOtpStoreShape,
   type EmailOtpUserStoreShape,
   EmailOtpService,
-} from "./EmailOtp.js";
+} from "../Email/EmailOtp.js";
 import {
   PendingTwoFactorStore,
   TwoFactorGateLayer,
@@ -67,7 +67,11 @@ import {
   type AccountToken,
   AccountManagementService,
 } from "../AccountManagement.js";
-import { AnonymousUserStore, type AnonymousUserStoreShape, AnonymousService } from "../Anonymous.js";
+import {
+  AnonymousUserStore,
+  type AnonymousUserStoreShape,
+  AnonymousService,
+} from "../Anonymous.js";
 import {
   PhoneOtpStore,
   PhoneOtpUserStore,

@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Layer } from "effect";
-import { getOpenApiSpec } from "./HttpApi.js";
-import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
+import { getOpenApiSpec } from "./Http/HttpApi.js";
+import { makeAuthWebHandler, type AuthServices } from "./Http/HttpServer.js";
 import { SessionManager } from "./Session.js";
 import { AuthLifecycleService } from "./AuthLifecycle.js";
-import { EmailPasswordStore } from "./EmailPassword.js";
+import { EmailPasswordStore } from "./Email/EmailPassword.js";
 import { PasswordHasher } from "./Password.js";
-import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.js";
+import { EmailVerificationService, EmailVerificationStore } from "./Email/EmailVerification.js";
 import {
   PasswordResetService,
   PasswordResetStore,

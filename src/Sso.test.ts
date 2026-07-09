@@ -7,15 +7,15 @@ import { SessionManager, SessionStore, UserStore, type SessionManagerShape } fro
 import { hashToken } from "./TokenHash.js";
 import { UserServiceStore, UserService } from "./User.js";
 import { AuthLifecycleService } from "./AuthLifecycle.js";
-import { EmailPasswordStore } from "./EmailPassword.js";
+import { EmailPasswordStore } from "./Email/EmailPassword.js";
 import { PasswordHasher } from "./Password.js";
-import { EmailVerificationService, EmailVerificationStore } from "./EmailVerification.js";
+import { EmailVerificationService, EmailVerificationStore } from "./Email/EmailVerification.js";
 import {
   PasswordResetService,
   PasswordResetStore,
   PasswordResetUserStore,
 } from "./PasswordReset.js";
-import { makeAuthWebHandler, type AuthServices } from "./HttpServer.js";
+import { makeAuthWebHandler, type AuthServices } from "./Http/HttpServer.js";
 import { OrganizationStore, type Member, type SsoProvider } from "./index.js";
 import { OAuthStateStore, OAuthUserStore, type OAuthState } from "./OAuth/OAuth.js";
 import {

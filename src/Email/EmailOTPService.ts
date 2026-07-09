@@ -191,7 +191,8 @@ export interface EmailOTPService {
   ) => Effect.Effect<EmailOtpCheckResult, EmailOtpError | Errors.AuthError, EmailOtpStore>;
 }
 
-export const EmailOTPService: Context.Service<EmailOTPService, EmailOTPService> = Context.Service<EmailOTPService>("@effect-auth/EmailOtpService");
+export const EmailOTPService: Context.Service<EmailOTPService, EmailOTPService> =
+  Context.Service<EmailOTPService>("@effect-auth/EmailOtpService");
 
 /** @deprecated Use {@link hashToken} from `"effect-auth"` instead. */
 export const hashOtp = hashToken;
@@ -212,7 +213,7 @@ export const generateOtp = (length: number): Effect.Effect<string, Errors.AuthEr
 /**
  * Create an email OTP service
  */
-export const make = (config: EmailOtpConfig): Effect.Effect<EmailOtpServiceShape, never> => {
+export const make = (config: EmailOtpConfig): Effect.Effect<EmailOTPService, never> => {
   const otpLength = config.otpLength ?? 6;
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
   const maxAttempts = config.maxAttempts ?? 3;
@@ -284,7 +285,7 @@ export const make = (config: EmailOtpConfig): Effect.Effect<EmailOtpServiceShape
     });
 
   return Effect.sync(
-    (): EmailOtpServiceShape => ({
+    (): EmailOTPService => ({
       send: (rawEmail: string, purpose: EmailOtpPurpose) =>
         Effect.gen(function* () {
           const store = yield* EmailOtpStore;

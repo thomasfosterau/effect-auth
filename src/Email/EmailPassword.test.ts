@@ -4,7 +4,7 @@ import * as nodeCrypto from "node:crypto";
 import { Hooks, makePlugin, composePlugins } from "../Hooks.js";
 import * as Errors from "../Errors.js";
 import { makeEmailPasswordService, EmailPasswordStore } from "./EmailPassword.js";
-import { makeSessionManager, SessionStore, UserStore, SessionManager } from "./Session.js";
+import { makeSessionManager, SessionStore, UserStore, SessionManager } from "../Session.js";
 import { hashToken } from "../TokenHash.js";
 import {
   MultiAlgorithmVerifier,

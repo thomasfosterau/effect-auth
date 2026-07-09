@@ -13,12 +13,13 @@
  * E.164 normalization is application policy: the default `normalizePhoneNumber`
  * only trims whitespace. Apps should plug a real E.164 normalizer via config.
  */
-import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
+import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
-import type { SessionService } from "./SessionService.ts";
+import { SessionService } from "./SessionService.ts";
 
 /** Error raised by phone OTP verification failures. */
 export class PhoneOtpError extends Data.TaggedError("PhoneOtpError")<{
@@ -192,16 +193,12 @@ export const getPhoneNumber = (user: Types.User): string | null => {
 };
 
 /** Generate a numeric OTP with crypto-secure randomness. */
-const generateOtp = Effect.fn("generateOTP")(function* (length: number) {
-  const crypto = yield* Crypto.Crypto;
-  let otp = "";
-  for (let i = 0; i < length; i++) {
-    const randomBytes = yield* crypto.randomBytes(1);
-    const digit = randomBytes[0] % 10;
-    otp += digit.toString();
-  }
-  return otp;
-});
+const generateOtp = (length: number): Effect.Effect<string, Errors.AuthError> =>
+  Effect.sync(() => {
+    let otp = "";
+    for (let i = 0; i < length; i++) otp += crypto.randomInt(0, 10).toString();
+    return otp;
+  });
 
 export const makePhoneOtpService = (
   config: PhoneOtpConfig,
@@ -319,7 +316,7 @@ export const makePhoneOtpService = (
       signIn: (rawPhoneNumber, otp, options) =>
         Effect.gen(function* () {
           const userStore = yield* PhoneOtpUserStore;
-          const sessionManager = yield* SessionManager;
+          const sessionManager = yield* SessionService;
 
           const phoneNumber = yield* normalize(rawPhoneNumber);
 

@@ -21,4 +21,4 @@ export * from "../SessionCookieCache.ts";
 export * from "./HttpClient.ts";
 
 /** Composable HttpApiMiddleware for consumer apps (AuthMiddleware, OptionalAuthMiddleware, …). */
-export * from "./HttpMiddleware.ts";
+export * from "../HttpMiddleware.ts";
