@@ -10,8 +10,8 @@ import {
   PhoneOtpStore,
   PhoneOtpUserStore,
 } from "./PhoneOtp.js";
-import { SessionStore } from "./SessionStore.js";
-import { SessionService } from "./SessionService.js";
+import { SessionStore, type SessionStore as SessionStoreShape } from "./SessionStore.js";
+import { SessionService, make as makeSessionService } from "./SessionService.js";
 import { UserStore, type UserStore as UserStoreShape } from "./UserStore.js";
 import { hashToken } from "./TokenHash.js";
 import { Hooks } from "./Hooks.js";
@@ -122,7 +122,7 @@ const sessionConfig: Types.SessionConfig = {
 const makeTestContext = async () => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
-      SessionService.make(sessionConfig),
+      makeSessionService(sessionConfig),
       Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
     ),
   );
