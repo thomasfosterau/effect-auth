@@ -5,11 +5,8 @@ import {
   AnonymousUserStore,
   isAnonymousUser,
   type AnonymousConfig,
-  type AnonymousServiceShape,
-  type AnonymousUserStoreShape,
 } from "./Anonymous.js";
 import { SessionService } from "./session/SessionService.js";
-import type { SessionServiceShape } from "./session/SessionService.js";
 import { Hooks } from "./Hooks.js";
 import type * as Types from "./Types.js";
 import { InvalidInputError } from "./Errors.js";
@@ -41,7 +38,7 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
   const invalidatedUserSessions: string[] = [];
   let seq = 0;
 
-  const store: AnonymousUserStoreShape = {
+  const store: typeof AnonymousUserStore.Service = {
     createAnonymousUser: () =>
       Effect.sync(() => {
         const id = `anon-${++seq}`;
@@ -61,7 +58,7 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
     deleteUser: (userId) => Effect.sync(() => void users.delete(userId)),
   };
 
-  const sessionManager: SessionServiceShape = {
+  const sessionManager: typeof SessionService.Service = {
     createSession: (userId) => Effect.sync(() => makeSession(userId)),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
@@ -96,7 +93,7 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
 const run = <A, E>(
   h: Harness,
   f: (
-    svc: AnonymousServiceShape,
+    svc: typeof AnonymousService.Service,
   ) => Effect.Effect<A, E, AnonymousUserStore | SessionService | Hooks>,
 ) =>
   Effect.runPromise(
@@ -109,7 +106,7 @@ const run = <A, E>(
 const runFail = <A, E>(
   h: Harness,
   f: (
-    svc: AnonymousServiceShape,
+    svc: typeof AnonymousService.Service,
   ) => Effect.Effect<A, E, AnonymousUserStore | SessionService | Hooks>,
 ) =>
   Effect.runPromise(

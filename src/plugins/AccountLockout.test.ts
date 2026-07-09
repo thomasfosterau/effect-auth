@@ -1,11 +1,10 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { Hooks, type HookDefs, type HookError } from "../Hooks.js";
+import { Hooks, type HookError } from "../Hooks.js";
 import {
   AccountLockoutPlugin,
   AccountLockoutStore,
   type AccountLockoutRecord,
-  type AccountLockoutStoreShape,
 } from "./AccountLockout.js";
 import { AccountLockedError } from "../Errors.js";
 import type { SignInInput, AuthResult } from "../email/EmailPassword.js";
@@ -33,7 +32,7 @@ interface Harness {
 
 const makeHarness = (config?: { maxAttempts?: number; lockoutDurationMs?: number }): Harness => {
   const records = new Map<string, AccountLockoutRecord>();
-  const store: AccountLockoutStoreShape = {
+  const store: typeof AccountLockoutStore.Service = {
     get: (key) => Effect.sync(() => records.get(key) ?? null),
     set: (key, record) => Effect.sync(() => void records.set(key, record)),
     delete: (key) => Effect.sync(() => void records.delete(key)),
@@ -44,7 +43,7 @@ const makeHarness = (config?: { maxAttempts?: number; lockoutDurationMs?: number
     Layer.provide(Layer.succeed(AccountLockoutStore)(store)),
   );
 
-  const drive = <A, E>(f: (hooks: HookDefs) => Effect.Effect<A, E, never>) =>
+  const drive = <A, E>(f: (hooks: typeof Hooks.Service) => Effect.Effect<A, E, never>) =>
     Effect.runPromise(
       Effect.gen(function* () {
         const hooks = yield* Hooks;

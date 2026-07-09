@@ -68,17 +68,16 @@ export interface OIDCClient {
 }
 
 /** Persistent registry of OIDC clients. */
-export interface OIDCClientStoreShape {
-  readonly create: (client: OIDCClient) => Effect.Effect<OIDCClient, AuthError>;
-  readonly getByClientId: (clientId: string) => Effect.Effect<OIDCClient | null, AuthError>;
-  readonly update: (client: OIDCClient) => Effect.Effect<OIDCClient, AuthError>;
-  readonly delete: (clientId: string) => Effect.Effect<void, AuthError>;
-  readonly list: () => Effect.Effect<ReadonlyArray<OIDCClient>, AuthError>;
-}
-
-export class OIDCClientStore extends Context.Service<OIDCClientStore, OIDCClientStoreShape>()(
-  "@effect-auth/OidcClientStore",
-) {}
+export class OIDCClientStore extends Context.Service<
+  OIDCClientStore,
+  {
+    readonly create: (client: OIDCClient) => Effect.Effect<OIDCClient, AuthError>;
+    readonly getByClientId: (clientId: string) => Effect.Effect<OIDCClient | null, AuthError>;
+    readonly update: (client: OIDCClient) => Effect.Effect<OIDCClient, AuthError>;
+    readonly delete: (clientId: string) => Effect.Effect<void, AuthError>;
+    readonly list: () => Effect.Effect<ReadonlyArray<OIDCClient>, AuthError>;
+  }
+>()("@effect-auth/OIDCClientStore") {}
 
 /**
  * A short-lived authorization artifact: either an issued authorization code
@@ -104,15 +103,16 @@ export interface OIDCAuthorizationCode {
 }
 
 /** Ephemeral store for authorization codes and pending consent requests. */
-export interface OIDCCodeStoreShape {
-  readonly create: (code: OIDCAuthorizationCode) => Effect.Effect<OIDCAuthorizationCode, AuthError>;
-  readonly get: (codeHash: string) => Effect.Effect<OIDCAuthorizationCode | null, AuthError>;
-  readonly delete: (codeHash: string) => Effect.Effect<void, AuthError>;
-}
-
-export class OIDCCodeStore extends Context.Service<OIDCCodeStore, OIDCCodeStoreShape>()(
-  "@effect-auth/OidcCodeStore",
-) {}
+export class OIDCCodeStore extends Context.Service<
+  OIDCCodeStore,
+  {
+    readonly create: (
+      code: OIDCAuthorizationCode,
+    ) => Effect.Effect<OIDCAuthorizationCode, AuthError>;
+    readonly get: (codeHash: string) => Effect.Effect<OIDCAuthorizationCode | null, AuthError>;
+    readonly delete: (codeHash: string) => Effect.Effect<void, AuthError>;
+  }
+>()("@effect-auth/OIDCCodeStore") {}
 
 /** An issued opaque token, keyed by the sha256 hex digest of its value. */
 export interface OIDCToken {
@@ -132,17 +132,18 @@ export interface OIDCToken {
 }
 
 /** Store for issued access and refresh tokens. */
-export interface OIDCTokenStoreShape {
-  readonly create: (token: OIDCToken) => Effect.Effect<OIDCToken, AuthError>;
-  readonly get: (tokenHash: string) => Effect.Effect<OIDCToken | null, AuthError>;
-  readonly delete: (tokenHash: string) => Effect.Effect<void, AuthError>;
-  /** Optional: list all tokens belonging to a rotation family. Used for reuse-detection revocation. */
-  readonly listByFamily?: (familyId: string) => Effect.Effect<ReadonlyArray<OIDCToken>, AuthError>;
-}
-
-export class OIDCTokenStore extends Context.Service<OIDCTokenStore, OIDCTokenStoreShape>()(
-  "@effect-auth/OidcTokenStore",
-) {}
+export class OIDCTokenStore extends Context.Service<
+  OIDCTokenStore,
+  {
+    readonly create: (token: OIDCToken) => Effect.Effect<OIDCToken, AuthError>;
+    readonly get: (tokenHash: string) => Effect.Effect<OIDCToken | null, AuthError>;
+    readonly delete: (tokenHash: string) => Effect.Effect<void, AuthError>;
+    /** Optional: list all tokens belonging to a rotation family. Used for reuse-detection revocation. */
+    readonly listByFamily?: (
+      familyId: string,
+    ) => Effect.Effect<ReadonlyArray<OIDCToken>, AuthError>;
+  }
+>()("@effect-auth/OIDCTokenStore") {}
 
 /** A user's recorded consent for a client (the union of granted scopes). */
 export interface OIDCConsent {
@@ -155,21 +156,23 @@ export interface OIDCConsent {
 }
 
 /** Store for recorded user consents. */
-export interface OIDCConsentStoreShape {
-  readonly get: (userId: string, clientId: string) => Effect.Effect<OIDCConsent | null, AuthError>;
-  readonly upsert: (consent: OIDCConsent) => Effect.Effect<OIDCConsent, AuthError>;
-  readonly delete: (userId: string, clientId: string) => Effect.Effect<void, AuthError>;
-}
-
-export class OIDCConsentStore extends Context.Service<OIDCConsentStore, OIDCConsentStoreShape>()(
-  "@effect-auth/OidcConsentStore",
-) {}
+export class OIDCConsentStore extends Context.Service<
+  OIDCConsentStore,
+  {
+    readonly get: (
+      userId: string,
+      clientId: string,
+    ) => Effect.Effect<OIDCConsent | null, AuthError>;
+    readonly upsert: (consent: OIDCConsent) => Effect.Effect<OIDCConsent, AuthError>;
+    readonly delete: (userId: string, clientId: string) => Effect.Effect<void, AuthError>;
+  }
+>()("@effect-auth/OIDCConsentStore") {}
 
 // -----------------------------------------------------------------------------
 // Service types
 // -----------------------------------------------------------------------------
 
-/** Input to {@link OIDCProviderServiceShape.registerClient}. */
+/** Input to {@link OIDCProviderService.registerClient}. */
 export interface RegisterOIDCClientInput {
   readonly name: string;
   readonly redirectUris: readonly string[];
@@ -187,7 +190,7 @@ export interface RegisteredOIDCClient {
   readonly clientSecret?: string;
 }
 
-/** Fields updatable via {@link OIDCProviderServiceShape.updateClient}. */
+/** Fields updatable via {@link OIDCProviderService.updateClient}. */
 export interface UpdateOIDCClientInput {
   readonly name?: string;
   readonly redirectUris?: readonly string[];
@@ -293,108 +296,110 @@ export interface OIDCProviderConfig {
   readonly trustedClients?: readonly TrustedOIDCClient[];
 }
 
-export interface OIDCProviderServiceShape {
-  /**
-   * Register a client application. Generates the `client_id` and — for `web`
-   * (confidential) clients — a secret returned in plaintext exactly once.
-   * Gate this behind an admin check at the HTTP layer.
-   */
-  readonly registerClient: (
-    input: RegisterOIDCClientInput,
-    registrarUserId?: string,
-  ) => Effect.Effect<RegisteredOIDCClient, OIDCProviderError | AuthError, OIDCClientStore>;
-
-  /** Look up a client (trusted config clients first, then the store). */
-  readonly getClient: (
-    clientId: string,
-  ) => Effect.Effect<OIDCClient | null, AuthError, OIDCClientStore>;
-
-  /** List registered clients (store-backed only). */
-  readonly listClients: () => Effect.Effect<ReadonlyArray<OIDCClient>, AuthError, OIDCClientStore>;
-
-  /** Update a registered client. Trusted config clients cannot be updated. */
-  readonly updateClient: (
-    clientId: string,
-    input: UpdateOIDCClientInput,
-  ) => Effect.Effect<OIDCClient, OIDCProviderError | AuthError, OIDCClientStore>;
-
-  /** Delete a registered client. */
-  readonly deleteClient: (
-    clientId: string,
-  ) => Effect.Effect<void, OIDCProviderError | AuthError, OIDCClientStore>;
-
-  /**
-   * Process an authorization request for an authenticated user. Fails with
-   * {@link OIDCProviderError} only for errors that must NOT redirect back to
-   * the client (unknown client, unregistered `redirect_uri`); every other
-   * outcome is a redirect (code, consent page, or spec error).
-   */
-  readonly authorize: (
-    user: Types.User,
-    request: OIDCAuthorizeRequest,
-  ) => Effect.Effect<
-    OIDCAuthorizeResult,
-    OIDCProviderError | AuthError,
-    OIDCClientStore | OIDCCodeStore | OIDCConsentStore
-  >;
-
-  /**
-   * Resolve a pending consent request. Accepting records the consent and
-   * issues an authorization code; denying redirects with
-   * `error=access_denied`. The `userId` must match the pending request.
-   */
-  readonly consent: (
-    userId: string,
-    consentCode: string,
-    accept: boolean,
-  ) => Effect.Effect<
-    { readonly redirectTo: string },
-    OIDCProviderError | AuthError,
-    OIDCCodeStore | OIDCConsentStore
-  >;
-
-  /**
-   * Token endpoint: `authorization_code` (with PKCE verification) and
-   * `refresh_token` (rotating) grants. Client authentication accepts a
-   * secret for confidential clients; public clients must present a PKCE
-   * verifier instead.
-   */
-  readonly token: (
-    request: OIDCTokenRequest,
-  ) => Effect.Effect<
-    OIDCTokenResult,
-    OIDCTokenError | AuthError,
-    OIDCClientStore | OIDCCodeStore | OIDCTokenStore | UserStore | JWTService | JWTKeyStore
-  >;
-
-  /**
-   * Resolve the standard claims for a bearer access token
-   * (`sub` always; `email`/`email_verified` with the `email` scope;
-   * `name`/`picture` with the `profile` scope).
-   */
-  readonly userinfo: (
-    accessToken: string,
-  ) => Effect.Effect<
-    Record<string, unknown>,
-    OIDCProviderError | AuthError,
-    OIDCTokenStore | UserStore
-  >;
-
-  /** The OpenID Provider Metadata document (RFC 8414 / OIDC Discovery). */
-  readonly getMetadata: () => Record<string, unknown>;
-
-  /**
-   * The login page URL for an unauthenticated authorization request, with the
-   * original authorize URL attached as `redirect_to` so the app can resume
-   * the flow after sign-in.
-   */
-  readonly loginRedirect: (returnTo: string) => string;
-}
-
 export class OIDCProviderService extends Context.Service<
   OIDCProviderService,
-  OIDCProviderServiceShape
->()("@effect-auth/OidcProviderService") {
+  {
+    /**
+     * Register a client application. Generates the `client_id` and — for `web`
+     * (confidential) clients — a secret returned in plaintext exactly once.
+     * Gate this behind an admin check at the HTTP layer.
+     */
+    readonly registerClient: (
+      input: RegisterOIDCClientInput,
+      registrarUserId?: string,
+    ) => Effect.Effect<RegisteredOIDCClient, OIDCProviderError | AuthError, OIDCClientStore>;
+
+    /** Look up a client (trusted config clients first, then the store). */
+    readonly getClient: (
+      clientId: string,
+    ) => Effect.Effect<OIDCClient | null, AuthError, OIDCClientStore>;
+
+    /** List registered clients (store-backed only). */
+    readonly listClients: () => Effect.Effect<
+      ReadonlyArray<OIDCClient>,
+      AuthError,
+      OIDCClientStore
+    >;
+
+    /** Update a registered client. Trusted config clients cannot be updated. */
+    readonly updateClient: (
+      clientId: string,
+      input: UpdateOIDCClientInput,
+    ) => Effect.Effect<OIDCClient, OIDCProviderError | AuthError, OIDCClientStore>;
+
+    /** Delete a registered client. */
+    readonly deleteClient: (
+      clientId: string,
+    ) => Effect.Effect<void, OIDCProviderError | AuthError, OIDCClientStore>;
+
+    /**
+     * Process an authorization request for an authenticated user. Fails with
+     * {@link OIDCProviderError} only for errors that must NOT redirect back to
+     * the client (unknown client, unregistered `redirect_uri`); every other
+     * outcome is a redirect (code, consent page, or spec error).
+     */
+    readonly authorize: (
+      user: Types.User,
+      request: OIDCAuthorizeRequest,
+    ) => Effect.Effect<
+      OIDCAuthorizeResult,
+      OIDCProviderError | AuthError,
+      OIDCClientStore | OIDCCodeStore | OIDCConsentStore
+    >;
+
+    /**
+     * Resolve a pending consent request. Accepting records the consent and
+     * issues an authorization code; denying redirects with
+     * `error=access_denied`. The `userId` must match the pending request.
+     */
+    readonly consent: (
+      userId: string,
+      consentCode: string,
+      accept: boolean,
+    ) => Effect.Effect<
+      { readonly redirectTo: string },
+      OIDCProviderError | AuthError,
+      OIDCCodeStore | OIDCConsentStore
+    >;
+
+    /**
+     * Token endpoint: `authorization_code` (with PKCE verification) and
+     * `refresh_token` (rotating) grants. Client authentication accepts a
+     * secret for confidential clients; public clients must present a PKCE
+     * verifier instead.
+     */
+    readonly token: (
+      request: OIDCTokenRequest,
+    ) => Effect.Effect<
+      OIDCTokenResult,
+      OIDCTokenError | AuthError,
+      OIDCClientStore | OIDCCodeStore | OIDCTokenStore | UserStore | JWTService | JWTKeyStore
+    >;
+
+    /**
+     * Resolve the standard claims for a bearer access token
+     * (`sub` always; `email`/`email_verified` with the `email` scope;
+     * `name`/`picture` with the `profile` scope).
+     */
+    readonly userinfo: (
+      accessToken: string,
+    ) => Effect.Effect<
+      Record<string, unknown>,
+      OIDCProviderError | AuthError,
+      OIDCTokenStore | UserStore
+    >;
+
+    /** The OpenID Provider Metadata document (RFC 8414 / OIDC Discovery). */
+    readonly getMetadata: () => Record<string, unknown>;
+
+    /**
+     * The login page URL for an unauthenticated authorization request, with the
+     * original authorize URL attached as `redirect_to` so the app can resume
+     * the flow after sign-in.
+     */
+    readonly loginRedirect: (returnTo: string) => string;
+  }
+>()("@effect-auth/OIDCProviderService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -457,7 +462,7 @@ const isAllowedRedirectUri = (uri: string): boolean => {
 
 export const makeOIDCProviderService = (
   config: OIDCProviderConfig,
-): Effect.Effect<OIDCProviderServiceShape, never> => {
+): Effect.Effect<typeof OIDCProviderService.Service, never> => {
   const codeExpiresIn = config.codeExpiresIn ?? 10 * 60 * 1000;
   const accessTokenExpiresIn = config.accessTokenExpiresIn ?? 60 * 60 * 1000;
   const refreshTokenExpiresIn = config.refreshTokenExpiresIn ?? 30 * 24 * 60 * 60 * 1000;
@@ -1062,5 +1067,5 @@ export const makeOIDCProviderService = (
     }),
 
     loginRedirect: (returnTo) => buildRedirect(config.loginPage, { redirect_to: returnTo }),
-  } satisfies OIDCProviderServiceShape);
+  } satisfies typeof OIDCProviderService.Service);
 };

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import * as crypto from "node:crypto";
-import { Hooks, type HookDefs } from "../Hooks.js";
+import { Hooks } from "../Hooks.js";
 import { HaveIBeenPwnedPlugin } from "../password/HaveIBeenPwned.js";
 import { CaptchaPlugin } from "./Captcha.js";
 import { PwnedPasswordError, CaptchaError } from "../Errors.js";
@@ -20,7 +20,7 @@ const stubHttpClient = (respond: (url: string) => Response) =>
 const drive = <A, E>(
   pluginLayer: Layer.Layer<Hooks, never, Hooks | HttpClient.HttpClient>,
   clientLayer: Layer.Layer<HttpClient.HttpClient>,
-  f: (hooks: HookDefs) => Effect.Effect<A, E, never>,
+  f: (hooks: typeof Hooks.Service) => Effect.Effect<A, E, never>,
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {

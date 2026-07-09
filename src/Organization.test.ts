@@ -8,7 +8,7 @@ import {
   type Member,
   type Organization,
   type OrganizationConfig,
-  type OrganizationServiceShape,
+  type OrganizationService,
 } from "./Organization.js";
 
 const organizations = new Map<string, Organization>();
@@ -124,7 +124,7 @@ const testContext = Context.make(OrganizationStore, organizationStore);
 
 const runService = <A, E>(
   config: OrganizationConfig,
-  program: (service: OrganizationServiceShape) => Effect.Effect<A, E, OrganizationStore>,
+  program: (service: typeof OrganizationService.Service) => Effect.Effect<A, E, OrganizationStore>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.provide(

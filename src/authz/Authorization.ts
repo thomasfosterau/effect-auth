@@ -6,23 +6,18 @@ import { formatPermission, permissionMatches, type PermissionRef } from "./Permi
  * Authorization policy interface
  * Users should implement this to define their authorization rules
  */
-export interface AuthorizationPolicyShape {
-  /**
-   * Check if a user has permission to perform an action on a resource
-   */
-  readonly checkPermission: (
-    userId: string,
-    resource: string,
-    action: string,
-  ) => Effect.Effect<boolean, never>;
-}
-
-/**
- * Tag for AuthorizationPolicy service
- */
 export class AuthorizationPolicy extends Context.Service<
   AuthorizationPolicy,
-  AuthorizationPolicyShape
+  {
+    /**
+     * Check if a user has permission to perform an action on a resource
+     */
+    readonly checkPermission: (
+      userId: string,
+      resource: string,
+      action: string,
+    ) => Effect.Effect<boolean, never>;
+  }
 >()("@effect-auth/AuthorizationPolicy") {
   /**
    * Construct a Layer providing this service.
@@ -34,31 +29,31 @@ export class AuthorizationPolicy extends Context.Service<
  * Simple role-based authorization policy
  * This is a basic implementation that users can extend or replace
  */
-export interface RoleStoreShape {
-  /**
-   * Get roles for a user
-   */
-  readonly getUserRoles: (userId: string) => Effect.Effect<readonly string[], never>;
+export class RoleStore extends Context.Service<
+  RoleStore,
+  {
+    /**
+     * Get roles for a user
+     */
+    readonly getUserRoles: (userId: string) => Effect.Effect<readonly string[], never>;
 
-  /**
-   * Get permissions for a role
-   */
-  readonly getRolePermissions: (
-    role: string,
-  ) => Effect.Effect<readonly { resource: string; action: string }[], never>;
-}
-
-/**
- * Tag for RoleStore service
- */
-export class RoleStore extends Context.Service<RoleStore, RoleStoreShape>()(
-  "@effect-auth/RoleStore",
-) {}
+    /**
+     * Get permissions for a role
+     */
+    readonly getRolePermissions: (
+      role: string,
+    ) => Effect.Effect<readonly { resource: string; action: string }[], never>;
+  }
+>()("@effect-auth/RoleStore") {}
 
 /**
  * Create a simple role-based authorization policy
  */
-export const makeRoleBasedPolicy = (): Effect.Effect<AuthorizationPolicyShape, never, RoleStore> =>
+export const makeRoleBasedPolicy = (): Effect.Effect<
+  typeof AuthorizationPolicy.Service,
+  never,
+  RoleStore
+> =>
   Effect.gen(function* () {
     const roleStore = yield* RoleStore;
 
@@ -117,14 +112,14 @@ export const requirePermission = (
 /**
  * A policy that grants every permission.
  */
-export const allowAll: AuthorizationPolicyShape = {
+export const allowAll: typeof AuthorizationPolicy.Service = {
   checkPermission: () => Effect.succeed(true),
 };
 
 /**
  * A policy that denies every permission.
  */
-export const denyAll: AuthorizationPolicyShape = {
+export const denyAll: typeof AuthorizationPolicy.Service = {
   checkPermission: () => Effect.succeed(false),
 };
 
@@ -139,7 +134,7 @@ export const denyAll: AuthorizationPolicyShape = {
  */
 export const fromPredicate = (
   check: (userId: string, resource: string, action: string) => Effect.Effect<boolean, never>,
-): AuthorizationPolicyShape => ({
+): typeof AuthorizationPolicy.Service => ({
   checkPermission: check,
 });
 
@@ -148,8 +143,8 @@ export const fromPredicate = (
  * it. Evaluation short-circuits on the first grant. With no policies, denies.
  */
 export const anyOf = (
-  ...policies: readonly AuthorizationPolicyShape[]
-): AuthorizationPolicyShape => ({
+  ...policies: readonly (typeof AuthorizationPolicy.Service)[]
+): typeof AuthorizationPolicy.Service => ({
   checkPermission: (userId, resource, action) =>
     Effect.gen(function* () {
       for (const policy of policies) {
@@ -167,8 +162,8 @@ export const anyOf = (
  * policies, grants (vacuously true).
  */
 export const allOf = (
-  ...policies: readonly AuthorizationPolicyShape[]
-): AuthorizationPolicyShape => ({
+  ...policies: readonly (typeof AuthorizationPolicy.Service)[]
+): typeof AuthorizationPolicy.Service => ({
   checkPermission: (userId, resource, action) =>
     Effect.gen(function* () {
       for (const policy of policies) {
@@ -183,7 +178,9 @@ export const allOf = (
 /**
  * Negate a policy: grants what the wrapped policy denies and vice versa.
  */
-export const not = (policy: AuthorizationPolicyShape): AuthorizationPolicyShape => ({
+export const not = (
+  policy: typeof AuthorizationPolicy.Service,
+): typeof AuthorizationPolicy.Service => ({
   checkPermission: (userId, resource, action) =>
     Effect.map(policy.checkPermission(userId, resource, action), (granted) => !granted),
 });
@@ -193,7 +190,7 @@ export const not = (policy: AuthorizationPolicyShape): AuthorizationPolicyShape 
 // ---------------------------------------------------------------------------
 
 /**
- * Check a permission against the {@link AuthorizationPolicyShape} in context,
+ * Check a permission against the `typeof AuthorizationPolicy.Service` in context,
  * returning a boolean instead of failing.
  */
 export const can = (

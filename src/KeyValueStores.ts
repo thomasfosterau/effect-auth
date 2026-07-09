@@ -43,42 +43,16 @@
 import { Effect, Layer } from "effect";
 import { KeyValueStore } from "effect/unstable/persistence";
 import * as Errors from "./Errors.ts";
-import {
-  type EmailOTPPurpose,
-  type EmailOTPRecord,
-  type EmailOTPStoreShape,
-  EmailOTPStore,
-} from "./email/EmailOTP.ts";
-import {
-  type Identifier,
-  IdentifierStore,
-  type IdentifierStoreShape,
-  type IdentifierType,
-} from "./Identifier.ts";
-import {
-  type EmailVerification,
-  type EmailVerificationStoreShape,
-  EmailVerificationStore,
-} from "./email/EmailVerification.ts";
-import { type MagicLinkStoreShape, MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
-import { type OAuthState, type OAuthStateStoreShape, OAuthStateStore } from "./oauth/OAuth.ts";
-import {
-  type PasswordResetStoreShape,
-  PasswordResetStore,
-  type PasswordResetToken,
-} from "./password/PasswordReset.ts";
-import { type RateLimitEntry, type RateLimitStoreShape, RateLimitStore } from "./RateLimit.ts";
-import {
-  type PendingTwoFactor,
-  type PendingTwoFactorStoreShape,
-  PendingTwoFactorStore,
-} from "./TwoFactor.ts";
-import { type ChallengeStoreShape, ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.ts";
-import {
-  type GoogleOneTapNonceEntry,
-  type GoogleOneTapNonceStoreShape,
-  GoogleOneTapNonceStore,
-} from "./GoogleOneTap.ts";
+import { type EmailOTPPurpose, type EmailOTPRecord, EmailOTPStore } from "./email/EmailOTP.ts";
+import { type Identifier, IdentifierStore, type IdentifierType } from "./Identifier.ts";
+import { type EmailVerification, EmailVerificationStore } from "./email/EmailVerification.ts";
+import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
+import { type OAuthState, OAuthStateStore } from "./oauth/OAuth.ts";
+import { PasswordResetStore, type PasswordResetToken } from "./password/PasswordReset.ts";
+import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
+import { type PendingTwoFactor, PendingTwoFactorStore } from "./TwoFactor.ts";
+import { ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.ts";
+import { type GoogleOneTapNonceEntry, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 
 // ---------------------------------------------------------------------------
 // Codecs & helpers
@@ -163,10 +137,10 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
 const oauthStateKey = (state: string) => `oauth-state:${state}`;
 
 /**
- * Build an {@link OAuthStateStoreShape} over the ambient `KeyValueStore`.
+ * Build an {@link OAuthStateStore} over the ambient `KeyValueStore`.
  */
 export const makeOAuthStateStoreKV: Effect.Effect<
-  OAuthStateStoreShape,
+  typeof OAuthStateStore.Service,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -179,7 +153,7 @@ export const makeOAuthStateStoreKV: Effect.Effect<
         .read<OAuthState>(oauthStateKey(state), "oauthState.get")
         .pipe(Effect.map((entry) => entry ?? null)),
     delete: (state) => kv.remove(oauthStateKey(state), "oauthState.delete"),
-  } satisfies OAuthStateStoreShape;
+  } satisfies typeof OAuthStateStore.Service;
 });
 
 /**
@@ -208,10 +182,10 @@ const decodeChallenge = (stored: StoredChallenge): WebAuthnChallenge => ({
 });
 
 /**
- * Build a WebAuthn {@link ChallengeStoreShape} over the ambient `KeyValueStore`.
+ * Build a WebAuthn {@link ChallengeStore} over the ambient `KeyValueStore`.
  */
 export const makeChallengeStoreKV: Effect.Effect<
-  ChallengeStoreShape,
+  typeof ChallengeStore.Service,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -235,7 +209,7 @@ export const makeChallengeStoreKV: Effect.Effect<
         Effect.map((stored) => (stored ? decodeChallenge(stored) : null)),
       ),
     delete: (challenge) => kv.remove(challengeKey(challenge), "challenge.delete"),
-  } satisfies ChallengeStoreShape;
+  } satisfies typeof ChallengeStore.Service;
 });
 
 /**
@@ -251,7 +225,7 @@ export const ChallengeStoreKV: Layer.Layer<ChallengeStore, never, KeyValueStore.
 const rateLimitKey = (key: string) => `rate-limit:${key}`;
 
 /**
- * Build a {@link RateLimitStoreShape} over the ambient `KeyValueStore`.
+ * Build a {@link RateLimitStore} over the ambient `KeyValueStore`.
  *
  * `increment` is read-modify-write and therefore not atomic (see the module
  * docs) — fine for best-effort limiting, not for strict quota enforcement.
@@ -259,7 +233,7 @@ const rateLimitKey = (key: string) => `rate-limit:${key}`;
  * rather than by backend-level expiry, since `KeyValueStore` has no TTL API.
  */
 export const makeRateLimitStoreKV: Effect.Effect<
-  RateLimitStoreShape,
+  typeof RateLimitStore.Service,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -282,7 +256,7 @@ export const makeRateLimitStoreKV: Effect.Effect<
         return updated.count;
       }),
     delete: (key) => kv.remove(rateLimitKey(key), "rateLimit.delete"),
-  } satisfies RateLimitStoreShape;
+  } satisfies typeof RateLimitStore.Service;
 });
 
 /**
@@ -299,13 +273,13 @@ const emailVerificationTokenKey = (token: string) => `email-verification:token:$
 const emailVerificationUserKey = (userId: string) => `email-verification:user:${userId}`;
 
 /**
- * Build an {@link EmailVerificationStoreShape} over the ambient `KeyValueStore`.
+ * Build an {@link EmailVerificationStore} over the ambient `KeyValueStore`.
  *
  * `deleteByUserId` is served by a secondary index key per user holding the
  * user's live tokens (see the module docs for staleness guarantees).
  */
 export const makeEmailVerificationStoreKV: Effect.Effect<
-  EmailVerificationStoreShape,
+  typeof EmailVerificationStore.Service,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -355,7 +329,7 @@ export const makeEmailVerificationStoreKV: Effect.Effect<
         );
         yield* kv.remove(emailVerificationUserKey(userId), "emailVerification.deleteByUserId");
       }),
-  } satisfies EmailVerificationStoreShape;
+  } satisfies typeof EmailVerificationStore.Service;
 });
 
 /**
@@ -375,12 +349,12 @@ const passwordResetTokenKey = (token: string) => `password-reset:token:${token}`
 const passwordResetUserKey = (userId: string) => `password-reset:user:${userId}`;
 
 /**
- * Build a {@link PasswordResetStoreShape} over the ambient `KeyValueStore`.
+ * Build a {@link PasswordResetStore} over the ambient `KeyValueStore`.
  *
  * `deleteByUserId` is served by a secondary index key per user.
  */
 export const makePasswordResetStoreKV: Effect.Effect<
-  PasswordResetStoreShape,
+  typeof PasswordResetStore.Service,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -416,7 +390,7 @@ export const makePasswordResetStoreKV: Effect.Effect<
         );
         yield* kv.remove(passwordResetUserKey(userId), "passwordReset.deleteByUserId");
       }),
-  } satisfies PasswordResetStoreShape;
+  } satisfies typeof PasswordResetStore.Service;
 });
 
 /**
@@ -436,12 +410,12 @@ const magicLinkTokenKey = (token: string) => `magic-link:token:${token}`;
 const magicLinkEmailKey = (email: string) => `magic-link:email:${email}`;
 
 /**
- * Build a {@link MagicLinkStoreShape} over the ambient `KeyValueStore`.
+ * Build a {@link MagicLinkStore} over the ambient `KeyValueStore`.
  *
  * `deleteByEmail` is served by a secondary index key per email address.
  */
 export const makeMagicLinkStoreKV: Effect.Effect<
-  MagicLinkStoreShape,
+  typeof MagicLinkStore.Service,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -483,7 +457,7 @@ export const makeMagicLinkStoreKV: Effect.Effect<
         );
         yield* kv.remove(magicLinkEmailKey(email), "magicLink.deleteByEmail");
       }),
-  } satisfies MagicLinkStoreShape;
+  } satisfies typeof MagicLinkStore.Service;
 });
 
 /**
@@ -499,14 +473,14 @@ export const MagicLinkStoreKV: Layer.Layer<MagicLinkStore, never, KeyValueStore.
 const emailOTPKey = (email: string, purpose: EmailOTPPurpose) => `email-otp:${purpose}:${email}`;
 
 /**
- * Build an {@link EmailOTPStoreShape} over the ambient `KeyValueStore`.
+ * Build an {@link EmailOTPStore} over the ambient `KeyValueStore`.
  *
  * There is at most one active OTP per email + purpose pair, so the pair is
  * the key itself and no secondary index is needed. `incrementAttempts` is
  * read-modify-write (see the module docs on atomicity).
  */
 export const makeEmailOTPStoreKV: Effect.Effect<
-  EmailOTPStoreShape,
+  typeof EmailOTPStore.Service,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -531,7 +505,7 @@ export const makeEmailOTPStoreKV: Effect.Effect<
         yield* kv.write(emailOTPKey(email, purpose), updated, "emailOTP.incrementAttempts");
         return updated.attempts;
       }),
-  } satisfies EmailOTPStoreShape;
+  } satisfies typeof EmailOTPStore.Service;
 });
 
 /**
@@ -547,10 +521,10 @@ export const EmailOTPStoreKV: Layer.Layer<EmailOTPStore, never, KeyValueStore.Ke
 const pendingTwoFactorKey = (token: string) => `pending-two-factor:${token}`;
 
 /**
- * Build a {@link PendingTwoFactorStoreShape} over the ambient `KeyValueStore`.
+ * Build a {@link PendingTwoFactorStore} over the ambient `KeyValueStore`.
  */
 export const makePendingTwoFactorStoreKV: Effect.Effect<
-  PendingTwoFactorStoreShape,
+  typeof PendingTwoFactorStore.Service,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -562,7 +536,7 @@ export const makePendingTwoFactorStoreKV: Effect.Effect<
         .pipe(Effect.as(pending)),
     get: (token) => kv.read<PendingTwoFactor>(pendingTwoFactorKey(token), "pendingTwoFactor.get"),
     delete: (token) => kv.remove(pendingTwoFactorKey(token), "pendingTwoFactor.delete"),
-  } satisfies PendingTwoFactorStoreShape;
+  } satisfies typeof PendingTwoFactorStore.Service;
 });
 
 /**
@@ -615,7 +589,7 @@ const encodeIdentifier = (identifier: Identifier): StoredIdentifier => ({
 });
 
 /**
- * Build an {@link IdentifierStoreShape} over the ambient `KeyValueStore`.
+ * Build an {@link IdentifierStore} over the ambient `KeyValueStore`.
  *
  * Key layout:
  * - `identifier:${id}` — primary record (full `StoredIdentifier`)
@@ -624,7 +598,7 @@ const encodeIdentifier = (identifier: Identifier): StoredIdentifier => ({
  *   `deleteByUser`
  */
 export const makeIdentifierStoreKV: Effect.Effect<
-  IdentifierStoreShape,
+  typeof IdentifierStore.Service,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -719,7 +693,7 @@ export const makeIdentifierStoreKV: Effect.Effect<
         );
         yield* kv.remove(identifierUserKey(userId), "identifier.deleteByUser");
       }),
-  } satisfies IdentifierStoreShape;
+  } satisfies typeof IdentifierStore.Service;
 });
 
 /**
@@ -739,14 +713,14 @@ export const IdentifierStoreKV: Layer.Layer<IdentifierStore, never, KeyValueStor
 const googleOneTapNonceKey = (nonce: string) => `google-one-tap-nonce:${nonce}`;
 
 /**
- * Build a {@link GoogleOneTapNonceStoreShape} over the ambient `KeyValueStore`.
+ * Build a {@link GoogleOneTapNonceStore} over the ambient `KeyValueStore`.
  *
  * Nonce entries are stored as JSON objects with an `expiresAt` epoch-ms field.
  * Expiry is enforced logically in `GoogleOneTap.signIn` (the entry is deleted
  * on first access regardless of validity, making every nonce single-use).
  */
 export const makeGoogleOneTapNonceStoreKV: Effect.Effect<
-  GoogleOneTapNonceStoreShape,
+  typeof GoogleOneTapNonceStore.Service,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -761,7 +735,7 @@ export const makeGoogleOneTapNonceStoreKV: Effect.Effect<
     get: (nonce) =>
       kv.read<GoogleOneTapNonceEntry>(googleOneTapNonceKey(nonce), "googleOneTapNonce.get"),
     delete: (nonce) => kv.remove(googleOneTapNonceKey(nonce), "googleOneTapNonce.delete"),
-  } satisfies GoogleOneTapNonceStoreShape;
+  } satisfies typeof GoogleOneTapNonceStore.Service;
 });
 
 /**

@@ -64,18 +64,17 @@ export interface SSOProvider {
 }
 
 /** Persistent registry of SSO connections. */
-export interface SSOProviderStoreShape {
-  readonly create: (provider: SSOProvider) => Effect.Effect<SSOProvider, AuthError>;
-  readonly getById: (id: string) => Effect.Effect<SSOProvider | null, AuthError>;
-  readonly getByDomain: (domain: string) => Effect.Effect<SSOProvider | null, AuthError>;
-  readonly list: () => Effect.Effect<ReadonlyArray<SSOProvider>, AuthError>;
-}
+export class SSOProviderStore extends Context.Service<
+  SSOProviderStore,
+  {
+    readonly create: (provider: SSOProvider) => Effect.Effect<SSOProvider, AuthError>;
+    readonly getById: (id: string) => Effect.Effect<SSOProvider | null, AuthError>;
+    readonly getByDomain: (domain: string) => Effect.Effect<SSOProvider | null, AuthError>;
+    readonly list: () => Effect.Effect<ReadonlyArray<SSOProvider>, AuthError>;
+  }
+>()("@effect-auth/SSOProviderStore") {}
 
-export class SSOProviderStore extends Context.Service<SSOProviderStore, SSOProviderStoreShape>()(
-  "@effect-auth/SsoProviderStore",
-) {}
-
-/** Input to {@link SSOServiceShape.registerProvider}. */
+/** Input to {@link SSOService.registerProvider}. */
 export interface RegisterProviderInput {
   readonly issuer: string;
   readonly domain: string;
@@ -108,55 +107,54 @@ export interface SSOSignInSelector {
   readonly domain?: string;
 }
 
-export interface SSOServiceShape {
-  /**
-   * Register (or discover + register) an SSO connection. The registrar
-   * (`registrarUserId`) is recorded on the connection; gate this behind an
-   * admin check at the HTTP layer.
-   */
-  readonly registerProvider: (
-    registrarUserId: string,
-    input: RegisterProviderInput,
-  ) => Effect.Effect<SSOProvider, SSOError | AuthError, SSOProviderStore>;
+export class SSOService extends Context.Service<
+  SSOService,
+  {
+    /**
+     * Register (or discover + register) an SSO connection. The registrar
+     * (`registrarUserId`) is recorded on the connection; gate this behind an
+     * admin check at the HTTP layer.
+     */
+    readonly registerProvider: (
+      registrarUserId: string,
+      input: RegisterProviderInput,
+    ) => Effect.Effect<SSOProvider, SSOError | AuthError, SSOProviderStore>;
 
-  /**
-   * Resolve the connection an email address routes to, by domain. Returns
-   * `null` when no connection matches.
-   */
-  readonly resolveProviderForEmail: (
-    email: string,
-  ) => Effect.Effect<SSOProvider | null, AuthError, SSOProviderStore>;
+    /**
+     * Resolve the connection an email address routes to, by domain. Returns
+     * `null` when no connection matches.
+     */
+    readonly resolveProviderForEmail: (
+      email: string,
+    ) => Effect.Effect<SSOProvider | null, AuthError, SSOProviderStore>;
 
-  /**
-   * Begin an SSO sign-in: resolve the connection (by `providerId`, `domain`, or
-   * the domain of `email`) and return the IdP authorization URL to redirect to.
-   */
-  readonly signIn: (
-    selector: SSOSignInSelector,
-  ) => Effect.Effect<
-    { readonly url: string; readonly state: string },
-    SSOError | AuthError,
-    SSOProviderStore | OAuthStateStore
-  >;
+    /**
+     * Begin an SSO sign-in: resolve the connection (by `providerId`, `domain`, or
+     * the domain of `email`) and return the IdP authorization URL to redirect to.
+     */
+    readonly signIn: (
+      selector: SSOSignInSelector,
+    ) => Effect.Effect<
+      { readonly url: string; readonly state: string },
+      SSOError | AuthError,
+      SSOProviderStore | OAuthStateStore
+    >;
 
-  /**
-   * Complete the SSO callback: exchange the code, verify the profile,
-   * find-or-create the user by verified email, optionally add them to the
-   * connection's organization, and issue a session.
-   */
-  readonly handleCallback: (
-    state: string,
-    code: string,
-  ) => Effect.Effect<
-    SSOSignInResult,
-    SSOError | AuthError | HookError,
-    SSOProviderStore | OAuthStateStore | OAuthUserStore | SessionService | Hooks
-  >;
-}
-
-export class SSOService extends Context.Service<SSOService, SSOServiceShape>()(
-  "@effect-auth/SsoService",
-) {
+    /**
+     * Complete the SSO callback: exchange the code, verify the profile,
+     * find-or-create the user by verified email, optionally add them to the
+     * connection's organization, and issue a session.
+     */
+    readonly handleCallback: (
+      state: string,
+      code: string,
+    ) => Effect.Effect<
+      SSOSignInResult,
+      SSOError | AuthError | HookError,
+      SSOProviderStore | OAuthStateStore | OAuthUserStore | SessionService | Hooks
+    >;
+  }
+>()("@effect-auth/SSOService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -198,7 +196,9 @@ const toOAuthConfig = (provider: SSOProvider): OAuthProviderConfig => ({
       }),
 });
 
-export const makeSSOService = (config: SSOConfig = {}): Effect.Effect<SSOServiceShape, never> => {
+export const makeSSOService = (
+  config: SSOConfig = {},
+): Effect.Effect<typeof SSOService.Service, never> => {
   const defaultScopes = config.defaultScopes ?? ["openid", "email", "profile"];
   const defaultRole = config.defaultRole ?? "member";
 
@@ -374,5 +374,5 @@ export const makeSSOService = (config: SSOConfig = {}): Effect.Effect<SSOService
         const session = yield* sessionManager.createSession(user.id);
         return { user, session, isNewUser, provider };
       }),
-  } satisfies SSOServiceShape);
+  } satisfies typeof SSOService.Service);
 };

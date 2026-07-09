@@ -43,26 +43,6 @@ export interface EmailOTPRecord {
 }
 
 /**
- * Storage interface for email OTPs. There is at most one active OTP per
- * email + purpose pair; `upsert` replaces any existing record for the pair.
- */
-export interface EmailOTPStoreShape {
-  readonly upsert: (record: EmailOTPRecord) => Effect.Effect<EmailOTPRecord, Errors.AuthError>;
-  readonly get: (
-    email: string,
-    purpose: EmailOTPPurpose,
-  ) => Effect.Effect<EmailOTPRecord | null, Errors.AuthError>;
-  readonly delete: (
-    email: string,
-    purpose: EmailOTPPurpose,
-  ) => Effect.Effect<void, Errors.AuthError>;
-  readonly incrementAttempts: (
-    email: string,
-    purpose: EmailOTPPurpose,
-  ) => Effect.Effect<number, Errors.AuthError>;
-}
-
-/**
  * Input for creating a user during email OTP sign-in
  */
 export interface EmailOTPCreateUserInput {
@@ -72,28 +52,40 @@ export interface EmailOTPCreateUserInput {
 }
 
 /**
+ * Storage interface for email OTPs. There is at most one active OTP per
+ * email + purpose pair; `upsert` replaces any existing record for the pair.
+ */
+export class EmailOTPStore extends Context.Service<
+  EmailOTPStore,
+  {
+    readonly upsert: (record: EmailOTPRecord) => Effect.Effect<EmailOTPRecord, Errors.AuthError>;
+    readonly get: (
+      email: string,
+      purpose: EmailOTPPurpose,
+    ) => Effect.Effect<EmailOTPRecord | null, Errors.AuthError>;
+    readonly delete: (
+      email: string,
+      purpose: EmailOTPPurpose,
+    ) => Effect.Effect<void, Errors.AuthError>;
+    readonly incrementAttempts: (
+      email: string,
+      purpose: EmailOTPPurpose,
+    ) => Effect.Effect<number, Errors.AuthError>;
+  }
+>()("@effect-auth/EmailOTPStore") {}
+
+/**
  * User store interface for email OTP sign-in
  */
-export interface EmailOTPUserStoreShape {
-  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
-  readonly createUser: (
-    input: EmailOTPCreateUserInput,
-  ) => Effect.Effect<Types.User, Errors.AuthError>;
-}
-
-/**
- * Email OTP store context tag
- */
-export class EmailOTPStore extends Context.Service<EmailOTPStore, EmailOTPStoreShape>()(
-  "@effect-auth/EmailOtpStore",
-) {}
-
-/**
- * Email OTP user store context tag
- */
-export class EmailOTPUserStore extends Context.Service<EmailOTPUserStore, EmailOTPUserStoreShape>()(
-  "@effect-auth/EmailOtpUserStore",
-) {}
+export class EmailOTPUserStore extends Context.Service<
+  EmailOTPUserStore,
+  {
+    readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly createUser: (
+      input: EmailOTPCreateUserInput,
+    ) => Effect.Effect<Types.User, Errors.AuthError>;
+  }
+>()("@effect-auth/EmailOTPUserStore") {}
 
 /**
  * Email OTP service configuration
@@ -143,57 +135,56 @@ export interface EmailOTPCheckResult {
 /**
  * Email OTP service
  */
-export interface EmailOTPServiceShape {
-  /**
-   * Generate an OTP for the given email + purpose (replacing any outstanding
-   * one) and send it. Only a SHA-256 hash of the code is stored.
-   *
-   * Anti-enumeration: for `"sign-in"` with sign-up disabled and no matching
-   * user, and for `"forget-password"` with no matching user, this succeeds
-   * silently without sending anything.
-   *
-   * When `resendCooldown` is configured and an outstanding OTP for the email +
-   * purpose was created within the cooldown window, fails with
-   * {@link Errors.ResendTooSoonError} containing the remaining wait time.
-   */
-  readonly send: (
-    email: string,
-    purpose: EmailOTPPurpose,
-  ) => Effect.Effect<
-    void,
-    Errors.AuthError | EmailOTPError | Errors.ResendTooSoonError,
-    EmailOTPStore | EmailOTPUserStore
-  >;
+export class EmailOTPService extends Context.Service<
+  EmailOTPService,
+  {
+    /**
+     * Generate an OTP for the given email + purpose (replacing any outstanding
+     * one) and send it. Only a SHA-256 hash of the code is stored.
+     *
+     * Anti-enumeration: for `"sign-in"` with sign-up disabled and no matching
+     * user, and for `"forget-password"` with no matching user, this succeeds
+     * silently without sending anything.
+     *
+     * When `resendCooldown` is configured and an outstanding OTP for the email +
+     * purpose was created within the cooldown window, fails with
+     * {@link Errors.ResendTooSoonError} containing the remaining wait time.
+     */
+    readonly send: (
+      email: string,
+      purpose: EmailOTPPurpose,
+    ) => Effect.Effect<
+      void,
+      Errors.AuthError | EmailOTPError | Errors.ResendTooSoonError,
+      EmailOTPStore | EmailOTPUserStore
+    >;
 
-  /**
-   * Verify a `"sign-in"` OTP and create a session. Users created here are
-   * marked `emailVerified: true` (the OTP proves ownership of the email).
-   */
-  readonly signIn: (
-    email: string,
-    otp: string,
-    options?: EmailOTPSignInOptions,
-  ) => Effect.Effect<
-    EmailOTPAuthResult,
-    EmailOTPError | Errors.AuthError | HookError,
-    EmailOTPStore | EmailOTPUserStore | SessionService | Hooks
-  >;
+    /**
+     * Verify a `"sign-in"` OTP and create a session. Users created here are
+     * marked `emailVerified: true` (the OTP proves ownership of the email).
+     */
+    readonly signIn: (
+      email: string,
+      otp: string,
+      options?: EmailOTPSignInOptions,
+    ) => Effect.Effect<
+      EmailOTPAuthResult,
+      EmailOTPError | Errors.AuthError | HookError,
+      EmailOTPStore | EmailOTPUserStore | SessionService | Hooks
+    >;
 
-  /**
-   * Verify an OTP for any purpose (single use) without creating a session.
-   * Intended for `"email-verification"` and `"forget-password"` flows to
-   * consume before performing their own follow-up work.
-   */
-  readonly check: (
-    email: string,
-    otp: string,
-    purpose: EmailOTPPurpose,
-  ) => Effect.Effect<EmailOTPCheckResult, EmailOTPError | Errors.AuthError, EmailOTPStore>;
-}
-
-export class EmailOTPService extends Context.Service<EmailOTPService, EmailOTPServiceShape>()(
-  "@effect-auth/EmailOtpService",
-) {
+    /**
+     * Verify an OTP for any purpose (single use) without creating a session.
+     * Intended for `"email-verification"` and `"forget-password"` flows to
+     * consume before performing their own follow-up work.
+     */
+    readonly check: (
+      email: string,
+      otp: string,
+      purpose: EmailOTPPurpose,
+    ) => Effect.Effect<EmailOTPCheckResult, EmailOTPError | Errors.AuthError, EmailOTPStore>;
+  }
+>()("@effect-auth/EmailOTPService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -222,7 +213,7 @@ export const generateOTP = (length: number): Effect.Effect<string, Errors.AuthEr
  */
 export const makeEmailOTPService = (
   config: EmailOTPConfig,
-): Effect.Effect<EmailOTPServiceShape, never> => {
+): Effect.Effect<typeof EmailOTPService.Service, never> => {
   const otpLength = config.otpLength ?? 6;
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
   const maxAttempts = config.maxAttempts ?? 3;
@@ -293,123 +284,121 @@ export const makeEmailOTPService = (
       yield* store.delete(email, purpose);
     });
 
-  return Effect.sync(
-    (): EmailOTPServiceShape => ({
-      send: (rawEmail: string, purpose: EmailOTPPurpose) =>
-        Effect.gen(function* () {
-          const store = yield* EmailOTPStore;
-          const userStore = yield* EmailOTPUserStore;
+  return Effect.sync((): typeof EmailOTPService.Service => ({
+    send: (rawEmail: string, purpose: EmailOTPPurpose) =>
+      Effect.gen(function* () {
+        const store = yield* EmailOTPStore;
+        const userStore = yield* EmailOTPUserStore;
 
-          const email = normalizeEmail(rawEmail);
-          if (!email) {
+        const email = normalizeEmail(rawEmail);
+        if (!email) {
+          return;
+        }
+
+        // Do not reveal whether the user exists to reduce email enumeration
+        // risk: succeed silently (without sending) for sign-in when sign-up
+        // is disabled and no user exists, and for forget-password when no
+        // user exists. Sign-in with sign-up enabled always sends (the user
+        // is created at verification time).
+        if (purpose === "sign-in" && disableSignUp) {
+          const user = yield* userStore.getUserByEmail(email);
+          if (!user) {
             return;
           }
+        }
 
-          // Do not reveal whether the user exists to reduce email enumeration
-          // risk: succeed silently (without sending) for sign-in when sign-up
-          // is disabled and no user exists, and for forget-password when no
-          // user exists. Sign-in with sign-up enabled always sends (the user
-          // is created at verification time).
-          if (purpose === "sign-in" && disableSignUp) {
-            const user = yield* userStore.getUserByEmail(email);
-            if (!user) {
-              return;
-            }
-          }
-
-          if (purpose === "forget-password") {
-            const user = yield* userStore.getUserByEmail(email);
-            if (!user) {
-              return;
-            }
-          }
-
-          // Resend cooldown: reject if an outstanding OTP was created within
-          // the configured window. The identifier (email) is already known to
-          // the caller, so this is not an enumeration risk.
-          if (config.resendCooldown !== undefined) {
-            const existing = yield* store.get(email, purpose);
-            if (existing !== null) {
-              const elapsed = Date.now() - existing.createdAt;
-              if (elapsed < config.resendCooldown) {
-                return yield* Effect.fail(
-                  new Errors.ResendTooSoonError({
-                    message: "Please wait before requesting another OTP",
-                    retryAfter: config.resendCooldown - elapsed,
-                  }),
-                );
-              }
-            }
-          }
-
-          const otp = yield* generateOTP(otpLength);
-          const record: EmailOTPRecord = {
-            email,
-            otpHash: hashToken(otp),
-            purpose,
-            attempts: 0,
-            createdAt: Date.now(),
-            expiresAt: Date.now() + expiresIn,
-          };
-
-          // One active OTP per email + purpose: replaces any outstanding one.
-          yield* store.upsert(record);
-
-          yield* Effect.catch(config.sendVerificationOTP(email, otp, purpose), (error) =>
-            Effect.fail(
-              new EmailOTPError({
-                message: `Failed to send OTP to ${email}`,
-                cause: error,
-              }),
-            ),
-          );
-        }),
-
-      signIn: (rawEmail: string, otp: string, options?: EmailOTPSignInOptions) =>
-        Effect.gen(function* () {
-          const userStore = yield* EmailOTPUserStore;
-          const sessionManager = yield* SessionService;
-
-          const email = normalizeEmail(rawEmail);
-
-          yield* verifyOTP(email, otp, "sign-in");
-
-          let user = yield* userStore.getUserByEmail(email);
+        if (purpose === "forget-password") {
+          const user = yield* userStore.getUserByEmail(email);
           if (!user) {
-            if (disableSignUp) {
+            return;
+          }
+        }
+
+        // Resend cooldown: reject if an outstanding OTP was created within
+        // the configured window. The identifier (email) is already known to
+        // the caller, so this is not an enumeration risk.
+        if (config.resendCooldown !== undefined) {
+          const existing = yield* store.get(email, purpose);
+          if (existing !== null) {
+            const elapsed = Date.now() - existing.createdAt;
+            if (elapsed < config.resendCooldown) {
               return yield* Effect.fail(
-                new EmailOTPError({
-                  message: "Sign-up is disabled",
+                new Errors.ResendTooSoonError({
+                  message: "Please wait before requesting another OTP",
+                  retryAfter: config.resendCooldown - elapsed,
                 }),
               );
             }
+          }
+        }
 
-            // A verified OTP proves ownership of the email.
-            user = yield* userStore.createUser({
-              email,
-              emailVerified: true,
-            });
+        const otp = yield* generateOTP(otpLength);
+        const record: EmailOTPRecord = {
+          email,
+          otpHash: hashToken(otp),
+          purpose,
+          attempts: 0,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + expiresIn,
+        };
+
+        // One active OTP per email + purpose: replaces any outstanding one.
+        yield* store.upsert(record);
+
+        yield* Effect.catch(config.sendVerificationOTP(email, otp, purpose), (error) =>
+          Effect.fail(
+            new EmailOTPError({
+              message: `Failed to send OTP to ${email}`,
+              cause: error,
+            }),
+          ),
+        );
+      }),
+
+    signIn: (rawEmail: string, otp: string, options?: EmailOTPSignInOptions) =>
+      Effect.gen(function* () {
+        const userStore = yield* EmailOTPUserStore;
+        const sessionManager = yield* SessionService;
+
+        const email = normalizeEmail(rawEmail);
+
+        yield* verifyOTP(email, otp, "sign-in");
+
+        let user = yield* userStore.getUserByEmail(email);
+        if (!user) {
+          if (disableSignUp) {
+            return yield* Effect.fail(
+              new EmailOTPError({
+                message: "Sign-up is disabled",
+              }),
+            );
           }
 
-          const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);
-
-          return {
-            user,
-            session,
-          } satisfies EmailOTPAuthResult;
-        }),
-
-      check: (rawEmail: string, otp: string, purpose: EmailOTPPurpose) =>
-        Effect.gen(function* () {
-          const email = normalizeEmail(rawEmail);
-
-          yield* verifyOTP(email, otp, purpose);
-
-          return {
+          // A verified OTP proves ownership of the email.
+          user = yield* userStore.createUser({
             email,
-            verified: true,
-          } satisfies EmailOTPCheckResult;
-        }),
-    }),
-  );
+            emailVerified: true,
+          });
+        }
+
+        const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);
+
+        return {
+          user,
+          session,
+        } satisfies EmailOTPAuthResult;
+      }),
+
+    check: (rawEmail: string, otp: string, purpose: EmailOTPPurpose) =>
+      Effect.gen(function* () {
+        const email = normalizeEmail(rawEmail);
+
+        yield* verifyOTP(email, otp, purpose);
+
+        return {
+          email,
+          verified: true,
+        } satisfies EmailOTPCheckResult;
+      }),
+  }));
 };

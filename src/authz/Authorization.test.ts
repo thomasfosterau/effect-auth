@@ -12,14 +12,12 @@ import {
   allOf,
   not,
   fromPredicate,
-  type RoleStoreShape,
-  type AuthorizationPolicyShape,
   RoleStore,
   AuthorizationPolicy,
 } from "./Authorization.js";
 
 // Mock role store for testing
-const mockRoleStore: RoleStoreShape = {
+const mockRoleStore: typeof RoleStore.Service = {
   getUserRoles: (userId) =>
     Effect.sync(() => {
       const roles: Record<string, string[]> = {
@@ -143,7 +141,7 @@ describe("Authorization", () => {
 
   describe("requirePermission", () => {
     // Create a mock authorization policy for testing requirePermission
-    const mockPolicy: AuthorizationPolicyShape = {
+    const mockPolicy: typeof AuthorizationPolicy.Service = {
       checkPermission: (userId, _resource, _action) =>
         Effect.sync(() => {
           // Simple mock: only admin-user can do everything
@@ -188,7 +186,7 @@ describe("Authorization", () => {
   });
 
   describe("combinators", () => {
-    const run = (policy: AuthorizationPolicyShape) =>
+    const run = (policy: typeof AuthorizationPolicy.Service) =>
       Effect.runPromise(policy.checkPermission("user", "posts", "read"));
 
     it("allowAll grants everything", async () => {
@@ -230,7 +228,7 @@ describe("Authorization", () => {
   });
 
   describe("guards", () => {
-    const mockPolicy: AuthorizationPolicyShape = {
+    const mockPolicy: typeof AuthorizationPolicy.Service = {
       checkPermission: (_userId, resource, action) =>
         Effect.succeed(resource === "posts" && (action === "read" || action === "update")),
     };

@@ -42,7 +42,7 @@
 import { Duration, Effect, Layer } from "effect";
 import { RateLimiter as PersistenceRateLimiter } from "effect/unstable/persistence";
 import { AuthError, RateLimitError } from "./Errors.ts";
-import { RateLimiter, type RateLimitConfig, type RateLimiterShape } from "./RateLimit.ts";
+import { RateLimiter, type RateLimitConfig } from "./RateLimit.ts";
 
 /** Map the persistence limiter's error onto effect-auth's error channel. */
 const toError = (error: PersistenceRateLimiter.RateLimiterError): RateLimitError | AuthError => {
@@ -72,13 +72,13 @@ const consumeOptions = (key: string, config: RateLimitConfig) =>
  * store.
  */
 export const makeRateLimiterPersistence: Effect.Effect<
-  RateLimiterShape,
+  typeof RateLimiter.Service,
   never,
   PersistenceRateLimiter.RateLimiter
 > = Effect.gen(function* () {
   const limiter = yield* PersistenceRateLimiter.RateLimiter;
 
-  const impl: RateLimiterShape = {
+  const impl: typeof RateLimiter.Service = {
     consumeToken: (key, config) =>
       limiter
         .consume({ ...consumeOptions(key, config), onExceeded: "fail" })

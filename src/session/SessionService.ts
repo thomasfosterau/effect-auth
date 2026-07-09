@@ -8,68 +8,6 @@ import * as Obs from "../Observability.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 
-/**
- * Session manager service
- */
-export interface SessionServiceShape {
-  /**
-   * Create a new session for a user
-   */
-  readonly createSession: (
-    userId: string,
-    attributes?: Record<string, unknown>,
-  ) => Effect.Effect<Types.Session, Errors.AuthError | HookError, Hooks>;
-
-  /**
-   * Validate a session and return it with the user
-   */
-  readonly validateSession: (
-    sessionId: string,
-  ) => Effect.Effect<
-    Types.SessionWithUser,
-    Errors.SessionNotFoundError | Errors.SessionExpiredError | Errors.UserNotFoundError | HookError,
-    Hooks
-  >;
-
-  /**
-   * Invalidate a session
-   */
-  readonly invalidateSession: (
-    sessionId: string,
-  ) => Effect.Effect<void, Errors.AuthError | HookError, Hooks>;
-
-  /**
-   * Invalidate all sessions for a user
-   */
-  readonly invalidateUserSessions: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-
-  /**
-   * List a user's sessions that have not yet expired.
-   */
-  readonly listSessions: (
-    userId: string,
-  ) => Effect.Effect<ReadonlyArray<Types.Session>, Errors.AuthError>;
-
-  /**
-   * Invalidate every session for a user except the given one (e.g. keep the
-   * current device signed in while revoking all others).
-   */
-  readonly revokeOtherSessions: (
-    userId: string,
-    currentSessionId: string,
-  ) => Effect.Effect<void, Errors.AuthError>;
-
-  /**
-   * Merge `attributes` into a session's stored attributes (e.g. record the
-   * `activeOrganizationId`). Existing keys are overwritten; others are kept.
-   * Returns the updated session.
-   */
-  readonly setSessionAttributes: (
-    sessionId: string,
-    attributes: Record<string, unknown>,
-  ) => Effect.Effect<Types.Session, Errors.SessionNotFoundError | Errors.AuthError>;
-}
-
 const generateSessionId = (): string => crypto.randomBytes(20).toString("hex");
 
 /**
@@ -77,7 +15,7 @@ const generateSessionId = (): string => crypto.randomBytes(20).toString("hex");
  */
 export const make = (
   config: Types.SessionConfig,
-): Effect.Effect<SessionServiceShape, never, SessionStore | UserStore> =>
+): Effect.Effect<typeof SessionService.Service, never, SessionStore | UserStore> =>
   Effect.gen(function* () {
     const sessionStore = yield* SessionStore;
     const userStore = yield* UserStore;
@@ -269,10 +207,73 @@ export const make = (
 
 /**
  * Tag for SessionService service
+ *
+ * Session manager service
  */
-export class SessionService extends Context.Service<SessionService, SessionServiceShape>()(
-  "@effect-auth/SessionService",
-) {
+export class SessionService extends Context.Service<
+  SessionService,
+  {
+    /**
+     * Create a new session for a user
+     */
+    readonly createSession: (
+      userId: string,
+      attributes?: Record<string, unknown>,
+    ) => Effect.Effect<Types.Session, Errors.AuthError | HookError, Hooks>;
+
+    /**
+     * Validate a session and return it with the user
+     */
+    readonly validateSession: (
+      sessionId: string,
+    ) => Effect.Effect<
+      Types.SessionWithUser,
+      | Errors.SessionNotFoundError
+      | Errors.SessionExpiredError
+      | Errors.UserNotFoundError
+      | HookError,
+      Hooks
+    >;
+
+    /**
+     * Invalidate a session
+     */
+    readonly invalidateSession: (
+      sessionId: string,
+    ) => Effect.Effect<void, Errors.AuthError | HookError, Hooks>;
+
+    /**
+     * Invalidate all sessions for a user
+     */
+    readonly invalidateUserSessions: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+
+    /**
+     * List a user's sessions that have not yet expired.
+     */
+    readonly listSessions: (
+      userId: string,
+    ) => Effect.Effect<ReadonlyArray<Types.Session>, Errors.AuthError>;
+
+    /**
+     * Invalidate every session for a user except the given one (e.g. keep the
+     * current device signed in while revoking all others).
+     */
+    readonly revokeOtherSessions: (
+      userId: string,
+      currentSessionId: string,
+    ) => Effect.Effect<void, Errors.AuthError>;
+
+    /**
+     * Merge `attributes` into a session's stored attributes (e.g. record the
+     * `activeOrganizationId`). Existing keys are overwritten; others are kept.
+     * Returns the updated session.
+     */
+    readonly setSessionAttributes: (
+      sessionId: string,
+      attributes: Record<string, unknown>,
+    ) => Effect.Effect<Types.Session, Errors.SessionNotFoundError | Errors.AuthError>;
+  }
+>()("@effect-auth/SessionService") {
   static readonly make = make;
   static readonly layer = (config: Types.SessionConfig) =>
     Layer.effect(SessionService, make(config));

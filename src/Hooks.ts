@@ -108,40 +108,11 @@ export type Transform<V> = (value: V) => Effect.Effect<V, HookError, never>;
  */
 export type Tap<V> = (value: V) => Effect.Effect<V, HookError, never>;
 
-/**
- * The full set of hook points and their (canonical) signatures.
- *
- * `before*` hooks are transforms (pre-process, validate, or short-circuit the
- * input); `after*` hooks are taps (observe the result). A plugin supplies a
- * `Partial<HookDefs>` - only the hooks it cares about - via {@link makePlugin};
- * everything else falls through to the no-op default.
- */
-export interface HookDefs {
-  readonly beforeSignUp: Transform<SignUpInput>;
-  readonly afterSignUp: Tap<AuthResult>;
-  readonly beforeSignIn: Transform<SignInInput>;
-  readonly afterSignIn: Tap<AuthResult>;
-  readonly beforeSignOut: Transform<SessionRef>;
-  readonly afterSignOut: Tap<SessionRef>;
-  readonly beforeCreateSession: Transform<CreateSessionArgs>;
-  readonly afterCreateSession: Tap<Types.Session>;
-  readonly beforeValidateSession: Transform<SessionRef>;
-  readonly afterValidateSession: Tap<Types.SessionWithUser>;
-  readonly beforeRequestPasswordReset: Transform<EmailRef>;
-  readonly afterRequestPasswordReset: Tap<EmailRef>;
-  readonly beforeResetPassword: Transform<ResetPasswordArgs>;
-  readonly afterResetPassword: Tap<PasswordResetResult>;
-  readonly beforeCreateVerification: Transform<CreateVerificationArgs>;
-  readonly afterCreateVerification: Tap<CreateVerificationArgs>;
-  readonly beforeVerifyEmail: Transform<VerifyEmailArgs>;
-  readonly afterVerifyEmail: Tap<EmailVerificationResult>;
-}
-
 /** Identity hook - passes the value through unchanged (the no-op default). */
 const identity = <V>(value: V): Effect.Effect<V, HookError, never> => Effect.succeed(value);
 
 /** Build the no-op default implementation: identity for every hook point. */
-const makeNoopHooks = (): HookDefs => ({
+const makeNoopHooks = (): typeof Hooks.Service => ({
   beforeSignUp: identity,
   afterSignUp: identity,
   beforeSignIn: identity,
@@ -163,12 +134,41 @@ const makeNoopHooks = (): HookDefs => ({
 });
 
 /**
+ * The full set of hook points and their (canonical) signatures.
+ *
+ * `before*` hooks are transforms (pre-process, validate, or short-circuit the
+ * input); `after*` hooks are taps (observe the result). A plugin supplies a
+ * `Partial<typeof Hooks.Service>` - only the hooks it cares about - via
+ * {@link makePlugin}; everything else falls through to the no-op default.
+ *
  * The `Hooks` service. Every auth operation that fires hooks reads the current
  * `Hooks` from context, so the active plugin stack can be swapped per request.
  *
  * `Hooks.Default` provides the no-op base (identity for every hook).
  */
-export class Hooks extends Context.Service<Hooks, HookDefs>()("@effect-auth/Hooks") {
+export class Hooks extends Context.Service<
+  Hooks,
+  {
+    readonly beforeSignUp: Transform<SignUpInput>;
+    readonly afterSignUp: Tap<AuthResult>;
+    readonly beforeSignIn: Transform<SignInInput>;
+    readonly afterSignIn: Tap<AuthResult>;
+    readonly beforeSignOut: Transform<SessionRef>;
+    readonly afterSignOut: Tap<SessionRef>;
+    readonly beforeCreateSession: Transform<CreateSessionArgs>;
+    readonly afterCreateSession: Tap<Types.Session>;
+    readonly beforeValidateSession: Transform<SessionRef>;
+    readonly afterValidateSession: Tap<Types.SessionWithUser>;
+    readonly beforeRequestPasswordReset: Transform<EmailRef>;
+    readonly afterRequestPasswordReset: Tap<EmailRef>;
+    readonly beforeResetPassword: Transform<ResetPasswordArgs>;
+    readonly afterResetPassword: Tap<PasswordResetResult>;
+    readonly beforeCreateVerification: Transform<CreateVerificationArgs>;
+    readonly afterCreateVerification: Tap<CreateVerificationArgs>;
+    readonly beforeVerifyEmail: Transform<VerifyEmailArgs>;
+    readonly afterVerifyEmail: Tap<EmailVerificationResult>;
+  }
+>()("@effect-auth/Hooks") {
   /** No-op base layer: identity for every hook point. */
   static readonly Default = Layer.succeed(Hooks, makeNoopHooks());
 
@@ -199,7 +199,7 @@ export class Hooks extends Context.Service<Hooks, HookDefs>()("@effect-auth/Hook
 }
 
 /** A plugin's hook implementations - any subset of the hook points. */
-export type PluginImpls = Partial<HookDefs>;
+export type PluginImpls = Partial<typeof Hooks.Service>;
 
 /** Options controlling how a plugin's hooks behave. */
 export interface MakePluginOptions {
@@ -247,11 +247,15 @@ const AFTER_HOOK_KEYS: ReadonlySet<string> = new Set([
  *   deny / short-circuit mechanism). `isolateTaps: true` has no effect here.
  * - `after*` taps: isolated only when `options.isolateTaps === true`.
  */
-const wrapHooks = (inner: HookDefs, impls: PluginImpls, options: MakePluginOptions): HookDefs => {
+const wrapHooks = (
+  inner: typeof Hooks.Service,
+  impls: PluginImpls,
+  options: MakePluginOptions,
+): typeof Hooks.Service => {
   const innerRecord = inner as unknown as Record<string, Transform<unknown>>;
   const result: Record<string, Transform<unknown>> = { ...innerRecord };
 
-  for (const key of Object.keys(impls) as Array<keyof HookDefs>) {
+  for (const key of Object.keys(impls) as Array<keyof typeof Hooks.Service>) {
     const pluginFn = impls[key] as Transform<unknown> | undefined;
     if (pluginFn === undefined) {
       continue;
@@ -281,7 +285,7 @@ const wrapHooks = (inner: HookDefs, impls: PluginImpls, options: MakePluginOptio
       );
   }
 
-  return result as unknown as HookDefs;
+  return result as unknown as typeof Hooks.Service;
 };
 
 /**

@@ -17,7 +17,7 @@ import {
   PasswordResetUserStore,
 } from "./password/PasswordReset.js";
 import { makeAuthWebHandler, type AuthServices } from "./http/HTTPServer.js";
-import { JWTKeyStore, type JWTKeyPair, type JWTKeyStoreShape, JWTService } from "./JWT.js";
+import { JWTKeyStore, type JWTKeyPair, JWTService } from "./JWT.js";
 import { generatePKCE, verifyIdToken } from "./oauth/OAuth.js";
 import {
   makeOIDCProviderService,
@@ -29,12 +29,8 @@ import {
   hashOIDCSecret,
   type OIDCAuthorizationCode,
   type OIDCClient,
-  type OIDCClientStoreShape,
-  type OIDCCodeStoreShape,
   type OIDCConsent,
-  type OIDCConsentStoreShape,
   type OIDCToken,
-  type OIDCTokenStoreShape,
   OIDCProviderService,
 } from "./OIDCProvider.js";
 import type * as Types from "./Types.js";
@@ -52,31 +48,31 @@ const makeOIDCStores = () => {
   const consents = new Map<string, OIDCConsent>();
   const jwtKeys: JWTKeyPair[] = [];
 
-  const clientStore: OIDCClientStoreShape = {
+  const clientStore: typeof OIDCClientStore.Service = {
     create: (c) => Effect.sync(() => (clients.set(c.clientId, c), c)),
     getByClientId: (id) => Effect.succeed(clients.get(id) ?? null),
     update: (c) => Effect.sync(() => (clients.set(c.clientId, c), c)),
     delete: (id) => Effect.sync(() => void clients.delete(id)),
     list: () => Effect.succeed([...clients.values()]),
   };
-  const codeStore: OIDCCodeStoreShape = {
+  const codeStore: typeof OIDCCodeStore.Service = {
     create: (c) => Effect.sync(() => (codes.set(c.codeHash, c), c)),
     get: (hash) => Effect.succeed(codes.get(hash) ?? null),
     delete: (hash) => Effect.sync(() => void codes.delete(hash)),
   };
-  const tokenStore: OIDCTokenStoreShape = {
+  const tokenStore: typeof OIDCTokenStore.Service = {
     create: (t) => Effect.sync(() => (tokens.set(t.tokenHash, t), t)),
     get: (hash) => Effect.succeed(tokens.get(hash) ?? null),
     delete: (hash) => Effect.sync(() => void tokens.delete(hash)),
     listByFamily: (familyId) =>
       Effect.succeed([...tokens.values()].filter((t) => t.familyId === familyId)),
   };
-  const consentStore: OIDCConsentStoreShape = {
+  const consentStore: typeof OIDCConsentStore.Service = {
     get: (userId, clientId) => Effect.succeed(consents.get(`${userId}:${clientId}`) ?? null),
     upsert: (c) => Effect.sync(() => (consents.set(`${c.userId}:${c.clientId}`, c), c)),
     delete: (userId, clientId) => Effect.sync(() => void consents.delete(`${userId}:${clientId}`)),
   };
-  const jwtKeyStore: JWTKeyStoreShape = {
+  const jwtKeyStore: typeof JWTKeyStore.Service = {
     getActive: () => Effect.succeed(jwtKeys[0] ?? null),
     create: (pair) => Effect.sync(() => (jwtKeys.push(pair), pair)),
     list: () => Effect.succeed([...jwtKeys]),

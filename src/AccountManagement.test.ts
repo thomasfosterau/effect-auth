@@ -4,14 +4,11 @@ import {
   AccountManagementService,
   AccountManagementStore,
   AccountTokenError,
-  type AccountManagementServiceShape,
-  type AccountManagementStoreShape,
   type AccountToken,
 } from "./AccountManagement.js";
 import { EmailInUseError } from "./Errors.js";
-import { UserServiceStore, type UserServiceStoreShape } from "./User.js";
+import { UserServiceStore } from "./User.js";
 import { SessionService } from "./session/SessionService.js";
-import type { SessionServiceShape } from "./session/SessionService.js";
 import type * as Types from "./Types.js";
 
 interface Harness {
@@ -56,7 +53,7 @@ const makeHarness = (): Harness => {
   addUser(makeUser("user-1", "alice@example.com"));
   addUser(makeUser("user-2", "bob@example.com"));
 
-  const userStore: UserServiceStoreShape = {
+  const userStore: typeof UserServiceStore.Service = {
     get: (userId) => Effect.sync(() => users.get(userId) ?? null),
     getByEmail: (email) =>
       Effect.sync(() => {
@@ -81,7 +78,7 @@ const makeHarness = (): Harness => {
       }),
   };
 
-  const tokenStore: AccountManagementStoreShape = {
+  const tokenStore: typeof AccountManagementStore.Service = {
     create: (token) =>
       Effect.sync(() => {
         tokens.set(token.token, token);
@@ -96,7 +93,7 @@ const makeHarness = (): Harness => {
   };
 
   // Minimal SessionService: only `invalidateUserSessions` is exercised.
-  const sessionManager: SessionServiceShape = {
+  const sessionManager: typeof SessionService.Service = {
     createSession: () => Effect.die("unused"),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
@@ -139,7 +136,7 @@ const makeHarness = (): Harness => {
 const run = <A, E>(
   h: Harness,
   f: (
-    svc: AccountManagementServiceShape,
+    svc: typeof AccountManagementService.Service,
   ) => Effect.Effect<A, E, AccountManagementStore | UserServiceStore | SessionService>,
 ) =>
   Effect.runPromise(

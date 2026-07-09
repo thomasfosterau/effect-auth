@@ -16,28 +16,27 @@ export interface PasswordResetToken {
   readonly expiresAt: number;
 }
 
-export interface PasswordResetStoreShape {
-  readonly create: (
-    reset: PasswordResetToken,
-  ) => Effect.Effect<PasswordResetToken, Errors.AuthError>;
-  readonly get: (token: string) => Effect.Effect<PasswordResetToken | null, Errors.AuthError>;
-  readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
-  readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
-export interface PasswordResetUserStoreShape {
-  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
-  readonly setPasswordHash: (userId: string, hash: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
 export class PasswordResetStore extends Context.Service<
   PasswordResetStore,
-  PasswordResetStoreShape
+  {
+    readonly create: (
+      reset: PasswordResetToken,
+    ) => Effect.Effect<PasswordResetToken, Errors.AuthError>;
+    readonly get: (token: string) => Effect.Effect<PasswordResetToken | null, Errors.AuthError>;
+    readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
+    readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+  }
 >()("@effect-auth/PasswordResetStore") {}
 
 export class PasswordResetUserStore extends Context.Service<
   PasswordResetUserStore,
-  PasswordResetUserStoreShape
+  {
+    readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly setPasswordHash: (
+      userId: string,
+      hash: string,
+    ) => Effect.Effect<void, Errors.AuthError>;
+  }
 >()("@effect-auth/PasswordResetUserStore") {}
 
 export interface PasswordResetConfig {
@@ -57,28 +56,26 @@ export interface PasswordResetResult {
   readonly reset: true;
 }
 
-export interface PasswordResetServiceShape {
-  readonly requestPasswordReset: (
-    email: string,
-  ) => Effect.Effect<
-    void,
-    Errors.AuthError | Errors.PasswordResetError | HookError,
-    PasswordResetStore | PasswordResetUserStore | Hooks
-  >;
-
-  readonly resetPassword: (
-    token: string,
-    newPassword: string,
-  ) => Effect.Effect<
-    PasswordResetResult,
-    Errors.AuthError | Errors.PasswordResetError | Errors.HashingError | HookError,
-    PasswordResetStore | PasswordResetUserStore | PasswordHasher | SessionService | Hooks
-  >;
-}
-
 export class PasswordResetService extends Context.Service<
   PasswordResetService,
-  PasswordResetServiceShape
+  {
+    readonly requestPasswordReset: (
+      email: string,
+    ) => Effect.Effect<
+      void,
+      Errors.AuthError | Errors.PasswordResetError | HookError,
+      PasswordResetStore | PasswordResetUserStore | Hooks
+    >;
+
+    readonly resetPassword: (
+      token: string,
+      newPassword: string,
+    ) => Effect.Effect<
+      PasswordResetResult,
+      Errors.AuthError | Errors.PasswordResetError | Errors.HashingError | HookError,
+      PasswordResetStore | PasswordResetUserStore | PasswordHasher | SessionService | Hooks
+    >;
+  }
 >()("@effect-auth/PasswordResetService") {
   /**
    * Construct a Layer providing this service.
@@ -115,122 +112,120 @@ const validatePasswordLength = (
 
 export const makePasswordResetService = (
   config: PasswordResetConfig,
-): Effect.Effect<PasswordResetServiceShape, never> => {
+): Effect.Effect<typeof PasswordResetService.Service, never> => {
   const expiresIn = config.expiresIn ?? 60 * 60 * 1000;
   const minPasswordLength = config.minPasswordLength ?? 8;
   const maxPasswordLength = config.maxPasswordLength ?? 128;
   const revokeSessionsOnPasswordReset = config.revokeSessionsOnPasswordReset ?? true;
 
-  return Effect.sync(
-    (): PasswordResetServiceShape => ({
-      requestPasswordReset: (rawEmail: string) =>
-        Effect.gen(function* () {
-          const hooks = yield* Hooks;
-          const { email } = yield* hooks.beforeRequestPasswordReset({ email: rawEmail });
+  return Effect.sync((): typeof PasswordResetService.Service => ({
+    requestPasswordReset: (rawEmail: string) =>
+      Effect.gen(function* () {
+        const hooks = yield* Hooks;
+        const { email } = yield* hooks.beforeRequestPasswordReset({ email: rawEmail });
 
-          const resetStore = yield* PasswordResetStore;
-          const userStore = yield* PasswordResetUserStore;
-          const normalizedEmail = normalizeEmail(email);
+        const resetStore = yield* PasswordResetStore;
+        const userStore = yield* PasswordResetUserStore;
+        const normalizedEmail = normalizeEmail(email);
 
-          if (!normalizedEmail) {
-            return;
-          }
+        if (!normalizedEmail) {
+          return;
+        }
 
-          const user = yield* userStore.getUserByEmail(normalizedEmail);
+        const user = yield* userStore.getUserByEmail(normalizedEmail);
 
-          // Do not reveal whether the user exists to reduce email enumeration risk.
-          // The after-hook fires uniformly (existence is not signalled to plugins).
-          if (!user) {
-            yield* hooks.afterRequestPasswordReset({ email: normalizedEmail });
-            return;
-          }
-
-          yield* resetStore.deleteByUserId(user.id);
-
-          const rawToken = yield* generateResetToken();
-          const reset: PasswordResetToken = {
-            // Store the hash — the raw token is delivered to the user via sendResetPassword.
-            token: hashToken(rawToken),
-            userId: user.id,
-            email: normalizedEmail,
-            createdAt: Date.now(),
-            expiresAt: Date.now() + expiresIn,
-          };
-
-          yield* resetStore.create(reset);
-
-          yield* Effect.catch(config.sendResetPassword(normalizedEmail, rawToken), (error) =>
-            Effect.fail(
-              new Errors.PasswordResetError({
-                message: `Failed to send reset password email to ${normalizedEmail}`,
-                cause: error,
-              }),
-            ),
-          );
-
+        // Do not reveal whether the user exists to reduce email enumeration risk.
+        // The after-hook fires uniformly (existence is not signalled to plugins).
+        if (!user) {
           yield* hooks.afterRequestPasswordReset({ email: normalizedEmail });
-        }),
+          return;
+        }
 
-      resetPassword: (rawToken: string, rawNewPassword: string) =>
-        Effect.gen(function* () {
-          const hooks = yield* Hooks;
-          // Hook receives the raw token from the URL; hash after any hook transform.
-          const { token, newPassword } = yield* hooks.beforeResetPassword({
-            token: rawToken,
-            newPassword: rawNewPassword,
-          });
+        yield* resetStore.deleteByUserId(user.id);
 
-          const resetStore = yield* PasswordResetStore;
-          const userStore = yield* PasswordResetUserStore;
-          const passwordHasher = yield* PasswordHasher;
+        const rawToken = yield* generateResetToken();
+        const reset: PasswordResetToken = {
+          // Store the hash — the raw token is delivered to the user via sendResetPassword.
+          token: hashToken(rawToken),
+          userId: user.id,
+          email: normalizedEmail,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + expiresIn,
+        };
 
-          if (!token) {
-            return yield* Effect.fail(
-              new Errors.PasswordResetError({
-                message: "Invalid password reset token",
-              }),
-            );
-          }
+        yield* resetStore.create(reset);
 
-          yield* validatePasswordLength(newPassword, minPasswordLength, maxPasswordLength);
+        yield* Effect.catch(config.sendResetPassword(normalizedEmail, rawToken), (error) =>
+          Effect.fail(
+            new Errors.PasswordResetError({
+              message: `Failed to send reset password email to ${normalizedEmail}`,
+              cause: error,
+            }),
+          ),
+        );
 
-          const tokenHash = hashToken(token);
-          const reset = yield* resetStore.get(tokenHash);
-          if (!reset) {
-            return yield* Effect.fail(
-              new Errors.PasswordResetError({
-                message: "Invalid or expired password reset token",
-              }),
-            );
-          }
+        yield* hooks.afterRequestPasswordReset({ email: normalizedEmail });
+      }),
 
-          if (Date.now() > reset.expiresAt) {
-            yield* resetStore.delete(tokenHash);
-            return yield* Effect.fail(
-              new Errors.PasswordResetError({
-                message: "Password reset token has expired",
-              }),
-            );
-          }
+    resetPassword: (rawToken: string, rawNewPassword: string) =>
+      Effect.gen(function* () {
+        const hooks = yield* Hooks;
+        // Hook receives the raw token from the URL; hash after any hook transform.
+        const { token, newPassword } = yield* hooks.beforeResetPassword({
+          token: rawToken,
+          newPassword: rawNewPassword,
+        });
 
-          const hashedPassword = yield* passwordHasher.hash(newPassword);
-          yield* userStore.setPasswordHash(reset.userId, hashedPassword.hash);
+        const resetStore = yield* PasswordResetStore;
+        const userStore = yield* PasswordResetUserStore;
+        const passwordHasher = yield* PasswordHasher;
 
+        if (!token) {
+          return yield* Effect.fail(
+            new Errors.PasswordResetError({
+              message: "Invalid password reset token",
+            }),
+          );
+        }
+
+        yield* validatePasswordLength(newPassword, minPasswordLength, maxPasswordLength);
+
+        const tokenHash = hashToken(token);
+        const reset = yield* resetStore.get(tokenHash);
+        if (!reset) {
+          return yield* Effect.fail(
+            new Errors.PasswordResetError({
+              message: "Invalid or expired password reset token",
+            }),
+          );
+        }
+
+        if (Date.now() > reset.expiresAt) {
           yield* resetStore.delete(tokenHash);
+          return yield* Effect.fail(
+            new Errors.PasswordResetError({
+              message: "Password reset token has expired",
+            }),
+          );
+        }
 
-          if (revokeSessionsOnPasswordReset) {
-            const sessionManager = yield* SessionService;
-            yield* sessionManager.invalidateUserSessions(reset.userId);
-          }
+        const hashedPassword = yield* passwordHasher.hash(newPassword);
+        yield* userStore.setPasswordHash(reset.userId, hashedPassword.hash);
 
-          const result = {
-            userId: reset.userId,
-            email: reset.email,
-            reset: true,
-          } satisfies PasswordResetResult;
+        yield* resetStore.delete(tokenHash);
 
-          return yield* hooks.afterResetPassword(result);
-        }),
-    }),
-  );
+        if (revokeSessionsOnPasswordReset) {
+          const sessionManager = yield* SessionService;
+          yield* sessionManager.invalidateUserSessions(reset.userId);
+        }
+
+        const result = {
+          userId: reset.userId,
+          email: reset.email,
+          reset: true,
+        } satisfies PasswordResetResult;
+
+        return yield* hooks.afterResetPassword(result);
+      }),
+  }));
 };

@@ -60,19 +60,16 @@ export interface GoogleOneTapNonceEntry {
  * Operations on the server-side nonce store used for One Tap replay
  * protection.
  */
-export interface GoogleOneTapNonceStoreShape {
-  /** Persist a nonce until `expiresAt` (epoch-ms). */
-  readonly create: (nonce: string, expiresAt: number) => Effect.Effect<void, AuthError>;
-  /** Return the stored entry, or `null` if absent. */
-  readonly get: (nonce: string) => Effect.Effect<GoogleOneTapNonceEntry | null, AuthError>;
-  /** Remove a nonce (called after a successful or failed consume). */
-  readonly delete: (nonce: string) => Effect.Effect<void, AuthError>;
-}
-
-/** Context tag for the Google One Tap nonce store. */
 export class GoogleOneTapNonceStore extends Context.Service<
   GoogleOneTapNonceStore,
-  GoogleOneTapNonceStoreShape
+  {
+    /** Persist a nonce until `expiresAt` (epoch-ms). */
+    readonly create: (nonce: string, expiresAt: number) => Effect.Effect<void, AuthError>;
+    /** Return the stored entry, or `null` if absent. */
+    readonly get: (nonce: string) => Effect.Effect<GoogleOneTapNonceEntry | null, AuthError>;
+    /** Remove a nonce (called after a successful or failed consume). */
+    readonly delete: (nonce: string) => Effect.Effect<void, AuthError>;
+  }
 >()("@effect-auth/GoogleOneTapNonceStore") {}
 
 // ---------------------------------------------------------------------------
@@ -104,41 +101,39 @@ export interface GoogleOneTapSignInResult {
   readonly claims: Record<string, unknown>;
 }
 
-export interface GoogleOneTapServiceShape {
-  /**
-   * Generate a server-side nonce, persist it, and return the raw value.
-   *
-   * Pass the returned nonce to Google's One Tap library (`data-nonce`).
-   * Google hashes it (SHA-256 hex) before embedding it in the id_token, but
-   * you always work with the **unhashed** value.
-   */
-  readonly createNonce: () => Effect.Effect<
-    string,
-    GoogleOneTapError | AuthError,
-    GoogleOneTapNonceStore
-  >;
-
-  /**
-   * Verify a One Tap `credential` (id_token) and sign the user in:
-   * find-or-create by the token's verified email, then issue a session.
-   *
-   * `nonce` must be the **unhashed** value returned by {@link createNonce}.
-   * The call consumes the nonce — a second call with the same credential /
-   * nonce pair is rejected even if the id_token has not yet expired.
-   */
-  readonly signIn: (
-    credential: string,
-    nonce: string,
-  ) => Effect.Effect<
-    GoogleOneTapSignInResult,
-    GoogleOneTapError | AuthError | HookError,
-    OAuthUserStore | SessionService | Hooks | GoogleOneTapNonceStore
-  >;
-}
-
 export class GoogleOneTapService extends Context.Service<
   GoogleOneTapService,
-  GoogleOneTapServiceShape
+  {
+    /**
+     * Generate a server-side nonce, persist it, and return the raw value.
+     *
+     * Pass the returned nonce to Google's One Tap library (`data-nonce`).
+     * Google hashes it (SHA-256 hex) before embedding it in the id_token, but
+     * you always work with the **unhashed** value.
+     */
+    readonly createNonce: () => Effect.Effect<
+      string,
+      GoogleOneTapError | AuthError,
+      GoogleOneTapNonceStore
+    >;
+
+    /**
+     * Verify a One Tap `credential` (id_token) and sign the user in:
+     * find-or-create by the token's verified email, then issue a session.
+     *
+     * `nonce` must be the **unhashed** value returned by {@link createNonce}.
+     * The call consumes the nonce — a second call with the same credential /
+     * nonce pair is rejected even if the id_token has not yet expired.
+     */
+    readonly signIn: (
+      credential: string,
+      nonce: string,
+    ) => Effect.Effect<
+      GoogleOneTapSignInResult,
+      GoogleOneTapError | AuthError | HookError,
+      OAuthUserStore | SessionService | Hooks | GoogleOneTapNonceStore
+    >;
+  }
 >()("@effect-auth/GoogleOneTapService") {
   /**
    * Construct a Layer providing this service.
@@ -160,7 +155,7 @@ const hashNonce = (nonce: string): string =>
 
 export const makeGoogleOneTapService = (
   config: GoogleOneTapConfig,
-): Effect.Effect<GoogleOneTapServiceShape, never> => {
+): Effect.Effect<typeof GoogleOneTapService.Service, never> => {
   const jwksEndpoint = config.jwksEndpoint ?? GOOGLE_JWKS_ENDPOINT;
   const issuers = config.issuers ?? GOOGLE_ISSUERS;
   const nonceTtlMs = config.nonceTtlMs ?? 600_000;
@@ -233,5 +228,5 @@ export const makeGoogleOneTapService = (
         const session = yield* sessionManager.createSession(user.id);
         return { user, session, isNewUser, claims };
       }),
-  } satisfies GoogleOneTapServiceShape);
+  } satisfies typeof GoogleOneTapService.Service);
 };

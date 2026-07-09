@@ -67,17 +67,16 @@ export interface JWTKeyPair {
 /**
  * Storage interface for JWT signing keys
  */
-export interface JWTKeyStoreShape {
-  /** The key pair new tokens should be signed with, or null when none exists */
-  readonly getActive: () => Effect.Effect<JWTKeyPair | null, Errors.AuthError>;
-  readonly create: (pair: JWTKeyPair) => Effect.Effect<JWTKeyPair, Errors.AuthError>;
-  /** Every known key pair (verification matches tokens by `kid`) */
-  readonly list: () => Effect.Effect<readonly JWTKeyPair[], Errors.AuthError>;
-}
-
-export class JWTKeyStore extends Context.Service<JWTKeyStore, JWTKeyStoreShape>()(
-  "@effect-auth/JwtKeyStore",
-) {}
+export class JWTKeyStore extends Context.Service<
+  JWTKeyStore,
+  {
+    /** The key pair new tokens should be signed with, or null when none exists */
+    readonly getActive: () => Effect.Effect<JWTKeyPair | null, Errors.AuthError>;
+    readonly create: (pair: JWTKeyPair) => Effect.Effect<JWTKeyPair, Errors.AuthError>;
+    /** Every known key pair (verification matches tokens by `kid`) */
+    readonly list: () => Effect.Effect<readonly JWTKeyPair[], Errors.AuthError>;
+  }
+>()("@effect-auth/JWTKeyStore") {}
 
 /**
  * JWT service configuration
@@ -138,39 +137,38 @@ export interface Jwks {
 /**
  * JWT service
  */
-export interface JWTServiceShape {
-  /**
-   * Sign a JWT for a user. The header is `{ alg, kid, typ: "JWT" }`; the
-   * payload carries `iss`/`aud?`/`sub`/`iat`/`exp` plus `definePayload(user)`
-   * and any `extraClaims`. Lazily generates and persists a key pair on first
-   * use when the store is empty.
-   */
-  readonly sign: (
-    user: Types.User,
-    extraClaims?: Record<string, unknown>,
-  ) => Effect.Effect<JWTSignResult, JWTError | Errors.AuthError, JWTKeyStore>;
+export class JWTService extends Context.Service<
+  JWTService,
+  {
+    /**
+     * Sign a JWT for a user. The header is `{ alg, kid, typ: "JWT" }`; the
+     * payload carries `iss`/`aud?`/`sub`/`iat`/`exp` plus `definePayload(user)`
+     * and any `extraClaims`. Lazily generates and persists a key pair on first
+     * use when the store is empty.
+     */
+    readonly sign: (
+      user: Types.User,
+      extraClaims?: Record<string, unknown>,
+    ) => Effect.Effect<JWTSignResult, JWTError | Errors.AuthError, JWTKeyStore>;
 
-  /**
-   * Verify a compact JWS and return its decoded payload. Validates the
-   * signature against the stored key whose `kid` matches the header, then
-   * checks `exp`, `nbf`, `iss`, and (when configured) `aud`. Fails with
-   * {@link JWTError} on any mismatch.
-   */
-  readonly verify: (
-    token: string,
-  ) => Effect.Effect<Record<string, unknown>, JWTError | Errors.AuthError, JWTKeyStore>;
+    /**
+     * Verify a compact JWS and return its decoded payload. Validates the
+     * signature against the stored key whose `kid` matches the header, then
+     * checks `exp`, `nbf`, `iss`, and (when configured) `aud`. Fails with
+     * {@link JWTError} on any mismatch.
+     */
+    readonly verify: (
+      token: string,
+    ) => Effect.Effect<Record<string, unknown>, JWTError | Errors.AuthError, JWTKeyStore>;
 
-  /**
-   * The JWKS document containing every stored public key (with `kid`,
-   * `alg`, and `use: "sig"`) and no private material. Serve this at
-   * `/.well-known/jwks.json`.
-   */
-  readonly getJwks: () => Effect.Effect<Jwks, Errors.AuthError, JWTKeyStore>;
-}
-
-export class JWTService extends Context.Service<JWTService, JWTServiceShape>()(
-  "@effect-auth/JwtService",
-) {
+    /**
+     * The JWKS document containing every stored public key (with `kid`,
+     * `alg`, and `use: "sig"`) and no private material. Serve this at
+     * `/.well-known/jwks.json`.
+     */
+    readonly getJwks: () => Effect.Effect<Jwks, Errors.AuthError, JWTKeyStore>;
+  }
+>()("@effect-auth/JWTService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -330,7 +328,9 @@ const decodeJsonSegment = (
 /**
  * Create a JWT service
  */
-export const makeJWTService = (config: JWTConfig): Effect.Effect<JWTServiceShape, never> =>
+export const makeJWTService = (
+  config: JWTConfig,
+): Effect.Effect<typeof JWTService.Service, never> =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 15 * 60 * 1000; // 15 minutes default
     const algorithm = config.algorithm ?? "ES256";
@@ -583,19 +583,17 @@ export interface RemoteJwksConfig {
 /**
  * A stand-alone JWT verifier backed by a remote JWKS document.
  */
-export interface RemoteJwksVerifierShape {
-  /**
-   * Verify a compact JWS against the remote JWKS. On first call (or after
-   * cache expiry) the JWKS is fetched and cached. If the `kid` from the
-   * token header is absent in the cached JWKS, the cache is refreshed once to
-   * handle key rotation before failing.
-   */
-  readonly verify: (token: string) => Effect.Effect<Record<string, unknown>, JWTError>;
-}
-
 export class RemoteJwksVerifier extends Context.Service<
   RemoteJwksVerifier,
-  RemoteJwksVerifierShape
+  {
+    /**
+     * Verify a compact JWS against the remote JWKS. On first call (or after
+     * cache expiry) the JWKS is fetched and cached. If the `kid` from the
+     * token header is absent in the cached JWKS, the cache is refreshed once to
+     * handle key rotation before failing.
+     */
+    readonly verify: (token: string) => Effect.Effect<Record<string, unknown>, JWTError>;
+  }
 >()("@effect-auth/RemoteJwksVerifier") {
   static readonly layer = (config: RemoteJwksConfig) =>
     Layer.effect(RemoteJwksVerifier, makeRemoteJwksVerifier(config));
@@ -619,13 +617,13 @@ const fetchJwks = (uri: string): Effect.Effect<JwksCache, JWTError> =>
   });
 
 /**
- * Create a {@link RemoteJwksVerifierShape} that fetches the JWKS at
+ * Create a {@link RemoteJwksVerifier} that fetches the JWKS at
  * `config.jwksUri`, caches it for `cacheTtlMs`, and verifies tokens against
  * it. Concurrent fetch requests are deduplicated via a Deferred.
  */
 export const makeRemoteJwksVerifier = (
   config: RemoteJwksConfig,
-): Effect.Effect<RemoteJwksVerifierShape, never> =>
+): Effect.Effect<typeof RemoteJwksVerifier.Service, never> =>
   Effect.gen(function* () {
     const cacheTtlMs = config.cacheTtlMs ?? 5 * 60 * 1000;
     const leewayMs = config.clockSkewLeeway ?? 0;

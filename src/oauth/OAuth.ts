@@ -153,32 +153,6 @@ export interface OAuthCallbackResult {
 }
 
 /**
- * Storage interface for OAuth state (temporary, Redis/memory)
- */
-export interface OAuthStateStoreShape {
-  readonly create: (state: OAuthState) => Effect.Effect<OAuthState, AuthError>;
-  /** Get a pending state entry, or `null` when unknown/expired-and-purged. */
-  readonly get: (state: string) => Effect.Effect<OAuthState | null, AuthError>;
-  readonly delete: (state: string) => Effect.Effect<void, AuthError>;
-}
-
-/**
- * Storage interface for OAuth accounts (persistent, database)
- */
-export interface OAuthAccountStoreShape {
-  readonly create: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
-  readonly get: (
-    provider: string,
-    providerId: string,
-  ) => Effect.Effect<OAuthAccount | null, AuthError>;
-  readonly getByUserId: (userId: string) => Effect.Effect<readonly OAuthAccount[], AuthError>;
-  readonly update: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
-  readonly linkToUser: (userId: string, account: OAuthAccount) => Effect.Effect<void, AuthError>;
-  readonly unlinkFromUser: (userId: string, provider: string) => Effect.Effect<void, AuthError>;
-  readonly delete: (provider: string, providerId: string) => Effect.Effect<void, AuthError>;
-}
-
-/**
  * Input for creating a user from an OAuth provider profile.
  */
 export interface OAuthCreateUserInput {
@@ -186,16 +160,6 @@ export interface OAuthCreateUserInput {
   readonly emailVerified: boolean;
   readonly name?: string;
   readonly image?: string;
-}
-
-/**
- * Minimal user store the OAuth sign-in flow needs to create or look up users
- * from provider profiles. Implement alongside {@link OAuthAccountStoreShape}.
- */
-export interface OAuthUserStoreShape {
-  readonly getUser: (userId: string) => Effect.Effect<Types.User, AuthError | UserNotFoundError>;
-  readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, AuthError>;
-  readonly createUser: (input: OAuthCreateUserInput) => Effect.Effect<Types.User, AuthError>;
 }
 
 /**
@@ -248,25 +212,49 @@ export interface OAuthProvider {
 import * as crypto from "node:crypto";
 
 /**
- * OAuth state store context tag
+ * Storage interface for OAuth state (temporary, Redis/memory)
  */
-export class OAuthStateStore extends Context.Service<OAuthStateStore, OAuthStateStoreShape>()(
-  "@effect-auth/OAuthStateStore",
-) {}
+export class OAuthStateStore extends Context.Service<
+  OAuthStateStore,
+  {
+    readonly create: (state: OAuthState) => Effect.Effect<OAuthState, AuthError>;
+    /** Get a pending state entry, or `null` when unknown/expired-and-purged. */
+    readonly get: (state: string) => Effect.Effect<OAuthState | null, AuthError>;
+    readonly delete: (state: string) => Effect.Effect<void, AuthError>;
+  }
+>()("@effect-auth/OAuthStateStore") {}
 
 /**
- * OAuth account store context tag
+ * Storage interface for OAuth accounts (persistent, database)
  */
-export class OAuthAccountStore extends Context.Service<OAuthAccountStore, OAuthAccountStoreShape>()(
-  "@effect-auth/OAuthAccountStore",
-) {}
+export class OAuthAccountStore extends Context.Service<
+  OAuthAccountStore,
+  {
+    readonly create: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
+    readonly get: (
+      provider: string,
+      providerId: string,
+    ) => Effect.Effect<OAuthAccount | null, AuthError>;
+    readonly getByUserId: (userId: string) => Effect.Effect<readonly OAuthAccount[], AuthError>;
+    readonly update: (account: OAuthAccount) => Effect.Effect<OAuthAccount, AuthError>;
+    readonly linkToUser: (userId: string, account: OAuthAccount) => Effect.Effect<void, AuthError>;
+    readonly unlinkFromUser: (userId: string, provider: string) => Effect.Effect<void, AuthError>;
+    readonly delete: (provider: string, providerId: string) => Effect.Effect<void, AuthError>;
+  }
+>()("@effect-auth/OAuthAccountStore") {}
 
 /**
- * OAuth user store context tag
+ * Minimal user store the OAuth sign-in flow needs to create or look up users
+ * from provider profiles. Implement alongside `typeof OAuthAccountStore.Service`.
  */
-export class OAuthUserStore extends Context.Service<OAuthUserStore, OAuthUserStoreShape>()(
-  "@effect-auth/OAuthUserStore",
-) {}
+export class OAuthUserStore extends Context.Service<
+  OAuthUserStore,
+  {
+    readonly getUser: (userId: string) => Effect.Effect<Types.User, AuthError | UserNotFoundError>;
+    readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, AuthError>;
+    readonly createUser: (input: OAuthCreateUserInput) => Effect.Effect<Types.User, AuthError>;
+  }
+>()("@effect-auth/OAuthUserStore") {}
 
 /**
  * Generate a cryptographically secure random state parameter
@@ -641,79 +629,78 @@ export const makeOAuthProvider = (
 /**
  * OAuth service for managing OAuth flows
  */
-export interface OAuthServiceShape {
-  readonly generateAuthorizationUrl: (
-    provider: string,
-    options?: { scopes?: readonly string[]; returnTo?: string },
-  ) => Effect.Effect<AuthorizationUrlResult, AuthError | OAuthProviderError, OAuthStateStore>;
+export class OAuthService extends Context.Service<
+  OAuthService,
+  {
+    readonly generateAuthorizationUrl: (
+      provider: string,
+      options?: { scopes?: readonly string[]; returnTo?: string },
+    ) => Effect.Effect<AuthorizationUrlResult, AuthError | OAuthProviderError, OAuthStateStore>;
 
-  readonly handleCallback: (
-    state: string,
-    code: string,
-    options?: { linkToUserId?: string },
-  ) => Effect.Effect<
-    OAuthCallbackResult,
-    AuthError | OAuthProviderError | OAuthStateNotFoundError | OAuthStateExpiredError,
-    OAuthStateStore | OAuthAccountStore
-  >;
+    readonly handleCallback: (
+      state: string,
+      code: string,
+      options?: { linkToUserId?: string },
+    ) => Effect.Effect<
+      OAuthCallbackResult,
+      AuthError | OAuthProviderError | OAuthStateNotFoundError | OAuthStateExpiredError,
+      OAuthStateStore | OAuthAccountStore
+    >;
 
-  /**
-   * Complete OAuth sign-in: verifies the callback, resolves or creates the
-   * user (auto-linking to an existing user when the provider reports a
-   * verified email, unless disabled), links the account, and issues a session.
-   *
-   * This is the recommended high-level entrypoint; use {@link handleCallback}
-   * only when managing users yourself.
-   */
-  readonly signInWithCallback: (
-    state: string,
-    code: string,
-  ) => Effect.Effect<
-    OAuthSignInResult,
-    | AuthError
-    | OAuthProviderError
-    | OAuthStateNotFoundError
-    | OAuthStateExpiredError
-    | OAuthAccountNotLinkedError
-    | OAuthMissingEmailError
-    | UserNotFoundError
-    | HookError,
-    OAuthStateStore | OAuthAccountStore | OAuthUserStore | SessionService | Hooks
-  >;
+    /**
+     * Complete OAuth sign-in: verifies the callback, resolves or creates the
+     * user (auto-linking to an existing user when the provider reports a
+     * verified email, unless disabled), links the account, and issues a session.
+     *
+     * This is the recommended high-level entrypoint; use {@link handleCallback}
+     * only when managing users yourself.
+     */
+    readonly signInWithCallback: (
+      state: string,
+      code: string,
+    ) => Effect.Effect<
+      OAuthSignInResult,
+      | AuthError
+      | OAuthProviderError
+      | OAuthStateNotFoundError
+      | OAuthStateExpiredError
+      | OAuthAccountNotLinkedError
+      | OAuthMissingEmailError
+      | UserNotFoundError
+      | HookError,
+      OAuthStateStore | OAuthAccountStore | OAuthUserStore | SessionService | Hooks
+    >;
 
-  readonly linkAccount: (
-    userId: string,
-    provider: string,
-    code: string,
-    state: string,
-  ) => Effect.Effect<
-    OAuthAccount,
-    | AuthError
-    | OAuthProviderError
-    | OAuthStateNotFoundError
-    | OAuthStateExpiredError
-    | OAuthAccountConflictError,
-    OAuthStateStore | OAuthAccountStore
-  >;
+    readonly linkAccount: (
+      userId: string,
+      provider: string,
+      code: string,
+      state: string,
+    ) => Effect.Effect<
+      OAuthAccount,
+      | AuthError
+      | OAuthProviderError
+      | OAuthStateNotFoundError
+      | OAuthStateExpiredError
+      | OAuthAccountConflictError,
+      OAuthStateStore | OAuthAccountStore
+    >;
 
-  readonly unlinkAccount: (
-    userId: string,
-    provider: string,
-  ) => Effect.Effect<void, AuthError | OAuthAccountNotFoundError, OAuthAccountStore>;
+    readonly unlinkAccount: (
+      userId: string,
+      provider: string,
+    ) => Effect.Effect<void, AuthError | OAuthAccountNotFoundError, OAuthAccountStore>;
 
-  readonly refreshAccessToken: (
-    userId: string,
-    provider: string,
-  ) => Effect.Effect<
-    string,
-    AuthError | OAuthProviderError | OAuthAccountNotFoundError | OAuthNoRefreshTokenError,
-    OAuthAccountStore
-  >;
-}
-
-export class OAuthService extends Context.Service<OAuthService, OAuthServiceShape>()(
-  "@effect-auth/OAuthService",
-) {
+    readonly refreshAccessToken: (
+      userId: string,
+      provider: string,
+    ) => Effect.Effect<
+      string,
+      AuthError | OAuthProviderError | OAuthAccountNotFoundError | OAuthNoRefreshTokenError,
+      OAuthAccountStore
+    >;
+  }
+>()("@effect-auth/OAuthService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -739,7 +726,7 @@ export const oauthServiceOptionsConfig = Config.all({
 });
 
 /**
- * Options controlling {@link OAuthServiceShape} behaviour.
+ * Options controlling `typeof OAuthService.Service` behaviour.
  */
 export interface OAuthServiceOptions {
   /**
@@ -775,7 +762,7 @@ export interface OAuthServiceOptions {
 export const makeOAuthService = (
   providers: Record<string, OAuthProvider>,
   options: OAuthServiceOptions = {},
-): Effect.Effect<OAuthServiceShape, never> => {
+): Effect.Effect<typeof OAuthService.Service, never> => {
   const autoLinkByVerifiedEmail = options.autoLinkByVerifiedEmail ?? true;
 
   const cipher: TokenCipher | null = options.encryptTokens
@@ -858,465 +845,463 @@ export const makeOAuthService = (
       return { stateEntry, tokens, userInfo };
     });
 
-  return Effect.sync(
-    (): OAuthServiceShape => ({
-      generateAuthorizationUrl: (provider, options) =>
-        Effect.gen(function* () {
-          const providerInstance = providers[provider];
-          if (!providerInstance) {
-            return yield* Effect.fail(
-              new OAuthProviderError({
-                message: `Provider ${provider} not found`,
-                provider,
-              }),
-            );
-          }
+  return Effect.sync((): typeof OAuthService.Service => ({
+    generateAuthorizationUrl: (provider, options) =>
+      Effect.gen(function* () {
+        const providerInstance = providers[provider];
+        if (!providerInstance) {
+          return yield* Effect.fail(
+            new OAuthProviderError({
+              message: `Provider ${provider} not found`,
+              provider,
+            }),
+          );
+        }
 
-          const result = yield* providerInstance.generateAuthorizationUrl(options?.scopes);
+        const result = yield* providerInstance.generateAuthorizationUrl(options?.scopes);
 
-          // Update state with returnTo if provided
-          if (options?.returnTo) {
-            const stateStore = yield* OAuthStateStore;
-            const stateEntry = yield* stateStore.get(result.state);
-            if (stateEntry === null) {
-              return yield* new AuthError({ message: "OAuth state missing after creation" });
-            }
-            // Delete old state and create new one with returnTo
-            yield* stateStore.delete(result.state);
-            yield* stateStore.create({
-              ...stateEntry,
-              returnTo: options.returnTo,
-            });
-          }
-
-          return result;
-        }).pipe(Effect.withSpan("effect-auth.oauth.authorize", { attributes: { provider } })),
-
-      handleCallback: (state, code, options) =>
-        Effect.gen(function* () {
+        // Update state with returnTo if provided
+        if (options?.returnTo) {
           const stateStore = yield* OAuthStateStore;
-          const accountStore = yield* OAuthAccountStore;
-
-          // Verify state
-          const stateEntry = yield* stateStore.get(state);
+          const stateEntry = yield* stateStore.get(result.state);
           if (stateEntry === null) {
-            return yield* new OAuthStateNotFoundError({
-              message: "OAuth state not found or expired",
-              state,
-            });
+            return yield* new AuthError({ message: "OAuth state missing after creation" });
           }
-
-          // Check expiration
-          if (Date.now() > stateEntry.expiresAt) {
-            yield* stateStore.delete(state);
-            return yield* Effect.fail(
-              new OAuthStateExpiredError({
-                message: "OAuth state expired",
-                state,
-              }),
-            );
-          }
-
-          const providerInstance = providers[stateEntry.provider];
-          if (!providerInstance) {
-            return yield* Effect.fail(
-              new OAuthProviderError({
-                message: `Provider ${stateEntry.provider} not found`,
-                provider: stateEntry.provider,
-              }),
-            );
-          }
-
-          // Exchange code for tokens
-          const tokens = yield* providerInstance.exchangeCode(code, stateEntry.codeVerifier);
-
-          // Get user info (userinfo endpoint or verified OIDC id_token)
-          const userInfo = yield* providerInstance.getProfile(tokens, {
-            ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
+          // Delete old state and create new one with returnTo
+          yield* stateStore.delete(result.state);
+          yield* stateStore.create({
+            ...stateEntry,
+            returnTo: options.returnTo,
           });
+        }
 
-          // Clean up state
+        return result;
+      }).pipe(Effect.withSpan("effect-auth.oauth.authorize", { attributes: { provider } })),
+
+    handleCallback: (state, code, options) =>
+      Effect.gen(function* () {
+        const stateStore = yield* OAuthStateStore;
+        const accountStore = yield* OAuthAccountStore;
+
+        // Verify state
+        const stateEntry = yield* stateStore.get(state);
+        if (stateEntry === null) {
+          return yield* new OAuthStateNotFoundError({
+            message: "OAuth state not found or expired",
+            state,
+          });
+        }
+
+        // Check expiration
+        if (Date.now() > stateEntry.expiresAt) {
           yield* stateStore.delete(state);
+          return yield* Effect.fail(
+            new OAuthStateExpiredError({
+              message: "OAuth state expired",
+              state,
+            }),
+          );
+        }
 
-          // Check if account exists
-          const existingAccount = yield* accountStore.get(stateEntry.provider, userInfo.id);
+        const providerInstance = providers[stateEntry.provider];
+        if (!providerInstance) {
+          return yield* Effect.fail(
+            new OAuthProviderError({
+              message: `Provider ${stateEntry.provider} not found`,
+              provider: stateEntry.provider,
+            }),
+          );
+        }
 
-          if (existingAccount) {
-            // Update existing account
-            const plainExisting = yield* decryptAccount(existingAccount);
-            const updatedAccount: OAuthAccount = {
-              ...plainExisting,
-              accessToken: tokens.access_token,
-              ...(tokens.refresh_token && {
-                refreshToken: tokens.refresh_token,
-              }),
-              ...(tokens.expires_in && {
-                expiresAt: Date.now() + tokens.expires_in * 1000,
-              }),
-              updatedAt: Date.now(),
-            };
-            yield* accountStore.update(yield* encryptAccount(updatedAccount));
+        // Exchange code for tokens
+        const tokens = yield* providerInstance.exchangeCode(code, stateEntry.codeVerifier);
 
-            return {
-              account: updatedAccount,
-              isNewUser: false,
-            } satisfies OAuthCallbackResult;
-          }
+        // Get user info (userinfo endpoint or verified OIDC id_token)
+        const userInfo = yield* providerInstance.getProfile(tokens, {
+          ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
+        });
 
-          // Create new account
-          // Note: For new accounts without linkToUserId, we create an unlinked account
-          // with empty userId. The caller should link it to a user after creating
-          // the user record in their database.
-          const newAccount: OAuthAccount = {
-            id: crypto.randomBytes(16).toString("hex"),
-            userId: options?.linkToUserId ?? "",
-            provider: stateEntry.provider,
-            providerId: userInfo.id,
-            ...(userInfo.email && { email: userInfo.email }),
-            ...(userInfo.name && { name: userInfo.name }),
-            ...(userInfo.picture && { picture: userInfo.picture }),
+        // Clean up state
+        yield* stateStore.delete(state);
+
+        // Check if account exists
+        const existingAccount = yield* accountStore.get(stateEntry.provider, userInfo.id);
+
+        if (existingAccount) {
+          // Update existing account
+          const plainExisting = yield* decryptAccount(existingAccount);
+          const updatedAccount: OAuthAccount = {
+            ...plainExisting,
             accessToken: tokens.access_token,
-            ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
+            ...(tokens.refresh_token && {
+              refreshToken: tokens.refresh_token,
+            }),
             ...(tokens.expires_in && {
               expiresAt: Date.now() + tokens.expires_in * 1000,
             }),
-            createdAt: Date.now(),
             updatedAt: Date.now(),
           };
-
-          yield* accountStore.create(yield* encryptAccount(newAccount));
+          yield* accountStore.update(yield* encryptAccount(updatedAccount));
 
           return {
-            account: newAccount,
-            isNewUser: true,
-            ...(options?.linkToUserId
-              ? {
-                  user: {
-                    id: newAccount.userId,
-                    ...(userInfo.email && { email: userInfo.email }),
-                    ...(userInfo.name && { name: userInfo.name }),
-                  },
-                }
-              : {}),
+            account: updatedAccount,
+            isNewUser: false,
           } satisfies OAuthCallbackResult;
-        }),
+        }
 
-      signInWithCallback: (state, code) =>
-        Effect.gen(function* () {
-          const accountStore = yield* OAuthAccountStore;
-          const userStore = yield* OAuthUserStore;
-          const sessionManager = yield* SessionService;
+        // Create new account
+        // Note: For new accounts without linkToUserId, we create an unlinked account
+        // with empty userId. The caller should link it to a user after creating
+        // the user record in their database.
+        const newAccount: OAuthAccount = {
+          id: crypto.randomBytes(16).toString("hex"),
+          userId: options?.linkToUserId ?? "",
+          provider: stateEntry.provider,
+          providerId: userInfo.id,
+          ...(userInfo.email && { email: userInfo.email }),
+          ...(userInfo.name && { name: userInfo.name }),
+          ...(userInfo.picture && { picture: userInfo.picture }),
+          accessToken: tokens.access_token,
+          ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
+          ...(tokens.expires_in && {
+            expiresAt: Date.now() + tokens.expires_in * 1000,
+          }),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
 
-          const { stateEntry, tokens, userInfo } = yield* resolveCallback(state, code);
-          const now = Date.now();
+        yield* accountStore.create(yield* encryptAccount(newAccount));
 
-          const tokenFields = {
-            accessToken: tokens.access_token,
-            ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
-            ...(tokens.expires_in && { expiresAt: now + tokens.expires_in * 1000 }),
-          };
+        return {
+          account: newAccount,
+          isNewUser: true,
+          ...(options?.linkToUserId
+            ? {
+                user: {
+                  id: newAccount.userId,
+                  ...(userInfo.email && { email: userInfo.email }),
+                  ...(userInfo.name && { name: userInfo.name }),
+                },
+              }
+            : {}),
+        } satisfies OAuthCallbackResult;
+      }),
 
-          const existingAccount = yield* accountStore.get(stateEntry.provider, userInfo.id);
+    signInWithCallback: (state, code) =>
+      Effect.gen(function* () {
+        const accountStore = yield* OAuthAccountStore;
+        const userStore = yield* OAuthUserStore;
+        const sessionManager = yield* SessionService;
 
-          if (existingAccount) {
-            if (existingAccount.userId === "") {
-              return yield* new OAuthAccountNotLinkedError({
-                message: `This ${stateEntry.provider} account is not linked to a user`,
-                provider: stateEntry.provider,
-              });
-            }
+        const { stateEntry, tokens, userInfo } = yield* resolveCallback(state, code);
+        const now = Date.now();
 
-            const plainExisting = yield* decryptAccount(existingAccount);
-            const updatedAccount: OAuthAccount = {
-              ...plainExisting,
-              ...tokenFields,
-              updatedAt: now,
-            };
-            yield* accountStore.update(yield* encryptAccount(updatedAccount));
+        const tokenFields = {
+          accessToken: tokens.access_token,
+          ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
+          ...(tokens.expires_in && { expiresAt: now + tokens.expires_in * 1000 }),
+        };
 
-            const user = yield* userStore.getUser(updatedAccount.userId);
-            const session = yield* sessionManager.createSession(user.id);
+        const existingAccount = yield* accountStore.get(stateEntry.provider, userInfo.id);
 
-            return {
-              user,
-              account: updatedAccount,
-              session,
-              isNewUser: false,
-              ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
-            } satisfies OAuthSignInResult;
-          }
-
-          // New account: resolve the user by verified email, or create one.
-          const email = userInfo.email ? normalizeEmail(userInfo.email) : undefined;
-          const emailVerified = userInfo.email_verified === true;
-
-          if (email === undefined) {
-            return yield* new OAuthMissingEmailError({
-              message: `${stateEntry.provider} did not return an email address for this account`,
+        if (existingAccount) {
+          if (existingAccount.userId === "") {
+            return yield* new OAuthAccountNotLinkedError({
+              message: `This ${stateEntry.provider} account is not linked to a user`,
               provider: stateEntry.provider,
             });
           }
 
-          let user: Types.User | null = null;
-          if (autoLinkByVerifiedEmail && emailVerified) {
-            user = yield* userStore.getUserByEmail(email);
-          }
-
-          const isNewUser = user === null;
-          if (user === null) {
-            user = yield* userStore.createUser({
-              email,
-              emailVerified,
-              ...(userInfo.name !== undefined && { name: userInfo.name }),
-              ...(userInfo.picture !== undefined && { image: userInfo.picture }),
-            });
-          }
-
-          const account: OAuthAccount = {
-            id: crypto.randomBytes(16).toString("hex"),
-            userId: user.id,
-            provider: stateEntry.provider,
-            providerId: userInfo.id,
-            ...(userInfo.email && { email }),
-            ...(userInfo.name && { name: userInfo.name }),
-            ...(userInfo.picture && { picture: userInfo.picture }),
+          const plainExisting = yield* decryptAccount(existingAccount);
+          const updatedAccount: OAuthAccount = {
+            ...plainExisting,
             ...tokenFields,
-            createdAt: now,
             updatedAt: now,
           };
-          yield* accountStore.create(yield* encryptAccount(account));
+          yield* accountStore.update(yield* encryptAccount(updatedAccount));
 
+          const user = yield* userStore.getUser(updatedAccount.userId);
           const session = yield* sessionManager.createSession(user.id);
 
           return {
             user,
-            account,
+            account: updatedAccount,
             session,
-            isNewUser,
+            isNewUser: false,
             ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
           } satisfies OAuthSignInResult;
-        }).pipe(
-          Effect.withSpan("effect-auth.oauth.callback"),
-          Effect.tap(() => Obs.recordOAuthCallback("success")),
-          Effect.tapError(() => Obs.recordOAuthCallback("failure")),
-        ),
+        }
 
-      linkAccount: (userId, provider, code, state) =>
-        Effect.gen(function* () {
-          // Properly implement OAuth flow for account linking
-          // This follows the same flow as handleCallback but links to existing user
-          const stateStore = yield* OAuthStateStore;
-          const accountStore = yield* OAuthAccountStore;
+        // New account: resolve the user by verified email, or create one.
+        const email = userInfo.email ? normalizeEmail(userInfo.email) : undefined;
+        const emailVerified = userInfo.email_verified === true;
 
-          // Verify state
-          const stateEntry = yield* stateStore.get(state);
-          if (stateEntry === null) {
-            return yield* new OAuthStateNotFoundError({
-              message: "OAuth state not found or expired",
-              state,
-            });
-          }
-
-          if (stateEntry.provider !== provider) {
-            return yield* Effect.fail(
-              new OAuthProviderError({
-                message: `State provider mismatch: expected ${provider}, got ${stateEntry.provider}`,
-                provider,
-              }),
-            );
-          }
-
-          // Check expiration
-          if (Date.now() > stateEntry.expiresAt) {
-            yield* stateStore.delete(state);
-            return yield* Effect.fail(
-              new OAuthStateExpiredError({
-                message: "OAuth state expired",
-                state,
-              }),
-            );
-          }
-
-          const providerInstance = providers[provider];
-          if (!providerInstance) {
-            return yield* Effect.fail(
-              new OAuthProviderError({
-                message: `Provider ${provider} not found`,
-                provider,
-              }),
-            );
-          }
-
-          // Exchange code for tokens
-          const tokens = yield* providerInstance.exchangeCode(code, stateEntry.codeVerifier);
-
-          // Get user info (userinfo endpoint or verified OIDC id_token)
-          const userInfo = yield* providerInstance.getProfile(tokens, {
-            ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
+        if (email === undefined) {
+          return yield* new OAuthMissingEmailError({
+            message: `${stateEntry.provider} did not return an email address for this account`,
+            provider: stateEntry.provider,
           });
+        }
 
-          // Clean up state
+        let user: Types.User | null = null;
+        if (autoLinkByVerifiedEmail && emailVerified) {
+          user = yield* userStore.getUserByEmail(email);
+        }
+
+        const isNewUser = user === null;
+        if (user === null) {
+          user = yield* userStore.createUser({
+            email,
+            emailVerified,
+            ...(userInfo.name !== undefined && { name: userInfo.name }),
+            ...(userInfo.picture !== undefined && { image: userInfo.picture }),
+          });
+        }
+
+        const account: OAuthAccount = {
+          id: crypto.randomBytes(16).toString("hex"),
+          userId: user.id,
+          provider: stateEntry.provider,
+          providerId: userInfo.id,
+          ...(userInfo.email && { email }),
+          ...(userInfo.name && { name: userInfo.name }),
+          ...(userInfo.picture && { picture: userInfo.picture }),
+          ...tokenFields,
+          createdAt: now,
+          updatedAt: now,
+        };
+        yield* accountStore.create(yield* encryptAccount(account));
+
+        const session = yield* sessionManager.createSession(user.id);
+
+        return {
+          user,
+          account,
+          session,
+          isNewUser,
+          ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
+        } satisfies OAuthSignInResult;
+      }).pipe(
+        Effect.withSpan("effect-auth.oauth.callback"),
+        Effect.tap(() => Obs.recordOAuthCallback("success")),
+        Effect.tapError(() => Obs.recordOAuthCallback("failure")),
+      ),
+
+    linkAccount: (userId, provider, code, state) =>
+      Effect.gen(function* () {
+        // Properly implement OAuth flow for account linking
+        // This follows the same flow as handleCallback but links to existing user
+        const stateStore = yield* OAuthStateStore;
+        const accountStore = yield* OAuthAccountStore;
+
+        // Verify state
+        const stateEntry = yield* stateStore.get(state);
+        if (stateEntry === null) {
+          return yield* new OAuthStateNotFoundError({
+            message: "OAuth state not found or expired",
+            state,
+          });
+        }
+
+        if (stateEntry.provider !== provider) {
+          return yield* Effect.fail(
+            new OAuthProviderError({
+              message: `State provider mismatch: expected ${provider}, got ${stateEntry.provider}`,
+              provider,
+            }),
+          );
+        }
+
+        // Check expiration
+        if (Date.now() > stateEntry.expiresAt) {
           yield* stateStore.delete(state);
-
-          // Check if this OAuth account is already linked to another user
-          const existingAccount = yield* accountStore.get(provider, userInfo.id);
-
-          if (existingAccount && existingAccount.userId !== userId) {
-            return yield* Effect.fail(
-              new OAuthAccountConflictError({
-                message: `This ${provider} account is already linked to another user`,
-                provider,
-              }),
-            );
-          }
-
-          // Create or update the account linked to this user
-          const account: OAuthAccount = {
-            id: existingAccount?.id ?? crypto.randomBytes(16).toString("hex"),
-            userId,
-            provider,
-            providerId: userInfo.id,
-            ...(userInfo.email && { email: userInfo.email }),
-            ...(userInfo.name && { name: userInfo.name }),
-            ...(userInfo.picture && { picture: userInfo.picture }),
-            accessToken: tokens.access_token,
-            ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
-            ...(tokens.expires_in && {
-              expiresAt: Date.now() + tokens.expires_in * 1000,
+          return yield* Effect.fail(
+            new OAuthStateExpiredError({
+              message: "OAuth state expired",
+              state,
             }),
-            createdAt: existingAccount?.createdAt ?? Date.now(),
-            updatedAt: Date.now(),
-          };
+          );
+        }
 
-          if (existingAccount) {
-            yield* accountStore.update(yield* encryptAccount(account));
-          } else {
-            yield* accountStore.create(yield* encryptAccount(account));
-          }
-
-          return account;
-        }),
-
-      unlinkAccount: (userId, provider) =>
-        Effect.gen(function* () {
-          const accountStore = yield* OAuthAccountStore;
-          const accounts = yield* accountStore.getByUserId(userId);
-          const account = accounts.find((a) => a.provider === provider);
-
-          if (!account) {
-            return yield* Effect.fail(
-              new OAuthAccountNotFoundError({
-                message: `No ${provider} account linked to this user`,
-                provider,
-              }),
-            );
-          }
-
-          yield* accountStore.delete(provider, account.providerId);
-        }),
-
-      refreshAccessToken: (userId, provider) =>
-        Effect.gen(function* () {
-          const accountStore = yield* OAuthAccountStore;
-          const accounts = yield* accountStore.getByUserId(userId);
-          const account = accounts.find((a) => a.provider === provider);
-
-          if (!account) {
-            return yield* Effect.fail(
-              new OAuthAccountNotFoundError({
-                message: `No ${provider} account linked to this user`,
-                provider,
-              }),
-            );
-          }
-          if (!account.refreshToken) {
-            return yield* Effect.fail(
-              new OAuthNoRefreshTokenError({
-                message: `No refresh token available for ${provider}`,
-                provider,
-              }),
-            );
-          }
-
-          const plainAccount = yield* decryptAccount(account);
-
-          const providerInstance = providers[provider];
-          if (!providerInstance) {
-            return yield* Effect.fail(
-              new OAuthProviderError({
-                message: `Provider ${provider} not found`,
-                provider,
-              }),
-            );
-          }
-
-          // Exchange refresh token for new access token
-          const rConfig = providerInstance.config;
-          const rUseBasic = rConfig.tokenAuthMethod === "basic";
-          const params = new URLSearchParams({
-            [rConfig.clientIdParam ?? "client_id"]: rConfig.clientId,
-            grant_type: "refresh_token",
-            refresh_token: plainAccount.refreshToken!,
-          });
-          if (!rUseBasic) {
-            params.set("client_secret", Redacted.value(rConfig.clientSecret));
-          }
-
-          const response = yield* Effect.tryPromise({
-            try: () =>
-              fetch(rConfig.tokenEndpoint, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/x-www-form-urlencoded",
-                  ...(rUseBasic && {
-                    Authorization: `Basic ${Buffer.from(
-                      `${rConfig.clientId}:${Redacted.value(rConfig.clientSecret)}`,
-                    ).toString("base64")}`,
-                  }),
-                },
-                body: params.toString(),
-              }),
-            catch: (cause) =>
-              new OAuthProviderError({
-                message: `Failed to refresh token for ${provider}`,
-                provider,
-                cause,
-              }),
-          });
-
-          if (!response.ok) {
-            const errorText = yield* Effect.promise(() => response.text());
-            return yield* Effect.fail(
-              new OAuthProviderError({
-                message: `Token refresh failed: ${errorText}`,
-                provider,
-              }),
-            );
-          }
-
-          const data = (yield* Effect.promise(() => response.json())) as OAuthTokenResponse;
-
-          // Update account with new tokens
-          const updatedAccount: OAuthAccount = {
-            ...plainAccount,
-            accessToken: data.access_token,
-            ...(data.refresh_token && { refreshToken: data.refresh_token }),
-            ...(data.expires_in && {
-              expiresAt: Date.now() + data.expires_in * 1000,
+        const providerInstance = providers[provider];
+        if (!providerInstance) {
+          return yield* Effect.fail(
+            new OAuthProviderError({
+              message: `Provider ${provider} not found`,
+              provider,
             }),
-            updatedAt: Date.now(),
-          };
+          );
+        }
 
-          yield* accountStore.update(yield* encryptAccount(updatedAccount));
+        // Exchange code for tokens
+        const tokens = yield* providerInstance.exchangeCode(code, stateEntry.codeVerifier);
 
-          return data.access_token;
-        }).pipe(
-          Effect.withSpan("effect-auth.oauth.refresh", { attributes: { provider } }),
-          Effect.tap(() => Obs.recordOAuthRefresh(provider, "success")),
-          Effect.tapError(() => Obs.recordOAuthRefresh(provider, "failure")),
-        ),
-    }),
-  );
+        // Get user info (userinfo endpoint or verified OIDC id_token)
+        const userInfo = yield* providerInstance.getProfile(tokens, {
+          ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
+        });
+
+        // Clean up state
+        yield* stateStore.delete(state);
+
+        // Check if this OAuth account is already linked to another user
+        const existingAccount = yield* accountStore.get(provider, userInfo.id);
+
+        if (existingAccount && existingAccount.userId !== userId) {
+          return yield* Effect.fail(
+            new OAuthAccountConflictError({
+              message: `This ${provider} account is already linked to another user`,
+              provider,
+            }),
+          );
+        }
+
+        // Create or update the account linked to this user
+        const account: OAuthAccount = {
+          id: existingAccount?.id ?? crypto.randomBytes(16).toString("hex"),
+          userId,
+          provider,
+          providerId: userInfo.id,
+          ...(userInfo.email && { email: userInfo.email }),
+          ...(userInfo.name && { name: userInfo.name }),
+          ...(userInfo.picture && { picture: userInfo.picture }),
+          accessToken: tokens.access_token,
+          ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
+          ...(tokens.expires_in && {
+            expiresAt: Date.now() + tokens.expires_in * 1000,
+          }),
+          createdAt: existingAccount?.createdAt ?? Date.now(),
+          updatedAt: Date.now(),
+        };
+
+        if (existingAccount) {
+          yield* accountStore.update(yield* encryptAccount(account));
+        } else {
+          yield* accountStore.create(yield* encryptAccount(account));
+        }
+
+        return account;
+      }),
+
+    unlinkAccount: (userId, provider) =>
+      Effect.gen(function* () {
+        const accountStore = yield* OAuthAccountStore;
+        const accounts = yield* accountStore.getByUserId(userId);
+        const account = accounts.find((a) => a.provider === provider);
+
+        if (!account) {
+          return yield* Effect.fail(
+            new OAuthAccountNotFoundError({
+              message: `No ${provider} account linked to this user`,
+              provider,
+            }),
+          );
+        }
+
+        yield* accountStore.delete(provider, account.providerId);
+      }),
+
+    refreshAccessToken: (userId, provider) =>
+      Effect.gen(function* () {
+        const accountStore = yield* OAuthAccountStore;
+        const accounts = yield* accountStore.getByUserId(userId);
+        const account = accounts.find((a) => a.provider === provider);
+
+        if (!account) {
+          return yield* Effect.fail(
+            new OAuthAccountNotFoundError({
+              message: `No ${provider} account linked to this user`,
+              provider,
+            }),
+          );
+        }
+        if (!account.refreshToken) {
+          return yield* Effect.fail(
+            new OAuthNoRefreshTokenError({
+              message: `No refresh token available for ${provider}`,
+              provider,
+            }),
+          );
+        }
+
+        const plainAccount = yield* decryptAccount(account);
+
+        const providerInstance = providers[provider];
+        if (!providerInstance) {
+          return yield* Effect.fail(
+            new OAuthProviderError({
+              message: `Provider ${provider} not found`,
+              provider,
+            }),
+          );
+        }
+
+        // Exchange refresh token for new access token
+        const rConfig = providerInstance.config;
+        const rUseBasic = rConfig.tokenAuthMethod === "basic";
+        const params = new URLSearchParams({
+          [rConfig.clientIdParam ?? "client_id"]: rConfig.clientId,
+          grant_type: "refresh_token",
+          refresh_token: plainAccount.refreshToken!,
+        });
+        if (!rUseBasic) {
+          params.set("client_secret", Redacted.value(rConfig.clientSecret));
+        }
+
+        const response = yield* Effect.tryPromise({
+          try: () =>
+            fetch(rConfig.tokenEndpoint, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                ...(rUseBasic && {
+                  Authorization: `Basic ${Buffer.from(
+                    `${rConfig.clientId}:${Redacted.value(rConfig.clientSecret)}`,
+                  ).toString("base64")}`,
+                }),
+              },
+              body: params.toString(),
+            }),
+          catch: (cause) =>
+            new OAuthProviderError({
+              message: `Failed to refresh token for ${provider}`,
+              provider,
+              cause,
+            }),
+        });
+
+        if (!response.ok) {
+          const errorText = yield* Effect.promise(() => response.text());
+          return yield* Effect.fail(
+            new OAuthProviderError({
+              message: `Token refresh failed: ${errorText}`,
+              provider,
+            }),
+          );
+        }
+
+        const data = (yield* Effect.promise(() => response.json())) as OAuthTokenResponse;
+
+        // Update account with new tokens
+        const updatedAccount: OAuthAccount = {
+          ...plainAccount,
+          accessToken: data.access_token,
+          ...(data.refresh_token && { refreshToken: data.refresh_token }),
+          ...(data.expires_in && {
+            expiresAt: Date.now() + data.expires_in * 1000,
+          }),
+          updatedAt: Date.now(),
+        };
+
+        yield* accountStore.update(yield* encryptAccount(updatedAccount));
+
+        return data.access_token;
+      }).pipe(
+        Effect.withSpan("effect-auth.oauth.refresh", { attributes: { provider } }),
+        Effect.tap(() => Obs.recordOAuthRefresh(provider, "success")),
+        Effect.tapError(() => Obs.recordOAuthRefresh(provider, "failure")),
+      ),
+  }));
 };
 
 /**

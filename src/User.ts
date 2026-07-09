@@ -3,20 +3,19 @@ import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
 
-export interface UserServiceStoreShape {
-  /** Get a user by ID, or `null` when no such user exists. */
-  readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
+export class UserServiceStore extends Context.Service<
+  UserServiceStore,
+  {
+    /** Get a user by ID, or `null` when no such user exists. */
+    readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
-  readonly getByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly getByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
 
-  readonly update: (user: Types.User) => Effect.Effect<Types.User, Errors.AuthError>;
+    readonly update: (user: Types.User) => Effect.Effect<Types.User, Errors.AuthError>;
 
-  readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
-export class UserServiceStore extends Context.Service<UserServiceStore, UserServiceStoreShape>()(
-  "@effect-auth/UserServiceStore",
-) {}
+    readonly delete: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+  }
+>()("@effect-auth/UserServiceStore") {}
 
 /** Partial update of a user's first-class profile fields. */
 export interface UpdateUserInput {
@@ -24,35 +23,36 @@ export interface UpdateUserInput {
   readonly image?: string;
 }
 
-export interface UserServiceShape {
-  readonly getUser: (
-    userId: string,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+export class UserService extends Context.Service<
+  UserService,
+  {
+    readonly getUser: (
+      userId: string,
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
-  readonly getUserByEmail: (
-    email: string,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    readonly getUserByEmail: (
+      email: string,
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
-  readonly updateUserAttributes: (
-    userId: string,
-    attributes: Record<string, unknown>,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    readonly updateUserAttributes: (
+      userId: string,
+      attributes: Record<string, unknown>,
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
-  readonly updateUser: (
-    userId: string,
-    updates: UpdateUserInput,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    readonly updateUser: (
+      userId: string,
+      updates: UpdateUserInput,
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
-  readonly markEmailVerified: (
-    userId: string,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    readonly markEmailVerified: (
+      userId: string,
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
 
-  readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError, UserServiceStore>;
-}
-
-export class UserService extends Context.Service<UserService, UserServiceShape>()(
-  "@effect-auth/UserService",
-) {
+    readonly deleteUser: (
+      userId: string,
+    ) => Effect.Effect<void, Errors.AuthError, UserServiceStore>;
+  }
+>()("@effect-auth/UserService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -61,7 +61,7 @@ export class UserService extends Context.Service<UserService, UserServiceShape>(
 
 /** Fetch a user from the store, failing with `UserNotFoundError` on a miss. */
 const getUserOrFail = (
-  store: UserServiceStoreShape,
+  store: typeof UserServiceStore.Service,
   userId: string,
 ): Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError> =>
   Effect.flatMap(store.get(userId), (user) =>
@@ -70,92 +70,90 @@ const getUserOrFail = (
       : Effect.succeed(user),
   );
 
-export const makeUserService = (): Effect.Effect<UserServiceShape, never> =>
-  Effect.sync(
-    (): UserServiceShape => ({
-      getUser: (userId: string) =>
-        Effect.gen(function* () {
-          const store = yield* UserServiceStore;
-          return yield* getUserOrFail(store, userId);
-        }),
+export const makeUserService = (): Effect.Effect<typeof UserService.Service, never> =>
+  Effect.sync((): typeof UserService.Service => ({
+    getUser: (userId: string) =>
+      Effect.gen(function* () {
+        const store = yield* UserServiceStore;
+        return yield* getUserOrFail(store, userId);
+      }),
 
-      getUserByEmail: (email: string) =>
-        Effect.gen(function* () {
-          const store = yield* UserServiceStore;
-          const normalizedEmail = normalizeEmail(email);
+    getUserByEmail: (email: string) =>
+      Effect.gen(function* () {
+        const store = yield* UserServiceStore;
+        const normalizedEmail = normalizeEmail(email);
 
-          if (!normalizedEmail) {
-            return yield* Effect.fail(
-              new Errors.UserNotFoundError({
-                message: "User not found",
-                userId: "",
-              }),
-            );
-          }
+        if (!normalizedEmail) {
+          return yield* Effect.fail(
+            new Errors.UserNotFoundError({
+              message: "User not found",
+              userId: "",
+            }),
+          );
+        }
 
-          const user = yield* store.getByEmail(normalizedEmail);
-          if (!user) {
-            return yield* Effect.fail(
-              new Errors.UserNotFoundError({
-                message: "User not found",
-                userId: normalizedEmail,
-              }),
-            );
-          }
+        const user = yield* store.getByEmail(normalizedEmail);
+        if (!user) {
+          return yield* Effect.fail(
+            new Errors.UserNotFoundError({
+              message: "User not found",
+              userId: normalizedEmail,
+            }),
+          );
+        }
 
-          return user;
-        }),
+        return user;
+      }),
 
-      updateUserAttributes: (userId: string, attributes: Record<string, unknown>) =>
-        Effect.gen(function* () {
-          const store = yield* UserServiceStore;
-          const existing = yield* getUserOrFail(store, userId);
+    updateUserAttributes: (userId: string, attributes: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const store = yield* UserServiceStore;
+        const existing = yield* getUserOrFail(store, userId);
 
-          const updated: Types.User = {
-            ...existing,
-            updatedAt: new Date(),
-            attributes: {
-              ...existing.attributes,
-              ...attributes,
-            },
-          };
+        const updated: Types.User = {
+          ...existing,
+          updatedAt: new Date(),
+          attributes: {
+            ...existing.attributes,
+            ...attributes,
+          },
+        };
 
-          return yield* store.update(updated);
-        }),
+        return yield* store.update(updated);
+      }),
 
-      updateUser: (userId: string, updates: UpdateUserInput) =>
-        Effect.gen(function* () {
-          const store = yield* UserServiceStore;
-          const existing = yield* getUserOrFail(store, userId);
+    updateUser: (userId: string, updates: UpdateUserInput) =>
+      Effect.gen(function* () {
+        const store = yield* UserServiceStore;
+        const existing = yield* getUserOrFail(store, userId);
 
-          const updated: Types.User = {
-            ...existing,
-            ...(updates.name !== undefined && { name: updates.name }),
-            ...(updates.image !== undefined && { image: updates.image }),
-            updatedAt: new Date(),
-          };
+        const updated: Types.User = {
+          ...existing,
+          ...(updates.name !== undefined && { name: updates.name }),
+          ...(updates.image !== undefined && { image: updates.image }),
+          updatedAt: new Date(),
+        };
 
-          return yield* store.update(updated);
-        }),
+        return yield* store.update(updated);
+      }),
 
-      markEmailVerified: (userId: string) =>
-        Effect.gen(function* () {
-          const store = yield* UserServiceStore;
-          const existing = yield* getUserOrFail(store, userId);
+    markEmailVerified: (userId: string) =>
+      Effect.gen(function* () {
+        const store = yield* UserServiceStore;
+        const existing = yield* getUserOrFail(store, userId);
 
-          const updated: Types.User = {
-            ...existing,
-            emailVerified: true,
-            updatedAt: new Date(),
-          };
+        const updated: Types.User = {
+          ...existing,
+          emailVerified: true,
+          updatedAt: new Date(),
+        };
 
-          return yield* store.update(updated);
-        }),
+        return yield* store.update(updated);
+      }),
 
-      deleteUser: (userId: string) =>
-        Effect.gen(function* () {
-          const store = yield* UserServiceStore;
-          yield* store.delete(userId);
-        }),
-    }),
-  );
+    deleteUser: (userId: string) =>
+      Effect.gen(function* () {
+        const store = yield* UserServiceStore;
+        yield* store.delete(userId);
+      }),
+  }));

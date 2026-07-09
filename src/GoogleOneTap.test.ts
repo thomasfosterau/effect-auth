@@ -6,7 +6,6 @@ import { Hooks } from "./Hooks.js";
 import { SessionService } from "./session/SessionService.js";
 import { SessionStore } from "./session/SessionStore.js";
 import { UserStore } from "./session/UserStore.js";
-import type { SessionServiceShape } from "./session/SessionService.js";
 import { UserServiceStore, UserService } from "./User.js";
 import { AuthLifecycleService } from "./AuthLifecycle.js";
 import { EmailPasswordStore } from "./email/EmailPassword.js";
@@ -18,13 +17,12 @@ import {
   PasswordResetUserStore,
 } from "./password/PasswordReset.js";
 import { makeAuthWebHandler, type AuthServices } from "./http/HTTPServer.js";
-import { OAuthUserStore, type OAuthUserStoreShape } from "./oauth/OAuth.js";
+import { OAuthUserStore } from "./oauth/OAuth.js";
 import {
   makeGoogleOneTapService,
   GoogleOneTapError,
   GoogleOneTapService,
   GoogleOneTapNonceStore,
-  type GoogleOneTapNonceStoreShape,
 } from "./GoogleOneTap.js";
 import type * as Types from "./Types.js";
 
@@ -87,7 +85,7 @@ const withJwks = async <A>(thunk: () => Promise<A>): Promise<A> => {
 // In-memory nonce store for tests
 // ---------------------------------------------------------------------------
 
-const makeMemoryNonceStore = (): GoogleOneTapNonceStoreShape => {
+const makeMemoryNonceStore = (): typeof GoogleOneTapNonceStore.Service => {
   const store = new Map<string, { expiresAt: number }>();
   return {
     create: (nonce, expiresAt) =>
@@ -109,7 +107,7 @@ const makeStores = () => {
   const usersByEmail = new Map<string, Types.User>();
   let userSeq = 0;
 
-  const userStore: OAuthUserStoreShape = {
+  const userStore: typeof OAuthUserStore.Service = {
     getUser: (userId) => {
       const u = users.get(userId);
       return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
@@ -133,7 +131,7 @@ const makeStores = () => {
         return user;
       }),
   };
-  const sessionManager: SessionServiceShape = {
+  const sessionManager: typeof SessionService.Service = {
     createSession: (userId) =>
       Effect.succeed({
         id: `s-${userId}`,
@@ -342,7 +340,7 @@ const makeHttpFixture = () => {
   const sessions = new Map<string, Types.Session>();
   let userSeq = 0;
 
-  const oauthUserStore: OAuthUserStoreShape = {
+  const oauthUserStore: typeof OAuthUserStore.Service = {
     getUser: (userId) => {
       const u = usersById.get(userId);
       return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));

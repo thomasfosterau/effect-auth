@@ -69,7 +69,7 @@ export type TrustedProxyConfig = TrustedProxyHopCount | TrustedProxyCidrs;
  * HTTP request scope.
  */
 export class ClientIP extends Context.Service<ClientIP, { readonly ip: string | undefined }>()(
-  "@effect-auth/ClientIp",
+  "@effect-auth/ClientIP",
 ) {}
 
 // ---------------------------------------------------------------------------

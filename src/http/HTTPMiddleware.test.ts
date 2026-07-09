@@ -2,10 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Exit, Layer, Option, Redacted } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type * as Types from "../Types.js";
-import {
-  SessionService,
-  type SessionService as SessionServiceShape,
-} from "../session/SessionService.js";
+import { SessionService } from "../session/SessionService.js";
 import { Hooks } from "../Hooks.js";
 import * as Errors from "../Errors.js";
 import {
@@ -44,7 +41,7 @@ const testSession: Types.Session = {
   attributes: {},
 };
 
-const mockSessionService: SessionServiceShape = {
+const mockSessionService: typeof SessionService.Service = {
   createSession: () => Effect.die("unused"),
   validateSession: (id: string) =>
     id === RAW_TOKEN

@@ -1,26 +1,15 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import {
-  UsernameService,
-  UsernameStore,
-  UsernameError,
-  type UsernameConfig,
-  type UsernameServiceShape,
-  type UsernameStoreShape,
-} from "./Username.js";
+import { UsernameService, UsernameStore, UsernameError, type UsernameConfig } from "./Username.js";
 import {
   EmailPasswordService,
   EmailPasswordStore,
   SecondFactorGate,
-  type EmailPasswordStoreShape,
-  type SecondFactorGateShape,
 } from "./email/EmailPassword.js";
-import { PasswordHasher, makeScryptHasher, type PasswordHasherShape } from "./password/Password.js";
+import { PasswordHasher, makeScryptHasher } from "./password/Password.js";
 import { SessionService } from "./session/SessionService.js";
 import { SessionStore } from "./session/SessionStore.js";
 import { UserStore } from "./session/UserStore.js";
-import type { SessionStoreShape } from "./session/SessionStore.js";
-import type { UserStoreShape } from "./session/UserStore.js";
 import { Hooks } from "./Hooks.js";
 import type * as Types from "./Types.js";
 
@@ -37,7 +26,7 @@ const passwordHashes = new Map<string, string>();
 const sessions = new Map<string, Types.Session>();
 let seq = 0;
 
-const usernameStore: UsernameStoreShape = {
+const usernameStore: typeof UsernameStore.Service = {
   getUserByUsername: (username) =>
     Effect.sync(() => {
       const id = usernameToId.get(username);
@@ -59,7 +48,7 @@ const usernameStore: UsernameStoreShape = {
     }),
 };
 
-const emailPasswordStore: EmailPasswordStoreShape = {
+const emailPasswordStore: typeof EmailPasswordStore.Service = {
   getUserByEmail: (email) =>
     Effect.sync(() => {
       const id = userIdByEmail.get(email);
@@ -85,7 +74,7 @@ const emailPasswordStore: EmailPasswordStoreShape = {
   setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
 };
 
-const sessionStore: SessionStoreShape = {
+const sessionStore: typeof SessionStore.Service = {
   create: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -106,7 +95,7 @@ const sessionStore: SessionStoreShape = {
     Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
 };
 
-const userStore: UserStoreShape = {
+const userStore: typeof UserStore.Service = {
   get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
   getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
 };
@@ -131,7 +120,7 @@ const baseDeps = Layer.mergeAll(
   Hooks.Default,
 );
 
-const gate = (required: boolean): SecondFactorGateShape => ({
+const gate = (required: boolean): typeof SecondFactorGate.Service => ({
   required: () => Effect.succeed(required),
   begin: () => Effect.succeed({ token: "2fa-token", expiresAt: Date.now() + 60_000 }),
 });
@@ -145,8 +134,8 @@ type UsernameDeps =
   | Hooks;
 
 const run = <A, E>(
-  f: (svc: UsernameServiceShape) => Effect.Effect<A, E, UsernameDeps>,
-  opts?: { config?: UsernameConfig; gate?: SecondFactorGateShape },
+  f: (svc: typeof UsernameService.Service) => Effect.Effect<A, E, UsernameDeps>,
+  opts?: { config?: UsernameConfig; gate?: typeof SecondFactorGate.Service },
 ) => {
   // UsernameService.layer also requires PasswordHasher at construction time (decoy hash).
   const usernameLayer = UsernameService.layer(opts?.config).pipe(Layer.provide(hasherLayer));
@@ -262,7 +251,7 @@ describe("UsernameService", () => {
   it("calls passwordHasher.verify even for an unknown username (constant-work)", async () => {
     let verifyCalls = 0;
     const realHasher = makeScryptHasher({ cost: 16384 });
-    const spyHasher: PasswordHasherShape = {
+    const spyHasher: typeof PasswordHasher.Service = {
       algorithm: realHasher.algorithm,
       hash: (password) => realHasher.hash(password),
       verify: (password, hash) => {

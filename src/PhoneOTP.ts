@@ -44,21 +44,24 @@ export interface PhoneOTPRecord {
  * Persistence for phone OTPs, keyed by the (normalized phoneNumber, purpose)
  * pair; `upsert` replaces any existing record for the pair.
  */
-export interface PhoneOTPStoreShape {
-  readonly upsert: (record: PhoneOTPRecord) => Effect.Effect<PhoneOTPRecord, Errors.AuthError>;
-  readonly get: (
-    phoneNumber: string,
-    purpose: PhoneOTPPurpose,
-  ) => Effect.Effect<PhoneOTPRecord | null, Errors.AuthError>;
-  readonly delete: (
-    phoneNumber: string,
-    purpose: PhoneOTPPurpose,
-  ) => Effect.Effect<void, Errors.AuthError>;
-  readonly incrementAttempts: (
-    phoneNumber: string,
-    purpose: PhoneOTPPurpose,
-  ) => Effect.Effect<number, Errors.AuthError>;
-}
+export class PhoneOTPStore extends Context.Service<
+  PhoneOTPStore,
+  {
+    readonly upsert: (record: PhoneOTPRecord) => Effect.Effect<PhoneOTPRecord, Errors.AuthError>;
+    readonly get: (
+      phoneNumber: string,
+      purpose: PhoneOTPPurpose,
+    ) => Effect.Effect<PhoneOTPRecord | null, Errors.AuthError>;
+    readonly delete: (
+      phoneNumber: string,
+      purpose: PhoneOTPPurpose,
+    ) => Effect.Effect<void, Errors.AuthError>;
+    readonly incrementAttempts: (
+      phoneNumber: string,
+      purpose: PhoneOTPPurpose,
+    ) => Effect.Effect<number, Errors.AuthError>;
+  }
+>()("@effect-auth/PhoneOTPStore") {}
 
 /** Input for creating a user from a verified phone number. */
 export interface PhoneOTPCreateUserInput {
@@ -72,26 +75,21 @@ export interface PhoneOTPCreateUserInput {
  * `attributes.phoneNumber` and the verification flag in
  * `attributes.phoneNumberVerified`.
  */
-export interface PhoneOTPUserStoreShape {
-  readonly getUserByPhoneNumber: (
-    phoneNumber: string,
-  ) => Effect.Effect<Types.User | null, Errors.AuthError>;
-  readonly createUser: (
-    input: PhoneOTPCreateUserInput,
-  ) => Effect.Effect<Types.User, Errors.AuthError>;
-  readonly setPhoneNumberVerified: (
-    userId: string,
-    phoneNumber: string,
-  ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
-}
-
-export class PhoneOTPStore extends Context.Service<PhoneOTPStore, PhoneOTPStoreShape>()(
-  "@effect-auth/PhoneOtpStore",
-) {}
-
-export class PhoneOTPUserStore extends Context.Service<PhoneOTPUserStore, PhoneOTPUserStoreShape>()(
-  "@effect-auth/PhoneOtpUserStore",
-) {}
+export class PhoneOTPUserStore extends Context.Service<
+  PhoneOTPUserStore,
+  {
+    readonly getUserByPhoneNumber: (
+      phoneNumber: string,
+    ) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly createUser: (
+      input: PhoneOTPCreateUserInput,
+    ) => Effect.Effect<Types.User, Errors.AuthError>;
+    readonly setPhoneNumberVerified: (
+      userId: string,
+      phoneNumber: string,
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
+  }
+>()("@effect-auth/PhoneOTPUserStore") {}
 
 export interface PhoneOTPConfig {
   readonly otpLength?: number; // Default: 6 digits
@@ -127,58 +125,57 @@ export interface PhoneOTPAuthResult {
   readonly session: Types.Session;
 }
 
-export interface PhoneOTPServiceShape {
-  /**
-   * Generate an OTP for the given phone number + purpose (replacing any
-   * outstanding one) and send it. Only a SHA-256 hash of the code is stored.
-   * Anti-enumeration: for `sign-in` with sign-up disabled and no user, this
-   * succeeds silently without sending.
-   *
-   * When `resendCooldown` is configured and an outstanding OTP for the phone +
-   * purpose was created within the cooldown window, fails with
-   * {@link Errors.ResendTooSoonError} containing the remaining wait time.
-   */
-  readonly send: (
-    phoneNumber: string,
-    purpose: PhoneOTPPurpose,
-  ) => Effect.Effect<
-    void,
-    PhoneOTPError | Errors.AuthError | Errors.ResendTooSoonError,
-    PhoneOTPStore | PhoneOTPUserStore
-  >;
+export class PhoneOTPService extends Context.Service<
+  PhoneOTPService,
+  {
+    /**
+     * Generate an OTP for the given phone number + purpose (replacing any
+     * outstanding one) and send it. Only a SHA-256 hash of the code is stored.
+     * Anti-enumeration: for `sign-in` with sign-up disabled and no user, this
+     * succeeds silently without sending.
+     *
+     * When `resendCooldown` is configured and an outstanding OTP for the phone +
+     * purpose was created within the cooldown window, fails with
+     * {@link Errors.ResendTooSoonError} containing the remaining wait time.
+     */
+    readonly send: (
+      phoneNumber: string,
+      purpose: PhoneOTPPurpose,
+    ) => Effect.Effect<
+      void,
+      PhoneOTPError | Errors.AuthError | Errors.ResendTooSoonError,
+      PhoneOTPStore | PhoneOTPUserStore
+    >;
 
-  /**
-   * Verify a `sign-in` OTP (single use) and sign the user in, creating a new
-   * `phoneNumberVerified: true` user when none exists (unless `disableSignUp`).
-   */
-  readonly signIn: (
-    phoneNumber: string,
-    otp: string,
-    options?: PhoneOTPSignInOptions,
-  ) => Effect.Effect<
-    PhoneOTPAuthResult,
-    PhoneOTPError | Errors.AuthError | HookError,
-    PhoneOTPStore | PhoneOTPUserStore | SessionService | Hooks
-  >;
+    /**
+     * Verify a `sign-in` OTP (single use) and sign the user in, creating a new
+     * `phoneNumberVerified: true` user when none exists (unless `disableSignUp`).
+     */
+    readonly signIn: (
+      phoneNumber: string,
+      otp: string,
+      options?: PhoneOTPSignInOptions,
+    ) => Effect.Effect<
+      PhoneOTPAuthResult,
+      PhoneOTPError | Errors.AuthError | HookError,
+      PhoneOTPStore | PhoneOTPUserStore | SessionService | Hooks
+    >;
 
-  /**
-   * Verify a `phone-verification` OTP (single use) for an existing user and
-   * mark their phone number verified.
-   */
-  readonly verifyPhoneNumber: (
-    userId: string,
-    phoneNumber: string,
-    otp: string,
-  ) => Effect.Effect<
-    Types.User,
-    PhoneOTPError | Errors.AuthError | Errors.UserNotFoundError,
-    PhoneOTPStore | PhoneOTPUserStore
-  >;
-}
-
-export class PhoneOTPService extends Context.Service<PhoneOTPService, PhoneOTPServiceShape>()(
-  "@effect-auth/PhoneOtpService",
-) {
+    /**
+     * Verify a `phone-verification` OTP (single use) for an existing user and
+     * mark their phone number verified.
+     */
+    readonly verifyPhoneNumber: (
+      userId: string,
+      phoneNumber: string,
+      otp: string,
+    ) => Effect.Effect<
+      Types.User,
+      PhoneOTPError | Errors.AuthError | Errors.UserNotFoundError,
+      PhoneOTPStore | PhoneOTPUserStore
+    >;
+  }
+>()("@effect-auth/PhoneOTPService") {
   /**
    * Construct a Layer providing this service.
    */
@@ -202,7 +199,7 @@ const generateOTP = (length: number): Effect.Effect<string, Errors.AuthError> =>
 
 export const makePhoneOTPService = (
   config: PhoneOTPConfig,
-): Effect.Effect<PhoneOTPServiceShape, never> => {
+): Effect.Effect<typeof PhoneOTPService.Service, never> => {
   const otpLength = config.otpLength ?? 6;
   const expiresIn = config.expiresIn ?? 5 * 60 * 1000;
   const maxAttempts = config.maxAttempts ?? 3;
@@ -255,96 +252,94 @@ export const makePhoneOTPService = (
       yield* store.delete(phoneNumber, purpose);
     });
 
-  return Effect.sync(
-    (): PhoneOTPServiceShape => ({
-      send: (rawPhoneNumber, purpose) =>
-        Effect.gen(function* () {
-          const store = yield* PhoneOTPStore;
-          const userStore = yield* PhoneOTPUserStore;
+  return Effect.sync((): typeof PhoneOTPService.Service => ({
+    send: (rawPhoneNumber, purpose) =>
+      Effect.gen(function* () {
+        const store = yield* PhoneOTPStore;
+        const userStore = yield* PhoneOTPUserStore;
 
-          const phoneNumber = yield* normalize(rawPhoneNumber);
-          if (!phoneNumber) {
+        const phoneNumber = yield* normalize(rawPhoneNumber);
+        if (!phoneNumber) {
+          return;
+        }
+
+        // Anti-enumeration: sign-in with sign-up disabled and no user, and
+        // phone-verification with no user, succeed silently without sending.
+        if (purpose === "sign-in" && disableSignUp) {
+          const user = yield* userStore.getUserByPhoneNumber(phoneNumber);
+          if (!user) {
             return;
           }
+        }
 
-          // Anti-enumeration: sign-in with sign-up disabled and no user, and
-          // phone-verification with no user, succeed silently without sending.
-          if (purpose === "sign-in" && disableSignUp) {
-            const user = yield* userStore.getUserByPhoneNumber(phoneNumber);
-            if (!user) {
-              return;
+        // Resend cooldown: reject if an outstanding OTP was created within
+        // the configured window. The identifier (phone number) is already
+        // known to the caller, so this is not an enumeration risk.
+        if (config.resendCooldown !== undefined) {
+          const existing = yield* store.get(phoneNumber, purpose);
+          if (existing !== null) {
+            const elapsed = Date.now() - existing.createdAt;
+            if (elapsed < config.resendCooldown) {
+              return yield* Effect.fail(
+                new Errors.ResendTooSoonError({
+                  message: "Please wait before requesting another OTP",
+                  retryAfter: config.resendCooldown - elapsed,
+                }),
+              );
             }
           }
+        }
 
-          // Resend cooldown: reject if an outstanding OTP was created within
-          // the configured window. The identifier (phone number) is already
-          // known to the caller, so this is not an enumeration risk.
-          if (config.resendCooldown !== undefined) {
-            const existing = yield* store.get(phoneNumber, purpose);
-            if (existing !== null) {
-              const elapsed = Date.now() - existing.createdAt;
-              if (elapsed < config.resendCooldown) {
-                return yield* Effect.fail(
-                  new Errors.ResendTooSoonError({
-                    message: "Please wait before requesting another OTP",
-                    retryAfter: config.resendCooldown - elapsed,
-                  }),
-                );
-              }
-            }
+        const otp = yield* generateOTP(otpLength);
+        const record: PhoneOTPRecord = {
+          phoneNumber,
+          otpHash: hashToken(otp),
+          purpose,
+          attempts: 0,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + expiresIn,
+        };
+
+        yield* store.upsert(record);
+
+        yield* Effect.catch(config.sendOTP(phoneNumber, otp, purpose), (error) =>
+          Effect.fail(
+            new PhoneOTPError({ message: `Failed to send OTP to ${phoneNumber}`, cause: error }),
+          ),
+        );
+      }),
+
+    signIn: (rawPhoneNumber, otp, options) =>
+      Effect.gen(function* () {
+        const userStore = yield* PhoneOTPUserStore;
+        const sessionManager = yield* SessionService;
+
+        const phoneNumber = yield* normalize(rawPhoneNumber);
+
+        yield* verifyOTP(phoneNumber, otp, "sign-in");
+
+        let user = yield* userStore.getUserByPhoneNumber(phoneNumber);
+        if (!user) {
+          if (disableSignUp) {
+            return yield* Effect.fail(new PhoneOTPError({ message: "Sign-up is disabled" }));
           }
+          // A verified OTP proves ownership of the phone number.
+          user = yield* userStore.createUser({ phoneNumber, phoneNumberVerified: true });
+        }
 
-          const otp = yield* generateOTP(otpLength);
-          const record: PhoneOTPRecord = {
-            phoneNumber,
-            otpHash: hashToken(otp),
-            purpose,
-            attempts: 0,
-            createdAt: Date.now(),
-            expiresAt: Date.now() + expiresIn,
-          };
+        const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);
 
-          yield* store.upsert(record);
+        return { user, session } satisfies PhoneOTPAuthResult;
+      }),
 
-          yield* Effect.catch(config.sendOTP(phoneNumber, otp, purpose), (error) =>
-            Effect.fail(
-              new PhoneOTPError({ message: `Failed to send OTP to ${phoneNumber}`, cause: error }),
-            ),
-          );
-        }),
+    verifyPhoneNumber: (userId, rawPhoneNumber, otp) =>
+      Effect.gen(function* () {
+        const userStore = yield* PhoneOTPUserStore;
+        const phoneNumber = yield* normalize(rawPhoneNumber);
 
-      signIn: (rawPhoneNumber, otp, options) =>
-        Effect.gen(function* () {
-          const userStore = yield* PhoneOTPUserStore;
-          const sessionManager = yield* SessionService;
+        yield* verifyOTP(phoneNumber, otp, "phone-verification");
 
-          const phoneNumber = yield* normalize(rawPhoneNumber);
-
-          yield* verifyOTP(phoneNumber, otp, "sign-in");
-
-          let user = yield* userStore.getUserByPhoneNumber(phoneNumber);
-          if (!user) {
-            if (disableSignUp) {
-              return yield* Effect.fail(new PhoneOTPError({ message: "Sign-up is disabled" }));
-            }
-            // A verified OTP proves ownership of the phone number.
-            user = yield* userStore.createUser({ phoneNumber, phoneNumberVerified: true });
-          }
-
-          const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);
-
-          return { user, session } satisfies PhoneOTPAuthResult;
-        }),
-
-      verifyPhoneNumber: (userId, rawPhoneNumber, otp) =>
-        Effect.gen(function* () {
-          const userStore = yield* PhoneOTPUserStore;
-          const phoneNumber = yield* normalize(rawPhoneNumber);
-
-          yield* verifyOTP(phoneNumber, otp, "phone-verification");
-
-          return yield* userStore.setPhoneNumberVerified(userId, phoneNumber);
-        }),
-    }),
-  );
+        return yield* userStore.setPhoneNumberVerified(userId, phoneNumber);
+      }),
+  }));
 };

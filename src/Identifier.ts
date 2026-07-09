@@ -57,53 +57,52 @@ export class IdentifierNotFoundError extends Data.TaggedError("IdentifierNotFoun
 // Store contract (D3 conventions: null on miss, AuthError for infra failures)
 // ---------------------------------------------------------------------------
 
-export interface IdentifierStoreShape {
-  /**
-   * Look up an identifier by its `(type, value)` pair (the natural unique key).
-   * Returns `null` when no matching record exists.
-   */
-  readonly getByValue: (
-    type: IdentifierType,
-    value: string,
-  ) => Effect.Effect<Identifier | null, Errors.AuthError>;
-
-  /**
-   * List all identifiers for a user, ordered by `createdAt` ascending.
-   * Returns an empty array when the user has no identifiers.
-   */
-  readonly listByUser: (
-    userId: string,
-  ) => Effect.Effect<ReadonlyArray<Identifier>, Errors.AuthError>;
-
-  /** Persist a new identifier record. */
-  readonly create: (identifier: Identifier) => Effect.Effect<Identifier, Errors.AuthError>;
-
-  /**
-   * Mark an identifier as verified, recording the timestamp.
-   * Returns `null` when no identifier with the given `id` exists.
-   */
-  readonly setVerified: (
-    id: string,
-    verifiedAt: Date,
-  ) => Effect.Effect<Identifier | null, Errors.AuthError>;
-
-  /**
-   * Delete a single identifier by `id`.
-   * No-ops silently when the identifier does not exist.
-   */
-  readonly delete: (id: string) => Effect.Effect<void, Errors.AuthError>;
-
-  /**
-   * Delete all identifiers for a user (e.g. on account deletion).
-   * No-ops silently when the user has no identifiers.
-   */
-  readonly deleteByUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
-}
-
 /** Tag for the `IdentifierStore` service. */
-export class IdentifierStore extends Context.Service<IdentifierStore, IdentifierStoreShape>()(
-  "@effect-auth/IdentifierStore",
-) {}
+export class IdentifierStore extends Context.Service<
+  IdentifierStore,
+  {
+    /**
+     * Look up an identifier by its `(type, value)` pair (the natural unique key).
+     * Returns `null` when no matching record exists.
+     */
+    readonly getByValue: (
+      type: IdentifierType,
+      value: string,
+    ) => Effect.Effect<Identifier | null, Errors.AuthError>;
+
+    /**
+     * List all identifiers for a user, ordered by `createdAt` ascending.
+     * Returns an empty array when the user has no identifiers.
+     */
+    readonly listByUser: (
+      userId: string,
+    ) => Effect.Effect<ReadonlyArray<Identifier>, Errors.AuthError>;
+
+    /** Persist a new identifier record. */
+    readonly create: (identifier: Identifier) => Effect.Effect<Identifier, Errors.AuthError>;
+
+    /**
+     * Mark an identifier as verified, recording the timestamp.
+     * Returns `null` when no identifier with the given `id` exists.
+     */
+    readonly setVerified: (
+      id: string,
+      verifiedAt: Date,
+    ) => Effect.Effect<Identifier | null, Errors.AuthError>;
+
+    /**
+     * Delete a single identifier by `id`.
+     * No-ops silently when the identifier does not exist.
+     */
+    readonly delete: (id: string) => Effect.Effect<void, Errors.AuthError>;
+
+    /**
+     * Delete all identifiers for a user (e.g. on account deletion).
+     * No-ops silently when the user has no identifiers.
+     */
+    readonly deleteByUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+  }
+>()("@effect-auth/IdentifierStore") {}
 
 // ---------------------------------------------------------------------------
 // Read views & helpers
