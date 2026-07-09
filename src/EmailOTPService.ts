@@ -10,7 +10,6 @@
  */
 import { randomInt } from "node:crypto";
 import { Context, Data, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { SessionManager } from "./Session.ts";
