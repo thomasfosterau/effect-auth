@@ -24,7 +24,7 @@
  * @module jwt
  */
 
-import { Context, Data, Deferred, Effect, Layer, Ref } from "effect";
+import { Context, Data, Deferred, Effect, Layer, Redacted, Ref } from "effect";
 import * as crypto from "node:crypto";
 import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
@@ -114,7 +114,9 @@ export interface JwtConfig {
    * Strongly recommended in production. When this option is set, encryption
    * is always applied — there is no opt-out per key.
    */
-  readonly encryptPrivateKey?: { readonly secret: string } | { readonly cipher: TokenCipher };
+  readonly encryptPrivateKey?:
+    | { readonly secret: Redacted.Redacted<string> }
+    | { readonly cipher: TokenCipher };
 }
 
 /**
@@ -291,7 +293,7 @@ export const makeJwtService = (config: JwtConfig): Effect.Effect<JwtServiceShape
     const cipher: TokenCipher | null = config.encryptPrivateKey
       ? "cipher" in config.encryptPrivateKey
         ? config.encryptPrivateKey.cipher
-        : makeAes256GcmCipher(config.encryptPrivateKey.secret)
+        : makeAes256GcmCipher(Redacted.value(config.encryptPrivateKey.secret))
       : null;
 
     // Ref holding an in-progress key-creation Deferred; null when idle.

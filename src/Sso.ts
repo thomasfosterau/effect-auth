@@ -13,7 +13,7 @@
  *
  * @module sso
  */
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer, Redacted } from "effect";
 import { AuthError } from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { SessionManager } from "./Session.ts";
@@ -183,7 +183,7 @@ const idFromStateProvider = (name: string): string | null =>
 /** Build the OAuth provider config for an SSO connection. */
 const toOAuthConfig = (provider: SsoProvider): OAuthProviderConfig => ({
   clientId: provider.clientId,
-  clientSecret: provider.clientSecret,
+  clientSecret: Redacted.make(provider.clientSecret),
   redirectUri: provider.redirectUri,
   authorizationEndpoint: provider.authorizationEndpoint,
   tokenEndpoint: provider.tokenEndpoint,

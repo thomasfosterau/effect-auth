@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Redacted } from "effect";
 import * as crypto from "node:crypto";
 import { AuthError } from "../Errors.js";
 import {
@@ -100,7 +100,7 @@ const json = (value: unknown): Response =>
 
 const CLIENT = {
   clientId: "client-123",
-  clientSecret: "secret-xyz",
+  clientSecret: Redacted.make("secret-xyz"),
   redirectUri: "https://app/cb",
 };
 
@@ -253,7 +253,7 @@ describe("OAuth token exchange", () => {
         const result = await Effect.runPromise(SpotifyProvider(CLIENT).exchangeCode("the-code"));
         expect(result.access_token).toBe("at");
         const call = calls[0]!;
-        const expected = `Basic ${Buffer.from(`${CLIENT.clientId}:${CLIENT.clientSecret}`).toString("base64")}`;
+        const expected = `Basic ${Buffer.from(`${CLIENT.clientId}:${Redacted.value(CLIENT.clientSecret)}`).toString("base64")}`;
         expect(call.headers.get("authorization")).toBe(expected);
         expect(call.body).not.toContain("client_secret");
         expect(call.body).toContain("client_id=client-123");
@@ -436,7 +436,7 @@ describe("profile-mapping helpers (str / nested / profile / ProfileMap)", () => 
         "custom",
         {
           clientId: "id",
-          clientSecret: "secret",
+          clientSecret: Redacted.make("secret"),
           redirectUri: "https://app/cb",
           authorizationEndpoint: "https://custom.example/oauth/authorize",
           tokenEndpoint: "https://custom.example/oauth/token",
@@ -648,7 +648,7 @@ describe("getProfile via id_token", () => {
     const token = signIdToken("ES256", key.privateKey, { ...baseClaims(now), exp: 4_102_444_800 });
     const provider = makeOAuthProvider("idp", {
       clientId: "client-123",
-      clientSecret: "s",
+      clientSecret: Redacted.make("s"),
       redirectUri: "https://app/cb",
       authorizationEndpoint: "https://idp/authorize",
       tokenEndpoint: "https://idp/token",
@@ -703,7 +703,7 @@ describe("discoverOAuthEndpoints", () => {
     const provider = makeOAuthProvider("generic", {
       ...endpoints,
       clientId: "c",
-      clientSecret: "s",
+      clientSecret: Redacted.make("s"),
       redirectUri: "https://app/cb",
       scopes: ["openid"],
     });
@@ -731,7 +731,7 @@ describe("makeAppleClientSecret", () => {
         teamId: "TEAM123",
         clientId: "com.example.app",
         keyId: "KEY123",
-        privateKey: pem,
+        privateKey: Redacted.make(pem),
         now,
       }),
     );
@@ -830,7 +830,7 @@ describe("OAuthService encryptTokens", () => {
     "github",
     {
       clientId: "c",
-      clientSecret: "s",
+      clientSecret: Redacted.make("s"),
       redirectUri: "https://app/cb",
       authorizationEndpoint: "https://github.com/login/oauth/authorize",
       tokenEndpoint: "https://github.com/login/oauth/access_token",
@@ -863,7 +863,10 @@ describe("OAuthService encryptTokens", () => {
     });
 
     const service = await Effect.runPromise(
-      makeOAuthService({ github: githubProvider }, { encryptTokens: { secret: TEST_SECRET } }),
+      makeOAuthService(
+        { github: githubProvider },
+        { encryptTokens: { secret: Redacted.make(TEST_SECRET) } },
+      ),
     );
 
     let capturedRefreshToken: string | null = null;

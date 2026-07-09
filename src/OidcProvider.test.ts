@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Redacted } from "effect";
 import * as crypto from "node:crypto";
 import { Hooks } from "./Hooks.js";
 import { SessionStore, UserStore, type UserStoreShape, SessionManager } from "./Session.js";
@@ -279,7 +279,7 @@ describe("OidcProviderService", () => {
         trustedClients: [
           {
             clientId: "first-party",
-            clientSecret: "shh",
+            clientSecret: Redacted.make("shh"),
             name: "First Party",
             redirectUris: ["https://fp.test/cb"],
           },
