@@ -149,7 +149,7 @@ export const sessionCookieSecurity: HttpApiSecurity.ApiKey = HttpApiSecurity.api
  * @since 1.0.0
  * @category security
  */
-export const bearerTokenSecurity: HttpApiSecurity.Bearer = HttpApiSecurity.bearer;
+export const bearerTokenSecurity: HttpApiSecurity.Http = HttpApiSecurity.bearer;
 
 // Security scheme record attached to AuthMiddleware (drives OpenAPI output).
 // Key names become OpenAPI securityScheme names.
