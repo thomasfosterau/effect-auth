@@ -2,17 +2,15 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect } from "effect";
 import {
   makePhoneOTPService,
-  type PhoneOTPStoreShape,
-  type PhoneOTPUserStoreShape,
   getPhoneNumber,
   type PhoneOTPRecord,
   type PhoneOTPPurpose,
   PhoneOTPStore,
   PhoneOTPUserStore,
 } from "./PhoneOTP.js";
-import { SessionStore, type SessionStore as SessionStoreShape } from "./session/SessionStore.js";
+import { SessionStore } from "./session/SessionStore.js";
 import { SessionService, make as makeSessionService } from "./session/SessionService.js";
-import { UserStore, type UserStore as UserStoreShape } from "./session/UserStore.js";
+import { UserStore } from "./session/UserStore.js";
 import { hashToken } from "./TokenHash.js";
 import { Hooks } from "./Hooks.js";
 import { UserNotFoundError } from "./Errors.js";
@@ -29,7 +27,7 @@ const sentOTPs: Array<{ phoneNumber: string; otp: string; purpose: PhoneOTPPurpo
 
 const key = (phone: string, purpose: PhoneOTPPurpose) => `${phone}:${purpose}`;
 
-const phoneOTPStore: PhoneOTPStoreShape = {
+const phoneOTPStore: typeof PhoneOTPStore.Service = {
   upsert: (record) =>
     Effect.sync(() => {
       records.set(key(record.phoneNumber, record.purpose), record);
@@ -47,7 +45,7 @@ const phoneOTPStore: PhoneOTPStoreShape = {
     }),
 };
 
-const phoneOTPUserStore: PhoneOTPUserStoreShape = {
+const phoneOTPUserStore: typeof PhoneOTPUserStore.Service = {
   getUserByPhoneNumber: (phone) =>
     Effect.sync(() => {
       const id = phoneToId.get(phone);
@@ -89,7 +87,7 @@ const phoneOTPUserStore: PhoneOTPUserStoreShape = {
     }),
 };
 
-const sessionStore: SessionStore = {
+const sessionStore: typeof SessionStore.Service = {
   create: (session) =>
     Effect.sync(() => {
       sessions.set(session.id, session);
@@ -110,7 +108,7 @@ const sessionStore: SessionStore = {
     Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
 };
 
-const userStore: UserStore = {
+const userStore: typeof UserStore.Service = {
   get: (userId) => Effect.sync(() => users.get(userId) ?? null),
   getCredentials: (_userId) => Effect.succeed(null),
 };
