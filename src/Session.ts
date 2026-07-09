@@ -1,13 +1,14 @@
 /**
- * Compatibility re-export.
+ * Re-export barrel for the session module.
  *
- * `Session.ts` was split into `SessionService.ts`, `SessionStore.ts`, and
- * `UserStore.ts`. This shim lets existing imports continue to resolve while
- * the codebase migrates to the new paths.
- *
- * @module session
+ * The session module was split into SessionService / SessionStore / UserStore.
+ * This file re-exports everything under the original names so that consumers
+ * can update their imports incrementally.
  */
-export { SessionService as SessionManager, make as makeSessionManager } from "./SessionService.ts";
-export type { SessionServiceShape as SessionManagerShape } from "./SessionService.ts";
-export { SessionStore } from "./SessionStore.ts";
-export { UserStore } from "./UserStore.ts";
+export {
+  SessionService as SessionManager,
+  make as makeSessionManager,
+  type SessionService as SessionManagerShape,
+} from "./SessionService.ts";
+export { SessionStore, type SessionStore as SessionStoreShape } from "./SessionStore.ts";
+export { UserStore, type UserStore as UserStoreShape } from "./UserStore.ts";

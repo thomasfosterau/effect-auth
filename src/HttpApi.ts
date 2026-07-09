@@ -211,12 +211,18 @@ export const authGroup = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("deviceApprove", "/device/approve", {
     payload: S.DeviceUserCodePayload,
     success: S.StatusResponse,
-    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.BadRequestError,
+      S.TooManyRequestsError,
+      S.InternalError,
+    ],
   }),
   HttpApiEndpoint.post("deviceDeny", "/device/deny", {
     payload: S.DeviceUserCodePayload,
     success: S.StatusResponse,
-    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+    error: [S.NotFoundError, S.BadRequestError, S.TooManyRequestsError, S.InternalError],
   }),
   // Phone (SMS) OTP. Anti-enumeration: send always answers `{ status: true }`.
   HttpApiEndpoint.post("phoneOtpSend", "/phone-otp/send", {

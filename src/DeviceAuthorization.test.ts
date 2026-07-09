@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Result } from "effect";
 import {
   DeviceAuthorizationService,
   DeviceAuthorizationStore,
@@ -41,6 +41,14 @@ const store: DeviceAuthorizationStoreShape = {
       return record;
     }),
   delete: (deviceCode) => Effect.sync(() => void records.delete(deviceCode)),
+  claimApproval: (deviceCode) =>
+    Effect.sync(() => {
+      const record = records.get(deviceCode);
+      if (record === undefined || record.status !== "approved") return null;
+      // Read and delete in one synchronous step — atomic on a single JS thread.
+      records.delete(deviceCode);
+      return record;
+    }),
 };
 
 const sessionStore: SessionStoreShape = {
@@ -186,5 +194,54 @@ describe("DeviceAuthorizationService", () => {
 
   it("normalizes user codes (case / separators)", () => {
     expect(normalizeUserCode("bdwm-hqpk")).toBe("BDWMHQPK");
+  });
+
+  it("concurrent polls only mint one session (atomic consumption)", async () => {
+    const begun = await run((svc) => svc.begin());
+    await run((svc) => svc.approve(begun.userCode, "user-1"));
+
+    // Run two polls "concurrently". With sync stores they serialise on the JS
+    // event loop, but claimApproval is a conditional-delete so exactly one wins.
+    const results = await Promise.all(
+      [0, 1].map(() =>
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const svc = yield* DeviceAuthorizationService;
+            return yield* Effect.result(svc.poll(begun.deviceCode));
+          }).pipe(Effect.provide(layer)),
+        ),
+      ),
+    );
+
+    const successes = results.filter(Result.isSuccess);
+    const expired = results.filter(
+      (r) =>
+        Result.isFailure(r) &&
+        r.failure instanceof DevicePollError &&
+        r.failure.error === "expired_token",
+    );
+    expect(successes).toHaveLength(1);
+    expect(expired).toHaveLength(1);
+    // Exactly one session was created — no duplicate mint.
+    expect(sessions.size).toBe(1);
+  });
+
+  it("slow_down does not reset the polling window and escalates the interval", async () => {
+    const begun = await run((svc) => svc.begin());
+    const hash = hashToken(begun.deviceCode);
+
+    // Seed lastPolledAt to 1 second ago — within the 5 s interval.
+    const record = records.get(hash)!;
+    const lastPolled = Date.now() - 1000;
+    records.set(hash, { ...record, lastPolledAt: lastPolled });
+
+    const err = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
+    expect((err as DevicePollError).error).toBe("slow_down");
+
+    const updated = records.get(hash)!;
+    // lastPolledAt must NOT advance — the rejected poll must not reset the window.
+    expect(updated.lastPolledAt).toBe(lastPolled);
+    // Interval escalates by 5 s per RFC 8628 §3.5.
+    expect(updated.interval).toBe(record.interval + 5);
   });
 });

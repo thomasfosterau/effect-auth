@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Effect, Redacted } from "effect";
 import { Hooks } from "./Hooks.js";
+import { SessionService, make as makeSessionService } from "./SessionService.js";
 import { SessionStore } from "./SessionStore.js";
 import { UserStore } from "./UserStore.js";
-import { SessionService } from "./SessionService.js";
 import {
   makeTwoFactorService,
   type PendingTwoFactor,
@@ -134,7 +134,7 @@ const sessionConfig: SessionConfig = {
 const makeTestContext = async () => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
-      SessionService.make(sessionConfig),
+      makeSessionService(sessionConfig),
       Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
     ),
   );

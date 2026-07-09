@@ -21,7 +21,11 @@ import { AccountManagementService, AccountManagementStore } from "./AccountManag
 import { AnonymousService, AnonymousUserStore } from "./Anonymous.ts";
 import { PhoneOtpService, PhoneOtpStore, PhoneOtpUserStore } from "./PhoneOtp.ts";
 import { UsernameService, UsernameStore } from "./Username.ts";
-import { DeviceAuthorizationService, DeviceAuthorizationStore } from "./DeviceAuthorization.ts";
+import {
+  DeviceAuthorizationService,
+  DeviceAuthorizationStore,
+  normalizeUserCode,
+} from "./DeviceAuthorization.ts";
 import { EmailOtpService, EmailOtpStore, EmailOtpUserStore } from "./EmailOtp.ts";
 import { PendingTwoFactorStore, TwoFactorService, TwoFactorStore } from "./TwoFactor.ts";
 import { PasswordHasher } from "./Password.ts";
@@ -666,6 +670,34 @@ const internalServerError = (e: unknown): Effect.Effect<never, S.InternalServerE
       Effect.fail(new S.InternalServerError({ message: "Internal server error" })),
     ),
   );
+
+/**
+ * Per-user-code rate limit for device-authorization approve/deny endpoints
+ * (RFC 8628 §5.2). Optionally applied when RateLimiter + RateLimitStore are
+ * in scope; silent no-op when neither service is present.
+ */
+const USER_CODE_RATE_LIMIT: RateLimitConfig = {
+  maxRequests: 5,
+  windowMs: 15 * 60 * 1000,
+  blockDurationMs: 30 * 60 * 1000,
+};
+
+const applyUserCodeRateLimit = (
+  userCode: string,
+): Effect.Effect<void, S.TooManyRequests | S.InternalServerError, never> =>
+  Effect.gen(function* () {
+    const rateLimiterOpt = yield* Effect.serviceOption(RateLimiter);
+    const storeOpt = yield* Effect.serviceOption(RateLimitStore);
+    if (Option.isNone(rateLimiterOpt) || Option.isNone(storeOpt)) return;
+    const key = `device-user-code:${normalizeUserCode(userCode)}`;
+    yield* rateLimiterOpt.value.consumeToken(key, USER_CODE_RATE_LIMIT).pipe(
+      Effect.provideService(RateLimitStore, storeOpt.value),
+      Effect.catchTag("RateLimitError", (e) =>
+        Effect.fail(new S.TooManyRequests({ message: e.message })),
+      ),
+      Effect.catchTag("AuthError", (e) => internalServerError(e)),
+    );
+  });
 
 /** Layer implementing the `auth` group handlers. */
 export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
@@ -1579,6 +1611,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
           const device = yield* resolveDevice;
+          // Rate-limit user_code attempts per RFC 8628 §5.2 to prevent
+          // enumeration of pending codes (approve is session-gated, but
+          // still benefits from per-code throttling).
+          yield* applyUserCodeRateLimit(payload.userCode);
           yield* device
             .provideStores(device.service.approve(payload.userCode, resolved.user.id))
             .pipe(
@@ -1593,6 +1629,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("deviceDeny", ({ payload }) =>
         Effect.gen(function* () {
           const device = yield* resolveDevice;
+          // Rate-limit unauthenticated deny attempts per RFC 8628 §5.2.
+          // User codes are ~39 bits; without throttling an attacker can grief
+          // pending codes at scale.
+          yield* applyUserCodeRateLimit(payload.userCode);
           yield* device.provideStores(device.service.deny(payload.userCode)).pipe(
             Effect.catchTags({
               DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
