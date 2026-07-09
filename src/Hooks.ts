@@ -21,7 +21,8 @@
  * @example
  * ```ts
  * import { Layer } from "effect"
- * import { AuditPlugin, composePlugins, Hooks, NormalizeEmailPlugin } from "effect-auth"
+ * import { Hooks, composePlugins } from "effect-auth"
+ * import { AuditPlugin, NormalizeEmailPlugin } from "effect-auth/plugins"
  *
  * const layer = composePlugins([
  *   NormalizeEmailPlugin, // beforeSignUp/beforeSignIn: lowercases email
@@ -179,7 +180,8 @@ export class Hooks extends Context.Service<Hooks, HookDefs>()("@effect-auth/Hook
    * @example
    * ```ts
    * import { Effect } from "effect"
-   * import { Hooks, type AuthResult } from "effect-auth"
+   * import { Hooks } from "effect-auth"
+   * import type { AuthResult } from "effect-auth/email"
    *
    * const afterSignIn = Hooks.tap((result: AuthResult) =>
    *   Effect.logInfo("signed in", { userId: result.user.id }),
@@ -304,7 +306,8 @@ const wrapHooks = (inner: HookDefs, impls: PluginImpls, options: MakePluginOptio
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { makePlugin, type PluginImpls, type SignInInput } from "effect-auth"
+ * import { makePlugin, type PluginImpls } from "effect-auth"
+ * import type { SignInInput } from "effect-auth/email"
  *
  * // Zero-dependency: pass the hook implementations directly.
  * const NormalizeEmail = makePlugin({
@@ -359,7 +362,8 @@ export function makePlugin(
  * @example
  * ```ts
  * import { Layer } from "effect"
- * import { AuditPlugin, composePlugins, Hooks, NormalizeEmailPlugin } from "effect-auth"
+ * import { Hooks, composePlugins } from "effect-auth"
+ * import { AuditPlugin, NormalizeEmailPlugin } from "effect-auth/plugins"
  *
  * const layer = composePlugins([NormalizeEmailPlugin, AuditPlugin]).pipe(
  *   Layer.provide(Hooks.Default),

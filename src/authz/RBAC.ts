@@ -46,7 +46,7 @@ const lookup = <V>(source: StringKeyed<V>, key: string): V | undefined =>
  *
  * @example
  * ```ts
- * import { makeInMemoryRoleStore } from "effect-auth"
+ * import { makeInMemoryRoleStore } from "effect-auth/authz"
  *
  * const store = makeInMemoryRoleStore({
  *   userRoles: { "user-1": ["editor"] },

@@ -30,7 +30,7 @@
  *   AuthMiddleware,
  *   CurrentUser,
  *   makeAuthMiddlewareLayer,
- * } from "effect-auth/Http"
+ * } from "effect-auth/http"
  *
  * // 1. Define API group – mark endpoints that need auth
  * const ProfileGroup = HttpApiGroup.make("profile").pipe(

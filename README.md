@@ -25,7 +25,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🏢 **Organizations & Admin**: Multi-tenant organizations (members, invitations, roles) and admin tooling (ban, impersonate)
 - 🗝️ **API Keys & JWT**: Hashed API keys with permissions/quotas; ES256/EdDSA JWTs with JWKS
 - 🌍 **HTTP Protocol**: A typed `effect/unstable/httpapi` contract serving the whole surface as a mountable Web handler with a derived typed client, session cookies, and trusted-origin CSRF protection
-- 📖 **OpenAPI Document + Reference UI**: Derive an OpenAPI 3.1 spec from the HTTP contract (`Http.getOpenApiSpec()`) and optionally serve it plus a Scalar reference page via `makeAuthWebHandler({ docs: true })`
+- 📖 **OpenAPI Document + Reference UI**: Derive an OpenAPI 3.1 spec from the HTTP contract (`HTTP.getOpenApiSpec()`) and optionally serve it plus a Scalar reference page via `makeAuthWebHandler({ docs: true })`
 - 🍪 **Session Cookie Cache**: Optional HMAC-signed session-data cookie (`cookie.cache`) that serves authenticated requests without a session-store read for a short window
 - 🏛️ **Enterprise SSO**: OIDC relying party with per-organization connections, email-domain routing, and first-login provisioning
 - 🪞 **OIDC Provider**: Act as an OpenID Connect identity provider — client registry, authorization-code flow with PKCE, consent, opaque access/refresh tokens, id_tokens on a shared JWKS, and discovery metadata
@@ -139,7 +139,7 @@ import { Effect } from "effect";
 import * as Auth from "effect-auth";
 
 const program = Effect.gen(function* () {
-  const hasher = yield* Auth.PasswordHasher;
+  const hasher = yield* Auth.Password.PasswordHasher;
 
   // Hash a password
   const hashed = yield* hasher.hash("mySecurePassword");
@@ -151,7 +151,9 @@ const program = Effect.gen(function* () {
 });
 
 // Run with the default hasher
-const isValid = await Effect.runPromise(Effect.provide(program, Auth.PasswordHasher.layer()));
+const isValid = await Effect.runPromise(
+  Effect.provide(program, Auth.Password.PasswordHasher.layer()),
+);
 ```
 
 ### 4. Compose custom layers with the low-level constructors
@@ -181,7 +183,7 @@ import { Effect, Context } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement your role store
-const roleStore: Auth.RoleStoreShape = {
+const roleStore: Auth.Authz.RoleStoreShape = {
   getUserRoles: (userId) => Effect.succeed(["admin", "user"]),
   getRolePermissions: (role) =>
     Effect.succeed([
@@ -191,17 +193,17 @@ const roleStore: Auth.RoleStoreShape = {
 };
 
 const program = Effect.gen(function* () {
-  const policy = yield* Auth.makeRoleBasedPolicy();
+  const policy = yield* Auth.Authz.makeRoleBasedPolicy();
 
   // Check permission
   const canCreate = yield* policy.checkPermission("user-123", "posts", "create");
 
   // Or require permission (throws if denied)
-  yield* Auth.requirePermission("user-123", "posts", "create");
+  yield* Auth.Authz.requirePermission("user-123", "posts", "create");
 });
 
 const result = await Effect.runPromise(
-  Effect.provide(program, Context.make(Auth.RoleStore, roleStore)),
+  Effect.provide(program, Context.make(Auth.Authz.RoleStore, roleStore)),
 );
 ```
 
@@ -430,7 +432,7 @@ import { Effect, Context } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement OAuth state store (temporary, Redis/memory recommended)
-const oauthStateStore: Auth.OAuthStateStoreShape = {
+const oauthStateStore: Auth.OAuth.OAuthStateStoreShape = {
   create: (state) => Effect.succeed(state), // Store in Redis with 10-minute TTL
   get: (stateStr) =>
     Effect.fail(
@@ -443,7 +445,7 @@ const oauthStateStore: Auth.OAuthStateStoreShape = {
 };
 
 // Implement OAuth account store (persistent, database)
-const oauthAccountStore: Auth.OAuthAccountStoreShape = {
+const oauthAccountStore: Auth.OAuth.OAuthAccountStoreShape = {
   create: (account) => Effect.succeed(account), // Store in database
   get: (provider, providerId) => Effect.succeed(null), // Return account or null
   getByUserId: (userId) => Effect.succeed([]), // Return all user's OAuth accounts
@@ -455,22 +457,22 @@ const oauthAccountStore: Auth.OAuthAccountStoreShape = {
 
 // Configure OAuth providers
 const providers = {
-  google: Auth.GoogleProvider({
+  google: Auth.OAuth.GoogleProvider({
     clientId: process.env.GOOGLE_CLIENT_ID!,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     redirectUri: "https://example.com/auth/google/callback",
   }),
-  github: Auth.GitHubProvider({
+  github: Auth.OAuth.GitHubProvider({
     clientId: process.env.GITHUB_CLIENT_ID!,
     clientSecret: process.env.GITHUB_CLIENT_SECRET!,
     redirectUri: "https://example.com/auth/github/callback",
   }),
-  discord: Auth.DiscordProvider({
+  discord: Auth.OAuth.DiscordProvider({
     clientId: process.env.DISCORD_CLIENT_ID!,
     clientSecret: process.env.DISCORD_CLIENT_SECRET!,
     redirectUri: "https://example.com/auth/discord/callback",
   }),
-  microsoft: Auth.MicrosoftProvider({
+  microsoft: Auth.OAuth.MicrosoftProvider({
     clientId: process.env.MICROSOFT_CLIENT_ID!,
     clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
     redirectUri: "https://example.com/auth/microsoft/callback",
@@ -479,7 +481,7 @@ const providers = {
 
 // Create OAuth service
 const oauthService = Effect.gen(function* () {
-  return yield* Auth.makeOAuthService(providers);
+  return yield* Auth.OAuth.makeOAuthService(providers);
 });
 
 // Step 1: Generate authorization URL (initiate OAuth flow)
@@ -544,8 +546,8 @@ const refreshToken = (userId: string, provider: string) =>
 
 // Provide dependencies and run
 const oauthDependencies = Context.merge(
-  Context.make(Auth.OAuthStateStore, oauthStateStore),
-  Context.make(Auth.OAuthAccountStore, oauthAccountStore),
+  Context.make(Auth.OAuth.OAuthStateStore, oauthStateStore),
+  Context.make(Auth.OAuth.OAuthAccountStore, oauthAccountStore),
 );
 
 await Effect.runPromise(Effect.provide(initiateOAuth, oauthDependencies));
@@ -560,7 +562,7 @@ import { Effect, Context } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement email verification store
-const emailVerificationStore: Auth.EmailVerificationStoreShape = {
+const emailVerificationStore: Auth.Email.EmailVerificationStoreShape = {
   create: (verification) => Effect.succeed(verification), // Store in database
   get: (token) => Effect.succeed(null), // Return verification or null
   delete: (token) => Effect.void,
@@ -569,7 +571,7 @@ const emailVerificationStore: Auth.EmailVerificationStoreShape = {
 
 // Configure email verification service
 const emailVerifier = Effect.gen(function* () {
-  return yield* Auth.makeEmailVerificationService({
+  return yield* Auth.Email.makeEmailVerificationService({
     expiresIn: 24 * 60 * 60 * 1000, // 24 hours
     sendEmail: (to, token) =>
       Effect.tryPromise({
@@ -615,7 +617,7 @@ const verifyEmail = (token: string) =>
   });
 
 // Provide dependencies
-const emailDependencies = Context.make(Auth.EmailVerificationStore, emailVerificationStore);
+const emailDependencies = Context.make(Auth.Email.EmailVerificationStore, emailVerificationStore);
 
 await Effect.runPromise(Effect.provide(verifyEmail("token123"), emailDependencies));
 ```
@@ -650,7 +652,7 @@ const login = (email: string, password: string, ip: string) =>
     yield* limiter.consumeToken(`login:${ip}`, Auth.RateLimitPresets.login);
 
     // Proceed with login...
-    const hasher = yield* Auth.PasswordHasher;
+    const hasher = yield* Auth.Password.PasswordHasher;
     const userStore = yield* Auth.UserStore;
 
     const user = yield* userStore.get(email);
@@ -709,8 +711,8 @@ import * as Auth from "effect-auth";
 // Reject compromised passwords (k-anonymity range query) and require a captcha
 // token on sign-up/sign-in. Array order is execution order.
 const plugins = Auth.composePlugins([
-  Auth.HaveIBeenPwnedPlugin({ threshold: 1 }),
-  Auth.CaptchaPlugin({
+  Auth.Password.HaveIBeenPwnedPlugin({ threshold: 1 }),
+  Auth.Plugins.CaptchaPlugin({
     provider: "cloudflare-turnstile",
     secretKey: Redacted.make(process.env.TURNSTILE_SECRET!),
     endpoints: ["signUp", "signIn"],

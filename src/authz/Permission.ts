@@ -38,7 +38,7 @@ export const makePermission = (resource: string, action: string): PermissionRef 
  *
  * @example
  * ```ts
- * import { parsePermission } from "effect-auth"
+ * import { parsePermission } from "effect-auth/authz"
  *
  * parsePermission("posts:read") // { resource: "posts", action: "read" }
  * parsePermission("posts:*") // { resource: "posts", action: "*" }
@@ -73,7 +73,7 @@ export const formatPermission = (permission: PermissionRef): string =>
  *
  * @example
  * ```ts
- * import { permissionMatches } from "effect-auth"
+ * import { permissionMatches } from "effect-auth/authz"
  *
  * permissionMatches({ resource: "posts", action: "*" }, { resource: "posts", action: "read" }) // true
  * permissionMatches({ resource: "*", action: "*" }, { resource: "users", action: "delete" }) // true

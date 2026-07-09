@@ -12,7 +12,7 @@ import { AuthApi } from "./HTTPApi.ts";
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { Http } from "effect-auth"
+ * import { HTTP } from "effect-auth"
  *
  * const program = Effect.gen(function* () {
  *   const client = yield* Http.makeAuthClient("http://localhost:5173")

@@ -99,7 +99,7 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { makeEmailPasswordAuth } from "effect-auth/EmailPassword";
+import { makeEmailPasswordAuth } from "effect-auth/email";
 
 const ObservabilityLayer = NodeSdk.layer(() => ({
   resource: { serviceName: "my-app" },
@@ -112,11 +112,11 @@ const runtime = ManagedRuntime.make(Layer.mergeAll(ObservabilityLayer /* auth la
 
 ### Reading metric counters in tests
 
-The raw `Metric.Counter` instances are exported from `effect-auth/Observability`
+The raw `Metric.Counter` instances are exported from the package root
 (e.g. `signInTotal`) so you can read their current state in unit tests:
 
 ```ts
-import { signInTotal } from "effect-auth/Observability";
+import { signInTotal } from "effect-auth";
 import { Effect, Metric } from "effect";
 
 const snapshot = await Effect.runPromise(Metric.value(signInTotal));

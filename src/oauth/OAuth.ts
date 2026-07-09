@@ -1449,7 +1449,7 @@ export const profile = (
  * can be just as terse.
  *
  * @example
- * import { makeOAuthProvider, ProfileMap } from "effect-auth";
+ * import { makeOAuthProvider, ProfileMap } from "effect-auth/oauth";
  *
  * const LinearProvider = (config: OAuthClientConfig): OAuthProvider =>
  *   makeOAuthProvider("linear", {
