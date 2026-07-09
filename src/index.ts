@@ -1,6 +1,16 @@
 /**
  * effect-auth — public API barrel.
  *
+ * No `Session` namespace: `Types.ts` already exports the flat `Session`
+ * record type/schema (`export * from "./Types.ts"` above), and a sibling
+ * `export * as Session from "./session/index.ts"` would silently win that
+ * name collision — an explicit `export * as X` always beats an ambiguous
+ * `export *`-derived binding of the same name — making `Types.Session`
+ * unreachable from the root for every consumer that types a session as
+ * `Auth.Session`. The session cluster (`SessionService`, `SessionStore`,
+ * `UserStore`, `TrustedDevice`) stays reachable via the flat spine below
+ * and the `effect-auth/session` subpath.
+ *
  * @module effect-auth
  */
 
@@ -71,7 +81,6 @@ export * from "./Observability.ts";
 export * as Email from "./email/index.ts";
 export * as HTTP from "./http/index.ts";
 export * as OAuth from "./oauth/index.ts";
-export * as Session from "./session/index.ts";
 export * as Password from "./password/index.ts";
 export * as Plugins from "./plugins/index.ts";
 export * as Authz from "./authz/index.ts";
