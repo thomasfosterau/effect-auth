@@ -24,7 +24,7 @@
  * @module jwt
  */
 
-import { Context, Data, Deferred, Effect, Layer, Redacted, Ref } from "effect";
+import { Config, Context, Data, Deferred, Effect, Layer, Redacted, Ref } from "effect";
 import * as crypto from "node:crypto";
 import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
@@ -175,7 +175,53 @@ export class JwtService extends Context.Service<JwtService, JwtServiceShape>()(
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: JwtConfig) => Layer.effect(JwtService, makeJwtService(config));
+
+  /**
+   * Construct a Layer from environment variables via {@link jwtServiceConfig}.
+   *
+   * Required env vars: `JWT_ISSUER`.
+   * Optional: `JWT_AUDIENCE`, `JWT_EXPIRES_IN_MS`, `JWT_ALGORITHM`,
+   * `JWT_CLOCK_SKEW_LEEWAY_MS`, `JWT_ENCRYPT_PRIVATE_KEY_SECRET`.
+   */
+  static readonly layerFromEnv = Layer.effect(
+    JwtService,
+    Effect.gen(function* () {
+      const cfg = yield* jwtServiceConfig;
+      return yield* makeJwtService({
+        issuer: cfg.issuer,
+        ...(cfg.audience !== undefined && { audience: cfg.audience }),
+        ...(cfg.expiresIn !== undefined && { expiresIn: cfg.expiresIn }),
+        ...(cfg.algorithm !== undefined && { algorithm: cfg.algorithm }),
+        ...(cfg.clockSkewLeeway !== undefined && { clockSkewLeeway: cfg.clockSkewLeeway }),
+        ...(cfg.encryptPrivateKey !== undefined && { encryptPrivateKey: cfg.encryptPrivateKey }),
+      });
+    }),
+  );
 }
+
+/**
+ * Effect `Config` for {@link JwtConfig}.
+ *
+ * Required env vars: `JWT_ISSUER`.
+ * Optional: `JWT_AUDIENCE`, `JWT_EXPIRES_IN_MS`, `JWT_ALGORITHM`,
+ * `JWT_CLOCK_SKEW_LEEWAY_MS`, `JWT_ENCRYPT_PRIVATE_KEY_SECRET`.
+ */
+export const jwtServiceConfig = Config.all({
+  issuer: Config.string("JWT_ISSUER"),
+  audience: Config.string("JWT_AUDIENCE").pipe(Config.orElse(() => Config.succeed(undefined))),
+  expiresIn: Config.int("JWT_EXPIRES_IN_MS").pipe(Config.orElse(() => Config.succeed(undefined))),
+  algorithm: Config.string("JWT_ALGORITHM").pipe(
+    Config.map((s) => s as JwtAlgorithm),
+    Config.orElse(() => Config.succeed(undefined)),
+  ),
+  clockSkewLeeway: Config.int("JWT_CLOCK_SKEW_LEEWAY_MS").pipe(
+    Config.orElse(() => Config.succeed(undefined)),
+  ),
+  encryptPrivateKey: Config.redacted("JWT_ENCRYPT_PRIVATE_KEY_SECRET").pipe(
+    Config.map((secret) => ({ secret }) as const),
+    Config.orElse(() => Config.succeed(undefined)),
+  ),
+});
 
 /**
  * Unpadded base64url of a UTF-8 string or byte buffer (Node's "base64url"
