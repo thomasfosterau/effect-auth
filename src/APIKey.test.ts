@@ -75,7 +75,9 @@ const rateLimitStore = {
 const storeContext = Context.make(APIKeyStore, apiKeyStore);
 
 const makeRateLimitContext = async () => {
-  const rateLimiter = await Effect.runPromise(makeRateLimiter());
+  const rateLimiter = await Effect.runPromise(
+    Effect.provide(makeRateLimiter(), Context.make(RateLimitStore, rateLimitStore)),
+  );
   return Context.merge(
     storeContext,
     Context.merge(
@@ -85,19 +87,26 @@ const makeRateLimitContext = async () => {
   );
 };
 
-const runService = <A, E>(
-  program: (service: typeof APIKeyService.Service) => Effect.Effect<A, E, APIKeyStore>,
+// APIKeyService now resolves RateLimiter at construction time (not just
+// per-call), so every test — even ones that don't exercise rate limiting —
+// needs a full context including RateLimiter | RateLimitStore.
+const runService = async <A, E>(
+  program: (
+    service: typeof APIKeyService.Service,
+  ) => Effect.Effect<A, E, APIKeyStore | RateLimiter>,
   config?: APIKeyConfig,
-) =>
-  Effect.runPromise(
+): Promise<A> => {
+  const testContext = await makeRateLimitContext();
+  return Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
         const service = yield* makeAPIKeyService(config);
         return yield* program(service);
       }),
-      storeContext,
+      testContext,
     ),
   );
+};
 
 describe("APIKeyService", () => {
   beforeEach(() => {
