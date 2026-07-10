@@ -28,8 +28,8 @@ OpenTelemetry-compatible backend (Jaeger, Honeycomb, Datadog, etc.) when a
 | `effect-auth.token.verify`          | JWT verification                     |
 | `effect-auth.password.hash`         | Password hashing (PBKDF2 / scrypt)   |
 | `effect-auth.password.verify`       | Password verification                |
-| `effect-auth.2fa.challenge`         | Two-factor challenge creation        |
-| `effect-auth.2fa.verify`            | Two-factor code verification         |
+| `effect-auth.2fa.challenge`         | Multi-factor challenge creation      |
+| `effect-auth.2fa.verify`            | Multi-factor code verification       |
 | `effect-auth.webauthn.register`     | WebAuthn registration verification   |
 | `effect-auth.webauthn.authenticate` | WebAuthn authentication verification |
 | `effect-auth.oidc.authorize`        | OIDC authorization endpoint          |

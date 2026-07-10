@@ -51,24 +51,24 @@ types (`User`, `Session`, `SessionWithUser`, `Credentials`) live in `Types.ts`.
 
 Relevant operations, where a hook could fire, and the services involved:
 
-| Module (`src/…`)            | Operation                                                   | Input                          | Output (success)                    | Deps in scope                                                               |
-| --------------------------- | ----------------------------------------------------------- | ------------------------------ | ----------------------------------- | --------------------------------------------------------------------------- |
-| `EmailPassword.ts`          | `signUp`                                                    | `SignUpInput`                  | `AuthResult` `{user, session?}`     | `EmailPasswordStore`, `PasswordHasher`, `SessionService`                    |
-| `EmailPassword.ts`          | `signIn`                                                    | `SignInInput`                  | `AuthResult`                        | same                                                                        |
-| `AuthLifecycle.ts`          | `signUp`                                                    | `SignUpInput`                  | `AuthLifecycleResult`               | + `EmailVerificationService/Store`                                          |
-| `AuthLifecycle.ts`          | `signIn`                                                    | `SignInInput`                  | `AuthLifecycleResult`               | same                                                                        |
-| `AuthLifecycle.ts`          | `verifyEmail`                                               | `VerifyEmailInput` `{token,…}` | `AuthLifecycleResult`               | `UserService(+Store)`, `SessionService`, `EmailVerificationService(+Store)` |
-| `session/SessionService.ts` | `createSession`                                             | `(userId, attributes?)`        | `Session`                           | `SessionStore`, `UserStore`                                                 |
-| `session/SessionService.ts` | `validateSession`                                           | `(sessionId)`                  | `SessionWithUser`                   | same                                                                        |
-| `session/SessionService.ts` | `invalidateSession`                                         | `(sessionId)`                  | `void`                              | `SessionStore`                                                              |
-| `session/SessionService.ts` | `invalidateUserSessions`                                    | `(userId)`                     | `void`                              | `SessionStore`                                                              |
-| `PasswordReset.ts`          | `requestPasswordReset`                                      | `(email)`                      | `void`                              | `PasswordResetStore`, `PasswordResetUserStore`                              |
-| `PasswordReset.ts`          | `resetPassword`                                             | `(token, newPassword)`         | `PasswordResetResult`               | + `PasswordHasher`, `SessionService`                                        |
-| `EmailVerification.ts`      | `createVerification`                                        | `(userId, email)`              | `{token, expiresAt}`                | `EmailVerificationStore`                                                    |
-| `EmailVerification.ts`      | `verifyToken`                                               | `(token)`                      | `EmailVerificationResult`           | same                                                                        |
-| `OAuth.ts`                  | `generateAuthorizationUrl` / `exchangeCode` / `getUserInfo` | various                        | `OAuthResult`/`OAuthAccount`        | `OAuthStateStore`, `OAuthAccountStore`                                      |
-| `WebAuthn.ts`               | `verifyRegistration` / `verifyAuthentication`               | challenge + response           | `Registration/AuthenticationResult` | `ChallengeStore`, `CredentialStore`                                         |
-| `Authorization.ts`          | `checkPermission`                                           | `(userId, resource, action)`   | `boolean`/`Permission`              | `RoleStore`                                                                 |
+| Module (`src/…`)             | Operation                                                   | Input                          | Output (success)                    | Deps in scope                                                               |
+| ---------------------------- | ----------------------------------------------------------- | ------------------------------ | ----------------------------------- | --------------------------------------------------------------------------- |
+| `email/EmailPassword.ts`     | `signUp`                                                    | `SignUpInput`                  | `AuthResult` `{user, session?}`     | `EmailPasswordStore`, `PasswordHasher`, `SessionService`                    |
+| `email/EmailPassword.ts`     | `signIn`                                                    | `SignInInput`                  | `AuthResult`                        | same                                                                        |
+| `AuthLifecycle.ts`           | `signUp`                                                    | `SignUpInput`                  | `AuthLifecycleResult`               | + `EmailVerificationService/Store`                                          |
+| `AuthLifecycle.ts`           | `signIn`                                                    | `SignInInput`                  | `AuthLifecycleResult`               | same                                                                        |
+| `AuthLifecycle.ts`           | `verifyEmail`                                               | `VerifyEmailInput` `{token,…}` | `AuthLifecycleResult`               | `UserService(+Store)`, `SessionService`, `EmailVerificationService(+Store)` |
+| `session/SessionService.ts`  | `createSession`                                             | `(userId, attributes?)`        | `Session`                           | `SessionStore`, `UserStore`                                                 |
+| `session/SessionService.ts`  | `validateSession`                                           | `(sessionId)`                  | `SessionWithUser`                   | same                                                                        |
+| `session/SessionService.ts`  | `invalidateSession`                                         | `(sessionId)`                  | `void`                              | `SessionStore`                                                              |
+| `session/SessionService.ts`  | `invalidateUserSessions`                                    | `(userId)`                     | `void`                              | `SessionStore`                                                              |
+| `password/PasswordReset.ts`  | `requestPasswordReset`                                      | `(email)`                      | `void`                              | `PasswordResetStore`, `PasswordResetUserStore`                              |
+| `password/PasswordReset.ts`  | `resetPassword`                                             | `(token, newPassword)`         | `PasswordResetResult`               | + `PasswordHasher`, `SessionService`                                        |
+| `email/EmailVerification.ts` | `createVerification`                                        | `(userId, email)`              | `{token, expiresAt}`                | `EmailVerificationStore`                                                    |
+| `email/EmailVerification.ts` | `verifyToken`                                               | `(token)`                      | `EmailVerificationResult`           | same                                                                        |
+| `oauth/OAuth.ts`             | `generateAuthorizationUrl` / `exchangeCode` / `getUserInfo` | various                        | `OAuthResult`/`OAuthAccount`        | `OAuthStateStore`, `OAuthAccountStore`                                      |
+| `secondfactor/WebAuthn.ts`   | `verifyRegistration` / `verifyAuthentication`               | challenge + response           | `Registration/AuthenticationResult` | `ChallengeStore`, `CredentialStore`                                         |
+| `authz/Authorization.ts`     | `checkPermission`                                           | `(userId, resource, action)`   | `boolean`/`Permission`              | `RoleStore`                                                                 |
 
 > **Note on "token refresh":** the library has **no separate refresh-token
 > endpoint**. `Session.validateSession` implements _sliding_ expiry (it extends
@@ -286,11 +286,11 @@ spec.
 
 ```ts
 import { Effect } from "effect";
-import type * as Types from "./Types.js";
-import type * as Errors from "./Errors.js";
-import type { SignUpInput, SignInInput, AuthResult } from "./EmailPassword.js";
-import type { EmailVerificationResult } from "./EmailVerification.js";
-import type { PasswordResetResult } from "./PasswordReset.js";
+import type * as Types from "./Types.ts";
+import type * as Errors from "./Errors.ts";
+import type { SignUpInput, SignInInput, AuthResult } from "./email/EmailPassword.ts";
+import type { EmailVerificationResult } from "./email/EmailVerification.ts";
+import type { PasswordResetResult } from "./password/PasswordReset.ts";
 
 /** A transform hook: maps a value to a new value of the same type. */
 export type Transform<V, E = never, R = never> = (value: V) => Effect.Effect<V, E, R>;
