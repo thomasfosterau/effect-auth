@@ -2,9 +2,10 @@
  * Email verification types for effect-auth
  */
 
-import { Context, Effect, Layer } from "effect";
+import { Context, Crypto, Effect, Layer } from "effect";
 import { AuthError, EmailVerificationError, type RateLimitError } from "../Errors.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 
 /**
  * Email verification token
@@ -42,7 +43,6 @@ export interface EmailVerificationConfig {
  *
  * @module email-verification
  */
-import * as crypto from "node:crypto";
 import { hashToken } from "../TokenHash.ts";
 
 /**
@@ -120,25 +120,39 @@ export class EmailVerificationService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: EmailVerificationConfig) =>
-    Layer.effect(EmailVerificationService, makeEmailVerificationService(config));
+    Layer.effect(EmailVerificationService, makeEmailVerificationService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
 
 /**
  * Generate a cryptographically secure verification token
  */
-export const generateVerificationToken = (): Effect.Effect<string, AuthError> =>
-  Effect.sync(() => crypto.randomBytes(32).toString("base64url"));
+export const generateVerificationToken = (
+  crypto: Crypto.Crypto,
+): Effect.Effect<string, AuthError> =>
+  crypto.randomBytes(32).pipe(
+    Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+    Effect.mapError(
+      (cause) => new AuthError({ message: "Failed to generate verification token", cause }),
+    ),
+  );
 
 /**
  * Create an email verification service
  */
 export const makeEmailVerificationService = (
   config: EmailVerificationConfig,
-): Effect.Effect<typeof EmailVerificationService.Service, never, EmailVerificationStore | Hooks> =>
+): Effect.Effect<
+  typeof EmailVerificationService.Service,
+  never,
+  EmailVerificationStore | Hooks | Crypto.Crypto
+> =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 24 * 60 * 60 * 1000; // 24 hours default
     const store = yield* EmailVerificationStore;
     const hooks = yield* Hooks;
+    const crypto = yield* Crypto.Crypto;
 
     const createVerification = Effect.fn("EmailVerificationService.createVerification")(function* (
       rawUserId: string,
@@ -149,7 +163,7 @@ export const makeEmailVerificationService = (
         email: rawEmail,
       });
 
-      const rawToken = yield* generateVerificationToken();
+      const rawToken = yield* generateVerificationToken(crypto);
 
       const verification: EmailVerification = {
         // Store the hash — the raw token is delivered to the user via sendEmail.

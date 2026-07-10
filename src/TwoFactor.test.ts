@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Effect, Redacted } from "effect";
+import { Context, Crypto, Effect, Redacted } from "effect";
 import { Hooks } from "./Hooks.js";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 import { SessionService, make as makeSessionService } from "./session/SessionService.js";
 import { SessionStore } from "./session/SessionStore.js";
 import { UserStore } from "./session/UserStore.js";
@@ -135,7 +136,10 @@ const makeTestContext = async () => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       makeSessionService(sessionConfig),
-      Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+      Context.merge(
+        Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+      ),
     ).pipe(Effect.provide(Hooks.Default)),
   );
 
@@ -150,8 +154,11 @@ const makeTestContext = async () => {
           Context.merge(
             Context.make(TwoFactorStore, twoFactorStore),
             Context.merge(
-              Context.make(PendingTwoFactorStore, pendingTwoFactorStore),
-              Context.make(PasswordHasher, makePBKDF2Hasher()),
+              Context.merge(
+                Context.make(PendingTwoFactorStore, pendingTwoFactorStore),
+                Context.make(PasswordHasher, makePBKDF2Hasher()),
+              ),
+              Context.make(Crypto.Crypto, PlatformCrypto.instance),
             ),
           ),
         ),

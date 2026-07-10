@@ -1,9 +1,9 @@
-import { Context, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
+import { Context, Crypto, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
 import { hashToken } from "../TokenHash.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import { PasswordHasher } from "./Password.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import type * as Types from "../Types.ts";
 import { SessionService } from "../session/SessionService.ts";
 import { normalizeEmail } from "../utils.ts";
@@ -76,11 +76,10 @@ export class PasswordResetService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: PasswordResetConfig) =>
-    Layer.effect(PasswordResetService, makePasswordResetService(config));
+    Layer.effect(PasswordResetService, makePasswordResetService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
-
-const generateResetToken = (): Effect.Effect<string, Errors.AuthError> =>
-  Effect.sync(() => crypto.randomBytes(32).toString("base64url"));
 
 const validatePasswordLength = (
   newPassword: string,
@@ -110,7 +109,12 @@ export const makePasswordResetService = (
 ): Effect.Effect<
   typeof PasswordResetService.Service,
   never,
-  PasswordResetStore | PasswordResetUserStore | PasswordHasher | SessionService | Hooks
+  | PasswordResetStore
+  | PasswordResetUserStore
+  | PasswordHasher
+  | SessionService
+  | Hooks
+  | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 60 * 60 * 1000;
@@ -123,6 +127,15 @@ export const makePasswordResetService = (
     const passwordHasher = yield* PasswordHasher;
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
+    const crypto = yield* Crypto.Crypto;
+
+    const generateResetToken = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomBytes(32).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate reset token", cause }),
+        ),
+      );
 
     return {
       requestPasswordReset: Effect.fn("PasswordResetService.requestPasswordReset")(function* (

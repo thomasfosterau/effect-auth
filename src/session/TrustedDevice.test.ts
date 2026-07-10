@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Effect, Redacted } from "effect";
+import { Context, Crypto, Effect, Redacted } from "effect";
 import { AuthError } from "../Errors.js";
 import { Hooks } from "../Hooks.js";
+import * as PlatformCrypto from "../PlatformCrypto.js";
 import {
   makeTrustedDeviceService,
   makeTrustedDeviceGateShape,
@@ -41,7 +42,10 @@ const deviceStore = {
     }),
 };
 
-const storeCtx = Context.make(TrustedDeviceStore, deviceStore);
+const storeCtx = Context.merge(
+  Context.make(TrustedDeviceStore, deviceStore),
+  Context.make(Crypto.Crypto, PlatformCrypto.instance),
+);
 
 const testConfig = { secret: Redacted.make("test-hmac-secret-32bytes-exactly!!") };
 

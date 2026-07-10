@@ -13,9 +13,9 @@
  * E.164 normalization is application policy: the default `normalizePhoneNumber`
  * only trims whitespace. Apps should plug a real E.164 normalizer via config.
  */
-import { Context, Data, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
+import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { type HookError } from "./Hooks.ts";
@@ -168,7 +168,9 @@ export class PhoneOTPService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: PhoneOTPConfig) =>
-    Layer.effect(PhoneOTPService, makePhoneOTPService(config));
+    Layer.effect(PhoneOTPService, makePhoneOTPService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
 
 /** Read the phone number from a user's attributes, or `null`. */
@@ -177,20 +179,12 @@ export const getPhoneNumber = (user: Types.User): string | null => {
   return typeof value === "string" ? value : null;
 };
 
-/** Generate a numeric OTP with crypto-secure randomness. */
-const generateOTP = (length: number): Effect.Effect<string, Errors.AuthError> =>
-  Effect.sync(() => {
-    let otp = "";
-    for (let i = 0; i < length; i++) otp += crypto.randomInt(0, 10).toString();
-    return otp;
-  });
-
 export const makePhoneOTPService = (
   config: PhoneOTPConfig,
 ): Effect.Effect<
   typeof PhoneOTPService.Service,
   never,
-  PhoneOTPStore | PhoneOTPUserStore | SessionService
+  PhoneOTPStore | PhoneOTPUserStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
@@ -201,6 +195,18 @@ export const makePhoneOTPService = (
     const store = yield* PhoneOTPStore;
     const userStore = yield* PhoneOTPUserStore;
     const sessionManager = yield* SessionService;
+    const crypto = yield* Crypto.Crypto;
+
+    /** Generate a numeric OTP with crypto-secure, unbiased randomness. */
+    const generateOTP = (length: number): Effect.Effect<string> =>
+      Effect.gen(function* () {
+        let otp = "";
+        for (let i = 0; i < length; i++) {
+          const digit = yield* crypto.randomIntBetween(0, 10, { halfOpen: true });
+          otp += digit.toString();
+        }
+        return otp;
+      });
 
     const normalize = (raw: string): Effect.Effect<string, Errors.AuthError> =>
       config.normalizePhoneNumber !== undefined

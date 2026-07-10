@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Effect } from "effect";
+import { Context, Crypto, Effect } from "effect";
 import { Hooks } from "../Hooks.js";
+import * as PlatformCrypto from "../PlatformCrypto.js";
 import {
   makePasswordResetService,
   type PasswordResetToken,
@@ -108,7 +109,10 @@ const makeTestContext = async () => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       make(sessionConfig),
-      Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+      Context.merge(
+        Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+      ),
     ).pipe(Effect.provide(Hooks.Default)),
   );
 
@@ -121,8 +125,11 @@ const makeTestContext = async () => {
         Context.merge(
           Context.make(PasswordResetStore, passwordResetStore),
           Context.merge(
-            Context.make(PasswordResetUserStore, passwordResetUserStore),
-            Context.make(PasswordHasher, makePBKDF2Hasher()),
+            Context.merge(
+              Context.make(PasswordResetUserStore, passwordResetUserStore),
+              Context.make(PasswordHasher, makePBKDF2Hasher()),
+            ),
+            Context.make(Crypto.Crypto, PlatformCrypto.instance),
           ),
         ),
       ),

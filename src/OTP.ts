@@ -1,6 +1,7 @@
-import { Effect } from "effect";
-import * as crypto from "node:crypto";
+import { Crypto, Effect } from "effect";
+import * as Cipher from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
+import { timingSafeEqualBytes } from "./TokenHash.ts";
 
 /**
  * OTP (One-Time Password) utilities for HOTP and TOTP
@@ -59,19 +60,27 @@ export interface OTPURIParams {
  * @param length - Number of bytes to generate (default: 20)
  * @returns Effect that produces random bytes
  */
-export const generateSecret = (length: number = 20): Effect.Effect<Buffer, Errors.HashingError> =>
-  Effect.try({
-    try: () => {
-      if (!Number.isInteger(length) || length < 16) {
-        throw new Error("Invalid secret length: must be a positive integer of at least 16 bytes");
-      }
-      return crypto.randomBytes(length);
-    },
-    catch: (error) =>
-      new Errors.HashingError({
-        message: error instanceof Error ? error.message : "Failed to generate random secret",
-        cause: error,
-      }),
+export const generateSecret = (
+  crypto: Crypto.Crypto,
+  length: number = 20,
+): Effect.Effect<Buffer, Errors.HashingError> =>
+  Effect.gen(function* () {
+    if (!Number.isInteger(length) || length < 16) {
+      return yield* Effect.fail(
+        new Errors.HashingError({
+          message: "Invalid secret length: must be a positive integer of at least 16 bytes",
+        }),
+      );
+    }
+    const bytes = yield* crypto
+      .randomBytes(length)
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new Errors.HashingError({ message: "Failed to generate random secret", cause }),
+        ),
+      );
+    return Buffer.from(bytes);
   });
 
 /**
@@ -203,9 +212,7 @@ export const generateHOTP = (
     counterBuffer.writeBigUInt64BE(BigInt(counter), 0);
 
     // Generate HMAC
-    const hmac = crypto.createHmac(algorithm, secretBuffer);
-    hmac.update(counterBuffer);
-    const hash = hmac.digest();
+    const hash = Cipher.hmac(algorithm, secretBuffer, counterBuffer);
 
     // Dynamic truncation (RFC 4226 Section 5.3)
     const offset = hash[hash.length - 1] & 0x0f;
@@ -248,7 +255,7 @@ export const verifyHOTP = (
       return false;
     }
 
-    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expectedToken));
+    return timingSafeEqualBytes(Buffer.from(token), Buffer.from(expectedToken));
   });
 
 /**
@@ -319,7 +326,7 @@ export const verifyTOTP = (
 
       // Timing-safe comparison
       if (token.length === expectedToken.length) {
-        const isValid = crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expectedToken));
+        const isValid = timingSafeEqualBytes(Buffer.from(token), Buffer.from(expectedToken));
         if (isValid) {
           return true;
         }
@@ -391,9 +398,10 @@ export const generateOTPURI = (params: OTPURIParams): string => {
  * @returns Effect that produces a base32-encoded secret
  */
 export const generateBase32Secret = (
+  crypto: Crypto.Crypto,
   length: number = 20,
 ): Effect.Effect<string, Errors.HashingError> =>
   Effect.gen(function* () {
-    const bytes = yield* generateSecret(length);
+    const bytes = yield* generateSecret(crypto, length);
     return encodeBase32(bytes);
   });

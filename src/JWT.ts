@@ -6,7 +6,9 @@
  * without a shared secret or a round-trip to the auth server, and publish
  * the matching public keys as a JWKS document.
  *
- * Implemented with `node:crypto` only (no dependencies):
+ * Key generation, signing, and verification delegate to the raw primitives
+ * in `Cipher.ts`; the key id's randomness comes from Effect's `Crypto`
+ * service:
  *
  * - `ES256` (ECDSA over P-256 with SHA-256) — the default. Node's ECDSA
  *   signatures are DER-encoded by default, but JOSE requires the raw
@@ -24,11 +26,12 @@
  * @module jwt
  */
 
-import { Config, Context, Data, Deferred, Effect, Layer, Redacted, Ref } from "effect";
-import * as crypto from "node:crypto";
+import { Config, Context, Crypto, Data, Deferred, Effect, Layer, Redacted, Ref } from "effect";
+import * as Cipher from "./Cipher.ts";
 import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import type * as Errors from "./Errors.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type * as Types from "./Types.ts";
 import * as Obs from "./Observability.ts";
 
@@ -172,7 +175,8 @@ export class JWTService extends Context.Service<
   /**
    * Construct a Layer providing this service.
    */
-  static readonly layer = (config: JWTConfig) => Layer.effect(JWTService, makeJWTService(config));
+  static readonly layer = (config: JWTConfig) =>
+    Layer.effect(JWTService, makeJWTService(config)).pipe(Layer.provide(PlatformCrypto.layer));
 
   /**
    * Construct a Layer from environment variables via {@link jwtServiceConfig}.
@@ -194,7 +198,7 @@ export class JWTService extends Context.Service<
         ...(cfg.encryptPrivateKey !== undefined && { encryptPrivateKey: cfg.encryptPrivateKey }),
       });
     }),
-  );
+  ).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /**
@@ -234,45 +238,45 @@ const base64UrlDecode = (segment: string): Buffer => Buffer.from(segment, "base6
  * Generate a fresh signing key pair for the given algorithm.
  *
  * ES256 uses ECDSA over the P-256 curve; EdDSA uses Ed25519. The public key
- * is exported as a JWK (via `crypto.KeyObject.export({ format: "jwk" })`),
- * the private key as PKCS#8 PEM.
+ * is exported as a JWK, the private key as PKCS#8 PEM.
  */
-export const generateKeyPair = (algorithm: JWTAlgorithm): Effect.Effect<JWTKeyPair, JWTError> =>
-  Effect.try({
-    try: (): JWTKeyPair => {
-      const { publicKey, privateKey } =
-        algorithm === "ES256"
-          ? crypto.generateKeyPairSync("ec", { namedCurve: "P-256" })
-          : crypto.generateKeyPairSync("ed25519");
-
-      return {
-        id: crypto.randomUUID(),
-        algorithm,
-        publicKeyJwk: publicKey.export({ format: "jwk" }) as Record<string, unknown>,
-        privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
-        createdAt: Date.now(),
-      };
-    },
-    catch: (error) =>
-      new JWTError({
-        message: `Failed to generate ${algorithm} key pair`,
-        cause: error,
-      }),
+export const generateKeyPair = (
+  algorithm: JWTAlgorithm,
+  crypto: Crypto.Crypto,
+): Effect.Effect<JWTKeyPair, JWTError> =>
+  Effect.gen(function* () {
+    const id = yield* crypto.randomUUIDv4.pipe(
+      Effect.mapError(
+        (cause) => new JWTError({ message: `Failed to generate ${algorithm} key id`, cause }),
+      ),
+    );
+    return yield* Effect.try({
+      try: (): JWTKeyPair => {
+        const { publicKeyJwk, privateKeyPem } = Cipher.generateJwsKeyPair(algorithm);
+        return {
+          id,
+          algorithm,
+          publicKeyJwk,
+          privateKeyPem,
+          createdAt: Date.now(),
+        };
+      },
+      catch: (error) =>
+        new JWTError({
+          message: `Failed to generate ${algorithm} key pair`,
+          cause: error,
+        }),
+    });
   });
 
 /**
  * Sign `data` with the pair's private key. ES256 signatures are emitted in
- * raw JOSE `r || s` form via `dsaEncoding: "ieee-p1363"` (Node defaults to
- * DER, which JWS does not accept); Ed25519 signs with a null digest.
+ * raw JOSE `r || s` form (Node defaults to DER, which JWS does not accept);
+ * Ed25519 signs with a null digest.
  */
 const signBytes = (pair: JWTKeyPair, data: Buffer): Effect.Effect<Buffer, JWTError> =>
   Effect.try({
-    try: () => {
-      const key = crypto.createPrivateKey(pair.privateKeyPem);
-      return pair.algorithm === "ES256"
-        ? crypto.sign("sha256", data, { key, dsaEncoding: "ieee-p1363" })
-        : crypto.sign(null, data, key);
-    },
+    try: () => Buffer.from(Cipher.signJws(pair.algorithm, data, pair.privateKeyPem)),
     catch: (error) =>
       new JWTError({
         message: "Failed to sign token",
@@ -290,15 +294,7 @@ const verifyBytesFromJwk = (
   signature: Buffer,
 ): Effect.Effect<boolean, JWTError> =>
   Effect.try({
-    try: () => {
-      const key = crypto.createPublicKey({
-        key: jwk as crypto.webcrypto.JsonWebKey,
-        format: "jwk",
-      });
-      return algorithm === "ES256"
-        ? crypto.verify("sha256", data, { key, dsaEncoding: "ieee-p1363" }, signature)
-        : crypto.verify(null, data, key, signature);
-    },
+    try: () => Cipher.verifyJws(algorithm, data, signature, jwk),
     catch: (error) =>
       new JWTError({
         message: "Failed to verify token signature",
@@ -330,7 +326,7 @@ const decodeJsonSegment = (
  */
 export const makeJWTService = (
   config: JWTConfig,
-): Effect.Effect<typeof JWTService.Service, never, JWTKeyStore> =>
+): Effect.Effect<typeof JWTService.Service, never, JWTKeyStore | Crypto.Crypto> =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 15 * 60 * 1000; // 15 minutes default
     const algorithm = config.algorithm ?? "ES256";
@@ -344,6 +340,7 @@ export const makeJWTService = (
       : null;
 
     const store = yield* JWTKeyStore;
+    const crypto = yield* Crypto.Crypto;
 
     // Ref holding an in-progress key-creation Deferred; null when idle.
     // Prevents duplicate active keys when concurrent fibers both call sign()
@@ -381,7 +378,7 @@ export const makeJWTService = (
 
         // Leader: generate and persist the key
         const pair = yield* Effect.gen(function* () {
-          const kp = yield* generateKeyPair(algorithm);
+          const kp = yield* generateKeyPair(algorithm, crypto);
           const toStore =
             cipher !== null
               ? { ...kp, privateKeyPem: yield* cipher.encrypt(kp.privateKeyPem) }

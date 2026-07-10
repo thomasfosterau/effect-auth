@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
+import * as Cipher from "./Cipher.js";
 import { UserNotFoundError } from "./Errors.js";
 import { Hooks } from "./Hooks.js";
+import * as PlatformCrypto from "./PlatformCrypto.js";
+import { hashToken } from "./TokenHash.js";
 import { SessionService } from "./session/SessionService.js";
 import { SessionStore } from "./session/SessionStore.js";
 import { UserStore } from "./session/UserStore.js";
@@ -31,10 +33,10 @@ const JWKS_ENDPOINT = "https://fake-google.test/certs";
 
 // --- A fake Google: an ES256 key + JWT signer + JWKS document -----------------
 
-const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+const { publicKeyJwk, privateKeyPem } = Cipher.generateJwsKeyPair("ES256");
 const KID = "test-key-1";
 const JWKS = {
-  keys: [{ ...(publicKey.export({ format: "jwk" }) as object), kid: KID, alg: "ES256" }],
+  keys: [{ ...publicKeyJwk, kid: KID, alg: "ES256" }],
 };
 
 const b64 = (value: unknown): string =>
@@ -43,16 +45,12 @@ const b64 = (value: unknown): string =>
 const signCredential = (claims: Record<string, unknown>): string => {
   const header = { alg: "ES256", kid: KID, typ: "JWT" };
   const signingInput = `${b64(header)}.${b64(claims)}`;
-  const signature = crypto.sign("sha256", Buffer.from(signingInput, "utf8"), {
-    key: privateKey,
-    dsaEncoding: "ieee-p1363",
-  });
-  return `${signingInput}.${signature.toString("base64url")}`;
+  const signature = Cipher.signJws("ES256", Buffer.from(signingInput, "utf8"), privateKeyPem);
+  return `${signingInput}.${Buffer.from(signature).toString("base64url")}`;
 };
 
 /** Hash a nonce the same way GoogleOneTap.ts does (SHA-256 hex). */
-const hashNonce = (nonce: string): string =>
-  crypto.createHash("sha256").update(nonce, "utf8").digest("hex");
+const hashNonce = hashToken;
 
 const validClaims = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   iss: "https://accounts.google.com",
@@ -156,6 +154,7 @@ const makeStores = () => {
     Layer.succeed(SessionService)(sessionManager),
     Layer.succeed(GoogleOneTapNonceStore)(nonceStore),
     Hooks.Default,
+    PlatformCrypto.layer,
   );
   return { layer, users, nonceStore };
 };

@@ -13,9 +13,10 @@
  *
  * @module sso
  */
-import { Context, Data, Effect, Layer, Redacted } from "effect";
+import { Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
 import { AuthError } from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { OrganizationStore, type Member } from "./Organization.ts";
 import {
@@ -25,7 +26,6 @@ import {
   OAuthUserStore,
   type OAuthProviderConfig,
 } from "./oauth/OAuth.ts";
-import * as crypto from "node:crypto";
 import type * as Types from "./Types.ts";
 
 /** Failure to register, resolve, or complete an SSO sign-in. */
@@ -137,7 +137,7 @@ export class SSOService extends Context.Service<
     ) => Effect.Effect<
       { readonly url: string; readonly state: string },
       SSOError | AuthError,
-      OAuthStateStore
+      OAuthStateStore | Crypto.Crypto
     >;
 
     /**
@@ -159,7 +159,7 @@ export class SSOService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: SSOConfig = {}) =>
-    Layer.effect(SSOService, makeSSOService(config));
+    Layer.effect(SSOService, makeSSOService(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /** Configuration for {@link makeSSOService}. */
@@ -198,12 +198,18 @@ const toOAuthConfig = (provider: SSOProvider): OAuthProviderConfig => ({
 
 export const makeSSOService = (
   config: SSOConfig = {},
-): Effect.Effect<typeof SSOService.Service, never, SSOProviderStore> =>
+): Effect.Effect<typeof SSOService.Service, never, SSOProviderStore | Crypto.Crypto> =>
   Effect.gen(function* () {
     const defaultScopes = config.defaultScopes ?? ["openid", "email", "profile"];
     const defaultRole = config.defaultRole ?? "member";
 
     const store = yield* SSOProviderStore;
+    const crypto = yield* Crypto.Crypto;
+
+    const randomId = (): Effect.Effect<string, AuthError> =>
+      crypto.randomUUIDv4.pipe(
+        Effect.mapError((cause) => new AuthError({ message: "Failed to generate id", cause })),
+      );
 
     const resolveProvider = (selector: SSOSignInSelector) =>
       Effect.gen(function* () {
@@ -254,7 +260,7 @@ export const makeSSOService = (
         const jwksEndpoint = input.jwksEndpoint ?? discovered?.jwksEndpoint;
 
         const provider: SSOProvider = {
-          id: crypto.randomUUID(),
+          id: yield* randomId(),
           issuer: input.issuer,
           domain: normalizeDomain(input.domain),
           protocol: "oidc",
@@ -362,7 +368,7 @@ export const makeSSOService = (
             const existing = yield* orgStore.value.getMember(provider.organizationId, user.id);
             if (existing === null) {
               const member: Member = {
-                id: crypto.randomUUID(),
+                id: yield* randomId(),
                 organizationId: provider.organizationId,
                 userId: user.id,
                 role: defaultRole,

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Effect, Layer } from "effect";
+import { Context, Crypto, Effect, Layer } from "effect";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 import {
   AdminUserStore,
   BannedUserPlugin,
@@ -186,8 +187,11 @@ const makeTestContext = async (hooksLayer: Layer.Layer<Hooks> = Hooks.Default) =
     Effect.provide(
       make(sessionConfig),
       Context.merge(
-        Context.make(SessionStore, sessionStore),
-        Context.make(UserStore, sessionUserStore),
+        Context.merge(
+          Context.make(SessionStore, sessionStore),
+          Context.make(UserStore, sessionUserStore),
+        ),
+        Context.make(Crypto.Crypto, PlatformCrypto.instance),
       ),
     ).pipe(Effect.provide(hooksLayer)),
   );
@@ -199,6 +203,7 @@ const makeTestContext = async (hooksLayer: Layer.Layer<Hooks> = Hooks.Default) =
     Context.add(AdminUserStore, adminUserStore),
     Context.add(IdentifierStore, identifierStore),
     Context.add(PasswordHasher, testHasher),
+    Context.add(Crypto.Crypto, PlatformCrypto.instance),
   );
 };
 

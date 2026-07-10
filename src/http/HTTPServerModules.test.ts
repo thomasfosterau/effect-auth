@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
+import * as Cipher from "../Cipher.js";
 import { makeAuthWebHandler, type AuthServices } from "./HTTPServer.js";
 import { SessionStore } from "../session/SessionStore.js";
 import { UserStore } from "../session/UserStore.js";
@@ -60,7 +60,9 @@ const makeFixture = () => {
   };
 
   const makeSession = (userId: string): string => {
-    const rawToken = crypto.randomBytes(16).toString("hex");
+    const rawToken = Buffer.from(globalThis.crypto.getRandomValues(new Uint8Array(16))).toString(
+      "hex",
+    );
     const tokenHash = hashToken(rawToken);
     const now = new Date();
     sessions.set(tokenHash, {
@@ -484,15 +486,11 @@ describe("HTTP JWT endpoints", () => {
     expect(header.alg).toBe("ES256");
     const jwk = keys.find((k) => k["kid"] === header.kid);
     expect(jwk).toBeDefined();
-    const key = crypto.createPublicKey({
-      key: jwk as crypto.JsonWebKeyInput["key"],
-      format: "jwk",
-    });
-    const valid = crypto.verify(
-      "sha256",
+    const valid = Cipher.verifyJws(
+      "ES256",
       Buffer.from(`${headerSeg}.${payloadSeg}`),
-      { key, dsaEncoding: "ieee-p1363" },
       Buffer.from(sigSeg, "base64url"),
+      jwk!,
     );
     expect(valid).toBe(true);
 

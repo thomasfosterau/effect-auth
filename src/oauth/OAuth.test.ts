@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer, Redacted } from "effect";
-import * as crypto from "node:crypto";
+import { Crypto, Effect, Layer, Redacted } from "effect";
 import { AuthError } from "../Errors.js";
+import * as Cipher from "../Cipher.js";
+import * as PlatformCrypto from "../PlatformCrypto.js";
 import { SessionService } from "../session/SessionService.js";
 import {
   makeOAuthProvider,
@@ -59,8 +60,12 @@ const StateStoreLive = () => {
   });
 };
 
-const runWithState = <A, E>(eff: Effect.Effect<A, E, OAuthStateStore>): Promise<A> =>
-  Effect.runPromise(eff.pipe(Effect.provide(StateStoreLive())));
+const runWithState = <A, E>(
+  eff: Effect.Effect<A, E, OAuthStateStore | Crypto.Crypto>,
+): Promise<A> =>
+  Effect.runPromise(
+    eff.pipe(Effect.provide(Layer.mergeAll(StateStoreLive(), PlatformCrypto.layer))),
+  );
 
 /** A single captured fetch call. */
 interface Captured {
@@ -489,39 +494,55 @@ describe("profile-mapping helpers (str / nested / profile / ProfileMap)", () => 
 // --- OIDC id_token verification ---------------------------------------------
 
 interface SigningKey {
-  privateKey: crypto.KeyObject;
+  privateKey: CryptoKey;
   jwks: { keys: unknown[] };
 }
 
-const makeSigningKey = (alg: "RS256" | "ES256" | "EdDSA", kid = "test-kid"): SigningKey => {
-  const { publicKey, privateKey } =
-    alg === "RS256"
-      ? crypto.generateKeyPairSync("rsa", { modulusLength: 2048 })
-      : alg === "ES256"
-        ? crypto.generateKeyPairSync("ec", { namedCurve: "P-256" })
-        : crypto.generateKeyPairSync("ed25519");
-  const jwk = publicKey.export({ format: "jwk" }) as Record<string, unknown>;
-  return { privateKey, jwks: { keys: [{ ...jwk, kid, alg, use: "sig" }] } };
+/** Web Crypto keygen params per JWS alg (keeps test fixtures off the Node crypto module). */
+const keyGenParams = (alg: "RS256" | "ES256" | "EdDSA") =>
+  alg === "RS256"
+    ? {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      }
+    : alg === "ES256"
+      ? { name: "ECDSA", namedCurve: "P-256" }
+      : { name: "Ed25519" };
+
+const signParams = (alg: "RS256" | "ES256" | "EdDSA") =>
+  alg === "RS256"
+    ? "RSASSA-PKCS1-v1_5"
+    : alg === "ES256"
+      ? { name: "ECDSA", hash: "SHA-256" }
+      : "Ed25519";
+
+const makeSigningKey = async (
+  alg: "RS256" | "ES256" | "EdDSA",
+  kid = "test-kid",
+): Promise<SigningKey> => {
+  const keyPair = (await globalThis.crypto.subtle.generateKey(keyGenParams(alg), true, [
+    "sign",
+    "verify",
+  ])) as { publicKey: CryptoKey; privateKey: CryptoKey };
+  const jwk = await globalThis.crypto.subtle.exportKey("jwk", keyPair.publicKey);
+  return { privateKey: keyPair.privateKey, jwks: { keys: [{ ...jwk, kid, alg, use: "sig" }] } };
 };
 
 const b64u = (obj: unknown): string =>
   Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
 
-const signIdToken = (
+const signIdToken = async (
   alg: "RS256" | "ES256" | "EdDSA",
-  key: crypto.KeyObject,
+  key: CryptoKey,
   claims: Record<string, unknown>,
   kid = "test-kid",
-): string => {
+): Promise<string> => {
   const signingInput = `${b64u({ alg, kid, typ: "JWT" })}.${b64u(claims)}`;
-  const data = Buffer.from(signingInput);
-  const signature =
-    alg === "RS256"
-      ? crypto.sign("sha256", data, key)
-      : alg === "ES256"
-        ? crypto.sign("sha256", data, { key, dsaEncoding: "ieee-p1363" })
-        : crypto.sign(null, data, key);
-  return `${signingInput}.${signature.toString("base64url")}`;
+  const data = new TextEncoder().encode(signingInput);
+  const signature = await globalThis.crypto.subtle.sign(signParams(alg), key, data);
+  return `${signingInput}.${Buffer.from(signature).toString("base64url")}`;
 };
 
 const JWKS_URL = "https://idp/jwks";
@@ -541,8 +562,8 @@ describe("verifyIdToken", () => {
 
   for (const alg of ["RS256", "ES256", "EdDSA"] as const) {
     it(`verifies a valid ${alg} id_token`, async () => {
-      const key = makeSigningKey(alg);
-      const token = signIdToken(alg, key.privateKey, baseClaims(now));
+      const key = await makeSigningKey(alg);
+      const token = await signIdToken(alg, key.privateKey, baseClaims(now));
       const claims = await withFetch(
         () => json(key.jwks),
         () =>
@@ -572,8 +593,8 @@ describe("verifyIdToken", () => {
     );
 
   it("rejects a tampered signature", async () => {
-    const key = makeSigningKey("ES256");
-    const token = signIdToken("ES256", key.privateKey, baseClaims(now));
+    const key = await makeSigningKey("ES256");
+    const token = await signIdToken("ES256", key.privateKey, baseClaims(now));
     const tampered = `${token.slice(0, -4)}AAAA`;
     const err = await expectFailure(tampered, key.jwks, {
       provider: "idp",
@@ -586,8 +607,8 @@ describe("verifyIdToken", () => {
   });
 
   it("rejects an issuer mismatch", async () => {
-    const key = makeSigningKey("ES256");
-    const token = signIdToken("ES256", key.privateKey, baseClaims(now));
+    const key = await makeSigningKey("ES256");
+    const token = await signIdToken("ES256", key.privateKey, baseClaims(now));
     const err = await expectFailure(token, key.jwks, {
       provider: "idp",
       jwksEndpoint: JWKS_URL,
@@ -599,8 +620,8 @@ describe("verifyIdToken", () => {
   });
 
   it("rejects an audience mismatch", async () => {
-    const key = makeSigningKey("ES256");
-    const token = signIdToken("ES256", key.privateKey, baseClaims(now));
+    const key = await makeSigningKey("ES256");
+    const token = await signIdToken("ES256", key.privateKey, baseClaims(now));
     const err = await expectFailure(token, key.jwks, {
       provider: "idp",
       jwksEndpoint: JWKS_URL,
@@ -612,8 +633,8 @@ describe("verifyIdToken", () => {
   });
 
   it("rejects an expired token", async () => {
-    const key = makeSigningKey("ES256");
-    const token = signIdToken("ES256", key.privateKey, {
+    const key = await makeSigningKey("ES256");
+    const token = await signIdToken("ES256", key.privateKey, {
       ...baseClaims(now),
       exp: Math.floor(now / 1000) - 10,
     });
@@ -628,8 +649,8 @@ describe("verifyIdToken", () => {
   });
 
   it("rejects a nonce mismatch", async () => {
-    const key = makeSigningKey("ES256");
-    const token = signIdToken("ES256", key.privateKey, { ...baseClaims(now), nonce: "real" });
+    const key = await makeSigningKey("ES256");
+    const token = await signIdToken("ES256", key.privateKey, { ...baseClaims(now), nonce: "real" });
     const err = await expectFailure(token, key.jwks, {
       provider: "idp",
       jwksEndpoint: JWKS_URL,
@@ -645,9 +666,12 @@ describe("verifyIdToken", () => {
 describe("getProfile via id_token", () => {
   it("resolves the profile from a verified id_token instead of userinfo", async () => {
     const now = 1_700_000_000_000;
-    const key = makeSigningKey("ES256");
+    const key = await makeSigningKey("ES256");
     // getProfile validates against the real clock, so use a far-future exp.
-    const token = signIdToken("ES256", key.privateKey, { ...baseClaims(now), exp: 4_102_444_800 });
+    const token = await signIdToken("ES256", key.privateKey, {
+      ...baseClaims(now),
+      exp: 4_102_444_800,
+    });
     const provider = makeOAuthProvider("idp", {
       clientId: "client-123",
       clientSecret: Redacted.make("s"),
@@ -725,15 +749,14 @@ describe("discoverOAuthEndpoints", () => {
 
 describe("makeAppleClientSecret", () => {
   it("produces a verifiable ES256 JWT with Apple's claims", async () => {
-    const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
-    const pem = privateKey.export({ format: "pem", type: "pkcs8" }) as string;
+    const { publicKeyJwk, privateKeyPem } = Cipher.generateJwsKeyPair("ES256");
     const now = 1_700_000_000_000;
     const secret = await Effect.runPromise(
       makeAppleClientSecret({
         teamId: "TEAM123",
         clientId: "com.example.app",
         keyId: "KEY123",
-        privateKey: Redacted.make(pem),
+        privateKey: Redacted.make(privateKeyPem),
         now,
       }),
     );
@@ -749,11 +772,11 @@ describe("makeAppleClientSecret", () => {
     });
     expect(payload.exp).toBeGreaterThan(payload.iat);
 
-    const valid = crypto.verify(
-      "sha256",
+    const valid = Cipher.verifyJws(
+      "ES256",
       Buffer.from(`${headerSeg}.${payloadSeg}`),
-      { key: publicKey, dsaEncoding: "ieee-p1363" },
       Buffer.from(signatureSeg, "base64url"),
+      publicKeyJwk,
     );
     expect(valid).toBe(true);
   });
@@ -805,6 +828,7 @@ describe("OAuthService encryptTokens", () => {
     Layer.succeed(OAuthStateStore)(undefined as never),
     Layer.succeed(OAuthUserStore)(undefined as never),
     Layer.succeed(SessionService)(undefined as never),
+    PlatformCrypto.layer,
   );
 
   const makeAccountStore = () => {

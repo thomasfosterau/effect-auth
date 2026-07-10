@@ -16,12 +16,12 @@
  *
  * @module otp-second-factor
  */
-import { Context, Data, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
+import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { generateOTP } from "./email/EmailOTP.ts";
 import { SecondFactorGate, type SecondFactorChallenge } from "./email/EmailPassword.ts";
 import { type HookError } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import { TrustedDeviceService, makeTrustedDeviceGateShape } from "./session/TrustedDevice.ts";
@@ -128,7 +128,9 @@ export class OTPSecondFactorService extends Context.Service<
   }
 >()("@effect-auth/OTPSecondFactorService") {
   static readonly layer = (config: OTPSecondFactorConfig) =>
-    Layer.effect(OTPSecondFactorService, makeOTPSecondFactorService(config));
+    Layer.effect(OTPSecondFactorService, makeOTPSecondFactorService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -140,7 +142,7 @@ export const makeOTPSecondFactorService = (
 ): Effect.Effect<
   typeof OTPSecondFactorService.Service,
   never,
-  OTPSecondFactorStore | SessionService
+  OTPSecondFactorStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
@@ -149,14 +151,23 @@ export const makeOTPSecondFactorService = (
 
     const store = yield* OTPSecondFactorStore;
     const sessionManager = yield* SessionService;
+    const crypto = yield* Crypto.Crypto;
 
     const invalidOTP = () =>
       Effect.fail(new OTPSecondFactorError({ message: "Invalid or expired OTP" }));
 
+    const generatePendingToken = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomBytes(32).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate pending token", cause }),
+        ),
+      );
+
     return {
       begin: Effect.fn("OTPSecondFactorService.begin")(function* (user: Types.User) {
-        const otp = yield* generateOTP(otpLength);
-        const pendingToken = crypto.randomBytes(32).toString("base64url");
+        const otp = yield* generateOTP(crypto, otpLength);
+        const pendingToken = yield* generatePendingToken();
         const now = Date.now();
 
         const record: OTPSecondFactorRecord = {

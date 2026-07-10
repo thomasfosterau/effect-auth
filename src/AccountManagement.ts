@@ -12,9 +12,9 @@
  * value (tokens are high-entropy random), anti-enumeration at the HTTP layer
  * (see `HttpServer.ts`), and session invalidation on sensitive changes.
  */
-import { Context, Data, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
+import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 import { SessionService } from "./session/SessionService.ts";
@@ -140,17 +140,17 @@ export class AccountManagementService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: AccountManagementConfig) =>
-    Layer.effect(AccountManagementService, makeAccountManagementService(config));
+    Layer.effect(AccountManagementService, makeAccountManagementService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
-
-const generateToken = (): string => crypto.randomBytes(32).toString("base64url");
 
 export const makeAccountManagementService = (
   config: AccountManagementConfig,
 ): Effect.Effect<
   typeof AccountManagementService.Service,
   never,
-  AccountManagementStore | UserServiceStore | SessionService
+  AccountManagementStore | UserServiceStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const changeEmailExpiresIn = config.changeEmailExpiresIn ?? 60 * 60 * 1000;
@@ -160,6 +160,15 @@ export const makeAccountManagementService = (
     const users = yield* UserServiceStore;
     const store = yield* AccountManagementStore;
     const sessions = yield* SessionService;
+    const crypto = yield* Crypto.Crypto;
+
+    const generateToken = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomBytes(32).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate token", cause }),
+        ),
+      );
 
     return {
       requestEmailChange: Effect.fn("AccountManagementService.requestEmailChange")(function* (
@@ -178,7 +187,7 @@ export const makeAccountManagementService = (
           return yield* new Errors.EmailInUseError({ message: "Email already in use" });
         }
 
-        const token = generateToken();
+        const token = yield* generateToken();
         const now = Date.now();
         yield* store.create({
           token,
@@ -252,7 +261,7 @@ export const makeAccountManagementService = (
             return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
           }
 
-          const token = generateToken();
+          const token = yield* generateToken();
           const now = Date.now();
           yield* store.create({
             token,

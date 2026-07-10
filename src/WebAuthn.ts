@@ -3,7 +3,7 @@
  * Following Copenhagen/Oslo guidelines for WebAuthn implementation.
  */
 
-import { Context, Effect, Layer } from "effect";
+import { Context, Crypto, Effect, Layer } from "effect";
 import {
   parseAttestationObject,
   parseClientDataJSON,
@@ -16,9 +16,11 @@ import {
   type ClientData,
   type AuthenticatorData,
 } from "@oslojs/webauthn";
-import * as crypto from "node:crypto";
+import * as Cipher from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
 import * as Obs from "./Observability.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { timingSafeEqualBytes } from "./TokenHash.ts";
 
 /**
  * Represents a WebAuthn challenge used during registration and authentication
@@ -244,18 +246,32 @@ export function base64UrlDecode(str: string): Uint8Array {
  */
 export const makeWebAuthnService = (
   config: WebAuthnConfig,
-): Effect.Effect<typeof WebAuthnService.Service, never, ChallengeStore | CredentialStore> =>
+): Effect.Effect<
+  typeof WebAuthnService.Service,
+  never,
+  ChallengeStore | CredentialStore | Crypto.Crypto
+> =>
   Effect.gen(function* () {
     const challengeStore = yield* ChallengeStore;
     const credentialStore = yield* CredentialStore;
+    const crypto = yield* Crypto.Crypto;
 
     const challengeExpiresIn = config.challengeExpiresIn ?? 5 * 60 * 1000; // 5 minutes default
+
+    const generateChallenge = (): Effect.Effect<Uint8Array, Errors.AuthError> =>
+      crypto
+        .randomBytes(32)
+        .pipe(
+          Effect.mapError(
+            (cause) => new Errors.AuthError({ message: "Failed to generate challenge", cause }),
+          ),
+        );
 
     return {
       generateRegistrationChallenge: Effect.fn("WebAuthnService.generateRegistrationChallenge")(
         function* (user: WebAuthnUser) {
           // Generate random challenge (32 bytes = 256 bits)
-          const challenge: Uint8Array = crypto.randomBytes(32);
+          const challenge: Uint8Array = yield* generateChallenge();
           const expiresAt = Date.now() + challengeExpiresIn;
 
           const challengeData: WebAuthnChallenge = {
@@ -456,7 +472,7 @@ export const makeWebAuthnService = (
 
       generateAuthenticationChallenge: Effect.fn("WebAuthnService.generateAuthenticationChallenge")(
         function* (userId?: string) {
-          const challenge: Uint8Array = crypto.randomBytes(32);
+          const challenge: Uint8Array = yield* generateChallenge();
           const expiresAt = Date.now() + challengeExpiresIn;
 
           const challengeData: WebAuthnChallenge = {
@@ -606,6 +622,7 @@ export const makeWebAuthnService = (
 
             // Verify signature
             const verified = yield* verifySignature(
+              crypto,
               credential.publicKey,
               credential.algorithm,
               response.authenticatorData,
@@ -754,7 +771,9 @@ export class WebAuthnService extends Context.Service<
   }
 >()("@effect-auth/WebAuthnService") {
   static readonly layer = (config: WebAuthnConfig) =>
-    Layer.effect(WebAuthnService, makeWebAuthnService(config));
+    Layer.effect(WebAuthnService, makeWebAuthnService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
 
 const b64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
@@ -765,7 +784,7 @@ const b64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base6
  * EdDSA credentials share one storage format and one verification path.
  */
 function serializePublicKey(publicKey: COSEPublicKey, algorithm: number): Uint8Array {
-  let jwk: crypto.JsonWebKeyInput["key"];
+  let jwk: Record<string, unknown>;
   if (algorithm === coseAlgorithmES256) {
     const ec2 = publicKey.ec2();
     jwk = {
@@ -787,8 +806,7 @@ function serializePublicKey(publicKey: COSEPublicKey, algorithm: number): Uint8A
   } else {
     throw new Error(`Unsupported algorithm: ${algorithm}`);
   }
-  const key = crypto.createPublicKey({ key: jwk, format: "jwk" });
-  return new Uint8Array(key.export({ type: "spki", format: "der" }));
+  return Cipher.jwkToSpkiDer(jwk);
 }
 
 /**
@@ -808,43 +826,52 @@ function bigintToBytes(value: bigint, minLength?: number): Uint8Array {
 /**
  * Verify an assertion signature over `authenticatorData || SHA-256(clientDataJSON)`.
  *
- * Uses `node:crypto` (not WebCrypto) so the algorithm-native signature
- * encodings authenticators produce verify directly: ES256 (DER-encoded ECDSA),
- * RS256 (RSASSA-PKCS1-v1_5), and EdDSA (Ed25519). The stored public key is the
- * SPKI DER produced by {@link serializePublicKey}.
+ * Delegates to the raw asymmetric primitives in `Cipher.ts` (not WebCrypto),
+ * so the algorithm-native signature encodings authenticators produce verify
+ * directly: ES256 (DER-encoded ECDSA), RS256 (RSASSA-PKCS1-v1_5), and EdDSA
+ * (Ed25519). The stored public key is the SPKI DER produced by
+ * {@link serializePublicKey}.
  */
 function verifySignature(
+  crypto: Crypto.Crypto,
   publicKeyDer: Uint8Array,
   algorithm: number,
   authenticatorData: Uint8Array,
   clientDataJSON: Uint8Array,
   signature: Uint8Array,
 ): Effect.Effect<boolean, Errors.WebAuthnVerificationError> {
-  return Effect.try({
-    try: () => {
-      const clientDataHash = crypto.createHash("sha256").update(clientDataJSON).digest();
-      const message = Buffer.concat([Buffer.from(authenticatorData), clientDataHash]);
-      const key = crypto.createPublicKey({
-        key: Buffer.from(publicKeyDer),
-        format: "der",
-        type: "spki",
-      });
-      const sig = Buffer.from(signature);
+  return Effect.gen(function* () {
+    const clientDataHash = yield* crypto
+      .digest("SHA-256", clientDataJSON)
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new Errors.WebAuthnVerificationError({ message: "Failed to hash client data", cause }),
+        ),
+      );
 
-      if (algorithm === coseAlgorithmES256 || algorithm === coseAlgorithmRS256) {
-        return crypto.verify("sha256", message, key, sig);
-      }
-      if (algorithm === coseAlgorithmEdDSA) {
-        // Ed25519 hashes internally; the digest algorithm must be null.
-        return crypto.verify(null, message, key, sig);
-      }
-      throw new Error(`Unsupported algorithm: ${algorithm}`);
-    },
-    catch: (error) =>
-      new Errors.WebAuthnVerificationError({
-        message: "Failed to verify signature",
-        cause: error,
-      }),
+    return yield* Effect.try({
+      try: () => {
+        const message = Buffer.concat([
+          Buffer.from(authenticatorData),
+          Buffer.from(clientDataHash),
+        ]);
+
+        if (algorithm === coseAlgorithmES256 || algorithm === coseAlgorithmRS256) {
+          return Cipher.verifyDerSignature("sha256", publicKeyDer, message, signature);
+        }
+        if (algorithm === coseAlgorithmEdDSA) {
+          // Ed25519 hashes internally; the digest algorithm must be null.
+          return Cipher.verifyDerSignature(null, publicKeyDer, message, signature);
+        }
+        throw new Error(`Unsupported algorithm: ${algorithm}`);
+      },
+      catch: (error) =>
+        new Errors.WebAuthnVerificationError({
+          message: "Failed to verify signature",
+          cause: error,
+        }),
+    });
   });
 }
 
@@ -852,12 +879,7 @@ function verifySignature(
  * Helper to compare two Uint8Arrays using timing-safe comparison
  */
 function compareUint8Arrays(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  return crypto.timingSafeEqual(bufA, bufB);
+  return timingSafeEqualBytes(a, b);
 }
 
 /**

@@ -1,6 +1,10 @@
 /**
- * Pluggable AEAD cipher seam shared across JWT private-key storage, TOTP
- * secret storage, and OAuth token storage.
+ * Raw `node:crypto` primitives for effect-auth: the AEAD cipher seam shared
+ * across JWT private-key storage, TOTP secret storage, and OAuth token
+ * storage, plus every other primitive Effect's `Crypto` service does not
+ * cover (keyed HMAC, and asymmetric key generation/signing/verification for
+ * JWS and WebAuthn). This is one of the three modules allowed to import
+ * `node:crypto` directly — see `docs/refactor-plan.md` §5.
  *
  * @module cipher
  */
@@ -78,4 +82,110 @@ export const makeAes256GcmCipher = (secret: string): TokenCipher => {
         catch: (cause) => new AuthError({ message: `Decryption failed: ${String(cause)}` }),
       }),
   };
+};
+
+// ---------------------------------------------------------------------------
+// Keyed HMAC
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute a keyed HMAC digest. Used for signed cookies (session cache,
+ * trusted-device tokens) and RFC 4226/6238 HOTP/TOTP, none of which are
+ * covered by Effect's `Crypto` service (digest-only, no HMAC).
+ */
+export const hmac = (
+  algorithm: "sha1" | "sha256" | "sha512",
+  secret: Uint8Array | string,
+  data: Uint8Array | string,
+): Uint8Array => new Uint8Array(crypto.createHmac(algorithm, secret).update(data).digest());
+
+// ---------------------------------------------------------------------------
+// JWS (JSON Web Signature) asymmetric primitives — used by JWT.ts and
+// oauth/OAuth.ts (signing/verifying compact JWS tokens).
+// ---------------------------------------------------------------------------
+
+/** Signing/verification algorithms supported for compact JWS tokens. */
+export type JWSAlgorithm = "ES256" | "EdDSA" | "RS256";
+
+/**
+ * Generate a fresh ES256 (P-256) or EdDSA (Ed25519) signing key pair. The
+ * public key is exported as a JWK; the private key as a PKCS#8 PEM string.
+ */
+export const generateJwsKeyPair = (
+  algorithm: "ES256" | "EdDSA",
+): { readonly publicKeyJwk: Record<string, unknown>; readonly privateKeyPem: string } => {
+  const { publicKey, privateKey } =
+    algorithm === "ES256"
+      ? crypto.generateKeyPairSync("ec", { namedCurve: "P-256" })
+      : crypto.generateKeyPairSync("ed25519");
+
+  return {
+    publicKeyJwk: publicKey.export({ format: "jwk" }) as Record<string, unknown>,
+    privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+  };
+};
+
+/**
+ * Sign `data` with a PKCS#8 PEM private key. ES256 signatures are emitted in
+ * raw JOSE `r || s` form via `dsaEncoding: "ieee-p1363"` (Node defaults to
+ * DER, which JWS does not accept); EdDSA signs with a null digest.
+ */
+export const signJws = (
+  algorithm: "ES256" | "EdDSA",
+  data: Uint8Array,
+  privateKeyPem: string,
+): Uint8Array => {
+  const key = crypto.createPrivateKey(privateKeyPem);
+  return algorithm === "EdDSA"
+    ? crypto.sign(null, data, key)
+    : crypto.sign("sha256", data, { key, dsaEncoding: "ieee-p1363" });
+};
+
+/**
+ * Verify `signature` over `data` against a public JWK. ES256 uses the raw
+ * JOSE `r || s` encoding (`dsaEncoding: "ieee-p1363"`); EdDSA verifies with a
+ * null digest; RS256 is plain RSASSA-PKCS1-v1_5 over SHA-256.
+ */
+export const verifyJws = (
+  algorithm: JWSAlgorithm,
+  data: Uint8Array,
+  signature: Uint8Array,
+  jwk: Record<string, unknown>,
+): boolean => {
+  const key = crypto.createPublicKey({ key: jwk as crypto.webcrypto.JsonWebKey, format: "jwk" });
+  if (algorithm === "RS256") return crypto.verify("sha256", data, key, signature);
+  if (algorithm === "ES256")
+    return crypto.verify("sha256", data, { key, dsaEncoding: "ieee-p1363" }, signature);
+  return crypto.verify(null, data, key, signature);
+};
+
+// ---------------------------------------------------------------------------
+// DER/SPKI asymmetric primitives — used by WebAuthn.ts. Authenticators
+// produce algorithm-native signature encodings (DER ECDSA, PKCS1-v1.5 RSA,
+// raw EdDSA), so verification stays on `node:crypto` rather than WebCrypto.
+// ---------------------------------------------------------------------------
+
+/** Convert a JWK public key to SPKI DER, for compact storage. */
+export const jwkToSpkiDer = (jwk: crypto.JsonWebKeyInput["key"]): Uint8Array => {
+  const key = crypto.createPublicKey({ key: jwk, format: "jwk" });
+  return new Uint8Array(key.export({ type: "spki", format: "der" }));
+};
+
+/**
+ * Verify `signature` over `message` against an SPKI DER public key.
+ * `digestAlgorithm` must be `null` for EdDSA (which hashes internally) and
+ * `"sha256"` for ECDSA/RSA.
+ */
+export const verifyDerSignature = (
+  digestAlgorithm: "sha256" | null,
+  publicKeyDer: Uint8Array,
+  message: Uint8Array,
+  signature: Uint8Array,
+): boolean => {
+  const key = crypto.createPublicKey({
+    key: Buffer.from(publicKeyDer),
+    format: "der",
+    type: "spki",
+  });
+  return crypto.verify(digestAlgorithm, Buffer.from(message), key, Buffer.from(signature));
 };

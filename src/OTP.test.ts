@@ -1,24 +1,25 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect } from "effect";
 import * as OTP from "./OTP.js";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 
 describe("OTP Secret Generation", () => {
   it("should generate random bytes", async () => {
-    const secret = await Effect.runPromise(OTP.generateSecret(20));
+    const secret = await Effect.runPromise(OTP.generateSecret(PlatformCrypto.instance, 20));
 
     expect(secret).toBeInstanceOf(Buffer);
     expect(secret.length).toBe(20);
   });
 
   it("should generate different secrets each time", async () => {
-    const secret1 = await Effect.runPromise(OTP.generateSecret(20));
-    const secret2 = await Effect.runPromise(OTP.generateSecret(20));
+    const secret1 = await Effect.runPromise(OTP.generateSecret(PlatformCrypto.instance, 20));
+    const secret2 = await Effect.runPromise(OTP.generateSecret(PlatformCrypto.instance, 20));
 
     expect(secret1.equals(secret2)).toBe(false);
   });
 
   it("should generate base32-encoded secret", async () => {
-    const secret = await Effect.runPromise(OTP.generateBase32Secret(20));
+    const secret = await Effect.runPromise(OTP.generateBase32Secret(PlatformCrypto.instance, 20));
 
     expect(typeof secret).toBe("string");
     expect(secret.length).toBeGreaterThan(0);
@@ -313,7 +314,7 @@ describe("OTP URI Generation", () => {
 describe("Integration Tests", () => {
   it("should work end-to-end for TOTP enrollment", async () => {
     // Step 1: Generate a secret
-    const secret = await Effect.runPromise(OTP.generateBase32Secret(20));
+    const secret = await Effect.runPromise(OTP.generateBase32Secret(PlatformCrypto.instance, 20));
 
     // Step 2: Generate URI for QR code
     const uri = OTP.generateOTPURI({
@@ -336,7 +337,7 @@ describe("Integration Tests", () => {
 
   it("should work end-to-end for HOTP enrollment", async () => {
     // Step 1: Generate a secret
-    const secret = await Effect.runPromise(OTP.generateBase32Secret(20));
+    const secret = await Effect.runPromise(OTP.generateBase32Secret(PlatformCrypto.instance, 20));
 
     // Step 2: Generate URI for QR code with initial counter
     const uri = OTP.generateOTPURI({
@@ -365,7 +366,9 @@ describe("Input Validation and Edge Cases", () => {
 
   describe("generateSecret validation", () => {
     it("should reject length less than 16 bytes", async () => {
-      const result = await Effect.runPromise(Effect.result(OTP.generateSecret(15)));
+      const result = await Effect.runPromise(
+        Effect.result(OTP.generateSecret(PlatformCrypto.instance, 15)),
+      );
 
       expect(result._tag).toBe("Failure");
       if (result._tag === "Failure") {
@@ -375,7 +378,9 @@ describe("Input Validation and Edge Cases", () => {
     });
 
     it("should reject negative length", async () => {
-      const result = await Effect.runPromise(Effect.result(OTP.generateSecret(-1)));
+      const result = await Effect.runPromise(
+        Effect.result(OTP.generateSecret(PlatformCrypto.instance, -1)),
+      );
 
       expect(result._tag).toBe("Failure");
       if (result._tag === "Failure") {
@@ -384,7 +389,9 @@ describe("Input Validation and Edge Cases", () => {
     });
 
     it("should reject non-integer length", async () => {
-      const result = await Effect.runPromise(Effect.result(OTP.generateSecret(20.5)));
+      const result = await Effect.runPromise(
+        Effect.result(OTP.generateSecret(PlatformCrypto.instance, 20.5)),
+      );
 
       expect(result._tag).toBe("Failure");
       if (result._tag === "Failure") {

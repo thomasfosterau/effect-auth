@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
-import { Context, Effect } from "effect";
+import { Context, Crypto, Effect } from "effect";
 import { Hooks } from "./Hooks.js";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 import { makeAuthLifecycleService } from "./AuthLifecycle.js";
 import {
   type EmailVerification,
@@ -162,10 +163,15 @@ const sessionConfig: SessionConfig = {
 const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) => {
   const hasher = makePBKDF2Hasher();
 
+  const cryptoContext = Context.make(Crypto.Crypto, PlatformCrypto.instance);
+
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       make(sessionConfig),
-      Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+      Context.merge(
+        Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+        cryptoContext,
+      ),
     ).pipe(Effect.provide(Hooks.Default)),
   );
 
@@ -177,7 +183,7 @@ const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) =>
             sentEmails.push({ email, token });
           }),
       }),
-      Context.make(EmailVerificationStore, emailVerificationStore),
+      Context.merge(Context.make(EmailVerificationStore, emailVerificationStore), cryptoContext),
     ).pipe(Effect.provide(Hooks.Default)),
   );
 
@@ -199,24 +205,27 @@ const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) =>
   );
 
   return Context.merge(
-    Context.make(SessionService, sessionManager),
+    cryptoContext,
     Context.merge(
-      Context.make(SessionStore, sessionStore),
+      Context.make(SessionService, sessionManager),
       Context.merge(
-        Context.make(UserStore, userStore),
+        Context.make(SessionStore, sessionStore),
         Context.merge(
-          Context.make(EmailPasswordService, emailPasswordService),
+          Context.make(UserStore, userStore),
           Context.merge(
-            Context.make(EmailPasswordStore, emailPasswordStore),
+            Context.make(EmailPasswordService, emailPasswordService),
             Context.merge(
-              Context.make(EmailVerificationStore, emailVerificationStore),
+              Context.make(EmailPasswordStore, emailPasswordStore),
               Context.merge(
-                Context.make(EmailVerificationService, emailVerificationService),
+                Context.make(EmailVerificationStore, emailVerificationStore),
                 Context.merge(
-                  Context.make(UserServiceStore, userServiceStore),
+                  Context.make(EmailVerificationService, emailVerificationService),
                   Context.merge(
-                    Context.make(UserService, userService),
-                    Context.make(PasswordHasher, hasher),
+                    Context.make(UserServiceStore, userServiceStore),
+                    Context.merge(
+                      Context.make(UserService, userService),
+                      Context.make(PasswordHasher, hasher),
+                    ),
                   ),
                 ),
               ),

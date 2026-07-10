@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Context, Effect, Layer } from "effect";
+import { Context, Crypto, Effect, Layer } from "effect";
 import { Hooks, composePlugins, makePlugin } from "./Hooks.js";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 import * as Errors from "./Errors.js";
 import type { AuthResult, SignInInput } from "./email/EmailPassword.js";
 import { EmailPasswordStore } from "./email/EmailPassword.js";
@@ -403,15 +404,24 @@ describe("Hooks - integration with EmailPasswordService", () => {
     const sessionManager = await Effect.runPromise(
       Effect.provide(
         make(sessionConfig),
-        Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+        Context.merge(
+          Context.merge(
+            Context.make(SessionStore, sessionStore),
+            Context.make(UserStore, userStore),
+          ),
+          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
 
     const testContext = Context.merge(
       Context.make(SessionService, sessionManager),
       Context.merge(
-        Context.make(EmailPasswordStore, emailPasswordStore),
-        Context.make(PasswordHasher, makePBKDF2Hasher()),
+        Context.merge(
+          Context.make(EmailPasswordStore, emailPasswordStore),
+          Context.make(PasswordHasher, makePBKDF2Hasher()),
+        ),
+        Context.make(Crypto.Crypto, PlatformCrypto.instance),
       ),
     );
 

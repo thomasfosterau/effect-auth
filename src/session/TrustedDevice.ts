@@ -29,11 +29,12 @@
  *
  * @module trusted-device
  */
-import { Config, Context, Effect, Layer, Redacted } from "effect";
-import * as crypto from "node:crypto";
+import { Config, Context, Crypto, Effect, Layer, Redacted } from "effect";
+import * as Cipher from "../Cipher.ts";
 import * as Errors from "../Errors.ts";
 import { SecondFactorGate } from "../email/EmailPassword.ts";
-import { hashToken } from "../TokenHash.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { hashToken, timingSafeEqualBytes } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { TwoFactorService } from "../TwoFactor.ts";
 
@@ -146,7 +147,9 @@ export class TrustedDeviceService extends Context.Service<
   }
 >()("@effect-auth/TrustedDeviceService") {
   static readonly layer = (config: TrustedDeviceConfig) =>
-    Layer.effect(TrustedDeviceService, makeTrustedDeviceService(config));
+    Layer.effect(TrustedDeviceService, makeTrustedDeviceService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 
   /**
    * Construct a Layer from environment variables via {@link trustedDeviceConfig}.
@@ -160,7 +163,7 @@ export class TrustedDeviceService extends Context.Service<
       const config = yield* trustedDeviceConfig;
       return yield* makeTrustedDeviceService(config);
     }),
-  );
+  ).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /**
@@ -184,19 +187,11 @@ export const trustedDeviceConfig: Config.Config<TrustedDeviceConfig> = Config.al
 const COOKIE_SEPARATOR = ".";
 
 const computeHmac = (secret: Redacted.Redacted<string>, rawToken: string): string =>
-  crypto.createHmac("sha256", Redacted.value(secret)).update(rawToken).digest("hex");
+  Buffer.from(Cipher.hmac("sha256", Redacted.value(secret), rawToken)).toString("hex");
 
 /** Constant-time comparison of two hex strings of equal expected length. */
-const timingSafeHexEqual = (a: string, b: string): boolean => {
-  try {
-    const bufA = Buffer.from(a, "hex");
-    const bufB = Buffer.from(b, "hex");
-    if (bufA.length !== bufB.length) return false;
-    return crypto.timingSafeEqual(bufA, bufB);
-  } catch {
-    return false;
-  }
-};
+const timingSafeHexEqual = (a: string, b: string): boolean =>
+  timingSafeEqualBytes(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
 
 const parseCookie = (cookieValue: string): { rawToken: string; hmac: string } | null => {
   const idx = cookieValue.lastIndexOf(COOKIE_SEPARATOR);
@@ -209,14 +204,23 @@ const parseCookie = (cookieValue: string): { rawToken: string; hmac: string } | 
 
 export const makeTrustedDeviceService = (
   config: TrustedDeviceConfig,
-): Effect.Effect<typeof TrustedDeviceService.Service, never, TrustedDeviceStore> =>
+): Effect.Effect<typeof TrustedDeviceService.Service, never, TrustedDeviceStore | Crypto.Crypto> =>
   Effect.gen(function* () {
     const maxAge = config.maxAge ?? 30 * 24 * 60 * 60 * 1000;
     const store = yield* TrustedDeviceStore;
+    const crypto = yield* Crypto.Crypto;
+
+    const generateRawToken = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomBytes(32).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate device token", cause }),
+        ),
+      );
 
     return {
       issue: Effect.fn("TrustedDeviceService.issue")(function* (userId: string) {
-        const rawToken = crypto.randomBytes(32).toString("base64url");
+        const rawToken = yield* generateRawToken();
         const hmac = computeHmac(config.secret, rawToken);
         const tokenHash = hashToken(rawToken);
         const now = Date.now();

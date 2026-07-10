@@ -12,8 +12,7 @@
  *
  * @module plugins/hibp
  */
-import { Effect } from "effect";
-import * as nodeCrypto from "node:crypto";
+import { Crypto, Effect } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import type { SignUpInput } from "../email/EmailPassword.ts";
 import { makePlugin, type ResetPasswordArgs } from "../Hooks.ts";
@@ -28,13 +27,11 @@ export interface HibpConfig {
 
 const RANGE_URL = "https://api.pwnedpasswords.com/range";
 
-const sha1Upper = (password: string): string =>
-  nodeCrypto.createHash("sha1").update(password).digest("hex").toUpperCase();
-
 /**
  * Build the HIBP plugin. The resulting layer is
- * `Layer<Hooks, never, Hooks | HttpClient>` — provide `FetchHttpClient.layer`
- * (or a stub) to satisfy the client.
+ * `Layer<Hooks, never, Hooks | HttpClient | Crypto.Crypto>` — provide
+ * `FetchHttpClient.layer` (or a stub) and a `Crypto.Crypto` layer to satisfy
+ * the dependencies.
  */
 export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
   const threshold = config.threshold ?? 1;
@@ -43,27 +40,35 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
   return makePlugin(
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
+      const crypto = yield* Crypto.Crypto;
 
-      const breachCount = (password: string): Effect.Effect<number, AuthError> => {
-        const hash = sha1Upper(password);
-        const prefix = hash.slice(0, 5);
-        const suffix = hash.slice(5);
-        return client.execute(HttpClientRequest.get(`${RANGE_URL}/${prefix}`)).pipe(
-          Effect.flatMap((response) => response.text),
-          Effect.map((body) => {
-            for (const line of body.split("\n")) {
-              const [suf, count] = line.trim().split(":");
-              if (suf === suffix) return Number(count) || 0;
-            }
-            return 0;
-          }),
-          Effect.catch(() =>
-            failClosed
-              ? Effect.fail(new AuthError({ message: "Password breach check is unavailable" }))
-              : Effect.succeed(0),
-          ),
+      const sha1Upper = (password: string): Effect.Effect<string, AuthError> =>
+        crypto.digest("SHA-1", new TextEncoder().encode(password)).pipe(
+          Effect.map((bytes) => Buffer.from(bytes).toString("hex").toUpperCase()),
+          Effect.mapError((cause) => new AuthError({ message: "Failed to hash password", cause })),
         );
-      };
+
+      const breachCount = (password: string): Effect.Effect<number, AuthError> =>
+        Effect.gen(function* () {
+          const hash = yield* sha1Upper(password);
+          const prefix = hash.slice(0, 5);
+          const suffix = hash.slice(5);
+          return yield* client.execute(HttpClientRequest.get(`${RANGE_URL}/${prefix}`)).pipe(
+            Effect.flatMap((response) => response.text),
+            Effect.map((body) => {
+              for (const line of body.split("\n")) {
+                const [suf, count] = line.trim().split(":");
+                if (suf === suffix) return Number(count) || 0;
+              }
+              return 0;
+            }),
+            Effect.catch(() =>
+              failClosed
+                ? Effect.fail(new AuthError({ message: "Password breach check is unavailable" }))
+                : Effect.succeed(0),
+            ),
+          );
+        });
 
       const check = (password: string): Effect.Effect<void, AuthError | PwnedPasswordError> =>
         Effect.gen(function* () {

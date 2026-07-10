@@ -19,7 +19,8 @@
  * data (including any PII in `attributes`) is visible to the browser.
  */
 import { Option, Redacted, Schema } from "effect";
-import * as crypto from "node:crypto";
+import * as Cipher from "./Cipher.ts";
+import { timingSafeEqualBytes } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 
 /** Cookie-cache configuration (part of `CookieConfig`). */
@@ -57,14 +58,10 @@ const PAYLOAD_VERSION = 1;
 const b64url = (data: Uint8Array): string => Buffer.from(data).toString("base64url");
 
 const sign = (data: string, secret: Redacted.Redacted<string>): string =>
-  b64url(crypto.createHmac("sha256", Redacted.value(secret)).update(data).digest());
+  b64url(Cipher.hmac("sha256", Redacted.value(secret), data));
 
-const timingSafeEqualStr = (a: string, b: string): boolean => {
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ba.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ba, bb);
-};
+const timingSafeEqualStr = (a: string, b: string): boolean =>
+  timingSafeEqualBytes(Buffer.from(a), Buffer.from(b));
 
 // Schemas for the JSON-serialized payload form (dates stored as ms timestamps).
 const SerializedSession = Schema.Struct({

@@ -18,9 +18,9 @@
  * @module organization
  */
 
-import { Context, Data, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
+import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { normalizeEmail } from "./utils.ts";
 
 /**
@@ -396,20 +396,17 @@ export class OrganizationService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: OrganizationConfig = {}) =>
-    Layer.effect(OrganizationService, makeOrganizationService(config));
+    Layer.effect(OrganizationService, makeOrganizationService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
-
-/**
- * Generate a random identifier for organizations, members, and invitations
- */
-const generateId = (): string => crypto.randomBytes(16).toString("hex");
 
 /**
  * Create an organization service
  */
 export const makeOrganizationService = (
   config: OrganizationConfig = {},
-): Effect.Effect<typeof OrganizationService.Service, never, OrganizationStore> =>
+): Effect.Effect<typeof OrganizationService.Service, never, OrganizationStore | Crypto.Crypto> =>
   Effect.gen(function* () {
     const allowUserToCreateOrganization = config.allowUserToCreateOrganization ?? true;
     const organizationLimit = config.organizationLimit ?? 5;
@@ -419,6 +416,16 @@ export const makeOrganizationService = (
     const roles = config.roles ?? defaultOrganizationRoles;
 
     const store = yield* OrganizationStore;
+    const crypto = yield* Crypto.Crypto;
+
+    /** Generate a random identifier for organizations, members, and invitations. */
+    const generateId = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomBytes(16).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate id", cause }),
+        ),
+      );
 
     /** Whether a role name grants a `"resource:action"` permission. */
     const roleHasPermission = (role: string, permission: string): boolean =>
@@ -475,7 +482,7 @@ export const makeOrganizationService = (
     const createMembership = (organizationId: string, userId: string, role: string) =>
       Effect.gen(function* () {
         const member: Member = {
-          id: generateId(),
+          id: yield* generateId(),
           organizationId,
           userId,
           role,
@@ -541,7 +548,7 @@ export const makeOrganizationService = (
         }
 
         const organization: Organization = {
-          id: generateId(),
+          id: yield* generateId(),
           name: input.name,
           slug: input.slug,
           ...(input.logo !== undefined && { logo: input.logo }),
@@ -643,7 +650,7 @@ export const makeOrganizationService = (
         }
 
         const invitation: Invitation = {
-          id: generateId(),
+          id: yield* generateId(),
           organizationId,
           email,
           role: input.role,

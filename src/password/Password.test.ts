@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Context, Effect } from "effect";
-import * as nodeCrypto from "node:crypto";
 import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
 
 describe("PasswordHasher", () => {
@@ -141,13 +140,21 @@ describe("PasswordHasher", () => {
     expect(h.needsRehash!(current.hash)).toBe(false);
 
     // Simulate a hash produced with old params (210000 iterations, 64-byte key).
-    const salt = nodeCrypto.randomBytes(16);
-    const oldKey = await new Promise<Buffer>((resolve, reject) =>
-      nodeCrypto.pbkdf2("pw", salt, 210000, 64, "sha256", (err, k) =>
-        err ? reject(err) : resolve(k),
-      ),
+    const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
+    const keyMaterial = await globalThis.crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode("pw"),
+      "PBKDF2",
+      false,
+      ["deriveBits"],
     );
-    const oldHash = `pbkdf2-sha256$210000$${salt.toString("hex")}$${oldKey.toString("hex")}`;
+    const bits = await globalThis.crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt, iterations: 210000, hash: "SHA-256" },
+      keyMaterial,
+      64 * 8,
+    );
+    const oldKey = Buffer.from(bits);
+    const oldHash = `pbkdf2-sha256$210000$${Buffer.from(salt).toString("hex")}$${oldKey.toString("hex")}`;
     expect(h.needsRehash!(oldHash)).toBe(true);
 
     // Old hash must still verify correctly (uses stored key length).

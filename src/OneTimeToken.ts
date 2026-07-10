@@ -12,10 +12,10 @@
  *
  * @module one-time-token
  */
-import { Context, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
+import { Context, Crypto, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { hashToken } from "./TokenHash.ts";
 import { SessionService } from "./session/SessionService.ts";
 import type * as Types from "./Types.ts";
@@ -119,7 +119,7 @@ export class OneTimeTokenService extends Context.Service<
    * @param config - Optional configuration (default TTL, etc.)
    */
   static readonly layer = (config?: OneTimeTokenConfig) =>
-    Layer.effect(OneTimeTokenService, make(config ?? {}));
+    Layer.effect(OneTimeTokenService, make(config ?? {})).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 // ---------------------------------------------------------------------------
@@ -128,16 +128,25 @@ export class OneTimeTokenService extends Context.Service<
 
 export const make = (
   config: OneTimeTokenConfig,
-): Effect.Effect<typeof OneTimeTokenService.Service, never, OneTimeTokenStore> =>
+): Effect.Effect<typeof OneTimeTokenService.Service, never, OneTimeTokenStore | Crypto.Crypto> =>
   Effect.gen(function* () {
     const defaultExpiresIn = config.expiresIn ?? 15 * 60 * 1000;
     const store = yield* OneTimeTokenStore;
+    const crypto = yield* Crypto.Crypto;
+
+    const generateRawToken = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomBytes(32).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate token", cause }),
+        ),
+      );
 
     return {
       generate: Effect.fn("OneTimeTokenService.generate")(
         (subject: string, options?: OneTimeTokenGenerateOptions) =>
           Effect.gen(function* () {
-            const rawToken = yield* Effect.sync(() => crypto.randomBytes(32).toString("base64url"));
+            const rawToken = yield* generateRawToken();
             const expiresIn = options?.expiresIn ?? defaultExpiresIn;
             const now = Date.now();
             const record: OneTimeTokenRecord = {

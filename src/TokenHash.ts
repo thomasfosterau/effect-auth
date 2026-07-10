@@ -24,14 +24,21 @@ export const hashToken = (token: string): string =>
   createHash("sha256").update(token).digest("hex");
 
 /**
+ * Constant-time comparison of two equal-length byte sequences (raw digests,
+ * HMACs, signatures). Every timing-safe comparison in effect-auth routes
+ * through this function so `node:crypto`'s `timingSafeEqual` stays corralled
+ * to this module.
+ */
+export const timingSafeEqualBytes = (a: Uint8Array, b: Uint8Array): boolean => {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+};
+
+/**
  * Constant-time comparison of two hex-encoded SHA-256 digests.
  *
  * Always compare hashes with this function rather than `===` to prevent
  * timing side-channels.
  */
-export const constantTimeHashEqual = (a: string, b: string): boolean => {
-  const bufA = Buffer.from(a, "hex");
-  const bufB = Buffer.from(b, "hex");
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
-};
+export const constantTimeHashEqual = (a: string, b: string): boolean =>
+  timingSafeEqualBytes(Buffer.from(a, "hex"), Buffer.from(b, "hex"));

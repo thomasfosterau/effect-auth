@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Effect } from "effect";
+import { Context, Crypto, Effect } from "effect";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 import {
   makeOrganizationService,
   OrganizationStore,
@@ -120,7 +121,10 @@ const organizationStore = {
     ),
 };
 
-const testContext = Context.make(OrganizationStore, organizationStore);
+const testContext = Context.merge(
+  Context.make(OrganizationStore, organizationStore),
+  Context.make(Crypto.Crypto, PlatformCrypto.instance),
+);
 
 const runService = <A, E>(
   config: OrganizationConfig,
