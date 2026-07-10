@@ -282,19 +282,21 @@ export const generateTOTP = (
 };
 
 /**
- * Verify Time-based One-Time Password (TOTP)
- * Checks current time step and adjacent time steps within the window
+ * Verify Time-based One-Time Password (TOTP).
+ * Checks the current time step and adjacent steps within the window.
  *
  * @param token - The OTP token to verify
  * @param secret - Base32-encoded secret or raw Buffer
  * @param config - TOTP configuration
- * @returns Effect that produces true if valid, false otherwise
+ * @returns Effect that produces the matched time-step counter, or `null` if
+ *   the token is invalid. Callers should persist the counter and reject
+ *   subsequent submissions with the same or lower counter to prevent replay.
  */
 export const verifyTOTP = (
   token: string,
   secret: string | Buffer,
   config: TOTPConfig = {},
-): Effect.Effect<boolean, Errors.HashingError> =>
+): Effect.Effect<number | null, Errors.HashingError> =>
   Effect.gen(function* () {
     // Validate and normalize period
     let period = config?.period ?? 30;
@@ -328,12 +330,12 @@ export const verifyTOTP = (
       if (token.length === expectedToken.length) {
         const isValid = timingSafeEqualBytes(Buffer.from(token), Buffer.from(expectedToken));
         if (isValid) {
-          return true;
+          return counter;
         }
       }
     }
 
-    return false;
+    return null;
   });
 
 /**
