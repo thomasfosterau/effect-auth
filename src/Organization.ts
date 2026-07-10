@@ -250,7 +250,7 @@ export class OrganizationService extends Context.Service<
     readonly createOrganization: (
       userId: string,
       input: CreateOrganizationInput,
-    ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError>;
 
     /**
      * Update an organization's fields. Requires the `organization:update`
@@ -260,7 +260,7 @@ export class OrganizationService extends Context.Service<
       userId: string,
       organizationId: string,
       updates: UpdateOrganizationInput,
-    ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError>;
 
     /**
      * Delete an organization. Requires the `organization:delete` permission.
@@ -268,21 +268,21 @@ export class OrganizationService extends Context.Service<
     readonly deleteOrganization: (
       userId: string,
       organizationId: string,
-    ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
 
     /**
      * Fetch an organization together with all of its members.
      */
     readonly getFullOrganization: (
       organizationId: string,
-    ) => Effect.Effect<FullOrganization, OrganizationError | Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<FullOrganization, OrganizationError | Errors.AuthError>;
 
     /**
      * List the organizations a user belongs to.
      */
     readonly listOrganizations: (
       userId: string,
-    ) => Effect.Effect<ReadonlyArray<Organization>, Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<ReadonlyArray<Organization>, Errors.AuthError>;
 
     /**
      * Invite a user (by email) to the organization. Requires the
@@ -295,7 +295,7 @@ export class OrganizationService extends Context.Service<
       inviterId: string,
       organizationId: string,
       input: InviteMemberInput,
-    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
 
     /**
      * Accept a pending invitation. Validates that the invitation is pending,
@@ -306,7 +306,7 @@ export class OrganizationService extends Context.Service<
       userId: string,
       invitationId: string,
       userEmail: string,
-    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
 
     /**
      * Reject a pending invitation addressed to `userEmail`.
@@ -314,7 +314,7 @@ export class OrganizationService extends Context.Service<
     readonly rejectInvitation: (
       invitationId: string,
       userEmail: string,
-    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
 
     /**
      * Cancel a pending invitation. The canceler needs the `invitation:cancel`
@@ -323,21 +323,21 @@ export class OrganizationService extends Context.Service<
     readonly cancelInvitation: (
       cancelerId: string,
       invitationId: string,
-    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
 
     /**
      * List all invitations for an organization (any status).
      */
     readonly listInvitations: (
       organizationId: string,
-    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
 
     /**
      * List pending, unexpired invitations addressed to an email.
      */
     readonly listUserInvitations: (
       email: string,
-    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
 
     /**
      * Add a user to the organization directly (no invitation). Requires the
@@ -348,7 +348,7 @@ export class OrganizationService extends Context.Service<
       organizationId: string,
       userId: string,
       role: string,
-    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
 
     /**
      * Remove a member. Requires the `member:delete` permission. An owner can
@@ -358,7 +358,7 @@ export class OrganizationService extends Context.Service<
       actorId: string,
       organizationId: string,
       memberUserId: string,
-    ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
 
     /**
      * Change a member's role. Requires the `member:update` permission. The last
@@ -369,7 +369,7 @@ export class OrganizationService extends Context.Service<
       organizationId: string,
       memberUserId: string,
       role: string,
-    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
 
     /**
      * Whether the user's role in the organization grants the given
@@ -379,7 +379,7 @@ export class OrganizationService extends Context.Service<
       userId: string,
       organizationId: string,
       permission: string,
-    ) => Effect.Effect<boolean, Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<boolean, Errors.AuthError>;
 
     /**
      * Like {@link checkPermission} but fails with `OrganizationError` when the
@@ -389,7 +389,7 @@ export class OrganizationService extends Context.Service<
       userId: string,
       organizationId: string,
       permission: string,
-    ) => Effect.Effect<void, OrganizationError | Errors.AuthError, OrganizationStore>;
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
   }
 >()("@effect-auth/OrganizationService") {
   /**
@@ -409,112 +409,111 @@ const generateId = (): string => crypto.randomBytes(16).toString("hex");
  */
 export const makeOrganizationService = (
   config: OrganizationConfig = {},
-): Effect.Effect<typeof OrganizationService.Service, never> => {
-  const allowUserToCreateOrganization = config.allowUserToCreateOrganization ?? true;
-  const organizationLimit = config.organizationLimit ?? 5;
-  const membershipLimit = config.membershipLimit ?? 100;
-  const invitationExpiresIn = config.invitationExpiresIn ?? 48 * 60 * 60 * 1000; // 48 hours
-  const creatorRole = config.creatorRole ?? "owner";
-  const roles = config.roles ?? defaultOrganizationRoles;
+): Effect.Effect<typeof OrganizationService.Service, never, OrganizationStore> =>
+  Effect.gen(function* () {
+    const allowUserToCreateOrganization = config.allowUserToCreateOrganization ?? true;
+    const organizationLimit = config.organizationLimit ?? 5;
+    const membershipLimit = config.membershipLimit ?? 100;
+    const invitationExpiresIn = config.invitationExpiresIn ?? 48 * 60 * 60 * 1000; // 48 hours
+    const creatorRole = config.creatorRole ?? "owner";
+    const roles = config.roles ?? defaultOrganizationRoles;
 
-  /** Whether a role name grants a `"resource:action"` permission. */
-  const roleHasPermission = (role: string, permission: string): boolean =>
-    (roles[role] ?? []).includes(permission);
+    const store = yield* OrganizationStore;
 
-  /** Load an organization, failing when it does not exist. */
-  const getOrganizationOrFail = (organizationId: string) =>
-    Effect.gen(function* () {
-      const store = yield* OrganizationStore;
-      const organization = yield* store.getOrganizationById(organizationId);
-      if (!organization) {
-        return yield* Effect.fail(new OrganizationError({ message: "Organization not found" }));
-      }
-      return organization;
-    });
+    /** Whether a role name grants a `"resource:action"` permission. */
+    const roleHasPermission = (role: string, permission: string): boolean =>
+      (roles[role] ?? []).includes(permission);
 
-  /**
-   * Resolve the actor's membership and enforce a permission, returning the
-   * membership so callers can inspect the actor's role.
-   */
-  const requireMemberPermission = (userId: string, organizationId: string, permission: string) =>
-    Effect.gen(function* () {
-      const store = yield* OrganizationStore;
-      const member = yield* store.getMember(organizationId, userId);
-      if (!member || !roleHasPermission(member.role, permission)) {
-        return yield* Effect.fail(
-          new OrganizationError({
-            message: `Missing permission '${permission}' in this organization`,
-          }),
-        );
-      }
-      return member;
-    });
-
-  /** Enforce the per-organization membership limit before adding a member. */
-  const ensureMembershipCapacity = (organizationId: string) =>
-    Effect.gen(function* () {
-      const store = yield* OrganizationStore;
-      const count = yield* store.countMembersByOrganization(organizationId);
-      if (count >= membershipLimit) {
-        return yield* Effect.fail(
-          new OrganizationError({
-            message: "Organization has reached its membership limit",
-          }),
-        );
-      }
-    });
-
-  /** Number of members holding the protected owner (creator) role. */
-  const countOwners = (organizationId: string) =>
-    Effect.gen(function* () {
-      const store = yield* OrganizationStore;
-      const members = yield* store.listMembersByOrganization(organizationId);
-      return members.filter((member) => member.role === creatorRole).length;
-    });
-
-  /** Create a membership record (after all checks have passed). */
-  const createMembership = (organizationId: string, userId: string, role: string) =>
-    Effect.gen(function* () {
-      const store = yield* OrganizationStore;
-      const member: Member = {
-        id: generateId(),
-        organizationId,
-        userId,
-        role,
-        createdAt: Date.now(),
-      };
-      return yield* store.createMember(member);
-    });
-
-  /** Load a pending invitation addressed to `userEmail`, enforcing expiry. */
-  const getPendingInvitationFor = (invitationId: string, userEmail: string) =>
-    Effect.gen(function* () {
-      const store = yield* OrganizationStore;
-      const invitation = yield* store.getInvitation(invitationId);
-      if (!invitation) {
-        return yield* Effect.fail(new OrganizationError({ message: "Invitation not found" }));
-      }
-      if (invitation.status !== "pending") {
-        return yield* Effect.fail(
-          new OrganizationError({ message: "Invitation is no longer pending" }),
-        );
-      }
-      if (invitation.email !== normalizeEmail(userEmail)) {
-        return yield* Effect.fail(
-          new OrganizationError({
-            message: "This invitation is addressed to a different email",
-          }),
-        );
-      }
-      if (Date.now() > invitation.expiresAt) {
-        return yield* Effect.fail(new OrganizationError({ message: "Invitation has expired" }));
-      }
-      return invitation;
-    });
-
-  return Effect.sync((): typeof OrganizationService.Service => ({
-    createOrganization: (userId, input) =>
+    /** Load an organization, failing when it does not exist. */
+    const getOrganizationOrFail = (organizationId: string) =>
       Effect.gen(function* () {
+        const organization = yield* store.getOrganizationById(organizationId);
+        if (!organization) {
+          return yield* Effect.fail(new OrganizationError({ message: "Organization not found" }));
+        }
+        return organization;
+      });
+
+    /**
+     * Resolve the actor's membership and enforce a permission, returning the
+     * membership so callers can inspect the actor's role.
+     */
+    const requireMemberPermission = (userId: string, organizationId: string, permission: string) =>
+      Effect.gen(function* () {
+        const member = yield* store.getMember(organizationId, userId);
+        if (!member || !roleHasPermission(member.role, permission)) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: `Missing permission '${permission}' in this organization`,
+            }),
+          );
+        }
+        return member;
+      });
+
+    /** Enforce the per-organization membership limit before adding a member. */
+    const ensureMembershipCapacity = (organizationId: string) =>
+      Effect.gen(function* () {
+        const count = yield* store.countMembersByOrganization(organizationId);
+        if (count >= membershipLimit) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "Organization has reached its membership limit",
+            }),
+          );
+        }
+      });
+
+    /** Number of members holding the protected owner (creator) role. */
+    const countOwners = (organizationId: string) =>
+      Effect.gen(function* () {
+        const members = yield* store.listMembersByOrganization(organizationId);
+        return members.filter((member) => member.role === creatorRole).length;
+      });
+
+    /** Create a membership record (after all checks have passed). */
+    const createMembership = (organizationId: string, userId: string, role: string) =>
+      Effect.gen(function* () {
+        const member: Member = {
+          id: generateId(),
+          organizationId,
+          userId,
+          role,
+          createdAt: Date.now(),
+        };
+        return yield* store.createMember(member);
+      });
+
+    /** Load a pending invitation addressed to `userEmail`, enforcing expiry. */
+    const getPendingInvitationFor = (invitationId: string, userEmail: string) =>
+      Effect.gen(function* () {
+        const invitation = yield* store.getInvitation(invitationId);
+        if (!invitation) {
+          return yield* Effect.fail(new OrganizationError({ message: "Invitation not found" }));
+        }
+        if (invitation.status !== "pending") {
+          return yield* Effect.fail(
+            new OrganizationError({ message: "Invitation is no longer pending" }),
+          );
+        }
+        if (invitation.email !== normalizeEmail(userEmail)) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "This invitation is addressed to a different email",
+            }),
+          );
+        }
+        if (Date.now() > invitation.expiresAt) {
+          return yield* Effect.fail(new OrganizationError({ message: "Invitation has expired" }));
+        }
+        return invitation;
+      });
+
+    return {
+      createOrganization: Effect.fn("OrganizationService.createOrganization")(function* (
+        userId: string,
+        input: CreateOrganizationInput,
+      ) {
         if (!allowUserToCreateOrganization) {
           return yield* Effect.fail(
             new OrganizationError({
@@ -522,8 +521,6 @@ export const makeOrganizationService = (
             }),
           );
         }
-
-        const store = yield* OrganizationStore;
 
         const memberships = yield* store.listMembersByUser(userId);
         if (memberships.length >= organizationLimit) {
@@ -557,11 +554,13 @@ export const makeOrganizationService = (
         return created;
       }),
 
-    updateOrganization: (userId, organizationId, updates) =>
-      Effect.gen(function* () {
+      updateOrganization: Effect.fn("OrganizationService.updateOrganization")(function* (
+        userId: string,
+        organizationId: string,
+        updates: UpdateOrganizationInput,
+      ) {
         yield* requireMemberPermission(userId, organizationId, "organization:update");
 
-        const store = yield* OrganizationStore;
         const organization = yield* getOrganizationOrFail(organizationId);
 
         if (updates.slug !== undefined && updates.slug !== organization.slug) {
@@ -586,26 +585,27 @@ export const makeOrganizationService = (
         return yield* store.updateOrganization(updated);
       }),
 
-    deleteOrganization: (userId, organizationId) =>
-      Effect.gen(function* () {
+      deleteOrganization: Effect.fn("OrganizationService.deleteOrganization")(function* (
+        userId: string,
+        organizationId: string,
+      ) {
         yield* requireMemberPermission(userId, organizationId, "organization:delete");
         yield* getOrganizationOrFail(organizationId);
 
-        const store = yield* OrganizationStore;
         yield* store.deleteOrganization(organizationId);
       }),
 
-    getFullOrganization: (organizationId) =>
-      Effect.gen(function* () {
-        const store = yield* OrganizationStore;
+      getFullOrganization: Effect.fn("OrganizationService.getFullOrganization")(function* (
+        organizationId: string,
+      ) {
         const organization = yield* getOrganizationOrFail(organizationId);
         const members = yield* store.listMembersByOrganization(organizationId);
         return { organization, members } satisfies FullOrganization;
       }),
 
-    listOrganizations: (userId) =>
-      Effect.gen(function* () {
-        const store = yield* OrganizationStore;
+      listOrganizations: Effect.fn("OrganizationService.listOrganizations")(function* (
+        userId: string,
+      ) {
         const memberships = yield* store.listMembersByUser(userId);
         const organizations = yield* Effect.forEach(memberships, (membership) =>
           store.getOrganizationById(membership.organizationId),
@@ -615,13 +615,15 @@ export const makeOrganizationService = (
         );
       }),
 
-    inviteMember: (inviterId, organizationId, input) =>
-      Effect.gen(function* () {
+      inviteMember: Effect.fn("OrganizationService.inviteMember")(function* (
+        inviterId: string,
+        organizationId: string,
+        input: InviteMemberInput,
+      ) {
         yield* requireMemberPermission(inviterId, organizationId, "invitation:create");
         const organization = yield* getOrganizationOrFail(organizationId);
         yield* ensureMembershipCapacity(organizationId);
 
-        const store = yield* OrganizationStore;
         const email = normalizeEmail(input.email);
 
         const existingInvitations = yield* store.listInvitationsByEmail(email);
@@ -660,9 +662,11 @@ export const makeOrganizationService = (
         return created;
       }),
 
-    acceptInvitation: (userId, invitationId, userEmail) =>
-      Effect.gen(function* () {
-        const store = yield* OrganizationStore;
+      acceptInvitation: Effect.fn("OrganizationService.acceptInvitation")(function* (
+        userId: string,
+        invitationId: string,
+        userEmail: string,
+      ) {
         const invitation = yield* getPendingInvitationFor(invitationId, userEmail);
 
         const existingMember = yield* store.getMember(invitation.organizationId, userId);
@@ -681,17 +685,18 @@ export const makeOrganizationService = (
         return member;
       }),
 
-    rejectInvitation: (invitationId, userEmail) =>
-      Effect.gen(function* () {
-        const store = yield* OrganizationStore;
+      rejectInvitation: Effect.fn("OrganizationService.rejectInvitation")(function* (
+        invitationId: string,
+        userEmail: string,
+      ) {
         const invitation = yield* getPendingInvitationFor(invitationId, userEmail);
         return yield* store.updateInvitation({ ...invitation, status: "rejected" });
       }),
 
-    cancelInvitation: (cancelerId, invitationId) =>
-      Effect.gen(function* () {
-        const store = yield* OrganizationStore;
-
+      cancelInvitation: Effect.fn("OrganizationService.cancelInvitation")(function* (
+        cancelerId: string,
+        invitationId: string,
+      ) {
         const invitation = yield* store.getInvitation(invitationId);
         if (!invitation) {
           return yield* Effect.fail(new OrganizationError({ message: "Invitation not found" }));
@@ -707,15 +712,15 @@ export const makeOrganizationService = (
         return yield* store.updateInvitation({ ...invitation, status: "canceled" });
       }),
 
-    listInvitations: (organizationId) =>
-      Effect.gen(function* () {
-        const store = yield* OrganizationStore;
+      listInvitations: Effect.fn("OrganizationService.listInvitations")(function* (
+        organizationId: string,
+      ) {
         return yield* store.listInvitationsByOrganization(organizationId);
       }),
 
-    listUserInvitations: (email) =>
-      Effect.gen(function* () {
-        const store = yield* OrganizationStore;
+      listUserInvitations: Effect.fn("OrganizationService.listUserInvitations")(function* (
+        email: string,
+      ) {
         const invitations = yield* store.listInvitationsByEmail(email);
         const now = Date.now();
         return invitations.filter(
@@ -723,12 +728,15 @@ export const makeOrganizationService = (
         );
       }),
 
-    addMember: (actorId, organizationId, userId, role) =>
-      Effect.gen(function* () {
+      addMember: Effect.fn("OrganizationService.addMember")(function* (
+        actorId: string,
+        organizationId: string,
+        userId: string,
+        role: string,
+      ) {
         yield* requireMemberPermission(actorId, organizationId, "member:create");
         yield* getOrganizationOrFail(organizationId);
 
-        const store = yield* OrganizationStore;
         const existing = yield* store.getMember(organizationId, userId);
         if (existing) {
           return yield* Effect.fail(
@@ -742,11 +750,13 @@ export const makeOrganizationService = (
         return yield* createMembership(organizationId, userId, role);
       }),
 
-    removeMember: (actorId, organizationId, memberUserId) =>
-      Effect.gen(function* () {
+      removeMember: Effect.fn("OrganizationService.removeMember")(function* (
+        actorId: string,
+        organizationId: string,
+        memberUserId: string,
+      ) {
         const actor = yield* requireMemberPermission(actorId, organizationId, "member:delete");
 
-        const store = yield* OrganizationStore;
         const target = yield* store.getMember(organizationId, memberUserId);
         if (!target) {
           return yield* Effect.fail(new OrganizationError({ message: "Member not found" }));
@@ -771,11 +781,14 @@ export const makeOrganizationService = (
         yield* store.deleteMember(target.id);
       }),
 
-    updateMemberRole: (actorId, organizationId, memberUserId, role) =>
-      Effect.gen(function* () {
+      updateMemberRole: Effect.fn("OrganizationService.updateMemberRole")(function* (
+        actorId: string,
+        organizationId: string,
+        memberUserId: string,
+        role: string,
+      ) {
         yield* requireMemberPermission(actorId, organizationId, "member:update");
 
-        const store = yield* OrganizationStore;
         const target = yield* store.getMember(organizationId, memberUserId);
         if (!target) {
           return yield* Effect.fail(new OrganizationError({ message: "Member not found" }));
@@ -795,14 +808,18 @@ export const makeOrganizationService = (
         return yield* store.updateMember({ ...target, role });
       }),
 
-    checkPermission: (userId, organizationId, permission) =>
-      Effect.gen(function* () {
-        const store = yield* OrganizationStore;
+      checkPermission: Effect.fn("OrganizationService.checkPermission")(function* (
+        userId: string,
+        organizationId: string,
+        permission: string,
+      ) {
         const member = yield* store.getMember(organizationId, userId);
         return member !== null && roleHasPermission(member.role, permission);
       }),
 
-    requirePermission: (userId, organizationId, permission) =>
-      requireMemberPermission(userId, organizationId, permission).pipe(Effect.asVoid),
-  }));
-};
+      requirePermission: Effect.fn("OrganizationService.requirePermission")(
+        (userId: string, organizationId: string, permission: string) =>
+          requireMemberPermission(userId, organizationId, permission).pipe(Effect.asVoid),
+      ),
+    };
+  });

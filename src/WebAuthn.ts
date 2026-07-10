@@ -252,8 +252,8 @@ export const makeWebAuthnService = (
     const challengeExpiresIn = config.challengeExpiresIn ?? 5 * 60 * 1000; // 5 minutes default
 
     return {
-      generateRegistrationChallenge: (user: WebAuthnUser) =>
-        Effect.gen(function* () {
+      generateRegistrationChallenge: Effect.fn("WebAuthnService.generateRegistrationChallenge")(
+        function* (user: WebAuthnUser) {
           // Generate random challenge (32 bytes = 256 bits)
           const challenge: Uint8Array = crypto.randomBytes(32);
           const expiresAt = Date.now() + challengeExpiresIn;
@@ -294,165 +294,168 @@ export const makeWebAuthnService = (
             excludeCredentials,
             authenticatorSelection,
           };
-        }),
+        },
+      ),
 
-      verifyRegistration: (challenge: Uint8Array, response: RegistrationResponse) =>
-        Effect.gen(function* () {
-          // Get and verify challenge
-          const storedChallenge = yield* challengeStore.get(challenge);
-          if (storedChallenge === null) {
-            return yield* new Errors.ChallengeNotFoundError({ message: "Challenge not found" });
-          }
+      verifyRegistration: Effect.fn("WebAuthnService.verifyRegistration")(
+        (challenge: Uint8Array, response: RegistrationResponse) =>
+          Effect.gen(function* () {
+            // Get and verify challenge
+            const storedChallenge = yield* challengeStore.get(challenge);
+            if (storedChallenge === null) {
+              return yield* new Errors.ChallengeNotFoundError({ message: "Challenge not found" });
+            }
 
-          if (Date.now() > storedChallenge.expiresAt) {
+            if (Date.now() > storedChallenge.expiresAt) {
+              yield* challengeStore.delete(challenge);
+              return yield* Effect.fail(
+                new Errors.ChallengeExpiredError({
+                  message: "Challenge has expired",
+                }),
+              );
+            }
+
+            // Parse client data JSON
+            let clientData: ClientData;
+            try {
+              clientData = parseClientDataJSON(response.clientDataJSON);
+            } catch (error) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "Failed to parse client data JSON",
+                  cause: error,
+                }),
+              );
+            }
+
+            // Verify challenge matches
+            if (!compareUint8Arrays(clientData.challenge, challenge)) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "Challenge mismatch",
+                }),
+              );
+            }
+
+            // Verify origin
+            const origins = Array.isArray(config.expectedOrigin)
+              ? config.expectedOrigin
+              : [config.expectedOrigin];
+
+            if (!origins.includes(clientData.origin)) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: `Invalid origin: ${clientData.origin}`,
+                }),
+              );
+            }
+
+            // Verify type
+            if (clientData.type !== ClientDataType.Create) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: `Invalid type: ${clientData.type}`,
+                }),
+              );
+            }
+
+            // Parse attestation object
+            let authenticatorData: AuthenticatorData;
+            try {
+              const parsed = parseAttestationObject(response.attestationObject);
+              authenticatorData = parsed.authenticatorData;
+            } catch (error) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "Failed to parse attestation object",
+                  cause: error,
+                }),
+              );
+            }
+
+            // Verify authenticator data
+            if (!authenticatorData.userPresent) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "User not present",
+                }),
+              );
+            }
+
+            // Verify relying party ID hash
+            if (!authenticatorData.verifyRelyingPartyIdHash(config.relyingPartyId)) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "Invalid relying party ID hash",
+                }),
+              );
+            }
+
+            // Extract credential
+            if (!authenticatorData.credential) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "No credential in authenticator data",
+                }),
+              );
+            }
+
+            // Verify algorithm — ES256, RS256, and EdDSA are supported.
+            const publicKey = authenticatorData.credential.publicKey;
+            const algorithm = publicKey.algorithm();
+
+            if (!(SUPPORTED_COSE_ALGORITHMS as readonly number[]).includes(algorithm)) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: `Unsupported algorithm: ${algorithm}. Supported: ES256 (-7), RS256 (-257), EdDSA (-8).`,
+                }),
+              );
+            }
+
+            // Encode credential ID as base64url for storage
+            const credentialId = base64UrlEncode(response.credentialId);
+
+            // Serialize public key for storage
+            const publicKeyBytes = serializePublicKey(publicKey, algorithm);
+
+            // Validate userId is present
+            if (!storedChallenge.userId) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "Challenge missing user ID",
+                }),
+              );
+            }
+
+            // Create credential object
+            const credential: WebAuthnCredential = {
+              id: credentialId,
+              userId: storedChallenge.userId,
+              publicKey: publicKeyBytes,
+              algorithm,
+              counter: authenticatorData.signatureCounter,
+              createdAt: Date.now(),
+            };
+
+            // Store credential
+            yield* credentialStore.create(credential);
+
+            // Delete used challenge
             yield* challengeStore.delete(challenge);
-            return yield* Effect.fail(
-              new Errors.ChallengeExpiredError({
-                message: "Challenge has expired",
-              }),
-            );
-          }
 
-          // Parse client data JSON
-          let clientData: ClientData;
-          try {
-            clientData = parseClientDataJSON(response.clientDataJSON);
-          } catch (error) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "Failed to parse client data JSON",
-                cause: error,
-              }),
-            );
-          }
+            return {
+              credential,
+              verified: authenticatorData.userVerified,
+            };
+          }).pipe(
+            Effect.withSpan("effect-auth.webauthn.register"),
+            Effect.tap(() => Obs.recordWebAuthnRegistration("success")),
+            Effect.tapError(() => Obs.recordWebAuthnRegistration("failure")),
+          ),
+      ),
 
-          // Verify challenge matches
-          if (!compareUint8Arrays(clientData.challenge, challenge)) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "Challenge mismatch",
-              }),
-            );
-          }
-
-          // Verify origin
-          const origins = Array.isArray(config.expectedOrigin)
-            ? config.expectedOrigin
-            : [config.expectedOrigin];
-
-          if (!origins.includes(clientData.origin)) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: `Invalid origin: ${clientData.origin}`,
-              }),
-            );
-          }
-
-          // Verify type
-          if (clientData.type !== ClientDataType.Create) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: `Invalid type: ${clientData.type}`,
-              }),
-            );
-          }
-
-          // Parse attestation object
-          let authenticatorData: AuthenticatorData;
-          try {
-            const parsed = parseAttestationObject(response.attestationObject);
-            authenticatorData = parsed.authenticatorData;
-          } catch (error) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "Failed to parse attestation object",
-                cause: error,
-              }),
-            );
-          }
-
-          // Verify authenticator data
-          if (!authenticatorData.userPresent) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "User not present",
-              }),
-            );
-          }
-
-          // Verify relying party ID hash
-          if (!authenticatorData.verifyRelyingPartyIdHash(config.relyingPartyId)) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "Invalid relying party ID hash",
-              }),
-            );
-          }
-
-          // Extract credential
-          if (!authenticatorData.credential) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "No credential in authenticator data",
-              }),
-            );
-          }
-
-          // Verify algorithm — ES256, RS256, and EdDSA are supported.
-          const publicKey = authenticatorData.credential.publicKey;
-          const algorithm = publicKey.algorithm();
-
-          if (!(SUPPORTED_COSE_ALGORITHMS as readonly number[]).includes(algorithm)) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: `Unsupported algorithm: ${algorithm}. Supported: ES256 (-7), RS256 (-257), EdDSA (-8).`,
-              }),
-            );
-          }
-
-          // Encode credential ID as base64url for storage
-          const credentialId = base64UrlEncode(response.credentialId);
-
-          // Serialize public key for storage
-          const publicKeyBytes = serializePublicKey(publicKey, algorithm);
-
-          // Validate userId is present
-          if (!storedChallenge.userId) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "Challenge missing user ID",
-              }),
-            );
-          }
-
-          // Create credential object
-          const credential: WebAuthnCredential = {
-            id: credentialId,
-            userId: storedChallenge.userId,
-            publicKey: publicKeyBytes,
-            algorithm,
-            counter: authenticatorData.signatureCounter,
-            createdAt: Date.now(),
-          };
-
-          // Store credential
-          yield* credentialStore.create(credential);
-
-          // Delete used challenge
-          yield* challengeStore.delete(challenge);
-
-          return {
-            credential,
-            verified: authenticatorData.userVerified,
-          };
-        }).pipe(
-          Effect.withSpan("effect-auth.webauthn.register"),
-          Effect.tap(() => Obs.recordWebAuthnRegistration("success")),
-          Effect.tapError(() => Obs.recordWebAuthnRegistration("failure")),
-        ),
-
-      generateAuthenticationChallenge: (userId?: string) =>
-        Effect.gen(function* () {
+      generateAuthenticationChallenge: Effect.fn("WebAuthnService.generateAuthenticationChallenge")(
+        function* (userId?: string) {
           const challenge: Uint8Array = crypto.randomBytes(32);
           const expiresAt = Date.now() + challengeExpiresIn;
 
@@ -465,210 +468,220 @@ export const makeWebAuthnService = (
           yield* challengeStore.create(challengeData);
 
           return { challenge, expiresAt };
-        }),
+        },
+      ),
 
-      verifyAuthentication: (challenge: Uint8Array, response: AuthenticationResponse) =>
-        Effect.gen(function* () {
-          // Get and verify challenge
-          const storedChallenge = yield* challengeStore.get(challenge);
-          if (storedChallenge === null) {
-            return yield* Effect.fail(
-              new Errors.ChallengeNotFoundError({ message: "Challenge not found" }),
-            );
-          }
-
-          if (Date.now() > storedChallenge.expiresAt) {
-            yield* challengeStore.delete(challenge);
-            return yield* Effect.fail(
-              new Errors.ChallengeExpiredError({
-                message: "Challenge has expired",
-              }),
-            );
-          }
-
-          // Get credential — on the usernameless path the credentialId is the
-          // lookup key; on the bound path we use the same route for consistency.
-          const credentialId = base64UrlEncode(response.credentialId);
-          const credential = yield* credentialStore.get(credentialId);
-          if (credential === null) {
-            return yield* Effect.fail(
-              new Errors.CredentialNotFoundError({
-                message: "Credential not found",
-                credentialId,
-              }),
-            );
-          }
-
-          // Bound challenge: verify the credential belongs to the expected user.
-          if (
-            storedChallenge.userId !== undefined &&
-            credential.userId !== storedChallenge.userId
-          ) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "Credential does not belong to the expected user",
-              }),
-            );
-          }
-
-          // Parse client data JSON
-          let clientData: ClientData;
-          try {
-            clientData = parseClientDataJSON(response.clientDataJSON);
-          } catch (error) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "Failed to parse client data JSON",
-                cause: error,
-              }),
-            );
-          }
-
-          // Verify challenge matches
-          if (!compareUint8Arrays(clientData.challenge, challenge)) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "Challenge mismatch",
-              }),
-            );
-          }
-
-          // Verify origin
-          const origins = Array.isArray(config.expectedOrigin)
-            ? config.expectedOrigin
-            : [config.expectedOrigin];
-
-          if (!origins.includes(clientData.origin)) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: `Invalid origin: ${clientData.origin}`,
-              }),
-            );
-          }
-
-          // Verify type
-          if (clientData.type !== ClientDataType.Get) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: `Invalid type: ${clientData.type}`,
-              }),
-            );
-          }
-
-          // Parse authenticator data
-          let authenticatorData: AuthenticatorData;
-          try {
-            authenticatorData = parseAuthenticatorData(response.authenticatorData);
-          } catch (error) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "Failed to parse authenticator data",
-                cause: error,
-              }),
-            );
-          }
-
-          // Verify user presence
-          if (!authenticatorData.userPresent) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "User not present",
-              }),
-            );
-          }
-
-          // Verify relying party ID hash
-          if (!authenticatorData.verifyRelyingPartyIdHash(config.relyingPartyId)) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "Invalid relying party ID hash",
-              }),
-            );
-          }
-
-          // Verify counter (anti-replay protection)
-          // If both counters are 0, the authenticator does not support counter-based replay protection
-          // and the counter check must be skipped per WebAuthn specification.
-          if (!(authenticatorData.signatureCounter === 0 && credential.counter === 0)) {
-            if (authenticatorData.signatureCounter <= credential.counter) {
+      verifyAuthentication: Effect.fn("WebAuthnService.verifyAuthentication")(
+        (challenge: Uint8Array, response: AuthenticationResponse) =>
+          Effect.gen(function* () {
+            // Get and verify challenge
+            const storedChallenge = yield* challengeStore.get(challenge);
+            if (storedChallenge === null) {
               return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: "Invalid counter value (possible cloned authenticator)",
+                new Errors.ChallengeNotFoundError({ message: "Challenge not found" }),
+              );
+            }
+
+            if (Date.now() > storedChallenge.expiresAt) {
+              yield* challengeStore.delete(challenge);
+              return yield* Effect.fail(
+                new Errors.ChallengeExpiredError({
+                  message: "Challenge has expired",
                 }),
               );
             }
-          }
 
-          // Verify signature
-          const verified = yield* verifySignature(
-            credential.publicKey,
-            credential.algorithm,
-            response.authenticatorData,
-            response.clientDataJSON,
-            response.signature,
+            // Get credential — on the usernameless path the credentialId is the
+            // lookup key; on the bound path we use the same route for consistency.
+            const credentialId = base64UrlEncode(response.credentialId);
+            const credential = yield* credentialStore.get(credentialId);
+            if (credential === null) {
+              return yield* Effect.fail(
+                new Errors.CredentialNotFoundError({
+                  message: "Credential not found",
+                  credentialId,
+                }),
+              );
+            }
+
+            // Bound challenge: verify the credential belongs to the expected user.
+            if (
+              storedChallenge.userId !== undefined &&
+              credential.userId !== storedChallenge.userId
+            ) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "Credential does not belong to the expected user",
+                }),
+              );
+            }
+
+            // Parse client data JSON
+            let clientData: ClientData;
+            try {
+              clientData = parseClientDataJSON(response.clientDataJSON);
+            } catch (error) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "Failed to parse client data JSON",
+                  cause: error,
+                }),
+              );
+            }
+
+            // Verify challenge matches
+            if (!compareUint8Arrays(clientData.challenge, challenge)) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "Challenge mismatch",
+                }),
+              );
+            }
+
+            // Verify origin
+            const origins = Array.isArray(config.expectedOrigin)
+              ? config.expectedOrigin
+              : [config.expectedOrigin];
+
+            if (!origins.includes(clientData.origin)) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: `Invalid origin: ${clientData.origin}`,
+                }),
+              );
+            }
+
+            // Verify type
+            if (clientData.type !== ClientDataType.Get) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: `Invalid type: ${clientData.type}`,
+                }),
+              );
+            }
+
+            // Parse authenticator data
+            let authenticatorData: AuthenticatorData;
+            try {
+              authenticatorData = parseAuthenticatorData(response.authenticatorData);
+            } catch (error) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "Failed to parse authenticator data",
+                  cause: error,
+                }),
+              );
+            }
+
+            // Verify user presence
+            if (!authenticatorData.userPresent) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "User not present",
+                }),
+              );
+            }
+
+            // Verify relying party ID hash
+            if (!authenticatorData.verifyRelyingPartyIdHash(config.relyingPartyId)) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "Invalid relying party ID hash",
+                }),
+              );
+            }
+
+            // Verify counter (anti-replay protection)
+            // If both counters are 0, the authenticator does not support counter-based replay protection
+            // and the counter check must be skipped per WebAuthn specification.
+            if (!(authenticatorData.signatureCounter === 0 && credential.counter === 0)) {
+              if (authenticatorData.signatureCounter <= credential.counter) {
+                return yield* Effect.fail(
+                  new Errors.WebAuthnVerificationError({
+                    message: "Invalid counter value (possible cloned authenticator)",
+                  }),
+                );
+              }
+            }
+
+            // Verify signature
+            const verified = yield* verifySignature(
+              credential.publicKey,
+              credential.algorithm,
+              response.authenticatorData,
+              response.clientDataJSON,
+              response.signature,
+            );
+
+            if (!verified) {
+              return yield* Effect.fail(
+                new Errors.WebAuthnVerificationError({
+                  message: "Invalid signature",
+                }),
+              );
+            }
+
+            // Update credential counter
+            const updatedCredential = {
+              ...credential,
+              counter: authenticatorData.signatureCounter,
+            };
+            yield* credentialStore.update(updatedCredential);
+
+            // Delete used challenge
+            yield* challengeStore.delete(challenge);
+
+            return {
+              credential: updatedCredential,
+              newCounter: authenticatorData.signatureCounter,
+            };
+          }).pipe(
+            Effect.withSpan("effect-auth.webauthn.authenticate"),
+            Effect.tap(() => Obs.recordWebAuthnAuthentication("success")),
+            Effect.tapError(() => Obs.recordWebAuthnAuthentication("failure")),
+          ),
+      ),
+
+      listCredentials: Effect.fn("WebAuthnService.listCredentials")((userId: string) =>
+        credentialStore.listByUserId(userId),
+      ),
+
+      deleteCredential: Effect.fn("WebAuthnService.deleteCredential")(function* (
+        userId: string,
+        credentialId: string,
+      ) {
+        const credential = yield* credentialStore.get(credentialId);
+        if (credential === null) {
+          return yield* Effect.fail(
+            new Errors.CredentialNotFoundError({ message: "Credential not found", credentialId }),
           );
+        }
+        if (credential.userId !== userId) {
+          return yield* Effect.fail(
+            new Errors.AuthError({ message: "Not authorized to delete this credential" }),
+          );
+        }
+        yield* credentialStore.delete(credentialId);
+      }),
 
-          if (!verified) {
-            return yield* Effect.fail(
-              new Errors.WebAuthnVerificationError({
-                message: "Invalid signature",
-              }),
-            );
-          }
-
-          // Update credential counter
-          const updatedCredential = {
-            ...credential,
-            counter: authenticatorData.signatureCounter,
-          };
-          yield* credentialStore.update(updatedCredential);
-
-          // Delete used challenge
-          yield* challengeStore.delete(challenge);
-
-          return {
-            credential: updatedCredential,
-            newCounter: authenticatorData.signatureCounter,
-          };
-        }).pipe(
-          Effect.withSpan("effect-auth.webauthn.authenticate"),
-          Effect.tap(() => Obs.recordWebAuthnAuthentication("success")),
-          Effect.tapError(() => Obs.recordWebAuthnAuthentication("failure")),
-        ),
-
-      listCredentials: (userId: string) => credentialStore.listByUserId(userId),
-
-      deleteCredential: (userId: string, credentialId: string) =>
-        Effect.gen(function* () {
-          const credential = yield* credentialStore.get(credentialId);
-          if (credential === null) {
-            return yield* Effect.fail(
-              new Errors.CredentialNotFoundError({ message: "Credential not found", credentialId }),
-            );
-          }
-          if (credential.userId !== userId) {
-            return yield* Effect.fail(
-              new Errors.AuthError({ message: "Not authorized to delete this credential" }),
-            );
-          }
-          yield* credentialStore.delete(credentialId);
-        }),
-
-      renameCredential: (userId: string, credentialId: string, name: string) =>
-        Effect.gen(function* () {
-          const credential = yield* credentialStore.get(credentialId);
-          if (credential === null) {
-            return yield* Effect.fail(
-              new Errors.CredentialNotFoundError({ message: "Credential not found", credentialId }),
-            );
-          }
-          if (credential.userId !== userId) {
-            return yield* Effect.fail(
-              new Errors.AuthError({ message: "Not authorized to rename this credential" }),
-            );
-          }
-          return yield* credentialStore.update({ ...credential, name });
-        }),
+      renameCredential: Effect.fn("WebAuthnService.renameCredential")(function* (
+        userId: string,
+        credentialId: string,
+        name: string,
+      ) {
+        const credential = yield* credentialStore.get(credentialId);
+        if (credential === null) {
+          return yield* Effect.fail(
+            new Errors.CredentialNotFoundError({ message: "Credential not found", credentialId }),
+          );
+        }
+        if (credential.userId !== userId) {
+          return yield* Effect.fail(
+            new Errors.AuthError({ message: "Not authorized to rename this credential" }),
+          );
+        }
+        return yield* credentialStore.update({ ...credential, name });
+      }),
     };
   });
 

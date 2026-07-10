@@ -28,29 +28,27 @@ export class UserService extends Context.Service<
   {
     readonly getUser: (
       userId: string,
-    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
 
     readonly getUserByEmail: (
       email: string,
-    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
 
     readonly updateUserAttributes: (
       userId: string,
       attributes: Record<string, unknown>,
-    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
 
     readonly updateUser: (
       userId: string,
       updates: UpdateUserInput,
-    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
 
     readonly markEmailVerified: (
       userId: string,
-    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError, UserServiceStore>;
+    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
 
-    readonly deleteUser: (
-      userId: string,
-    ) => Effect.Effect<void, Errors.AuthError, UserServiceStore>;
+    readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/UserService") {
   /**
@@ -70,17 +68,18 @@ const getUserOrFail = (
       : Effect.succeed(user),
   );
 
-export const makeUserService = (): Effect.Effect<typeof UserService.Service, never> =>
-  Effect.sync((): typeof UserService.Service => ({
-    getUser: (userId: string) =>
-      Effect.gen(function* () {
-        const store = yield* UserServiceStore;
-        return yield* getUserOrFail(store, userId);
-      }),
+export const makeUserService = (): Effect.Effect<
+  typeof UserService.Service,
+  never,
+  UserServiceStore
+> =>
+  Effect.gen(function* () {
+    const store = yield* UserServiceStore;
 
-    getUserByEmail: (email: string) =>
-      Effect.gen(function* () {
-        const store = yield* UserServiceStore;
+    return {
+      getUser: Effect.fn("UserService.getUser")((userId: string) => getUserOrFail(store, userId)),
+
+      getUserByEmail: Effect.fn("UserService.getUserByEmail")(function* (email: string) {
         const normalizedEmail = normalizeEmail(email);
 
         if (!normalizedEmail) {
@@ -105,9 +104,10 @@ export const makeUserService = (): Effect.Effect<typeof UserService.Service, nev
         return user;
       }),
 
-    updateUserAttributes: (userId: string, attributes: Record<string, unknown>) =>
-      Effect.gen(function* () {
-        const store = yield* UserServiceStore;
+      updateUserAttributes: Effect.fn("UserService.updateUserAttributes")(function* (
+        userId: string,
+        attributes: Record<string, unknown>,
+      ) {
         const existing = yield* getUserOrFail(store, userId);
 
         const updated: Types.User = {
@@ -122,9 +122,10 @@ export const makeUserService = (): Effect.Effect<typeof UserService.Service, nev
         return yield* store.update(updated);
       }),
 
-    updateUser: (userId: string, updates: UpdateUserInput) =>
-      Effect.gen(function* () {
-        const store = yield* UserServiceStore;
+      updateUser: Effect.fn("UserService.updateUser")(function* (
+        userId: string,
+        updates: UpdateUserInput,
+      ) {
         const existing = yield* getUserOrFail(store, userId);
 
         const updated: Types.User = {
@@ -137,9 +138,7 @@ export const makeUserService = (): Effect.Effect<typeof UserService.Service, nev
         return yield* store.update(updated);
       }),
 
-    markEmailVerified: (userId: string) =>
-      Effect.gen(function* () {
-        const store = yield* UserServiceStore;
+      markEmailVerified: Effect.fn("UserService.markEmailVerified")(function* (userId: string) {
         const existing = yield* getUserOrFail(store, userId);
 
         const updated: Types.User = {
@@ -151,9 +150,6 @@ export const makeUserService = (): Effect.Effect<typeof UserService.Service, nev
         return yield* store.update(updated);
       }),
 
-    deleteUser: (userId: string) =>
-      Effect.gen(function* () {
-        const store = yield* UserServiceStore;
-        yield* store.delete(userId);
-      }),
-  }));
+      deleteUser: Effect.fn("UserService.deleteUser")((userId: string) => store.delete(userId)),
+    };
+  });

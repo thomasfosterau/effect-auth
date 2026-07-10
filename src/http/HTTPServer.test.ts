@@ -255,19 +255,29 @@ const makeFixture = (): Fixture => {
     Hooks.Default,
   );
 
-  const services: Layer.Layer<AuthServices> = Layer.mergeAll(
+  const sessionServiceLayer = SessionService.layer(SESSION_CONFIG).pipe(Layer.provide(storeLayer));
+
+  // Stage 1: services needing only raw stores + Hooks + SessionService.
+  const stage1 = Layer.mergeAll(
     storeLayer,
-    SessionService.layer(SESSION_CONFIG).pipe(Layer.provide(storeLayer)),
-    AuthLifecycleService.layer(),
-    EmailPasswordService.layer(),
+    sessionServiceLayer,
+    UserService.layer().pipe(Layer.provide(storeLayer)),
     EmailVerificationService.layer({
       sendEmail: (_to, token) => Effect.sync(() => void sentVerificationTokens.push(token)),
-    }),
-    PasswordResetService.layer({
-      sendResetPassword: (_email, token) => Effect.sync(() => void sentResetTokens.push(token)),
-    }),
-    UserService.layer(),
+    }).pipe(Layer.provide(storeLayer)),
   );
+
+  // Stage 2: services needing stage-1 services (e.g. SessionService).
+  const emailPasswordServiceLayer = EmailPasswordService.layer().pipe(Layer.provide(stage1));
+  const passwordResetServiceLayer = PasswordResetService.layer({
+    sendResetPassword: (_email, token) => Effect.sync(() => void sentResetTokens.push(token)),
+  }).pipe(Layer.provide(stage1));
+  const stage2 = Layer.mergeAll(stage1, emailPasswordServiceLayer, passwordResetServiceLayer);
+
+  // Stage 3: AuthLifecycleService needs EmailPasswordService + others from stage 2.
+  const authLifecycleServiceLayer = AuthLifecycleService.layer().pipe(Layer.provide(stage2));
+
+  const services: Layer.Layer<AuthServices> = Layer.mergeAll(stage2, authLifecycleServiceLayer);
 
   // --- optional feature stores -----------------------------------------------
   const magicLinks = new Map<string, MagicLinkToken>();
@@ -338,12 +348,6 @@ const makeFixture = (): Fixture => {
     get: (token) => Effect.sync(() => pendingTwoFactors.get(token) ?? null),
     delete: (token) => Effect.sync(() => void pendingTwoFactors.delete(token)),
   };
-
-  const twoFactorLayer = Layer.mergeAll(
-    TwoFactorService.layer({ issuer: "effect-auth-test" }),
-    Layer.succeed(TwoFactorStore)(twoFactorStore),
-    Layer.succeed(PendingTwoFactorStore)(pendingTwoFactorStore),
-  );
 
   const accountTokens = new Map<string, AccountToken>();
   const accountStore: typeof AccountManagementStore.Service = {
@@ -475,47 +479,60 @@ const makeFixture = (): Fixture => {
       }),
   };
 
-  const featureServices: Layer.Layer<AuthServices> = Layer.mergeAll(
+  // Every optional-feature store, merged with the base `services` layer:
+  // enough to satisfy any feature service's construction-time dependencies
+  // (their own store(s) plus SessionService/EmailPasswordStore/PasswordHasher/
+  // UserStore/Hooks already provided by `services`).
+  const featureBase = Layer.mergeAll(
     services,
-    AnonymousService.layer(),
     Layer.succeed(AnonymousUserStore)(anonymousUserStore),
-    // UsernameService.layer requires PasswordHasher at construction time (decoy hash).
-    UsernameService.layer().pipe(Layer.provide(Layer.succeed(PasswordHasher)(hasher))),
     Layer.succeed(UsernameStore)(usernameStore),
+    Layer.succeed(DeviceAuthorizationStore)(deviceStore),
+    Layer.succeed(PhoneOTPStore)(phoneOTPStore),
+    Layer.succeed(PhoneOTPUserStore)(phoneOTPUserStore),
+    Layer.succeed(AccountManagementStore)(accountStore),
+    Layer.succeed(MagicLinkStore)(magicLinkStore),
+    Layer.succeed(MagicLinkUserStore)(magicLinkUserStore),
+    Layer.succeed(EmailOTPStore)(emailOTPStore),
+    Layer.succeed(EmailOTPUserStore)(emailOTPUserStore),
+    Layer.succeed(TwoFactorStore)(twoFactorStore),
+    Layer.succeed(PendingTwoFactorStore)(pendingTwoFactorStore),
+  );
+
+  const twoFactorServiceLayer = TwoFactorService.layer({ issuer: "effect-auth-test" }).pipe(
+    Layer.provide(featureBase),
+  );
+
+  const featureServices: Layer.Layer<AuthServices> = Layer.mergeAll(
+    featureBase,
+    AnonymousService.layer().pipe(Layer.provide(featureBase)),
+    UsernameService.layer().pipe(Layer.provide(featureBase)),
     DeviceAuthorizationService.layer({
       verificationUri: "https://example.com/device",
       // interval 0 so back-to-back polls in a single test don't hit slow_down.
       interval: 0,
-    }),
-    Layer.succeed(DeviceAuthorizationStore)(deviceStore),
+    }).pipe(Layer.provide(featureBase)),
     PhoneOTPService.layer({
       sendOTP: (phoneNumber, otp, purpose) =>
         Effect.sync(() => void sentPhoneOTPs.push({ phoneNumber, otp, purpose })),
-    }),
-    Layer.succeed(PhoneOTPStore)(phoneOTPStore),
-    Layer.succeed(PhoneOTPUserStore)(phoneOTPUserStore),
+    }).pipe(Layer.provide(featureBase)),
     AccountManagementService.layer({
       sendChangeEmailVerification: ({ newEmail, token }) =>
         Effect.sync(() => void sentChangeEmail.push({ newEmail, token })),
       sendDeleteAccountVerification: ({ token }) =>
         Effect.sync(() => void sentDeleteTokens.push(token)),
       beforeDelete: (user) => Effect.sync(() => void beforeDeleteCalls.push(user.id)),
-    }),
-    Layer.succeed(AccountManagementStore)(accountStore),
+    }).pipe(Layer.provide(featureBase)),
     MagicLinkService.layer({
       sendMagicLink: (_email, token) => Effect.sync(() => void sentMagicLinkTokens.push(token)),
-    }),
-    Layer.succeed(MagicLinkStore)(magicLinkStore),
-    Layer.succeed(MagicLinkUserStore)(magicLinkUserStore),
+    }).pipe(Layer.provide(featureBase)),
     EmailOTPService.layer({
       sendVerificationOTP: (email, otp, purpose) =>
         Effect.sync(() => void sentOTPs.push({ email, otp, purpose })),
-    }),
-    Layer.succeed(EmailOTPStore)(emailOTPStore),
-    Layer.succeed(EmailOTPUserStore)(emailOTPUserStore),
-    twoFactorLayer,
+    }).pipe(Layer.provide(featureBase)),
+    twoFactorServiceLayer,
     // The gate makes password sign-in return `secondFactor` for enrolled users.
-    TwoFactorGateLayer.pipe(Layer.provide(twoFactorLayer)),
+    TwoFactorGateLayer.pipe(Layer.provide(twoFactorServiceLayer)),
   );
 
   return {

@@ -29,7 +29,7 @@
 import * as crypto from "node:crypto";
 import { Context, Data, Effect, Layer } from "effect";
 import type { AuthError } from "./Errors.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
+import type { HookError } from "./Hooks.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { OAuthUserStore, generateNonce, verifyIdToken } from "./oauth/OAuth.ts";
 import type * as Types from "./Types.ts";
@@ -111,11 +111,7 @@ export class GoogleOneTapService extends Context.Service<
      * Google hashes it (SHA-256 hex) before embedding it in the id_token, but
      * you always work with the **unhashed** value.
      */
-    readonly createNonce: () => Effect.Effect<
-      string,
-      GoogleOneTapError | AuthError,
-      GoogleOneTapNonceStore
-    >;
+    readonly createNonce: () => Effect.Effect<string, GoogleOneTapError | AuthError>;
 
     /**
      * Verify a One Tap `credential` (id_token) and sign the user in:
@@ -128,11 +124,7 @@ export class GoogleOneTapService extends Context.Service<
     readonly signIn: (
       credential: string,
       nonce: string,
-    ) => Effect.Effect<
-      GoogleOneTapSignInResult,
-      GoogleOneTapError | AuthError | HookError,
-      OAuthUserStore | SessionService | Hooks | GoogleOneTapNonceStore
-    >;
+    ) => Effect.Effect<GoogleOneTapSignInResult, GoogleOneTapError | AuthError | HookError>;
   }
 >()("@effect-auth/GoogleOneTapService") {
   /**
@@ -155,15 +147,22 @@ const hashNonce = (nonce: string): string =>
 
 export const makeGoogleOneTapService = (
   config: GoogleOneTapConfig,
-): Effect.Effect<typeof GoogleOneTapService.Service, never> => {
-  const jwksEndpoint = config.jwksEndpoint ?? GOOGLE_JWKS_ENDPOINT;
-  const issuers = config.issuers ?? GOOGLE_ISSUERS;
-  const nonceTtlMs = config.nonceTtlMs ?? 600_000;
+): Effect.Effect<
+  typeof GoogleOneTapService.Service,
+  never,
+  GoogleOneTapNonceStore | OAuthUserStore | SessionService
+> =>
+  Effect.gen(function* () {
+    const jwksEndpoint = config.jwksEndpoint ?? GOOGLE_JWKS_ENDPOINT;
+    const issuers = config.issuers ?? GOOGLE_ISSUERS;
+    const nonceTtlMs = config.nonceTtlMs ?? 600_000;
 
-  return Effect.succeed({
-    createNonce: () =>
-      Effect.gen(function* () {
-        const nonceStore = yield* GoogleOneTapNonceStore;
+    const nonceStore = yield* GoogleOneTapNonceStore;
+    const userStore = yield* OAuthUserStore;
+    const sessionManager = yield* SessionService;
+
+    return {
+      createNonce: Effect.fn("GoogleOneTapService.createNonce")(function* () {
         const nonce = yield* generateNonce();
         yield* nonceStore
           .create(nonce, Date.now() + nonceTtlMs)
@@ -171,12 +170,10 @@ export const makeGoogleOneTapService = (
         return nonce;
       }),
 
-    signIn: (credential, nonce) =>
-      Effect.gen(function* () {
-        const nonceStore = yield* GoogleOneTapNonceStore;
-        const userStore = yield* OAuthUserStore;
-        const sessionManager = yield* SessionService;
-
+      signIn: Effect.fn("GoogleOneTapService.signIn")(function* (
+        credential: string,
+        nonce: string,
+      ) {
         // --- Nonce lifecycle: verify present, unexpired, then consume --------
         const entry = yield* nonceStore
           .get(nonce)
@@ -228,5 +225,5 @@ export const makeGoogleOneTapService = (
         const session = yield* sessionManager.createSession(user.id);
         return { user, session, isNewUser, claims };
       }),
-  } satisfies typeof GoogleOneTapService.Service);
-};
+    };
+  });

@@ -15,44 +15,45 @@ const generateSessionId = (): string => crypto.randomBytes(20).toString("hex");
  */
 export const make = (
   config: Types.SessionConfig,
-): Effect.Effect<typeof SessionService.Service, never, SessionStore | UserStore> =>
+): Effect.Effect<typeof SessionService.Service, never, SessionStore | UserStore | Hooks> =>
   Effect.gen(function* () {
     const sessionStore = yield* SessionStore;
     const userStore = yield* UserStore;
+    const hooks = yield* Hooks;
 
     return {
-      createSession: (rawUserId: string, rawAttributes: Record<string, unknown> = {}) =>
+      createSession: Effect.fn("SessionService.createSession")(
+        (rawUserId: string, rawAttributes: Record<string, unknown> = {}) =>
+          Effect.gen(function* () {
+            const args = yield* hooks.beforeCreateSession({
+              userId: rawUserId,
+              attributes: rawAttributes,
+            });
+
+            const rawToken = generateSessionId();
+            const now = new Date();
+            const expiresAt = new Date(now.getTime() + config.sessionExpiresIn.activePeriod);
+
+            const session: Types.Session = {
+              id: hashToken(rawToken), // store only the hash; raw token goes to the cookie
+              userId: args.userId,
+              expiresAt,
+              createdAt: now,
+              lastActivityAt: now,
+              attributes: args.attributes ?? {},
+            };
+
+            yield* sessionStore.create(session);
+            // Return the raw token as session.id so the HTTP layer can set it as the cookie value.
+            return yield* hooks.afterCreateSession({ ...session, id: rawToken });
+          }).pipe(
+            Effect.withSpan("effect-auth.create-session"),
+            Effect.tap(() => Obs.recordSessionCreated()),
+          ),
+      ),
+
+      validateSession: Effect.fn("SessionService.validateSession")((rawSessionId: string) =>
         Effect.gen(function* () {
-          const hooks = yield* Hooks;
-          const args = yield* hooks.beforeCreateSession({
-            userId: rawUserId,
-            attributes: rawAttributes,
-          });
-
-          const rawToken = generateSessionId();
-          const now = new Date();
-          const expiresAt = new Date(now.getTime() + config.sessionExpiresIn.activePeriod);
-
-          const session: Types.Session = {
-            id: hashToken(rawToken), // store only the hash; raw token goes to the cookie
-            userId: args.userId,
-            expiresAt,
-            createdAt: now,
-            lastActivityAt: now,
-            attributes: args.attributes ?? {},
-          };
-
-          yield* sessionStore.create(session);
-          // Return the raw token as session.id so the HTTP layer can set it as the cookie value.
-          return yield* hooks.afterCreateSession({ ...session, id: rawToken });
-        }).pipe(
-          Effect.withSpan("effect-auth.create-session"),
-          Effect.tap(() => Obs.recordSessionCreated()),
-        ),
-
-      validateSession: (rawSessionId) =>
-        Effect.gen(function* () {
-          const hooks = yield* Hooks;
           const { sessionId: rawToken } = yield* hooks.beforeValidateSession({
             sessionId: rawSessionId,
           });
@@ -151,10 +152,10 @@ export const make = (
                 : Effect.void,
           ),
         ),
+      ),
 
-      invalidateSession: (rawSessionId) =>
+      invalidateSession: Effect.fn("SessionService.invalidateSession")((rawSessionId: string) =>
         Effect.gen(function* () {
-          const hooks = yield* Hooks;
           const { sessionId: rawToken } = yield* hooks.beforeSignOut({ sessionId: rawSessionId });
           yield* sessionStore.delete(hashToken(rawToken));
           yield* hooks.afterSignOut({ sessionId: rawToken });
@@ -162,46 +163,52 @@ export const make = (
           Effect.withSpan("effect-auth.sign-out"),
           Effect.tap(() => Obs.recordSessionInvalidated()),
         ),
+      ),
 
-      invalidateUserSessions: (userId) => sessionStore.deleteByUserId(userId),
+      invalidateUserSessions: Effect.fn("SessionService.invalidateUserSessions")((userId: string) =>
+        sessionStore.deleteByUserId(userId),
+      ),
 
-      listSessions: (userId) =>
-        Effect.gen(function* () {
-          const sessions = yield* sessionStore.listByUserId(userId);
-          const now = Date.now();
-          return sessions.filter((session) => session.expiresAt.getTime() >= now);
-        }),
+      listSessions: Effect.fn("SessionService.listSessions")(function* (userId: string) {
+        const sessions = yield* sessionStore.listByUserId(userId);
+        const now = Date.now();
+        return sessions.filter((session) => session.expiresAt.getTime() >= now);
+      }),
 
-      revokeOtherSessions: (userId, currentSessionId) =>
-        Effect.gen(function* () {
-          const currentHash = hashToken(currentSessionId);
-          const sessions = yield* sessionStore.listByUserId(userId);
-          yield* Effect.forEach(
-            // session.id values from the store are hashes; compare against hashed current token
-            sessions.filter((session) => session.id !== currentHash),
-            (session) => sessionStore.delete(session.id),
-            { discard: true },
-          );
-        }),
+      revokeOtherSessions: Effect.fn("SessionService.revokeOtherSessions")(function* (
+        userId: string,
+        currentSessionId: string,
+      ) {
+        const currentHash = hashToken(currentSessionId);
+        const sessions = yield* sessionStore.listByUserId(userId);
+        yield* Effect.forEach(
+          // session.id values from the store are hashes; compare against hashed current token
+          sessions.filter((session) => session.id !== currentHash),
+          (session) => sessionStore.delete(session.id),
+          { discard: true },
+        );
+      }),
 
-      setSessionAttributes: (rawSessionId, attributes) =>
-        Effect.gen(function* () {
-          const tokenHash = hashToken(rawSessionId);
-          const session = yield* sessionStore.get(tokenHash);
-          if (session === null) {
-            return yield* new Errors.SessionNotFoundError({
-              message: "Session not found",
-              sessionId: tokenHash,
-            });
-          }
-          const updated: Types.Session = {
-            ...session,
-            attributes: { ...session.attributes, ...attributes },
-          };
-          const result = yield* sessionStore.update(updated);
-          // Return raw token as id, matching the pattern from createSession/validateSession.
-          return { ...result, id: rawSessionId };
-        }),
+      setSessionAttributes: Effect.fn("SessionService.setSessionAttributes")(function* (
+        rawSessionId: string,
+        attributes: Record<string, unknown>,
+      ) {
+        const tokenHash = hashToken(rawSessionId);
+        const session = yield* sessionStore.get(tokenHash);
+        if (session === null) {
+          return yield* new Errors.SessionNotFoundError({
+            message: "Session not found",
+            sessionId: tokenHash,
+          });
+        }
+        const updated: Types.Session = {
+          ...session,
+          attributes: { ...session.attributes, ...attributes },
+        };
+        const result = yield* sessionStore.update(updated);
+        // Return raw token as id, matching the pattern from createSession/validateSession.
+        return { ...result, id: rawSessionId };
+      }),
     };
   });
 
@@ -219,7 +226,7 @@ export class SessionService extends Context.Service<
     readonly createSession: (
       userId: string,
       attributes?: Record<string, unknown>,
-    ) => Effect.Effect<Types.Session, Errors.AuthError | HookError, Hooks>;
+    ) => Effect.Effect<Types.Session, Errors.AuthError | HookError>;
 
     /**
      * Validate a session and return it with the user
@@ -231,8 +238,7 @@ export class SessionService extends Context.Service<
       | Errors.SessionNotFoundError
       | Errors.SessionExpiredError
       | Errors.UserNotFoundError
-      | HookError,
-      Hooks
+      | HookError
     >;
 
     /**
@@ -240,7 +246,7 @@ export class SessionService extends Context.Service<
      */
     readonly invalidateSession: (
       sessionId: string,
-    ) => Effect.Effect<void, Errors.AuthError | HookError, Hooks>;
+    ) => Effect.Effect<void, Errors.AuthError | HookError>;
 
     /**
      * Invalidate all sessions for a user

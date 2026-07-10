@@ -190,7 +190,7 @@ export class APIKeyService extends Context.Service<
     readonly create: (
       userId: string,
       options?: APIKeyCreateOptions,
-    ) => Effect.Effect<APIKeyCreateResult, APIKeyError | Errors.AuthError, APIKeyStore>;
+    ) => Effect.Effect<APIKeyCreateResult, APIKeyError | Errors.AuthError>;
 
     /**
      * Verify a plaintext API key: sha256 hash lookup, then enabled / expiry /
@@ -201,7 +201,7 @@ export class APIKeyService extends Context.Service<
     readonly verify: (
       plaintextKey: string,
       requiredPermissions?: Record<string, readonly string[]>,
-    ) => Effect.Effect<APIKeyVerifyResult, Errors.AuthError, APIKeyStore>;
+    ) => Effect.Effect<APIKeyVerifyResult, Errors.AuthError>;
 
     /**
      * Like `verify`, but when the key carries a `rateLimit` configuration a
@@ -212,25 +212,17 @@ export class APIKeyService extends Context.Service<
     readonly verifyWithRateLimit: (
       plaintextKey: string,
       requiredPermissions?: Record<string, readonly string[]>,
-    ) => Effect.Effect<
-      APIKeyVerifyResult,
-      Errors.AuthError,
-      APIKeyStore | RateLimiter | RateLimitStore
-    >;
+    ) => Effect.Effect<APIKeyVerifyResult, Errors.AuthError, RateLimitStore>;
 
     /**
      * Fetch a key by id, failing with {@link APIKeyError} when it does not exist.
      */
-    readonly get: (
-      keyId: string,
-    ) => Effect.Effect<APIKey, APIKeyError | Errors.AuthError, APIKeyStore>;
+    readonly get: (keyId: string) => Effect.Effect<APIKey, APIKeyError | Errors.AuthError>;
 
     /**
      * List all keys belonging to a user.
      */
-    readonly list: (
-      userId: string,
-    ) => Effect.Effect<readonly APIKey[], Errors.AuthError, APIKeyStore>;
+    readonly list: (userId: string) => Effect.Effect<readonly APIKey[], Errors.AuthError>;
 
     /**
      * Update a key on behalf of a user. Fails with {@link APIKeyError} when the
@@ -240,7 +232,7 @@ export class APIKeyService extends Context.Service<
       userId: string,
       keyId: string,
       updates: APIKeyUpdate,
-    ) => Effect.Effect<APIKey, APIKeyError | Errors.AuthError, APIKeyStore>;
+    ) => Effect.Effect<APIKey, APIKeyError | Errors.AuthError>;
 
     /**
      * Delete a key on behalf of a user. Fails with {@link APIKeyError} when the
@@ -249,16 +241,14 @@ export class APIKeyService extends Context.Service<
     readonly delete: (
       userId: string,
       keyId: string,
-    ) => Effect.Effect<void, APIKeyError | Errors.AuthError, APIKeyStore>;
+    ) => Effect.Effect<void, APIKeyError | Errors.AuthError>;
 
     /**
      * Delete every key of a user whose `expiresAt` is in the past. Returns the
      * number of keys removed. (The store enumerates per user, so run this per
      * user; a store-level sweep job is the right tool for global cleanup.)
      */
-    readonly deleteAllExpired: (
-      userId: string,
-    ) => Effect.Effect<number, Errors.AuthError, APIKeyStore>;
+    readonly deleteAllExpired: (userId: string) => Effect.Effect<number, Errors.AuthError>;
   }
 >()("@effect-auth/APIKeyService") {
   /**
@@ -305,111 +295,109 @@ const hasRequiredPermissions = (
  */
 export const makeAPIKeyService = (
   config: APIKeyConfig = {},
-): Effect.Effect<typeof APIKeyService.Service, never> => {
-  const defaultPrefix = config?.defaultPrefix ?? "ak_";
-  const keyLength = config?.keyLength ?? 32;
-  const defaultExpiresIn = config?.defaultExpiresIn;
-  const maxKeysPerUser = config?.maxKeysPerUser ?? 10;
+): Effect.Effect<typeof APIKeyService.Service, never, APIKeyStore | RateLimiter> =>
+  Effect.gen(function* () {
+    const defaultPrefix = config?.defaultPrefix ?? "ak_";
+    const keyLength = config?.keyLength ?? 32;
+    const defaultExpiresIn = config?.defaultExpiresIn;
+    const maxKeysPerUser = config?.maxKeysPerUser ?? 10;
 
-  /**
-   * Load a key by id and enforce ownership.
-   */
-  const getOwned = (userId: string, keyId: string) =>
-    Effect.gen(function* () {
-      const store = yield* APIKeyStore;
-      const apiKey = yield* store.get(keyId);
-      if (!apiKey || apiKey.userId !== userId) {
-        return yield* Effect.fail(
-          new APIKeyError({
-            message: "API key not found",
-          }),
-        );
-      }
-      return apiKey;
-    });
+    const store = yield* APIKeyStore;
+    const rateLimiter = yield* RateLimiter;
 
-  /**
-   * Run the enabled/expiry/remaining/permission checks against a record
-   * found by hash lookup, updating `remaining`/`lastUsedAt` on success.
-   * Due quota refills are applied lazily before the remaining-uses check.
-   */
-  const verifyRecord = (
-    apiKey: APIKey,
-    requiredPermissions: Record<string, readonly string[]> | undefined,
-  ) =>
-    Effect.gen(function* () {
-      const now = Date.now();
-
-      if (!apiKey.enabled) {
-        return { valid: false, error: "API key is disabled" } satisfies APIKeyVerifyResult;
-      }
-
-      if (apiKey.expiresAt !== undefined && now > apiKey.expiresAt) {
-        return { valid: false, error: "API key has expired" } satisfies APIKeyVerifyResult;
-      }
-
-      // Lazily apply quota refills before checking remaining
-      let key = apiKey;
-      if (
-        key.remaining !== undefined &&
-        key.refillAmount !== undefined &&
-        key.refillInterval !== undefined &&
-        key.lastRefillAt !== undefined
-      ) {
-        const dueRefills = Math.floor((now - key.lastRefillAt) / key.refillInterval);
-        if (dueRefills > 0) {
-          const refilled =
-            key.refillMax !== undefined
-              ? Math.min(key.remaining + dueRefills * key.refillAmount, key.refillMax)
-              : key.remaining + dueRefills * key.refillAmount;
-          key = {
-            ...key,
-            remaining: refilled,
-            lastRefillAt: key.lastRefillAt + dueRefills * key.refillInterval,
-          };
+    /**
+     * Load a key by id and enforce ownership.
+     */
+    const getOwned = (userId: string, keyId: string) =>
+      Effect.gen(function* () {
+        const apiKey = yield* store.get(keyId);
+        if (!apiKey || apiKey.userId !== userId) {
+          return yield* Effect.fail(
+            new APIKeyError({
+              message: "API key not found",
+            }),
+          );
         }
-      }
-
-      if (key.remaining !== undefined && key.remaining <= 0) {
-        return {
-          valid: false,
-          error: "API key has no remaining uses",
-        } satisfies APIKeyVerifyResult;
-      }
-
-      if (requiredPermissions && !hasRequiredPermissions(key.permissions, requiredPermissions)) {
-        return {
-          valid: false,
-          error: "API key is missing required permissions",
-        } satisfies APIKeyVerifyResult;
-      }
-
-      const store = yield* APIKeyStore;
-      const updated = yield* store.update({
-        ...key,
-        ...(key.remaining !== undefined && { remaining: key.remaining - 1 }),
-        lastUsedAt: now,
-        updatedAt: now,
+        return apiKey;
       });
 
-      return { valid: true, apiKey: updated } satisfies APIKeyVerifyResult;
-    });
-
-  /**
-   * Hash lookup for a plaintext key. Lookup is by exact sha256 digest, so
-   * the comparison carries no secret-dependent timing.
-   */
-  const lookup = (plaintextKey: string) =>
-    Effect.gen(function* () {
-      const store = yield* APIKeyStore;
-      return yield* store.getByHash(hashAPIKey(plaintextKey));
-    });
-
-  return Effect.sync((): typeof APIKeyService.Service => ({
-    create: (userId, options) =>
+    /**
+     * Run the enabled/expiry/remaining/permission checks against a record
+     * found by hash lookup, updating `remaining`/`lastUsedAt` on success.
+     * Due quota refills are applied lazily before the remaining-uses check.
+     */
+    const verifyRecord = (
+      apiKey: APIKey,
+      requiredPermissions: Record<string, readonly string[]> | undefined,
+    ) =>
       Effect.gen(function* () {
-        const store = yield* APIKeyStore;
+        const now = Date.now();
 
+        if (!apiKey.enabled) {
+          return { valid: false, error: "API key is disabled" } satisfies APIKeyVerifyResult;
+        }
+
+        if (apiKey.expiresAt !== undefined && now > apiKey.expiresAt) {
+          return { valid: false, error: "API key has expired" } satisfies APIKeyVerifyResult;
+        }
+
+        // Lazily apply quota refills before checking remaining
+        let key = apiKey;
+        if (
+          key.remaining !== undefined &&
+          key.refillAmount !== undefined &&
+          key.refillInterval !== undefined &&
+          key.lastRefillAt !== undefined
+        ) {
+          const dueRefills = Math.floor((now - key.lastRefillAt) / key.refillInterval);
+          if (dueRefills > 0) {
+            const refilled =
+              key.refillMax !== undefined
+                ? Math.min(key.remaining + dueRefills * key.refillAmount, key.refillMax)
+                : key.remaining + dueRefills * key.refillAmount;
+            key = {
+              ...key,
+              remaining: refilled,
+              lastRefillAt: key.lastRefillAt + dueRefills * key.refillInterval,
+            };
+          }
+        }
+
+        if (key.remaining !== undefined && key.remaining <= 0) {
+          return {
+            valid: false,
+            error: "API key has no remaining uses",
+          } satisfies APIKeyVerifyResult;
+        }
+
+        if (requiredPermissions && !hasRequiredPermissions(key.permissions, requiredPermissions)) {
+          return {
+            valid: false,
+            error: "API key is missing required permissions",
+          } satisfies APIKeyVerifyResult;
+        }
+
+        const updated = yield* store.update({
+          ...key,
+          ...(key.remaining !== undefined && { remaining: key.remaining - 1 }),
+          lastUsedAt: now,
+          updatedAt: now,
+        });
+
+        return { valid: true, apiKey: updated } satisfies APIKeyVerifyResult;
+      });
+
+    /**
+     * Hash lookup for a plaintext key. Lookup is by exact sha256 digest, so
+     * the comparison carries no secret-dependent timing.
+     */
+    const lookup = (plaintextKey: string) => store.getByHash(hashAPIKey(plaintextKey));
+
+    return {
+      create: Effect.fn("APIKeyService.create")(function* (
+        userId: string,
+        options?: APIKeyCreateOptions,
+      ) {
         const existing = yield* store.listByUserId(userId);
         if (existing.length >= maxKeysPerUser) {
           return yield* Effect.fail(
@@ -459,8 +447,10 @@ export const makeAPIKeyService = (
         return { key, apiKey: created } satisfies APIKeyCreateResult;
       }),
 
-    verify: (plaintextKey, requiredPermissions) =>
-      Effect.gen(function* () {
+      verify: Effect.fn("APIKeyService.verify")(function* (
+        plaintextKey: string,
+        requiredPermissions?: Record<string, readonly string[]>,
+      ) {
         const apiKey = yield* lookup(plaintextKey);
         if (!apiKey) {
           return { valid: false, error: "Invalid API key" } satisfies APIKeyVerifyResult;
@@ -468,15 +458,16 @@ export const makeAPIKeyService = (
         return yield* verifyRecord(apiKey, requiredPermissions);
       }),
 
-    verifyWithRateLimit: (plaintextKey, requiredPermissions) =>
-      Effect.gen(function* () {
+      verifyWithRateLimit: Effect.fn("APIKeyService.verifyWithRateLimit")(function* (
+        plaintextKey: string,
+        requiredPermissions?: Record<string, readonly string[]>,
+      ) {
         const apiKey = yield* lookup(plaintextKey);
         if (!apiKey) {
           return { valid: false, error: "Invalid API key" } satisfies APIKeyVerifyResult;
         }
 
         if (apiKey.rateLimit) {
-          const rateLimiter = yield* RateLimiter;
           const limited = yield* rateLimiter
             .consumeToken(`api-key:${apiKey.id}`, apiKey.rateLimit satisfies RateLimitConfig)
             .pipe(
@@ -491,9 +482,7 @@ export const makeAPIKeyService = (
         return yield* verifyRecord(apiKey, requiredPermissions);
       }),
 
-    get: (keyId) =>
-      Effect.gen(function* () {
-        const store = yield* APIKeyStore;
+      get: Effect.fn("APIKeyService.get")(function* (keyId: string) {
         const apiKey = yield* store.get(keyId);
         if (!apiKey) {
           return yield* Effect.fail(
@@ -505,16 +494,16 @@ export const makeAPIKeyService = (
         return apiKey;
       }),
 
-    list: (userId) =>
-      Effect.gen(function* () {
-        const store = yield* APIKeyStore;
+      list: Effect.fn("APIKeyService.list")(function* (userId: string) {
         return yield* store.listByUserId(userId);
       }),
 
-    update: (userId, keyId, updates) =>
-      Effect.gen(function* () {
+      update: Effect.fn("APIKeyService.update")(function* (
+        userId: string,
+        keyId: string,
+        updates: APIKeyUpdate,
+      ) {
         const apiKey = yield* getOwned(userId, keyId);
-        const store = yield* APIKeyStore;
 
         return yield* store.update({
           ...apiKey,
@@ -533,16 +522,12 @@ export const makeAPIKeyService = (
         });
       }),
 
-    delete: (userId, keyId) =>
-      Effect.gen(function* () {
+      delete: Effect.fn("APIKeyService.delete")(function* (userId: string, keyId: string) {
         const apiKey = yield* getOwned(userId, keyId);
-        const store = yield* APIKeyStore;
         yield* store.delete(apiKey.id);
       }),
 
-    deleteAllExpired: (userId) =>
-      Effect.gen(function* () {
-        const store = yield* APIKeyStore;
+      deleteAllExpired: Effect.fn("APIKeyService.deleteAllExpired")(function* (userId: string) {
         const now = Date.now();
 
         const candidates = yield* store.listByUserId(userId);
@@ -556,5 +541,5 @@ export const makeAPIKeyService = (
         }
         return deleted;
       }),
-  }));
-};
+    };
+  });

@@ -102,23 +102,26 @@ const userStore: typeof UserStore.Service = {
 
 const hasherLayer = Layer.succeed(PasswordHasher)(hasher);
 
-const baseDeps = Layer.mergeAll(
+// Stage 0: raw stores + hasher + Hooks (no construction-time deps of their own).
+const storesLayer = Layer.mergeAll(
   Layer.succeed(UsernameStore)(usernameStore),
   Layer.succeed(EmailPasswordStore)(emailPasswordStore),
+  Layer.succeed(SessionStore)(sessionStore),
+  Layer.succeed(UserStore)(userStore),
   hasherLayer,
-  SessionService.layer(sessionConfig).pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        Layer.succeed(SessionStore)(sessionStore),
-        Layer.succeed(UserStore)(userStore),
-      ),
-    ),
-  ),
-  // EmailPasswordService.layer now requires PasswordHasher at construction (for the
-  // decoy hash). Layer.mergeAll does not auto-wire, so pipe Layer.provide explicitly.
-  EmailPasswordService.layer({}).pipe(Layer.provide(hasherLayer)),
   Hooks.Default,
 );
+
+// Stage 1: SessionService.layer needs SessionStore | UserStore | Hooks.
+const sessionServiceLayer = SessionService.layer(sessionConfig).pipe(Layer.provide(storesLayer));
+
+const stage1 = Layer.mergeAll(storesLayer, sessionServiceLayer);
+
+// Stage 2: EmailPasswordService.layer needs EmailPasswordStore | PasswordHasher |
+// SessionService | Hooks, all now available from stage1.
+const emailPasswordServiceLayer = EmailPasswordService.layer({}).pipe(Layer.provide(stage1));
+
+const baseDeps = Layer.mergeAll(stage1, emailPasswordServiceLayer);
 
 const gate = (required: boolean): typeof SecondFactorGate.Service => ({
   required: () => Effect.succeed(required),
@@ -137,8 +140,9 @@ const run = <A, E>(
   f: (svc: typeof UsernameService.Service) => Effect.Effect<A, E, UsernameDeps>,
   opts?: { config?: UsernameConfig; gate?: typeof SecondFactorGate.Service },
 ) => {
-  // UsernameService.layer also requires PasswordHasher at construction time (decoy hash).
-  const usernameLayer = UsernameService.layer(opts?.config).pipe(Layer.provide(hasherLayer));
+  // UsernameService.layer needs UsernameStore | EmailPasswordService | EmailPasswordStore |
+  // PasswordHasher | SessionService | Hooks at construction time — all satisfied by baseDeps.
+  const usernameLayer = UsernameService.layer(opts?.config).pipe(Layer.provide(baseDeps));
   const layer = opts?.gate
     ? Layer.mergeAll(usernameLayer, baseDeps, Layer.succeed(SecondFactorGate)(opts.gate))
     : Layer.mergeAll(usernameLayer, baseDeps);
@@ -262,21 +266,26 @@ describe("UsernameService", () => {
 
     const spyHasherLayer = Layer.succeed(PasswordHasher)(spyHasher);
 
-    const spyDeps = Layer.mergeAll(
+    const spyStoresLayer = Layer.mergeAll(
       Layer.succeed(UsernameStore)(usernameStore),
       Layer.succeed(EmailPasswordStore)(emailPasswordStore),
+      Layer.succeed(SessionStore)(sessionStore),
+      Layer.succeed(UserStore)(userStore),
       spyHasherLayer,
-      SessionService.layer(sessionConfig).pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            Layer.succeed(SessionStore)(sessionStore),
-            Layer.succeed(UserStore)(userStore),
-          ),
-        ),
-      ),
-      EmailPasswordService.layer({}).pipe(Layer.provide(spyHasherLayer)),
       Hooks.Default,
     );
+
+    const spySessionServiceLayer = SessionService.layer(sessionConfig).pipe(
+      Layer.provide(spyStoresLayer),
+    );
+
+    const spyStage1 = Layer.mergeAll(spyStoresLayer, spySessionServiceLayer);
+
+    const spyEmailPasswordServiceLayer = EmailPasswordService.layer({}).pipe(
+      Layer.provide(spyStage1),
+    );
+
+    const spyDeps = Layer.mergeAll(spyStage1, spyEmailPasswordServiceLayer);
 
     const err = await Effect.runPromise(
       Effect.gen(function* () {
@@ -284,7 +293,7 @@ describe("UsernameService", () => {
         return yield* Effect.flip(svc.signIn({ username: "ghost", password: "any-password" }));
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(UsernameService.layer().pipe(Layer.provide(spyHasherLayer)), spyDeps),
+          Layer.mergeAll(UsernameService.layer().pipe(Layer.provide(spyDeps)), spyDeps),
         ),
       ),
     );

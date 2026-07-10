@@ -118,7 +118,7 @@ export class SSOService extends Context.Service<
     readonly registerProvider: (
       registrarUserId: string,
       input: RegisterProviderInput,
-    ) => Effect.Effect<SSOProvider, SSOError | AuthError, SSOProviderStore>;
+    ) => Effect.Effect<SSOProvider, SSOError | AuthError>;
 
     /**
      * Resolve the connection an email address routes to, by domain. Returns
@@ -126,7 +126,7 @@ export class SSOService extends Context.Service<
      */
     readonly resolveProviderForEmail: (
       email: string,
-    ) => Effect.Effect<SSOProvider | null, AuthError, SSOProviderStore>;
+    ) => Effect.Effect<SSOProvider | null, AuthError>;
 
     /**
      * Begin an SSO sign-in: resolve the connection (by `providerId`, `domain`, or
@@ -137,7 +137,7 @@ export class SSOService extends Context.Service<
     ) => Effect.Effect<
       { readonly url: string; readonly state: string },
       SSOError | AuthError,
-      SSOProviderStore | OAuthStateStore
+      OAuthStateStore
     >;
 
     /**
@@ -151,7 +151,7 @@ export class SSOService extends Context.Service<
     ) => Effect.Effect<
       SSOSignInResult,
       SSOError | AuthError | HookError,
-      SSOProviderStore | OAuthStateStore | OAuthUserStore | SessionService | Hooks
+      OAuthStateStore | OAuthUserStore | SessionService | Hooks
     >;
   }
 >()("@effect-auth/SSOService") {
@@ -198,41 +198,43 @@ const toOAuthConfig = (provider: SSOProvider): OAuthProviderConfig => ({
 
 export const makeSSOService = (
   config: SSOConfig = {},
-): Effect.Effect<typeof SSOService.Service, never> => {
-  const defaultScopes = config.defaultScopes ?? ["openid", "email", "profile"];
-  const defaultRole = config.defaultRole ?? "member";
+): Effect.Effect<typeof SSOService.Service, never, SSOProviderStore> =>
+  Effect.gen(function* () {
+    const defaultScopes = config.defaultScopes ?? ["openid", "email", "profile"];
+    const defaultRole = config.defaultRole ?? "member";
 
-  const resolveProvider = (selector: SSOSignInSelector) =>
-    Effect.gen(function* () {
-      const store = yield* SSOProviderStore;
-      if (selector.providerId !== undefined) {
-        const p = yield* store.getById(selector.providerId);
+    const store = yield* SSOProviderStore;
+
+    const resolveProvider = (selector: SSOSignInSelector) =>
+      Effect.gen(function* () {
+        if (selector.providerId !== undefined) {
+          const p = yield* store.getById(selector.providerId);
+          if (p === null) {
+            return yield* new SSOError({ message: "SSO provider not found" });
+          }
+          return p;
+        }
+        const domain =
+          selector.domain !== undefined
+            ? normalizeDomain(selector.domain)
+            : selector.email !== undefined
+              ? domainOf(selector.email)
+              : "";
+        if (domain === "") {
+          return yield* new SSOError({ message: "An email, domain, or providerId is required" });
+        }
+        const p = yield* store.getByDomain(domain);
         if (p === null) {
-          return yield* new SSOError({ message: "SSO provider not found" });
+          return yield* new SSOError({ message: `No SSO provider for domain "${domain}"` });
         }
         return p;
-      }
-      const domain =
-        selector.domain !== undefined
-          ? normalizeDomain(selector.domain)
-          : selector.email !== undefined
-            ? domainOf(selector.email)
-            : "";
-      if (domain === "") {
-        return yield* new SSOError({ message: "An email, domain, or providerId is required" });
-      }
-      const p = yield* store.getByDomain(domain);
-      if (p === null) {
-        return yield* new SSOError({ message: `No SSO provider for domain "${domain}"` });
-      }
-      return p;
-    });
+      });
 
-  return Effect.succeed({
-    registerProvider: (registrarUserId, input) =>
-      Effect.gen(function* () {
-        const store = yield* SSOProviderStore;
-
+    return {
+      registerProvider: Effect.fn("SSOService.registerProvider")(function* (
+        registrarUserId: string,
+        input: RegisterProviderInput,
+      ) {
         const discovered = input.discover
           ? yield* discoverOAuthEndpoints(input.issuer).pipe(
               Effect.mapError((e) => new SSOError({ message: e.message, cause: e })),
@@ -272,14 +274,13 @@ export const makeSSOService = (
         return yield* store.create(provider);
       }),
 
-    resolveProviderForEmail: (email) =>
-      Effect.gen(function* () {
-        const store = yield* SSOProviderStore;
+      resolveProviderForEmail: Effect.fn("SSOService.resolveProviderForEmail")(function* (
+        email: string,
+      ) {
         return yield* store.getByDomain(domainOf(email));
       }),
 
-    signIn: (selector) =>
-      Effect.gen(function* () {
+      signIn: Effect.fn("SSOService.signIn")(function* (selector: SSOSignInSelector) {
         const provider = yield* resolveProvider(selector);
         const oauth = makeOAuthProvider(
           stateProviderName(provider.id),
@@ -292,12 +293,13 @@ export const makeSSOService = (
         return { url: result.url, state: result.state };
       }),
 
-    handleCallback: (state, code) =>
-      Effect.gen(function* () {
+      handleCallback: Effect.fn("SSOService.handleCallback")(function* (
+        state: string,
+        code: string,
+      ) {
         const stateStore = yield* OAuthStateStore;
         const userStore = yield* OAuthUserStore;
         const sessionManager = yield* SessionService;
-        const providerStore = yield* SSOProviderStore;
 
         const stateEntry = yield* stateStore
           .get(state)
@@ -314,7 +316,7 @@ export const makeSSOService = (
         if (providerId === null) {
           return yield* new SSOError({ message: "State does not belong to an SSO sign-in" });
         }
-        const provider = yield* providerStore.getById(providerId);
+        const provider = yield* store.getById(providerId);
         if (provider === null) {
           return yield* new SSOError({ message: "SSO provider no longer exists" });
         }
@@ -374,5 +376,5 @@ export const makeSSOService = (
         const session = yield* sessionManager.createSession(user.id);
         return { user, session, isNewUser, provider };
       }),
-  } satisfies typeof SSOService.Service);
-};
+    } satisfies typeof SSOService.Service;
+  });

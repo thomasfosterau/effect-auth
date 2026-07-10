@@ -35,7 +35,7 @@ import * as Errors from "../Errors.ts";
 import { SecondFactorGate } from "../email/EmailPassword.ts";
 import { hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
-import { PendingTwoFactorStore, TwoFactorService, TwoFactorStore } from "../TwoFactor.ts";
+import { TwoFactorService } from "../TwoFactor.ts";
 
 // ---------------------------------------------------------------------------
 // Record + Store
@@ -123,34 +123,26 @@ export class TrustedDeviceService extends Context.Service<
      * store in a `Set-Cookie` header (`HttpOnly; Secure; SameSite=Strict`
      * recommended).
      */
-    readonly issue: (
-      userId: string,
-    ) => Effect.Effect<TrustedDeviceIssueResult, Errors.AuthError, TrustedDeviceStore>;
+    readonly issue: (userId: string) => Effect.Effect<TrustedDeviceIssueResult, Errors.AuthError>;
 
     /**
      * Verify a device cookie value. Returns the associated `userId` if the
      * token is valid (HMAC matches, not expired, not revoked), or `null`
      * otherwise. Never throws on invalid tokens — returns `null` instead.
      */
-    readonly verify: (
-      cookieValue: string,
-    ) => Effect.Effect<string | null, Errors.AuthError, TrustedDeviceStore>;
+    readonly verify: (cookieValue: string) => Effect.Effect<string | null, Errors.AuthError>;
 
     /**
      * Revoke a single device token by its cookie value.
      * Use when the user explicitly signs out on one device.
      */
-    readonly revoke: (
-      cookieValue: string,
-    ) => Effect.Effect<void, Errors.AuthError, TrustedDeviceStore>;
+    readonly revoke: (cookieValue: string) => Effect.Effect<void, Errors.AuthError>;
 
     /**
      * Revoke all trusted-device tokens for a user.
      * **Must** be called on: password change, 2FA disable, sign-out-everywhere.
      */
-    readonly revokeAll: (
-      userId: string,
-    ) => Effect.Effect<void, Errors.AuthError, TrustedDeviceStore>;
+    readonly revokeAll: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/TrustedDeviceService") {
   static readonly layer = (config: TrustedDeviceConfig) =>
@@ -217,13 +209,13 @@ const parseCookie = (cookieValue: string): { rawToken: string; hmac: string } | 
 
 export const makeTrustedDeviceService = (
   config: TrustedDeviceConfig,
-): Effect.Effect<typeof TrustedDeviceService.Service, never> => {
-  const maxAge = config.maxAge ?? 30 * 24 * 60 * 60 * 1000;
+): Effect.Effect<typeof TrustedDeviceService.Service, never, TrustedDeviceStore> =>
+  Effect.gen(function* () {
+    const maxAge = config.maxAge ?? 30 * 24 * 60 * 60 * 1000;
+    const store = yield* TrustedDeviceStore;
 
-  return Effect.sync((): typeof TrustedDeviceService.Service => ({
-    issue: (userId) =>
-      Effect.gen(function* () {
-        const store = yield* TrustedDeviceStore;
+    return {
+      issue: Effect.fn("TrustedDeviceService.issue")(function* (userId: string) {
         const rawToken = crypto.randomBytes(32).toString("base64url");
         const hmac = computeHmac(config.secret, rawToken);
         const tokenHash = hashToken(rawToken);
@@ -241,8 +233,7 @@ export const makeTrustedDeviceService = (
         };
       }),
 
-    verify: (cookieValue) =>
-      Effect.gen(function* () {
+      verify: Effect.fn("TrustedDeviceService.verify")(function* (cookieValue: string) {
         const parsed = parseCookie(cookieValue);
         if (!parsed) return null;
 
@@ -250,7 +241,6 @@ export const makeTrustedDeviceService = (
         const expectedHmac = computeHmac(config.secret, parsed.rawToken);
         if (!timingSafeHexEqual(expectedHmac, parsed.hmac)) return null;
 
-        const store = yield* TrustedDeviceStore;
         const tokenHash = hashToken(parsed.rawToken);
         const record = yield* store.getByTokenHash(tokenHash);
         if (!record) return null;
@@ -263,21 +253,17 @@ export const makeTrustedDeviceService = (
         return record.userId;
       }),
 
-    revoke: (cookieValue) =>
-      Effect.gen(function* () {
+      revoke: Effect.fn("TrustedDeviceService.revoke")(function* (cookieValue: string) {
         const parsed = parseCookie(cookieValue);
         if (!parsed) return;
-        const store = yield* TrustedDeviceStore;
         yield* store.delete(hashToken(parsed.rawToken));
       }),
 
-    revokeAll: (userId) =>
-      Effect.gen(function* () {
-        const store = yield* TrustedDeviceStore;
-        yield* store.deleteByUserId(userId);
-      }),
-  }));
-};
+      revokeAll: Effect.fn("TrustedDeviceService.revokeAll")((userId: string) =>
+        store.deleteByUserId(userId),
+      ),
+    };
+  });
 
 // ---------------------------------------------------------------------------
 // Gate composition helper
@@ -290,18 +276,18 @@ export const makeTrustedDeviceService = (
  * non-revoked token for this exact user is present, it returns `false` (skip
  * second factor). Otherwise it delegates to `inner`.
  *
- * All deps are pre-provided in closures so the returned shape has R = never.
+ * `service` already resolved its own store at Layer-construction time
+ * (R = never), so the returned shape has R = never too.
  */
 export const makeTrustedDeviceGateShape = (
   service: typeof TrustedDeviceService.Service,
-  stores: Context.Context<TrustedDeviceStore>,
   inner: typeof SecondFactorGate.Service,
 ): typeof SecondFactorGate.Service => ({
   required: (user: Types.User) =>
     Effect.gen(function* () {
       const cookie = yield* TrustedDeviceCookieRef;
       if (cookie !== undefined && cookie !== "") {
-        const userId = yield* service.verify(cookie).pipe(Effect.provide(stores));
+        const userId = yield* service.verify(cookie);
         if (userId === user.id) return false;
       }
       return yield* inner.required(user);
@@ -324,10 +310,8 @@ export const makeTrustedDeviceGateShape = (
  * const services = Layer.mergeAll(
  *   EmailPasswordService.layer(),
  *   TrustedDeviceWithTwoFactorGateLayer.pipe(
- *     Layer.provide(TrustedDeviceService.layer({ secret: Redacted.make("...") })),
- *     Layer.provide(trustedDeviceStore),
- *     Layer.provide(TwoFactorService.layer({ issuer: "MyApp" })),
- *     Layer.provide(twoFactorStores),
+ *     Layer.provide(TrustedDeviceService.layer({ secret: Redacted.make("...") }).pipe(Layer.provide(trustedDeviceStore))),
+ *     Layer.provide(TwoFactorService.layer({ issuer: "MyApp" }).pipe(Layer.provide(twoFactorStores))),
  *   ),
  * )
  * ```
@@ -338,30 +322,25 @@ export const makeTrustedDeviceGateShape = (
 export const TrustedDeviceWithTwoFactorGateLayer: Layer.Layer<
   SecondFactorGate,
   never,
-  | TrustedDeviceService
-  | TrustedDeviceStore
-  | TwoFactorService
-  | TwoFactorStore
-  | PendingTwoFactorStore
+  TrustedDeviceService | TwoFactorService
 > = Layer.effect(
   SecondFactorGate,
   Effect.gen(function* () {
     const trustedDeviceService = yield* TrustedDeviceService;
     const twoFactor = yield* TwoFactorService;
-    const tdStores = yield* Effect.context<TrustedDeviceStore>();
-    const tfStores = yield* Effect.context<TwoFactorStore | PendingTwoFactorStore>();
 
     const totpGate: typeof SecondFactorGate.Service = {
-      required: (user) => twoFactor.isEnabled(user.id).pipe(Effect.provide(tfStores)),
+      required: (user) => twoFactor.isEnabled(user.id),
       begin: (user) =>
-        twoFactor.beginChallenge(user.id).pipe(
-          Effect.provide(tfStores),
-          Effect.catchTag("TwoFactorError", (err) =>
-            Effect.fail(new Errors.AuthError({ message: err.message })),
+        twoFactor
+          .beginChallenge(user.id)
+          .pipe(
+            Effect.catchTag("TwoFactorError", (err) =>
+              Effect.fail(new Errors.AuthError({ message: err.message })),
+            ),
           ),
-        ),
     };
 
-    return makeTrustedDeviceGateShape(trustedDeviceService, tdStores, totpGate);
+    return makeTrustedDeviceGateShape(trustedDeviceService, totpGate);
   }),
 );

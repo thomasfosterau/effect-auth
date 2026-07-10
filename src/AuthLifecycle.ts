@@ -12,11 +12,9 @@ import {
 import {
   type EmailVerificationResult,
   EmailVerificationService,
-  EmailVerificationStore,
 } from "./email/EmailVerification.ts";
-import { PasswordHasher } from "./password/Password.ts";
 import { SessionService } from "./session/SessionService.ts";
-import { UserServiceStore, UserService } from "./User.ts";
+import { UserService } from "./User.ts";
 import type * as Types from "./Types.ts";
 
 export interface AuthLifecycleConfig {
@@ -59,14 +57,7 @@ export class AuthLifecycleService extends Context.Service<
       | Errors.PasswordPolicyError
       | Errors.SignUpDisabledError
       | Errors.InvalidInputError
-      | HookError,
-      | EmailPasswordService
-      | EmailPasswordStore
-      | PasswordHasher
-      | SessionService
-      | EmailVerificationService
-      | EmailVerificationStore
-      | Hooks
+      | HookError
     >;
 
     readonly signIn: (
@@ -77,27 +68,14 @@ export class AuthLifecycleService extends Context.Service<
       | Errors.HashingError
       | Errors.InvalidCredentialsError
       | Errors.EmailVerificationError
-      | HookError,
-      | EmailPasswordService
-      | EmailPasswordStore
-      | PasswordHasher
-      | SessionService
-      | EmailVerificationService
-      | EmailVerificationStore
-      | Hooks
+      | HookError
     >;
 
     readonly verifyEmail: (
       input: VerifyEmailInput,
     ) => Effect.Effect<
       AuthLifecycleResult,
-      Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError | HookError,
-      | UserService
-      | UserServiceStore
-      | SessionService
-      | EmailVerificationService
-      | EmailVerificationStore
-      | Hooks
+      Errors.AuthError | Errors.EmailVerificationError | Errors.UserNotFoundError | HookError
     >;
   }
 >()("@effect-auth/AuthLifecycleService") {
@@ -115,21 +93,33 @@ const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
 
 export const makeAuthLifecycleService = (
   config: AuthLifecycleConfig = {},
-): Effect.Effect<typeof AuthLifecycleService.Service, never> => {
-  const requireEmailVerification = config.requireEmailVerification ?? false;
-  const sendOnSignUp = config.sendOnSignUp ?? requireEmailVerification;
-  const sendOnSignIn = config.sendOnSignIn ?? false;
-  const autoSignInAfterVerification = config.autoSignInAfterVerification ?? true;
+): Effect.Effect<
+  typeof AuthLifecycleService.Service,
+  never,
+  | EmailPasswordService
+  | EmailPasswordStore
+  | SessionService
+  | EmailVerificationService
+  | UserService
+  | Hooks
+> =>
+  Effect.gen(function* () {
+    const requireEmailVerification = config.requireEmailVerification ?? false;
+    const sendOnSignUp = config.sendOnSignUp ?? requireEmailVerification;
+    const sendOnSignIn = config.sendOnSignIn ?? false;
+    const autoSignInAfterVerification = config.autoSignInAfterVerification ?? true;
 
-  return Effect.sync((): typeof AuthLifecycleService.Service => ({
-    signUp: (input) =>
-      Effect.gen(function* () {
-        // FIX 1: consume the app-configured EmailPasswordService from context
-        // rather than reconstructing inline (which silently dropped disableSignUp,
-        // minPasswordLength, maxPasswordLength, etc.).
-        const emailPassword = yield* EmailPasswordService;
-        const verification = yield* EmailVerificationService;
+    // FIX 1: consume the app-configured EmailPasswordService from context
+    // rather than reconstructing inline (which silently dropped disableSignUp,
+    // minPasswordLength, maxPasswordLength, etc.).
+    const emailPassword = yield* EmailPasswordService;
+    const emailPasswordStore = yield* EmailPasswordStore;
+    const verification = yield* EmailVerificationService;
+    const userService = yield* UserService;
+    const sessionManager = yield* SessionService;
 
+    return {
+      signUp: Effect.fn("AuthLifecycleService.signUp")(function* (input: SignUpInput) {
         // FIX 3: catch EmailInUseError to handle the atomicity gap — if
         // createVerification fails after the user+password are written, a retry
         // hits EmailInUseError for an unverified account. Re-issue the
@@ -139,8 +129,9 @@ export const makeAuthLifecycleService = (
           Effect.map((r) => ({ recovered: false as const, result: r })),
           Effect.catchTag("EmailInUseError", (e) =>
             Effect.gen(function* () {
-              const store = yield* EmailPasswordStore;
-              const existing = yield* store.getUserByEmail(normalizeEmail(input.email));
+              const existing = yield* emailPasswordStore.getUserByEmail(
+                normalizeEmail(input.email),
+              );
 
               if (!existing || existing.emailVerified) {
                 return yield* Effect.fail(e);
@@ -181,19 +172,13 @@ export const makeAuthLifecycleService = (
         } satisfies AuthLifecycleResult;
       }),
 
-    signIn: (input) =>
-      Effect.gen(function* () {
-        // FIX 1: consume the app-configured EmailPasswordService from context.
-        const emailPassword = yield* EmailPasswordService;
-        const verification = yield* EmailVerificationService;
-
+      signIn: Effect.fn("AuthLifecycleService.signIn")(function* (input: SignInInput) {
         const signInResult = yield* Effect.catchTag(
           emailPassword.signIn(input),
           "EmailNotVerifiedError",
           (error) =>
             Effect.gen(function* () {
-              const store = yield* EmailPasswordStore;
-              const user = yield* store.getUserByEmail(error.email);
+              const user = yield* emailPasswordStore.getUserByEmail(error.email);
 
               if (!user) {
                 return yield* Effect.fail(
@@ -231,12 +216,9 @@ export const makeAuthLifecycleService = (
         } satisfies AuthLifecycleResult;
       }),
 
-    verifyEmail: (input) =>
-      Effect.gen(function* () {
-        const verification = yield* EmailVerificationService;
-        const userService = yield* UserService;
-        const sessionManager = yield* SessionService;
-
+      verifyEmail: Effect.fn("AuthLifecycleService.verifyEmail")(function* (
+        input: VerifyEmailInput,
+      ) {
         // FIX 4: peekToken validates and returns the record without burning it,
         // so a failure in markEmailVerified leaves the token valid for retry.
         const verificationRecord = yield* verification.peekToken(input.token);
@@ -281,5 +263,5 @@ export const makeAuthLifecycleService = (
           needsEmailVerification: false,
         } satisfies AuthLifecycleResult;
       }),
-  }));
-};
+    };
+  });

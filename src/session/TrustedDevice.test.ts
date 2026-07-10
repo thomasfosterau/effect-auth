@@ -198,7 +198,7 @@ describe("makeTrustedDeviceGateShape", () => {
       const service = yield* makeTrustedDeviceService(testConfig);
       const { cookieValue } = yield* service.issue(testUser.id);
 
-      const gate = makeTrustedDeviceGateShape(service, storeCtx, innerRequired);
+      const gate = makeTrustedDeviceGateShape(service, innerRequired);
 
       return yield* gate
         .required(testUser)
@@ -212,7 +212,7 @@ describe("makeTrustedDeviceGateShape", () => {
   it("required delegates to inner gate when TrustedDeviceCookieRef is empty", async () => {
     const program = Effect.gen(function* () {
       const service = yield* makeTrustedDeviceService(testConfig);
-      const gate = makeTrustedDeviceGateShape(service, storeCtx, innerRequired);
+      const gate = makeTrustedDeviceGateShape(service, innerRequired);
 
       // Default FiberRef value is undefined — no cookie
       return yield* gate.required(testUser);
@@ -229,7 +229,7 @@ describe("makeTrustedDeviceGateShape", () => {
       const { cookieValue } = yield* service.issue(testUser.id);
       yield* Effect.sleep("5 millis");
 
-      const gate = makeTrustedDeviceGateShape(service, storeCtx, innerRequired);
+      const gate = makeTrustedDeviceGateShape(service, innerRequired);
       return yield* gate
         .required(testUser)
         .pipe(Effect.provide(Context.make(TrustedDeviceCookieRef, cookieValue)));
@@ -245,7 +245,7 @@ describe("makeTrustedDeviceGateShape", () => {
       const { cookieValue } = yield* service.issue(testUser.id);
       yield* service.revokeAll(testUser.id);
 
-      const gate = makeTrustedDeviceGateShape(service, storeCtx, innerRequired);
+      const gate = makeTrustedDeviceGateShape(service, innerRequired);
       return yield* gate
         .required(testUser)
         .pipe(Effect.provide(Context.make(TrustedDeviceCookieRef, cookieValue)));
@@ -261,7 +261,7 @@ describe("makeTrustedDeviceGateShape", () => {
       // Issue for a different user
       const { cookieValue } = yield* service.issue("other-user-id");
 
-      const gate = makeTrustedDeviceGateShape(service, storeCtx, innerRequired);
+      const gate = makeTrustedDeviceGateShape(service, innerRequired);
       // testUser.id !== "other-user-id"
       return yield* gate
         .required(testUser)

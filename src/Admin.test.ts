@@ -189,7 +189,7 @@ const makeTestContext = async () => {
         Context.make(SessionStore, sessionStore),
         Context.make(UserStore, sessionUserStore),
       ),
-    ),
+    ).pipe(Effect.provide(Hooks.Default)),
   );
 
   return Context.make(SessionService, sessionManager).pipe(
