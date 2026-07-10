@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Framework client libraries for effect-auth: a typed vanilla client with an observable session store, plus React, Svelte, and Vue bindings.",
   "keywords": [
     "auth",
