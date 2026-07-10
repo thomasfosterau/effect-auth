@@ -6,6 +6,17 @@ the breaking proposals below were put to the maintainer (2026-07-03), approved
 Changesets. Date: 2026-07-03/04. Supersedes the architectural framing in `ARCHITECTURE.md`
 (rewritten alongside this document) and the status header of `HOOKS_DESIGN.md`.
 
+> **Superseded (partially) by the directory/export restructure.** The API
+> restructure milestone (`docs/refactor-plan.md`, `docs/migration.md`) landed
+> after this document and revisited two calls made below: the service formerly
+> named `SessionManager` is now `SessionService` (renamed as part of the
+> restructure's naming pass), and the `XShape` interface convention decided in
+> D1's "implementation finding" was reversed — `*Shape` interfaces are deleted
+> outright; implementors reference `typeof X.Service` instead. The rest of this
+> document's rationale and decisions still hold; read D1 and D9 below with
+> those two corrections in mind, and see `docs/migration.md` for the full
+> rename table.
+
 This document records, per design dimension: **status quo → problem → decision →
 rationale → migration & blast radius → risk**. Evidence lines reference the tree at
 the time of writing. The yardstick throughout is the Effect v4 service idiom
@@ -22,21 +33,22 @@ import * as Auth from "effect-auth";
 
 // Canonical: the service name IS the export; layers are statics on it.
 const app = Effect.gen(function* () {
-  const sessions = yield* Auth.SessionManager;
+  const sessions = yield* Auth.SessionService;
   const session = yield* sessions.createSession(userId);
 }).pipe(
-  Effect.provide(Auth.SessionManager.layer({ sessionExpiresIn })),
-  Effect.provide(Auth.EmailPasswordService.layer()),
+  Effect.provide(Auth.SessionService.layer({ sessionExpiresIn })),
+  Effect.provide(Auth.Email.EmailPasswordService.layer()),
   Effect.provide(Auth.Hooks.Default),
 );
 ```
 
 - **Service access:** `yield* Auth.X` where `X` is the service name
-  (`SessionManager`, `EmailPasswordService`, `WebAuthnService`, …).
+  (`SessionService`, `EmailPasswordService`, `WebAuthnService`, …).
 - **Layer construction:** `Auth.X.layer(config)` — a `static` on the service class,
   mirroring `Hooks.Default` (core) and `WorkOS.layer/layerOptions/layerClient`
   (`packages/workos/src/WorkOS.ts:246`), which already follow the Effect v4 idiom.
-- **Stores:** you implement `interface XStoreShape` and provide it with
+- **Stores:** you implement a value of type `typeof Auth.XStore.Service` (no
+  separate `XStoreShape` interface) and provide it with
   `Layer.succeed(Auth.XStore)(impl)` or a first-party layer from
   `@effect-auth/sql`, `@effect-auth/alchemy`, or the KV layers in core.
 - **Errors:** tagged errors, `AuthError` for infrastructure failure, specific tags
@@ -49,7 +61,17 @@ const app = Effect.gen(function* () {
 
 ## D1. The Tag–Service–Layer quartet (highest leverage)
 
-**Status quo.** Every module ships four things (e.g. `Session.ts:12–54,147–152,167,311`):
+> **Superseded (partially) by the API restructure** (`docs/refactor-plan.md`
+> §3, `docs/migration.md` §4): the `Shape`-suffix decision below did not
+> survive contact with real usage and was reversed — `*Shape` interfaces
+> (`SessionStoreShape`, `EmailOtpServiceShape`, and ~65 others) are deleted
+> outright; implementors use `typeof X.Service` in type position instead.
+> Separately, `SessionManager` (the example service used throughout this
+> section) was renamed to `SessionService` in the same restructure, with no
+> compat alias. The rest of D1 — bare service names, `X.layer(config)` as the
+> sole constructor — still holds.
+
+**Status quo.** Every module ships four things (e.g. `session/SessionService.ts` (then flat `Session.ts`)):
 
 1. `interface SessionManager` — the service shape;
 2. `class SessionManagerTag extends Context.Service<SessionManagerTag, SessionManager>()("@effect-auth/SessionManager")`;
@@ -120,12 +142,12 @@ the KV store layers (`KeyValueStores.ts`, provide store tags from many modules).
 
 **Status quo.** 31 `*Layer` exports: 24 `XServiceLayer(config)` functions; 3
 no-config functions (`RateLimiterLayer()` `RateLimit.ts:212`,
-`AuthorizationPolicyLayer()` `Authorization.ts:90`, `UserServiceLayer()`
+`AuthorizationPolicyLayer()` `authz/Authorization.ts` (then flat `Authorization.ts`), `UserServiceLayer()`
 `User.ts:153`); 4 bare Layer values (`RateLimiterPersistenceLayer`,
 `ScryptHasherLayer`, `PasswordHasherLayer`, `TwoFactorGateLayer`); one
-`make`-prefixed (`makeMultiAlgorithmVerifierLayer` `Password.ts:136`); one
-lowercase two-arg (`authGroupLayer(config?, multiSession?)` `HttpServer.ts:596`);
-plus `PasswordHasherLive`/`PBKDF2HasherLive` (`Password.ts:408,418`) which are
+`make`-prefixed (`makeMultiAlgorithmVerifierLayer` `password/Password.ts` (then flat `Password.ts`)); one
+lowercase two-arg (`authGroupLayer(config?, multiSession?)` `http/HTTPServer.ts` (then flat `HttpServer.ts`));
+plus `PasswordHasherLive`/`PBKDF2HasherLive` (`password/Password.ts` (then flat `Password.ts`)) which are
 **`Context.make` values, not Layers**, wearing a `Live` suffix used nowhere else.
 
 **Decision.**
@@ -159,7 +181,7 @@ needs a short migration note in the changeset.
 
 **Status quo.** 38 store interfaces. 30+ return `X | null` for lookups with an
 `AuthError` channel; 4 fail typed not-found errors (`SessionStore.get` →
-`SessionNotFoundError` `Session.ts:21`; `UserStore.get`/`UserServiceStore.get` →
+`SessionNotFoundError` `session/SessionService.ts` (then flat `Session.ts`); `UserStore.get`/`UserServiceStore.get` →
 `UserNotFoundError`; `ChallengeStore.get`/`CredentialStore.get` →
 `Challenge/CredentialNotFoundError` `WebAuthn.ts:191–216`); one —
 `OAuthStateStore.get` (`OAuth.ts:147`) — is neither: non-nullable success with
@@ -183,7 +205,7 @@ only broad `AuthError`. Method vocabulary drifts: `get` vs `getById` vs
    `SessionStore.get`, `UserStore.get`, `UserServiceStore.get`,
    `ChallengeStore.get`, `CredentialStore.get` become nullable (their services
    already own the typed errors); `OAuthStateStore.get` becomes nullable;
-   `CredentialStore.getByUserId` → `listByUserId`; `ApiKeyStore.getById` → `get`.
+   `CredentialStore.getByUserId` → `listByUserId`; `APIKeyStore.getById` → `get`.
    `@effect-auth/sql` and `@effect-auth/alchemy` update in lockstep.
 
 **Rationale.** The nullable convention is the de-facto majority (30+ of 38), is
@@ -201,9 +223,9 @@ Changeset with a migration table.
 ### First-party implementation coverage
 
 `@effect-auth/sql` and `@effect-auth/alchemy` both implement the same 20
-stores (the alchemy gap — MagicLink, MagicLinkUser, EmailOtp, EmailOtpUser,
+stores (the alchemy gap — MagicLink, MagicLinkUser, EmailOTP, EmailOTPUser,
 TwoFactor, PendingTwoFactor — was closed 2026-07-04). Neither implements the
-advanced-feature stores (Organization, ApiKey, Sso, Oidc\*,
+advanced-feature stores (Organization, APIKey, SSO, OIDC\*,
 DeviceAuthorization, …); that remains a tracked feature gap, not an API
 question.
 
@@ -213,9 +235,9 @@ question.
 (`Errors.ts`) + 17 module-local. `AuthError` is a nominal base **nothing
 subclasses**; it composes via unions. 6 HTTP boundary errors use
 `Schema.TaggedErrorClass` + `HttpApiSchema.status`
-(`HttpApiSchemas.ts:703–739`). Domain→HTTP mapping happens per-endpoint in ~40
-`Effect.catchTags` blocks in `HttpServer.ts`, with real inconsistencies:
-`AuthError` → 409 in `signUp` (`HttpServer.ts:606`) but → 500 in `signIn`
+(`http/HTTPApiSchemas.ts`, then flat `HttpApiSchemas.ts:703–739`). Domain→HTTP mapping happens per-endpoint in ~40
+`Effect.catchTags` blocks in `http/HTTPServer.ts` (then flat `HttpServer.ts`), with real
+inconsistencies: `AuthError` → 409 in `signUp` but → 500 in `signIn`
 (`:634`); `RateLimitError` → 400 in signUp (`:611`) but → 403 in signIn
 (`:638`); there is **no 429** anywhere.
 
@@ -302,7 +324,7 @@ that is exactly why they are proposals.
 effect `Config`), defaults applied per-field with `??` inside factories; two
 factory styles (`config: XConfig = {}` vs `config?: XConfig`), sometimes mixed
 between a module's factory and its layer (`Username.ts:123` vs `:241`);
-`EmailPassword.ts:191–195` resolves defaults upfront; `OAuthClientConfig` uses
+`email/EmailPassword.ts:191–195` (then flat `EmailPassword.ts`) resolves defaults upfront; `OAuthClientConfig` uses
 spread-merge; `SessionConfig` and `RateLimitConfig` have required fields (the
 latter with `RateLimitPresets`).
 
@@ -320,7 +342,7 @@ latter with `RateLimitPresets`).
   parameter. _(Applied now — signature-level normalization, type-identical to
   callers.)_
 - **Defaults convention:** resolve all defaults once at the top of the factory
-  (the `EmailPassword.ts:191` style) so the rest of the code reads resolved
+  (the `email/EmailPassword.ts:191` style, then flat `EmailPassword.ts`) so the rest of the code reads resolved
   values. Applied opportunistically; enforced for new code.
 - Security-relevant defaults (cookie `Secure: true`, `HttpOnly`, `SameSite`,
   timing-safe comparisons, entropy sizes) are **not** configurable knobs beyond
@@ -354,7 +376,7 @@ batching/caching data access — a need this library's own code never exhibited.
 
 ## D7. HTTP contract conventions
 
-**Status quo.** One flat `auth` group with ~84 endpoints (`HttpApi.ts:21,576`).
+**Status quo.** One flat `auth` group with ~84 endpoints (`http/HTTPApi.ts` (then flat `HttpApi.ts:21,576`)).
 Paths are consistently kebab-case. operationIds drift across four schemes:
 `signIn<Method>` family (6 endpoints) vs `ssoSignIn` (`:449`, sits at
 `/sign-in/sso`); `siweNonce` (`:462`) vs sibling `signInSiwe` (`:467`);
@@ -387,9 +409,9 @@ correct).
 - **Kept as settled conventions:** the single flat `auth` group (splitting into
   per-feature groups would break every `client.auth.*` call for cosmetic gain —
   revisit only if a 2.0 happens); `404-until-configured` via
-  `Effect.serviceOption` (`HttpServer.ts:251–500`) — documented as the official
+  `Effect.serviceOption` (`http/HTTPServer.ts`, then flat `HttpServer.ts:251–500`) — documented as the official
   behavior for optional features; the trusted-origin CSRF gate
-  (`HttpServer.ts:2387–2437`) — no-Origin requests pass (server-to-server),
+  (`http/HTTPServer.ts`, then flat `HttpServer.ts:2387–2437`) — no-Origin requests pass (server-to-server),
   browser requests must match request origin or `trustedOrigins`, enforced
   before any handler.
 
@@ -399,7 +421,7 @@ they're batched for one 0.x minor with a rename table.
 ## D8. Client API & framework parity
 
 **Status quo.** Two clients: the generated Effect client
-(`HttpClient.ts:26`, full parity by construction) and the hand-written
+(`http/HTTPClient.ts`, then flat `HttpClient.ts:26`, full parity by construction) and the hand-written
 zero-dependency browser client (`packages/client/src/Client.ts:136`) covering
 23/84 endpoints (core flows + magicLink/emailOtp/twoFactor namespaces). No
 dead methods; the missing 61 are the optional/advanced surface. Framework
@@ -438,7 +460,7 @@ has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`
 `Types`, `Errors`, all feature modules, all plugins, `Requests`/`Resolvers`,
 and re-exports `Effect`, `Context`, `Layer`, `RequestResolver` from `effect`
 (`index.ts:137–146`). SIWE — contrary to earlier planning notes — is still fully
-present (core `Siwe.ts`, `@effect-auth/siwe`, HTTP endpoints `HttpApi.ts:462–472`).
+present (core `Siwe.ts`, `@effect-auth/siwe`, HTTP endpoints in `http/HTTPApi.ts`, then flat `HttpApi.ts:462–472`).
 
 **Decision.**
 
@@ -455,7 +477,7 @@ present (core `Siwe.ts`, `@effect-auth/siwe`, HTTP endpoints `HttpApi.ts:462–4
      `@effect-auth/siwe` as the home, or keep as-is. The verifier is already
      externalized; core carries the store/service/HTTP surface.
   2. **OIDC provider** (5 stores + ~1,000-line module + 10 endpoints): keep in
-     core (it reuses Jwt/Session and the 404-pattern makes it invisible when
+     core (it reuses JWT/Session and the 404-pattern makes it invisible when
      unconfigured) — recommended — or extract to `@effect-auth/oidc-provider`.
   3. Remove the `effect` re-exports at 1.0.
 

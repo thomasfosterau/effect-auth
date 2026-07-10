@@ -54,9 +54,11 @@ session IDs, or tokens.
 
 ## Metrics
 
-Metrics are `Metric.counter` values exported from `effect-auth/Observability`
-(or from the root `effect-auth` package). They are tagged with attributes and
-updated inside the same Effect pipelines as the spans.
+Metrics are `Metric.counter` values exported from `src/Observability.ts` and
+re-exported from the root `effect-auth` package (there is no separate
+`effect-auth/Observability` subpath — it isn't one of the clustered exports in
+`package.json`). They are tagged with attributes and updated inside the same
+Effect pipelines as the spans.
 
 ### Counter names
 

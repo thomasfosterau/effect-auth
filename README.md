@@ -70,11 +70,12 @@ First, implement the storage interfaces for your database:
 import { Effect } from "effect";
 import * as Auth from "effect-auth";
 
-// Implement session storage (e.g., Redis, PostgreSQL, etc.)
+// Implement session storage (e.g., Redis, PostgreSQL, etc.). Stores are
+// "dumb persistence" — lookups return `null` on a miss; the service converts
+// that into a typed `SessionNotFoundError`/`UserNotFoundError`.
 const sessionStore: typeof Auth.SessionStore.Service = {
   create: (session) => Effect.succeed(session), // Your implementation
-  get: (sessionId) =>
-    Effect.fail(new Auth.SessionNotFoundError({ message: "Not found", sessionId })),
+  get: (sessionId) => Effect.succeed(null), // Look up by hash; null if not found
   update: (session) => Effect.succeed(session),
   delete: (sessionId) => Effect.void,
   deleteByUserId: (userId) => Effect.void,
@@ -85,7 +86,7 @@ const sessionStore: typeof Auth.SessionStore.Service = {
 // (email, emailVerified, name, image, createdAt, updatedAt) plus an
 // `attributes` bag for app-specific data.
 const userStore: typeof Auth.UserStore.Service = {
-  get: (userId) => Effect.fail(new Auth.UserNotFoundError({ message: "Not found", userId })),
+  get: (userId) => Effect.succeed(null), // Look up by id; null if not found
   getCredentials: (userId) => Effect.succeed("hashed-password"),
 };
 ```
@@ -350,31 +351,21 @@ Implement passwordless authentication using WebAuthn (Passkeys):
 import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
-// Implement challenge store (temporary storage for challenges)
+// Implement challenge store (temporary storage for challenges). Stores are
+// "dumb persistence" — lookups return `null` on a miss; the service converts
+// that into a typed `ChallengeNotFoundError`/`CredentialNotFoundError`.
 const challengeStore: typeof Auth.ChallengeStore.Service = {
   create: (challenge) => Effect.succeed(challenge), // Store in Redis/memory
-  get: (challenge) => Effect.fail(new Auth.ChallengeNotFoundError({ message: "Not found" })),
+  get: (challenge) => Effect.succeed(null), // null if not found
   delete: (challenge) => Effect.void,
 };
 
 // Implement credential store (persistent storage for passkeys)
 const credentialStore: typeof Auth.CredentialStore.Service = {
   create: (credential) => Effect.succeed(credential), // Store in database
-  get: (credentialId) =>
-    Effect.fail(
-      new Auth.CredentialNotFoundError({
-        message: "Not found",
-        credentialId,
-      }),
-    ),
+  get: (credentialId) => Effect.succeed(null), // null if not found
   // Resolve by the raw credential id; used on the discoverable/usernameless login path.
-  getByCredentialId: (credentialId) =>
-    Effect.fail(
-      new Auth.CredentialNotFoundError({
-        message: "Not found",
-        credentialId,
-      }),
-    ),
+  getByCredentialId: (credentialId) => Effect.succeed(null), // null if not found
   update: (credential) => Effect.succeed(credential),
   delete: (credentialId) => Effect.void,
   listByUserId: (userId) => Effect.succeed([]), // Return all user's credentials
@@ -462,13 +453,7 @@ import * as Auth from "effect-auth";
 // Implement OAuth state store (temporary, Redis/memory recommended)
 const oauthStateStore: typeof Auth.OAuth.OAuthStateStore.Service = {
   create: (state) => Effect.succeed(state), // Store in Redis with 10-minute TTL
-  get: (stateStr) =>
-    Effect.fail(
-      new Auth.OAuthStateNotFoundError({
-        message: "State not found",
-        state: stateStr,
-      }),
-    ),
+  get: (stateStr) => Effect.succeed(null), // null when unknown/expired-and-purged
   delete: (stateStr) => Effect.void,
 };
 
@@ -777,6 +762,8 @@ schemas). HIBP fails open on API errors by default (`failClosed: false`).
 
 ### Types
 
+Flat root exports (`Auth.X`) unless noted:
+
 - `User`: Represents a user with ID and attributes
 - `Session`: Represents an active session
 - `SessionWithUser`: Session combined with user data
@@ -790,32 +777,34 @@ schemas). HIBP fails open on API errors by default (`failClosed: false`).
 - `WebAuthnCredential`: Stored passkey credential
 - `WebAuthnConfig`: Configuration for WebAuthn service
 - `WebAuthnUser`: User information for passkey registration
-- `OAuthProviderConfig`: OAuth2 provider configuration
-- `OAuthState`: OAuth state for CSRF protection
-- `OAuthAccount`: OAuth account linked to user
-- `OAuthTokenResponse`: OAuth2 token exchange response
-- `OAuthUserInfo`: User info from OAuth provider
-- `EmailVerification`: Email verification token data
-- `EmailVerificationConfig`: Email verification service configuration
+- `Auth.OAuth.OAuthProviderConfig`: OAuth2 provider configuration
+- `Auth.OAuth.OAuthState`: OAuth state for CSRF protection
+- `Auth.OAuth.OAuthAccount`: OAuth account linked to user
+- `Auth.OAuth.OAuthTokenResponse`: OAuth2 token exchange response
+- `Auth.OAuth.OAuthUserInfo`: User info from OAuth provider
+- `Auth.Email.EmailVerification`: Email verification token data
+- `Auth.Email.EmailVerificationConfig`: Email verification service configuration
 - `RateLimitConfig`: Rate limiting configuration
 - `RateLimitEntry`: Rate limit entry data
 
 ### Services
 
+Flat root exports (`Auth.X`) unless noted:
+
 - `SessionStore`: Interface for session persistence
 - `UserStore`: Interface for user data retrieval
 - `SessionService`: Service for managing sessions
-- `PasswordHasher`: Service for password hashing and verification
-- `AuthorizationPolicy`: Interface for permission checking
-- `RoleStore`: Interface for role-based authorization
+- `Auth.Password.PasswordHasher`: Service for password hashing and verification
+- `Auth.Authz.AuthorizationPolicy`: Interface for permission checking
+- `Auth.Authz.RoleStore`: Interface for role-based authorization
 - `ChallengeStore`: Interface for WebAuthn challenge storage
 - `CredentialStore`: Interface for WebAuthn credential storage
 - `WebAuthnService`: Service for passkey registration and authentication
-- `OAuthStateStore`: Interface for OAuth state storage (temporary)
-- `OAuthAccountStore`: Interface for OAuth account storage (persistent)
-- `OAuthService`: Service for OAuth2 flows
-- `EmailVerificationStore`: Interface for email verification storage
-- `EmailVerificationService`: Service for email verification
+- `Auth.OAuth.OAuthStateStore`: Interface for OAuth state storage (temporary)
+- `Auth.OAuth.OAuthAccountStore`: Interface for OAuth account storage (persistent)
+- `Auth.OAuth.OAuthService`: Service for OAuth2 flows
+- `Auth.Email.EmailVerificationStore`: Interface for email verification storage
+- `Auth.Email.EmailVerificationService`: Service for email verification
 - `RateLimitStore`: Interface for rate limit storage
 - `RateLimiter`: Service for rate limiting
 
@@ -859,22 +848,6 @@ All OTP functions return Effect types for composability:
 - `generateTOTP(secret, config?)`: Generate TOTP token
 - `verifyTOTP(token, secret, config?)`: Verify TOTP token
 - `generateOTPURI(params)`: Generate OTP URI for QR codes
-
-### Requests
-
-> **Deprecated** — the Request/Resolver surface is scheduled for removal in
-> 1.0 (see `DESIGN.md`, D6). Call the service APIs directly.
-
-All requests follow the Effect Request/Resolver pattern:
-
-- `CreateSessionRequest`: Create a new session
-- `ValidateSessionRequest`: Validate and retrieve a session
-- `InvalidateSessionRequest`: Invalidate a session
-- `InvalidateUserSessionsRequest`: Invalidate all user sessions
-- `VerifyCredentialsRequest`: Verify user credentials
-- `HashPasswordRequest`: Hash a password
-- `VerifyPasswordRequest`: Verify a password against a hash
-- `CheckPermissionRequest`: Check user permissions
 
 ### Errors
 

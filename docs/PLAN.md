@@ -24,7 +24,7 @@ deprecated) so the record requires no natural key. `User` becomes purely:
 1. Update `Types.ts`: remove `email: Schema.String` and `emailVerified: Schema.Boolean`
    from the `User` schema (or make them `Schema.optional` with a deprecation comment
    during a transition window).
-2. Update `UserStoreShape` / `UserServiceStoreShape` in `User.ts`: remove `getByEmail`,
+2. Update `typeof UserStore.Service` / `typeof UserServiceStore.Service` in `User.ts`: remove `getByEmail`,
    `getUserByEmail` (callers must now query `IdentifierStore.getByValue("email", ...)` to
    resolve a user id, then fetch the user by id).
 3. Update `@effect-auth/sql` `auth_users` DDL: remove `email` and `email_verified` columns
@@ -46,8 +46,8 @@ Stage behind a Changeset (major for `effect-auth`, major for sql/alchemy).
 
 **Steps:**
 
-1. Remove `getUserByEmail` from `EmailPasswordStoreShape`.
-2. In `makeEmailPasswordService`, replace:
+1. Remove `getUserByEmail` from `typeof EmailPasswordStore.Service` (`email/EmailPassword.ts`).
+2. In `EmailPassword.make` (`email/EmailPassword.ts`), replace:
    ```ts
    store.getUserByEmail(normalizeEmail(email));
    ```
@@ -71,7 +71,7 @@ Stage behind a Changeset (major for `effect-auth`, major for sql/alchemy).
 
 **Steps:**
 
-1. Replace `getUserByUsername` / `isUsernameTaken` / `setUsername` in `UsernameStoreShape`
+1. Replace `getUserByUsername` / `isUsernameTaken` / `setUsername` in `typeof UsernameStore.Service`
    with a simpler shape (or remove the store entirely — `IdentifierStore` subsumes it).
 2. Sign-up: create a `username` identifier in `IdentifierStore` after creating the user.
 3. Sign-in: `identifierStore.getByValue("username", normalized)` → userId → user.
@@ -79,9 +79,9 @@ Stage behind a Changeset (major for `effect-auth`, major for sql/alchemy).
 
 ---
 
-## Phase 5 — Migrate PhoneOtp flow
+## Phase 5 — Migrate PhoneOTP flow
 
-**Goal:** Replace phone lookups in `PhoneOtp.ts` with `IdentifierStore`.
+**Goal:** Replace phone lookups in `PhoneOTP.ts` with `IdentifierStore`.
 
 **Steps:**
 
@@ -105,7 +105,7 @@ Stage behind a Changeset (major for `effect-auth`, major for sql/alchemy).
 2. `AccountManagement.changeEmail`: create a new `email` identifier (unverified), send
    the verification token for it, and on confirm delete the old identifier (or mark it
    as primary=false if multi-email is supported).
-3. Remove `markEmailVerified` from `UserServiceShape` if it is no longer needed.
+3. Remove `markEmailVerified` from `typeof UserService.Service` if it is no longer needed.
 
 ---
 
@@ -121,7 +121,7 @@ Stage behind a Changeset (major for `effect-auth`, major for sql/alchemy).
 3. Add `DELETE /identifiers/:id` endpoint.
 4. Update `signUp` request bodies that currently include an `email` field to
    instead record the email through `IdentifierStore` internally.
-5. Update the generated `HttpClient` and `@effect-auth/client`.
+5. Update the generated `HTTPClient` and `@effect-auth/client`.
 
 ---
 
