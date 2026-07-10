@@ -24,7 +24,7 @@ export interface PermissionRef {
 /**
  * Construct a {@link PermissionRef}.
  */
-export const makePermission = (resource: string, action: string): PermissionRef => ({
+export const make = (resource: string, action: string): PermissionRef => ({
   resource,
   action,
 });

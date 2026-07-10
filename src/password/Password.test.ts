@@ -1,15 +1,16 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Context, Effect } from "effect";
-import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
+import { PasswordHasher } from "./Password.ts";
+import * as Password from "./Password.ts";
 
 describe("PasswordHasher", () => {
-  const hasher = makePBKDF2Hasher();
+  const hasher = Password.pbkdf2Hasher();
 
   it("should hash a password", async () => {
     const result = await Effect.runPromise(
       Effect.provide(
         hasher.hash("myPassword123"),
-        Context.make(PasswordHasher, makePBKDF2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
       ),
     );
 
@@ -23,14 +24,14 @@ describe("PasswordHasher", () => {
     const hashResult = await Effect.runPromise(
       Effect.provide(
         hasher.hash("myPassword123"),
-        Context.make(PasswordHasher, makePBKDF2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
       ),
     );
 
     const verifyResult = await Effect.runPromise(
       Effect.provide(
         hasher.verify("myPassword123", hashResult.hash),
-        Context.make(PasswordHasher, makePBKDF2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
       ),
     );
 
@@ -41,14 +42,14 @@ describe("PasswordHasher", () => {
     const hashResult = await Effect.runPromise(
       Effect.provide(
         hasher.hash("myPassword123"),
-        Context.make(PasswordHasher, makePBKDF2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
       ),
     );
 
     const verifyResult = await Effect.runPromise(
       Effect.provide(
         hasher.verify("wrongPassword", hashResult.hash),
-        Context.make(PasswordHasher, makePBKDF2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
       ),
     );
 
@@ -59,14 +60,14 @@ describe("PasswordHasher", () => {
     const hash1 = await Effect.runPromise(
       Effect.provide(
         hasher.hash("myPassword123"),
-        Context.make(PasswordHasher, makePBKDF2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
       ),
     );
 
     const hash2 = await Effect.runPromise(
       Effect.provide(
         hasher.hash("myPassword123"),
-        Context.make(PasswordHasher, makePBKDF2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
       ),
     );
 
@@ -77,13 +78,13 @@ describe("PasswordHasher", () => {
     const verify1 = await Effect.runPromise(
       Effect.provide(
         hasher.verify("myPassword123", hash1.hash),
-        Context.make(PasswordHasher, makePBKDF2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
       ),
     );
     const verify2 = await Effect.runPromise(
       Effect.provide(
         hasher.verify("myPassword123", hash2.hash),
-        Context.make(PasswordHasher, makePBKDF2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
       ),
     );
 
@@ -96,7 +97,7 @@ describe("PasswordHasher", () => {
       Effect.result(
         Effect.provide(
           hasher.verify("password", "invalid-hash"),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
       ),
     );
@@ -135,7 +136,7 @@ describe("PasswordHasher", () => {
   });
 
   it("needsRehash returns false for a current hash and true for an old one", async () => {
-    const h = makePBKDF2Hasher();
+    const h = Password.pbkdf2Hasher();
     const current = await Effect.runPromise(h.hash("pw"));
     expect(h.needsRehash!(current.hash)).toBe(false);
 
@@ -165,8 +166,8 @@ describe("PasswordHasher", () => {
 
 describe("ScryptHasher", () => {
   it("should hash and verify a password", async () => {
-    const { makeScryptHasher } = await import("./Password.js");
-    const scrypt = makeScryptHasher();
+    const { scryptHasher } = await import("./Password.ts");
+    const scrypt = scryptHasher();
 
     const hashed = await Effect.runPromise(scrypt.hash("mySecurePassword123"));
     expect(hashed.algorithm).toBe("scrypt");
@@ -180,8 +181,8 @@ describe("ScryptHasher", () => {
   });
 
   it("should produce different hashes for the same password (random salt)", async () => {
-    const { makeScryptHasher } = await import("./Password.js");
-    const scrypt = makeScryptHasher({ cost: 16384 });
+    const { scryptHasher } = await import("./Password.ts");
+    const scrypt = scryptHasher({ cost: 16384 });
 
     const h1 = await Effect.runPromise(scrypt.hash("samePassword"));
     const h2 = await Effect.runPromise(scrypt.hash("samePassword"));
@@ -189,9 +190,9 @@ describe("ScryptHasher", () => {
   });
 
   it("should verify hashes produced with non-default parameters", async () => {
-    const { makeScryptHasher } = await import("./Password.js");
-    const weak = makeScryptHasher({ cost: 16384, blockSize: 8, parallelization: 1 });
-    const strong = makeScryptHasher();
+    const { scryptHasher } = await import("./Password.ts");
+    const weak = scryptHasher({ cost: 16384, blockSize: 8, parallelization: 1 });
+    const strong = scryptHasher();
 
     // Parameters are stored in the hash, so a default-config hasher verifies them.
     const hashed = await Effect.runPromise(weak.hash("migrating-password"));
@@ -200,15 +201,11 @@ describe("ScryptHasher", () => {
   });
 
   it("should interop with the multi-algorithm verifier", async () => {
-    const { makeScryptHasher, makePBKDF2Hasher, makeMultiAlgorithmVerifier } =
-      await import("./Password.js");
-    const verifier = makeMultiAlgorithmVerifier([
-      makePBKDF2Hasher(),
-      makeScryptHasher({ cost: 16384 }),
-    ]);
+    const { scryptHasher, pbkdf2Hasher, multiAlgorithmVerifier } = await import("./Password.ts");
+    const verifier = multiAlgorithmVerifier([pbkdf2Hasher(), scryptHasher({ cost: 16384 })]);
 
-    const scryptHash = await Effect.runPromise(makeScryptHasher({ cost: 16384 }).hash("pw-one"));
-    const pbkdf2Hash = await Effect.runPromise(makePBKDF2Hasher().hash("pw-two"));
+    const scryptHash = await Effect.runPromise(scryptHasher({ cost: 16384 }).hash("pw-one"));
+    const pbkdf2Hash = await Effect.runPromise(pbkdf2Hasher().hash("pw-two"));
 
     expect(await Effect.runPromise(verifier.verify("pw-one", scryptHash.hash))).toBe(true);
     expect(await Effect.runPromise(verifier.verify("pw-two", pbkdf2Hash.hash))).toBe(true);
@@ -216,15 +213,15 @@ describe("ScryptHasher", () => {
   });
 
   it("should fail on malformed scrypt hash", async () => {
-    const { makeScryptHasher } = await import("./Password.js");
-    const scrypt = makeScryptHasher();
+    const { scryptHasher } = await import("./Password.ts");
+    const scrypt = scryptHasher();
 
     const result = await Effect.runPromise(Effect.result(scrypt.verify("password", "scrypt$bad")));
     expect(result._tag).toBe("Failure");
   });
 
   it("routes PHC-format (leading `$`) hashes by their second segment", async () => {
-    const { makeMultiAlgorithmVerifier } = await import("./Password.js");
+    const { multiAlgorithmVerifier } = await import("./Password.ts");
     // A stand-in PHC hasher (e.g. Argon2) whose hashes begin with `$argon2id$`.
     const phcHasher = {
       algorithm: "argon2id",
@@ -232,7 +229,7 @@ describe("ScryptHasher", () => {
         Effect.succeed({ hash: "$argon2id$v=19$m=1,t=1,p=1$abc$def", algorithm: "argon2id" }),
       verify: (password: string) => Effect.succeed(password === "right"),
     };
-    const verifier = makeMultiAlgorithmVerifier([phcHasher]);
+    const verifier = multiAlgorithmVerifier([phcHasher]);
     const phc = "$argon2id$v=19$m=1,t=1,p=1$abc$def";
     expect(await Effect.runPromise(verifier.verify("right", phc))).toBe(true);
     expect(await Effect.runPromise(verifier.verify("wrong", phc))).toBe(false);

@@ -139,7 +139,7 @@ export class DeviceAuthorizationService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: DeviceAuthorizationConfig) =>
-    Layer.effect(DeviceAuthorizationService, makeDeviceAuthorizationService(config)).pipe(
+    Layer.effect(DeviceAuthorizationService, make(config)).pipe(
       Layer.provide(PlatformCrypto.layer),
     );
 }
@@ -171,7 +171,7 @@ const formatUserCode = (raw: string): string => {
 export const normalizeUserCode = (code: string): string =>
   code.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-export const makeDeviceAuthorizationService = (
+export const make = (
   config: DeviceAuthorizationConfig,
 ): Effect.Effect<
   typeof DeviceAuthorizationService.Service,

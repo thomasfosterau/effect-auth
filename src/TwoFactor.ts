@@ -13,7 +13,7 @@
  */
 
 import { Config, Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
-import { makeAes256GcmCipher } from "./Cipher.ts";
+import * as Cipher from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
 import * as Obs from "./Observability.ts";
@@ -256,9 +256,7 @@ export class TwoFactorService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: TwoFactorConfig) =>
-    Layer.effect(TwoFactorService, makeTwoFactorService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(TwoFactorService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 
   /**
    * Construct a Layer from environment variables via {@link twoFactorConfig}.
@@ -270,7 +268,7 @@ export class TwoFactorService extends Context.Service<
     TwoFactorService,
     Effect.gen(function* () {
       const cfg = yield* twoFactorConfig;
-      return yield* makeTwoFactorService({
+      return yield* make({
         issuer: cfg.issuer,
         ...(cfg.encryptSecret !== undefined && { encryptSecret: cfg.encryptSecret }),
       });
@@ -326,7 +324,7 @@ const findBackupCodeIndex = (hashes: readonly string[], candidateHash: string): 
 /**
  * Create a two-factor service
  */
-export const makeTwoFactorService = (
+export const make = (
   config: TwoFactorConfig,
 ): Effect.Effect<
   typeof TwoFactorService.Service,
@@ -347,7 +345,7 @@ export const makeTwoFactorService = (
     const cipher: TokenCipher | null = config.encryptSecret
       ? "cipher" in config.encryptSecret
         ? config.encryptSecret.cipher
-        : makeAes256GcmCipher(Redacted.value(config.encryptSecret.secret))
+        : Cipher.aes256GcmCipher(Redacted.value(config.encryptSecret.secret))
       : null;
 
     const store = yield* TwoFactorStore;

@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Context } from "effect";
 import {
-  makeRoleBasedPolicy,
   requirePermission,
   requireAllPermissions,
   requireAnyPermission,
@@ -14,7 +13,8 @@ import {
   fromPredicate,
   RoleStore,
   AuthorizationPolicy,
-} from "./Authorization.js";
+} from "./Authorization.ts";
+import * as Authorization from "./Authorization.ts";
 
 // Mock role store for testing
 const mockRoleStore: typeof RoleStore.Service = {
@@ -54,10 +54,10 @@ const mockRoleStore: typeof RoleStore.Service = {
 const RoleStoreTest = Context.make(RoleStore, mockRoleStore);
 
 describe("Authorization", () => {
-  describe("makeRoleBasedPolicy", () => {
+  describe("Authorization.make", () => {
     it("should allow admin to delete users", async () => {
       const program = Effect.gen(function* () {
-        const policy = yield* makeRoleBasedPolicy();
+        const policy = yield* Authorization.make();
         return yield* policy.checkPermission("admin-user", "users", "delete");
       });
 
@@ -68,7 +68,7 @@ describe("Authorization", () => {
 
     it("should allow editor to create posts", async () => {
       const program = Effect.gen(function* () {
-        const policy = yield* makeRoleBasedPolicy();
+        const policy = yield* Authorization.make();
         return yield* policy.checkPermission("editor-user", "posts", "create");
       });
 
@@ -79,7 +79,7 @@ describe("Authorization", () => {
 
     it("should deny editor from deleting users", async () => {
       const program = Effect.gen(function* () {
-        const policy = yield* makeRoleBasedPolicy();
+        const policy = yield* Authorization.make();
         return yield* policy.checkPermission("editor-user", "users", "delete");
       });
 
@@ -90,7 +90,7 @@ describe("Authorization", () => {
 
     it("should allow viewer to read posts", async () => {
       const program = Effect.gen(function* () {
-        const policy = yield* makeRoleBasedPolicy();
+        const policy = yield* Authorization.make();
         return yield* policy.checkPermission("viewer-user", "posts", "read");
       });
 
@@ -101,7 +101,7 @@ describe("Authorization", () => {
 
     it("should deny viewer from creating posts", async () => {
       const program = Effect.gen(function* () {
-        const policy = yield* makeRoleBasedPolicy();
+        const policy = yield* Authorization.make();
         return yield* policy.checkPermission("viewer-user", "posts", "create");
       });
 
@@ -112,7 +112,7 @@ describe("Authorization", () => {
 
     it("should handle multiple roles correctly", async () => {
       const program = Effect.gen(function* () {
-        const policy = yield* makeRoleBasedPolicy();
+        const policy = yield* Authorization.make();
         // User has both editor and viewer roles
         const canCreate = yield* policy.checkPermission("multi-user", "posts", "create");
         const canRead = yield* policy.checkPermission("multi-user", "posts", "read");
@@ -129,7 +129,7 @@ describe("Authorization", () => {
 
     it("should deny unknown users", async () => {
       const program = Effect.gen(function* () {
-        const policy = yield* makeRoleBasedPolicy();
+        const policy = yield* Authorization.make();
         return yield* policy.checkPermission("unknown-user", "posts", "read");
       });
 

@@ -5,11 +5,11 @@ import {
   AnonymousUserStore,
   isAnonymousUser,
   type AnonymousConfig,
-} from "./Anonymous.js";
-import { SessionService } from "./session/SessionService.js";
-import { Hooks } from "./Hooks.js";
-import type * as Types from "./Types.js";
-import { InvalidInputError } from "./Errors.js";
+} from "./Anonymous.ts";
+import { SessionService } from "./session/SessionService.ts";
+import { Hooks } from "./Hooks.ts";
+import type * as Types from "./Types.ts";
+import { InvalidInputError } from "./Errors.ts";
 
 const makeSession = (userId: string): Types.Session => {
   const now = new Date();

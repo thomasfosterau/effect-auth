@@ -1,21 +1,21 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect } from "effect";
-import { Hooks } from "../Hooks.js";
-import * as PlatformCrypto from "../PlatformCrypto.js";
+import { Hooks } from "../Hooks.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
-  makeEmailOTPService,
   type EmailOTPCreateUserInput,
   type EmailOTPPurpose,
   type EmailOTPRecord,
   EmailOTPStore,
   EmailOTPUserStore,
-} from "./EmailOTP.js";
-import { hashToken } from "../TokenHash.js";
-import { make, SessionService } from "../session/SessionService.js";
-import { SessionStore } from "../session/SessionStore.js";
-import { UserStore } from "../session/UserStore.js";
-import type { Session, User, SessionConfig } from "../Types.js";
-import * as Errors from "../Errors.js";
+} from "./EmailOTP.ts";
+import * as EmailOTP from "./EmailOTP.ts";
+import { hashToken } from "../TokenHash.ts";
+import { make, SessionService } from "../session/SessionService.ts";
+import { SessionStore } from "../session/SessionStore.ts";
+import { UserStore } from "../session/UserStore.ts";
+import type { Session, User, SessionConfig } from "../Types.ts";
+import * as Errors from "../Errors.ts";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
@@ -173,7 +173,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
       yield* service.send("new@example.com", "sign-in");
     });
 
@@ -198,7 +198,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({
+      const service = yield* EmailOTP.make({
         otpLength: 8,
         sendVerificationOTP: recordingSend,
       });
@@ -221,7 +221,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
       yield* service.send("  Fresh@Example.COM ", "sign-in");
       return yield* service.signIn("fresh@example.com", sentOTPs[0]!.otp, {
         sessionAttributes: { device: "test" },
@@ -255,7 +255,7 @@ describe("EmailOTPService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
       yield* service.send("known@example.com", "sign-in");
       return yield* service.signIn("known@example.com", sentOTPs[0]!.otp);
     });
@@ -273,7 +273,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
       yield* service.send("once@example.com", "sign-in");
       const otp = sentOTPs[0]!.otp;
       yield* service.signIn("once@example.com", otp);
@@ -304,7 +304,7 @@ describe("EmailOTPService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
       return yield* Effect.result(service.signIn("late@example.com", "123456"));
     });
 
@@ -324,7 +324,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({
+      const service = yield* EmailOTP.make({
         maxAttempts: 3,
         sendVerificationOTP: recordingSend,
       });
@@ -359,7 +359,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
       yield* service.send("fumble@example.com", "sign-in");
       yield* Effect.result(service.signIn("fumble@example.com", "000000"));
       return yield* service.signIn("fumble@example.com", sentOTPs[0]!.otp);
@@ -377,7 +377,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({
+      const service = yield* EmailOTP.make({
         disableSignUp: true,
         sendVerificationOTP: recordingSend,
       });
@@ -406,7 +406,7 @@ describe("EmailOTPService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({
+      const service = yield* EmailOTP.make({
         disableSignUp: true,
         sendVerificationOTP: recordingSend,
       });
@@ -438,7 +438,7 @@ describe("EmailOTPService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
       yield* service.send("missing@example.com", "forget-password");
       yield* service.send("member@example.com", "forget-password");
     });
@@ -458,7 +458,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
       yield* service.send("verify@example.com", "email-verification");
       return yield* service.check("verify@example.com", sentOTPs[0]!.otp, "email-verification");
     });
@@ -477,7 +477,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
       yield* service.send("scoped@example.com", "email-verification");
       // A code issued for email-verification must not sign the user in.
       return yield* Effect.result(service.signIn("scoped@example.com", sentOTPs[0]!.otp));
@@ -498,7 +498,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({
+      const service = yield* EmailOTP.make({
         sendVerificationOTP: recordingSend,
         resendCooldown: 60_000,
       });
@@ -535,7 +535,7 @@ describe("EmailOTPService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({
+      const service = yield* EmailOTP.make({
         sendVerificationOTP: recordingSend,
         resendCooldown: 60_000,
       });
@@ -557,7 +557,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({
+      const service = yield* EmailOTP.make({
         sendVerificationOTP: recordingSend,
         resendCooldown: 60_000,
       });
@@ -578,7 +578,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailOTPService({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
       yield* service.send("repeat@example.com", "sign-in");
       yield* service.send("repeat@example.com", "sign-in");
     });

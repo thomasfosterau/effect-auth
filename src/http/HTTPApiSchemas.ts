@@ -357,11 +357,11 @@ export const SSOSignInPayload = Schema.Struct({
 export type SSOSignInPayload = typeof SSOSignInPayload.Type;
 
 /** The IdP authorization URL to redirect the user to, with its CSRF state. */
-export const SSOUrlView = Schema.Struct({
+export const SSOURLView = Schema.Struct({
   url: Schema.String,
   state: Schema.String,
 });
-export type SSOUrlView = typeof SSOUrlView.Type;
+export type SSOURLView = typeof SSOURLView.Type;
 
 /** Request body for completing an SSO callback. */
 export const SSOCallbackPayload = Schema.Struct({

@@ -1,21 +1,21 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect } from "effect";
-import * as PlatformCrypto from "./PlatformCrypto.js";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
-  makePhoneOTPService,
   getPhoneNumber,
   type PhoneOTPRecord,
   type PhoneOTPPurpose,
   PhoneOTPStore,
   PhoneOTPUserStore,
-} from "./PhoneOTP.js";
-import { SessionStore } from "./session/SessionStore.js";
-import { SessionService, make as makeSessionService } from "./session/SessionService.js";
-import { UserStore } from "./session/UserStore.js";
-import { hashToken } from "./TokenHash.js";
-import { Hooks } from "./Hooks.js";
-import { UserNotFoundError } from "./Errors.js";
-import type * as Types from "./Types.js";
+} from "./PhoneOTP.ts";
+import * as PhoneOTP from "./PhoneOTP.ts";
+import { SessionStore } from "./session/SessionStore.ts";
+import { SessionService, make as makeSessionService } from "./session/SessionService.ts";
+import { UserStore } from "./session/UserStore.ts";
+import { hashToken } from "./TokenHash.ts";
+import { Hooks } from "./Hooks.ts";
+import { UserNotFoundError } from "./Errors.ts";
+import type * as Types from "./Types.ts";
 
 // --- in-memory state ---------------------------------------------------------
 const users = new Map<string, Types.User>();
@@ -156,7 +156,7 @@ describe("PhoneOTPService", () => {
   it("sends a numeric OTP and stores only its hash", async () => {
     const testContext = await makeTestContext();
     const program = Effect.gen(function* () {
-      const service = yield* makePhoneOTPService({ sendOTP: recordingSend });
+      const service = yield* PhoneOTP.make({ sendOTP: recordingSend });
       yield* service.send("+15551230000", "sign-in");
     });
     await Effect.runPromise(
@@ -175,7 +175,7 @@ describe("PhoneOTPService", () => {
     const testContext = await makeTestContext();
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* makePhoneOTPService({ sendOTP: recordingSend });
+        const service = yield* PhoneOTP.make({ sendOTP: recordingSend });
         yield* service.send("+15551231111", "sign-in");
         return yield* service.signIn("+15551231111", sentOTPs[0]!.otp, {
           sessionAttributes: { device: "cli" },
@@ -198,7 +198,7 @@ describe("PhoneOTPService", () => {
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* makePhoneOTPService({ sendOTP: recordingSend });
+        const service = yield* PhoneOTP.make({ sendOTP: recordingSend });
         yield* service.send("+15551232222", "sign-in");
         return yield* service.signIn("+15551232222", sentOTPs[0]!.otp);
       }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
@@ -212,7 +212,7 @@ describe("PhoneOTPService", () => {
     const testContext = await makeTestContext();
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* makePhoneOTPService({ sendOTP: recordingSend });
+        const service = yield* PhoneOTP.make({ sendOTP: recordingSend });
         yield* service.send("+15551233333", "sign-in");
         const otp = sentOTPs[0]!.otp;
         yield* service.signIn("+15551233333", otp);
@@ -234,7 +234,7 @@ describe("PhoneOTPService", () => {
     });
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* makePhoneOTPService({ sendOTP: recordingSend });
+        const service = yield* PhoneOTP.make({ sendOTP: recordingSend });
         return yield* Effect.result(service.signIn("+15551234444", "123456"));
       }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
     );
@@ -246,7 +246,7 @@ describe("PhoneOTPService", () => {
     const testContext = await makeTestContext();
     const outcome = await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* makePhoneOTPService({ sendOTP: recordingSend, maxAttempts: 3 });
+        const service = yield* PhoneOTP.make({ sendOTP: recordingSend, maxAttempts: 3 });
         yield* service.send("+15551235555", "sign-in");
         const a = yield* Effect.result(service.signIn("+15551235555", "000000"));
         const b = yield* Effect.result(service.signIn("+15551235555", "000001"));
@@ -262,7 +262,7 @@ describe("PhoneOTPService", () => {
     const testContext = await makeTestContext();
     await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* makePhoneOTPService({
+        const service = yield* PhoneOTP.make({
           sendOTP: recordingSend,
           disableSignUp: true,
         });
@@ -281,7 +281,7 @@ describe("PhoneOTPService", () => {
 
     const updated = await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* makePhoneOTPService({ sendOTP: recordingSend });
+        const service = yield* PhoneOTP.make({ sendOTP: recordingSend });
         yield* service.send("+15551237777", "phone-verification");
         return yield* service.verifyPhoneNumber(created.id, "+15551237777", sentOTPs[0]!.otp);
       }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
@@ -293,7 +293,7 @@ describe("PhoneOTPService", () => {
     const testContext = await makeTestContext();
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* makePhoneOTPService({
+        const service = yield* PhoneOTP.make({
           sendOTP: recordingSend,
           normalizePhoneNumber: (raw) => Effect.succeed(raw.replace(/[^\d+]/g, "")),
         });
@@ -308,7 +308,7 @@ describe("PhoneOTPService", () => {
     const testContext = await makeTestContext();
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* makePhoneOTPService({
+        const service = yield* PhoneOTP.make({
           sendOTP: recordingSend,
           resendCooldown: 60_000,
         });
@@ -343,7 +343,7 @@ describe("PhoneOTPService", () => {
 
     await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* makePhoneOTPService({
+        const service = yield* PhoneOTP.make({
           sendOTP: recordingSend,
           resendCooldown: 60_000,
         });
@@ -362,7 +362,7 @@ describe("PhoneOTPService", () => {
     const testContext = await makeTestContext();
     await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* makePhoneOTPService({ sendOTP: recordingSend });
+        const service = yield* PhoneOTP.make({ sendOTP: recordingSend });
         yield* service.send("+15559990003", "sign-in");
         yield* service.send("+15559990003", "sign-in");
       }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),

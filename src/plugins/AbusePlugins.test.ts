@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Crypto, Effect, Layer, Redacted } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
-import { Hooks } from "../Hooks.js";
-import { HaveIBeenPwnedPlugin } from "../password/HaveIBeenPwned.js";
-import * as PlatformCrypto from "../PlatformCrypto.js";
-import { CaptchaPlugin } from "./Captcha.js";
-import { PwnedPasswordError, CaptchaError } from "../Errors.js";
-import type { SignInInput, SignUpInput } from "../email/EmailPassword.js";
+import { Hooks } from "../Hooks.ts";
+import { HaveIBeenPwnedPlugin } from "../password/HaveIBeenPwned.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { CaptchaPlugin } from "./Captcha.ts";
+import { PwnedPasswordError, CaptchaError } from "../Errors.ts";
+import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
 
 /** A stubbed HttpClient that answers every request with `respond(request)`. */
 const stubHttpClient = (respond: (url: string) => Response) =>

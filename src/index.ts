@@ -25,12 +25,18 @@ export * from "./Messages.ts";
 export * from "./utils.ts";
 
 // Session management (core — depended on by nearly every feature module)
-export * from "./session/SessionService.ts";
+export { SessionService } from "./session/SessionService.ts";
 export * from "./session/SessionStore.ts";
 export * from "./session/UserStore.ts";
 
 // Rate limiting facade
-export * from "./RateLimit.ts";
+export {
+  type RateLimitConfig,
+  type RateLimitEntry,
+  RateLimitStore,
+  RateLimiter,
+  RateLimitPresets,
+} from "./RateLimit.ts";
 export * from "./RateLimitPersistence.ts";
 
 // Key-value store adapters
@@ -40,25 +46,209 @@ export * from "./KeyValueStores.ts";
 export * from "./OTP.ts";
 
 // Core user service
-export * from "./User.ts";
+export { UserServiceStore, type UpdateUserInput, UserService } from "./User.ts";
 
 // Feature modules
-export * from "./PhoneOTP.ts";
-export * from "./MagicLink.ts";
-export * from "./Username.ts";
-export * from "./TwoFactor.ts";
-export * from "./WebAuthn.ts";
-export * from "./APIKey.ts";
-export * from "./JWT.ts";
-export * from "./SSO.ts";
-export * from "./GoogleOneTap.ts";
-export * from "./Anonymous.ts";
-export * from "./Admin.ts";
-export * from "./Organization.ts";
-export * from "./AccountManagement.ts";
-export * from "./DeviceAuthorization.ts";
-export * from "./AuthLifecycle.ts";
-export * from "./OIDCProvider.ts";
+export {
+  PhoneOTPError,
+  type PhoneOTPPurpose,
+  type PhoneOTPRecord,
+  PhoneOTPStore,
+  type PhoneOTPCreateUserInput,
+  PhoneOTPUserStore,
+  type PhoneOTPConfig,
+  type PhoneOTPSignInOptions,
+  type PhoneOTPAuthResult,
+  PhoneOTPService,
+  getPhoneNumber,
+} from "./PhoneOTP.ts";
+export {
+  type MagicLinkToken,
+  type MagicLinkCreateUserInput,
+  MagicLinkStore,
+  MagicLinkUserStore,
+  type MagicLinkConfig,
+  type MagicLinkVerifyOptions,
+  type MagicLinkResult,
+  MagicLinkService,
+  generateMagicLinkToken,
+} from "./MagicLink.ts";
+export {
+  UsernameError,
+  UsernameStore,
+  type UsernameConfig,
+  type UsernameSignUpInput,
+  type UsernameSignInInput,
+  UsernameService,
+} from "./Username.ts";
+export {
+  TwoFactorError,
+  type TwoFactorRecord,
+  TwoFactorStore,
+  type PendingTwoFactor,
+  PendingTwoFactorStore,
+  type TwoFactorConfig,
+  type TwoFactorEnableResult,
+  type TwoFactorChallenge,
+  type TwoFactorVerifyResult,
+  type TwoFactorVerifyOptions,
+  TwoFactorService,
+  twoFactorConfig,
+  hashBackupCode,
+  TwoFactorGateLayer,
+} from "./TwoFactor.ts";
+export {
+  base64UrlDecode,
+  type WebAuthnChallenge,
+  type WebAuthnCredential,
+  type WebAuthnConfig,
+  type PublicKeyCredentialParameter,
+  type PublicKeyCredentialDescriptor,
+  type AuthenticatorSelectionCriteria,
+  type RegistrationChallenge,
+  type WebAuthnUser,
+  type RegistrationResponse,
+  type AuthenticationResponse,
+  type RegistrationResult,
+  type AuthenticationResult,
+  SUPPORTED_COSE_ALGORITHMS,
+  ChallengeStore,
+  CredentialStore,
+  WebAuthnService,
+} from "./WebAuthn.ts";
+export {
+  APIKeyError,
+  type APIKey,
+  APIKeyStore,
+  type APIKeyConfig,
+  type APIKeyCreateOptions,
+  type APIKeyCreateResult,
+  type APIKeyVerifyResult,
+  type APIKeyUpdate,
+  APIKeyService,
+  hashAPIKey,
+} from "./APIKey.ts";
+export {
+  JWTError,
+  type JWTAlgorithm,
+  type JWTKeyPair,
+  JWTKeyStore,
+  type JWTConfig,
+  type JWTSignResult,
+  type Jwks,
+  JWTService,
+  jwtServiceConfig,
+  generateKeyPair,
+  type RemoteJwksConfig,
+  RemoteJwksVerifier,
+  remoteJwksVerifier,
+} from "./JWT.ts";
+export {
+  SSOError,
+  type SSOProvider,
+  SSOProviderStore,
+  type RegisterProviderInput,
+  type SSOSignInResult,
+  type SSOSignInSelector,
+  SSOService,
+  type SSOConfig,
+} from "./SSO.ts";
+export {
+  GoogleOneTapError,
+  GOOGLE_JWKS_ENDPOINT,
+  GOOGLE_ISSUERS,
+  type GoogleOneTapNonceEntry,
+  GoogleOneTapNonceStore,
+  type GoogleOneTapConfig,
+  type GoogleOneTapSignInResult,
+  GoogleOneTapService,
+} from "./GoogleOneTap.ts";
+export {
+  AnonymousUserStore,
+  type AnonymousConfig,
+  type AnonymousResult,
+  AnonymousService,
+  isAnonymousUser,
+} from "./Anonymous.ts";
+export {
+  AdminError,
+  type ListUsersQuery,
+  type ListUsersResult,
+  type AdminCreateUserInput,
+  AdminUserStore,
+  type AdminConfig,
+  isAdmin,
+  isBanned,
+  type BanUserOptions,
+  AdminService,
+  BannedUserPlugin,
+} from "./Admin.ts";
+export {
+  OrganizationError,
+  type Organization,
+  type Member,
+  type InvitationStatus,
+  type Invitation,
+  defaultOrganizationRoles,
+  OrganizationStore,
+  type OrganizationConfig,
+  type CreateOrganizationInput,
+  type UpdateOrganizationInput,
+  type InviteMemberInput,
+  type FullOrganization,
+  OrganizationService,
+} from "./Organization.ts";
+export {
+  type AccountTokenPurpose,
+  type AccountToken,
+  AccountManagementStore,
+  AccountTokenError,
+  type AccountManagementConfig,
+  type EmailChangeResult,
+  AccountManagementService,
+} from "./AccountManagement.ts";
+export {
+  type DeviceAuthorizationStatus,
+  type DeviceAuthorizationRecord,
+  DeviceAuthorizationStore,
+  DevicePollError,
+  DeviceCodeError,
+  type DeviceAuthorizationConfig,
+  type DeviceBeginResult,
+  type DevicePollResult,
+  DeviceAuthorizationService,
+  normalizeUserCode,
+} from "./DeviceAuthorization.ts";
+export {
+  type AuthLifecycleConfig,
+  type AuthLifecycleResult,
+  type VerifyEmailInput,
+  AuthLifecycleService,
+} from "./AuthLifecycle.ts";
+export {
+  OIDCProviderError,
+  OIDCTokenError,
+  type OIDCClient,
+  OIDCClientStore,
+  type OIDCAuthorizationCode,
+  OIDCCodeStore,
+  type OIDCToken,
+  OIDCTokenStore,
+  type OIDCConsent,
+  OIDCConsentStore,
+  type RegisterOIDCClientInput,
+  type RegisteredOIDCClient,
+  type UpdateOIDCClientInput,
+  type OIDCAuthorizeRequest,
+  type OIDCAuthorizeResult,
+  type OIDCTokenRequest,
+  type OIDCTokenResult,
+  type TrustedOIDCClient,
+  type OIDCProviderConfig,
+  OIDCProviderService,
+  hashOIDCSecret,
+  DEFAULT_OIDC_SCOPES,
+} from "./OIDCProvider.ts";
 export * from "./ClientIP.ts";
 export * from "./SessionCookieCache.ts";
 export {

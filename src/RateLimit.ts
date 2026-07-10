@@ -80,17 +80,13 @@ export class RateLimiter extends Context.Service<
   /**
    * Construct a Layer providing this service.
    */
-  static readonly layer = () => Layer.effect(RateLimiter, makeRateLimiter());
+  static readonly layer = () => Layer.effect(RateLimiter, make());
 }
 
 /**
  * Create a rate limiter service
  */
-export const makeRateLimiter = (): Effect.Effect<
-  typeof RateLimiter.Service,
-  never,
-  RateLimitStore
-> =>
+export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLimitStore> =>
   Effect.gen(function* () {
     const store = yield* RateLimitStore;
 

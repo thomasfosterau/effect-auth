@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test";
-import { createAuthClient } from "./Client.js";
-import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.js";
+import { createAuthClient } from "./Client.ts";
+import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
 
 const EMAIL = "alice@refresh.test";
 const PW = "password-123";

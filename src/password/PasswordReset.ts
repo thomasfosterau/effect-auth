@@ -76,9 +76,7 @@ export class PasswordResetService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: PasswordResetConfig) =>
-    Layer.effect(PasswordResetService, makePasswordResetService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(PasswordResetService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 const validatePasswordLength = (
@@ -104,7 +102,7 @@ const validatePasswordLength = (
     }
   });
 
-export const makePasswordResetService = (
+export const make = (
   config: PasswordResetConfig,
 ): Effect.Effect<
   typeof PasswordResetService.Service,

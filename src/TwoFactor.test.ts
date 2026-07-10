@@ -1,22 +1,23 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect, Redacted } from "effect";
-import { Hooks } from "./Hooks.js";
-import * as PlatformCrypto from "./PlatformCrypto.js";
-import { SessionService, make as makeSessionService } from "./session/SessionService.js";
-import { SessionStore } from "./session/SessionStore.js";
-import { UserStore } from "./session/UserStore.js";
+import { Hooks } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { SessionService, make as makeSessionService } from "./session/SessionService.ts";
+import { SessionStore } from "./session/SessionStore.ts";
+import { UserStore } from "./session/UserStore.ts";
 import {
-  makeTwoFactorService,
   type PendingTwoFactor,
   type TwoFactorRecord,
   TwoFactorStore,
   PendingTwoFactorStore,
-} from "./TwoFactor.js";
-import { makeAes256GcmCipher } from "./Cipher.js";
-import { type CreateUserInput, EmailPasswordStore } from "./email/EmailPassword.js";
-import { generateTOTP } from "./OTP.js";
-import { PasswordHasher, makePBKDF2Hasher } from "./password/Password.js";
-import type { Session, User, SessionConfig } from "./Types.js";
+} from "./TwoFactor.ts";
+import * as TwoFactor from "./TwoFactor.ts";
+import * as Cipher from "./Cipher.ts";
+import { type CreateUserInput, EmailPasswordStore } from "./email/EmailPassword.ts";
+import { generateTOTP } from "./OTP.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import * as Password from "./password/Password.ts";
+import type { Session, User, SessionConfig } from "./Types.ts";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
@@ -156,7 +157,7 @@ const makeTestContext = async () => {
             Context.merge(
               Context.merge(
                 Context.make(PendingTwoFactorStore, pendingTwoFactorStore),
-                Context.make(PasswordHasher, makePBKDF2Hasher()),
+                Context.make(PasswordHasher, Password.pbkdf2Hasher()),
               ),
               Context.make(Crypto.Crypto, PlatformCrypto.instance),
             ),
@@ -179,7 +180,7 @@ const seedUser = async (id: string, email: string, password: string): Promise<Us
   users.set(id, user);
   usersByEmail.set(email, id);
 
-  const hasher = makePBKDF2Hasher();
+  const hasher = Password.pbkdf2Hasher();
   const hashed = await Effect.runPromise(hasher.hash(password));
   passwordHashes.set(id, hashed.hash);
 
@@ -201,7 +202,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-1", "totp@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({ issuer: "TestApp" });
+      const service = yield* TwoFactor.make({ issuer: "TestApp" });
 
       const enableResult = yield* service.enable("user-2fa-1", "correct-password");
       const enabledBeforeConfirm = yield* service.isEnabled("user-2fa-1");
@@ -243,7 +244,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-2", "badcode@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({ issuer: "TestApp" });
+      const service = yield* TwoFactor.make({ issuer: "TestApp" });
       yield* service.enable("user-2fa-2", "correct-password");
       return yield* Effect.result(service.confirmEnable("user-2fa-2", "000000"));
     });
@@ -264,7 +265,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-3", "wrongpw@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({ issuer: "TestApp" });
+      const service = yield* TwoFactor.make({ issuer: "TestApp" });
       return yield* Effect.result(service.enable("user-2fa-3", "wrong-password"));
     });
 
@@ -284,7 +285,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-4", "disable@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({
+      const service = yield* TwoFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
       });
@@ -318,7 +319,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-5", "challenge@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({
+      const service = yield* TwoFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
       });
@@ -349,7 +350,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-6", "expired@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({
+      const service = yield* TwoFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
         pendingExpiresIn: -1000, // Already expired on creation
@@ -380,7 +381,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-7", "replay@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({
+      const service = yield* TwoFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
       });
@@ -412,7 +413,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-8", "backup@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({
+      const service = yield* TwoFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
       });
@@ -452,7 +453,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-9", "regen@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({
+      const service = yield* TwoFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
         backupCodeCount: 4,
@@ -495,7 +496,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-10", "nochallenge@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({ issuer: "TestApp" });
+      const service = yield* TwoFactor.make({ issuer: "TestApp" });
 
       const withoutRecord = yield* Effect.result(service.beginChallenge("user-2fa-10"));
 
@@ -537,7 +538,7 @@ describe("TwoFactorService with TOTP secret encryption", () => {
     await seedUser("user-enc-1", "enc-totp@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({
+      const service = yield* TwoFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: false,
         encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
@@ -576,10 +577,10 @@ describe("TwoFactorService with TOTP secret encryption", () => {
     const testContext = await makeTestContext();
     await seedUser("user-enc-2", "enc-cipher@example.com", "correct-password");
 
-    const cipher = makeAes256GcmCipher("custom-cipher-secret");
+    const cipher = Cipher.aes256GcmCipher("custom-cipher-secret");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({
+      const service = yield* TwoFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
         encryptSecret: { cipher },
@@ -610,7 +611,7 @@ describe("TwoFactorService with TOTP secret encryption", () => {
     await seedUser("user-enc-3", "enc-uri@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({
+      const service = yield* TwoFactor.make({
         issuer: "TestApp",
         encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
       });
@@ -633,7 +634,7 @@ describe("TwoFactorService with TOTP secret encryption", () => {
     await seedUser("user-enc-4", "enc-backup@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeTwoFactorService({
+      const service = yield* TwoFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
         encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },

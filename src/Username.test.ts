@@ -1,19 +1,20 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { UsernameService, UsernameStore, UsernameError, type UsernameConfig } from "./Username.js";
+import { UsernameService, UsernameStore, UsernameError, type UsernameConfig } from "./Username.ts";
 import {
   EmailPasswordService,
   EmailPasswordStore,
   SecondFactorGate,
-} from "./email/EmailPassword.js";
-import { PasswordHasher, makeScryptHasher } from "./password/Password.js";
-import { SessionService } from "./session/SessionService.js";
-import { SessionStore } from "./session/SessionStore.js";
-import { UserStore } from "./session/UserStore.js";
-import { Hooks } from "./Hooks.js";
-import type * as Types from "./Types.js";
+} from "./email/EmailPassword.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import * as Password from "./password/Password.ts";
+import { SessionService } from "./session/SessionService.ts";
+import { SessionStore } from "./session/SessionStore.ts";
+import { UserStore } from "./session/UserStore.ts";
+import { Hooks } from "./Hooks.ts";
+import type * as Types from "./Types.ts";
 
-const hasher = makeScryptHasher({ cost: 16384 });
+const hasher = Password.scryptHasher({ cost: 16384 });
 const sessionConfig: Types.SessionConfig = {
   sessionExpiresIn: { activePeriod: 1000 * 60 * 60, idlePeriod: 1000 * 60 * 60 },
 };
@@ -254,7 +255,7 @@ describe("UsernameService", () => {
 
   it("calls passwordHasher.verify even for an unknown username (constant-work)", async () => {
     let verifyCalls = 0;
-    const realHasher = makeScryptHasher({ cost: 16384 });
+    const realHasher = Password.scryptHasher({ cost: 16384 });
     const spyHasher: typeof PasswordHasher.Service = {
       algorithm: realHasher.algorithm,
       hash: (password) => realHasher.hash(password),

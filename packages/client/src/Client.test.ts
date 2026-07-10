@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vite-plus/test";
-import { createAuthClient, AuthClientError, definePlugin } from "./Client.js";
-import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.js";
+import { createAuthClient, AuthClientError, definePlugin } from "./Client.ts";
+import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
 
 const EMAIL = "alice@client.test";
 const PW = "password-123";

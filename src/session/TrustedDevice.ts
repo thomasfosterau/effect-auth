@@ -147,9 +147,7 @@ export class TrustedDeviceService extends Context.Service<
   }
 >()("@effect-auth/TrustedDeviceService") {
   static readonly layer = (config: TrustedDeviceConfig) =>
-    Layer.effect(TrustedDeviceService, makeTrustedDeviceService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(TrustedDeviceService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 
   /**
    * Construct a Layer from environment variables via {@link trustedDeviceConfig}.
@@ -161,7 +159,7 @@ export class TrustedDeviceService extends Context.Service<
     TrustedDeviceService,
     Effect.gen(function* () {
       const config = yield* trustedDeviceConfig;
-      return yield* makeTrustedDeviceService(config);
+      return yield* make(config);
     }),
   ).pipe(Layer.provide(PlatformCrypto.layer));
 }
@@ -202,7 +200,7 @@ const parseCookie = (cookieValue: string): { rawToken: string; hmac: string } | 
   return { rawToken, hmac };
 };
 
-export const makeTrustedDeviceService = (
+export const make = (
   config: TrustedDeviceConfig,
 ): Effect.Effect<typeof TrustedDeviceService.Service, never, TrustedDeviceStore | Crypto.Crypto> =>
   Effect.gen(function* () {
@@ -283,7 +281,7 @@ export const makeTrustedDeviceService = (
  * `service` already resolved its own store at Layer-construction time
  * (R = never), so the returned shape has R = never too.
  */
-export const makeTrustedDeviceGateShape = (
+export const gate = (
   service: typeof TrustedDeviceService.Service,
   inner: typeof SecondFactorGate.Service,
 ): typeof SecondFactorGate.Service => ({
@@ -345,6 +343,6 @@ export const TrustedDeviceWithTwoFactorGateLayer: Layer.Layer<
           ),
     };
 
-    return makeTrustedDeviceGateShape(trustedDeviceService, totpGate);
+    return gate(trustedDeviceService, totpGate);
   }),
 );

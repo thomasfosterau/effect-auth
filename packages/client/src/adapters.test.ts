@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vite-plus/test";
-import { createAuthClient, type AuthClient } from "./Client.js";
-import { listSessionsStore, sessionStore, type ListSessionsState } from "./svelte.js";
-import { useListSessions as useVueListSessions, useSession as useVueSession } from "./vue.js";
-import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.js";
-import type { SessionView } from "./types.js";
+import { createAuthClient, type AuthClient } from "./Client.ts";
+import { listSessionsStore, sessionStore, type ListSessionsState } from "./svelte.ts";
+import { useListSessions as useVueListSessions, useSession as useVueSession } from "./vue.ts";
+import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
+import type { SessionView } from "./types.ts";
 
 const EMAIL = "alice@adapters.test";
 const PW = "password-123";

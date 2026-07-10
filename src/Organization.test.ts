@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect } from "effect";
-import * as PlatformCrypto from "./PlatformCrypto.js";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
-  makeOrganizationService,
   OrganizationStore,
   defaultOrganizationRoles,
   type Invitation,
@@ -10,7 +9,8 @@ import {
   type Organization,
   type OrganizationConfig,
   type OrganizationService,
-} from "./Organization.js";
+} from "./Organization.ts";
+import * as OrganizationModule from "./Organization.ts";
 
 const organizations = new Map<string, Organization>();
 const members = new Map<string, Member>();
@@ -133,7 +133,7 @@ const runService = <A, E>(
   Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
-        const service = yield* makeOrganizationService(config);
+        const service = yield* OrganizationModule.make(config);
         return yield* program(service);
       }),
       testContext,

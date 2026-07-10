@@ -16,7 +16,7 @@ import { AuthError } from "./Errors.ts";
 /**
  * Pluggable encryption/decryption interface for secrets stored at rest.
  * Implement this to use an HSM, envelope encryption, or any other custom
- * cipher. The built-in {@link makeAes256GcmCipher} covers most use-cases.
+ * cipher. The built-in {@link aes256GcmCipher} covers most use-cases.
  */
 export interface TokenCipher {
   /** Encrypt a plaintext string; returns an opaque encoded string. */
@@ -39,7 +39,7 @@ export interface TokenCipher {
  *
  * @example
  * ```ts
- * const cipher = makeAes256GcmCipher(process.env.ENCRYPTION_SECRET!)
+ * const cipher = aes256GcmCipher(process.env.ENCRYPTION_SECRET!)
  * // JWT private key at rest
  * const jwtLayer = JWTService.layer({ issuer: "...", encryptPrivateKey: { cipher } })
  * // TOTP secret at rest
@@ -53,7 +53,7 @@ export interface TokenCipher {
  * })
  * ```
  */
-export const makeAes256GcmCipher = (secret: string): TokenCipher => {
+export const aes256GcmCipher = (secret: string): TokenCipher => {
   const key = crypto.createHash("sha256").update(Buffer.from(secret, "utf8")).digest();
   return {
     encrypt: (plaintext) =>

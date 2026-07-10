@@ -140,12 +140,10 @@ export class AccountManagementService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: AccountManagementConfig) =>
-    Layer.effect(AccountManagementService, makeAccountManagementService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(AccountManagementService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
-export const makeAccountManagementService = (
+export const make = (
   config: AccountManagementConfig,
 ): Effect.Effect<
   typeof AccountManagementService.Service,

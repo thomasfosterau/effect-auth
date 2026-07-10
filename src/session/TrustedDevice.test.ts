@@ -1,16 +1,15 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect, Redacted } from "effect";
-import { AuthError } from "../Errors.js";
-import { Hooks } from "../Hooks.js";
-import * as PlatformCrypto from "../PlatformCrypto.js";
+import { AuthError } from "../Errors.ts";
+import { Hooks } from "../Hooks.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
-  makeTrustedDeviceService,
-  makeTrustedDeviceGateShape,
   TrustedDeviceCookieRef,
   TrustedDeviceStore,
   type TrustedDeviceRecord,
-} from "./TrustedDevice.js";
-import type { User } from "../Types.js";
+} from "./TrustedDevice.ts";
+import * as TrustedDevice from "./TrustedDevice.ts";
+import type { User } from "../Types.ts";
 
 // ---------------------------------------------------------------------------
 // In-memory store
@@ -69,7 +68,7 @@ beforeEach(() => {
 describe("TrustedDeviceService", () => {
   it("issues a cookie and verifies it successfully", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeTrustedDeviceService(testConfig);
+      const service = yield* TrustedDevice.make(testConfig);
       const { cookieValue, expiresAt } = yield* service.issue(testUser.id);
       const verifiedId = yield* service.verify(cookieValue);
       return { cookieValue, expiresAt, verifiedId };
@@ -87,7 +86,7 @@ describe("TrustedDeviceService", () => {
 
   it("stores only the hash, not the raw token", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeTrustedDeviceService(testConfig);
+      const service = yield* TrustedDevice.make(testConfig);
       const { cookieValue } = yield* service.issue(testUser.id);
       return cookieValue;
     }).pipe(Effect.provide(storeCtx));
@@ -104,7 +103,7 @@ describe("TrustedDeviceService", () => {
 
   it("returns null for a tampered HMAC", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeTrustedDeviceService(testConfig);
+      const service = yield* TrustedDevice.make(testConfig);
       const { cookieValue } = yield* service.issue(testUser.id);
       // Flip a character in the HMAC (last segment), ensuring it actually changes
       const parts = cookieValue.split(".");
@@ -123,7 +122,7 @@ describe("TrustedDeviceService", () => {
   it("returns null for an expired token", async () => {
     const program = Effect.gen(function* () {
       // maxAge = 1 ms → already expired
-      const service = yield* makeTrustedDeviceService({ ...testConfig, maxAge: 1 });
+      const service = yield* TrustedDevice.make({ ...testConfig, maxAge: 1 });
       const { cookieValue } = yield* service.issue(testUser.id);
       // Small wait to ensure expiry
       yield* Effect.sleep("5 millis");
@@ -138,7 +137,7 @@ describe("TrustedDeviceService", () => {
 
   it("revoke removes a specific token", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeTrustedDeviceService(testConfig);
+      const service = yield* TrustedDevice.make(testConfig);
       const { cookieValue } = yield* service.issue(testUser.id);
       yield* service.revoke(cookieValue);
       return yield* service.verify(cookieValue);
@@ -151,7 +150,7 @@ describe("TrustedDeviceService", () => {
 
   it("revokeAll removes every token for a user", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeTrustedDeviceService(testConfig);
+      const service = yield* TrustedDevice.make(testConfig);
       const { cookieValue: c1 } = yield* service.issue(testUser.id);
       const { cookieValue: c2 } = yield* service.issue(testUser.id);
       // Different user's token should survive
@@ -172,7 +171,7 @@ describe("TrustedDeviceService", () => {
 
   it("ignores an unrecognised cookie format gracefully", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeTrustedDeviceService(testConfig);
+      const service = yield* TrustedDevice.make(testConfig);
       return {
         empty: yield* service.verify(""),
         noSeparator: yield* service.verify("noseparatorhere"),
@@ -188,10 +187,10 @@ describe("TrustedDeviceService", () => {
 });
 
 // ---------------------------------------------------------------------------
-// makeTrustedDeviceGateShape
+// TrustedDevice.gate
 // ---------------------------------------------------------------------------
 
-describe("makeTrustedDeviceGateShape", () => {
+describe("TrustedDevice.gate", () => {
   const innerRequired = {
     required: (_user: User) => Effect.succeed(true),
     begin: (_user: User) => Effect.fail(new AuthError({ message: "not exercised" })),
@@ -199,10 +198,10 @@ describe("makeTrustedDeviceGateShape", () => {
 
   it("required returns false when a valid device token is in TrustedDeviceCookieRef", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeTrustedDeviceService(testConfig);
+      const service = yield* TrustedDevice.make(testConfig);
       const { cookieValue } = yield* service.issue(testUser.id);
 
-      const gate = makeTrustedDeviceGateShape(service, innerRequired);
+      const gate = TrustedDevice.gate(service, innerRequired);
 
       return yield* gate
         .required(testUser)
@@ -215,8 +214,8 @@ describe("makeTrustedDeviceGateShape", () => {
 
   it("required delegates to inner gate when TrustedDeviceCookieRef is empty", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeTrustedDeviceService(testConfig);
-      const gate = makeTrustedDeviceGateShape(service, innerRequired);
+      const service = yield* TrustedDevice.make(testConfig);
+      const gate = TrustedDevice.gate(service, innerRequired);
 
       // Default FiberRef value is undefined — no cookie
       return yield* gate.required(testUser);
@@ -229,11 +228,11 @@ describe("makeTrustedDeviceGateShape", () => {
 
   it("required delegates to inner gate when device token is expired", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeTrustedDeviceService({ ...testConfig, maxAge: 1 });
+      const service = yield* TrustedDevice.make({ ...testConfig, maxAge: 1 });
       const { cookieValue } = yield* service.issue(testUser.id);
       yield* Effect.sleep("5 millis");
 
-      const gate = makeTrustedDeviceGateShape(service, innerRequired);
+      const gate = TrustedDevice.gate(service, innerRequired);
       return yield* gate
         .required(testUser)
         .pipe(Effect.provide(Context.make(TrustedDeviceCookieRef, cookieValue)));
@@ -245,11 +244,11 @@ describe("makeTrustedDeviceGateShape", () => {
 
   it("required delegates to inner gate when device token is revoked", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeTrustedDeviceService(testConfig);
+      const service = yield* TrustedDevice.make(testConfig);
       const { cookieValue } = yield* service.issue(testUser.id);
       yield* service.revokeAll(testUser.id);
 
-      const gate = makeTrustedDeviceGateShape(service, innerRequired);
+      const gate = TrustedDevice.gate(service, innerRequired);
       return yield* gate
         .required(testUser)
         .pipe(Effect.provide(Context.make(TrustedDeviceCookieRef, cookieValue)));
@@ -261,11 +260,11 @@ describe("makeTrustedDeviceGateShape", () => {
 
   it("required delegates when the token belongs to a different user", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeTrustedDeviceService(testConfig);
+      const service = yield* TrustedDevice.make(testConfig);
       // Issue for a different user
       const { cookieValue } = yield* service.issue("other-user-id");
 
-      const gate = makeTrustedDeviceGateShape(service, innerRequired);
+      const gate = TrustedDevice.gate(service, innerRequired);
       // testUser.id !== "other-user-id"
       return yield* gate
         .required(testUser)

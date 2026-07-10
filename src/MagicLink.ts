@@ -138,9 +138,7 @@ export class MagicLinkService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: MagicLinkConfig) =>
-    Layer.effect(MagicLinkService, makeMagicLinkService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(MagicLinkService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /**
@@ -159,7 +157,7 @@ export const generateMagicLinkToken = (
 /**
  * Create a magic link service
  */
-export const makeMagicLinkService = (
+export const make = (
   config: MagicLinkConfig,
 ): Effect.Effect<
   typeof MagicLinkService.Service,

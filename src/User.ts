@@ -54,7 +54,7 @@ export class UserService extends Context.Service<
   /**
    * Construct a Layer providing this service.
    */
-  static readonly layer = () => Layer.effect(UserService, makeUserService());
+  static readonly layer = () => Layer.effect(UserService, make());
 }
 
 /** Fetch a user from the store, failing with `UserNotFoundError` on a miss. */
@@ -68,11 +68,7 @@ const getUserOrFail = (
       : Effect.succeed(user),
   );
 
-export const makeUserService = (): Effect.Effect<
-  typeof UserService.Service,
-  never,
-  UserServiceStore
-> =>
+export const make = (): Effect.Effect<typeof UserService.Service, never, UserServiceStore> =>
   Effect.gen(function* () {
     const store = yield* UserServiceStore;
 

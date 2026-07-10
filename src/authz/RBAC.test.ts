@@ -1,13 +1,14 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Context } from "effect";
-import { makeInMemoryRoleStore } from "./RBAC.js";
-import { makeRoleBasedPolicy, RoleStore } from "./Authorization.js";
-import { formatPermission } from "./Permission.js";
+import * as RBAC from "./RBAC.ts";
+import { RoleStore } from "./Authorization.ts";
+import * as Authorization from "./Authorization.ts";
+import { formatPermission } from "./Permission.ts";
 
 describe("RBAC", () => {
-  describe("makeInMemoryRoleStore", () => {
+  describe("RBAC.make", () => {
     it("builds from a plain record", async () => {
-      const store = makeInMemoryRoleStore({
+      const store = RBAC.make({
         userRoles: { "user-1": ["editor"] },
         rolePermissions: { editor: [{ resource: "posts", action: "update" }] },
       });
@@ -20,7 +21,7 @@ describe("RBAC", () => {
     });
 
     it("builds from Maps", async () => {
-      const store = makeInMemoryRoleStore({
+      const store = RBAC.make({
         userRoles: new Map([["user-1", ["viewer"]]]),
         rolePermissions: new Map([["viewer", [{ resource: "posts", action: "read" }]]]),
       });
@@ -30,14 +31,14 @@ describe("RBAC", () => {
     });
 
     it("returns empty for unknown users and roles", async () => {
-      const store = makeInMemoryRoleStore({ userRoles: {}, rolePermissions: {} });
+      const store = RBAC.make({ userRoles: {}, rolePermissions: {} });
 
       expect(await Effect.runPromise(store.getUserRoles("nobody"))).toEqual([]);
       expect(await Effect.runPromise(store.getRolePermissions("ghost"))).toEqual([]);
     });
 
     it("inherits permissions from parent roles transitively", async () => {
-      const store = makeInMemoryRoleStore({
+      const store = RBAC.make({
         userRoles: {},
         rolePermissions: {
           viewer: [{ resource: "posts", action: "read" }],
@@ -57,7 +58,7 @@ describe("RBAC", () => {
     });
 
     it("de-duplicates inherited permissions", async () => {
-      const store = makeInMemoryRoleStore({
+      const store = RBAC.make({
         userRoles: {},
         rolePermissions: {
           base: [{ resource: "posts", action: "read" }],
@@ -71,7 +72,7 @@ describe("RBAC", () => {
     });
 
     it("tolerates cycles in the hierarchy", async () => {
-      const store = makeInMemoryRoleStore({
+      const store = RBAC.make({
         userRoles: {},
         rolePermissions: {
           a: [{ resource: "x", action: "read" }],
@@ -86,9 +87,9 @@ describe("RBAC", () => {
     });
   });
 
-  describe("integration with makeRoleBasedPolicy", () => {
+  describe("integration with Authorization.make", () => {
     it("grants inherited and wildcard permissions", async () => {
-      const store = makeInMemoryRoleStore({
+      const store = RBAC.make({
         userRoles: {
           "admin-user": ["admin"],
           "editor-user": ["editor"],
@@ -102,7 +103,7 @@ describe("RBAC", () => {
       });
 
       const program = Effect.gen(function* () {
-        const policy = yield* makeRoleBasedPolicy();
+        const policy = yield* Authorization.make();
         return {
           editorCanRead: yield* policy.checkPermission("editor-user", "posts", "read"),
           editorCanUpdate: yield* policy.checkPermission("editor-user", "posts", "update"),

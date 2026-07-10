@@ -518,7 +518,7 @@ export const authGroup = HttpApiGroup.make("auth").add(
   // Returns the IdP authorization URL; unknown domain/provider -> 400.
   HttpApiEndpoint.post("signInSSO", "/sign-in/sso", {
     payload: S.SSOSignInPayload,
-    success: S.SSOUrlView,
+    success: S.SSOURLView,
     error: [S.NotFoundError, S.BadRequestError, S.InternalError],
   }),
   // Completes the OIDC callback and issues a session (cookie).
@@ -667,7 +667,7 @@ export const AuthApi = HttpApi.make("AuthApi")
  * contract. The document describes every endpoint path together with its
  * request/response and error schemas (each carrying its HTTP status code).
  *
- * Served at `GET {prefix}/openapi.json` when `makeAuthWebHandler` is created
+ * Served at `GET {prefix}/openapi.json` when `HTTPServer.make` is created
  * with `{ docs: true }`, and consumable by any OpenAPI tooling.
  */
 export const getOpenApiSpec = (): OpenApi.OpenAPISpec => OpenApi.fromApi(AuthApi);

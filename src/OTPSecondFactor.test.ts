@@ -1,16 +1,13 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect } from "effect";
-import { Hooks } from "./Hooks.js";
-import * as PlatformCrypto from "./PlatformCrypto.js";
-import {
-  makeOTPSecondFactorService,
-  OTPSecondFactorStore,
-  type OTPSecondFactorRecord,
-} from "./OTPSecondFactor.js";
-import { make, SessionService } from "./session/SessionService.js";
-import { SessionStore } from "./session/SessionStore.js";
-import { UserStore } from "./session/UserStore.js";
-import type { Session, SessionConfig, User } from "./Types.js";
+import { Hooks } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { OTPSecondFactorStore, type OTPSecondFactorRecord } from "./OTPSecondFactor.ts";
+import * as OTPSecondFactor from "./OTPSecondFactor.ts";
+import { make, SessionService } from "./session/SessionService.ts";
+import { SessionStore } from "./session/SessionStore.ts";
+import { UserStore } from "./session/UserStore.ts";
+import type { Session, SessionConfig, User } from "./Types.ts";
 
 // ---------------------------------------------------------------------------
 // In-memory stores
@@ -128,7 +125,7 @@ describe("OTPSecondFactorService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeOTPSecondFactorService({
+      const service = yield* OTPSecondFactor.make({
         sendOTP: (user, otp) =>
           Effect.sync(() => {
             sentOTPs.push({ user, otp });
@@ -158,7 +155,7 @@ describe("OTPSecondFactorService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeOTPSecondFactorService({
+      const service = yield* OTPSecondFactor.make({
         sendOTP: (user, otp) =>
           Effect.sync(() => {
             sentOTPs.push({ user, otp });
@@ -183,7 +180,7 @@ describe("OTPSecondFactorService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeOTPSecondFactorService({
+      const service = yield* OTPSecondFactor.make({
         sendOTP: (user, otp) =>
           Effect.sync(() => {
             sentOTPs.push({ user, otp });
@@ -209,7 +206,7 @@ describe("OTPSecondFactorService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeOTPSecondFactorService({
+      const service = yield* OTPSecondFactor.make({
         sendOTP: (user, otp) =>
           Effect.sync(() => {
             sentOTPs.push({ user, otp });
@@ -237,7 +234,7 @@ describe("OTPSecondFactorService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeOTPSecondFactorService({
+      const service = yield* OTPSecondFactor.make({
         maxAttempts: 3,
         sendOTP: (user, otp) =>
           Effect.sync(() => {
@@ -273,7 +270,7 @@ describe("OTPSecondFactorService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeOTPSecondFactorService({
+      const service = yield* OTPSecondFactor.make({
         expiresIn: 1, // 1 ms → immediately expired
         sendOTP: (user, otp) =>
           Effect.sync(() => {
@@ -303,7 +300,7 @@ describe("OTPSecondFactorService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeOTPSecondFactorService({
+      const service = yield* OTPSecondFactor.make({
         otpLength: 8,
         sendOTP: (user, otp) =>
           Effect.sync(() => {
@@ -325,7 +322,7 @@ describe("OTPSecondFactorService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeOTPSecondFactorService({
+      const service = yield* OTPSecondFactor.make({
         sendOTP: (user, otp) =>
           Effect.sync(() => {
             sentOTPs.push({ user, otp });

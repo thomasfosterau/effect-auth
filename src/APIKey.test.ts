@@ -1,22 +1,23 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect } from "effect";
-import * as PlatformCrypto from "./PlatformCrypto.js";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   type APIKeyService,
   APIKeyStore,
   hashAPIKey,
-  makeAPIKeyService,
-  type APIKey,
+  type APIKey as APIKeyRecord,
   type APIKeyConfig,
   type APIKeyVerifyResult,
-} from "./APIKey.js";
-import { makeRateLimiter, type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.js";
+} from "./APIKey.ts";
+import * as APIKey from "./APIKey.ts";
+import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.ts";
+import * as RateLimit from "./RateLimit.ts";
 
-const apiKeys = new Map<string, APIKey>();
+const apiKeys = new Map<string, APIKeyRecord>();
 const rateLimitEntries = new Map<string, RateLimitEntry>();
 
 const apiKeyStore = {
-  create: (apiKey: APIKey) =>
+  create: (apiKey: APIKeyRecord) =>
     Effect.sync(() => {
       apiKeys.set(apiKey.id, apiKey);
       return apiKey;
@@ -34,7 +35,7 @@ const apiKeyStore = {
       return null;
     }),
 
-  update: (apiKey: APIKey) =>
+  update: (apiKey: APIKeyRecord) =>
     Effect.sync(() => {
       apiKeys.set(apiKey.id, apiKey);
       return apiKey;
@@ -77,7 +78,7 @@ const storeContext = Context.make(APIKeyStore, apiKeyStore);
 
 const makeRateLimitContext = async () => {
   const rateLimiter = await Effect.runPromise(
-    Effect.provide(makeRateLimiter(), Context.make(RateLimitStore, rateLimitStore)),
+    Effect.provide(RateLimit.make(), Context.make(RateLimitStore, rateLimitStore)),
   );
   return Context.merge(
     storeContext,
@@ -104,7 +105,7 @@ const runService = async <A, E>(
   return Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
-        const service = yield* makeAPIKeyService(config);
+        const service = yield* APIKey.make(config);
         return yield* program(service);
       }),
       testContext,
@@ -329,7 +330,7 @@ describe("APIKeyService", () => {
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const service = yield* makeAPIKeyService();
+          const service = yield* APIKey.make();
           const { key } = yield* service.create("user-1", {
             rateLimit: { maxRequests: 2, windowMs: 60_000 },
           });
@@ -488,7 +489,7 @@ describe("APIKeyService", () => {
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const service = yield* makeAPIKeyService();
+          const service = yield* APIKey.make();
           const { key } = yield* service.create("user-1");
           const outcomes: APIKeyVerifyResult[] = [];
           for (let i = 0; i < 5; i++) {

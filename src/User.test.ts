@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { Context, Effect } from "effect";
-import { makeUserService, UserServiceStore } from "./User.js";
-import type { User } from "./Types.js";
+import { UserServiceStore } from "./User.ts";
+import * as User from "./User.ts";
+import type { User as UserRecord } from "./Types.ts";
 
-const users = new Map<string, User>();
+const users = new Map<string, UserRecord>();
 const usersByEmail = new Map<string, string>();
 
 const userStore = {
@@ -15,7 +16,7 @@ const userStore = {
       return userId ? (users.get(userId) ?? null) : null;
     }),
 
-  update: (user: User) =>
+  update: (user: UserRecord) =>
     Effect.sync(() => {
       users.set(user.id, user);
       usersByEmail.set(user.email.toLowerCase(), user.id);
@@ -39,7 +40,7 @@ describe("UserService", () => {
     users.clear();
     usersByEmail.clear();
 
-    const seeded: User = {
+    const seeded: UserRecord = {
       id: "user-1",
       email: "user@example.com",
       emailVerified: false,
@@ -57,7 +58,7 @@ describe("UserService", () => {
 
   it("should get user by id", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeUserService();
+      const service = yield* User.make();
       return yield* service.getUser("user-1");
     });
 
@@ -69,7 +70,7 @@ describe("UserService", () => {
 
   it("should get user by normalized email", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeUserService();
+      const service = yield* User.make();
       return yield* service.getUserByEmail("  USER@EXAMPLE.COM  ");
     });
 
@@ -80,7 +81,7 @@ describe("UserService", () => {
 
   it("should merge attributes when updating user", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeUserService();
+      const service = yield* User.make();
       return yield* service.updateUserAttributes("user-1", {
         role: "admin",
         displayName: "Updated User",
@@ -96,7 +97,7 @@ describe("UserService", () => {
 
   it("should mark user email as verified", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeUserService();
+      const service = yield* User.make();
       return yield* service.markEmailVerified("user-1");
     });
 
@@ -107,7 +108,7 @@ describe("UserService", () => {
 
   it("should delete user", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* makeUserService();
+      const service = yield* User.make();
       yield* service.deleteUser("user-1");
       return yield* Effect.result(service.getUser("user-1"));
     });

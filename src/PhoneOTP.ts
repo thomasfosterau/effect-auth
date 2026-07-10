@@ -168,9 +168,7 @@ export class PhoneOTPService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: PhoneOTPConfig) =>
-    Layer.effect(PhoneOTPService, makePhoneOTPService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(PhoneOTPService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /** Read the phone number from a user's attributes, or `null`. */
@@ -179,7 +177,7 @@ export const getPhoneNumber = (user: Types.User): string | null => {
   return typeof value === "string" ? value : null;
 };
 
-export const makePhoneOTPService = (
+export const make = (
   config: PhoneOTPConfig,
 ): Effect.Effect<
   typeof PhoneOTPService.Service,

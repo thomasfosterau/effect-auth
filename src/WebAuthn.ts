@@ -244,7 +244,7 @@ export function base64UrlDecode(str: string): Uint8Array {
 /**
  * Create a WebAuthn service
  */
-export const makeWebAuthnService = (
+export const make = (
   config: WebAuthnConfig,
 ): Effect.Effect<
   typeof WebAuthnService.Service,
@@ -771,9 +771,7 @@ export class WebAuthnService extends Context.Service<
   }
 >()("@effect-auth/WebAuthnService") {
   static readonly layer = (config: WebAuthnConfig) =>
-    Layer.effect(WebAuthnService, makeWebAuthnService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(WebAuthnService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 const b64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");

@@ -1,26 +1,26 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
-import { Hooks } from "./Hooks.js";
-import * as PlatformCrypto from "./PlatformCrypto.js";
-import { SessionStore } from "./session/SessionStore.js";
-import { UserStore } from "./session/UserStore.js";
-import { SessionService } from "./session/SessionService.js";
-import { hashToken } from "./TokenHash.js";
-import { UserServiceStore, UserService } from "./User.js";
-import { AuthLifecycleService } from "./AuthLifecycle.js";
-import { EmailPasswordStore } from "./email/EmailPassword.js";
-import { PasswordHasher } from "./password/Password.js";
-import { EmailVerificationService, EmailVerificationStore } from "./email/EmailVerification.js";
+import { Hooks } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { SessionStore } from "./session/SessionStore.ts";
+import { UserStore } from "./session/UserStore.ts";
+import { SessionService } from "./session/SessionService.ts";
+import { hashToken } from "./TokenHash.ts";
+import { UserServiceStore, UserService } from "./User.ts";
+import { AuthLifecycleService } from "./AuthLifecycle.ts";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import { EmailVerificationService, EmailVerificationStore } from "./email/EmailVerification.ts";
 import {
   PasswordResetService,
   PasswordResetStore,
   PasswordResetUserStore,
-} from "./password/PasswordReset.js";
-import { makeAuthWebHandler, type AuthServices } from "./http/HTTPServer.js";
-import { JWTKeyStore, type JWTKeyPair, JWTService } from "./JWT.js";
-import { generatePKCE, verifyIdToken } from "./oauth/OAuth.js";
+} from "./password/PasswordReset.ts";
+import { type AuthServices } from "./http/HTTPServer.ts";
+import * as HTTPServer from "./http/HTTPServer.ts";
+import { JWTKeyStore, type JWTKeyPair, JWTService } from "./JWT.ts";
+import { generatePKCE, verifyIdToken } from "./oauth/OAuth.ts";
 import {
-  makeOIDCProviderService,
   OIDCClientStore,
   OIDCCodeStore,
   OIDCTokenStore,
@@ -32,8 +32,9 @@ import {
   type OIDCConsent,
   type OIDCToken,
   OIDCProviderService,
-} from "./OIDCProvider.js";
-import type * as Types from "./Types.js";
+} from "./OIDCProvider.ts";
+import * as OIDCProvider from "./OIDCProvider.ts";
+import type * as Types from "./Types.ts";
 
 const ISSUER = "http://idp.test/api/auth";
 
@@ -107,7 +108,7 @@ describe("OIDCProviderService", () => {
 
   const setup = () => {
     const stores = makeOIDCStores();
-    // `makeOIDCProviderService` also resolves `UserStore` and `JWTService` at
+    // `OIDCProvider.make` also resolves `UserStore` and `JWTService` at
     // construction time (even though these service-level tests never exercise
     // the userinfo/token-signing paths), so both must be satisfiable here too.
     const userStore: typeof UserStore.Service = {
@@ -131,9 +132,7 @@ describe("OIDCProviderService", () => {
 
   it("registers web clients with a secret and native clients without", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(
-      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
-    );
+    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
 
     const { web, native } = await Effect.runPromise(
       Effect.gen(function* () {
@@ -159,9 +158,7 @@ describe("OIDCProviderService", () => {
 
   it("rejects registration without redirect URIs", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(
-      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
-    );
+    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
     const err = await Effect.runPromise(
       Effect.flip(service.registerClient({ name: "x", redirectUris: [] })).pipe(
         Effect.provide(layer),
@@ -172,9 +169,7 @@ describe("OIDCProviderService", () => {
 
   it("refuses to redirect for unknown clients or unregistered redirect URIs", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(
-      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
-    );
+    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
     const user = makeUser("u1", "u1@test");
 
     const { unknownClient, badRedirect } = await Effect.runPromise(
@@ -209,9 +204,7 @@ describe("OIDCProviderService", () => {
 
   it("redirects spec-level errors back to the client", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(
-      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
-    );
+    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
     const user = makeUser("u1", "u1@test");
 
     const results = await Effect.runPromise(
@@ -268,9 +261,7 @@ describe("OIDCProviderService", () => {
 
   it("requires PKCE from native (public) clients", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(
-      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
-    );
+    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
     const user = makeUser("u1", "u1@test");
 
     const result = await Effect.runPromise(
@@ -296,9 +287,7 @@ describe("OIDCProviderService", () => {
 
   it("rejects redirect URIs that are not https or loopback http", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(
-      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
-    );
+    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
 
     const bad = [
       "javascript:alert(1)",
@@ -333,9 +322,7 @@ describe("OIDCProviderService", () => {
 
   it("returns interaction_required for prompt=none when consent is needed", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(
-      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
-    );
+    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
     const user = makeUser("u1", "u1@test");
 
     const result = await Effect.runPromise(
@@ -364,9 +351,7 @@ describe("OIDCProviderService", () => {
 
   it("prompt=none succeeds when consent has already been granted", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(
-      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
-    );
+    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
     const user = makeUser("u1", "u1@test");
 
     const result = await Effect.runPromise(
@@ -401,7 +386,7 @@ describe("OIDCProviderService", () => {
   it("resolves trusted config clients without touching the store", async () => {
     const { layer } = setup();
     const service = await Effect.runPromise(
-      makeOIDCProviderService({
+      OIDCProvider.make({
         ...config,
         trustedClients: [
           {
@@ -554,8 +539,8 @@ const makeHttpFixture = () => {
     seedUser,
     makeSession,
     oidcTokenStore: oidc.tokens,
-    handler: makeAuthWebHandler({ services: withOIDC, cookie: { secure: false } }).handler,
-    handlerWithoutOIDC: makeAuthWebHandler({ services: withoutOIDC, cookie: { secure: false } })
+    handler: HTTPServer.make({ services: withOIDC, cookie: { secure: false } }).handler,
+    handlerWithoutOIDC: HTTPServer.make({ services: withoutOIDC, cookie: { secure: false } })
       .handler,
   };
 };

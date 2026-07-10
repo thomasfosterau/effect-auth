@@ -33,36 +33,36 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./email": {
-      "import": "./dist/email/index.js",
-      "types": "./dist/email/index.d.ts"
+      "types": "./dist/email/index.d.ts",
+      "import": "./dist/email/index.js"
     },
     "./http": {
-      "import": "./dist/http/index.js",
-      "types": "./dist/http/index.d.ts"
+      "types": "./dist/http/index.d.ts",
+      "import": "./dist/http/index.js"
     },
     "./oauth": {
-      "import": "./dist/oauth/index.js",
-      "types": "./dist/oauth/index.d.ts"
+      "types": "./dist/oauth/index.d.ts",
+      "import": "./dist/oauth/index.js"
     },
     "./session": {
-      "import": "./dist/session/index.js",
-      "types": "./dist/session/index.d.ts"
+      "types": "./dist/session/index.d.ts",
+      "import": "./dist/session/index.js"
     },
     "./password": {
-      "import": "./dist/password/index.js",
-      "types": "./dist/password/index.d.ts"
+      "types": "./dist/password/index.d.ts",
+      "import": "./dist/password/index.js"
     },
     "./plugins": {
-      "import": "./dist/plugins/index.js",
-      "types": "./dist/plugins/index.d.ts"
+      "types": "./dist/plugins/index.d.ts",
+      "import": "./dist/plugins/index.js"
     },
     "./authz": {
-      "import": "./dist/authz/index.js",
-      "types": "./dist/authz/index.d.ts"
+      "types": "./dist/authz/index.d.ts",
+      "import": "./dist/authz/index.js"
     }
   },
   "scripts": {

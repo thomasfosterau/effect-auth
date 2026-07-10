@@ -32,7 +32,7 @@ import type {
   UpdateUserPayload,
   UserView,
   UsernameSignInPayload,
-} from "./types.js";
+} from "./types.ts";
 
 /** A non-2xx response from the auth server. */
 export class AuthClientError extends Error {

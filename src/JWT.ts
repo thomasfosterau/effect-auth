@@ -28,7 +28,6 @@
 
 import { Config, Context, Crypto, Data, Deferred, Effect, Layer, Redacted, Ref } from "effect";
 import * as Cipher from "./Cipher.ts";
-import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import type * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -176,7 +175,7 @@ export class JWTService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: JWTConfig) =>
-    Layer.effect(JWTService, makeJWTService(config)).pipe(Layer.provide(PlatformCrypto.layer));
+    Layer.effect(JWTService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 
   /**
    * Construct a Layer from environment variables via {@link jwtServiceConfig}.
@@ -189,7 +188,7 @@ export class JWTService extends Context.Service<
     JWTService,
     Effect.gen(function* () {
       const cfg = yield* jwtServiceConfig;
-      return yield* makeJWTService({
+      return yield* make({
         issuer: cfg.issuer,
         ...(cfg.audience !== undefined && { audience: cfg.audience }),
         ...(cfg.expiresIn !== undefined && { expiresIn: cfg.expiresIn }),
@@ -324,7 +323,7 @@ const decodeJsonSegment = (
 /**
  * Create a JWT service
  */
-export const makeJWTService = (
+export const make = (
   config: JWTConfig,
 ): Effect.Effect<typeof JWTService.Service, never, JWTKeyStore | Crypto.Crypto> =>
   Effect.gen(function* () {
@@ -336,7 +335,7 @@ export const makeJWTService = (
     const cipher: TokenCipher | null = config.encryptPrivateKey
       ? "cipher" in config.encryptPrivateKey
         ? config.encryptPrivateKey.cipher
-        : makeAes256GcmCipher(Redacted.value(config.encryptPrivateKey.secret))
+        : Cipher.aes256GcmCipher(Redacted.value(config.encryptPrivateKey.secret))
       : null;
 
     const store = yield* JWTKeyStore;
@@ -594,7 +593,7 @@ export class RemoteJwksVerifier extends Context.Service<
   }
 >()("@effect-auth/RemoteJwksVerifier") {
   static readonly layer = (config: RemoteJwksConfig) =>
-    Layer.effect(RemoteJwksVerifier, makeRemoteJwksVerifier(config));
+    Layer.effect(RemoteJwksVerifier, remoteJwksVerifier(config));
 }
 
 interface JwksCache {
@@ -619,7 +618,7 @@ const fetchJwks = (uri: string): Effect.Effect<JwksCache, JWTError> =>
  * `config.jwksUri`, caches it for `cacheTtlMs`, and verifies tokens against
  * it. Concurrent fetch requests are deduplicated via a Deferred.
  */
-export const makeRemoteJwksVerifier = (
+export const remoteJwksVerifier = (
   config: RemoteJwksConfig,
 ): Effect.Effect<typeof RemoteJwksVerifier.Service, never> =>
   Effect.gen(function* () {

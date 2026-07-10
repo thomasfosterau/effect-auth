@@ -1,25 +1,25 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect, Layer } from "effect";
-import * as PlatformCrypto from "./PlatformCrypto.js";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   AdminUserStore,
   BannedUserPlugin,
   isAdmin,
   isBanned,
-  makeAdminService,
   type AdminConfig,
   type AdminService,
   type ListUsersQuery,
-} from "./Admin.js";
-import { Hooks } from "./Hooks.js";
-import { IdentifierStore, type Identifier } from "./Identifier.js";
-import { PasswordHasher } from "./password/Password.js";
-import { make, SessionService } from "./session/SessionService.js";
-import { SessionStore } from "./session/SessionStore.js";
-import { UserStore } from "./session/UserStore.js";
-import { hashToken } from "./TokenHash.js";
-import type { Session, SessionConfig, User } from "./Types.js";
-import { UserServiceStore } from "./User.js";
+} from "./Admin.ts";
+import * as Admin from "./Admin.ts";
+import { Hooks } from "./Hooks.ts";
+import { IdentifierStore, type Identifier } from "./Identifier.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import { make, SessionService } from "./session/SessionService.ts";
+import { SessionStore } from "./session/SessionStore.ts";
+import { UserStore } from "./session/UserStore.ts";
+import { hashToken } from "./TokenHash.ts";
+import type { Session, SessionConfig, User } from "./Types.ts";
+import { UserServiceStore } from "./User.ts";
 
 const users = new Map<string, User>();
 const sessions = new Map<string, Session>();
@@ -236,7 +236,7 @@ const runService = <A, E>(
   Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
-        const service = yield* makeAdminService(config);
+        const service = yield* Admin.make(config);
         return yield* program(service);
       }),
       testContext,
@@ -414,7 +414,7 @@ describe("AdminService", () => {
     const testContext = await makeTestContext(hooksWithPlugin);
 
     const program = Effect.gen(function* () {
-      const service = yield* makeAdminService({});
+      const service = yield* Admin.make({});
       const sessionManager = yield* SessionService;
 
       // Ban first (revokes existing sessions), then mint a fresh session to

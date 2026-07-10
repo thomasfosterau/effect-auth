@@ -12,10 +12,10 @@ import { AuthApi } from "./HTTPApi.ts";
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { Http } from "effect-auth"
+ * import { HTTP } from "effect-auth"
  *
  * const program = Effect.gen(function* () {
- *   const client = yield* Http.makeAuthClient("http://localhost:5173")
+ *   const client = yield* HTTP.client("http://localhost:5173")
  *   const result = yield* client.auth.signIn({
  *     payload: { email: "user@example.com", password: "password-123" },
  *   })
@@ -23,4 +23,4 @@ import { AuthApi } from "./HTTPApi.ts";
  * })
  * ```
  */
-export const makeAuthClient = (baseUrl: string | URL) => HttpApiClient.make(AuthApi, { baseUrl });
+export const client = (baseUrl: string | URL) => HttpApiClient.make(AuthApi, { baseUrl });

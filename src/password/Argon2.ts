@@ -39,13 +39,13 @@ export interface Argon2Options {
  *
  * @example
  * ```ts
- * import { makeArgon2Hasher, Argon2HasherLayer } from "@effect-auth/argon2";
+ * import { Password } from "effect-auth";
  *
- * const hasher = makeArgon2Hasher();          // OWASP defaults
- * const layer = Argon2HasherLayer({ timeCost: 3 });
+ * const hasher = Password.argon2Hasher();          // OWASP defaults
+ * const layer = Password.argon2HasherLayer({ timeCost: 3 });
  * ```
  */
-export const makeArgon2Hasher = (options?: Argon2Options): typeof PasswordHasher.Service => {
+export const argon2Hasher = (options?: Argon2Options): typeof PasswordHasher.Service => {
   // Omit `algorithm`/`version`: the binding already defaults to Argon2id / 0x13.
   const params = {
     memoryCost: options?.memoryCost ?? 19456,
@@ -94,5 +94,5 @@ export const makeArgon2Hasher = (options?: Argon2Options): typeof PasswordHasher
  * of `PasswordHasher.layer()` to make Argon2id the default hasher for new
  * passwords.
  */
-export const Argon2HasherLayer = (options?: Argon2Options): Layer.Layer<PasswordHasher> =>
-  Layer.succeed(PasswordHasher, makeArgon2Hasher(options));
+export const argon2HasherLayer = (options?: Argon2Options): Layer.Layer<PasswordHasher> =>
+  Layer.succeed(PasswordHasher, argon2Hasher(options));

@@ -1,17 +1,18 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { composePlugins, Hooks } from "../Hooks.js";
-import { makeLastLoginMethodPlugin } from "./LastLoginMethod.js";
-import { makeEmailPasswordService } from "../email/EmailPassword.js";
-import { EmailPasswordStore } from "../email/EmailPassword.js";
-import { PasswordHasher, makeScryptHasher } from "../password/Password.js";
-import { SessionService } from "../session/SessionService.js";
-import { SessionStore } from "../session/SessionStore.js";
-import { UserStore } from "../session/UserStore.js";
-import { hashToken } from "../TokenHash.js";
-import type * as Types from "../Types.js";
+import { composePlugins, Hooks } from "../Hooks.ts";
+import * as LastLoginMethod from "./LastLoginMethod.ts";
+import * as EmailPassword from "../email/EmailPassword.ts";
+import { EmailPasswordStore } from "../email/EmailPassword.ts";
+import { PasswordHasher } from "../password/Password.ts";
+import * as Password from "../password/Password.ts";
+import { SessionService } from "../session/SessionService.ts";
+import { SessionStore } from "../session/SessionStore.ts";
+import { UserStore } from "../session/UserStore.ts";
+import { hashToken } from "../TokenHash.ts";
+import type * as Types from "../Types.ts";
 
-const hasher = makeScryptHasher({ cost: 16384 });
+const hasher = Password.scryptHasher({ cost: 16384 });
 
 const makeFixture = () => {
   const usersById = new Map<string, Types.User>();
@@ -73,7 +74,7 @@ const makeFixture = () => {
   }).pipe(Layer.provide(Layer.mergeAll(stores, Hooks.Default)));
 
   // Hooks stack: the last-login-method plugin over the no-op base.
-  const hooks = composePlugins([makeLastLoginMethodPlugin()]).pipe(
+  const hooks = composePlugins([LastLoginMethod.make()]).pipe(
     Layer.provide(Hooks.Default),
     Layer.provide(sessionManager),
   );
@@ -86,7 +87,7 @@ describe("LastLoginMethodPlugin", () => {
     const { layer, sessions } = makeFixture();
     const { signedUp, signedIn } = await Effect.runPromise(
       Effect.gen(function* () {
-        const service = yield* makeEmailPasswordService();
+        const service = yield* EmailPassword.make();
         const signedUp = yield* service.signUp({
           email: "alice@test.dev",
           password: "password-123",
@@ -118,7 +119,7 @@ describe("LastLoginMethodPlugin", () => {
     // Drive the hook directly with a session-less result (e.g. a pending
     // second factor): the plugin must not attempt to record anything.
     const probe = Layer.mergeAll(
-      composePlugins([makeLastLoginMethodPlugin()]).pipe(
+      composePlugins([LastLoginMethod.make()]).pipe(
         Layer.provide(Hooks.Default),
         Layer.provide(
           Layer.succeed(SessionService)({

@@ -1,18 +1,19 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Context, Crypto, Effect, Layer } from "effect";
-import { Hooks, composePlugins, makePlugin } from "./Hooks.js";
-import * as PlatformCrypto from "./PlatformCrypto.js";
-import * as Errors from "./Errors.js";
-import type { AuthResult, SignInInput } from "./email/EmailPassword.js";
-import { EmailPasswordStore } from "./email/EmailPassword.js";
-import { makeEmailPasswordService } from "./email/EmailPassword.js";
-import { PasswordHasher, makePBKDF2Hasher } from "./password/Password.js";
-import { make, SessionService } from "./session/SessionService.js";
-import { SessionStore } from "./session/SessionStore.js";
-import { UserStore } from "./session/UserStore.js";
-import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.js";
-import { RateLimitPlugin } from "./plugins/RateLimit.js";
-import type { Session, SessionConfig, User } from "./Types.js";
+import { Hooks, composePlugins, makePlugin } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import * as Errors from "./Errors.ts";
+import type { AuthResult, SignInInput } from "./email/EmailPassword.ts";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import * as EmailPassword from "./email/EmailPassword.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import * as Password from "./password/Password.ts";
+import { make, SessionService } from "./session/SessionService.ts";
+import { SessionStore } from "./session/SessionStore.ts";
+import { UserStore } from "./session/UserStore.ts";
+import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.ts";
+import { RateLimitPlugin } from "./plugins/RateLimit.ts";
+import type { Session, SessionConfig, User } from "./Types.ts";
 
 const signIn = (email: string): SignInInput => ({ email, password: "secret" });
 const authResult: AuthResult = {
@@ -419,7 +420,7 @@ describe("Hooks - integration with EmailPasswordService", () => {
       Context.merge(
         Context.merge(
           Context.make(EmailPasswordStore, emailPasswordStore),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
         Context.make(Crypto.Crypto, PlatformCrypto.instance),
       ),
@@ -435,7 +436,7 @@ describe("Hooks - integration with EmailPasswordService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService();
+      const service = yield* EmailPassword.make();
       return yield* service.signUp({ email: "person@example.com", password: "strong-password" });
     });
 

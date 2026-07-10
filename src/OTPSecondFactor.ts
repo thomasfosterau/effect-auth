@@ -12,7 +12,7 @@
  *
  * Can serve as an **alternative** to TOTP (use `OTPSecondFactorGateLayer`
  * instead of `TwoFactorGateLayer`) or in **addition** to it by pairing with
- * `makeTrustedDeviceGateShape` from the TrustedDevice module.
+ * `TrustedDevice.gate` from the TrustedDevice module.
  *
  * @module otp-second-factor
  */
@@ -24,7 +24,8 @@ import { type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
-import { TrustedDeviceService, makeTrustedDeviceGateShape } from "./session/TrustedDevice.ts";
+import { TrustedDeviceService } from "./session/TrustedDevice.ts";
+import * as TrustedDevice from "./session/TrustedDevice.ts";
 import type * as Types from "./Types.ts";
 
 // ---------------------------------------------------------------------------
@@ -128,16 +129,14 @@ export class OTPSecondFactorService extends Context.Service<
   }
 >()("@effect-auth/OTPSecondFactorService") {
   static readonly layer = (config: OTPSecondFactorConfig) =>
-    Layer.effect(OTPSecondFactorService, makeOTPSecondFactorService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(OTPSecondFactorService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 
-export const makeOTPSecondFactorService = (
+export const make = (
   config: OTPSecondFactorConfig,
 ): Effect.Effect<
   typeof OTPSecondFactorService.Service,
@@ -335,6 +334,6 @@ export const TrustedDeviceWithOTPSecondFactorGateLayer: Layer.Layer<
           ),
     };
 
-    return makeTrustedDeviceGateShape(tdService, otpGate);
+    return TrustedDevice.gate(tdService, otpGate);
   }),
 );

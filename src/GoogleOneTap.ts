@@ -77,7 +77,7 @@ export class GoogleOneTapNonceStore extends Context.Service<
 // Config & result types
 // ---------------------------------------------------------------------------
 
-/** Configuration for {@link makeGoogleOneTapService}. */
+/** Configuration for {@link make}. */
 export interface GoogleOneTapConfig {
   /** Your Google OAuth client id — the credential's required `aud`. */
   readonly clientId: string;
@@ -132,9 +132,7 @@ export class GoogleOneTapService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: GoogleOneTapConfig) =>
-    Layer.effect(GoogleOneTapService, makeGoogleOneTapService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(GoogleOneTapService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 // ---------------------------------------------------------------------------
@@ -147,7 +145,7 @@ export class GoogleOneTapService extends Context.Service<
  */
 const hashNonce = hashToken;
 
-export const makeGoogleOneTapService = (
+export const make = (
   config: GoogleOneTapConfig,
 ): Effect.Effect<
   typeof GoogleOneTapService.Service,

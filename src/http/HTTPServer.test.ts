@@ -1,41 +1,43 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { makeAuthWebHandler, BEARER_TOKEN_HEADER, type AuthServices } from "./HTTPServer.js";
-import { makeAuthClient } from "./HTTPClient.js";
-import { SessionStore } from "../session/SessionStore.js";
-import { UserStore } from "../session/UserStore.js";
-import { SessionService } from "../session/SessionService.js";
-import { AuthLifecycleService } from "../AuthLifecycle.js";
-import { EmailPasswordService, EmailPasswordStore } from "../email/EmailPassword.js";
-import { PasswordHasher, makeScryptHasher } from "../password/Password.js";
+import { BEARER_TOKEN_HEADER, type AuthServices } from "./HTTPServer.ts";
+import * as HTTPServer from "./HTTPServer.ts";
+import * as HTTPClient from "./HTTPClient.ts";
+import { SessionStore } from "../session/SessionStore.ts";
+import { UserStore } from "../session/UserStore.ts";
+import { SessionService } from "../session/SessionService.ts";
+import { AuthLifecycleService } from "../AuthLifecycle.ts";
+import { EmailPasswordService, EmailPasswordStore } from "../email/EmailPassword.ts";
+import { PasswordHasher } from "../password/Password.ts";
+import * as Password from "../password/Password.ts";
 import {
   EmailVerificationStore,
   type EmailVerification,
   EmailVerificationService,
-} from "../email/EmailVerification.js";
+} from "../email/EmailVerification.ts";
 import {
   PasswordResetStore,
   PasswordResetUserStore,
   type PasswordResetToken,
   PasswordResetService,
-} from "../password/PasswordReset.js";
-import { UserServiceStore, UserService } from "../User.js";
-import { hashToken } from "../TokenHash.js";
-import { Hooks } from "../Hooks.js";
+} from "../password/PasswordReset.ts";
+import { UserServiceStore, UserService } from "../User.ts";
+import { hashToken } from "../TokenHash.ts";
+import { Hooks } from "../Hooks.ts";
 import {
   MagicLinkStore,
   MagicLinkUserStore,
   type MagicLinkToken,
   MagicLinkService,
-} from "../MagicLink.js";
+} from "../MagicLink.ts";
 import {
   EmailOTPStore,
   EmailOTPUserStore,
   type EmailOTPPurpose,
   type EmailOTPRecord,
   EmailOTPService,
-} from "../email/EmailOTP.js";
+} from "../email/EmailOTP.ts";
 import {
   PendingTwoFactorStore,
   TwoFactorGateLayer,
@@ -43,29 +45,29 @@ import {
   type PendingTwoFactor,
   type TwoFactorRecord,
   TwoFactorService,
-} from "../TwoFactor.js";
+} from "../TwoFactor.ts";
 import {
   AccountManagementStore,
   type AccountToken,
   AccountManagementService,
-} from "../AccountManagement.js";
-import { AnonymousUserStore, AnonymousService } from "../Anonymous.js";
+} from "../AccountManagement.ts";
+import { AnonymousUserStore, AnonymousService } from "../Anonymous.ts";
 import {
   PhoneOTPStore,
   PhoneOTPUserStore,
   type PhoneOTPPurpose,
   type PhoneOTPRecord,
   PhoneOTPService,
-} from "../PhoneOTP.js";
-import { UsernameStore, UsernameService } from "../Username.js";
+} from "../PhoneOTP.ts";
+import { UsernameStore, UsernameService } from "../Username.ts";
 import {
   DeviceAuthorizationStore,
   type DeviceAuthorizationRecord,
   DeviceAuthorizationService,
-} from "../DeviceAuthorization.js";
-import { generateTOTP } from "../OTP.js";
-import { UserNotFoundError } from "../Errors.js";
-import type * as Types from "../Types.js";
+} from "../DeviceAuthorization.ts";
+import { generateTOTP } from "../OTP.ts";
+import { UserNotFoundError } from "../Errors.ts";
+import type * as Types from "../Types.ts";
 
 const HOUR = 60 * 60 * 1000;
 const SESSION_CONFIG: Types.SessionConfig = {
@@ -76,7 +78,7 @@ const PW2 = "new-password-456";
 
 // One shared (stateless) hasher; low scrypt cost keeps the suite fast while
 // still exercising real hashing end to end.
-const hasher = makeScryptHasher({ cost: 16384 });
+const hasher = Password.scryptHasher({ cost: 16384 });
 
 interface Fixture {
   /** The base `AuthServices` layer (no optional features). */
@@ -568,7 +570,7 @@ const handlerFor = (
     readonly bearerMode?: boolean | "opt-in";
   },
 ): Handler =>
-  makeAuthWebHandler({
+  HTTPServer.make({
     services: options?.features ? fixture.featureServices : fixture.services,
     ...(options?.multiSession !== undefined && { multiSession: options.multiSession }),
     cookie: {
@@ -739,7 +741,7 @@ describe("HTTP auth protocol", () => {
     );
 
     const program = Effect.gen(function* () {
-      const client = yield* makeAuthClient("http://test");
+      const client = yield* HTTPClient.client("http://test");
       return yield* client.auth.signUp({ payload: { email: "c@d.com", password: PW } });
     }).pipe(Effect.provide(ClientLayer));
 

@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { ClientIP } from "../ClientIP.js";
-import { Hooks } from "../Hooks.js";
-import type { SignInInput } from "../email/EmailPassword.js";
-import { RateLimitError } from "../Errors.js";
-import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.js";
-import { IPRateLimitPlugin } from "./IPRateLimit.js";
+import { ClientIP } from "../ClientIP.ts";
+import { Hooks } from "../Hooks.ts";
+import type { SignInInput } from "../email/EmailPassword.ts";
+import { RateLimitError } from "../Errors.ts";
+import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
+import { IPRateLimitPlugin } from "./IPRateLimit.ts";
 
 // ---------------------------------------------------------------------------
 // Test harness

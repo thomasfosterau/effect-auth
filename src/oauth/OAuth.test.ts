@@ -1,16 +1,12 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Crypto, Effect, Layer, Redacted } from "effect";
-import { AuthError } from "../Errors.js";
-import * as Cipher from "../Cipher.js";
-import * as PlatformCrypto from "../PlatformCrypto.js";
-import { SessionService } from "../session/SessionService.js";
+import { AuthError } from "../Errors.ts";
+import * as Cipher from "../Cipher.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { SessionService } from "../session/SessionService.ts";
 import {
-  makeOAuthProvider,
-  makeOAuthService,
-  makeAes256GcmCipher,
   verifyIdToken,
   discoverOAuthEndpoints,
-  makeAppleClientSecret,
   OAuthStateStore,
   OAuthAccountStore,
   OAuthUserStore,
@@ -38,7 +34,8 @@ import {
   RobloxProvider,
   KickProvider,
   HuggingFaceProvider,
-} from "./OAuth.js";
+} from "./OAuth.ts";
+import * as OAuth from "./OAuth.ts";
 
 /** In-memory OAuth state store for authorization-URL tests. */
 const StateStoreLive = () => {
@@ -439,7 +436,7 @@ describe("profile-mapping helpers (str / nested / profile / ProfileMap)", () => 
     });
 
     it("supports a custom mapProfile using ProfileMap ergonomics", async () => {
-      const customProvider = makeOAuthProvider(
+      const customProvider = OAuth.provider(
         "custom",
         {
           clientId: "id",
@@ -672,7 +669,7 @@ describe("getProfile via id_token", () => {
       ...baseClaims(now),
       exp: 4_102_444_800,
     });
-    const provider = makeOAuthProvider("idp", {
+    const provider = OAuth.provider("idp", {
       clientId: "client-123",
       clientSecret: Redacted.make("s"),
       redirectUri: "https://app/cb",
@@ -726,7 +723,7 @@ describe("discoverOAuthEndpoints", () => {
     });
 
     // The discovered endpoints slot straight into a generic provider.
-    const provider = makeOAuthProvider("generic", {
+    const provider = OAuth.provider("generic", {
       ...endpoints,
       clientId: "c",
       clientSecret: Redacted.make("s"),
@@ -747,12 +744,12 @@ describe("discoverOAuthEndpoints", () => {
 
 // --- Apple client secret -----------------------------------------------------
 
-describe("makeAppleClientSecret", () => {
+describe("OAuth.appleClientSecret", () => {
   it("produces a verifiable ES256 JWT with Apple's claims", async () => {
     const { publicKeyJwk, privateKeyPem } = Cipher.generateJwsKeyPair("ES256");
     const now = 1_700_000_000_000;
     const secret = await Effect.runPromise(
-      makeAppleClientSecret({
+      OAuth.appleClientSecret({
         teamId: "TEAM123",
         clientId: "com.example.app",
         keyId: "KEY123",
@@ -786,9 +783,9 @@ describe("makeAppleClientSecret", () => {
 
 const TEST_SECRET = "test-secret-for-aes-256-gcm-cipher";
 
-describe("makeAes256GcmCipher", () => {
+describe("Cipher.aes256GcmCipher", () => {
   it("encrypts and decrypts round-trip", async () => {
-    const cipher = makeAes256GcmCipher(TEST_SECRET);
+    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
     const token = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ012345";
     const encrypted = await Effect.runPromise(cipher.encrypt(token));
     expect(encrypted).not.toBe(token);
@@ -796,14 +793,14 @@ describe("makeAes256GcmCipher", () => {
   });
 
   it("produces a different ciphertext on each call (random IV)", async () => {
-    const cipher = makeAes256GcmCipher(TEST_SECRET);
+    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
     const e1 = await Effect.runPromise(cipher.encrypt("same-plaintext"));
     const e2 = await Effect.runPromise(cipher.encrypt("same-plaintext"));
     expect(e1).not.toBe(e2);
   });
 
   it("fails loudly on tampered ciphertext (GCM auth-tag)", async () => {
-    const cipher = makeAes256GcmCipher(TEST_SECRET);
+    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
     const encrypted = await Effect.runPromise(cipher.encrypt("hello"));
     const buf = Buffer.from(encrypted, "base64url");
     buf[buf.length - 1] ^= 0xff;
@@ -813,14 +810,14 @@ describe("makeAes256GcmCipher", () => {
   });
 
   it("fails on ciphertext that is too short", async () => {
-    const cipher = makeAes256GcmCipher(TEST_SECRET);
+    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
     const err = await Effect.runPromise(Effect.flip(cipher.decrypt("dG9vc2hvcnQ")));
     expect(err._tag).toBe("AuthError");
   });
 });
 
 describe("OAuthService encryptTokens", () => {
-  // makeOAuthService resolves OAuthStateStore | OAuthAccountStore | OAuthUserStore |
+  // OAuth.make resolves OAuthStateStore | OAuthAccountStore | OAuthUserStore |
   // SessionService at construction time. These tests only exercise
   // refreshAccessToken (which only touches OAuthAccountStore, via closure), so the
   // other three are stubbed out — never actually invoked.
@@ -862,7 +859,7 @@ describe("OAuthService encryptTokens", () => {
     return { stored, layer };
   };
 
-  const githubProvider = makeOAuthProvider(
+  const githubProvider = OAuth.provider(
     "github",
     {
       clientId: "c",
@@ -878,7 +875,7 @@ describe("OAuthService encryptTokens", () => {
 
   it("stores encrypted tokens and refreshAccessToken returns plaintext", async () => {
     const { stored, layer: accountStoreLive } = makeAccountStore();
-    const cipher = makeAes256GcmCipher(TEST_SECRET);
+    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
 
     const PLAIN_ACCESS = "plain-access-token";
     const PLAIN_REFRESH = "plain-refresh-token";
@@ -899,7 +896,7 @@ describe("OAuthService encryptTokens", () => {
     });
 
     const service = await Effect.runPromise(
-      makeOAuthService(
+      OAuth.make(
         { github: githubProvider },
         { encryptTokens: { secret: Redacted.make(TEST_SECRET) } },
       ).pipe(Effect.provide(accountStoreLive), Effect.provide(unusedDepsLayer)),
@@ -951,7 +948,7 @@ describe("OAuthService encryptTokens", () => {
     });
 
     const service = await Effect.runPromise(
-      makeOAuthService({ github: githubProvider }).pipe(
+      OAuth.make({ github: githubProvider }).pipe(
         Effect.provide(accountStoreLive),
         Effect.provide(unusedDepsLayer),
       ),
@@ -973,7 +970,7 @@ describe("OAuthService encryptTokens", () => {
 
   it("accepts a custom TokenCipher via { cipher }", async () => {
     const { stored, layer: accountStoreLive } = makeAccountStore();
-    const customCipher = makeAes256GcmCipher(TEST_SECRET);
+    const customCipher = Cipher.aes256GcmCipher(TEST_SECRET);
 
     const PLAIN_REFRESH = "custom-cipher-refresh-token";
     const NEW_ACCESS = "new-access-from-custom-cipher";
@@ -991,10 +988,10 @@ describe("OAuthService encryptTokens", () => {
     });
 
     const service = await Effect.runPromise(
-      makeOAuthService(
-        { github: githubProvider },
-        { encryptTokens: { cipher: customCipher } },
-      ).pipe(Effect.provide(accountStoreLive), Effect.provide(unusedDepsLayer)),
+      OAuth.make({ github: githubProvider }, { encryptTokens: { cipher: customCipher } }).pipe(
+        Effect.provide(accountStoreLive),
+        Effect.provide(unusedDepsLayer),
+      ),
     );
 
     let capturedRefreshToken: string | null = null;

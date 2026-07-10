@@ -83,7 +83,7 @@ export class AuthLifecycleService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: AuthLifecycleConfig = {}) =>
-    Layer.effect(AuthLifecycleService, makeAuthLifecycleService(config));
+    Layer.effect(AuthLifecycleService, make(config));
 }
 
 const getEmailFromUser = (user: Types.User): string | undefined =>
@@ -91,7 +91,7 @@ const getEmailFromUser = (user: Types.User): string | undefined =>
 
 const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
 
-export const makeAuthLifecycleService = (
+export const make = (
   config: AuthLifecycleConfig = {},
 ): Effect.Effect<
   typeof AuthLifecycleService.Service,

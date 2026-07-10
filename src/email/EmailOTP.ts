@@ -181,9 +181,7 @@ export class EmailOTPService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: EmailOTPConfig) =>
-    Layer.effect(EmailOTPService, makeEmailOTPService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(EmailOTPService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /** @deprecated Use {@link hashToken} from `"effect-auth"` instead. */
@@ -206,7 +204,7 @@ export const generateOTP = (crypto: Crypto.Crypto, length: number): Effect.Effec
 /**
  * Create an email OTP service
  */
-export const makeEmailOTPService = (
+export const make = (
   config: EmailOTPConfig,
 ): Effect.Effect<
   typeof EmailOTPService.Service,

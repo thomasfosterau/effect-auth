@@ -78,14 +78,14 @@ export class AnonymousService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: AnonymousConfig = {}) =>
-    Layer.effect(AnonymousService, makeAnonymousService(config));
+    Layer.effect(AnonymousService, make(config));
 }
 
 /** Whether a user is an anonymous (guest) user. */
 export const isAnonymousUser = (user: Types.User): boolean =>
   user.attributes["isAnonymous"] === true;
 
-export const makeAnonymousService = (
+export const make = (
   config: AnonymousConfig = {},
 ): Effect.Effect<typeof AnonymousService.Service, never, AnonymousUserStore | SessionService> =>
   Effect.gen(function* () {
