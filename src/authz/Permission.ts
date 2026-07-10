@@ -32,17 +32,21 @@ export const make = (resource: string, action: string): PermissionRef => ({
 /**
  * Parse a `"resource:action"` string into a {@link PermissionRef}.
  *
- * The string is split on the first `:`. If there is no `:`, the whole string is
- * treated as the resource and the action defaults to `"*"`. Surrounding
- * whitespace is trimmed.
+ * The string must contain a `:` separator. Both sides are trimmed. An empty
+ * action (e.g. `"posts:"`) or an empty resource (e.g. `":read"`) is a parse
+ * error. Use the `"*"` wildcard explicitly to match all resources or actions
+ * (e.g. `"posts:*"` or `"*:*"`).
+ *
+ * @throws {Error} if the input has no `:`, an empty resource, or an empty action
  *
  * @example
  * ```ts
  * import { parsePermission } from "effect-auth"
  *
  * parsePermission("posts:read") // { resource: "posts", action: "read" }
- * parsePermission("posts:*") // { resource: "posts", action: "*" }
- * parsePermission("posts") // { resource: "posts", action: "*" }
+ * parsePermission("posts:*")   // { resource: "posts", action: "*" }
+ * parsePermission("*:*")       // { resource: "*", action: "*" }
+ * parsePermission("posts")     // throws — no colon
  * ```
  */
 export const parsePermission = (input: string): PermissionRef => {
@@ -50,13 +54,26 @@ export const parsePermission = (input: string): PermissionRef => {
   const separator = trimmed.indexOf(":");
 
   if (separator === -1) {
-    return { resource: trimmed, action: "*" };
+    throw new Error(
+      `parsePermission: invalid permission string "${input}" — must be in "resource:action" format`,
+    );
   }
 
-  return {
-    resource: trimmed.slice(0, separator).trim(),
-    action: trimmed.slice(separator + 1).trim(),
-  };
+  const resource = trimmed.slice(0, separator).trim();
+  const action = trimmed.slice(separator + 1).trim();
+
+  if (resource === "") {
+    throw new Error(
+      `parsePermission: invalid permission string "${input}" — resource must not be empty`,
+    );
+  }
+  if (action === "") {
+    throw new Error(
+      `parsePermission: invalid permission string "${input}" — action must not be empty (use "*" to match all)`,
+    );
+  }
+
+  return { resource, action };
 };
 
 /**

@@ -155,13 +155,14 @@ export const anyOf = (
 /**
  * Combine policies with logical AND: permission is granted only if *every*
  * policy grants it. Evaluation short-circuits on the first denial. With no
- * policies, grants (vacuously true).
+ * policies, denies (consistent with the empty-`anyOf` behaviour).
  */
 export const allOf = (
   ...policies: readonly (typeof AuthorizationPolicy.Service)[]
 ): typeof AuthorizationPolicy.Service => ({
   checkPermission: (userId, resource, action) =>
     Effect.gen(function* () {
+      if (policies.length === 0) return false;
       for (const policy of policies) {
         if (!(yield* policy.checkPermission(userId, resource, action))) {
           return false;
@@ -201,19 +202,29 @@ export const can = (
 
 /**
  * Require that the user has *all* of the given permissions. Fails with
- * `PermissionDeniedError` for the first permission that is not granted.
+ * `PermissionDeniedError` for the first permission that is not granted, or
+ * immediately when `permissions` is empty (consistent with
+ * `requireAnyPermission`).
  */
 export const requireAllPermissions = (
   userId: string,
   permissions: readonly PermissionRef[],
-): Effect.Effect<void, Errors.PermissionDeniedError, AuthorizationPolicy> =>
-  Effect.forEach(
+): Effect.Effect<void, Errors.PermissionDeniedError, AuthorizationPolicy> => {
+  if (permissions.length === 0) {
+    return Effect.fail(
+      new Errors.PermissionDeniedError({
+        message: "Permission denied: no permissions provided",
+        resource: "*",
+        action: "*",
+      }),
+    );
+  }
+  return Effect.forEach(
     permissions,
     ({ resource, action }) => requirePermission(userId, resource, action),
-    {
-      discard: true,
-    },
+    { discard: true },
   );
+};
 
 /**
  * Require that the user has *at least one* of the given permissions. Fails with

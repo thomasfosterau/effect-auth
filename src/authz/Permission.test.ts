@@ -12,8 +12,20 @@ describe("Permission", () => {
       expect(parsePermission("posts:*")).toEqual({ resource: "posts", action: "*" });
     });
 
-    it("defaults missing action to wildcard", () => {
-      expect(parsePermission("posts")).toEqual({ resource: "posts", action: "*" });
+    it("throws on missing colon", () => {
+      expect(() => parsePermission("posts")).toThrow();
+    });
+
+    it("throws on empty resource", () => {
+      expect(() => parsePermission(":read")).toThrow();
+    });
+
+    it("throws on empty action", () => {
+      expect(() => parsePermission("posts:")).toThrow();
+    });
+
+    it("parses superadmin wildcard", () => {
+      expect(parsePermission("*:*")).toEqual({ resource: "*", action: "*" });
     });
 
     it("trims whitespace", () => {
