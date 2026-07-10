@@ -1,6 +1,6 @@
 /**
  * Test-only fixture: a fully functional in-memory effect-auth server (the
- * real `makeAuthWebHandler` over in-memory stores) plus a cookie-jar `fetch`
+ * real `Auth.HTTP.make` handler over in-memory stores) plus a cookie-jar `fetch`
  * so the browser-oriented client can be exercised end to end in-process.
  *
  * Excluded from the published build (see `tsconfig.json`).
@@ -11,7 +11,7 @@ import { Effect, Layer } from "effect";
 const HOUR = 60 * 60 * 1000;
 
 // Low scrypt cost keeps the suite fast while exercising real hashing.
-const hasher = Auth.Password.makeScryptHasher({ cost: 16384 });
+const hasher = Auth.Password.scryptHasher({ cost: 16384 });
 
 export const makeServerFixture = () => {
   const usersById = new Map<string, Auth.User>();
@@ -163,7 +163,7 @@ export const makeServerFixture = () => {
     authLifecycleServiceLayer,
   ) as Layer.Layer<Auth.HTTP.AuthServices>;
 
-  const { handler } = Auth.HTTP.makeAuthWebHandler({
+  const { handler } = Auth.HTTP.make({
     services,
     cookie: { secure: false },
   });

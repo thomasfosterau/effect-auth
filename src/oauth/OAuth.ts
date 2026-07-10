@@ -7,12 +7,10 @@
 
 import { Config, Context, Crypto, Effect, Layer, Redacted } from "effect";
 import * as Cipher from "../Cipher.ts";
-import { makeAes256GcmCipher } from "../Cipher.ts";
 import * as Obs from "../Observability.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import type { TokenCipher } from "../Cipher.ts";
 export type { TokenCipher } from "../Cipher.ts";
-export { makeAes256GcmCipher } from "../Cipher.ts";
 import {
   AuthError,
   OAuthProviderError,
@@ -135,7 +133,7 @@ export interface OAuthUserInfo {
 /**
  * Authorization URL generation result
  */
-export interface AuthorizationUrlResult {
+export interface AuthorizationURLResult {
   readonly url: string;
   readonly state: string;
   readonly codeVerifier?: string;
@@ -183,11 +181,11 @@ export interface OAuthProvider {
   readonly name: string;
   readonly config: OAuthProviderConfig;
   /**
-   * `OAuthProvider` is a plain object built by {@link makeOAuthProvider} — it
+   * `OAuthProvider` is a plain object built by {@link provider} — it
    * is never itself Layer-constructed, so there is no construction-time
    * scope to resolve `OAuthStateStore` in. `OAuthStateStore` is only ever
    * yielded here from inside `OAuthService`'s methods, which already resolve
-   * it once at their own Layer-construction time (see `makeOAuthService`);
+   * it once at their own Layer-construction time (see `make`);
    * this per-call requirement is analogous to an ambient request context
    * (e.g. `HttpServerRequest`) rather than an implementation detail leaking
    * out. See `@effect-leakable-service` on {@link OAuthStateStore}.
@@ -195,7 +193,7 @@ export interface OAuthProvider {
   readonly generateAuthorizationUrl: (
     scopes?: readonly string[],
   ) => Effect.Effect<
-    AuthorizationUrlResult,
+    AuthorizationURLResult,
     OAuthProviderError | AuthError,
     OAuthStateStore | Crypto.Crypto
   >;
@@ -452,7 +450,7 @@ const claimsToUserInfo = (claims: Record<string, unknown>): OAuthUserInfo => ({
 /**
  * Create an OAuth provider
  */
-export const makeOAuthProvider = (
+export const provider = (
   name: string,
   config: OAuthProviderConfig,
   usePKCE = true,
@@ -557,7 +555,7 @@ export const makeOAuthProvider = (
           url,
           state,
           ...(pkce?.codeVerifier && { codeVerifier: pkce.codeVerifier }),
-        } satisfies AuthorizationUrlResult;
+        } satisfies AuthorizationURLResult;
       }),
 
     exchangeCode: (code: string, codeVerifier?: string) =>
@@ -660,7 +658,7 @@ export class OAuthService extends Context.Service<
     readonly generateAuthorizationUrl: (
       provider: string,
       options?: { scopes?: readonly string[]; returnTo?: string },
-    ) => Effect.Effect<AuthorizationUrlResult, AuthError | OAuthProviderError>;
+    ) => Effect.Effect<AuthorizationURLResult, AuthError | OAuthProviderError>;
 
     readonly handleCallback: (
       state: string,
@@ -729,9 +727,7 @@ export class OAuthService extends Context.Service<
     providers: Record<string, OAuthProvider>,
     options: OAuthServiceOptions = {},
   ) =>
-    Layer.effect(OAuthService, makeOAuthService(providers, options)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(OAuthService, make(providers, options)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /**
@@ -783,7 +779,7 @@ export interface OAuthServiceOptions {
 /**
  * Create an OAuth service with configured providers
  */
-export const makeOAuthService = (
+export const make = (
   providers: Record<string, OAuthProvider>,
   options: OAuthServiceOptions = {},
 ): Effect.Effect<
@@ -797,7 +793,7 @@ export const makeOAuthService = (
     const cipher: TokenCipher | null = options.encryptTokens
       ? "cipher" in options.encryptTokens
         ? options.encryptTokens.cipher
-        : makeAes256GcmCipher(Redacted.value(options.encryptTokens.secret))
+        : Cipher.aes256GcmCipher(Redacted.value(options.encryptTokens.secret))
       : null;
 
     const stateStore = yield* OAuthStateStore;
@@ -1365,7 +1361,7 @@ export const GoogleProvider = (config: {
   clientSecret: Redacted.Redacted<string>;
   redirectUri: string;
 }): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "google",
     {
       ...config,
@@ -1382,7 +1378,7 @@ export const GitHubProvider = (config: {
   clientSecret: Redacted.Redacted<string>;
   redirectUri: string;
 }): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "github",
     {
       ...config,
@@ -1399,7 +1395,7 @@ export const DiscordProvider = (config: {
   clientSecret: Redacted.Redacted<string>;
   redirectUri: string;
 }): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "discord",
     {
       ...config,
@@ -1417,7 +1413,7 @@ export const MicrosoftProvider = (config: {
   redirectUri: string;
   tenant?: string;
 }): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "microsoft",
     {
       ...config,
@@ -1486,10 +1482,10 @@ export const profile = (
  * can be just as terse.
  *
  * @example
- * import { makeOAuthProvider, ProfileMap } from "effect-auth";
+ * import { provider, ProfileMap } from "effect-auth";
  *
  * const LinearProvider = (config: OAuthClientConfig): OAuthProvider =>
- *   makeOAuthProvider("linear", {
+ *   provider("linear", {
  *     ...config,
  *     authorizationEndpoint: "https://linear.app/oauth/authorize",
  *     tokenEndpoint: "https://api.linear.app/oauth/token",
@@ -1509,10 +1505,10 @@ export const ProfileMap = { str, nested, profile } as const;
 /**
  * Sign-in with Apple. Apple returns identity only via the OIDC `id_token`
  * (`response_mode=form_post`, `name`/`email` scopes). `clientSecret` must be a
- * signed ES256 JWT — generate it with {@link makeAppleClientSecret}.
+ * signed ES256 JWT — generate it with {@link appleClientSecret}.
  */
 export const AppleProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "apple",
     {
       ...config,
@@ -1532,7 +1528,7 @@ export const AppleProvider = (config: OAuthClientConfig): OAuthProvider =>
  * months; Apple caps `exp` at 15777000s). Pass the result as `clientSecret`
  * to {@link AppleProvider}.
  */
-export const makeAppleClientSecret = (params: {
+export const appleClientSecret = (params: {
   readonly teamId: string;
   readonly clientId: string;
   readonly keyId: string;
@@ -1572,7 +1568,7 @@ export const makeAppleClientSecret = (params: {
 
 /** Facebook Login (Graph API userinfo; `picture` is nested under `data.url`). */
 export const FacebookProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "facebook",
     {
       ...config,
@@ -1593,7 +1589,7 @@ export const FacebookProvider = (config: OAuthClientConfig): OAuthProvider =>
 
 /** X/Twitter OAuth2 (PKCE + Basic auth required; email needs elevated access). */
 export const TwitterProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "twitter",
     {
       ...config,
@@ -1616,7 +1612,7 @@ export const TwitterProvider = (config: OAuthClientConfig): OAuthProvider =>
 
 /** LinkedIn (OpenID Connect userinfo). */
 export const LinkedInProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "linkedin",
     {
       ...config,
@@ -1630,7 +1626,7 @@ export const LinkedInProvider = (config: OAuthClientConfig): OAuthProvider =>
 
 /** Twitch (OpenID Connect userinfo). */
 export const TwitchProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "twitch",
     {
       ...config,
@@ -1644,7 +1640,7 @@ export const TwitchProvider = (config: OAuthClientConfig): OAuthProvider =>
 
 /** Spotify (Basic auth token exchange; `images[0].url`, `display_name`). */
 export const SpotifyProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "spotify",
     {
       ...config,
@@ -1672,7 +1668,7 @@ export const GitLabProvider = (
   config: OAuthClientConfig & { readonly baseUrl?: string },
 ): OAuthProvider => {
   const base = (config.baseUrl ?? "https://gitlab.com").replace(/\/$/, "");
-  return makeOAuthProvider(
+  return provider(
     "gitlab",
     {
       clientId: config.clientId,
@@ -1696,7 +1692,7 @@ export const GitLabProvider = (
 
 /** Reddit (Basic auth; `identity` scope; no email; `duration=permanent`). */
 export const RedditProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "reddit",
     {
       ...config,
@@ -1718,7 +1714,7 @@ export const RedditProvider = (config: OAuthClientConfig): OAuthProvider =>
 
 /** Dropbox (POST userinfo; `token_access_type=offline` for refresh tokens). */
 export const DropboxProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "dropbox",
     {
       ...config,
@@ -1741,7 +1737,7 @@ export const DropboxProvider = (config: OAuthClientConfig): OAuthProvider =>
 
 /** Notion (Basic auth; profile via `/v1/users/me` bot owner). */
 export const NotionProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "notion",
     {
       ...config,
@@ -1767,7 +1763,7 @@ export const NotionProvider = (config: OAuthClientConfig): OAuthProvider =>
 
 /** Slack (Sign in with Slack / OpenID Connect). */
 export const SlackProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "slack",
     {
       ...config,
@@ -1781,7 +1777,7 @@ export const SlackProvider = (config: OAuthClientConfig): OAuthProvider =>
 
 /** Zoom (Basic auth; `first_name`/`last_name`, `pic_url`). */
 export const ZoomProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "zoom",
     {
       ...config,
@@ -1805,7 +1801,7 @@ export const ZoomProvider = (config: OAuthClientConfig): OAuthProvider =>
 
 /** TikTok (uses `client_key`; PKCE; profile under `data.user`). */
 export const TikTokProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "tiktok",
     {
       ...config,
@@ -1829,7 +1825,7 @@ export const TikTokProvider = (config: OAuthClientConfig): OAuthProvider =>
 
 /** Roblox (OpenID Connect; PKCE required). */
 export const RobloxProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "roblox",
     {
       ...config,
@@ -1843,7 +1839,7 @@ export const RobloxProvider = (config: OAuthClientConfig): OAuthProvider =>
 
 /** Kick (PKCE required; profile under `data[0]`). */
 export const KickProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "kick",
     {
       ...config,
@@ -1867,7 +1863,7 @@ export const KickProvider = (config: OAuthClientConfig): OAuthProvider =>
 
 /** Hugging Face (OpenID Connect; PKCE). */
 export const HuggingFaceProvider = (config: OAuthClientConfig): OAuthProvider =>
-  makeOAuthProvider(
+  provider(
     "huggingface",
     {
       ...config,
@@ -1894,7 +1890,7 @@ export interface DiscoveredEndpoints {
 /**
  * Populate a provider's endpoints from an issuer's
  * `/.well-known/openid-configuration`. Spread the result into a
- * {@link makeOAuthProvider} config to build a generic OIDC provider.
+ * {@link provider} config to build a generic OIDC provider.
  */
 export const discoverOAuthEndpoints = (
   issuerUrl: string,

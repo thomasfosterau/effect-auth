@@ -5,8 +5,8 @@ import {
   encodeSessionCacheCookie,
   resolveSessionCache,
   type ResolvedSessionCache,
-} from "./SessionCookieCache.js";
-import type * as Types from "./Types.js";
+} from "./SessionCookieCache.ts";
+import type * as Types from "./Types.ts";
 
 const SECRET = "a".repeat(32);
 const SESSION_ID = "sess_abc123";

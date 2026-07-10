@@ -1,19 +1,19 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect } from "effect";
-import { Hooks } from "./Hooks.js";
-import * as PlatformCrypto from "./PlatformCrypto.js";
+import { Hooks } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
-  makeMagicLinkService,
   type MagicLinkCreateUserInput,
   type MagicLinkToken,
   MagicLinkStore,
   MagicLinkUserStore,
-} from "./MagicLink.js";
-import { make, SessionService } from "./session/SessionService.js";
-import { SessionStore } from "./session/SessionStore.js";
-import { UserStore } from "./session/UserStore.js";
-import { hashToken } from "./TokenHash.js";
-import type { Session, User, SessionConfig } from "./Types.js";
+} from "./MagicLink.ts";
+import * as MagicLink from "./MagicLink.ts";
+import { make, SessionService } from "./session/SessionService.ts";
+import { SessionStore } from "./session/SessionStore.ts";
+import { UserStore } from "./session/UserStore.ts";
+import { hashToken } from "./TokenHash.ts";
+import type { Session, User, SessionConfig } from "./Types.ts";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
@@ -168,7 +168,7 @@ describe("MagicLinkService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
       yield* service.send("new@example.com");
     });
 
@@ -191,7 +191,7 @@ describe("MagicLinkService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
       yield* service.send("  Person@Example.COM  ");
     });
 
@@ -207,7 +207,7 @@ describe("MagicLinkService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
       yield* service.send("repeat@example.com");
       yield* service.send("repeat@example.com");
     });
@@ -227,7 +227,7 @@ describe("MagicLinkService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({
+      const service = yield* MagicLink.make({
         disableSignUp: true,
         sendMagicLink: recordingSend,
       });
@@ -256,7 +256,7 @@ describe("MagicLinkService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({
+      const service = yield* MagicLink.make({
         disableSignUp: true,
         sendMagicLink: recordingSend,
       });
@@ -275,7 +275,7 @@ describe("MagicLinkService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
       yield* service.send("fresh@example.com");
       return yield* service.verify(sentLinks[0]!.token, {
         sessionAttributes: { device: "test" },
@@ -310,7 +310,7 @@ describe("MagicLinkService", () => {
     addUser(existing);
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
       yield* service.send("known@example.com");
       return yield* service.verify(sentLinks[0]!.token);
     });
@@ -336,7 +336,7 @@ describe("MagicLinkService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
       return yield* Effect.result(service.verify("expired-token"));
     });
 
@@ -356,7 +356,7 @@ describe("MagicLinkService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
       yield* service.send("once@example.com");
       const token = sentLinks[0]!.token;
       yield* service.verify(token);
@@ -379,7 +379,7 @@ describe("MagicLinkService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
       return yield* Effect.result(service.verify("missing-token"));
     });
 
@@ -404,7 +404,7 @@ describe("MagicLinkService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({
+      const service = yield* MagicLink.make({
         disableSignUp: true,
         sendMagicLink: recordingSend,
       });
@@ -427,7 +427,7 @@ describe("MagicLinkService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({
+      const service = yield* MagicLink.make({
         sendMagicLink: recordingSend,
         resendCooldown: 60_000,
       });
@@ -463,7 +463,7 @@ describe("MagicLinkService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* makeMagicLinkService({
+      const service = yield* MagicLink.make({
         sendMagicLink: recordingSend,
         resendCooldown: 60_000,
       });
@@ -486,7 +486,7 @@ describe("MagicLinkService", () => {
 
     const program = Effect.gen(function* () {
       // No resendCooldown: default behavior — immediate resend always succeeds.
-      const service = yield* makeMagicLinkService({ sendMagicLink: recordingSend });
+      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
       yield* service.send("repeat@example.com");
       yield* service.send("repeat@example.com");
     });

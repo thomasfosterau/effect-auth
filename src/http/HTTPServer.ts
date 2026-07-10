@@ -15,11 +15,8 @@ import * as S from "./HTTPApiSchemas.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { Hooks } from "../Hooks.ts";
 import { SessionService } from "../session/SessionService.ts";
-import {
-  EmailPasswordService,
-  EmailPasswordStore,
-  makeEmailPasswordService,
-} from "../email/EmailPassword.ts";
+import { EmailPasswordService, EmailPasswordStore } from "../email/EmailPassword.ts";
+import * as EmailPassword from "../email/EmailPassword.ts";
 import { MagicLinkService } from "../MagicLink.ts";
 import { AccountManagementService } from "../AccountManagement.ts";
 import { AnonymousService } from "../Anonymous.ts";
@@ -82,7 +79,7 @@ export type AuthServices =
 /**
  * Server implementation for the auth HTTP contract.
  *
- * `makeAuthWebHandler` turns the contract + your service layer into a standard
+ * `make` turns the contract + your service layer into a standard
  * Web `Request => Response` handler that any framework can mount. Handlers call
  * the existing Effect services; the session cookie and session resolution are
  * handled here so framework integrations no longer hand-roll them.
@@ -134,7 +131,7 @@ export interface CookieConfig {
    * whenever a sign-in endpoint issues a session, so login pages can
    * highlight the user's previous method (`"email-password"`,
    * `"magic-link"`, `"sso"`, ...). Pass `true` for a 30-day cookie or an
-   * object to tune the lifetime. Pair with `makeLastLoginMethodPlugin` to
+   * object to tune the lifetime. Pair with `LastLoginMethod.make` to
    * also record the method into `session.attributes.method` server-side.
    */
   readonly lastLoginMethod?: boolean | { readonly maxAge?: number };
@@ -883,7 +880,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("changePassword", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const emailPassword = yield* makeEmailPasswordService();
+          const emailPassword = yield* EmailPassword.make();
           yield* emailPassword
             .changePassword({
               userId: resolved.user.id,
@@ -2703,7 +2700,7 @@ export interface EndpointRateLimitRule {
  * When `rules` is omitted, {@link defaultEndpointRules} is used — sane
  * defaults for all sensitive auth endpoints.
  */
-export interface HttpIPRateLimitConfig {
+export interface HTTPIPRateLimitConfig {
   /**
    * Declarative rule set. First matching rule (in order) wins.
    * Omit to use the built-in defaults for all sensitive endpoints.
@@ -2851,7 +2848,7 @@ export interface AuthWebHandlerOptions {
    * Set to `{}` to use the built-in {@link defaultEndpointRules}, or supply
    * `{ rules: [...] }` for a custom rule set.
    */
-  readonly ipRateLimit?: HttpIPRateLimitConfig;
+  readonly ipRateLimit?: HTTPIPRateLimitConfig;
 }
 
 /** Minimal Scalar API reference shell pointing at the sibling `openapi.json`. */
@@ -2933,7 +2930,7 @@ const isTrustedRequest = (
  * Mount the returned `handler` in any framework (SvelteKit/Next/Hono/...).
  * `dispose` releases the handler's scope.
  */
-export const makeAuthWebHandler = (
+export const make = (
   options: AuthWebHandlerOptions,
 ): {
   readonly handler: (request: Request, context?: Context.Context<never>) => Promise<Response>;

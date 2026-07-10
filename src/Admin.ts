@@ -289,13 +289,13 @@ export class AdminService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: AdminConfig = {}) =>
-    Layer.effect(AdminService, makeAdminService(config)).pipe(Layer.provide(PlatformCrypto.layer));
+    Layer.effect(AdminService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /**
  * Create an admin service
  */
-export const makeAdminService = (
+export const make = (
   config: AdminConfig = {},
 ): Effect.Effect<
   typeof AdminService.Service,

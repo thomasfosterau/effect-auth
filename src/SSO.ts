@@ -5,7 +5,7 @@
  * OIDC connection, route sign-ins by email domain, and provision users (and,
  * optionally, organization members) on first login. An SSO connection is, under
  * the hood, a dynamically-registered OAuth provider, so this module reuses the
- * OAuth machinery in {@link module:oauth} — {@link makeOAuthProvider},
+ * OAuth machinery in {@link module:oauth} — {@link OAuth.provider},
  * {@link discoverOAuthEndpoints}, and the shared {@link OAuthStateStore}.
  *
  * SAML is out of scope for now; the store shape carries a `protocol` field so a
@@ -20,12 +20,12 @@ import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { OrganizationStore, type Member } from "./Organization.ts";
 import {
-  makeOAuthProvider,
   discoverOAuthEndpoints,
   OAuthStateStore,
   OAuthUserStore,
   type OAuthProviderConfig,
 } from "./oauth/OAuth.ts";
+import * as OAuth from "./oauth/OAuth.ts";
 import type * as Types from "./Types.ts";
 
 /** Failure to register, resolve, or complete an SSO sign-in. */
@@ -159,10 +159,10 @@ export class SSOService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: SSOConfig = {}) =>
-    Layer.effect(SSOService, makeSSOService(config)).pipe(Layer.provide(PlatformCrypto.layer));
+    Layer.effect(SSOService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
-/** Configuration for {@link makeSSOService}. */
+/** Configuration for {@link make}. */
 export interface SSOConfig {
   /** Default scopes when a connection doesn't specify any. */
   readonly defaultScopes?: readonly string[];
@@ -196,7 +196,7 @@ const toOAuthConfig = (provider: SSOProvider): OAuthProviderConfig => ({
       }),
 });
 
-export const makeSSOService = (
+export const make = (
   config: SSOConfig = {},
 ): Effect.Effect<typeof SSOService.Service, never, SSOProviderStore | Crypto.Crypto> =>
   Effect.gen(function* () {
@@ -288,7 +288,7 @@ export const makeSSOService = (
 
       signIn: Effect.fn("SSOService.signIn")(function* (selector: SSOSignInSelector) {
         const provider = yield* resolveProvider(selector);
-        const oauth = makeOAuthProvider(
+        const oauth = OAuth.provider(
           stateProviderName(provider.id),
           toOAuthConfig(provider),
           provider.usePKCE,
@@ -327,7 +327,7 @@ export const makeSSOService = (
           return yield* new SSOError({ message: "SSO provider no longer exists" });
         }
 
-        const oauth = makeOAuthProvider(
+        const oauth = OAuth.provider(
           stateProviderName(provider.id),
           toOAuthConfig(provider),
           provider.usePKCE,

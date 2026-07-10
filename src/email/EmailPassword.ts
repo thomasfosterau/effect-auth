@@ -177,7 +177,7 @@ export class EmailPasswordService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: EmailPasswordConfig = {}) =>
-    Layer.effect(EmailPasswordService, makeEmailPasswordService(config));
+    Layer.effect(EmailPasswordService, make(config));
 }
 
 export const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
@@ -208,7 +208,7 @@ const validatePasswordLength = (
     }
   });
 
-export const makeEmailPasswordService = (
+export const make = (
   config: EmailPasswordConfig = {},
 ): Effect.Effect<
   typeof EmailPasswordService.Service,

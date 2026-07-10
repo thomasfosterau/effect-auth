@@ -8,7 +8,7 @@ import {
   hasAnyScope,
   requireScope,
   requireAllScopes,
-} from "./Scope.js";
+} from "./Scope.ts";
 
 describe("Scope", () => {
   describe("parseScopes / formatScopes", () => {

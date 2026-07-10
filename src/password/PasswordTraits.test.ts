@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Context, Effect } from "effect";
-import { PasswordHasher, makePBKDF2Hasher, makeMultiAlgorithmVerifier } from "./Password.js";
+import { PasswordHasher } from "./Password.ts";
+import * as Password from "./Password.ts";
 
 // Mock hasher for testing multi-algorithm support
 const makeMockBcryptHasher = (): typeof PasswordHasher.Service => ({
@@ -18,16 +19,19 @@ const makeMockBcryptHasher = (): typeof PasswordHasher.Service => ({
 });
 
 describe("Multi-Algorithm Password Hashing", () => {
-  describe("makePBKDF2Hasher", () => {
+  describe("Password.pbkdf2Hasher", () => {
     it("should include algorithm identifier", () => {
-      const hasher = makePBKDF2Hasher();
+      const hasher = Password.pbkdf2Hasher();
       expect(hasher.algorithm).toBe("pbkdf2-sha256");
     });
 
     it("should hash password with algorithm in PHC format", async () => {
-      const hasher = makePBKDF2Hasher();
+      const hasher = Password.pbkdf2Hasher();
       const result = await Effect.runPromise(
-        Effect.provide(hasher.hash("test123"), Context.make(PasswordHasher, makePBKDF2Hasher())),
+        Effect.provide(
+          hasher.hash("test123"),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+        ),
       );
 
       expect(result.hash).toMatch(/^pbkdf2-sha256\$/);
@@ -35,17 +39,17 @@ describe("Multi-Algorithm Password Hashing", () => {
     });
   });
 
-  describe("makeMultiAlgorithmVerifier", () => {
+  describe("Password.multiAlgorithmVerifier", () => {
     it("should verify password with correct algorithm", async () => {
-      const pbkdf2Hasher = makePBKDF2Hasher();
+      const pbkdf2Hasher = Password.pbkdf2Hasher();
       const bcryptHasher = makeMockBcryptHasher();
-      const verifier = makeMultiAlgorithmVerifier([pbkdf2Hasher, bcryptHasher]);
+      const verifier = Password.multiAlgorithmVerifier([pbkdf2Hasher, bcryptHasher]);
 
       // Hash with PBKDF2
       const pbkdf2Hash = await Effect.runPromise(
         Effect.provide(
           pbkdf2Hasher.hash("password123"),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
       );
 
@@ -53,7 +57,7 @@ describe("Multi-Algorithm Password Hashing", () => {
       const isValid = await Effect.runPromise(
         Effect.provide(
           verifier.verify("password123", pbkdf2Hash.hash),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
       );
 
@@ -61,15 +65,15 @@ describe("Multi-Algorithm Password Hashing", () => {
     });
 
     it("should verify password with different algorithm", async () => {
-      const pbkdf2Hasher = makePBKDF2Hasher();
+      const pbkdf2Hasher = Password.pbkdf2Hasher();
       const bcryptHasher = makeMockBcryptHasher();
-      const verifier = makeMultiAlgorithmVerifier([pbkdf2Hasher, bcryptHasher]);
+      const verifier = Password.multiAlgorithmVerifier([pbkdf2Hasher, bcryptHasher]);
 
       // Hash with mock bcrypt
       const bcryptHash = await Effect.runPromise(
         Effect.provide(
           bcryptHasher.hash("password123"),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
       );
 
@@ -77,7 +81,7 @@ describe("Multi-Algorithm Password Hashing", () => {
       const isValid = await Effect.runPromise(
         Effect.provide(
           verifier.verify("password123", bcryptHash.hash),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
       );
 
@@ -85,15 +89,15 @@ describe("Multi-Algorithm Password Hashing", () => {
     });
 
     it("should reject wrong password regardless of algorithm", async () => {
-      const pbkdf2Hasher = makePBKDF2Hasher();
+      const pbkdf2Hasher = Password.pbkdf2Hasher();
       const bcryptHasher = makeMockBcryptHasher();
-      const verifier = makeMultiAlgorithmVerifier([pbkdf2Hasher, bcryptHasher]);
+      const verifier = Password.multiAlgorithmVerifier([pbkdf2Hasher, bcryptHasher]);
 
       // Hash with PBKDF2
       const hash = await Effect.runPromise(
         Effect.provide(
           pbkdf2Hasher.hash("correctPassword"),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
       );
 
@@ -101,7 +105,7 @@ describe("Multi-Algorithm Password Hashing", () => {
       const isValid = await Effect.runPromise(
         Effect.provide(
           verifier.verify("wrongPassword", hash.hash),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
       );
 
@@ -109,15 +113,15 @@ describe("Multi-Algorithm Password Hashing", () => {
     });
 
     it("should fail with unsupported algorithm", async () => {
-      const pbkdf2Hasher = makePBKDF2Hasher();
-      const verifier = makeMultiAlgorithmVerifier([pbkdf2Hasher]);
+      const pbkdf2Hasher = Password.pbkdf2Hasher();
+      const verifier = Password.multiAlgorithmVerifier([pbkdf2Hasher]);
 
       // Try to verify a hash from an unsupported algorithm
       const result = await Effect.runPromise(
         Effect.result(
           Effect.provide(
             verifier.verify("password", "argon2$someParams$hash"),
-            Context.make(PasswordHasher, makePBKDF2Hasher()),
+            Context.make(PasswordHasher, Password.pbkdf2Hasher()),
           ),
         ),
       );
@@ -131,15 +135,15 @@ describe("Multi-Algorithm Password Hashing", () => {
     });
 
     it("should support migration between algorithms", async () => {
-      const pbkdf2Hasher = makePBKDF2Hasher();
+      const pbkdf2Hasher = Password.pbkdf2Hasher();
       const bcryptHasher = makeMockBcryptHasher();
-      const verifier = makeMultiAlgorithmVerifier([pbkdf2Hasher, bcryptHasher]);
+      const verifier = Password.multiAlgorithmVerifier([pbkdf2Hasher, bcryptHasher]);
 
       // Simulate old user with bcrypt hash
       const oldHash = await Effect.runPromise(
         Effect.provide(
           bcryptHasher.hash("oldPassword"),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
       );
 
@@ -147,7 +151,7 @@ describe("Multi-Algorithm Password Hashing", () => {
       const newHash = await Effect.runPromise(
         Effect.provide(
           pbkdf2Hasher.hash("newPassword"),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
       );
 
@@ -155,13 +159,13 @@ describe("Multi-Algorithm Password Hashing", () => {
       const oldValid = await Effect.runPromise(
         Effect.provide(
           verifier.verify("oldPassword", oldHash.hash),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
       );
       const newValid = await Effect.runPromise(
         Effect.provide(
           verifier.verify("newPassword", newHash.hash),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
       );
 
@@ -170,14 +174,14 @@ describe("Multi-Algorithm Password Hashing", () => {
     });
 
     it("should handle invalid hash format", async () => {
-      const pbkdf2Hasher = makePBKDF2Hasher();
-      const verifier = makeMultiAlgorithmVerifier([pbkdf2Hasher]);
+      const pbkdf2Hasher = Password.pbkdf2Hasher();
+      const verifier = Password.multiAlgorithmVerifier([pbkdf2Hasher]);
 
       const result = await Effect.runPromise(
         Effect.result(
           Effect.provide(
             verifier.verify("password", "invalidhash"),
-            Context.make(PasswordHasher, makePBKDF2Hasher()),
+            Context.make(PasswordHasher, Password.pbkdf2Hasher()),
           ),
         ),
       );

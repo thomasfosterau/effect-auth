@@ -265,7 +265,7 @@ export interface TrustedOIDCClient {
   readonly skipConsent?: boolean;
 }
 
-/** Configuration for {@link makeOIDCProviderService}. */
+/** Configuration for {@link make}. */
 export interface OIDCProviderConfig {
   /**
    * Issuer identifier: the external base URL where the auth handler is
@@ -380,9 +380,7 @@ export class OIDCProviderService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: OIDCProviderConfig) =>
-    Layer.effect(OIDCProviderService, makeOIDCProviderService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(OIDCProviderService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 // -----------------------------------------------------------------------------
@@ -433,7 +431,7 @@ const isAllowedRedirectUri = (uri: string): boolean => {
 // Service implementation
 // -----------------------------------------------------------------------------
 
-export const makeOIDCProviderService = (
+export const make = (
   config: OIDCProviderConfig,
 ): Effect.Effect<
   typeof OIDCProviderService.Service,

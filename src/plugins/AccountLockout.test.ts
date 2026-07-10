@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { Hooks, type HookError } from "../Hooks.js";
+import { Hooks, type HookError } from "../Hooks.ts";
 import {
   AccountLockoutPlugin,
   AccountLockoutStore,
   type AccountLockoutRecord,
-} from "./AccountLockout.js";
-import { AccountLockedError } from "../Errors.js";
-import type { SignInInput, AuthResult } from "../email/EmailPassword.js";
-import type * as Types from "../Types.js";
+} from "./AccountLockout.ts";
+import { AccountLockedError } from "../Errors.ts";
+import type { SignInInput, AuthResult } from "../email/EmailPassword.ts";
+import type * as Types from "../Types.ts";
 
 const signIn = (email: string): SignInInput => ({ email, password: "pw" });
 

@@ -13,8 +13,8 @@
  * @module vue
  */
 import { getCurrentScope, onScopeDispose, shallowRef, type ShallowRef } from "vue";
-import type { AuthClient, AuthClientError, SessionState } from "./Client.js";
-import type { SessionView } from "./types.js";
+import type { AuthClient, AuthClientError, SessionState } from "./Client.ts";
+import type { SessionView } from "./types.ts";
 
 /**
  * A `ref` over the client's session store that also carries a `dispose()`

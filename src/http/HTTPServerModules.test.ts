@@ -1,35 +1,36 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import * as Cipher from "../Cipher.js";
-import { makeAuthWebHandler, type AuthServices } from "./HTTPServer.js";
-import { SessionStore } from "../session/SessionStore.js";
-import { UserStore } from "../session/UserStore.js";
-import { SessionService } from "../session/SessionService.js";
-import { hashToken } from "../TokenHash.js";
-import { UserServiceStore, UserService } from "../User.js";
-import { Hooks } from "../Hooks.js";
-import { AuthLifecycleService } from "../AuthLifecycle.js";
-import { EmailPasswordStore } from "../email/EmailPassword.js";
-import { PasswordHasher } from "../password/Password.js";
-import { EmailVerificationService, EmailVerificationStore } from "../email/EmailVerification.js";
+import * as Cipher from "../Cipher.ts";
+import { type AuthServices } from "./HTTPServer.ts";
+import * as HTTPServer from "./HTTPServer.ts";
+import { SessionStore } from "../session/SessionStore.ts";
+import { UserStore } from "../session/UserStore.ts";
+import { SessionService } from "../session/SessionService.ts";
+import { hashToken } from "../TokenHash.ts";
+import { UserServiceStore, UserService } from "../User.ts";
+import { Hooks } from "../Hooks.ts";
+import { AuthLifecycleService } from "../AuthLifecycle.ts";
+import { EmailPasswordStore } from "../email/EmailPassword.ts";
+import { PasswordHasher } from "../password/Password.ts";
+import { EmailVerificationService, EmailVerificationStore } from "../email/EmailVerification.ts";
 import {
   PasswordResetService,
   PasswordResetStore,
   PasswordResetUserStore,
-} from "../password/PasswordReset.js";
+} from "../password/PasswordReset.ts";
 import {
   OrganizationStore,
   type Organization,
   type Member,
   type Invitation,
   OrganizationService,
-} from "../Organization.js";
-import { AdminUserStore, AdminService } from "../Admin.js";
-import { APIKeyStore, type APIKey, APIKeyService } from "../APIKey.js";
-import { JWTKeyStore, type JWTKeyPair, JWTService } from "../JWT.js";
-import { IdentifierStore } from "../Identifier.js";
-import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.js";
-import type * as Types from "../Types.js";
+} from "../Organization.ts";
+import { AdminUserStore, AdminService } from "../Admin.ts";
+import { APIKeyStore, type APIKey, APIKeyService } from "../APIKey.ts";
+import { JWTKeyStore, type JWTKeyPair, JWTService } from "../JWT.ts";
+import { IdentifierStore } from "../Identifier.ts";
+import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
+import type * as Types from "../Types.ts";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -286,7 +287,7 @@ const makeFixture = () => {
     apiKeyServiceLayer,
     jwtServiceLayer,
   ) as Layer.Layer<AuthServices>;
-  const { handler } = makeAuthWebHandler({ services, cookie: { secure: false } });
+  const { handler } = HTTPServer.make({ services, cookie: { secure: false } });
 
   return { handler, seedUser, makeSession, sessions };
 };

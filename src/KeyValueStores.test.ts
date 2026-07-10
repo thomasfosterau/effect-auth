@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import { KeyValueStore } from "effect/unstable/persistence";
-import * as PlatformCrypto from "./PlatformCrypto.js";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   layerKV,
   OAuthStateStoreKV,
@@ -12,20 +12,20 @@ import {
   MagicLinkStoreKV,
   EmailOTPStoreKV,
   PendingTwoFactorStoreKV,
-} from "./KeyValueStores.js";
-import { OAuthStateStore, type OAuthState } from "./oauth/OAuth.js";
-import { ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.js";
-import { RateLimitStore, type RateLimitEntry } from "./RateLimit.js";
+} from "./KeyValueStores.ts";
+import { OAuthStateStore, type OAuthState } from "./oauth/OAuth.ts";
+import { ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.ts";
+import { RateLimitStore, type RateLimitEntry } from "./RateLimit.ts";
 import {
   EmailVerificationStore,
-  makeEmailVerificationService,
-  type EmailVerification,
-} from "./email/EmailVerification.js";
-import { PasswordResetStore, type PasswordResetToken } from "./password/PasswordReset.js";
-import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.js";
-import { EmailOTPStore, type EmailOTPRecord } from "./email/EmailOTP.js";
-import { PendingTwoFactorStore, type PendingTwoFactor } from "./TwoFactor.js";
-import { Hooks } from "./Hooks.js";
+  type EmailVerification as EmailVerificationRecord,
+} from "./email/EmailVerification.ts";
+import * as EmailVerification from "./email/EmailVerification.ts";
+import { PasswordResetStore, type PasswordResetToken } from "./password/PasswordReset.ts";
+import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
+import { EmailOTPStore, type EmailOTPRecord } from "./email/EmailOTP.ts";
+import { PendingTwoFactorStore, type PendingTwoFactor } from "./TwoFactor.ts";
+import { Hooks } from "./Hooks.ts";
 
 /** Fresh in-memory KV per invocation so tests are isolated. */
 const testLayer = () => layerKV.pipe(Layer.provide(KeyValueStore.layerMemory));
@@ -172,7 +172,7 @@ describe("KeyValueStores", () => {
   });
 
   describe("EmailVerificationStoreKV", () => {
-    const verification = (token: string, userId: string): EmailVerification => ({
+    const verification = (token: string, userId: string): EmailVerificationRecord => ({
       token,
       userId,
       email: `${userId}@example.com`,
@@ -349,7 +349,7 @@ describe("KeyValueStores", () => {
     it("creates, resends and verifies tokens end-to-end", async () => {
       const sent: Array<{ to: string; token: string }> = [];
       const program = Effect.gen(function* () {
-        const service = yield* makeEmailVerificationService({
+        const service = yield* EmailVerification.make({
           sendEmail: (to, token) => Effect.sync(() => void sent.push({ to, token })),
         });
         const first = yield* service.createVerification("user-1", "user-1@example.com");

@@ -255,9 +255,7 @@ export class APIKeyService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: APIKeyConfig = {}) =>
-    Layer.effect(APIKeyService, makeAPIKeyService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(APIKeyService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /**
@@ -295,7 +293,7 @@ const hasRequiredPermissions = (
 /**
  * Create an API key service
  */
-export const makeAPIKeyService = (
+export const make = (
   config: APIKeyConfig = {},
 ): Effect.Effect<typeof APIKeyService.Service, never, APIKeyStore | RateLimiter | Crypto.Crypto> =>
   Effect.gen(function* () {

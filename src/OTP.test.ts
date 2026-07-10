@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect } from "effect";
-import * as OTP from "./OTP.js";
-import * as PlatformCrypto from "./PlatformCrypto.js";
+import * as OTP from "./OTP.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 
 describe("OTP Secret Generation", () => {
   it("should generate random bytes", async () => {

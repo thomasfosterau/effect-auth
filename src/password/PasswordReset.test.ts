@@ -1,19 +1,20 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect } from "effect";
-import { Hooks } from "../Hooks.js";
-import * as PlatformCrypto from "../PlatformCrypto.js";
+import { Hooks } from "../Hooks.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
-  makePasswordResetService,
   type PasswordResetToken,
   PasswordResetStore,
   PasswordResetUserStore,
-} from "./PasswordReset.js";
-import { make, SessionService } from "../session/SessionService.js";
-import { SessionStore } from "../session/SessionStore.js";
-import { UserStore } from "../session/UserStore.js";
-import { PasswordHasher, makePBKDF2Hasher } from "./Password.js";
-import { hashToken } from "../TokenHash.js";
-import type { Session, User, SessionConfig } from "../Types.js";
+} from "./PasswordReset.ts";
+import * as PasswordReset from "./PasswordReset.ts";
+import { make, SessionService } from "../session/SessionService.ts";
+import { SessionStore } from "../session/SessionStore.ts";
+import { UserStore } from "../session/UserStore.ts";
+import { PasswordHasher } from "./Password.ts";
+import * as Password from "./Password.ts";
+import { hashToken } from "../TokenHash.ts";
+import type { Session, User, SessionConfig } from "../Types.ts";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
@@ -127,7 +128,7 @@ const makeTestContext = async () => {
           Context.merge(
             Context.merge(
               Context.make(PasswordResetUserStore, passwordResetUserStore),
-              Context.make(PasswordHasher, makePBKDF2Hasher()),
+              Context.make(PasswordHasher, Password.pbkdf2Hasher()),
             ),
             Context.make(Crypto.Crypto, PlatformCrypto.instance),
           ),
@@ -162,7 +163,7 @@ describe("PasswordResetService", () => {
     usersByEmail.set("reset@example.com", user.id);
 
     const program = Effect.gen(function* () {
-      const service = yield* makePasswordResetService({
+      const service = yield* PasswordReset.make({
         sendResetPassword: (email, token) =>
           Effect.sync(() => {
             sentEmails.push({ email, token });
@@ -185,7 +186,7 @@ describe("PasswordResetService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makePasswordResetService({
+      const service = yield* PasswordReset.make({
         sendResetPassword: () => Effect.void,
       });
 
@@ -203,7 +204,7 @@ describe("PasswordResetService", () => {
   it("should revoke sessions by default on password reset", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = makePBKDF2Hasher();
+    const hasher = Password.pbkdf2Hasher();
     const oldHash = await Effect.runPromise(hasher.hash("old-password-123"));
 
     const user: User = {
@@ -240,7 +241,7 @@ describe("PasswordResetService", () => {
 
     // No revokeSessionsOnPasswordReset option — default should revoke sessions.
     const program = Effect.gen(function* () {
-      const service = yield* makePasswordResetService({
+      const service = yield* PasswordReset.make({
         sendResetPassword: () => Effect.void,
       });
 
@@ -263,7 +264,7 @@ describe("PasswordResetService", () => {
   it("should not revoke sessions when revokeSessionsOnPasswordReset is false", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = makePBKDF2Hasher();
+    const hasher = Password.pbkdf2Hasher();
     const oldHash = await Effect.runPromise(hasher.hash("old-password-123"));
 
     const user: User = {
@@ -298,7 +299,7 @@ describe("PasswordResetService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* makePasswordResetService({
+      const service = yield* PasswordReset.make({
         revokeSessionsOnPasswordReset: false,
         sendResetPassword: () => Effect.void,
       });
@@ -323,7 +324,7 @@ describe("PasswordResetService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makePasswordResetService({
+      const service = yield* PasswordReset.make({
         sendResetPassword: () => Effect.void,
       });
 

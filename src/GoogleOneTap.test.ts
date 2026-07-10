@@ -1,32 +1,29 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import * as Cipher from "./Cipher.js";
-import { UserNotFoundError } from "./Errors.js";
-import { Hooks } from "./Hooks.js";
-import * as PlatformCrypto from "./PlatformCrypto.js";
-import { hashToken } from "./TokenHash.js";
-import { SessionService } from "./session/SessionService.js";
-import { SessionStore } from "./session/SessionStore.js";
-import { UserStore } from "./session/UserStore.js";
-import { UserServiceStore, UserService } from "./User.js";
-import { AuthLifecycleService } from "./AuthLifecycle.js";
-import { EmailPasswordStore } from "./email/EmailPassword.js";
-import { PasswordHasher } from "./password/Password.js";
-import { EmailVerificationService, EmailVerificationStore } from "./email/EmailVerification.js";
+import * as Cipher from "./Cipher.ts";
+import { UserNotFoundError } from "./Errors.ts";
+import { Hooks } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { hashToken } from "./TokenHash.ts";
+import { SessionService } from "./session/SessionService.ts";
+import { SessionStore } from "./session/SessionStore.ts";
+import { UserStore } from "./session/UserStore.ts";
+import { UserServiceStore, UserService } from "./User.ts";
+import { AuthLifecycleService } from "./AuthLifecycle.ts";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import { EmailVerificationService, EmailVerificationStore } from "./email/EmailVerification.ts";
 import {
   PasswordResetService,
   PasswordResetStore,
   PasswordResetUserStore,
-} from "./password/PasswordReset.js";
-import { makeAuthWebHandler, type AuthServices } from "./http/HTTPServer.js";
-import { OAuthUserStore } from "./oauth/OAuth.js";
-import {
-  makeGoogleOneTapService,
-  GoogleOneTapError,
-  GoogleOneTapService,
-  GoogleOneTapNonceStore,
-} from "./GoogleOneTap.js";
-import type * as Types from "./Types.js";
+} from "./password/PasswordReset.ts";
+import { type AuthServices } from "./http/HTTPServer.ts";
+import * as HTTPServer from "./http/HTTPServer.ts";
+import { OAuthUserStore } from "./oauth/OAuth.ts";
+import { GoogleOneTapError, GoogleOneTapService, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
+import * as GoogleOneTap from "./GoogleOneTap.ts";
+import type * as Types from "./Types.ts";
 
 const CLIENT_ID = "client-123.apps.googleusercontent.com";
 const JWKS_ENDPOINT = "https://fake-google.test/certs";
@@ -164,7 +161,7 @@ describe("GoogleOneTapService", () => {
 
   it("verifies a credential and provisions the user once", async () => {
     const { layer, users, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
+    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
 
     const nonce1 = "test-nonce-1";
     const nonce2 = "test-nonce-2";
@@ -204,7 +201,7 @@ describe("GoogleOneTapService", () => {
 
   it("accepts the bare `accounts.google.com` issuer", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
+    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "test-nonce-bare-iss";
     await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
     const result = await withJwks(() =>
@@ -222,7 +219,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects wrong audience, wrong issuer, expiry, unverified email, and bad signatures", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
+    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
 
     const nonces = ["n1", "n2", "n3", "n4", "n5"];
     for (const n of nonces) {
@@ -268,7 +265,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects a replayed id_token (nonce already consumed)", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
+    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "replay-nonce";
     await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
 
@@ -289,7 +286,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects a nonce that was never issued", async () => {
     const { layer } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
+    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "never-issued";
     const credential = signCredential(validClaims({ nonce: hashNonce(nonce) }));
 
@@ -302,7 +299,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects an expired nonce", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
+    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "expired-nonce";
     // Create with a timestamp that is already in the past
     await Effect.runPromise(nonceStore.create(nonce, Date.now() - 1));
@@ -317,7 +314,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects when nonce in id_token does not match the supplied nonce", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
+    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "correct-nonce";
     await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
 
@@ -426,11 +423,11 @@ const makeHttpFixture = () => {
   );
 
   return {
-    handler: makeAuthWebHandler({
+    handler: HTTPServer.make({
       services: Layer.mergeAll(base, oneTapLayer) as Layer.Layer<AuthServices>,
       cookie: { secure: false, lastLoginMethod: true },
     }).handler,
-    handlerWithoutOneTap: makeAuthWebHandler({
+    handlerWithoutOneTap: HTTPServer.make({
       services: base as Layer.Layer<AuthServices>,
       cookie: { secure: false },
     }).handler,

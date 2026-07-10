@@ -139,7 +139,7 @@ const oauthStateKey = (state: string) => `oauth-state:${state}`;
 /**
  * Build an {@link OAuthStateStore} over the ambient `KeyValueStore`.
  */
-export const makeOAuthStateStoreKV: Effect.Effect<
+export const oauthStateStoreKV: Effect.Effect<
   typeof OAuthStateStore.Service,
   never,
   KeyValueStore.KeyValueStore
@@ -160,7 +160,7 @@ export const makeOAuthStateStoreKV: Effect.Effect<
  * `OAuthStateStore` layer backed by `KeyValueStore`.
  */
 export const OAuthStateStoreKV: Layer.Layer<OAuthStateStore, never, KeyValueStore.KeyValueStore> =
-  Layer.effect(OAuthStateStore, makeOAuthStateStoreKV);
+  Layer.effect(OAuthStateStore, oauthStateStoreKV);
 
 // ---------------------------------------------------------------------------
 // WebAuthn ChallengeStore
@@ -184,7 +184,7 @@ const decodeChallenge = (stored: StoredChallenge): WebAuthnChallenge => ({
 /**
  * Build a WebAuthn {@link ChallengeStore} over the ambient `KeyValueStore`.
  */
-export const makeChallengeStoreKV: Effect.Effect<
+export const challengeStoreKV: Effect.Effect<
   typeof ChallengeStore.Service,
   never,
   KeyValueStore.KeyValueStore
@@ -216,7 +216,7 @@ export const makeChallengeStoreKV: Effect.Effect<
  * WebAuthn `ChallengeStore` layer backed by `KeyValueStore`.
  */
 export const ChallengeStoreKV: Layer.Layer<ChallengeStore, never, KeyValueStore.KeyValueStore> =
-  Layer.effect(ChallengeStore, makeChallengeStoreKV);
+  Layer.effect(ChallengeStore, challengeStoreKV);
 
 // ---------------------------------------------------------------------------
 // RateLimitStore
@@ -232,7 +232,7 @@ const rateLimitKey = (key: string) => `rate-limit:${key}`;
  * The `ttl` arguments are honoured logically via each entry's `resetAt`
  * rather than by backend-level expiry, since `KeyValueStore` has no TTL API.
  */
-export const makeRateLimitStoreKV: Effect.Effect<
+export const rateLimitStoreKV: Effect.Effect<
   typeof RateLimitStore.Service,
   never,
   KeyValueStore.KeyValueStore
@@ -263,7 +263,7 @@ export const makeRateLimitStoreKV: Effect.Effect<
  * `RateLimitStore` layer backed by `KeyValueStore`.
  */
 export const RateLimitStoreKV: Layer.Layer<RateLimitStore, never, KeyValueStore.KeyValueStore> =
-  Layer.effect(RateLimitStore, makeRateLimitStoreKV);
+  Layer.effect(RateLimitStore, rateLimitStoreKV);
 
 // ---------------------------------------------------------------------------
 // EmailVerificationStore
@@ -278,7 +278,7 @@ const emailVerificationUserKey = (userId: string) => `email-verification:user:${
  * `deleteByUserId` is served by a secondary index key per user holding the
  * user's live tokens (see the module docs for staleness guarantees).
  */
-export const makeEmailVerificationStoreKV: Effect.Effect<
+export const emailVerificationStoreKV: Effect.Effect<
   typeof EmailVerificationStore.Service,
   never,
   KeyValueStore.KeyValueStore
@@ -339,7 +339,7 @@ export const EmailVerificationStoreKV: Layer.Layer<
   EmailVerificationStore,
   never,
   KeyValueStore.KeyValueStore
-> = Layer.effect(EmailVerificationStore, makeEmailVerificationStoreKV);
+> = Layer.effect(EmailVerificationStore, emailVerificationStoreKV);
 
 // ---------------------------------------------------------------------------
 // PasswordResetStore
@@ -353,7 +353,7 @@ const passwordResetUserKey = (userId: string) => `password-reset:user:${userId}`
  *
  * `deleteByUserId` is served by a secondary index key per user.
  */
-export const makePasswordResetStoreKV: Effect.Effect<
+export const passwordResetStoreKV: Effect.Effect<
   typeof PasswordResetStore.Service,
   never,
   KeyValueStore.KeyValueStore
@@ -400,7 +400,7 @@ export const PasswordResetStoreKV: Layer.Layer<
   PasswordResetStore,
   never,
   KeyValueStore.KeyValueStore
-> = Layer.effect(PasswordResetStore, makePasswordResetStoreKV);
+> = Layer.effect(PasswordResetStore, passwordResetStoreKV);
 
 // ---------------------------------------------------------------------------
 // MagicLinkStore
@@ -414,7 +414,7 @@ const magicLinkEmailKey = (email: string) => `magic-link:email:${email}`;
  *
  * `deleteByEmail` is served by a secondary index key per email address.
  */
-export const makeMagicLinkStoreKV: Effect.Effect<
+export const magicLinkStoreKV: Effect.Effect<
   typeof MagicLinkStore.Service,
   never,
   KeyValueStore.KeyValueStore
@@ -464,7 +464,7 @@ export const makeMagicLinkStoreKV: Effect.Effect<
  * `MagicLinkStore` layer backed by `KeyValueStore`.
  */
 export const MagicLinkStoreKV: Layer.Layer<MagicLinkStore, never, KeyValueStore.KeyValueStore> =
-  Layer.effect(MagicLinkStore, makeMagicLinkStoreKV);
+  Layer.effect(MagicLinkStore, magicLinkStoreKV);
 
 // ---------------------------------------------------------------------------
 // EmailOTPStore
@@ -479,7 +479,7 @@ const emailOTPKey = (email: string, purpose: EmailOTPPurpose) => `email-otp:${pu
  * the key itself and no secondary index is needed. `incrementAttempts` is
  * read-modify-write (see the module docs on atomicity).
  */
-export const makeEmailOTPStoreKV: Effect.Effect<
+export const emailOTPStoreKV: Effect.Effect<
   typeof EmailOTPStore.Service,
   never,
   KeyValueStore.KeyValueStore
@@ -512,7 +512,7 @@ export const makeEmailOTPStoreKV: Effect.Effect<
  * `EmailOTPStore` layer backed by `KeyValueStore`.
  */
 export const EmailOTPStoreKV: Layer.Layer<EmailOTPStore, never, KeyValueStore.KeyValueStore> =
-  Layer.effect(EmailOTPStore, makeEmailOTPStoreKV);
+  Layer.effect(EmailOTPStore, emailOTPStoreKV);
 
 // ---------------------------------------------------------------------------
 // PendingTwoFactorStore
@@ -523,7 +523,7 @@ const pendingTwoFactorKey = (token: string) => `pending-two-factor:${token}`;
 /**
  * Build a {@link PendingTwoFactorStore} over the ambient `KeyValueStore`.
  */
-export const makePendingTwoFactorStoreKV: Effect.Effect<
+export const pendingTwoFactorStoreKV: Effect.Effect<
   typeof PendingTwoFactorStore.Service,
   never,
   KeyValueStore.KeyValueStore
@@ -546,7 +546,7 @@ export const PendingTwoFactorStoreKV: Layer.Layer<
   PendingTwoFactorStore,
   never,
   KeyValueStore.KeyValueStore
-> = Layer.effect(PendingTwoFactorStore, makePendingTwoFactorStoreKV);
+> = Layer.effect(PendingTwoFactorStore, pendingTwoFactorStoreKV);
 
 // ---------------------------------------------------------------------------
 // IdentifierStore
@@ -597,7 +597,7 @@ const encodeIdentifier = (identifier: Identifier): StoredIdentifier => ({
  * - `identifier:user:${userId}` — JSON array of ids for `listByUser` /
  *   `deleteByUser`
  */
-export const makeIdentifierStoreKV: Effect.Effect<
+export const identifierStoreKV: Effect.Effect<
   typeof IdentifierStore.Service,
   never,
   KeyValueStore.KeyValueStore
@@ -704,7 +704,7 @@ export const makeIdentifierStoreKV: Effect.Effect<
  * persists data across restarts (file system, Redis, …).
  */
 export const IdentifierStoreKV: Layer.Layer<IdentifierStore, never, KeyValueStore.KeyValueStore> =
-  Layer.effect(IdentifierStore, makeIdentifierStoreKV);
+  Layer.effect(IdentifierStore, identifierStoreKV);
 
 // ---------------------------------------------------------------------------
 // GoogleOneTapNonceStore
@@ -719,7 +719,7 @@ const googleOneTapNonceKey = (nonce: string) => `google-one-tap-nonce:${nonce}`;
  * Expiry is enforced logically in `GoogleOneTap.signIn` (the entry is deleted
  * on first access regardless of validity, making every nonce single-use).
  */
-export const makeGoogleOneTapNonceStoreKV: Effect.Effect<
+export const googleOneTapNonceStoreKV: Effect.Effect<
   typeof GoogleOneTapNonceStore.Service,
   never,
   KeyValueStore.KeyValueStore
@@ -745,7 +745,7 @@ export const GoogleOneTapNonceStoreKV: Layer.Layer<
   GoogleOneTapNonceStore,
   never,
   KeyValueStore.KeyValueStore
-> = Layer.effect(GoogleOneTapNonceStore, makeGoogleOneTapNonceStoreKV);
+> = Layer.effect(GoogleOneTapNonceStore, googleOneTapNonceStoreKV);
 
 // ---------------------------------------------------------------------------
 // Aggregate layer

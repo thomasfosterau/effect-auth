@@ -22,7 +22,7 @@ export class AuthorizationPolicy extends Context.Service<
   /**
    * Construct a Layer providing this service.
    */
-  static readonly layer = () => Layer.effect(AuthorizationPolicy, makeRoleBasedPolicy());
+  static readonly layer = () => Layer.effect(AuthorizationPolicy, make());
 }
 
 /**
@@ -49,11 +49,7 @@ export class RoleStore extends Context.Service<
 /**
  * Create a simple role-based authorization policy
  */
-export const makeRoleBasedPolicy = (): Effect.Effect<
-  typeof AuthorizationPolicy.Service,
-  never,
-  RoleStore
-> =>
+export const make = (): Effect.Effect<typeof AuthorizationPolicy.Service, never, RoleStore> =>
   Effect.gen(function* () {
     const roleStore = yield* RoleStore;
 

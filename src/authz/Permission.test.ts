@@ -1,10 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
-import {
-  makePermission,
-  parsePermission,
-  formatPermission,
-  permissionMatches,
-} from "./Permission.js";
+import { parsePermission, formatPermission, permissionMatches } from "./Permission.ts";
+import * as Permission from "./Permission.ts";
 
 describe("Permission", () => {
   describe("parsePermission / formatPermission", () => {
@@ -25,7 +21,7 @@ describe("Permission", () => {
     });
 
     it("round-trips through format", () => {
-      const permission = makePermission("users", "delete");
+      const permission = Permission.make("users", "delete");
       expect(parsePermission(formatPermission(permission))).toEqual(permission);
     });
   });

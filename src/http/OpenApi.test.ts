@@ -1,19 +1,20 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Layer } from "effect";
-import { getOpenApiSpec } from "./HTTPApi.js";
-import { makeAuthWebHandler, type AuthServices } from "./HTTPServer.js";
-import { SessionService } from "../session/SessionService.js";
-import { AuthLifecycleService } from "../AuthLifecycle.js";
-import { EmailPasswordStore } from "../email/EmailPassword.js";
-import { PasswordHasher } from "../password/Password.js";
-import { EmailVerificationService, EmailVerificationStore } from "../email/EmailVerification.js";
+import { getOpenApiSpec } from "./HTTPApi.ts";
+import { type AuthServices } from "./HTTPServer.ts";
+import * as HTTPServer from "./HTTPServer.ts";
+import { SessionService } from "../session/SessionService.ts";
+import { AuthLifecycleService } from "../AuthLifecycle.ts";
+import { EmailPasswordStore } from "../email/EmailPassword.ts";
+import { PasswordHasher } from "../password/Password.ts";
+import { EmailVerificationService, EmailVerificationStore } from "../email/EmailVerification.ts";
 import {
   PasswordResetService,
   PasswordResetStore,
   PasswordResetUserStore,
-} from "../password/PasswordReset.js";
-import { UserService, UserServiceStore } from "../User.js";
-import { Hooks } from "../Hooks.js";
+} from "../password/PasswordReset.ts";
+import { UserService, UserServiceStore } from "../User.ts";
+import { Hooks } from "../Hooks.ts";
 
 /**
  * The docs routes are intercepted before the API router runs, so the handlers'
@@ -145,9 +146,9 @@ describe("getOpenApiSpec", () => {
   });
 });
 
-describe("makeAuthWebHandler docs routes", () => {
+describe("HTTPServer.make docs routes", () => {
   it("serves openapi.json and the reference UI when docs are enabled", async () => {
-    const { handler, dispose } = makeAuthWebHandler({
+    const { handler, dispose } = HTTPServer.make({
       services: stubServices(),
       prefix: "/api/auth",
       docs: true,
@@ -172,7 +173,7 @@ describe("makeAuthWebHandler docs routes", () => {
   });
 
   it("serves docs at the root when no prefix is configured", async () => {
-    const { handler, dispose } = makeAuthWebHandler({ services: stubServices(), docs: true });
+    const { handler, dispose } = HTTPServer.make({ services: stubServices(), docs: true });
     try {
       const res = await handler(new Request("http://test/openapi.json"));
       expect(res.status).toBe(200);
@@ -182,7 +183,7 @@ describe("makeAuthWebHandler docs routes", () => {
   });
 
   it("does not expose docs routes when docs are disabled", async () => {
-    const { handler, dispose } = makeAuthWebHandler({
+    const { handler, dispose } = HTTPServer.make({
       services: stubServices(),
       prefix: "/api/auth",
     });

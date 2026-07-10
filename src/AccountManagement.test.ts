@@ -5,11 +5,11 @@ import {
   AccountManagementStore,
   AccountTokenError,
   type AccountToken,
-} from "./AccountManagement.js";
-import { EmailInUseError } from "./Errors.js";
-import { UserServiceStore } from "./User.js";
-import { SessionService } from "./session/SessionService.js";
-import type * as Types from "./Types.js";
+} from "./AccountManagement.ts";
+import { EmailInUseError } from "./Errors.ts";
+import { UserServiceStore } from "./User.ts";
+import { SessionService } from "./session/SessionService.ts";
+import type * as Types from "./Types.ts";
 
 interface Harness {
   readonly layer: Layer.Layer<

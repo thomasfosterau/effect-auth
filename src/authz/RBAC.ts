@@ -5,7 +5,7 @@
  * adds optional role inheritance: a role can declare parent roles whose
  * permissions it inherits (resolved transitively, guarding against cycles).
  *
- * Pair the resulting store with {@link makeRoleBasedPolicy} (which understands
+ * Pair the resulting store with {@link Authorization.make} (which understands
  * `"*"` wildcard permissions) for a complete RBAC setup.
  */
 
@@ -19,7 +19,7 @@ import { formatPermission, type PermissionRef } from "./Permission.ts";
 type StringKeyed<V> = ReadonlyMap<string, V> | Record<string, V>;
 
 /**
- * Configuration for {@link makeInMemoryRoleStore}.
+ * Configuration for {@link make}.
  */
 export interface InMemoryRoleStoreConfig {
   /** Map of `userId` to the roles assigned to that user. */
@@ -46,9 +46,9 @@ const lookup = <V>(source: StringKeyed<V>, key: string): V | undefined =>
  *
  * @example
  * ```ts
- * import { makeInMemoryRoleStore } from "effect-auth"
+ * import { make } from "effect-auth"
  *
- * const store = makeInMemoryRoleStore({
+ * const store = make({
  *   userRoles: { "user-1": ["editor"] },
  *   rolePermissions: {
  *     viewer: [{ resource: "posts", action: "read" }],
@@ -58,9 +58,7 @@ const lookup = <V>(source: StringKeyed<V>, key: string): V | undefined =>
  * })
  * ```
  */
-export const makeInMemoryRoleStore = (
-  config: InMemoryRoleStoreConfig,
-): typeof RoleStore.Service => {
+export const make = (config: InMemoryRoleStoreConfig): typeof RoleStore.Service => {
   const { userRoles, rolePermissions, roleHierarchy } = config;
 
   const directPermissions = (role: string): readonly PermissionRef[] =>

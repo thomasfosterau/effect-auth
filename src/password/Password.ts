@@ -50,19 +50,19 @@ export class PasswordHasher extends Context.Service<
 >()("@effect-auth/PasswordHasher") {
   /**
    * Layer providing the default hasher: PBKDF2-SHA256 with OWASP parameters
-   * (see {@link makePBKDF2Hasher}).
+   * (see {@link pbkdf2Hasher}).
    */
-  static readonly layer = () => Layer.succeed(PasswordHasher, makePBKDF2Hasher());
+  static readonly layer = () => Layer.succeed(PasswordHasher, pbkdf2Hasher());
 
   /**
    * Layer providing the scrypt hasher (memory-hard; PHC-format output, see
-   * {@link makeScryptHasher}).
+   * {@link scryptHasher}).
    */
   static readonly layerScrypt = (options?: {
     readonly cost?: number;
     readonly blockSize?: number;
     readonly parallelization?: number;
-  }) => Layer.succeed(PasswordHasher, makeScryptHasher(options));
+  }) => Layer.succeed(PasswordHasher, scryptHasher(options));
 }
 
 /**
@@ -87,10 +87,10 @@ export class MultiAlgorithmVerifier extends Context.Service<
 >()("@effect-auth/MultiAlgorithmVerifier") {
   /**
    * Layer that verifies passwords against any of the given hashers, sniffing
-   * the algorithm from the PHC-format hash (see {@link makeMultiAlgorithmVerifier}).
+   * the algorithm from the PHC-format hash (see {@link multiAlgorithmVerifier}).
    */
   static readonly layer = (hashers: readonly (typeof PasswordHasher.Service)[]) =>
-    Layer.succeed(MultiAlgorithmVerifier, makeMultiAlgorithmVerifier(hashers));
+    Layer.succeed(MultiAlgorithmVerifier, multiAlgorithmVerifier(hashers));
 }
 
 /**
@@ -132,7 +132,7 @@ const parseAlgorithm = (hash: string): Effect.Effect<string, Errors.HashingError
  * })
  * ```
  */
-export const makeMultiAlgorithmVerifier = (
+export const multiAlgorithmVerifier = (
   hashers: readonly (typeof PasswordHasher.Service)[],
 ): typeof MultiAlgorithmVerifier.Service => {
   const hasherMap = new Map(hashers.map((h) => [h.algorithm, h]));
@@ -184,7 +184,7 @@ export type {
  * PBKDF2 Password Hasher implementing the PasswordHasher trait
  * Following OWASP guidelines for secure password hashing
  */
-export const makePBKDF2Hasher = (): typeof PasswordHasher.Service => {
+export const pbkdf2Hasher = (): typeof PasswordHasher.Service => {
   const ALGORITHM = "pbkdf2-sha256";
   // OWASP recommended minimum for SHA-256: 600,000 iterations (2023)
   const ITERATIONS = 600000;
@@ -346,7 +346,7 @@ export const makePBKDF2Hasher = (): typeof PasswordHasher.Service => {
  * PHC-style format: `scrypt$N$r$p$salt$hash` (N/r/p are stored so parameters
  * can be tuned without breaking existing hashes).
  */
-export const makeScryptHasher = (options?: {
+export const scryptHasher = (options?: {
   readonly cost?: number;
   readonly blockSize?: number;
   readonly parallelization?: number;

@@ -63,8 +63,8 @@ export type TrustedProxyConfig = TrustedProxyHopCount | TrustedProxyCidrs;
 /**
  * Per-request resolved client IP.
  *
- * Available in all hook and handler Effects after `makeAuthWebHandler` (or a
- * custom `makeClientIPLayer`) has been provided. Access via
+ * Available in all hook and handler Effects after `HTTPServer.make` (or a
+ * custom `layer`) has been provided. Access via
  * `Effect.serviceOption(ClientIP)` — returns `None` when running outside an
  * HTTP request scope.
  */
@@ -223,7 +223,7 @@ export const cidrContains = (cidr: string, ip: string): boolean => {
 /**
  * Minimal interface covering the parts of `HttpServerRequest` we need.
  */
-export interface IpResolvableRequest {
+export interface IPResolvableRequest {
   readonly headers: Readonly<Record<string, string>>;
   readonly remoteAddress: Option.Option<string>;
 }
@@ -244,7 +244,7 @@ export interface IpResolvableRequest {
  * lowercases hex).
  */
 export const resolveClientIP = (
-  req: IpResolvableRequest,
+  req: IPResolvableRequest,
   config?: TrustedProxyConfig,
 ): string | undefined => {
   const rawRemote = Option.getOrUndefined(req.remoteAddress);
@@ -297,12 +297,12 @@ export const resolveClientIP = (
  *
  * @example
  * ```ts
- * // In makeAuthWebHandler the trustedProxy option wires this up automatically.
+ * // In HTTPServer.make the trustedProxy option wires this up automatically.
  * // For custom usage:
- * const myLayer = Layer.mergeAll(services, ClientIP.layer({ hopCount: 1 }))
+ * const myLayer = Layer.mergeAll(services, clientIPLayer({ hopCount: 1 }))
  * ```
  */
-export const makeClientIPLayer = (
+export const clientIPLayer = (
   config?: TrustedProxyConfig,
 ): Layer.Layer<ClientIP, never, HttpServerRequest.HttpServerRequest> =>
   Layer.effect(

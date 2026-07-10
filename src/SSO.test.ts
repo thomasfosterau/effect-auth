@@ -1,27 +1,29 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { UserNotFoundError } from "./Errors.js";
-import { Hooks } from "./Hooks.js";
-import * as PlatformCrypto from "./PlatformCrypto.js";
-import { SessionService } from "./session/SessionService.js";
-import { SessionStore } from "./session/SessionStore.js";
-import { UserStore } from "./session/UserStore.js";
-import { hashToken } from "./TokenHash.js";
-import { UserServiceStore, UserService } from "./User.js";
-import { AuthLifecycleService } from "./AuthLifecycle.js";
-import { EmailPasswordStore } from "./email/EmailPassword.js";
-import { PasswordHasher } from "./password/Password.js";
-import { EmailVerificationService, EmailVerificationStore } from "./email/EmailVerification.js";
+import { UserNotFoundError } from "./Errors.ts";
+import { Hooks } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { SessionService } from "./session/SessionService.ts";
+import { SessionStore } from "./session/SessionStore.ts";
+import { UserStore } from "./session/UserStore.ts";
+import { hashToken } from "./TokenHash.ts";
+import { UserServiceStore, UserService } from "./User.ts";
+import { AuthLifecycleService } from "./AuthLifecycle.ts";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import { EmailVerificationService, EmailVerificationStore } from "./email/EmailVerification.ts";
 import {
   PasswordResetService,
   PasswordResetStore,
   PasswordResetUserStore,
-} from "./password/PasswordReset.js";
-import { makeAuthWebHandler, type AuthServices } from "./http/HTTPServer.js";
-import { OrganizationStore, type Member, type SSOProvider } from "./index.js";
-import { OAuthStateStore, OAuthUserStore, type OAuthState } from "./oauth/OAuth.js";
-import { makeSSOService, SSOProviderStore, SSOError, SSOService } from "./SSO.js";
-import type * as Types from "./Types.js";
+} from "./password/PasswordReset.ts";
+import { type AuthServices } from "./http/HTTPServer.ts";
+import * as HTTPServer from "./http/HTTPServer.ts";
+import { OrganizationStore, type Member, type SSOProvider } from "./index.ts";
+import { OAuthStateStore, OAuthUserStore, type OAuthState } from "./oauth/OAuth.ts";
+import { SSOProviderStore, SSOError, SSOService } from "./SSO.ts";
+import * as SSO from "./SSO.ts";
+import type * as Types from "./Types.ts";
 
 /** Swap `globalThis.fetch` for a route handler while `thunk` runs. */
 const withFetch = async <A>(
@@ -161,7 +163,7 @@ const ACME = {
 describe("SSOService", () => {
   it("registers a provider and routes sign-in by email domain", async () => {
     const { layer } = makeStores();
-    const sso = await Effect.runPromise(makeSSOService().pipe(Effect.provide(layer)));
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(layer)));
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -183,7 +185,7 @@ describe("SSOService", () => {
   it("provisions a user + org membership on first login and reuses on the second", async () => {
     const { layer, users, members } = makeStores();
     const sso = await Effect.runPromise(
-      makeSSOService({ defaultRole: "member" }).pipe(Effect.provide(layer)),
+      SSO.make({ defaultRole: "member" }).pipe(Effect.provide(layer)),
     );
 
     const idpRoutes = {
@@ -225,7 +227,7 @@ describe("SSOService", () => {
 
   it("populates endpoints from OIDC discovery", async () => {
     const { layer, providers } = makeStores();
-    const sso = await Effect.runPromise(makeSSOService().pipe(Effect.provide(layer)));
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(layer)));
 
     const discovered = await withFetch(
       {
@@ -260,7 +262,7 @@ describe("SSOService", () => {
 
   it("fails sign-in for an unknown domain", async () => {
     const { layer } = makeStores();
-    const sso = await Effect.runPromise(makeSSOService().pipe(Effect.provide(layer)));
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(layer)));
     const err = await Effect.runPromise(
       Effect.flip(sso.signIn({ email: "nobody@unknown.test" })).pipe(Effect.provide(layer)),
     );
@@ -269,7 +271,7 @@ describe("SSOService", () => {
 
   it("rejects a callback whose profile email is unverified", async () => {
     const { layer } = makeStores();
-    const sso = await Effect.runPromise(makeSSOService().pipe(Effect.provide(layer)));
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(layer)));
     await Effect.runPromise(sso.registerProvider("admin", ACME).pipe(Effect.provide(layer)));
 
     const err = await withFetch(
@@ -452,9 +454,8 @@ const makeHttpFixture = () => {
   return {
     seedUser,
     makeSession,
-    handler: makeAuthWebHandler({ services: withSSO, cookie: { secure: false } }).handler,
-    handlerWithoutSSO: makeAuthWebHandler({ services: withoutSSO, cookie: { secure: false } })
-      .handler,
+    handler: HTTPServer.make({ services: withSSO, cookie: { secure: false } }).handler,
+    handlerWithoutSSO: HTTPServer.make({ services: withoutSSO, cookie: { secure: false } }).handler,
     providers,
     usersByEmail,
   };

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import * as Auth from "./index.js";
+import * as Auth from "./index.ts";
 
 /**
  * D1 (DESIGN.md): every primary service class exposes a `static layer` — the

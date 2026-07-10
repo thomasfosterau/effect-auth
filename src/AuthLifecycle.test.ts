@@ -1,26 +1,28 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { Context, Crypto, Effect } from "effect";
-import { Hooks } from "./Hooks.js";
-import * as PlatformCrypto from "./PlatformCrypto.js";
-import { makeAuthLifecycleService } from "./AuthLifecycle.js";
+import { Hooks } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import * as AuthLifecycle from "./AuthLifecycle.ts";
 import {
   type EmailVerification,
-  makeEmailVerificationService,
   EmailVerificationStore,
   EmailVerificationService,
-} from "./email/EmailVerification.js";
-import { PasswordHasher, makePBKDF2Hasher } from "./password/Password.js";
-import { make, SessionService } from "./session/SessionService.js";
-import { SessionStore } from "./session/SessionStore.js";
-import { UserStore } from "./session/UserStore.js";
-import { makeUserService, UserServiceStore, UserService } from "./User.js";
-import type { Session, SessionConfig, User } from "./Types.js";
+} from "./email/EmailVerification.ts";
+import * as EmailVerificationModule from "./email/EmailVerification.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import * as Password from "./password/Password.ts";
+import { make, SessionService } from "./session/SessionService.ts";
+import { SessionStore } from "./session/SessionStore.ts";
+import { UserStore } from "./session/UserStore.ts";
+import { UserServiceStore, UserService } from "./User.ts";
+import * as UserModule from "./User.ts";
+import type { Session, SessionConfig, User } from "./Types.ts";
 import {
   EmailPasswordService,
   EmailPasswordStore,
-  makeEmailPasswordService,
   type EmailPasswordConfig,
-} from "./email/EmailPassword.js";
+} from "./email/EmailPassword.ts";
+import * as EmailPassword from "./email/EmailPassword.ts";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
@@ -161,7 +163,7 @@ const sessionConfig: SessionConfig = {
 };
 
 const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) => {
-  const hasher = makePBKDF2Hasher();
+  const hasher = Password.pbkdf2Hasher();
 
   const cryptoContext = Context.make(Crypto.Crypto, PlatformCrypto.instance);
 
@@ -177,7 +179,7 @@ const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) =>
 
   const emailVerificationService = await Effect.runPromise(
     Effect.provide(
-      makeEmailVerificationService({
+      EmailVerificationModule.make({
         sendEmail: (email, token) =>
           Effect.sync(() => {
             sentEmails.push({ email, token });
@@ -189,7 +191,7 @@ const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) =>
 
   const emailPasswordService = await Effect.runPromise(
     Effect.provide(
-      makeEmailPasswordService(emailPasswordConfig),
+      EmailPassword.make(emailPasswordConfig),
       Context.merge(
         Context.make(EmailPasswordStore, emailPasswordStore),
         Context.merge(
@@ -201,7 +203,7 @@ const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) =>
   );
 
   const userService = await Effect.runPromise(
-    Effect.provide(makeUserService(), Context.make(UserServiceStore, userServiceStore)),
+    Effect.provide(UserModule.make(), Context.make(UserServiceStore, userServiceStore)),
   );
 
   return Context.merge(
@@ -251,7 +253,7 @@ describe("AuthLifecycleService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeAuthLifecycleService({
+      const service = yield* AuthLifecycle.make({
         requireEmailVerification: true,
       });
 
@@ -275,7 +277,7 @@ describe("AuthLifecycleService", () => {
   it("should return verification-needed on sign-in and resend when enabled", async () => {
     const testContext = await makeTestContext({ requireEmailVerification: true });
 
-    const hasher = makePBKDF2Hasher();
+    const hasher = Password.pbkdf2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("password-123"));
 
     const user: User = {
@@ -292,7 +294,7 @@ describe("AuthLifecycleService", () => {
     passwordHashes.set(user.id, hashResult.hash);
 
     const program = Effect.gen(function* () {
-      const service = yield* makeAuthLifecycleService({
+      const service = yield* AuthLifecycle.make({
         requireEmailVerification: true,
         sendOnSignIn: true,
       });
@@ -341,7 +343,7 @@ describe("AuthLifecycleService", () => {
     );
 
     const program = Effect.gen(function* () {
-      const service = yield* makeAuthLifecycleService({
+      const service = yield* AuthLifecycle.make({
         autoSignInAfterVerification: true,
       });
       return yield* service.verifyEmail({ token });
@@ -360,7 +362,7 @@ describe("AuthLifecycleService", () => {
   it("should sign in verified users normally", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = makePBKDF2Hasher();
+    const hasher = Password.pbkdf2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("verified-password-123"));
 
     const user: User = {
@@ -377,7 +379,7 @@ describe("AuthLifecycleService", () => {
     passwordHashes.set(user.id, hashResult.hash);
 
     const program = Effect.gen(function* () {
-      const service = yield* makeAuthLifecycleService({
+      const service = yield* AuthLifecycle.make({
         requireEmailVerification: true,
       });
 

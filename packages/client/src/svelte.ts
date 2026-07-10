@@ -13,8 +13,8 @@
  *
  * @module svelte
  */
-import type { AuthClient, AuthClientError, SessionState } from "./Client.js";
-import type { SessionView } from "./types.js";
+import type { AuthClient, AuthClientError, SessionState } from "./Client.ts";
+import type { SessionView } from "./types.ts";
 
 /** Svelte's readable-store contract. */
 export interface Readable<T> {

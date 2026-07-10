@@ -396,15 +396,13 @@ export class OrganizationService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: OrganizationConfig = {}) =>
-    Layer.effect(OrganizationService, makeOrganizationService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(OrganizationService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /**
  * Create an organization service
  */
-export const makeOrganizationService = (
+export const make = (
   config: OrganizationConfig = {},
 ): Effect.Effect<typeof OrganizationService.Service, never, OrganizationStore | Crypto.Crypto> =>
   Effect.gen(function* () {

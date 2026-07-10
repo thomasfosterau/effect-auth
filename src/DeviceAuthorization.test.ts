@@ -7,13 +7,13 @@ import {
   DeviceCodeError,
   normalizeUserCode,
   type DeviceAuthorizationRecord,
-} from "./DeviceAuthorization.js";
-import { hashToken } from "./TokenHash.js";
-import { SessionStore } from "./session/SessionStore.js";
-import { UserStore } from "./session/UserStore.js";
-import { SessionService } from "./session/SessionService.js";
-import { Hooks } from "./Hooks.js";
-import type * as Types from "./Types.js";
+} from "./DeviceAuthorization.ts";
+import { hashToken } from "./TokenHash.ts";
+import { SessionStore } from "./session/SessionStore.ts";
+import { UserStore } from "./session/UserStore.ts";
+import { SessionService } from "./session/SessionService.ts";
+import { Hooks } from "./Hooks.ts";
+import type * as Types from "./Types.ts";
 
 const records = new Map<string, DeviceAuthorizationRecord>();
 const sessions = new Map<string, Types.Session>();

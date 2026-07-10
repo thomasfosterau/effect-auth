@@ -7,5 +7,5 @@
  * adapters exported from `@effect-auth/client/react`, `/svelte`, and `/vue`.
  * Wire types are re-exported (type-only) from `@effect-auth/client/types`.
  */
-export * from "./Client.js";
-export * from "./types.js";
+export * from "./Client.ts";
+export * from "./types.ts";

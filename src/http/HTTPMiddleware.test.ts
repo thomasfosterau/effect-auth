@@ -1,19 +1,18 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Exit, Layer, Option, Redacted } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import type * as Types from "../Types.js";
-import { SessionService } from "../session/SessionService.js";
-import { Hooks } from "../Hooks.js";
-import * as Errors from "../Errors.js";
+import type * as Types from "../Types.ts";
+import { SessionService } from "../session/SessionService.ts";
+import { Hooks } from "../Hooks.ts";
+import * as Errors from "../Errors.ts";
 import {
   AuthMiddleware,
   CurrentSession,
   CurrentUser,
   MaybeCurrentSession,
   OptionalAuthMiddleware,
-  makeAuthMiddlewareLayer,
-  makeOptionalAuthMiddlewareLayer,
-} from "./HTTPMiddleware.js";
+} from "./HTTPMiddleware.ts";
+import * as HTTPMiddleware from "./HTTPMiddleware.ts";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -74,8 +73,8 @@ const cell = <T>(): Cell<T> => ({ value: undefined });
 // AuthMiddleware – conduit_session handler
 // ---------------------------------------------------------------------------
 
-describe("makeAuthMiddlewareLayer – conduit_session handler", () => {
-  const authLayer = makeAuthMiddlewareLayer({ secure: false });
+describe("HTTPMiddleware.layer – conduit_session handler", () => {
+  const authLayer = HTTPMiddleware.layer({ secure: false });
 
   const runCookiePath = (
     request: HttpServerRequest.HttpServerRequest,
@@ -142,8 +141,8 @@ describe("makeAuthMiddlewareLayer – conduit_session handler", () => {
 // AuthMiddleware – bearer handler
 // ---------------------------------------------------------------------------
 
-describe("makeAuthMiddlewareLayer – bearer handler", () => {
-  const authLayer = makeAuthMiddlewareLayer({ secure: false });
+describe("HTTPMiddleware.layer – bearer handler", () => {
+  const authLayer = HTTPMiddleware.layer({ secure: false });
 
   const runBearerPath = (
     token: string,
@@ -191,8 +190,8 @@ describe("makeAuthMiddlewareLayer – bearer handler", () => {
 // OptionalAuthMiddleware
 // ---------------------------------------------------------------------------
 
-describe("makeOptionalAuthMiddlewareLayer", () => {
-  const optionalLayer = makeOptionalAuthMiddlewareLayer({ secure: false });
+describe("HTTPMiddleware.optionalLayer", () => {
+  const optionalLayer = HTTPMiddleware.optionalLayer({ secure: false });
 
   const runOptional = (request: HttpServerRequest.HttpServerRequest) => {
     const maybeCell = cell<Option.Option<Types.SessionWithUser>>();

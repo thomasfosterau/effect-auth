@@ -124,14 +124,14 @@ export class UsernameService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: UsernameConfig = {}) =>
-    Layer.effect(UsernameService, makeUsernameService(config));
+    Layer.effect(UsernameService, make(config));
 }
 
 const normalizeUsername = (username: string): string => username.trim().toLowerCase();
 
 const DEFAULT_CHARSET = /^[a-zA-Z0-9_.]+$/;
 
-export const makeUsernameService = (
+export const make = (
   config: UsernameConfig = {},
 ): Effect.Effect<
   typeof UsernameService.Service,

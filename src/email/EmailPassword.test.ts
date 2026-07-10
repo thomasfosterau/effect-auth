@@ -1,21 +1,17 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect, Layer } from "effect";
-import { Hooks, makePlugin, composePlugins } from "../Hooks.js";
-import * as PlatformCrypto from "../PlatformCrypto.js";
-import * as Errors from "../Errors.js";
-import { makeEmailPasswordService, EmailPasswordStore } from "./EmailPassword.js";
-import { make, SessionService } from "../session/SessionService.js";
-import { SessionStore } from "../session/SessionStore.js";
-import { UserStore } from "../session/UserStore.js";
-import { hashToken } from "../TokenHash.js";
-import {
-  MultiAlgorithmVerifier,
-  PasswordHasher,
-  makePBKDF2Hasher,
-  makeScryptHasher,
-  makeMultiAlgorithmVerifier,
-} from "../password/Password.js";
-import type { Session, User, SessionConfig } from "../Types.js";
+import { Hooks, makePlugin, composePlugins } from "../Hooks.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
+import * as Errors from "../Errors.ts";
+import { EmailPasswordStore } from "./EmailPassword.ts";
+import * as EmailPassword from "./EmailPassword.ts";
+import { make, SessionService } from "../session/SessionService.ts";
+import { SessionStore } from "../session/SessionStore.ts";
+import { UserStore } from "../session/UserStore.ts";
+import { hashToken } from "../TokenHash.ts";
+import { MultiAlgorithmVerifier, PasswordHasher } from "../password/Password.ts";
+import * as Password from "../password/Password.ts";
+import type { Session, User, SessionConfig } from "../Types.ts";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
@@ -128,7 +124,7 @@ const makeTestContext = async () => {
         Context.merge(
           Context.merge(
             Context.make(EmailPasswordStore, emailPasswordStore),
-            Context.make(PasswordHasher, makePBKDF2Hasher()),
+            Context.make(PasswordHasher, Password.pbkdf2Hasher()),
           ),
           Context.make(Crypto.Crypto, PlatformCrypto.instance),
         ),
@@ -149,7 +145,7 @@ describe("EmailPasswordService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService();
+      const service = yield* EmailPassword.make();
 
       const result = yield* service.signUp({
         email: "Test@Example.com",
@@ -174,7 +170,7 @@ describe("EmailPasswordService", () => {
   it("should sign in an existing user", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = makePBKDF2Hasher();
+    const hasher = Password.pbkdf2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("sign-in-password"));
 
     const user: User = {
@@ -191,7 +187,7 @@ describe("EmailPasswordService", () => {
     passwordHashes.set(user.id, hashResult.hash);
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService({
+      const service = yield* EmailPassword.make({
         requireEmailVerification: true,
       });
       return yield* service.signIn({
@@ -211,7 +207,7 @@ describe("EmailPasswordService", () => {
   it("should reject invalid credentials", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = makePBKDF2Hasher();
+    const hasher = Password.pbkdf2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("correct-password"));
 
     const user: User = {
@@ -228,7 +224,7 @@ describe("EmailPasswordService", () => {
     passwordHashes.set(user.id, hashResult.hash);
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService();
+      const service = yield* EmailPassword.make();
       return yield* Effect.result(
         service.signIn({
           email: "invalid@example.com",
@@ -250,7 +246,7 @@ describe("EmailPasswordService", () => {
   it("should block sign-in for unverified email when required", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = makePBKDF2Hasher();
+    const hasher = Password.pbkdf2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("password-123"));
 
     const user: User = {
@@ -267,7 +263,7 @@ describe("EmailPasswordService", () => {
     passwordHashes.set(user.id, hashResult.hash);
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService({
+      const service = yield* EmailPassword.make({
         requireEmailVerification: true,
       });
       return yield* Effect.result(
@@ -299,7 +295,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
 
   it("calls passwordHasher.verify even when the email does not exist", async () => {
     let verifyCalls = 0;
-    const realHasher = makePBKDF2Hasher();
+    const realHasher = Password.pbkdf2Hasher();
     const spyHasher: typeof PasswordHasher.Service = {
       algorithm: realHasher.algorithm,
       hash: (password) => realHasher.hash(password),
@@ -334,7 +330,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
     );
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService();
+      const service = yield* EmailPassword.make();
       return yield* Effect.result(
         service.signIn({ email: "ghost@example.com", password: "any-password" }),
       );
@@ -350,7 +346,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
 
   it("calls passwordHasher.verify even when the user has no password hash", async () => {
     let verifyCalls = 0;
-    const realHasher = makePBKDF2Hasher();
+    const realHasher = Password.pbkdf2Hasher();
     const spyHasher: typeof PasswordHasher.Service = {
       algorithm: realHasher.algorithm,
       hash: (password) => realHasher.hash(password),
@@ -397,7 +393,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
     );
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService();
+      const service = yield* EmailPassword.make();
       return yield* Effect.result(
         service.signIn({ email: "nohash@example.com", password: "any-password" }),
       );
@@ -421,10 +417,10 @@ describe("EmailPasswordService second-factor gate", () => {
   });
 
   it("returns a second-factor challenge instead of a session when the gate requires it", async () => {
-    const { SecondFactorGate } = await import("./EmailPassword.js");
+    const { SecondFactorGate } = await import("./EmailPassword.ts");
     const testContext = await makeTestContext();
 
-    const hasher = makePBKDF2Hasher();
+    const hasher = Password.pbkdf2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("gate-password"));
 
     const user: User = {
@@ -445,7 +441,7 @@ describe("EmailPasswordService second-factor gate", () => {
     };
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService();
+      const service = yield* EmailPassword.make();
       return yield* service.signIn({ email: user.email, password: "gate-password" });
     });
 
@@ -466,10 +462,10 @@ describe("EmailPasswordService second-factor gate", () => {
   });
 
   it("creates a session normally when the gate does not require a second factor", async () => {
-    const { SecondFactorGate } = await import("./EmailPassword.js");
+    const { SecondFactorGate } = await import("./EmailPassword.ts");
     const testContext = await makeTestContext();
 
-    const hasher = makePBKDF2Hasher();
+    const hasher = Password.pbkdf2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("no-gate-password"));
 
     const user: User = {
@@ -490,7 +486,7 @@ describe("EmailPasswordService second-factor gate", () => {
     };
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService();
+      const service = yield* EmailPassword.make();
       return yield* service.signIn({ email: user.email, password: "no-gate-password" });
     });
 
@@ -551,7 +547,7 @@ describe("EmailPasswordService — migration and security hardening", () => {
     passwordHashes.set(user.id, oldHash);
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService();
+      const service = yield* EmailPassword.make();
       return yield* service.signIn({ email: user.email, password: "migration-password" });
     });
 
@@ -585,11 +581,11 @@ describe("EmailPasswordService — migration and security hardening", () => {
     usersByEmail.set(user.email, user.id);
     passwordHashes.set(user.id, oldHash);
 
-    const scryptHasher = makeScryptHasher({ cost: 16384 });
-    const verifier = makeMultiAlgorithmVerifier([makePBKDF2Hasher(), scryptHasher]);
+    const scryptHasher = Password.scryptHasher({ cost: 16384 });
+    const verifier = Password.multiAlgorithmVerifier([Password.pbkdf2Hasher(), scryptHasher]);
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService();
+      const service = yield* EmailPassword.make();
       return yield* service.signIn({ email: user.email, password: "switch-password" });
     });
 
@@ -629,7 +625,7 @@ describe("EmailPasswordService — migration and security hardening", () => {
     passwordHashes.set(user.id, "pbkdf2-sha256$notanumber$aabbcc$ddeeff");
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService();
+      const service = yield* EmailPassword.make();
       return yield* Effect.result(service.signIn({ email: user.email, password: "any-password" }));
     });
 
@@ -645,7 +641,7 @@ describe("EmailPasswordService — migration and security hardening", () => {
 
   it("returns InvalidCredentialsError (not defect) for an excessively long password on sign-in", async () => {
     const testContext = await makeTestContext();
-    const hasher = makePBKDF2Hasher();
+    const hasher = Password.pbkdf2Hasher();
     const hashResult = await Effect.runPromise(hasher.hash("real-password"));
 
     const user: User = {
@@ -661,7 +657,7 @@ describe("EmailPasswordService — migration and security hardening", () => {
     passwordHashes.set(user.id, hashResult.hash);
 
     const program = Effect.gen(function* () {
-      const service = yield* makeEmailPasswordService();
+      const service = yield* EmailPassword.make();
       return yield* Effect.result(
         service.signIn({
           email: user.email,
@@ -775,7 +771,7 @@ describe("EmailPasswordService - dangling session protection", () => {
       Context.merge(
         Context.merge(
           Context.make(EmailPasswordStore, localEmailPasswordStore),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
         Context.make(Crypto.Crypto, PlatformCrypto.instance),
       ),
@@ -795,7 +791,7 @@ describe("EmailPasswordService - dangling session protection", () => {
     // First, register a user.
     const signUpResult = await Effect.runPromise(
       Effect.gen(function* () {
-        const svc = yield* makeEmailPasswordService();
+        const svc = yield* EmailPassword.make();
         return yield* svc.signUp({ email: "alice@example.com", password: "hunter2!" });
       }).pipe(Effect.provide(ctx), Effect.provide(Hooks.Default)),
     );
@@ -810,7 +806,7 @@ describe("EmailPasswordService - dangling session protection", () => {
 
     const signInResult = await Effect.runPromise(
       Effect.gen(function* () {
-        const svc = yield* makeEmailPasswordService();
+        const svc = yield* EmailPassword.make();
         return yield* svc.signIn({ email: "alice@example.com", password: "hunter2!" });
       }).pipe(
         Effect.provide(ctx),
@@ -837,7 +833,7 @@ describe("EmailPasswordService - dangling session protection", () => {
 
     const signUpResult = await Effect.runPromise(
       Effect.gen(function* () {
-        const svc = yield* makeEmailPasswordService();
+        const svc = yield* EmailPassword.make();
         return yield* svc.signUp({ email: "bob@example.com", password: "hunter2!" });
       }).pipe(
         Effect.provide(ctx),

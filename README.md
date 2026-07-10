@@ -19,13 +19,13 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 📺 **Device Authorization Grant**: RFC 8628 `device_code`/`user_code` flow for CLIs and TVs (`POST /device/code` → approve → `POST /device/token`)
 - 👤 **Anonymous Auth**: Guest sessions (`POST /sign-in/anonymous`) with account linking on sign-up (`isAnonymousUser` helper, `linkAccount` migration callback)
 - 🪪 **Username Auth**: Sign in with a username + password (`POST /sign-in/username`), case-insensitive uniqueness, honouring the two-factor gate
-- 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets, an optional `effect/unstable/persistence` backend (in-memory or Redis) via `RateLimiterPersistenceLayer`, and an `AccountLockoutPlugin` (OWASP-style lockout after N failed sign-ins)
+- 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets, an optional `effect/unstable/persistence` backend (in-memory or Redis) via `rateLimiterPersistenceLayer`, and an `AccountLockoutPlugin` (OWASP-style lockout after N failed sign-ins)
 - 🚫 **Abuse Protection**: Captcha verification (Turnstile/reCAPTCHA/hCaptcha) and Have-I-Been-Pwned compromised-password checks as composable hooks plugins
 - 🔓 **WebAuthn / Passkeys**: Passwordless authentication with FIDO2 compliance
 - 🏢 **Organizations & Admin**: Multi-tenant organizations (members, invitations, roles) and admin tooling (ban, impersonate)
 - 🗝️ **API Keys & JWT**: Hashed API keys with permissions/quotas; ES256/EdDSA JWTs with JWKS
 - 🌍 **HTTP Protocol**: A typed `effect/unstable/httpapi` contract serving the whole surface as a mountable Web handler with a derived typed client, session cookies, and trusted-origin CSRF protection
-- 📖 **OpenAPI Document + Reference UI**: Derive an OpenAPI 3.1 spec from the HTTP contract (`Http.getOpenApiSpec()`) and optionally serve it plus a Scalar reference page via `makeAuthWebHandler({ docs: true })`
+- 📖 **OpenAPI Document + Reference UI**: Derive an OpenAPI 3.1 spec from the HTTP contract (`HTTP.getOpenApiSpec()`) and optionally serve it plus a Scalar reference page via `HTTP.make({ docs: true })`
 - 🍪 **Session Cookie Cache**: Optional HMAC-signed session-data cookie (`cookie.cache`) that serves authenticated requests without a session-store read for a short window
 - 🏛️ **Enterprise SSO**: OIDC relying party with per-organization connections, email-domain routing, and first-login provisioning
 - 🪞 **OIDC Provider**: Act as an OpenID Connect identity provider — client registry, authorization-code flow with PKCE, consent, opaque access/refresh tokens, id_tokens on a shared JWKS, and discovery metadata
@@ -52,7 +52,7 @@ bun add effect-auth effect
 This library follows best practices from multiple authentication frameworks:
 
 - **Sessions**: Secure session management with automatic expiration and renewal (Lucia/Copenhagen)
-- **Password Hashing**: PBKDF2-SHA256 with recommended iterations (210,000+) (Oslo/OWASP)
+- **Password Hashing**: PBKDF2-SHA256 with recommended iterations (600,000+) (Oslo/OWASP)
 - **Two-Factor Authentication**: TOTP and HOTP for multi-factor authentication (RFC 6238/4226)
 - **OAuth 2.0**: Social login with major providers (BetterAuth-inspired)
 - **Email Verification**: Secure verification flows with rate limiting (BetterAuth-inspired)
@@ -71,7 +71,7 @@ import { Effect } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement session storage (e.g., Redis, PostgreSQL, etc.)
-const sessionStore: Auth.SessionStoreShape = {
+const sessionStore: typeof Auth.SessionStore.Service = {
   create: (session) => Effect.succeed(session), // Your implementation
   get: (sessionId) =>
     Effect.fail(new Auth.SessionNotFoundError({ message: "Not found", sessionId })),
@@ -84,7 +84,7 @@ const sessionStore: Auth.SessionStoreShape = {
 // Implement user storage. Users carry first-class identity fields
 // (email, emailVerified, name, image, createdAt, updatedAt) plus an
 // `attributes` bag for app-specific data.
-const userStore: Auth.UserStoreShape = {
+const userStore: typeof Auth.UserStore.Service = {
   get: (userId) => Effect.fail(new Auth.UserNotFoundError({ message: "Not found", userId })),
   getCredentials: (userId) => Effect.succeed("hashed-password"),
 };
@@ -105,7 +105,7 @@ const sessionConfig: Auth.SessionConfig = {
   },
 };
 
-const layer = Auth.SessionManager.layer(sessionConfig).pipe(
+const layer = Auth.SessionService.layer(sessionConfig).pipe(
   Layer.provideMerge(
     Layer.mergeAll(
       Layer.succeed(Auth.SessionStore)(sessionStore),
@@ -116,7 +116,7 @@ const layer = Auth.SessionManager.layer(sessionConfig).pipe(
 );
 
 const program = Effect.gen(function* () {
-  const sessions = yield* Auth.SessionManager;
+  const sessions = yield* Auth.SessionService;
 
   // Create a session
   const session = yield* sessions.createSession("user-123", {
@@ -158,15 +158,17 @@ const isValid = await Effect.runPromise(
 
 ### 4. Compose custom layers with the low-level constructors
 
-Each service's `makeX(config)` constructor is exported for embedding in your
-own layers when the static `X.layer(config)` isn't flexible enough:
+Most services expose their `make(config)` constructor from the module's own
+file for embedding in your own layers when the static `X.layer(config)` isn't
+flexible enough. `SessionService` is one of the few that also re-exposes it as
+a static, so it can be shown without a deep import:
 
 ```typescript
 import { Effect, Layer } from "effect";
 import { SessionService } from "effect-auth";
 
 const customSessionLayer = Layer.effect(
-  SessionService.SessionManager,
+  SessionService,
   Effect.gen(function* () {
     // ...acquire resources, read config, etc.
     return yield* SessionService.make(sessionConfig);
@@ -179,11 +181,11 @@ const customSessionLayer = Layer.effect(
 Implement role-based access control:
 
 ```typescript
-import { Effect, Context } from "effect";
+import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement your role store
-const roleStore: Auth.Authz.RoleStoreShape = {
+const roleStore: typeof Auth.Authz.RoleStore.Service = {
   getUserRoles: (userId) => Effect.succeed(["admin", "user"]),
   getRolePermissions: (role) =>
     Effect.succeed([
@@ -192,8 +194,14 @@ const roleStore: Auth.Authz.RoleStoreShape = {
     ]),
 };
 
+// `Authz.AuthorizationPolicy` only exposes `.layer()` (its raw `make` isn't
+// re-exported from the `authz` barrel), so provide it as a Layer.
+const layer = Auth.Authz.AuthorizationPolicy.layer().pipe(
+  Layer.provide(Layer.succeed(Auth.Authz.RoleStore)(roleStore)),
+);
+
 const program = Effect.gen(function* () {
-  const policy = yield* Auth.Authz.makeRoleBasedPolicy();
+  const policy = yield* Auth.Authz.AuthorizationPolicy;
 
   // Check permission
   const canCreate = yield* policy.checkPermission("user-123", "posts", "create");
@@ -202,9 +210,7 @@ const program = Effect.gen(function* () {
   yield* Auth.Authz.requirePermission("user-123", "posts", "create");
 });
 
-const result = await Effect.runPromise(
-  Effect.provide(program, Context.make(Auth.Authz.RoleStore, roleStore)),
-);
+const result = await Effect.runPromise(Effect.provide(program, layer));
 ```
 
 ## Two-Factor Authentication (TOTP/HOTP)
@@ -214,12 +220,28 @@ Implement two-factor authentication using Time-based One-Time Passwords (TOTP, R
 ### TOTP (Time-based)
 
 ```typescript
-import { Effect } from "effect";
+import { Crypto, Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
+// `generateBase32Secret`/`generateSecret` take the `Crypto` service directly
+// (instead of reaching for `node:crypto`); build one from the platform's Web
+// Crypto API (`effect-auth`'s own layer for this is internal-only).
+const CryptoLive = Layer.succeed(
+  Crypto.Crypto,
+  Crypto.make({
+    randomBytes: (size) => globalThis.crypto.getRandomValues(new Uint8Array(size)),
+    digest: (algorithm, data) =>
+      Effect.promise(() => globalThis.crypto.subtle.digest(algorithm, data)).pipe(
+        Effect.map((buf) => new Uint8Array(buf)),
+      ),
+  }),
+);
+
 const program = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
+
   // Generate a secret for the user
-  const secret = yield* Auth.generateBase32Secret(20);
+  const secret = yield* Auth.generateBase32Secret(crypto, 20);
 
   // Generate a QR code URI for the user to scan
   const uri = Auth.generateOTPURI({
@@ -245,18 +267,20 @@ const program = Effect.gen(function* () {
   }
 });
 
-await Effect.runPromise(program);
+await Effect.runPromise(Effect.provide(program, CryptoLive));
 ```
 
 ### HOTP (Counter-based)
 
 ```typescript
-import { Effect } from "effect";
+import { Crypto, Effect } from "effect";
 import * as Auth from "effect-auth";
 
 const program = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
+
   // Generate a secret for the user
-  const secret = yield* Auth.generateBase32Secret(20);
+  const secret = yield* Auth.generateBase32Secret(crypto, 20);
 
   // Store initial counter (typically 0) for the user
   let counter = 0;
@@ -288,140 +312,144 @@ const program = Effect.gen(function* () {
   }
 });
 
-await Effect.runPromise(program);
+// `program` requires `Crypto.Crypto` in context; see the `CryptoLive` layer
+// in the TOTP example above.
+await Effect.runPromise(Effect.provide(program, CryptoLive));
 ```
 
 ### Custom Configuration
 
 Both TOTP and HOTP support custom configurations:
 
-````typescript
+```typescript
 // TOTP with custom settings
 const totpConfig: Auth.TOTPConfig = {
-  period: 60,        // 60-second time window (default: 30)
-  digits: 8,         // 8-digit codes (default: 6)
+  period: 60, // 60-second time window (default: 30)
+  digits: 8, // 8-digit codes (default: 6)
   algorithm: "sha256", // Use SHA-256 (default: "sha1")
-  window: 2,         // Accept tokens from ±2 time steps (default: 1)
-}
+  window: 2, // Accept tokens from ±2 time steps (default: 1)
+};
 
-const token = yield* Auth.generateTOTP(secret, totpConfig)
-const isValid = yield* Auth.verifyTOTP(token, secret, totpConfig)
+const token = yield * Auth.generateTOTP(secret, totpConfig);
+const isValid = yield * Auth.verifyTOTP(token, secret, totpConfig);
 
 // HOTP with custom settings
 const hotpConfig: Auth.HOTPConfig = {
-  digits: 8,         // 8-digit codes (default: 6)
+  digits: 8, // 8-digit codes (default: 6)
   algorithm: "sha512", // Use SHA-512 (default: "sha1")
-}
+};
 
-const hotpToken = yield* Auth.generateHOTP(secret, counter, hotpConfig)
+const hotpToken = yield * Auth.generateHOTP(secret, counter, hotpConfig);
+```
+
 ## WebAuthn / Passkeys
 
 Implement passwordless authentication using WebAuthn (Passkeys):
 
 ```typescript
-import { Effect, Context } from "effect"
-import * as Auth from "effect-auth"
+import { Effect, Layer } from "effect";
+import * as Auth from "effect-auth";
 
 // Implement challenge store (temporary storage for challenges)
-const challengeStore: Auth.ChallengeStoreShape = {
-  create: (challenge) =>
-    Effect.succeed(challenge), // Store in Redis/memory
-  get: (challenge) =>
-    Effect.fail(new Auth.ChallengeNotFoundError({ message: "Not found" })),
-  delete: (challenge) =>
-    Effect.void
-}
+const challengeStore: typeof Auth.ChallengeStore.Service = {
+  create: (challenge) => Effect.succeed(challenge), // Store in Redis/memory
+  get: (challenge) => Effect.fail(new Auth.ChallengeNotFoundError({ message: "Not found" })),
+  delete: (challenge) => Effect.void,
+};
 
 // Implement credential store (persistent storage for passkeys)
-const credentialStore: Auth.CredentialStoreShape = {
-  create: (credential) =>
-    Effect.succeed(credential), // Store in database
+const credentialStore: typeof Auth.CredentialStore.Service = {
+  create: (credential) => Effect.succeed(credential), // Store in database
   get: (credentialId) =>
-    Effect.fail(new Auth.CredentialNotFoundError({
-      message: "Not found",
-      credentialId
-    })),
-  update: (credential) =>
-    Effect.succeed(credential),
-  delete: (credentialId) =>
-    Effect.void,
-  getByUserId: (userId) =>
-    Effect.succeed([]) // Return all user's credentials
-}
+    Effect.fail(
+      new Auth.CredentialNotFoundError({
+        message: "Not found",
+        credentialId,
+      }),
+    ),
+  // Resolve by the raw credential id; used on the discoverable/usernameless login path.
+  getByCredentialId: (credentialId) =>
+    Effect.fail(
+      new Auth.CredentialNotFoundError({
+        message: "Not found",
+        credentialId,
+      }),
+    ),
+  update: (credential) => Effect.succeed(credential),
+  delete: (credentialId) => Effect.void,
+  listByUserId: (userId) => Effect.succeed([]), // Return all user's credentials
+};
 
 const webAuthnConfig: Auth.WebAuthnConfig = {
   relyingPartyId: "example.com",
   relyingPartyName: "Example Corp",
   expectedOrigin: "https://example.com",
-  challengeExpiresIn: 5 * 60 * 1000 // 5 minutes
-}
+  challengeExpiresIn: 5 * 60 * 1000, // 5 minutes
+};
+
+// `WebAuthnService` only exposes `.layer()` (its raw `make` isn't re-exported
+// from the package root), so provide it as a Layer.
+const WebAuthnLive = Auth.WebAuthnService.layer(webAuthnConfig).pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      Layer.succeed(Auth.ChallengeStore)(challengeStore),
+      Layer.succeed(Auth.CredentialStore)(credentialStore),
+    ),
+  ),
+);
 
 // Registration flow
 const registerPasskey = Effect.gen(function* () {
-  const service = yield* Auth.makeWebAuthnService(webAuthnConfig)
+  const service = yield* Auth.WebAuthnService;
 
   // Step 1: Generate challenge
   const { challenge } = yield* service.generateRegistrationChallenge({
     id: "user-123",
     name: "user@example.com",
-    displayName: "User Name"
-  })
+    displayName: "User Name",
+  });
 
   // Send challenge to client, client creates credential
   // Client returns: credentialId, attestationObject, clientDataJSON
 
   // Step 2: Verify registration response
-  const result = yield* service.verifyRegistration(
-    challenge,
-    {
-      credentialId: clientCredentialId,
-      attestationObject: clientAttestationObject,
-      clientDataJSON: clientDataJSON
-    }
-  )
+  const result = yield* service.verifyRegistration(challenge, {
+    credentialId: clientCredentialId,
+    attestationObject: clientAttestationObject,
+    clientDataJSON: clientDataJSON,
+  });
 
   // Credential is now stored and ready for authentication
-  return result.credential
-})
+  return result.credential;
+});
 
 // Authentication flow
 const authenticateWithPasskey = Effect.gen(function* () {
-  const service = yield* Auth.makeWebAuthnService(webAuthnConfig)
+  const service = yield* Auth.WebAuthnService;
 
   // Step 1: Generate challenge
-  const { challenge } = yield* service.generateAuthenticationChallenge("user-123")
+  const { challenge } = yield* service.generateAuthenticationChallenge("user-123");
 
   // Send challenge to client, client signs with passkey
   // Client returns: credentialId, authenticatorData, clientDataJSON, signature
 
   // Step 2: Verify authentication response
-  const result = yield* service.verifyAuthentication(
-    challenge,
-    {
-      credentialId: clientCredentialId,
-      authenticatorData: clientAuthenticatorData,
-      clientDataJSON: clientDataJSON,
-      signature: clientSignature
-    }
-  )
+  const result = yield* service.verifyAuthentication(challenge, {
+    credentialId: clientCredentialId,
+    authenticatorData: clientAuthenticatorData,
+    clientDataJSON: clientDataJSON,
+    signature: clientSignature,
+  });
 
   // User is authenticated, create session
-  const sessionManager = yield* Auth.makeSessionManager(sessionConfig)
-  const session = yield* sessionManager.createSession(result.credential.userId)
+  const sessions = yield* Auth.SessionService.make(sessionConfig);
+  const session = yield* sessions.createSession(result.credential.userId);
 
-  return session
-})
+  return session;
+});
 
-// Provide dependencies
-const webAuthnDependencies = Context.merge(
-  Context.make(Auth.ChallengeStore, challengeStore),
-  Context.make(Auth.CredentialStore, credentialStore)
-)
-
-await Effect.runPromise(
-  Effect.provide(registerPasskey, webAuthnDependencies)
-)
-````
+await Effect.runPromise(Effect.provide(registerPasskey, WebAuthnLive));
+```
 
 ## OAuth 2.0 / Social Login
 
@@ -432,7 +460,7 @@ import { Effect, Context } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement OAuth state store (temporary, Redis/memory recommended)
-const oauthStateStore: Auth.OAuth.OAuthStateStoreShape = {
+const oauthStateStore: typeof Auth.OAuth.OAuthStateStore.Service = {
   create: (state) => Effect.succeed(state), // Store in Redis with 10-minute TTL
   get: (stateStr) =>
     Effect.fail(
@@ -445,7 +473,7 @@ const oauthStateStore: Auth.OAuth.OAuthStateStoreShape = {
 };
 
 // Implement OAuth account store (persistent, database)
-const oauthAccountStore: Auth.OAuth.OAuthAccountStoreShape = {
+const oauthAccountStore: typeof Auth.OAuth.OAuthAccountStore.Service = {
   create: (account) => Effect.succeed(account), // Store in database
   get: (provider, providerId) => Effect.succeed(null), // Return account or null
   getByUserId: (userId) => Effect.succeed([]), // Return all user's OAuth accounts
@@ -453,6 +481,22 @@ const oauthAccountStore: Auth.OAuth.OAuthAccountStoreShape = {
   linkToUser: (userId, account) => Effect.void,
   unlinkFromUser: (userId, provider) => Effect.void,
   delete: (provider, providerId) => Effect.void,
+};
+
+// Implement the OAuth-side user store (resolves/creates users during sign-in;
+// required by `OAuth.make` even if you only call `handleCallback` yourself)
+const oauthUserStore: typeof Auth.OAuth.OAuthUserStore.Service = {
+  getUser: (userId) => Effect.fail(new Auth.UserNotFoundError({ message: "Not found", userId })),
+  getUserByEmail: (email) => Effect.succeed(null), // Look up by email in your database
+  createUser: (input) =>
+    Effect.succeed({
+      id: "user-123", // Assign a real id when persisting
+      email: input.email,
+      emailVerified: input.emailVerified,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    }),
 };
 
 // Configure OAuth providers
@@ -481,7 +525,7 @@ const providers = {
 
 // Create OAuth service
 const oauthService = Effect.gen(function* () {
-  return yield* Auth.OAuth.makeOAuthService(providers);
+  return yield* Auth.OAuth.make(providers);
 });
 
 // Step 1: Generate authorization URL (initiate OAuth flow)
@@ -517,8 +561,8 @@ const handleOAuthCallback = (code: string, state: string) =>
     }
 
     // Create session
-    const sessionManager = yield* Auth.makeSessionManager(sessionConfig);
-    const session = yield* sessionManager.createSession(result.account.userId);
+    const sessions = yield* Auth.SessionService.make(sessionConfig);
+    const session = yield* sessions.createSession(result.account.userId);
 
     return { session, account: result.account };
   });
@@ -545,9 +589,10 @@ const refreshToken = (userId: string, provider: string) =>
   });
 
 // Provide dependencies and run
-const oauthDependencies = Context.merge(
+const oauthDependencies = Context.mergeAll(
   Context.make(Auth.OAuth.OAuthStateStore, oauthStateStore),
   Context.make(Auth.OAuth.OAuthAccountStore, oauthAccountStore),
+  Context.make(Auth.OAuth.OAuthUserStore, oauthUserStore),
 );
 
 await Effect.runPromise(Effect.provide(initiateOAuth, oauthDependencies));
@@ -558,42 +603,48 @@ await Effect.runPromise(Effect.provide(initiateOAuth, oauthDependencies));
 Implement secure email verification flows:
 
 ```typescript
-import { Effect, Context } from "effect";
+import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement email verification store
-const emailVerificationStore: Auth.Email.EmailVerificationStoreShape = {
+const emailVerificationStore: typeof Auth.Email.EmailVerificationStore.Service = {
   create: (verification) => Effect.succeed(verification), // Store in database
   get: (token) => Effect.succeed(null), // Return verification or null
   delete: (token) => Effect.void,
   deleteByUserId: (userId) => Effect.void,
 };
 
-// Configure email verification service
-const emailVerifier = Effect.gen(function* () {
-  return yield* Auth.Email.makeEmailVerificationService({
-    expiresIn: 24 * 60 * 60 * 1000, // 24 hours
-    sendEmail: (to, token) =>
-      Effect.tryPromise({
-        try: () =>
-          emailClient.send({
-            to,
-            subject: "Verify your email",
-            html: `Click here to verify: https://example.com/verify?token=${token}`,
-          }),
-        catch: (error) =>
-          new Auth.EmailVerificationError({
-            message: "Failed to send email",
-            cause: error,
-          }),
-      }),
-  });
-});
+// `Email.EmailVerificationService` only exposes `.layer()` (its raw `make`
+// isn't re-exported from the `email` barrel), so provide it as a Layer.
+const EmailVerificationLive = Auth.Email.EmailVerificationService.layer({
+  expiresIn: 24 * 60 * 60 * 1000, // 24 hours
+  sendEmail: (to, token) =>
+    Effect.tryPromise({
+      try: () =>
+        emailClient.send({
+          to,
+          subject: "Verify your email",
+          html: `Click here to verify: https://example.com/verify?token=${token}`,
+        }),
+      catch: (error) =>
+        new Auth.EmailVerificationError({
+          message: "Failed to send email",
+          cause: error,
+        }),
+    }),
+}).pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      Layer.succeed(Auth.Email.EmailVerificationStore)(emailVerificationStore),
+      Auth.Hooks.Default, // no-op hooks; register plugins here instead as needed
+    ),
+  ),
+);
 
 // Send verification email
 const sendVerification = (userId: string, email: string) =>
   Effect.gen(function* () {
-    const service = yield* emailVerifier;
+    const service = yield* Auth.Email.EmailVerificationService;
 
     const { token, expiresAt } = yield* service.createVerification(userId, email);
 
@@ -604,7 +655,7 @@ const sendVerification = (userId: string, email: string) =>
 // Verify token
 const verifyEmail = (token: string) =>
   Effect.gen(function* () {
-    const service = yield* emailVerifier;
+    const service = yield* Auth.Email.EmailVerificationService;
 
     const result = yield* service.verifyToken(token);
 
@@ -616,10 +667,7 @@ const verifyEmail = (token: string) =>
     return result;
   });
 
-// Provide dependencies
-const emailDependencies = Context.make(Auth.Email.EmailVerificationStore, emailVerificationStore);
-
-await Effect.runPromise(Effect.provide(verifyEmail("token123"), emailDependencies));
+await Effect.runPromise(Effect.provide(verifyEmail("token123"), EmailVerificationLive));
 ```
 
 ## Rate Limiting
@@ -627,26 +675,27 @@ await Effect.runPromise(Effect.provide(verifyEmail("token123"), emailDependencie
 Protect your authentication endpoints with rate limiting:
 
 ```typescript
-import { Effect, Context } from "effect";
+import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement rate limit store (Redis recommended for distributed systems)
-const rateLimitStore: Auth.RateLimitStoreShape = {
+const rateLimitStore: typeof Auth.RateLimitStore.Service = {
   get: (key) => Effect.succeed(null), // Return entry or null from Redis
   set: (key, entry, ttl) => Effect.void, // Store in Redis with TTL
   increment: (key, ttl) => Effect.succeed(1), // Atomic increment in Redis
   delete: (key) => Effect.void,
 };
 
-// Create rate limiter
-const rateLimiter = Effect.gen(function* () {
-  return yield* Auth.makeRateLimiter();
-});
+// `RateLimiter` only exposes `.layer()` (its raw `make` isn't re-exported
+// from the package root), so provide it as a Layer.
+const RateLimiterLive = Auth.RateLimiter.layer().pipe(
+  Layer.provide(Layer.succeed(Auth.RateLimitStore)(rateLimitStore)),
+);
 
 // Apply rate limiting to login endpoint
 const login = (email: string, password: string, ip: string) =>
   Effect.gen(function* () {
-    const limiter = yield* rateLimiter;
+    const limiter = yield* Auth.RateLimiter;
 
     // Rate limit by IP address
     yield* limiter.consumeToken(`login:${ip}`, Auth.RateLimitPresets.login);
@@ -666,8 +715,8 @@ const login = (email: string, password: string, ip: string) =>
     }
 
     // Create session
-    const sessionManager = yield* Auth.makeSessionManager(sessionConfig);
-    const session = yield* sessionManager.createSession(user.id);
+    const sessions = yield* Auth.SessionService.make(sessionConfig);
+    const session = yield* sessions.createSession(user.id);
 
     return session;
   });
@@ -689,11 +738,8 @@ const rateLimits = {
   totpVerification: Auth.RateLimitPresets.totpVerification, // 5 per 5 min
 };
 
-// Provide dependencies
-const rateLimitDependencies = Context.make(Auth.RateLimitStore, rateLimitStore);
-
 await Effect.runPromise(
-  Effect.provide(login("user@example.com", "password", "192.168.1.1"), rateLimitDependencies),
+  Effect.provide(login("user@example.com", "password", "192.168.1.1"), RateLimiterLive),
 );
 ```
 
@@ -758,7 +804,7 @@ schemas). HIBP fails open on API errors by default (`failClosed: false`).
 
 - `SessionStore`: Interface for session persistence
 - `UserStore`: Interface for user data retrieval
-- `SessionManager`: Service for managing sessions
+- `SessionService`: Service for managing sessions
 - `PasswordHasher`: Service for password hashing and verification
 - `AuthorizationPolicy`: Interface for permission checking
 - `RoleStore`: Interface for role-based authorization
@@ -775,8 +821,8 @@ schemas). HIBP fails open on API errors by default (`failClosed: false`).
 
 ### OAuth Functions
 
-- `makeOAuthProvider(name, config, usePKCE?)`: Create a custom OAuth provider
-- `makeOAuthService(providers)`: Create OAuth service with configured providers
+- `provider(name, config, usePKCE?)`: Create a custom OAuth provider
+- `make(providers, options?)`: Create OAuth service with configured providers
 - `GoogleProvider(config)`: Pre-built Google OAuth provider
 - `GitHubProvider(config)`: Pre-built GitHub OAuth provider
 - `DiscordProvider(config)`: Pre-built Discord OAuth provider
@@ -786,12 +832,12 @@ schemas). HIBP fails open on API errors by default (`failClosed: false`).
 
 ### Email Verification Functions
 
-- `makeEmailVerificationService(config)`: Create email verification service
-- `generateVerificationToken()`: Generate secure verification token
+- `make(config)`: Create email verification service
+- `generateVerificationToken(crypto)`: Generate secure verification token
 
 ### Rate Limiting Functions
 
-- `makeRateLimiter()`: Create rate limiter service
+- `make()`: Create rate limiter service
 - `RateLimitPresets`: Pre-configured rate limits for common operations
   - `RateLimitPresets.login`: 5 per 15 minutes
   - `RateLimitPresets.passwordReset`: 3 per hour
@@ -804,8 +850,8 @@ schemas). HIBP fails open on API errors by default (`failClosed: false`).
 
 All OTP functions return Effect types for composability:
 
-- `generateSecret(length?)`: Generate cryptographically secure random bytes
-- `generateBase32Secret(length?)`: Generate a base32-encoded secret
+- `generateSecret(crypto, length?)`: Generate cryptographically secure random bytes
+- `generateBase32Secret(crypto, length?)`: Generate a base32-encoded secret
 - `encodeBase32(buffer)`: Encode bytes to base32 string
 - `decodeBase32(base32)`: Decode base32 string to bytes
 - `generateHOTP(secret, counter, config?)`: Generate HOTP token
@@ -869,7 +915,7 @@ Following Copenhagen Book guidelines:
 
 Following Oslo guidelines:
 
-1. Use PBKDF2-SHA256 with 210,000+ iterations
+1. Use PBKDF2-SHA256 with 600,000+ iterations
 2. Generate random salts per password
 3. Use timing-safe comparisons
 4. Never store plaintext passwords
@@ -892,7 +938,7 @@ Security is our top priority. See our [Security Policy](./SECURITY.md) for:
 
 **Key Security Features:**
 
-- ✅ PBKDF2-SHA256 with 210,000+ iterations (OWASP recommended)
+- ✅ PBKDF2-SHA256 with 600,000+ iterations (OWASP recommended)
 - ✅ Timing-safe comparisons for all security-sensitive operations
 - ✅ Cryptographically secure random generation
 - ✅ Secure session management following Copenhagen Book guidelines

@@ -10,11 +10,11 @@
  *   holds `Option<SessionWithUser>` (some when authenticated, none otherwise).
  * - `AuthMiddleware` — required-auth `HttpApiMiddleware.Service` tag.
  * - `OptionalAuthMiddleware` — optional-auth variant; never fails.
- * - `makeAuthMiddlewareLayer(config?)` — returns the `Layer` that implements
+ * - `layer(config?)` — returns the `Layer` that implements
  *   `AuthMiddleware`. Reads the session cookie (honoring the cache) or an
  *   `Authorization: Bearer/Token` header; fails with `Unauthorized` (401) when
  *   neither is present or the session is expired/invalid.
- * - `makeOptionalAuthMiddlewareLayer(config?)` — returns the `Layer` that
+ * - `optionalLayer(config?)` — returns the `Layer` that
  *   implements `OptionalAuthMiddleware`. Never fails; provides
  *   `MaybeCurrentSession` with `Option.none()` when unauthenticated.
  *
@@ -29,7 +29,7 @@
  * import {
  *   AuthMiddleware,
  *   CurrentUser,
- *   makeAuthMiddlewareLayer,
+ *   layer,
  * } from "effect-auth/Http"
  *
  * // 1. Define API group – mark endpoints that need auth
@@ -55,7 +55,7 @@
  * // 3. Wire up the middleware layer alongside your service layer
  * const AppLayer = HttpApiBuilder.layer(MyApi).pipe(
  *   Layer.provide(ProfileGroupLayer),
- *   Layer.provide(makeAuthMiddlewareLayer()),
+ *   Layer.provide(layer()),
  *   Layer.provide(myServiceLayer), // must provide SessionService, Hooks, …
  * )
  * ```
@@ -198,7 +198,7 @@ const _authSecurity = {
 export class AuthMiddleware extends HttpApiMiddleware.Service<
   AuthMiddleware,
   { requires: SessionService | Hooks; provides: CurrentSession | CurrentUser }
->()("@effect-auth/http/AuthMiddleware", {
+>()("@effect-auth/AuthMiddleware", {
   error: S.UnauthorizedError,
   security: _authSecurity,
 }) {}
@@ -232,7 +232,7 @@ export class AuthMiddleware extends HttpApiMiddleware.Service<
 export class OptionalAuthMiddleware extends HttpApiMiddleware.Service<
   OptionalAuthMiddleware,
   { requires: SessionService | Hooks; provides: MaybeCurrentSession }
->()("@effect-auth/http/OptionalAuthMiddleware") {}
+>()("@effect-auth/OptionalAuthMiddleware") {}
 
 // =============================================================================
 // Internal session resolution helper
@@ -316,14 +316,14 @@ const validateToken = (
  * invalid.
  *
  * @param config - Optional cookie configuration (name, secure, cache, …).
- *   Defaults match `makeAuthWebHandler` defaults (`name: "conduit_session"`,
+ *   Defaults match `HTTPServer.make` defaults (`name: "conduit_session"`,
  *   `secure: true`).
  *
  * @example
  * ```ts
  * const AppLayer = HttpApiBuilder.layer(MyApi).pipe(
  *   Layer.provide(myGroupLayer),
- *   Layer.provide(makeAuthMiddlewareLayer()),
+ *   Layer.provide(layer()),
  *   Layer.provide(myServiceLayer),
  * )
  * ```
@@ -331,7 +331,7 @@ const validateToken = (
  * @since 1.0.0
  * @category constructors
  */
-export const makeAuthMiddlewareLayer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
+export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
   const cfg = resolveCookieConfig(config);
 
   return Layer.succeed(AuthMiddleware, {
@@ -382,13 +382,13 @@ export const makeAuthMiddlewareLayer = (config?: CookieConfig): Layer.Layer<Auth
  * session is present or it is invalid.
  *
  * @param config - Optional cookie configuration (name, secure, cache, …).
- *   Defaults match `makeAuthWebHandler` defaults.
+ *   Defaults match `HTTPServer.make` defaults.
  *
  * @example
  * ```ts
  * const AppLayer = HttpApiBuilder.layer(MyApi).pipe(
  *   Layer.provide(myFeedGroupLayer),
- *   Layer.provide(makeOptionalAuthMiddlewareLayer()),
+ *   Layer.provide(optionalLayer()),
  *   Layer.provide(myServiceLayer),
  * )
  * ```
@@ -396,9 +396,7 @@ export const makeAuthMiddlewareLayer = (config?: CookieConfig): Layer.Layer<Auth
  * @since 1.0.0
  * @category constructors
  */
-export const makeOptionalAuthMiddlewareLayer = (
-  config?: CookieConfig,
-): Layer.Layer<OptionalAuthMiddleware> => {
+export const optionalLayer = (config?: CookieConfig): Layer.Layer<OptionalAuthMiddleware> => {
   const cfg = resolveCookieConfig(config);
 
   return Layer.succeed(OptionalAuthMiddleware, (handler, _opts) =>

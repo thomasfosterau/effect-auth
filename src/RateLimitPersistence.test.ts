@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import { RateLimiter as PersistenceRateLimiter } from "effect/unstable/persistence";
-import { RateLimiterPersistenceLayer } from "./RateLimitPersistence.js";
-import { RateLimiter, RateLimitStore, RateLimitPresets } from "./RateLimit.js";
-import { RateLimitError } from "./Errors.js";
+import * as RateLimitPersistence from "./RateLimitPersistence.ts";
+import { RateLimiter, RateLimitStore, RateLimitPresets } from "./RateLimit.ts";
+import { RateLimitError } from "./Errors.ts";
 
 /**
  * The persistence facade + an in-memory persistence store. The legacy
@@ -11,7 +11,7 @@ import { RateLimitError } from "./Errors.js";
  * this backend, so a no-op satisfies the type.
  */
 const Live = Layer.mergeAll(
-  RateLimiterPersistenceLayer.pipe(
+  RateLimitPersistence.rateLimiterPersistenceLayer.pipe(
     Layer.provide(PersistenceRateLimiter.layer),
     Layer.provide(PersistenceRateLimiter.layerStoreMemory),
   ),
@@ -21,7 +21,7 @@ const Live = Layer.mergeAll(
 const run = <A, E>(eff: Effect.Effect<A, E, RateLimiter | RateLimitStore>) =>
   Effect.runPromise(eff.pipe(Effect.provide(Live)));
 
-describe("RateLimiterPersistenceLayer", () => {
+describe("RateLimitPersistence.rateLimiterPersistenceLayer", () => {
   it("consumeToken allows up to the limit then fails with RateLimitError", async () => {
     const config = { maxRequests: 3, windowMs: 60_000 };
     const result = await run(

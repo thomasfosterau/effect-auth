@@ -120,9 +120,7 @@ export class EmailVerificationService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: EmailVerificationConfig) =>
-    Layer.effect(EmailVerificationService, makeEmailVerificationService(config)).pipe(
-      Layer.provide(PlatformCrypto.layer),
-    );
+    Layer.effect(EmailVerificationService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /**
@@ -141,7 +139,7 @@ export const generateVerificationToken = (
 /**
  * Create an email verification service
  */
-export const makeEmailVerificationService = (
+export const make = (
   config: EmailVerificationConfig,
 ): Effect.Effect<
   typeof EmailVerificationService.Service,

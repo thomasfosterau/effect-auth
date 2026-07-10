@@ -32,24 +32,24 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./react": {
-      "import": "./dist/react.js",
-      "types": "./dist/react.d.ts"
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
     },
     "./svelte": {
-      "import": "./dist/svelte.js",
-      "types": "./dist/svelte.d.ts"
+      "types": "./dist/svelte.d.ts",
+      "import": "./dist/svelte.js"
     },
     "./vue": {
-      "import": "./dist/vue.js",
-      "types": "./dist/vue.d.ts"
+      "types": "./dist/vue.d.ts",
+      "import": "./dist/vue.js"
     },
     "./types": {
-      "import": "./dist/types.js",
-      "types": "./dist/types.d.ts"
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
     }
   },
   "scripts": {

@@ -4,8 +4,8 @@ import {
   normalizeIp,
   cidrContains,
   resolveClientIP,
-  type IpResolvableRequest,
-} from "./ClientIP.js";
+  type IPResolvableRequest,
+} from "./ClientIP.ts";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -15,7 +15,7 @@ const req = (
   xff: string | undefined,
   remote: string | undefined,
   header = "x-forwarded-for",
-): IpResolvableRequest => ({
+): IPResolvableRequest => ({
   headers: xff !== undefined ? { [header]: xff } : {},
   remoteAddress: remote !== undefined ? Option.some(remote) : Option.none(),
 });
@@ -182,7 +182,7 @@ describe("resolveClientIP — hopCount", () => {
   });
 
   it("uses custom header name", () => {
-    const r: IpResolvableRequest = {
+    const r: IPResolvableRequest = {
       headers: { "x-real-ip": "1.2.3.4" },
       remoteAddress: Option.some("9.10.11.12"),
     };
@@ -228,7 +228,7 @@ describe("resolveClientIP — trustedProxyCidrs", () => {
   });
 
   it("uses a custom header", () => {
-    const r: IpResolvableRequest = {
+    const r: IPResolvableRequest = {
       headers: { "cf-connecting-ip": "1.2.3.4" },
       remoteAddress: Option.some("10.0.0.50"),
     };
@@ -240,7 +240,7 @@ describe("resolveClientIP — trustedProxyCidrs", () => {
   });
 
   it("falls back to remote address when XFF header is absent", () => {
-    const r: IpResolvableRequest = {
+    const r: IPResolvableRequest = {
       headers: {},
       remoteAddress: Option.some("9.10.11.12"),
     };

@@ -10,9 +10,9 @@
  * ```ts
  * import { Layer } from "effect";
  * import { RateLimiter as PersistenceRateLimiter } from "effect/unstable/persistence";
- * import { RateLimiterPersistenceLayer } from "effect-auth";
+ * import { rateLimiterPersistenceLayer } from "effect-auth";
  *
- * const RateLimiterLive = RateLimiterPersistenceLayer.pipe(
+ * const RateLimiterLive = rateLimiterPersistenceLayer.pipe(
  *   Layer.provide(PersistenceRateLimiter.layer),
  *   Layer.provide(PersistenceRateLimiter.layerStoreMemory),
  * );
@@ -25,7 +25,7 @@
  * import { Layer } from "effect";
  * import { Redis, RateLimiter as PersistenceRateLimiter } from "effect/unstable/persistence";
  *
- * const RateLimiterRedis = RateLimiterPersistenceLayer.pipe(
+ * const RateLimiterRedis = rateLimiterPersistenceLayer.pipe(
  *   Layer.provide(PersistenceRateLimiter.layer),
  *   Layer.provide(
  *     Layer.effect(
@@ -71,7 +71,7 @@ const consumeOptions = (key: string, config: RateLimitConfig) =>
  * (`RateLimitStoreTag`) requirement satisfiable without touching the legacy
  * store.
  */
-export const makeRateLimiterPersistence: Effect.Effect<
+export const rateLimiterPersistence: Effect.Effect<
   typeof RateLimiter.Service,
   never,
   PersistenceRateLimiter.RateLimiter
@@ -111,4 +111,4 @@ export const makeRateLimiterPersistence: Effect.Effect<
  * `PersistenceRateLimiter.layer` plus a store (`layerStoreMemory` or a Redis
  * store) to obtain a runnable limiter (see the module docs for examples).
  */
-export const RateLimiterPersistenceLayer = Layer.effect(RateLimiter, makeRateLimiterPersistence);
+export const rateLimiterPersistenceLayer = Layer.effect(RateLimiter, rateLimiterPersistence);

@@ -9,7 +9,7 @@
  * The companion browser hint — a non-httpOnly `${cookie}_last_method` cookie
  * login pages read to highlight the user's previous method — is set by the
  * HTTP layer: enable it with `cookie.lastLoginMethod` on
- * `makeAuthWebHandler` (it covers every sign-in endpoint, including the
+ * `HTTPServer.make` (it covers every sign-in endpoint, including the
  * flows that don't fire these hooks).
  *
  * @module plugins/last-login-method
@@ -24,7 +24,7 @@ import { Hooks, makePlugin } from "../Hooks.ts";
  * provide your `SessionService` layer. Tap failures are isolated: recording
  * the method never breaks the sign-in itself.
  */
-export const makeLastLoginMethodPlugin = () =>
+export const make = () =>
   makePlugin(
     Effect.gen(function* () {
       const sessionManager = yield* SessionService;
