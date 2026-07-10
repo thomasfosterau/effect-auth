@@ -45,7 +45,7 @@ import {
   type PendingTwoFactor,
   type TwoFactorRecord,
   TwoFactorService,
-} from "../TwoFactor.ts";
+} from "../secondfactor/TwoFactor.ts";
 import {
   AccountManagementStore,
   type AccountToken,
@@ -65,7 +65,7 @@ import {
   type DeviceAuthorizationRecord,
   DeviceAuthorizationService,
 } from "../DeviceAuthorization.ts";
-import { generateTOTP } from "../OTP.ts";
+import { generateTOTP } from "../secondfactor/OTP.ts";
 import { UserNotFoundError } from "../Errors.ts";
 import type * as Types from "../Types.ts";
 

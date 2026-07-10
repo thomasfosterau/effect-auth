@@ -13,19 +13,19 @@
  */
 
 import { Config, Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
-import * as Cipher from "./Cipher.ts";
-import type { TokenCipher } from "./Cipher.ts";
-import * as Errors from "./Errors.ts";
-import * as Obs from "./Observability.ts";
-import { EmailPasswordStore, SecondFactorGate } from "./email/EmailPassword.ts";
-import { type HookError } from "./Hooks.ts";
+import * as Cipher from "../Cipher.ts";
+import type { TokenCipher } from "../Cipher.ts";
+import * as Errors from "../Errors.ts";
+import * as Obs from "../Observability.ts";
+import { EmailPasswordStore, SecondFactorGate } from "../email/EmailPassword.ts";
+import { type HookError } from "../Hooks.ts";
 import { generateBase32Secret, generateOTPURI, verifyTOTP, type TOTPConfig } from "./OTP.ts";
-import { PasswordHasher } from "./password/Password.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { hashToken, timingSafeEqualBytes } from "./TokenHash.ts";
-import type * as Types from "./Types.ts";
-import { UserStore } from "./session/UserStore.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { PasswordHasher } from "../password/Password.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { hashToken, timingSafeEqualBytes } from "../TokenHash.ts";
+import type * as Types from "../Types.ts";
+import { UserStore } from "../session/UserStore.ts";
+import { SessionService } from "../session/SessionService.ts";
 
 /**
  * Two-factor error

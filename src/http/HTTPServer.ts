@@ -24,7 +24,7 @@ import { PhoneOTPService } from "../PhoneOTP.ts";
 import { UsernameService } from "../Username.ts";
 import { DeviceAuthorizationService, normalizeUserCode } from "../DeviceAuthorization.ts";
 import { EmailOTPService } from "../email/EmailOTP.ts";
-import { TwoFactorService } from "../TwoFactor.ts";
+import { TwoFactorService } from "../secondfactor/TwoFactor.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { EmailVerificationService } from "../email/EmailVerification.ts";
 import { PasswordResetService } from "../password/PasswordReset.ts";

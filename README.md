@@ -241,10 +241,10 @@ const program = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   // Generate a secret for the user
-  const secret = yield* Auth.generateBase32Secret(crypto, 20);
+  const secret = yield* Auth.SecondFactor.generateBase32Secret(crypto, 20);
 
   // Generate a QR code URI for the user to scan
-  const uri = Auth.generateOTPURI({
+  const uri = Auth.SecondFactor.generateOTPURI({
     type: "totp",
     label: "user@example.com",
     issuer: "MyApp",
@@ -256,7 +256,7 @@ const program = Effect.gen(function* () {
 
   // When the user submits a token, verify it
   const userToken = "123456"; // From user input
-  const isValid = yield* Auth.verifyTOTP(userToken, secret);
+  const isValid = yield* Auth.SecondFactor.verifyTOTP(userToken, secret);
 
   if (isValid) {
     // Token is valid, proceed with authentication
@@ -280,13 +280,13 @@ const program = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   // Generate a secret for the user
-  const secret = yield* Auth.generateBase32Secret(crypto, 20);
+  const secret = yield* Auth.SecondFactor.generateBase32Secret(crypto, 20);
 
   // Store initial counter (typically 0) for the user
   let counter = 0;
 
   // Generate a QR code URI
-  const uri = Auth.generateOTPURI({
+  const uri = Auth.SecondFactor.generateOTPURI({
     type: "hotp",
     label: "user@example.com",
     issuer: "MyApp",
@@ -299,7 +299,7 @@ const program = Effect.gen(function* () {
 
   // When the user submits a token, verify it
   const userToken = "123456"; // From user input
-  const isValid = yield* Auth.verifyHOTP(userToken, secret, counter);
+  const isValid = yield* Auth.SecondFactor.verifyHOTP(userToken, secret, counter);
 
   if (isValid) {
     // Token is valid, increment counter for next use
@@ -323,23 +323,23 @@ Both TOTP and HOTP support custom configurations:
 
 ```typescript
 // TOTP with custom settings
-const totpConfig: Auth.TOTPConfig = {
+const totpConfig: Auth.SecondFactor.TOTPConfig = {
   period: 60, // 60-second time window (default: 30)
   digits: 8, // 8-digit codes (default: 6)
   algorithm: "sha256", // Use SHA-256 (default: "sha1")
   window: 2, // Accept tokens from ±2 time steps (default: 1)
 };
 
-const token = yield * Auth.generateTOTP(secret, totpConfig);
-const isValid = yield * Auth.verifyTOTP(token, secret, totpConfig);
+const token = yield * Auth.SecondFactor.generateTOTP(secret, totpConfig);
+const isValid = yield * Auth.SecondFactor.verifyTOTP(token, secret, totpConfig);
 
 // HOTP with custom settings
-const hotpConfig: Auth.HOTPConfig = {
+const hotpConfig: Auth.SecondFactor.HOTPConfig = {
   digits: 8, // 8-digit codes (default: 6)
   algorithm: "sha512", // Use SHA-512 (default: "sha1")
 };
 
-const hotpToken = yield * Auth.generateHOTP(secret, counter, hotpConfig);
+const hotpToken = yield * Auth.SecondFactor.generateHOTP(secret, counter, hotpConfig);
 ```
 
 ## WebAuthn / Passkeys
@@ -351,14 +351,14 @@ import { Effect, Layer } from "effect";
 import * as Auth from "effect-auth";
 
 // Implement challenge store (temporary storage for challenges)
-const challengeStore: typeof Auth.ChallengeStore.Service = {
+const challengeStore: typeof Auth.SecondFactor.ChallengeStore.Service = {
   create: (challenge) => Effect.succeed(challenge), // Store in Redis/memory
   get: (challenge) => Effect.fail(new Auth.ChallengeNotFoundError({ message: "Not found" })),
   delete: (challenge) => Effect.void,
 };
 
 // Implement credential store (persistent storage for passkeys)
-const credentialStore: typeof Auth.CredentialStore.Service = {
+const credentialStore: typeof Auth.SecondFactor.CredentialStore.Service = {
   create: (credential) => Effect.succeed(credential), // Store in database
   get: (credentialId) =>
     Effect.fail(
@@ -380,7 +380,7 @@ const credentialStore: typeof Auth.CredentialStore.Service = {
   listByUserId: (userId) => Effect.succeed([]), // Return all user's credentials
 };
 
-const webAuthnConfig: Auth.WebAuthnConfig = {
+const webAuthnConfig: Auth.SecondFactor.WebAuthnConfig = {
   relyingPartyId: "example.com",
   relyingPartyName: "Example Corp",
   expectedOrigin: "https://example.com",
@@ -389,18 +389,18 @@ const webAuthnConfig: Auth.WebAuthnConfig = {
 
 // `WebAuthnService` only exposes `.layer()` (its raw `make` isn't re-exported
 // from the package root), so provide it as a Layer.
-const WebAuthnLive = Auth.WebAuthnService.layer(webAuthnConfig).pipe(
+const WebAuthnLive = Auth.SecondFactor.WebAuthnService.layer(webAuthnConfig).pipe(
   Layer.provide(
     Layer.mergeAll(
-      Layer.succeed(Auth.ChallengeStore)(challengeStore),
-      Layer.succeed(Auth.CredentialStore)(credentialStore),
+      Layer.succeed(Auth.SecondFactor.ChallengeStore)(challengeStore),
+      Layer.succeed(Auth.SecondFactor.CredentialStore)(credentialStore),
     ),
   ),
 );
 
 // Registration flow
 const registerPasskey = Effect.gen(function* () {
-  const service = yield* Auth.WebAuthnService;
+  const service = yield* Auth.SecondFactor.WebAuthnService;
 
   // Step 1: Generate challenge
   const { challenge } = yield* service.generateRegistrationChallenge({
@@ -425,7 +425,7 @@ const registerPasskey = Effect.gen(function* () {
 
 // Authentication flow
 const authenticateWithPasskey = Effect.gen(function* () {
-  const service = yield* Auth.WebAuthnService;
+  const service = yield* Auth.SecondFactor.WebAuthnService;
 
   // Step 1: Generate challenge
   const { challenge } = yield* service.generateAuthenticationChallenge("user-123");

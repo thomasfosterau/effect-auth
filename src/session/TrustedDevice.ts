@@ -36,7 +36,7 @@ import { SecondFactorGate } from "../email/EmailPassword.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { hashToken, timingSafeEqualBytes } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
-import { TwoFactorService } from "../TwoFactor.ts";
+import { TwoFactorService } from "../secondfactor/TwoFactor.ts";
 
 // ---------------------------------------------------------------------------
 // Record + Store

@@ -63,6 +63,10 @@
     "./authz": {
       "types": "./dist/authz/index.d.ts",
       "import": "./dist/authz/index.js"
+    },
+    "./secondfactor": {
+      "types": "./dist/secondfactor/index.d.ts",
+      "import": "./dist/secondfactor/index.js"
     }
   },
   "scripts": {

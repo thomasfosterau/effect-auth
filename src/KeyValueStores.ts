@@ -50,8 +50,8 @@ import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
 import { type OAuthState, OAuthStateStore } from "./oauth/OAuth.ts";
 import { PasswordResetStore, type PasswordResetToken } from "./password/PasswordReset.ts";
 import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
-import { type PendingTwoFactor, PendingTwoFactorStore } from "./TwoFactor.ts";
-import { ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.ts";
+import { type PendingTwoFactor, PendingTwoFactorStore } from "./secondfactor/TwoFactor.ts";
+import { ChallengeStore, type WebAuthnChallenge } from "./secondfactor/WebAuthn.ts";
 import { type GoogleOneTapNonceEntry, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 
 // ---------------------------------------------------------------------------

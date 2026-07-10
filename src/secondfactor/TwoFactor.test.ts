@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect, Redacted } from "effect";
-import { Hooks } from "./Hooks.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { SessionService, make as makeSessionService } from "./session/SessionService.ts";
-import { SessionStore } from "./session/SessionStore.ts";
-import { UserStore } from "./session/UserStore.ts";
+import { Hooks } from "../Hooks.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { SessionService, make as makeSessionService } from "../session/SessionService.ts";
+import { SessionStore } from "../session/SessionStore.ts";
+import { UserStore } from "../session/UserStore.ts";
 import {
   type PendingTwoFactor,
   type TwoFactorRecord,
@@ -12,12 +12,12 @@ import {
   PendingTwoFactorStore,
 } from "./TwoFactor.ts";
 import * as TwoFactor from "./TwoFactor.ts";
-import * as Cipher from "./Cipher.ts";
-import { type CreateUserInput, EmailPasswordStore } from "./email/EmailPassword.ts";
+import * as Cipher from "../Cipher.ts";
+import { type CreateUserInput, EmailPasswordStore } from "../email/EmailPassword.ts";
 import { generateTOTP } from "./OTP.ts";
-import { PasswordHasher } from "./password/Password.ts";
-import * as Password from "./password/Password.ts";
-import type { Session, User, SessionConfig } from "./Types.ts";
+import { PasswordHasher } from "../password/Password.ts";
+import * as Password from "../password/Password.ts";
+import type { Session, User, SessionConfig } from "../Types.ts";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();

@@ -16,11 +16,11 @@ import {
   type ClientData,
   type AuthenticatorData,
 } from "@oslojs/webauthn";
-import * as Cipher from "./Cipher.ts";
-import * as Errors from "./Errors.ts";
-import * as Obs from "./Observability.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { timingSafeEqualBytes } from "./TokenHash.ts";
+import * as Cipher from "../Cipher.ts";
+import * as Errors from "../Errors.ts";
+import * as Obs from "../Observability.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { timingSafeEqualBytes } from "../TokenHash.ts";
 
 /**
  * Represents a WebAuthn challenge used during registration and authentication

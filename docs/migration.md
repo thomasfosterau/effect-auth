@@ -44,6 +44,10 @@ subpath imports (external) accordingly.
 | `src/IpRateLimitPlugin.ts`                                         | `src/plugins/IPRateLimit.ts`                   |
 | `src/WebAuthnService.ts`                                           | merged into `src/WebAuthn.ts`                  |
 | `src/MultiFactorService.ts` (orphaned duplicate of `TwoFactor.ts`) | **deleted**                                    |
+| `src/TwoFactor.ts`                                                 | `src/secondfactor/TwoFactor.ts`                |
+| `src/OTPSecondFactor.ts`                                           | `src/secondfactor/OTPSecondFactor.ts`          |
+| `src/WebAuthn.ts`                                                  | `src/secondfactor/WebAuthn.ts`                 |
+| `src/OTP.ts`                                                       | `src/secondfactor/OTP.ts`                      |
 
 Flat feature modules that only got acronym-case fixes (still exported from the package root, not
 clustered):
@@ -76,14 +80,18 @@ exports):
     "./password": { "types": "./dist/password/index.d.ts", "import": "./dist/password/index.js" },
     "./plugins": { "types": "./dist/plugins/index.d.ts", "import": "./dist/plugins/index.js" },
     "./authz": { "types": "./dist/authz/index.d.ts", "import": "./dist/authz/index.js" },
+    "./secondfactor": {
+      "types": "./dist/secondfactor/index.d.ts",
+      "import": "./dist/secondfactor/index.js",
+    },
   },
 }
 ```
 
 The root package (`effect-auth`) still re-exports every cluster as a namespace (`Email`, `HTTP`,
-`OAuth`, `Session`-flavored exports, `Password`, `Plugins`, `Authz`) alongside the flat,
-non-clustered feature modules (JWT, WebAuthn, Admin, Organization, …) — no import changes needed
-there beyond the renames below.
+`OAuth`, `Session`-flavored exports, `Password`, `Plugins`, `Authz`, `SecondFactor`) alongside the
+flat, non-clustered feature modules (JWT, Admin, Organization, …) — no import changes needed there
+beyond the renames below.
 
 ## 3. Tag-string and identifier acronym fixes
 
@@ -171,64 +179,64 @@ import * as EmailPassword from "effect-auth/email"; // or the specific file inte
 const service = yield * EmailPassword.make(config);
 ```
 
-| Old export                        | Module                       | New export                    |
-| --------------------------------- | ---------------------------- | ----------------------------- |
-| `makeAccountManagementService`    | `AccountManagement.ts`       | `make`                        |
-| `makeAdminService`                | `Admin.ts`                   | `make`                        |
-| `makeAes256GcmCipher`             | `Cipher.ts`                  | `aes256GcmCipher`             |
-| `makeAnonymousService`            | `Anonymous.ts`               | `make`                        |
-| `makeAPIKeyService`               | `APIKey.ts`                  | `make`                        |
-| `makeArgon2Hasher`                | `password/Argon2.ts`         | `argon2Hasher`                |
-| `Argon2HasherLayer`               | `password/Argon2.ts`         | `argon2HasherLayer`           |
-| `makeAuthClient`                  | `http/HTTPClient.ts`         | `client`                      |
-| `makeAuthLifecycleService`        | `AuthLifecycle.ts`           | `make`                        |
-| `makeAuthMiddlewareLayer`         | `http/HTTPMiddleware.ts`     | `layer`                       |
-| `makeOptionalAuthMiddlewareLayer` | `http/HTTPMiddleware.ts`     | `optionalLayer`               |
-| `makeAuthWebHandler`              | `http/HTTPServer.ts`         | `make`                        |
-| `makeClientIPLayer`               | `ClientIP.ts`                | `clientIPLayer`               |
-| `makeDeviceAuthorizationService`  | `DeviceAuthorization.ts`     | `make`                        |
-| `makeEmailOTPService`             | `email/EmailOTP.ts`          | `make`                        |
-| `makeEmailPasswordService`        | `email/EmailPassword.ts`     | `make`                        |
-| `makeEmailVerificationService`    | `email/EmailVerification.ts` | `make`                        |
-| `makeGoogleOneTapService`         | `GoogleOneTap.ts`            | `make`                        |
-| `makeInMemoryRoleStore`           | `authz/RBAC.ts`              | `make`                        |
-| `makeJWTService`                  | `JWT.ts`                     | `make`                        |
-| `makeRemoteJwksVerifier`          | `JWT.ts`                     | `remoteJwksVerifier`          |
-| `makeLastLoginMethodPlugin`       | `plugins/LastLoginMethod.ts` | `make`                        |
-| `makeMagicLinkService`            | `MagicLink.ts`               | `make`                        |
-| `makeOAuthProvider`               | `oauth/OAuth.ts`             | `provider`                    |
-| `makeOAuthService`                | `oauth/OAuth.ts`             | `make`                        |
-| `makeAppleClientSecret`           | `oauth/OAuth.ts`             | `appleClientSecret`           |
-| `makeOIDCProviderService`         | `OIDCProvider.ts`            | `make`                        |
-| `makeOrganizationService`         | `Organization.ts`            | `make`                        |
-| `makeOTPSecondFactorService`      | `OTPSecondFactor.ts`         | `make`                        |
-| `makePasswordResetService`        | `password/PasswordReset.ts`  | `make`                        |
-| `makePermission`                  | `authz/Permission.ts`        | `make`                        |
-| `makePhoneOTPService`             | `PhoneOTP.ts`                | `make`                        |
-| `makeRateLimiter`                 | `RateLimit.ts`               | `make`                        |
-| `makeRateLimiterPersistence`      | `RateLimitPersistence.ts`    | `rateLimiterPersistence`      |
-| `RateLimiterPersistenceLayer`     | `RateLimitPersistence.ts`    | `rateLimiterPersistenceLayer` |
-| `makeRoleBasedPolicy`             | `authz/Authorization.ts`     | `make`                        |
-| `makeSSOService`                  | `SSO.ts`                     | `make`                        |
-| `makeTrustedDeviceService`        | `session/TrustedDevice.ts`   | `make`                        |
-| `makeTrustedDeviceGateShape`      | `session/TrustedDevice.ts`   | `gate`                        |
-| `makeTwoFactorService`            | `TwoFactor.ts`               | `make`                        |
-| `makeUserService`                 | `User.ts`                    | `make`                        |
-| `makeUsernameService`             | `Username.ts`                | `make`                        |
-| `makeWebAuthnService`             | `WebAuthn.ts`                | `make`                        |
-| `makeOAuthStateStoreKV`           | `KeyValueStores.ts`          | `oauthStateStoreKV`           |
-| `makeChallengeStoreKV`            | `KeyValueStores.ts`          | `challengeStoreKV`            |
-| `makeRateLimitStoreKV`            | `KeyValueStores.ts`          | `rateLimitStoreKV`            |
-| `makeEmailVerificationStoreKV`    | `KeyValueStores.ts`          | `emailVerificationStoreKV`    |
-| `makePasswordResetStoreKV`        | `KeyValueStores.ts`          | `passwordResetStoreKV`        |
-| `makeMagicLinkStoreKV`            | `KeyValueStores.ts`          | `magicLinkStoreKV`            |
-| `makeEmailOTPStoreKV`             | `KeyValueStores.ts`          | `emailOTPStoreKV`             |
-| `makePendingTwoFactorStoreKV`     | `KeyValueStores.ts`          | `pendingTwoFactorStoreKV`     |
-| `makeIdentifierStoreKV`           | `KeyValueStores.ts`          | `identifierStoreKV`           |
-| `makeGoogleOneTapNonceStoreKV`    | `KeyValueStores.ts`          | `googleOneTapNonceStoreKV`    |
-| `makeMultiAlgorithmVerifier`      | `password/Password.ts`       | `multiAlgorithmVerifier`      |
-| `makePBKDF2Hasher`                | `password/Password.ts`       | `pbkdf2Hasher`                |
-| `makeScryptHasher`                | `password/Password.ts`       | `scryptHasher`                |
+| Old export                        | Module                            | New export                    |
+| --------------------------------- | --------------------------------- | ----------------------------- |
+| `makeAccountManagementService`    | `AccountManagement.ts`            | `make`                        |
+| `makeAdminService`                | `Admin.ts`                        | `make`                        |
+| `makeAes256GcmCipher`             | `Cipher.ts`                       | `aes256GcmCipher`             |
+| `makeAnonymousService`            | `Anonymous.ts`                    | `make`                        |
+| `makeAPIKeyService`               | `APIKey.ts`                       | `make`                        |
+| `makeArgon2Hasher`                | `password/Argon2.ts`              | `argon2Hasher`                |
+| `Argon2HasherLayer`               | `password/Argon2.ts`              | `argon2HasherLayer`           |
+| `makeAuthClient`                  | `http/HTTPClient.ts`              | `client`                      |
+| `makeAuthLifecycleService`        | `AuthLifecycle.ts`                | `make`                        |
+| `makeAuthMiddlewareLayer`         | `http/HTTPMiddleware.ts`          | `layer`                       |
+| `makeOptionalAuthMiddlewareLayer` | `http/HTTPMiddleware.ts`          | `optionalLayer`               |
+| `makeAuthWebHandler`              | `http/HTTPServer.ts`              | `make`                        |
+| `makeClientIPLayer`               | `ClientIP.ts`                     | `clientIPLayer`               |
+| `makeDeviceAuthorizationService`  | `DeviceAuthorization.ts`          | `make`                        |
+| `makeEmailOTPService`             | `email/EmailOTP.ts`               | `make`                        |
+| `makeEmailPasswordService`        | `email/EmailPassword.ts`          | `make`                        |
+| `makeEmailVerificationService`    | `email/EmailVerification.ts`      | `make`                        |
+| `makeGoogleOneTapService`         | `GoogleOneTap.ts`                 | `make`                        |
+| `makeInMemoryRoleStore`           | `authz/RBAC.ts`                   | `make`                        |
+| `makeJWTService`                  | `JWT.ts`                          | `make`                        |
+| `makeRemoteJwksVerifier`          | `JWT.ts`                          | `remoteJwksVerifier`          |
+| `makeLastLoginMethodPlugin`       | `plugins/LastLoginMethod.ts`      | `make`                        |
+| `makeMagicLinkService`            | `MagicLink.ts`                    | `make`                        |
+| `makeOAuthProvider`               | `oauth/OAuth.ts`                  | `provider`                    |
+| `makeOAuthService`                | `oauth/OAuth.ts`                  | `make`                        |
+| `makeAppleClientSecret`           | `oauth/OAuth.ts`                  | `appleClientSecret`           |
+| `makeOIDCProviderService`         | `OIDCProvider.ts`                 | `make`                        |
+| `makeOrganizationService`         | `Organization.ts`                 | `make`                        |
+| `makeOTPSecondFactorService`      | `secondfactor/OTPSecondFactor.ts` | `make`                        |
+| `makePasswordResetService`        | `password/PasswordReset.ts`       | `make`                        |
+| `makePermission`                  | `authz/Permission.ts`             | `make`                        |
+| `makePhoneOTPService`             | `PhoneOTP.ts`                     | `make`                        |
+| `makeRateLimiter`                 | `RateLimit.ts`                    | `make`                        |
+| `makeRateLimiterPersistence`      | `RateLimitPersistence.ts`         | `rateLimiterPersistence`      |
+| `RateLimiterPersistenceLayer`     | `RateLimitPersistence.ts`         | `rateLimiterPersistenceLayer` |
+| `makeRoleBasedPolicy`             | `authz/Authorization.ts`          | `make`                        |
+| `makeSSOService`                  | `SSO.ts`                          | `make`                        |
+| `makeTrustedDeviceService`        | `session/TrustedDevice.ts`        | `make`                        |
+| `makeTrustedDeviceGateShape`      | `session/TrustedDevice.ts`        | `gate`                        |
+| `makeTwoFactorService`            | `secondfactor/TwoFactor.ts`       | `make`                        |
+| `makeUserService`                 | `User.ts`                         | `make`                        |
+| `makeUsernameService`             | `Username.ts`                     | `make`                        |
+| `makeWebAuthnService`             | `secondfactor/WebAuthn.ts`        | `make`                        |
+| `makeOAuthStateStoreKV`           | `KeyValueStores.ts`               | `oauthStateStoreKV`           |
+| `makeChallengeStoreKV`            | `KeyValueStores.ts`               | `challengeStoreKV`            |
+| `makeRateLimitStoreKV`            | `KeyValueStores.ts`               | `rateLimitStoreKV`            |
+| `makeEmailVerificationStoreKV`    | `KeyValueStores.ts`               | `emailVerificationStoreKV`    |
+| `makePasswordResetStoreKV`        | `KeyValueStores.ts`               | `passwordResetStoreKV`        |
+| `makeMagicLinkStoreKV`            | `KeyValueStores.ts`               | `magicLinkStoreKV`            |
+| `makeEmailOTPStoreKV`             | `KeyValueStores.ts`               | `emailOTPStoreKV`             |
+| `makePendingTwoFactorStoreKV`     | `KeyValueStores.ts`               | `pendingTwoFactorStoreKV`     |
+| `makeIdentifierStoreKV`           | `KeyValueStores.ts`               | `identifierStoreKV`           |
+| `makeGoogleOneTapNonceStoreKV`    | `KeyValueStores.ts`               | `googleOneTapNonceStoreKV`    |
+| `makeMultiAlgorithmVerifier`      | `password/Password.ts`            | `multiAlgorithmVerifier`      |
+| `makePBKDF2Hasher`                | `password/Password.ts`            | `pbkdf2Hasher`                |
+| `makeScryptHasher`                | `password/Password.ts`            | `scryptHasher`                |
 
 `makePlugin` (the generic plugin-Layer factory in `Hooks.ts`, shared across every plugin module —
 not a per-service constructor) is unchanged.

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Context, Crypto } from "effect";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { base64UrlDecode, ChallengeStore, CredentialStore } from "./WebAuthn.ts";
 import * as WebAuthn from "./WebAuthn.ts";
 import type {
@@ -16,7 +16,7 @@ import {
   WebAuthnVerificationError,
   CredentialNotFoundError,
   AuthError,
-} from "./Errors.ts";
+} from "../Errors.ts";
 
 // Mock implementations for testing
 const mockChallengeStore = {

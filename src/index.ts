@@ -42,9 +42,6 @@ export * from "./RateLimitPersistence.ts";
 // Key-value store adapters
 export * from "./KeyValueStores.ts";
 
-// OTP primitives
-export * from "./OTP.ts";
-
 // Core user service
 export { UserServiceStore, type UpdateUserInput, UserService } from "./User.ts";
 
@@ -81,41 +78,6 @@ export {
   type UsernameSignInInput,
   UsernameService,
 } from "./Username.ts";
-export {
-  TwoFactorError,
-  type TwoFactorRecord,
-  TwoFactorStore,
-  type PendingTwoFactor,
-  PendingTwoFactorStore,
-  type TwoFactorConfig,
-  type TwoFactorEnableResult,
-  type TwoFactorChallenge,
-  type TwoFactorVerifyResult,
-  type TwoFactorVerifyOptions,
-  TwoFactorService,
-  twoFactorConfig,
-  hashBackupCode,
-  TwoFactorGateLayer,
-} from "./TwoFactor.ts";
-export {
-  base64UrlDecode,
-  type WebAuthnChallenge,
-  type WebAuthnCredential,
-  type WebAuthnConfig,
-  type PublicKeyCredentialParameter,
-  type PublicKeyCredentialDescriptor,
-  type AuthenticatorSelectionCriteria,
-  type RegistrationChallenge,
-  type WebAuthnUser,
-  type RegistrationResponse,
-  type AuthenticationResponse,
-  type RegistrationResult,
-  type AuthenticationResult,
-  SUPPORTED_COSE_ALGORITHMS,
-  ChallengeStore,
-  CredentialStore,
-  WebAuthnService,
-} from "./WebAuthn.ts";
 export {
   APIKeyError,
   type APIKey,
@@ -272,3 +234,4 @@ export * as OAuth from "./oauth/index.ts";
 export * as Password from "./password/index.ts";
 export * as Plugins from "./plugins/index.ts";
 export * as Authz from "./authz/index.ts";
+export * as SecondFactor from "./secondfactor/index.ts";

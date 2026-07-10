@@ -17,16 +17,16 @@
  * @module otp-second-factor
  */
 import { Context, Crypto, Data, Effect, Layer } from "effect";
-import * as Errors from "./Errors.ts";
-import { generateOTP } from "./email/EmailOTP.ts";
-import { SecondFactorGate, type SecondFactorChallenge } from "./email/EmailPassword.ts";
-import { type HookError } from "./Hooks.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { SessionService } from "./session/SessionService.ts";
-import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
-import { TrustedDeviceService } from "./session/TrustedDevice.ts";
-import * as TrustedDevice from "./session/TrustedDevice.ts";
-import type * as Types from "./Types.ts";
+import * as Errors from "../Errors.ts";
+import { generateOTP } from "../email/EmailOTP.ts";
+import { SecondFactorGate, type SecondFactorChallenge } from "../email/EmailPassword.ts";
+import { type HookError } from "../Hooks.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { SessionService } from "../session/SessionService.ts";
+import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
+import { TrustedDeviceService } from "../session/TrustedDevice.ts";
+import * as TrustedDevice from "../session/TrustedDevice.ts";
+import type * as Types from "../Types.ts";
 
 // ---------------------------------------------------------------------------
 // Error
