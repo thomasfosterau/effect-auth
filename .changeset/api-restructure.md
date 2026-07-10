@@ -1,5 +1,5 @@
 ---
-"effect-auth": minor
+"@thomasfosterau/effect-auth": minor
 ---
 
 BREAKING: API restructure — directory layout, package exports, service classes, and naming
@@ -7,9 +7,12 @@ conventions. Pre-1.0, so this ships as a minor per semver's 0.x carve-out; there
 layer, so every consumer needs to update call sites. See `docs/migration.md` for the full
 before/after mapping. Highlights:
 
+- The package is published as `@thomasfosterau/effect-auth` (the bare `effect-auth` npm name
+  belongs to an unrelated package), and the client as `@thomasfosterau/effect-auth-client`.
 - Feature modules moved into lowercase cluster directories (`email/`, `http/`, `oauth/`,
   `session/`, `password/`, `authz/`, `plugins/`), and the package now publishes per-cluster
-  subpath exports (`effect-auth/email`, `effect-auth/http`, ...) alongside the root export.
+  subpath exports (`@thomasfosterau/effect-auth/email`, `.../http`, ...) alongside the root
+  export.
 - Service tag strings and exported type names now match their class names exactly, with
   acronyms fully capitalized (`ApiKeyService` → `APIKeyService`, `JwtService` → `JWTService`,
   `OidcProviderService` → `OIDCProviderService`, etc.).

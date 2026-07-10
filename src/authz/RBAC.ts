@@ -46,7 +46,7 @@ const lookup = <V>(source: StringKeyed<V>, key: string): V | undefined =>
  *
  * @example
  * ```ts
- * import { make } from "effect-auth"
+ * import { make } from "@thomasfosterau/effect-auth"
  *
  * const store = make({
  *   userRoles: { "user-1": ["editor"] },

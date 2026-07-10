@@ -1,5 +1,5 @@
 {
-  "name": "effect-auth",
+  "name": "@thomasfosterau/effect-auth",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -37,5 +37,8 @@
       "types": "./dist/authz/index.d.ts",
       "import": "./dist/authz/index.js"
     }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

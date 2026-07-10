@@ -56,7 +56,7 @@ Canonical usage:
 
 ```ts
 import { Effect, Layer } from "effect";
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 const program = Effect.gen(function* () {
   const sessions = yield* Auth.SessionService;
@@ -151,7 +151,7 @@ directories, each with its own `index.ts` barrel and matching
 
 Every cluster namespace is also re-exported from the package root (`Auth.Email`,
 `Auth.HTTP`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`, `Auth.Authz`,
-`Auth.SecondFactor`), so `import * as Auth from "effect-auth"` reaches the
+`Auth.SecondFactor`), so `import * as Auth from "@thomasfosterau/effect-auth"` reaches the
 whole surface; the per-cluster subpaths (`effect-auth/email`, `/http`,
 `/oauth`, `/password`, `/plugins`, `/authz`, `/secondfactor`) exist for
 consumers who want a narrower import.

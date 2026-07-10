@@ -44,7 +44,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 ## Installation
 
 ```bash
-pnpm add effect-auth effect
+pnpm add @thomasfosterau/effect-auth effect
 ```
 
 ## Core Concepts
@@ -68,7 +68,7 @@ First, implement the storage interfaces for your database:
 
 ```typescript
 import { Effect } from "effect";
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 // Implement session storage (e.g., Redis, PostgreSQL, etc.). Stores are
 // "dumb persistence" — lookups return `null` on a miss; the service converts
@@ -97,7 +97,7 @@ Every service class exposes a static `layer` — the canonical way to provide it
 
 ```typescript
 import { Effect, Layer } from "effect";
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 const sessionConfig: Auth.SessionConfig = {
   sessionExpiresIn: {
@@ -137,7 +137,7 @@ const result = await Effect.runPromise(Effect.provide(program, layer));
 
 ```typescript
 import { Effect } from "effect";
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 const program = Effect.gen(function* () {
   const hasher = yield* Auth.Password.PasswordHasher;
@@ -166,7 +166,7 @@ a static, so it can be shown without a deep import:
 
 ```typescript
 import { Effect, Layer } from "effect";
-import { SessionService } from "effect-auth";
+import { SessionService } from "@thomasfosterau/effect-auth";
 
 const customSessionLayer = Layer.effect(
   SessionService,
@@ -183,7 +183,7 @@ Implement role-based access control:
 
 ```typescript
 import { Effect, Layer } from "effect";
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 // Implement your role store
 const roleStore: typeof Auth.Authz.RoleStore.Service = {
@@ -222,7 +222,7 @@ Implement multi-factor authentication using Time-based One-Time Passwords (TOTP,
 
 ```typescript
 import { Crypto, Effect, Layer } from "effect";
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 // `generateBase32Secret`/`generateSecret` take the `Crypto` service directly
 // (instead of reaching for `node:crypto`); build one from the platform's Web
@@ -275,7 +275,7 @@ await Effect.runPromise(Effect.provide(program, CryptoLive));
 
 ```typescript
 import { Crypto, Effect } from "effect";
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 const program = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
@@ -349,7 +349,7 @@ Implement passwordless authentication using WebAuthn (Passkeys):
 
 ```typescript
 import { Effect, Layer } from "effect";
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 // Implement challenge store (temporary storage for challenges). Stores are
 // "dumb persistence" — lookups return `null` on a miss; the service converts
@@ -448,7 +448,7 @@ Authenticate users with OAuth2 providers like Google, GitHub, Discord, and Micro
 
 ```typescript
 import { Effect, Context } from "effect";
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 // Implement OAuth state store (temporary, Redis/memory recommended)
 const oauthStateStore: typeof Auth.OAuth.OAuthStateStore.Service = {
@@ -589,7 +589,7 @@ Implement secure email verification flows:
 
 ```typescript
 import { Effect, Layer } from "effect";
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 // Implement email verification store
 const emailVerificationStore: typeof Auth.Email.EmailVerificationStore.Service = {
@@ -661,7 +661,7 @@ Protect your authentication endpoints with rate limiting:
 
 ```typescript
 import { Effect, Layer } from "effect";
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 // Implement rate limit store (Redis recommended for distributed systems)
 const rateLimitStore: typeof Auth.RateLimitStore.Service = {
@@ -737,7 +737,7 @@ transforms) composed with `composePlugins`. Both use `effect/unstable/http`'s
 ```typescript
 import { Effect, Layer, Redacted } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 // Reject compromised passwords (k-anonymity range query) and require a captcha
 // token on sign-up/sign-in. Array order is execution order.

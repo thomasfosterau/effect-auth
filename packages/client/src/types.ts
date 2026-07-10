@@ -5,7 +5,7 @@
  *
  * @module types
  */
-import type * as Auth from "effect-auth";
+import type * as Auth from "@thomasfosterau/effect-auth";
 
 export type UserView = Auth.HTTP.UserView;
 export type SessionView = Auth.HTTP.SessionView;

@@ -117,7 +117,7 @@ The raw `Metric.Counter` instances are exported from the `effect-auth` root
 barrel (e.g. `signInTotal`) so you can read their current state in unit tests:
 
 ```ts
-import { signInTotal } from "effect-auth";
+import { signInTotal } from "@thomasfosterau/effect-auth";
 import { Effect, Metric } from "effect";
 
 const snapshot = await Effect.runPromise(Metric.value(signInTotal));

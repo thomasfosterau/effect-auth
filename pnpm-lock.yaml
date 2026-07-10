@@ -42,7 +42,7 @@ importers:
 
   packages/client:
     dependencies:
-      effect-auth:
+      '@thomasfosterau/effect-auth':
         specifier: workspace:*
         version: link:../effect-auth
       svelte:

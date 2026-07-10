@@ -5,7 +5,7 @@
  *
  * Excluded from the published build (see `tsconfig.json`).
  */
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 import { Effect, Layer } from "effect";
 
 const HOUR = 60 * 60 * 1000;
