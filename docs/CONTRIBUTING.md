@@ -69,31 +69,40 @@ Before contributing, please:
 
 ### Project Structure
 
+The core library (`effect-auth`) lives at the repository root — it is the
+root workspace package, not a nested `packages/effect-auth`. Related feature
+modules are grouped into lowercase cluster directories (each with its own
+`index.ts` barrel and matching `effect-auth/<cluster>` subpath export);
+everything not listed in a cluster stays flat in `src/`. See
+`docs/refactor-plan.md` for the full rationale and `docs/migration.md` for the
+old-path → new-path table.
+
 ```
-effect-auth/                       # Bun workspaces monorepo (Nx task runner, Vite+ toolchain)
+effect-auth/                       # Bun workspaces monorepo (Vite+ toolchain)
+├── src/                           # Core library (root package `effect-auth`)
+│   ├── Types.ts                   # Core domain types (schema'd User, Session, ...)
+│   ├── Errors.ts                  # Shared tagged error definitions
+│   ├── Hooks.ts                   # Hooks/plugin system
+│   ├── PlatformCrypto.ts          # Default Crypto.Crypto layer (Web Crypto API)
+│   ├── <Feature>.ts               # One module per flat, non-clustered feature
+│   │                               # (EmailPassword-style modules that haven't
+│   │                               #  earned a cluster: AuthLifecycle, WebAuthn,
+│   │                               #  JWT, Organization, Admin, ...)
+│   ├── session/                   # SessionService, SessionStore, UserStore, TrustedDevice
+│   ├── email/                     # EmailAddress, EmailOTP, EmailPassword, EmailVerification
+│   ├── password/                  # Password, Argon2, PasswordReset, HaveIBeenPwned
+│   ├── authz/                     # Authorization (AuthorizationPolicy, RoleStore), RBAC, Permission
+│   ├── oauth/                     # OAuth, Scope
+│   ├── http/                      # HTTPApi, HTTPApiSchemas, HTTPServer, HTTPClient, HTTPMiddleware
+│   ├── plugins/                   # First-party Hooks plugins (AccountLockout, Audit, Captcha, ...)
+│   ├── index.ts                   # Public API barrel (curated root + cluster namespace re-exports)
+│   └── *.test.ts                  # Tests alongside source
 ├── packages/
-│   ├── effect-auth/               # Core library
-│   │   └── src/
-│   │       ├── Types.ts           # Core domain types (schema'd User, Session, ...)
-│   │       ├── Errors.ts          # Shared tagged error definitions
-│   │       ├── Password.ts        # Password hashing (PBKDF2, scrypt, multi-algorithm)
-│   │       ├── Session.ts         # Session stores + SessionManager
-│   │       ├── Authorization.ts   # Authorization/permissions (+ Rbac, Permission, Scope)
-│   │       ├── <Feature>.ts       # One module per feature (EmailPassword, WebAuthn, ...)
-│   │       ├── Hooks.ts           # Hooks/plugin system
-│   │       ├── plugins/           # First-party hooks plugins
-│   │       ├── Http*.ts           # HTTP contract, server handlers, typed client
-│   │       ├── index.ts           # Public API barrel (the only entry point)
-│   │       └── *.test.ts          # Tests alongside source
-│   ├── sql/                       # @effect-auth/sql storage layers
-│   └── alchemy/                   # @effect-auth/alchemy (Cloudflare D1 + IaC)
-├── examples/                      # Example apps
-├── site/                          # Starlight docs site (generated API reference)
+│   ├── client/                    # @effect-auth/client (zero-dependency browser client)
+│   └── effect-auth/                # Publish target for the root package's build output
+├── docs/                          # ARCHITECTURE.md, DESIGN.md, SECURITY.md, CONTRIBUTING.md (this file), adr/, ...
 ├── README.md                      # Project overview
-├── ARCHITECTURE.md                # Architecture documentation
-├── DESIGN.md                      # Settled API conventions & decision record
-├── SECURITY.md                    # Security policy
-└── CONTRIBUTING.md                # This file
+└── package.json                   # Root package `effect-auth`
 ```
 
 ## Making Changes
@@ -161,17 +170,17 @@ See [SECURITY.md](./SECURITY.md) for detailed security requirements.
 Follow the module conventions in DESIGN.md (service class + `static layer`,
 store interfaces with nullable lookups, tagged errors):
 
-1. **Define shared types** in `packages/effect-auth/src/Types.ts` (module-specific types live in the module)
-2. **Define errors** in `packages/effect-auth/src/Errors.ts` if shared, or module-local if only that module raises them
-3. **Implement the module** in `packages/effect-auth/src/<Feature>.ts`
+1. **Define shared types** in `src/Types.ts` (module-specific types live in the module)
+2. **Define errors** in `src/Errors.ts` if shared, or module-local if only that module raises them
+3. **Implement the module** in `src/<Feature>.ts`, or `src/<cluster>/<Feature>.ts` if it belongs to an existing cluster (`email/`, `http/`, `oauth/`, `session/`, `password/`, `plugins/`, `authz/`)
 4. **Add tests** in the sibling `<Feature>.test.ts` file
-5. **Export from** `packages/effect-auth/src/index.ts` (with a one-line doc comment)
+5. **Export from** the module's `index.ts` — the cluster barrel if clustered, otherwise `src/index.ts` (with a one-line doc comment)
 6. **Document** in README.md and the site guides
 
 Example: Adding a new password algorithm
 
 1. Read the multi-algorithm guide (`site/src/content/docs/guides/multi-algorithm.md`)
-2. Implement the hasher in `packages/effect-auth/src/Password.ts` (or a dedicated package for native deps)
+2. Implement the hasher in `src/password/Password.ts` (or a dedicated package for native deps)
 3. Add tests in `Password.test.ts`
 4. Document in README.md and the guide
 
@@ -343,9 +352,9 @@ All changes to security-sensitive code require:
 
 Security-sensitive areas:
 
-- Password hashing (`packages/effect-auth/src/Password.ts`)
-- Session management (`packages/effect-auth/src/Session.ts`, `SessionCookieCache.ts`)
-- Cookie flags, CSRF/trusted-origin checks (`packages/effect-auth/src/HttpServer.ts`)
+- Password hashing (`src/password/Password.ts`)
+- Session management (`src/session/SessionService.ts`, `src/SessionCookieCache.ts`)
+- Cookie flags, CSRF/trusted-origin checks (`src/http/HTTPServer.ts`)
 - Cryptographic operations (token generation, timing-safe comparison)
 - Input validation
 - Error handling (avoid information leakage / user enumeration)
