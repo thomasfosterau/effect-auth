@@ -21,14 +21,10 @@ import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import { generateOTP } from "./email/EmailOTP.ts";
 import { SecondFactorGate, type SecondFactorChallenge } from "./email/EmailPassword.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
+import { type HookError } from "./Hooks.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
-import {
-  TrustedDeviceService,
-  TrustedDeviceStore,
-  makeTrustedDeviceGateShape,
-} from "./session/TrustedDevice.ts";
+import { TrustedDeviceService, makeTrustedDeviceGateShape } from "./session/TrustedDevice.ts";
 import type * as Types from "./Types.ts";
 
 // ---------------------------------------------------------------------------
@@ -115,11 +111,7 @@ export class OTPSecondFactorService extends Context.Service<
      */
     readonly begin: (
       user: Types.User,
-    ) => Effect.Effect<
-      SecondFactorChallenge,
-      OTPSecondFactorError | Errors.AuthError,
-      OTPSecondFactorStore
-    >;
+    ) => Effect.Effect<SecondFactorChallenge, OTPSecondFactorError | Errors.AuthError>;
 
     /**
      * Verify the OTP for a pending challenge. On success: consumes the
@@ -131,8 +123,7 @@ export class OTPSecondFactorService extends Context.Service<
       options?: OTPSecondFactorVerifyOptions,
     ) => Effect.Effect<
       OTPSecondFactorVerifyResult,
-      OTPSecondFactorError | Errors.AuthError | HookError,
-      OTPSecondFactorStore | SessionService | Hooks
+      OTPSecondFactorError | Errors.AuthError | HookError
     >;
   }
 >()("@effect-auth/OTPSecondFactorService") {
@@ -146,18 +137,24 @@ export class OTPSecondFactorService extends Context.Service<
 
 export const makeOTPSecondFactorService = (
   config: OTPSecondFactorConfig,
-): Effect.Effect<typeof OTPSecondFactorService.Service, never> => {
-  const otpLength = config.otpLength ?? 6;
-  const expiresIn = config.expiresIn ?? 5 * 60 * 1000;
-  const maxAttempts = config.maxAttempts ?? 3;
+): Effect.Effect<
+  typeof OTPSecondFactorService.Service,
+  never,
+  OTPSecondFactorStore | SessionService
+> =>
+  Effect.gen(function* () {
+    const otpLength = config.otpLength ?? 6;
+    const expiresIn = config.expiresIn ?? 5 * 60 * 1000;
+    const maxAttempts = config.maxAttempts ?? 3;
 
-  const invalidOTP = () =>
-    Effect.fail(new OTPSecondFactorError({ message: "Invalid or expired OTP" }));
+    const store = yield* OTPSecondFactorStore;
+    const sessionManager = yield* SessionService;
 
-  return Effect.sync((): typeof OTPSecondFactorService.Service => ({
-    begin: (user: Types.User) =>
-      Effect.gen(function* () {
-        const store = yield* OTPSecondFactorStore;
+    const invalidOTP = () =>
+      Effect.fail(new OTPSecondFactorError({ message: "Invalid or expired OTP" }));
+
+    return {
+      begin: Effect.fn("OTPSecondFactorService.begin")(function* (user: Types.User) {
         const otp = yield* generateOTP(otpLength);
         const pendingToken = crypto.randomBytes(32).toString("base64url");
         const now = Date.now();
@@ -188,10 +185,11 @@ export const makeOTPSecondFactorService = (
         } satisfies SecondFactorChallenge;
       }),
 
-    verify: (pendingToken: string, otp: string, options?: OTPSecondFactorVerifyOptions) =>
-      Effect.gen(function* () {
-        const store = yield* OTPSecondFactorStore;
-
+      verify: Effect.fn("OTPSecondFactorService.verify")(function* (
+        pendingToken: string,
+        otp: string,
+        options?: OTPSecondFactorVerifyOptions,
+      ) {
         if (!pendingToken || !otp) {
           return yield* invalidOTP();
         }
@@ -224,7 +222,6 @@ export const makeOTPSecondFactorService = (
         // Consume the pending challenge (one-time use)
         yield* store.delete(pendingToken);
 
-        const sessionManager = yield* SessionService;
         const session = yield* sessionManager.createSession(
           record.userId,
           options?.sessionAttributes,
@@ -235,8 +232,8 @@ export const makeOTPSecondFactorService = (
           session,
         } satisfies OTPSecondFactorVerifyResult;
       }),
-  }));
-};
+    };
+  });
 
 // ---------------------------------------------------------------------------
 // Gate layer: OTP-only second factor
@@ -255,8 +252,7 @@ export const makeOTPSecondFactorService = (
  *   OTPSecondFactorGateLayer.pipe(
  *     Layer.provide(OTPSecondFactorService.layer({
  *       sendOTP: (user, otp) => mailer.send(user.email, `Your code: ${otp}`),
- *     })),
- *     Layer.provide(otpSecondFactorStore),
+ *     }).pipe(Layer.provide(otpSecondFactorStore))),
  *   ),
  * )
  * ```
@@ -264,22 +260,22 @@ export const makeOTPSecondFactorService = (
 export const OTPSecondFactorGateLayer: Layer.Layer<
   SecondFactorGate,
   never,
-  OTPSecondFactorService | OTPSecondFactorStore
+  OTPSecondFactorService
 > = Layer.effect(
   SecondFactorGate,
   Effect.gen(function* () {
     const service = yield* OTPSecondFactorService;
-    const stores = yield* Effect.context<OTPSecondFactorStore>();
 
     const gate: typeof SecondFactorGate.Service = {
       required: (_user) => Effect.succeed(true),
       begin: (user) =>
-        service.begin(user).pipe(
-          Effect.provide(stores),
-          Effect.catchTag("OTPSecondFactorError", (err) =>
-            Effect.fail(new Errors.AuthError({ message: err.message })),
+        service
+          .begin(user)
+          .pipe(
+            Effect.catchTag("OTPSecondFactorError", (err) =>
+              Effect.fail(new Errors.AuthError({ message: err.message })),
+            ),
           ),
-        ),
     };
     return gate;
   }),
@@ -300,10 +296,8 @@ export const OTPSecondFactorGateLayer: Layer.Layer<
  * const services = Layer.mergeAll(
  *   EmailPasswordService.layer(),
  *   TrustedDeviceWithOTPSecondFactorGateLayer.pipe(
- *     Layer.provide(TrustedDeviceService.layer({ secret: "..." })),
- *     Layer.provide(trustedDeviceStore),
- *     Layer.provide(OTPSecondFactorService.layer({ sendOTP: ... })),
- *     Layer.provide(otpSecondFactorStore),
+ *     Layer.provide(TrustedDeviceService.layer({ secret: "..." }).pipe(Layer.provide(trustedDeviceStore))),
+ *     Layer.provide(OTPSecondFactorService.layer({ sendOTP: ... }).pipe(Layer.provide(otpSecondFactorStore))),
  *   ),
  * )
  * ```
@@ -311,26 +305,25 @@ export const OTPSecondFactorGateLayer: Layer.Layer<
 export const TrustedDeviceWithOTPSecondFactorGateLayer: Layer.Layer<
   SecondFactorGate,
   never,
-  TrustedDeviceService | TrustedDeviceStore | OTPSecondFactorService | OTPSecondFactorStore
+  TrustedDeviceService | OTPSecondFactorService
 > = Layer.effect(
   SecondFactorGate,
   Effect.gen(function* () {
     const tdService = yield* TrustedDeviceService;
     const otpService = yield* OTPSecondFactorService;
-    const tdStores = yield* Effect.context<TrustedDeviceStore>();
-    const otpStores = yield* Effect.context<OTPSecondFactorStore>();
 
     const otpGate: typeof SecondFactorGate.Service = {
       required: (_user) => Effect.succeed(true),
       begin: (user) =>
-        otpService.begin(user).pipe(
-          Effect.provide(otpStores),
-          Effect.catchTag("OTPSecondFactorError", (err) =>
-            Effect.fail(new Errors.AuthError({ message: err.message })),
+        otpService
+          .begin(user)
+          .pipe(
+            Effect.catchTag("OTPSecondFactorError", (err) =>
+              Effect.fail(new Errors.AuthError({ message: err.message })),
+            ),
           ),
-        ),
     };
 
-    return makeTrustedDeviceGateShape(tdService, tdStores, otpGate);
+    return makeTrustedDeviceGateShape(tdService, otpGate);
   }),
 );

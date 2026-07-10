@@ -2,6 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
 import * as crypto from "node:crypto";
 import { AuthError } from "../Errors.js";
+import { SessionService } from "../session/SessionService.js";
 import {
   makeOAuthProvider,
   makeOAuthService,
@@ -11,6 +12,7 @@ import {
   makeAppleClientSecret,
   OAuthStateStore,
   OAuthAccountStore,
+  OAuthUserStore,
   str,
   nested,
   profile,
@@ -795,6 +797,16 @@ describe("makeAes256GcmCipher", () => {
 });
 
 describe("OAuthService encryptTokens", () => {
+  // makeOAuthService resolves OAuthStateStore | OAuthAccountStore | OAuthUserStore |
+  // SessionService at construction time. These tests only exercise
+  // refreshAccessToken (which only touches OAuthAccountStore, via closure), so the
+  // other three are stubbed out — never actually invoked.
+  const unusedDepsLayer = Layer.mergeAll(
+    Layer.succeed(OAuthStateStore)(undefined as never),
+    Layer.succeed(OAuthUserStore)(undefined as never),
+    Layer.succeed(SessionService)(undefined as never),
+  );
+
   const makeAccountStore = () => {
     const stored = new Map<string, OAuthAccount>();
     const layer = Layer.succeed(OAuthAccountStore, {
@@ -866,7 +878,7 @@ describe("OAuthService encryptTokens", () => {
       makeOAuthService(
         { github: githubProvider },
         { encryptTokens: { secret: Redacted.make(TEST_SECRET) } },
-      ),
+      ).pipe(Effect.provide(accountStoreLive), Effect.provide(unusedDepsLayer)),
     );
 
     let capturedRefreshToken: string | null = null;
@@ -914,7 +926,12 @@ describe("OAuthService encryptTokens", () => {
       updatedAt: Date.now(),
     });
 
-    const service = await Effect.runPromise(makeOAuthService({ github: githubProvider }));
+    const service = await Effect.runPromise(
+      makeOAuthService({ github: githubProvider }).pipe(
+        Effect.provide(accountStoreLive),
+        Effect.provide(unusedDepsLayer),
+      ),
+    );
     const tokenResp: OAuthTokenResponse = { access_token: NEW_ACCESS, token_type: "bearer" };
 
     const newAccessToken = await withFetch(
@@ -950,7 +967,10 @@ describe("OAuthService encryptTokens", () => {
     });
 
     const service = await Effect.runPromise(
-      makeOAuthService({ github: githubProvider }, { encryptTokens: { cipher: customCipher } }),
+      makeOAuthService(
+        { github: githubProvider },
+        { encryptTokens: { cipher: customCipher } },
+      ).pipe(Effect.provide(accountStoreLive), Effect.provide(unusedDepsLayer)),
     );
 
     let capturedRefreshToken: string | null = null;

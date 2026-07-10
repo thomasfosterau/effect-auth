@@ -130,11 +130,13 @@ const sessionConfig: SessionConfig = {
 };
 
 const makeTestContext = async () => {
+  // SessionService's `make` now resolves SessionStore | UserStore | Hooks at
+  // construction time, so Hooks must be provided alongside the raw stores.
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       make(sessionConfig),
       Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-    ),
+    ).pipe(Effect.provide(Hooks.Default)),
   );
 
   return Context.merge(

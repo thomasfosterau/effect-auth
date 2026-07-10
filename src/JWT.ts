@@ -149,7 +149,7 @@ export class JWTService extends Context.Service<
     readonly sign: (
       user: Types.User,
       extraClaims?: Record<string, unknown>,
-    ) => Effect.Effect<JWTSignResult, JWTError | Errors.AuthError, JWTKeyStore>;
+    ) => Effect.Effect<JWTSignResult, JWTError | Errors.AuthError>;
 
     /**
      * Verify a compact JWS and return its decoded payload. Validates the
@@ -159,14 +159,14 @@ export class JWTService extends Context.Service<
      */
     readonly verify: (
       token: string,
-    ) => Effect.Effect<Record<string, unknown>, JWTError | Errors.AuthError, JWTKeyStore>;
+    ) => Effect.Effect<Record<string, unknown>, JWTError | Errors.AuthError>;
 
     /**
      * The JWKS document containing every stored public key (with `kid`,
      * `alg`, and `use: "sig"`) and no private material. Serve this at
      * `/.well-known/jwks.json`.
      */
-    readonly getJwks: () => Effect.Effect<Jwks, Errors.AuthError, JWTKeyStore>;
+    readonly getJwks: () => Effect.Effect<Jwks, Errors.AuthError>;
   }
 >()("@effect-auth/JWTService") {
   /**
@@ -330,7 +330,7 @@ const decodeJsonSegment = (
  */
 export const makeJWTService = (
   config: JWTConfig,
-): Effect.Effect<typeof JWTService.Service, never> =>
+): Effect.Effect<typeof JWTService.Service, never, JWTKeyStore> =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 15 * 60 * 1000; // 15 minutes default
     const algorithm = config.algorithm ?? "ES256";
@@ -342,6 +342,8 @@ export const makeJWTService = (
         ? config.encryptPrivateKey.cipher
         : makeAes256GcmCipher(Redacted.value(config.encryptPrivateKey.secret))
       : null;
+
+    const store = yield* JWTKeyStore;
 
     // Ref holding an in-progress key-creation Deferred; null when idle.
     // Prevents duplicate active keys when concurrent fibers both call sign()
@@ -356,89 +358,90 @@ export const makeJWTService = (
      * Concurrent first-call fibers are serialized through a Deferred so only
      * one key is generated regardless of concurrency.
      */
-    const getOrCreateActiveKey: Effect.Effect<
-      JWTKeyPair,
-      JWTError | Errors.AuthError,
-      JWTKeyStore
-    > = Effect.gen(function* () {
-      const store = yield* JWTKeyStore;
-      const active = yield* store.getActive();
-      if (active) {
-        if (cipher === null) return active;
-        return { ...active, privateKeyPem: yield* cipher.decrypt(active.privateKeyPem) };
-      }
+    const getOrCreateActiveKey: Effect.Effect<JWTKeyPair, JWTError | Errors.AuthError> = Effect.gen(
+      function* () {
+        const active = yield* store.getActive();
+        if (active) {
+          if (cipher === null) return active;
+          return { ...active, privateKeyPem: yield* cipher.decrypt(active.privateKeyPem) };
+        }
 
-      const deferred = yield* Deferred.make<JWTKeyPair, JWTError | Errors.AuthError>();
+        const deferred = yield* Deferred.make<JWTKeyPair, JWTError | Errors.AuthError>();
 
-      // Atomically claim leadership or attach to an in-progress creation.
-      const existing: PendingDeferred | null = yield* Ref.modify(
-        pendingCreate,
-        (current): readonly [PendingDeferred | null, PendingDeferred | null] =>
-          current === null ? [null, deferred] : [current, current],
-      );
+        // Atomically claim leadership or attach to an in-progress creation.
+        const existing: PendingDeferred | null = yield* Ref.modify(
+          pendingCreate,
+          (current): readonly [PendingDeferred | null, PendingDeferred | null] =>
+            current === null ? [null, deferred] : [current, current],
+        );
 
-      if (existing !== null) {
-        return yield* Deferred.await(existing);
-      }
+        if (existing !== null) {
+          return yield* Deferred.await(existing);
+        }
 
-      // Leader: generate and persist the key
-      const pair = yield* Effect.gen(function* () {
-        const kp = yield* generateKeyPair(algorithm);
-        const toStore =
-          cipher !== null ? { ...kp, privateKeyPem: yield* cipher.encrypt(kp.privateKeyPem) } : kp;
-        yield* store.create(toStore);
-        return kp;
-      }).pipe(
-        Effect.onError((cause) =>
-          Effect.gen(function* () {
-            yield* Deferred.failCause(deferred, cause);
-            yield* Ref.set(pendingCreate, null);
-          }),
-        ),
-      );
+        // Leader: generate and persist the key
+        const pair = yield* Effect.gen(function* () {
+          const kp = yield* generateKeyPair(algorithm);
+          const toStore =
+            cipher !== null
+              ? { ...kp, privateKeyPem: yield* cipher.encrypt(kp.privateKeyPem) }
+              : kp;
+          yield* store.create(toStore);
+          return kp;
+        }).pipe(
+          Effect.onError((cause) =>
+            Effect.gen(function* () {
+              yield* Deferred.failCause(deferred, cause);
+              yield* Ref.set(pendingCreate, null);
+            }),
+          ),
+        );
 
-      yield* Deferred.succeed(deferred, pair);
-      yield* Ref.set(pendingCreate, null);
-      return pair;
-    });
+        yield* Deferred.succeed(deferred, pair);
+        yield* Ref.set(pendingCreate, null);
+        return pair;
+      },
+    );
 
     return {
-      sign: (user, extraClaims) =>
-        Effect.gen(function* () {
-          const pair = yield* getOrCreateActiveKey;
+      sign: Effect.fn("JWTService.sign")(
+        (user: Types.User, extraClaims?: Record<string, unknown>) =>
+          Effect.gen(function* () {
+            const pair = yield* getOrCreateActiveKey;
 
-          const now = Date.now();
-          const iat = Math.floor(now / 1000);
-          const exp = Math.floor((now + expiresIn) / 1000);
+            const now = Date.now();
+            const iat = Math.floor(now / 1000);
+            const exp = Math.floor((now + expiresIn) / 1000);
 
-          const header = {
-            alg: pair.algorithm,
-            kid: pair.id,
-            typ: "JWT",
-          };
+            const header = {
+              alg: pair.algorithm,
+              kid: pair.id,
+              typ: "JWT",
+            };
 
-          const payload: Record<string, unknown> = {
-            iss: config.issuer,
-            ...(config.audience !== undefined && { aud: config.audience }),
-            sub: getSubject(user),
-            iat,
-            exp,
-            ...config.definePayload?.(user),
-            ...extraClaims,
-          };
+            const payload: Record<string, unknown> = {
+              iss: config.issuer,
+              ...(config.audience !== undefined && { aud: config.audience }),
+              sub: getSubject(user),
+              iat,
+              exp,
+              ...config.definePayload?.(user),
+              ...extraClaims,
+            };
 
-          const signingInput = `${base64UrlEncode(JSON.stringify(header))}.${base64UrlEncode(
-            JSON.stringify(payload),
-          )}`;
-          const signature = yield* signBytes(pair, Buffer.from(signingInput, "utf8"));
+            const signingInput = `${base64UrlEncode(JSON.stringify(header))}.${base64UrlEncode(
+              JSON.stringify(payload),
+            )}`;
+            const signature = yield* signBytes(pair, Buffer.from(signingInput, "utf8"));
 
-          return {
-            token: `${signingInput}.${base64UrlEncode(signature)}`,
-            expiresAt: exp * 1000,
-          } satisfies JWTSignResult;
-        }).pipe(Effect.withSpan("effect-auth.token.sign")),
+            return {
+              token: `${signingInput}.${base64UrlEncode(signature)}`,
+              expiresAt: exp * 1000,
+            } satisfies JWTSignResult;
+          }).pipe(Effect.withSpan("effect-auth.token.sign")),
+      ),
 
-      verify: (token) =>
+      verify: Effect.fn("JWTService.verify")((token: string) =>
         Effect.gen(function* () {
           const segments = token.split(".");
           if (segments.length !== 3) {
@@ -456,7 +459,6 @@ export const makeJWTService = (
 
           const header = yield* decodeJsonSegment(headerSegment, "header");
 
-          const store = yield* JWTKeyStore;
           const keys = yield* store.list();
           const pair = keys.find((candidate) => candidate.id === header["kid"]);
           if (!pair) {
@@ -537,21 +539,20 @@ export const makeJWTService = (
           Effect.tap(() => Obs.recordTokenVerification("jwt", "success")),
           Effect.tapError(() => Obs.recordTokenVerification("jwt", "failure")),
         ),
+      ),
 
-      getJwks: () =>
-        Effect.gen(function* () {
-          const store = yield* JWTKeyStore;
-          const keys = yield* store.list();
+      getJwks: Effect.fn("JWTService.getJwks")(function* () {
+        const keys = yield* store.list();
 
-          return {
-            keys: keys.map((pair) => ({
-              ...pair.publicKeyJwk,
-              kid: pair.id,
-              alg: pair.algorithm,
-              use: "sig",
-            })),
-          } satisfies Jwks;
-        }),
+        return {
+          keys: keys.map((pair) => ({
+            ...pair.publicKeyJwk,
+            kid: pair.id,
+            alg: pair.algorithm,
+            use: "sig",
+          })),
+        } satisfies Jwks;
+      }),
     };
   });
 

@@ -132,16 +132,35 @@ export const makeServerFixture = () => {
     Auth.Hooks.Default,
   );
 
-  const services: Layer.Layer<Auth.HTTP.AuthServices> = Layer.mergeAll(
+  const sessionServiceLayer = Auth.SessionService.layer({
+    sessionExpiresIn: { activePeriod: HOUR, idlePeriod: HOUR },
+  }).pipe(Layer.provide(storeLayer));
+
+  // Stage 1: services needing only raw stores + Hooks + SessionService.
+  const stage1 = Layer.mergeAll(
     storeLayer,
-    Auth.SessionService.layer({
-      sessionExpiresIn: { activePeriod: HOUR, idlePeriod: HOUR },
-    }).pipe(Layer.provide(storeLayer)),
-    Auth.AuthLifecycleService.layer(),
-    Auth.Email.EmailPasswordService.layer(),
-    Auth.Email.EmailVerificationService.layer({ sendEmail: () => Effect.void }),
-    Auth.Password.PasswordResetService.layer({ sendResetPassword: () => Effect.void }),
-    Auth.UserService.layer(),
+    sessionServiceLayer,
+    Auth.UserService.layer().pipe(Layer.provide(storeLayer)),
+    Auth.Email.EmailVerificationService.layer({ sendEmail: () => Effect.void }).pipe(
+      Layer.provide(storeLayer),
+    ),
+  );
+
+  // Stage 2: services needing stage-1 services (e.g. SessionService).
+  const emailPasswordServiceLayer = Auth.Email.EmailPasswordService.layer().pipe(
+    Layer.provide(stage1),
+  );
+  const passwordResetServiceLayer = Auth.Password.PasswordResetService.layer({
+    sendResetPassword: () => Effect.void,
+  }).pipe(Layer.provide(stage1));
+  const stage2 = Layer.mergeAll(stage1, emailPasswordServiceLayer, passwordResetServiceLayer);
+
+  // Stage 3: AuthLifecycleService needs EmailPasswordService + others from stage 2.
+  const authLifecycleServiceLayer = Auth.AuthLifecycleService.layer().pipe(Layer.provide(stage2));
+
+  const services: Layer.Layer<Auth.HTTP.AuthServices> = Layer.mergeAll(
+    stage2,
+    authLifecycleServiceLayer,
   ) as Layer.Layer<Auth.HTTP.AuthServices>;
 
   const { handler } = Auth.HTTP.makeAuthWebHandler({

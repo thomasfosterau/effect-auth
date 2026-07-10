@@ -61,19 +61,14 @@ export class PasswordResetService extends Context.Service<
   {
     readonly requestPasswordReset: (
       email: string,
-    ) => Effect.Effect<
-      void,
-      Errors.AuthError | Errors.PasswordResetError | HookError,
-      PasswordResetStore | PasswordResetUserStore | Hooks
-    >;
+    ) => Effect.Effect<void, Errors.AuthError | Errors.PasswordResetError | HookError>;
 
     readonly resetPassword: (
       token: string,
       newPassword: string,
     ) => Effect.Effect<
       PasswordResetResult,
-      Errors.AuthError | Errors.PasswordResetError | Errors.HashingError | HookError,
-      PasswordResetStore | PasswordResetUserStore | PasswordHasher | SessionService | Hooks
+      Errors.AuthError | Errors.PasswordResetError | Errors.HashingError | HookError
     >;
   }
 >()("@effect-auth/PasswordResetService") {
@@ -112,20 +107,29 @@ const validatePasswordLength = (
 
 export const makePasswordResetService = (
   config: PasswordResetConfig,
-): Effect.Effect<typeof PasswordResetService.Service, never> => {
-  const expiresIn = config.expiresIn ?? 60 * 60 * 1000;
-  const minPasswordLength = config.minPasswordLength ?? 8;
-  const maxPasswordLength = config.maxPasswordLength ?? 128;
-  const revokeSessionsOnPasswordReset = config.revokeSessionsOnPasswordReset ?? true;
+): Effect.Effect<
+  typeof PasswordResetService.Service,
+  never,
+  PasswordResetStore | PasswordResetUserStore | PasswordHasher | SessionService | Hooks
+> =>
+  Effect.gen(function* () {
+    const expiresIn = config.expiresIn ?? 60 * 60 * 1000;
+    const minPasswordLength = config.minPasswordLength ?? 8;
+    const maxPasswordLength = config.maxPasswordLength ?? 128;
+    const revokeSessionsOnPasswordReset = config.revokeSessionsOnPasswordReset ?? true;
 
-  return Effect.sync((): typeof PasswordResetService.Service => ({
-    requestPasswordReset: (rawEmail: string) =>
-      Effect.gen(function* () {
-        const hooks = yield* Hooks;
+    const resetStore = yield* PasswordResetStore;
+    const userStore = yield* PasswordResetUserStore;
+    const passwordHasher = yield* PasswordHasher;
+    const sessionManager = yield* SessionService;
+    const hooks = yield* Hooks;
+
+    return {
+      requestPasswordReset: Effect.fn("PasswordResetService.requestPasswordReset")(function* (
+        rawEmail: string,
+      ) {
         const { email } = yield* hooks.beforeRequestPasswordReset({ email: rawEmail });
 
-        const resetStore = yield* PasswordResetStore;
-        const userStore = yield* PasswordResetUserStore;
         const normalizedEmail = normalizeEmail(email);
 
         if (!normalizedEmail) {
@@ -167,18 +171,15 @@ export const makePasswordResetService = (
         yield* hooks.afterRequestPasswordReset({ email: normalizedEmail });
       }),
 
-    resetPassword: (rawToken: string, rawNewPassword: string) =>
-      Effect.gen(function* () {
-        const hooks = yield* Hooks;
+      resetPassword: Effect.fn("PasswordResetService.resetPassword")(function* (
+        rawToken: string,
+        rawNewPassword: string,
+      ) {
         // Hook receives the raw token from the URL; hash after any hook transform.
         const { token, newPassword } = yield* hooks.beforeResetPassword({
           token: rawToken,
           newPassword: rawNewPassword,
         });
-
-        const resetStore = yield* PasswordResetStore;
-        const userStore = yield* PasswordResetUserStore;
-        const passwordHasher = yield* PasswordHasher;
 
         if (!token) {
           return yield* Effect.fail(
@@ -215,7 +216,6 @@ export const makePasswordResetService = (
         yield* resetStore.delete(tokenHash);
 
         if (revokeSessionsOnPasswordReset) {
-          const sessionManager = yield* SessionService;
           yield* sessionManager.invalidateUserSessions(reset.userId);
         }
 
@@ -227,5 +227,5 @@ export const makePasswordResetService = (
 
         return yield* hooks.afterResetPassword(result);
       }),
-  }));
-};
+    };
+  });

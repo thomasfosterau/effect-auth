@@ -75,23 +75,21 @@ const sessionConfig: Types.SessionConfig = {
   sessionExpiresIn: { activePeriod: 1000 * 60 * 60, idlePeriod: 1000 * 60 * 60 },
 };
 
-const layer = Layer.mergeAll(
-  DeviceAuthorizationService.layer({
-    verificationUri: "https://example.com/device",
-    interval: 5,
-  }),
+const storeLayer = Layer.mergeAll(
   Layer.succeed(DeviceAuthorizationStore)(store),
-  SessionService.layer(sessionConfig).pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        Layer.succeed(SessionStore)(sessionStore),
-        Layer.succeed(UserStore)(userStore),
-      ),
-    ),
-  ),
+  Layer.succeed(SessionStore)(sessionStore),
   Layer.succeed(UserStore)(userStore),
   Hooks.Default,
 );
+
+const sessionServiceLayer = SessionService.layer(sessionConfig).pipe(Layer.provide(storeLayer));
+
+const deviceAuthorizationServiceLayer = DeviceAuthorizationService.layer({
+  verificationUri: "https://example.com/device",
+  interval: 5,
+}).pipe(Layer.provide(Layer.mergeAll(storeLayer, sessionServiceLayer)));
+
+const layer = Layer.mergeAll(storeLayer, sessionServiceLayer, deviceAuthorizationServiceLayer);
 
 const run = <A, E>(
   f: (

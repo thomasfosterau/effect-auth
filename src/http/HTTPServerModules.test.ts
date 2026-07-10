@@ -27,6 +27,8 @@ import {
 import { AdminUserStore, AdminService } from "../Admin.js";
 import { APIKeyStore, type APIKey, APIKeyService } from "../APIKey.js";
 import { JWTKeyStore, type JWTKeyPair, JWTService } from "../JWT.js";
+import { IdentifierStore } from "../Identifier.js";
+import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.js";
 import type * as Types from "../Types.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -211,20 +213,36 @@ const makeFixture = () => {
     list: () => Effect.succeed(jwtKeys),
   };
 
-  const base = Layer.mergeAll(
-    SessionService.layer({ sessionExpiresIn: { activePeriod: HOUR, idlePeriod: HOUR } }).pipe(
-      Layer.provide(
-        Layer.mergeAll(
-          Layer.succeed(SessionStore)(sessionStore as never),
-          Layer.succeed(UserStore)(userStore),
-        ),
-      ),
-    ),
-    UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
-    // Admin handlers use the user store directly, so expose it in the context too.
+  // In-memory RateLimitStore: APIKeyService resolves RateLimiter at construction
+  // time even though these tests never exercise rate-limited paths.
+  const rateLimitEntries = new Map<string, RateLimitEntry>();
+  const rateLimitStore = {
+    get: (key: string) => Effect.sync(() => rateLimitEntries.get(key) ?? null),
+    set: (key: string, entry: RateLimitEntry, _ttl: number) =>
+      Effect.sync(() => void rateLimitEntries.set(key, entry)),
+    increment: (key: string, _ttl: number) =>
+      Effect.sync(() => {
+        const entry = rateLimitEntries.get(key);
+        const count = (entry?.count ?? 0) + 1;
+        if (entry) rateLimitEntries.set(key, { ...entry, count });
+        return count;
+      }),
+    delete: (key: string) => Effect.sync(() => void rateLimitEntries.delete(key)),
+  };
+
+  // Stage 0: raw stores + Hooks + dummy layers for AuthServices members these
+  // tests never exercise (org/admin/api-key/jwt handlers never touch them).
+  const storesLayer = Layer.mergeAll(
+    Layer.succeed(SessionStore)(sessionStore as never),
+    Layer.succeed(UserStore)(userStore),
     Layer.succeed(UserServiceStore)(userServiceStore),
+    Layer.succeed(OrganizationStore)(orgStore),
+    Layer.succeed(AdminUserStore)(adminUserStore),
+    Layer.succeed(APIKeyStore)(apiKeyStore),
+    Layer.succeed(JWTKeyStore)(jwtKeyStore),
+    Layer.succeed(RateLimitStore)(rateLimitStore),
+    Layer.succeed(IdentifierStore)(undefined as never),
     Hooks.Default,
-    // Unused base services (org/admin/api-key/jwt handlers never touch them).
     Layer.succeed(AuthLifecycleService)(undefined as never),
     Layer.succeed(EmailPasswordStore)(undefined as never),
     Layer.succeed(PasswordHasher)(undefined as never),
@@ -235,18 +253,37 @@ const makeFixture = () => {
     Layer.succeed(PasswordResetUserStore)(undefined as never),
   );
 
-  const modules = Layer.mergeAll(
-    OrganizationService.layer(),
-    Layer.succeed(OrganizationStore)(orgStore),
-    AdminService.layer({ adminRoles: ["admin"] }),
-    Layer.succeed(AdminUserStore)(adminUserStore),
-    APIKeyService.layer(),
-    Layer.succeed(APIKeyStore)(apiKeyStore),
-    JWTService.layer({ issuer: "https://auth.test" }),
-    Layer.succeed(JWTKeyStore)(jwtKeyStore),
+  // Stage 1: services whose construction-time deps are all raw stores.
+  const sessionServiceLayer = SessionService.layer({
+    sessionExpiresIn: { activePeriod: HOUR, idlePeriod: HOUR },
+  }).pipe(Layer.provide(storesLayer));
+  const userServiceLayer = UserService.layer().pipe(Layer.provide(storesLayer));
+  const rateLimiterLayer = RateLimiter.layer().pipe(Layer.provide(storesLayer));
+
+  const stage1 = Layer.mergeAll(
+    storesLayer,
+    sessionServiceLayer,
+    userServiceLayer,
+    rateLimiterLayer,
   );
 
-  const services = Layer.mergeAll(base, modules) as Layer.Layer<AuthServices>;
+  // Stage 2: services that depend on stage-1 services (SessionService, etc.).
+  const organizationServiceLayer = OrganizationService.layer().pipe(Layer.provide(stage1));
+  const adminServiceLayer = AdminService.layer({ adminRoles: ["admin"] }).pipe(
+    Layer.provide(stage1),
+  );
+  const apiKeyServiceLayer = APIKeyService.layer().pipe(Layer.provide(stage1));
+  const jwtServiceLayer = JWTService.layer({ issuer: "https://auth.test" }).pipe(
+    Layer.provide(stage1),
+  );
+
+  const services = Layer.mergeAll(
+    stage1,
+    organizationServiceLayer,
+    adminServiceLayer,
+    apiKeyServiceLayer,
+    jwtServiceLayer,
+  ) as Layer.Layer<AuthServices>;
   const { handler } = makeAuthWebHandler({ services, cookie: { secure: false } });
 
   return { handler, seedUser, makeSession, sessions };

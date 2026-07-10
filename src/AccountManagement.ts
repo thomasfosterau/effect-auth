@@ -108,8 +108,7 @@ export class AccountManagementService extends Context.Service<
       newEmail: string,
     ) => Effect.Effect<
       { readonly token: string; readonly expiresAt: number },
-      Errors.AuthError | Errors.UserNotFoundError | Errors.EmailInUseError,
-      AccountManagementStore | UserServiceStore
+      Errors.AuthError | Errors.UserNotFoundError | Errors.EmailInUseError
     >;
 
     /** Confirm an email change by token: swaps the email and marks it verified. */
@@ -117,8 +116,7 @@ export class AccountManagementService extends Context.Service<
       token: string,
     ) => Effect.Effect<
       EmailChangeResult,
-      Errors.AuthError | Errors.UserNotFoundError | AccountTokenError,
-      AccountManagementStore | UserServiceStore | SessionService
+      Errors.AuthError | Errors.UserNotFoundError | AccountTokenError
     >;
 
     /** Begin account deletion: issue a token delivered to the user's address. */
@@ -126,8 +124,7 @@ export class AccountManagementService extends Context.Service<
       userId: string,
     ) => Effect.Effect<
       { readonly token: string; readonly expiresAt: number },
-      Errors.AuthError | Errors.UserNotFoundError,
-      AccountManagementStore | UserServiceStore
+      Errors.AuthError | Errors.UserNotFoundError
     >;
 
     /** Confirm deletion by token: runs cleanup, revokes sessions, deletes user. */
@@ -135,8 +132,7 @@ export class AccountManagementService extends Context.Service<
       token: string,
     ) => Effect.Effect<
       { readonly userId: string },
-      Errors.AuthError | Errors.UserNotFoundError | AccountTokenError,
-      AccountManagementStore | UserServiceStore | SessionService
+      Errors.AuthError | Errors.UserNotFoundError | AccountTokenError
     >;
   }
 >()("@effect-auth/AccountManagementService") {
@@ -151,109 +147,106 @@ const generateToken = (): string => crypto.randomBytes(32).toString("base64url")
 
 export const makeAccountManagementService = (
   config: AccountManagementConfig,
-): Effect.Effect<typeof AccountManagementService.Service, never> =>
-  Effect.sync((): typeof AccountManagementService.Service => {
+): Effect.Effect<
+  typeof AccountManagementService.Service,
+  never,
+  AccountManagementStore | UserServiceStore | SessionService
+> =>
+  Effect.gen(function* () {
     const changeEmailExpiresIn = config.changeEmailExpiresIn ?? 60 * 60 * 1000;
     const deleteAccountExpiresIn = config.deleteAccountExpiresIn ?? 60 * 60 * 1000;
     const revokeSessionsOnEmailChange = config.revokeSessionsOnEmailChange ?? true;
 
+    const users = yield* UserServiceStore;
+    const store = yield* AccountManagementStore;
+    const sessions = yield* SessionService;
+
     return {
-      requestEmailChange: (userId, rawNewEmail) =>
-        Effect.gen(function* () {
-          const users = yield* UserServiceStore;
-          const store = yield* AccountManagementStore;
+      requestEmailChange: Effect.fn("AccountManagementService.requestEmailChange")(function* (
+        userId: string,
+        rawNewEmail: string,
+      ) {
+        const user = yield* users.get(userId);
+        if (user === null) {
+          return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
+        }
+        const newEmail = normalizeEmail(rawNewEmail);
 
-          const user = yield* users.get(userId);
-          if (user === null) {
-            return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
-          }
-          const newEmail = normalizeEmail(rawNewEmail);
+        // Uniqueness: reject if another account already owns the address.
+        const existing = yield* users.getByEmail(newEmail);
+        if (existing !== null && existing.id !== userId) {
+          return yield* new Errors.EmailInUseError({ message: "Email already in use" });
+        }
 
-          // Uniqueness: reject if another account already owns the address.
-          const existing = yield* users.getByEmail(newEmail);
-          if (existing !== null && existing.id !== userId) {
-            return yield* new Errors.EmailInUseError({ message: "Email already in use" });
-          }
+        const token = generateToken();
+        const now = Date.now();
+        yield* store.create({
+          token,
+          userId,
+          purpose: "change-email",
+          newEmail,
+          createdAt: now,
+          expiresAt: now + changeEmailExpiresIn,
+        });
 
-          const token = generateToken();
-          const now = Date.now();
-          yield* store.create({
-            token,
-            userId,
-            purpose: "change-email",
-            newEmail,
-            createdAt: now,
-            expiresAt: now + changeEmailExpiresIn,
-          });
+        yield* config.sendChangeEmailVerification({ user, newEmail, token });
 
-          yield* config.sendChangeEmailVerification({ user, newEmail, token });
+        return { token, expiresAt: now + changeEmailExpiresIn };
+      }),
 
-          return { token, expiresAt: now + changeEmailExpiresIn };
-        }),
-
-      confirmEmailChange: (token) =>
-        Effect.gen(function* () {
-          const users = yield* UserServiceStore;
-          const store = yield* AccountManagementStore;
-          const sessions = yield* SessionService;
-
-          const record = yield* store.get(token);
-          if (
-            record === null ||
-            record.purpose !== "change-email" ||
-            record.newEmail === undefined
-          ) {
-            return yield* new AccountTokenError({ message: "Invalid or expired token" });
-          }
-          if (Date.now() > record.expiresAt) {
-            yield* store.delete(token);
-            return yield* new AccountTokenError({ message: "Token has expired" });
-          }
-
-          const user = yield* users.get(record.userId);
-          if (user === null) {
-            return yield* new Errors.UserNotFoundError({
-              message: "User not found",
-              userId: record.userId,
-            });
-          }
-          const oldEmail = user.email;
-          const newEmail = record.newEmail;
-
-          // Re-check uniqueness at confirm time (the address may have been
-          // taken between request and confirm).
-          const clash = yield* users.getByEmail(newEmail);
-          if (clash !== null && clash.id !== user.id) {
-            yield* store.delete(token);
-            return yield* new AccountTokenError({ message: "Email already in use" });
-          }
-
-          const updated = yield* users.update({
-            ...user,
-            email: newEmail,
-            emailVerified: true,
-            updatedAt: new Date(),
-          });
-
-          // Single-use.
+      confirmEmailChange: Effect.fn("AccountManagementService.confirmEmailChange")(function* (
+        token: string,
+      ) {
+        const record = yield* store.get(token);
+        if (record === null || record.purpose !== "change-email" || record.newEmail === undefined) {
+          return yield* new AccountTokenError({ message: "Invalid or expired token" });
+        }
+        if (Date.now() > record.expiresAt) {
           yield* store.delete(token);
+          return yield* new AccountTokenError({ message: "Token has expired" });
+        }
 
-          if (revokeSessionsOnEmailChange) {
-            yield* sessions.invalidateUserSessions(user.id);
-          }
+        const user = yield* users.get(record.userId);
+        if (user === null) {
+          return yield* new Errors.UserNotFoundError({
+            message: "User not found",
+            userId: record.userId,
+          });
+        }
+        const oldEmail = user.email;
+        const newEmail = record.newEmail;
 
-          if (config.notifyEmailChanged !== undefined) {
-            yield* Effect.ignore(config.notifyEmailChanged({ user: updated, oldEmail, newEmail }));
-          }
+        // Re-check uniqueness at confirm time (the address may have been
+        // taken between request and confirm).
+        const clash = yield* users.getByEmail(newEmail);
+        if (clash !== null && clash.id !== user.id) {
+          yield* store.delete(token);
+          return yield* new AccountTokenError({ message: "Email already in use" });
+        }
 
-          return { user: updated };
-        }),
+        const updated = yield* users.update({
+          ...user,
+          email: newEmail,
+          emailVerified: true,
+          updatedAt: new Date(),
+        });
 
-      requestAccountDeletion: (userId) =>
-        Effect.gen(function* () {
-          const users = yield* UserServiceStore;
-          const store = yield* AccountManagementStore;
+        // Single-use.
+        yield* store.delete(token);
 
+        if (revokeSessionsOnEmailChange) {
+          yield* sessions.invalidateUserSessions(user.id);
+        }
+
+        if (config.notifyEmailChanged !== undefined) {
+          yield* Effect.ignore(config.notifyEmailChanged({ user: updated, oldEmail, newEmail }));
+        }
+
+        return { user: updated };
+      }),
+
+      requestAccountDeletion: Effect.fn("AccountManagementService.requestAccountDeletion")(
+        function* (userId: string) {
           const user = yield* users.get(userId);
           if (user === null) {
             return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
@@ -272,14 +265,11 @@ export const makeAccountManagementService = (
           yield* config.sendDeleteAccountVerification({ user, token });
 
           return { token, expiresAt: now + deleteAccountExpiresIn };
-        }),
+        },
+      ),
 
-      confirmAccountDeletion: (token) =>
-        Effect.gen(function* () {
-          const users = yield* UserServiceStore;
-          const store = yield* AccountManagementStore;
-          const sessions = yield* SessionService;
-
+      confirmAccountDeletion: Effect.fn("AccountManagementService.confirmAccountDeletion")(
+        function* (token: string) {
           const record = yield* store.get(token);
           if (record === null || record.purpose !== "delete-account") {
             return yield* new AccountTokenError({ message: "Invalid or expired token" });
@@ -309,6 +299,7 @@ export const makeAccountManagementService = (
           yield* store.deleteByUserId(user.id);
 
           return { userId: user.id };
-        }),
+        },
+      ),
     };
   });

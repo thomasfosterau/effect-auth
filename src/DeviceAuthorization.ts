@@ -12,7 +12,7 @@ import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
 import { SessionService } from "./session/SessionService.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
+import type { HookError } from "./Hooks.ts";
 import { hashToken } from "./TokenHash.ts";
 
 /** Lifecycle status of a device authorization request. */
@@ -106,7 +106,7 @@ export class DeviceAuthorizationService extends Context.Service<
     readonly begin: (options?: {
       readonly clientId?: string;
       readonly scopes?: readonly string[];
-    }) => Effect.Effect<DeviceBeginResult, Errors.AuthError, DeviceAuthorizationStore>;
+    }) => Effect.Effect<DeviceBeginResult, Errors.AuthError>;
 
     /**
      * Poll for completion. Returns a session once approved; otherwise fails with
@@ -122,20 +122,17 @@ export class DeviceAuthorizationService extends Context.Service<
       | Errors.SessionNotFoundError
       | Errors.SessionExpiredError
       | Errors.UserNotFoundError
-      | HookError,
-      DeviceAuthorizationStore | SessionService | Hooks
+      | HookError
     >;
 
     /** Approve a user code (called from an authenticated verification page). */
     readonly approve: (
       userCode: string,
       userId: string,
-    ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStore>;
+    ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError>;
 
     /** Deny a user code. */
-    readonly deny: (
-      userCode: string,
-    ) => Effect.Effect<void, DeviceCodeError | Errors.AuthError, DeviceAuthorizationStore>;
+    readonly deny: (userCode: string) => Effect.Effect<void, DeviceCodeError | Errors.AuthError>;
   }
 >()("@effect-auth/DeviceAuthorizationService") {
   /**
@@ -165,130 +162,133 @@ export const normalizeUserCode = (code: string): string =>
 
 export const makeDeviceAuthorizationService = (
   config: DeviceAuthorizationConfig,
-): Effect.Effect<typeof DeviceAuthorizationService.Service, never> =>
-  Effect.sync((): typeof DeviceAuthorizationService.Service => {
+): Effect.Effect<
+  typeof DeviceAuthorizationService.Service,
+  never,
+  DeviceAuthorizationStore | SessionService
+> =>
+  Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 30 * 60 * 1000;
     const interval = config.interval ?? 5;
     const userCodeLength = config.userCodeLength ?? 8;
     const alphabet = config.userCodeAlphabet ?? DEFAULT_ALPHABET;
 
+    const store = yield* DeviceAuthorizationStore;
+    const sessionManager = yield* SessionService;
+
     return {
-      begin: (options) =>
-        Effect.gen(function* () {
-          const store = yield* DeviceAuthorizationStore;
-          const rawDeviceCode = crypto.randomBytes(32).toString("base64url");
-          const rawUserCode = randomCode(userCodeLength, alphabet);
-          const userCode = formatUserCode(rawUserCode);
-          const normalizedUserCode = normalizeUserCode(userCode);
-          const now = Date.now();
+      begin: Effect.fn("DeviceAuthorizationService.begin")(function* (options?: {
+        readonly clientId?: string;
+        readonly scopes?: readonly string[];
+      }) {
+        const rawDeviceCode = crypto.randomBytes(32).toString("base64url");
+        const rawUserCode = randomCode(userCodeLength, alphabet);
+        const userCode = formatUserCode(rawUserCode);
+        const normalizedUserCode = normalizeUserCode(userCode);
+        const now = Date.now();
 
-          yield* store.create({
-            // Both codes are stored as SHA-256 hashes; the raw values are
-            // returned to the caller and never persisted.
-            deviceCode: hashToken(rawDeviceCode),
-            userCode: hashToken(normalizedUserCode),
-            ...(options?.clientId !== undefined && { clientId: options.clientId }),
-            ...(options?.scopes !== undefined && { scopes: options.scopes }),
-            status: "pending",
-            createdAt: now,
-            expiresAt: now + expiresIn,
-            lastPolledAt: 0,
-            interval,
+        yield* store.create({
+          // Both codes are stored as SHA-256 hashes; the raw values are
+          // returned to the caller and never persisted.
+          deviceCode: hashToken(rawDeviceCode),
+          userCode: hashToken(normalizedUserCode),
+          ...(options?.clientId !== undefined && { clientId: options.clientId }),
+          ...(options?.scopes !== undefined && { scopes: options.scopes }),
+          status: "pending",
+          createdAt: now,
+          expiresAt: now + expiresIn,
+          lastPolledAt: 0,
+          interval,
+        });
+
+        return {
+          deviceCode: rawDeviceCode,
+          userCode,
+          verificationUri: config.verificationUri,
+          expiresIn: Math.floor(expiresIn / 1000),
+          interval,
+        };
+      }),
+
+      poll: Effect.fn("DeviceAuthorizationService.poll")(function* (deviceCode: string) {
+        const record = yield* store.getByDeviceCode(hashToken(deviceCode));
+        const now = Date.now();
+
+        // record.deviceCode is already the stored hash.
+        if (record === null || now > record.expiresAt) {
+          if (record !== null) yield* store.delete(record.deviceCode);
+          return yield* new DevicePollError({
+            error: "expired_token",
+            message: "The device code has expired",
           });
+        }
 
-          return {
-            deviceCode: rawDeviceCode,
-            userCode,
-            verificationUri: config.verificationUri,
-            expiresIn: Math.floor(expiresIn / 1000),
-            interval,
-          };
-        }),
+        // Enforce the minimum polling interval (RFC 8628 slow_down).
+        // Don't update lastPolledAt on rejection: a slightly-too-fast client
+        // would otherwise continually reset its own window and never progress.
+        // Instead, escalate the stored interval by 5 s per RFC 8628 §3.5 so
+        // subsequent valid polls are gated by the new minimum.
+        if (record.lastPolledAt !== 0 && now - record.lastPolledAt < record.interval * 1000) {
+          yield* store.update({ ...record, interval: record.interval + 5 });
+          return yield* new DevicePollError({
+            error: "slow_down",
+            message: "Polling too frequently",
+          });
+        }
+        yield* store.update({ ...record, lastPolledAt: now });
 
-      poll: (deviceCode) =>
-        Effect.gen(function* () {
-          const store = yield* DeviceAuthorizationStore;
-          const sessionManager = yield* SessionService;
+        if (record.status === "denied") {
+          yield* store.delete(record.deviceCode);
+          return yield* new DevicePollError({
+            error: "access_denied",
+            message: "The user denied the request",
+          });
+        }
 
-          const record = yield* store.getByDeviceCode(hashToken(deviceCode));
-          const now = Date.now();
+        if (record.status === "pending" || record.userId === undefined) {
+          return yield* new DevicePollError({
+            error: "authorization_pending",
+            message: "The user has not yet approved the request",
+          });
+        }
 
-          // record.deviceCode is already the stored hash.
-          if (record === null || now > record.expiresAt) {
-            if (record !== null) yield* store.delete(record.deviceCode);
-            return yield* new DevicePollError({
-              error: "expired_token",
-              message: "The device code has expired",
-            });
-          }
+        // Atomically consume the approved record before minting a session.
+        // claimApproval does a conditional delete so that only one concurrent
+        // poll wins; a second poll racing the same approval sees null here and
+        // gets expired_token instead of minting a duplicate session.
+        const claimed = yield* store.claimApproval(record.deviceCode);
+        if (claimed === null || claimed.userId === undefined) {
+          return yield* new DevicePollError({
+            error: "expired_token",
+            message: "The device code has already been consumed",
+          });
+        }
 
-          // Enforce the minimum polling interval (RFC 8628 slow_down).
-          // Don't update lastPolledAt on rejection: a slightly-too-fast client
-          // would otherwise continually reset its own window and never progress.
-          // Instead, escalate the stored interval by 5 s per RFC 8628 §3.5 so
-          // subsequent valid polls are gated by the new minimum.
-          if (record.lastPolledAt !== 0 && now - record.lastPolledAt < record.interval * 1000) {
-            yield* store.update({ ...record, interval: record.interval + 5 });
-            return yield* new DevicePollError({
-              error: "slow_down",
-              message: "Polling too frequently",
-            });
-          }
-          yield* store.update({ ...record, lastPolledAt: now });
+        // User is resolved through the session manager so this flow needs no
+        // direct user-store dependency (it isn't part of `AuthServices`).
+        const session = yield* sessionManager.createSession(claimed.userId);
+        const { user } = yield* sessionManager.validateSession(session.id);
 
-          if (record.status === "denied") {
-            yield* store.delete(record.deviceCode);
-            return yield* new DevicePollError({
-              error: "access_denied",
-              message: "The user denied the request",
-            });
-          }
+        return { user, session };
+      }),
 
-          if (record.status === "pending" || record.userId === undefined) {
-            return yield* new DevicePollError({
-              error: "authorization_pending",
-              message: "The user has not yet approved the request",
-            });
-          }
+      approve: Effect.fn("DeviceAuthorizationService.approve")(function* (
+        userCode: string,
+        userId: string,
+      ) {
+        const record = yield* store.getByUserCode(hashToken(normalizeUserCode(userCode)));
+        if (record === null || Date.now() > record.expiresAt) {
+          return yield* new DeviceCodeError({ message: "Invalid or expired code" });
+        }
+        yield* store.update({ ...record, status: "approved", userId });
+      }),
 
-          // Atomically consume the approved record before minting a session.
-          // claimApproval does a conditional delete so that only one concurrent
-          // poll wins; a second poll racing the same approval sees null here and
-          // gets expired_token instead of minting a duplicate session.
-          const claimed = yield* store.claimApproval(record.deviceCode);
-          if (claimed === null || claimed.userId === undefined) {
-            return yield* new DevicePollError({
-              error: "expired_token",
-              message: "The device code has already been consumed",
-            });
-          }
-
-          // User is resolved through the session manager so this flow needs no
-          // direct user-store dependency (it isn't part of `AuthServices`).
-          const session = yield* sessionManager.createSession(claimed.userId);
-          const { user } = yield* sessionManager.validateSession(session.id);
-
-          return { user, session };
-        }),
-
-      approve: (userCode, userId) =>
-        Effect.gen(function* () {
-          const store = yield* DeviceAuthorizationStore;
-          const record = yield* store.getByUserCode(hashToken(normalizeUserCode(userCode)));
-          if (record === null || Date.now() > record.expiresAt) {
-            return yield* new DeviceCodeError({ message: "Invalid or expired code" });
-          }
-          yield* store.update({ ...record, status: "approved", userId });
-        }),
-
-      deny: (userCode) =>
-        Effect.gen(function* () {
-          const store = yield* DeviceAuthorizationStore;
-          const record = yield* store.getByUserCode(hashToken(normalizeUserCode(userCode)));
-          if (record === null || Date.now() > record.expiresAt) {
-            return yield* new DeviceCodeError({ message: "Invalid or expired code" });
-          }
-          yield* store.update({ ...record, status: "denied" });
-        }),
+      deny: Effect.fn("DeviceAuthorizationService.deny")(function* (userCode: string) {
+        const record = yield* store.getByUserCode(hashToken(normalizeUserCode(userCode)));
+        if (record === null || Date.now() > record.expiresAt) {
+          return yield* new DeviceCodeError({ message: "Invalid or expired code" });
+        }
+        yield* store.update({ ...record, status: "denied" });
+      }),
     };
   });

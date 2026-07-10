@@ -99,7 +99,7 @@ export class OneTimeTokenService extends Context.Service<
     readonly generate: (
       subject: string,
       options?: OneTimeTokenGenerateOptions,
-    ) => Effect.Effect<string, Errors.AuthError, OneTimeTokenStore>;
+    ) => Effect.Effect<string, Errors.AuthError>;
 
     /**
      * Verify and consume a raw token. On success returns `{ subject, metadata }`.
@@ -110,11 +110,7 @@ export class OneTimeTokenService extends Context.Service<
      */
     readonly verify: (
       token: string,
-    ) => Effect.Effect<
-      OneTimeTokenVerifyResult,
-      Errors.OneTimeTokenError | Errors.AuthError,
-      OneTimeTokenStore
-    >;
+    ) => Effect.Effect<OneTimeTokenVerifyResult, Errors.OneTimeTokenError | Errors.AuthError>;
   }
 >()("@effect-auth/OneTimeTokenService") {
   /**
@@ -132,31 +128,31 @@ export class OneTimeTokenService extends Context.Service<
 
 export const make = (
   config: OneTimeTokenConfig,
-): Effect.Effect<typeof OneTimeTokenService.Service, never> => {
-  const defaultExpiresIn = config.expiresIn ?? 15 * 60 * 1000;
+): Effect.Effect<typeof OneTimeTokenService.Service, never, OneTimeTokenStore> =>
+  Effect.gen(function* () {
+    const defaultExpiresIn = config.expiresIn ?? 15 * 60 * 1000;
+    const store = yield* OneTimeTokenStore;
 
-  return Effect.sync((): typeof OneTimeTokenService.Service => ({
-    generate: (subject: string, options?: OneTimeTokenGenerateOptions) =>
-      Effect.gen(function* () {
-        const store = yield* OneTimeTokenStore;
-        const rawToken = yield* Effect.sync(() => crypto.randomBytes(32).toString("base64url"));
-        const expiresIn = options?.expiresIn ?? defaultExpiresIn;
-        const now = Date.now();
-        const record: OneTimeTokenRecord = {
-          token: hashToken(rawToken),
-          subject,
-          ...(options?.metadata !== undefined ? { metadata: options.metadata } : {}),
-          createdAt: now,
-          expiresAt: now + expiresIn,
-        };
-        yield* store.create(record);
-        return rawToken;
-      }),
+    return {
+      generate: Effect.fn("OneTimeTokenService.generate")(
+        (subject: string, options?: OneTimeTokenGenerateOptions) =>
+          Effect.gen(function* () {
+            const rawToken = yield* Effect.sync(() => crypto.randomBytes(32).toString("base64url"));
+            const expiresIn = options?.expiresIn ?? defaultExpiresIn;
+            const now = Date.now();
+            const record: OneTimeTokenRecord = {
+              token: hashToken(rawToken),
+              subject,
+              ...(options?.metadata !== undefined ? { metadata: options.metadata } : {}),
+              createdAt: now,
+              expiresAt: now + expiresIn,
+            };
+            yield* store.create(record);
+            return rawToken;
+          }),
+      ),
 
-    verify: (rawToken: string) =>
-      Effect.gen(function* () {
-        const store = yield* OneTimeTokenStore;
-
+      verify: Effect.fn("OneTimeTokenService.verify")(function* (rawToken: string) {
         if (!rawToken) {
           return yield* Effect.fail(
             new Errors.OneTimeTokenError({ message: "Invalid or expired token" }),
@@ -187,8 +183,8 @@ export const make = (
           ...(record.metadata !== undefined ? { metadata: record.metadata } : {}),
         } satisfies OneTimeTokenVerifyResult;
       }),
-  }));
-};
+    };
+  });
 
 // ---------------------------------------------------------------------------
 // Optional: token → session exchange helper

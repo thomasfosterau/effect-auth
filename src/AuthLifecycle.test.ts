@@ -160,27 +160,43 @@ const sessionConfig: SessionConfig = {
 };
 
 const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) => {
+  const hasher = makePBKDF2Hasher();
+
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       make(sessionConfig),
       Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-    ),
+    ).pipe(Effect.provide(Hooks.Default)),
   );
 
   const emailVerificationService = await Effect.runPromise(
-    makeEmailVerificationService({
-      sendEmail: (email, token) =>
-        Effect.sync(() => {
-          sentEmails.push({ email, token });
-        }),
-    }),
+    Effect.provide(
+      makeEmailVerificationService({
+        sendEmail: (email, token) =>
+          Effect.sync(() => {
+            sentEmails.push({ email, token });
+          }),
+      }),
+      Context.make(EmailVerificationStore, emailVerificationStore),
+    ).pipe(Effect.provide(Hooks.Default)),
   );
 
   const emailPasswordService = await Effect.runPromise(
-    makeEmailPasswordService(emailPasswordConfig),
+    Effect.provide(
+      makeEmailPasswordService(emailPasswordConfig),
+      Context.merge(
+        Context.make(EmailPasswordStore, emailPasswordStore),
+        Context.merge(
+          Context.make(PasswordHasher, hasher),
+          Context.make(SessionService, sessionManager),
+        ),
+      ),
+    ).pipe(Effect.provide(Hooks.Default)),
   );
 
-  const userService = await Effect.runPromise(makeUserService());
+  const userService = await Effect.runPromise(
+    Effect.provide(makeUserService(), Context.make(UserServiceStore, userServiceStore)),
+  );
 
   return Context.merge(
     Context.make(SessionService, sessionManager),
@@ -200,7 +216,7 @@ const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) =>
                   Context.make(UserServiceStore, userServiceStore),
                   Context.merge(
                     Context.make(UserService, userService),
-                    Context.make(PasswordHasher, makePBKDF2Hasher()),
+                    Context.make(PasswordHasher, hasher),
                   ),
                 ),
               ),

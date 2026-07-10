@@ -11,7 +11,7 @@
 import { randomInt } from "node:crypto";
 import { Context, Data, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
-import { Hooks, type HookError } from "../Hooks.ts";
+import type { HookError } from "../Hooks.ts";
 import { SessionService } from "../session/SessionService.ts";
 import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
@@ -153,11 +153,7 @@ export class EmailOTPService extends Context.Service<
     readonly send: (
       email: string,
       purpose: EmailOTPPurpose,
-    ) => Effect.Effect<
-      void,
-      Errors.AuthError | EmailOTPError | Errors.ResendTooSoonError,
-      EmailOTPStore | EmailOTPUserStore
-    >;
+    ) => Effect.Effect<void, Errors.AuthError | EmailOTPError | Errors.ResendTooSoonError>;
 
     /**
      * Verify a `"sign-in"` OTP and create a session. Users created here are
@@ -167,11 +163,7 @@ export class EmailOTPService extends Context.Service<
       email: string,
       otp: string,
       options?: EmailOTPSignInOptions,
-    ) => Effect.Effect<
-      EmailOTPAuthResult,
-      EmailOTPError | Errors.AuthError | HookError,
-      EmailOTPStore | EmailOTPUserStore | SessionService | Hooks
-    >;
+    ) => Effect.Effect<EmailOTPAuthResult, EmailOTPError | Errors.AuthError | HookError>;
 
     /**
      * Verify an OTP for any purpose (single use) without creating a session.
@@ -182,7 +174,7 @@ export class EmailOTPService extends Context.Service<
       email: string,
       otp: string,
       purpose: EmailOTPPurpose,
-    ) => Effect.Effect<EmailOTPCheckResult, EmailOTPError | Errors.AuthError, EmailOTPStore>;
+    ) => Effect.Effect<EmailOTPCheckResult, EmailOTPError | Errors.AuthError>;
   }
 >()("@effect-auth/EmailOTPService") {
   /**
@@ -213,63 +205,59 @@ export const generateOTP = (length: number): Effect.Effect<string, Errors.AuthEr
  */
 export const makeEmailOTPService = (
   config: EmailOTPConfig,
-): Effect.Effect<typeof EmailOTPService.Service, never> => {
-  const otpLength = config.otpLength ?? 6;
-  const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
-  const maxAttempts = config.maxAttempts ?? 3;
-  const disableSignUp = config.disableSignUp ?? false;
+): Effect.Effect<
+  typeof EmailOTPService.Service,
+  never,
+  EmailOTPStore | EmailOTPUserStore | SessionService
+> =>
+  Effect.gen(function* () {
+    const otpLength = config.otpLength ?? 6;
+    const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
+    const maxAttempts = config.maxAttempts ?? 3;
+    const disableSignUp = config.disableSignUp ?? false;
 
-  const invalidOTP = () =>
-    Effect.fail(
-      new EmailOTPError({
-        message: "Invalid or expired OTP",
-      }),
-    );
+    const store = yield* EmailOTPStore;
+    const userStore = yield* EmailOTPUserStore;
+    const sessionManager = yield* SessionService;
 
-  /**
-   * Core verification: expiry, attempt limiting, constant-time hash
-   * comparison, and one-time-use consumption on success.
-   */
-  const verifyOTP = (
-    email: string,
-    otp: string,
-    purpose: EmailOTPPurpose,
-  ): Effect.Effect<void, EmailOTPError | Errors.AuthError, EmailOTPStore> =>
-    Effect.gen(function* () {
-      const store = yield* EmailOTPStore;
+    const invalidOTP = () =>
+      Effect.fail(
+        new EmailOTPError({
+          message: "Invalid or expired OTP",
+        }),
+      );
 
-      if (!email || !otp) {
-        return yield* invalidOTP();
-      }
+    /**
+     * Core verification: expiry, attempt limiting, constant-time hash
+     * comparison, and one-time-use consumption on success.
+     */
+    const verifyOTP = (
+      email: string,
+      otp: string,
+      purpose: EmailOTPPurpose,
+    ): Effect.Effect<void, EmailOTPError | Errors.AuthError> =>
+      Effect.gen(function* () {
+        if (!email || !otp) {
+          return yield* invalidOTP();
+        }
 
-      const record = yield* store.get(email, purpose);
-      if (!record) {
-        return yield* invalidOTP();
-      }
+        const record = yield* store.get(email, purpose);
+        if (!record) {
+          return yield* invalidOTP();
+        }
 
-      // Check expiration
-      if (Date.now() > record.expiresAt) {
-        yield* store.delete(email, purpose);
-        return yield* Effect.fail(
-          new EmailOTPError({
-            message: "OTP has expired",
-          }),
-        );
-      }
+        // Check expiration
+        if (Date.now() > record.expiresAt) {
+          yield* store.delete(email, purpose);
+          return yield* Effect.fail(
+            new EmailOTPError({
+              message: "OTP has expired",
+            }),
+          );
+        }
 
-      // Defensive: a record that already exhausted its attempts is unusable.
-      if (record.attempts >= maxAttempts) {
-        yield* store.delete(email, purpose);
-        return yield* Effect.fail(
-          new EmailOTPError({
-            message: "Too many attempts",
-          }),
-        );
-      }
-
-      if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
-        const attempts = yield* store.incrementAttempts(email, purpose);
-        if (attempts >= maxAttempts) {
+        // Defensive: a record that already exhausted its attempts is unusable.
+        if (record.attempts >= maxAttempts) {
           yield* store.delete(email, purpose);
           return yield* Effect.fail(
             new EmailOTPError({
@@ -277,19 +265,29 @@ export const makeEmailOTPService = (
             }),
           );
         }
-        return yield* invalidOTP();
-      }
 
-      // Consume the OTP (one-time use)
-      yield* store.delete(email, purpose);
-    });
+        if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
+          const attempts = yield* store.incrementAttempts(email, purpose);
+          if (attempts >= maxAttempts) {
+            yield* store.delete(email, purpose);
+            return yield* Effect.fail(
+              new EmailOTPError({
+                message: "Too many attempts",
+              }),
+            );
+          }
+          return yield* invalidOTP();
+        }
 
-  return Effect.sync((): typeof EmailOTPService.Service => ({
-    send: (rawEmail: string, purpose: EmailOTPPurpose) =>
-      Effect.gen(function* () {
-        const store = yield* EmailOTPStore;
-        const userStore = yield* EmailOTPUserStore;
+        // Consume the OTP (one-time use)
+        yield* store.delete(email, purpose);
+      });
 
+    return {
+      send: Effect.fn("EmailOTPService.send")(function* (
+        rawEmail: string,
+        purpose: EmailOTPPurpose,
+      ) {
         const email = normalizeEmail(rawEmail);
         if (!email) {
           return;
@@ -355,11 +353,11 @@ export const makeEmailOTPService = (
         );
       }),
 
-    signIn: (rawEmail: string, otp: string, options?: EmailOTPSignInOptions) =>
-      Effect.gen(function* () {
-        const userStore = yield* EmailOTPUserStore;
-        const sessionManager = yield* SessionService;
-
+      signIn: Effect.fn("EmailOTPService.signIn")(function* (
+        rawEmail: string,
+        otp: string,
+        options?: EmailOTPSignInOptions,
+      ) {
         const email = normalizeEmail(rawEmail);
 
         yield* verifyOTP(email, otp, "sign-in");
@@ -389,8 +387,11 @@ export const makeEmailOTPService = (
         } satisfies EmailOTPAuthResult;
       }),
 
-    check: (rawEmail: string, otp: string, purpose: EmailOTPPurpose) =>
-      Effect.gen(function* () {
+      check: Effect.fn("EmailOTPService.check")(function* (
+        rawEmail: string,
+        otp: string,
+        purpose: EmailOTPPurpose,
+      ) {
         const email = normalizeEmail(rawEmail);
 
         yield* verifyOTP(email, otp, purpose);
@@ -400,5 +401,5 @@ export const makeEmailOTPService = (
           verified: true,
         } satisfies EmailOTPCheckResult;
       }),
-  }));
-};
+    };
+  });

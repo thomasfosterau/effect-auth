@@ -404,7 +404,7 @@ describe("Hooks - integration with EmailPasswordService", () => {
       Effect.provide(
         make(sessionConfig),
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-      ),
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     const testContext = Context.merge(

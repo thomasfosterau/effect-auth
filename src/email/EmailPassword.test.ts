@@ -113,7 +113,7 @@ const makeTestContext = async () => {
     Effect.provide(
       make(sessionConfig),
       Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-    ),
+    ).pipe(Effect.provide(Hooks.Default)),
   );
 
   return Context.merge(
@@ -307,7 +307,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
       Effect.provide(
         make({ sessionExpiresIn: { activePeriod: 86400000, idlePeriod: 43200000 } }),
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-      ),
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     const ctx = Context.merge(
@@ -361,7 +361,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
       Effect.provide(
         make({ sessionExpiresIn: { activePeriod: 86400000, idlePeriod: 43200000 } }),
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-      ),
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     const ctx = Context.merge(
@@ -734,7 +734,7 @@ describe("EmailPasswordService - dangling session protection", () => {
           Context.make(SessionStore, localSessionStore),
           Context.make(UserStore, localUserStore),
         ),
-      ),
+      ).pipe(Effect.provide(Hooks.Default)),
     );
     return Context.merge(
       Context.make(SessionService, sessionManager),

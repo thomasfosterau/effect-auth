@@ -129,8 +129,7 @@ export class EmailPasswordService extends Context.Service<
       | Errors.PasswordPolicyError
       | Errors.SignUpDisabledError
       | Errors.InvalidInputError
-      | HookError,
-      EmailPasswordStore | PasswordHasher | SessionService | Hooks
+      | HookError
     >;
 
     readonly signIn: (
@@ -141,8 +140,7 @@ export class EmailPasswordService extends Context.Service<
       | Errors.HashingError
       | Errors.AuthError
       | Errors.EmailNotVerifiedError
-      | HookError,
-      EmailPasswordStore | PasswordHasher | SessionService | Hooks
+      | HookError
     >;
 
     /**
@@ -156,8 +154,7 @@ export class EmailPasswordService extends Context.Service<
       | Errors.InvalidCredentialsError
       | Errors.HashingError
       | Errors.AuthError
-      | Errors.PasswordPolicyError,
-      EmailPasswordStore | PasswordHasher | SessionService
+      | Errors.PasswordPolicyError
     >;
 
     /**
@@ -172,8 +169,7 @@ export class EmailPasswordService extends Context.Service<
       | Errors.HashingError
       | Errors.AuthError
       | Errors.PasswordPolicyError
-      | Errors.PasswordAlreadySetError,
-      EmailPasswordStore | PasswordHasher
+      | Errors.PasswordAlreadySetError
     >;
   }
 >()("@effect-auth/EmailPasswordService") {
@@ -214,211 +210,207 @@ const validatePasswordLength = (
 
 export const makeEmailPasswordService = (
   config: EmailPasswordConfig = {},
-): Effect.Effect<typeof EmailPasswordService.Service, never> => {
-  const resolved = {
-    disableSignUp: config.disableSignUp ?? false,
-    requireEmailVerification: config.requireEmailVerification ?? false,
-    minPasswordLength: config.minPasswordLength ?? 8,
-    maxPasswordLength: config.maxPasswordLength ?? 128,
-    autoSignIn: config.autoSignIn ?? true,
-  };
+): Effect.Effect<
+  typeof EmailPasswordService.Service,
+  never,
+  EmailPasswordStore | PasswordHasher | SessionService | Hooks
+> =>
+  Effect.gen(function* () {
+    const resolved = {
+      disableSignUp: config.disableSignUp ?? false,
+      requireEmailVerification: config.requireEmailVerification ?? false,
+      minPasswordLength: config.minPasswordLength ?? 8,
+      maxPasswordLength: config.maxPasswordLength ?? 128,
+      autoSignIn: config.autoSignIn ?? true,
+    };
 
-  // Cached decoy hash — computed on first signIn call so that unknown-user
-  // attempts always perform the same hashing work as known-user ones.
-  let cachedDecoyHash: string | undefined;
-  const getDecoyHash: Effect.Effect<string, Errors.HashingError, PasswordHasher> = Effect.gen(
-    function* () {
+    const store = yield* EmailPasswordStore;
+    const passwordHasher = yield* PasswordHasher;
+    const sessionManager = yield* SessionService;
+    const hooks = yield* Hooks;
+
+    // Cached decoy hash — computed on first signIn call so that unknown-user
+    // attempts always perform the same hashing work as known-user ones.
+    let cachedDecoyHash: string | undefined;
+    const getDecoyHash: Effect.Effect<string, Errors.HashingError> = Effect.gen(function* () {
       if (cachedDecoyHash !== undefined) return cachedDecoyHash;
-      const hasher = yield* PasswordHasher;
-      const result = yield* hasher.hash("effect-auth-decoy");
+      const result = yield* passwordHasher.hash("effect-auth-decoy");
       cachedDecoyHash = result.hash;
       return cachedDecoyHash;
-    },
-  );
+    });
 
-  return Effect.sync((): typeof EmailPasswordService.Service => ({
-    signUp: (rawInput) =>
-      Effect.gen(function* () {
-        const hooks = yield* Hooks;
-        const input = yield* hooks.beforeSignUp(rawInput);
+    return {
+      signUp: Effect.fn("EmailPasswordService.signUp")((rawInput: SignUpInput) =>
+        Effect.gen(function* () {
+          const input = yield* hooks.beforeSignUp(rawInput);
 
-        if (resolved.disableSignUp) {
-          return yield* Effect.fail(
-            new Errors.SignUpDisabledError({
-              message: "Email/password sign-up is disabled",
-            }),
-          );
-        }
+          if (resolved.disableSignUp) {
+            return yield* Effect.fail(
+              new Errors.SignUpDisabledError({
+                message: "Email/password sign-up is disabled",
+              }),
+            );
+          }
 
-        const store = yield* EmailPasswordStore;
-        const passwordHasher = yield* PasswordHasher;
-        const sessionManager = yield* SessionService;
+          const email = normalizeEmail(input.email);
+          if (!email) {
+            return yield* Effect.fail(
+              new Errors.InvalidInputError({
+                message: "Email is required",
+                field: "email",
+              }),
+            );
+          }
 
-        const email = normalizeEmail(input.email);
-        if (!email) {
-          return yield* Effect.fail(
-            new Errors.InvalidInputError({
-              message: "Email is required",
-              field: "email",
-            }),
-          );
-        }
-
-        yield* validatePasswordLength(input.password, {
-          minPasswordLength: resolved.minPasswordLength,
-          maxPasswordLength: resolved.maxPasswordLength,
-        });
-
-        const existing = yield* store.getUserByEmail(email);
-        if (existing) {
-          return yield* new Errors.EmailInUseError({
-            message: "A user with this email already exists",
+          yield* validatePasswordLength(input.password, {
+            minPasswordLength: resolved.minPasswordLength,
+            maxPasswordLength: resolved.maxPasswordLength,
           });
-        }
 
-        const user = yield* store.createUser({
-          email,
-          ...(input.name !== undefined && { name: input.name }),
-          ...(input.attributes !== undefined && { attributes: input.attributes }),
-        });
+          const existing = yield* store.getUserByEmail(email);
+          if (existing) {
+            return yield* new Errors.EmailInUseError({
+              message: "A user with this email already exists",
+            });
+          }
 
-        const hashedPassword = yield* passwordHasher.hash(input.password);
-        yield* store.setPasswordHash(user.id, hashedPassword.hash);
+          const user = yield* store.createUser({
+            email,
+            ...(input.name !== undefined && { name: input.name }),
+            ...(input.attributes !== undefined && { attributes: input.attributes }),
+          });
 
-        if (!resolved.autoSignIn) {
-          return yield* hooks.afterSignUp({ user, method: "email-password" });
-        }
+          const hashedPassword = yield* passwordHasher.hash(input.password);
+          yield* store.setPasswordHash(user.id, hashedPassword.hash);
 
-        if (resolved.requireEmailVerification && !isEmailVerified(user)) {
-          return yield* hooks.afterSignUp({ user, method: "email-password" });
-        }
+          if (!resolved.autoSignIn) {
+            return yield* hooks.afterSignUp({ user, method: "email-password" });
+          }
 
-        const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
-        const signUpResult = { user, session, method: "email-password" as const };
+          if (resolved.requireEmailVerification && !isEmailVerified(user)) {
+            return yield* hooks.afterSignUp({ user, method: "email-password" });
+          }
 
-        // Session is now live in the store. If afterSignUp fails we must not
-        // return an error (that would leave a dangling session the caller
-        // doesn't know about). Log and swallow so the caller receives the
-        // auth result.
-        return yield* hooks
-          .afterSignUp(signUpResult)
-          .pipe(
-            Effect.catch((error) =>
-              Effect.logError(
-                "[effect-auth] afterSignUp hook failed after session creation",
-                error,
-              ).pipe(Effect.as(signUpResult)),
-            ),
-          );
-      }).pipe(
-        Effect.withSpan("effect-auth.sign-up", { attributes: { method: "email-password" } }),
-        Effect.tap(() => Obs.recordSignUp("email-password", "success")),
-        Effect.tapError(() => Obs.recordSignUp("email-password", "failure")),
+          const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
+          const signUpResult = { user, session, method: "email-password" as const };
+
+          // Session is now live in the store. If afterSignUp fails we must not
+          // return an error (that would leave a dangling session the caller
+          // doesn't know about). Log and swallow so the caller receives the
+          // auth result.
+          return yield* hooks
+            .afterSignUp(signUpResult)
+            .pipe(
+              Effect.catch((error) =>
+                Effect.logError(
+                  "[effect-auth] afterSignUp hook failed after session creation",
+                  error,
+                ).pipe(Effect.as(signUpResult)),
+              ),
+            );
+        }).pipe(
+          Effect.withSpan("effect-auth.sign-up", { attributes: { method: "email-password" } }),
+          Effect.tap(() => Obs.recordSignUp("email-password", "success")),
+          Effect.tapError(() => Obs.recordSignUp("email-password", "failure")),
+        ),
       ),
 
-    signIn: (rawInput) =>
-      Effect.gen(function* () {
-        const hooks = yield* Hooks;
-        const input = yield* hooks.beforeSignIn(rawInput);
+      signIn: Effect.fn("EmailPasswordService.signIn")((rawInput: SignInInput) =>
+        Effect.gen(function* () {
+          const input = yield* hooks.beforeSignIn(rawInput);
 
-        const store = yield* EmailPasswordStore;
-        const passwordHasher = yield* PasswordHasher;
-        const sessionManager = yield* SessionService;
+          const email = normalizeEmail(input.email);
+          if (!email) {
+            return yield* Effect.fail(
+              new Errors.InvalidCredentialsError({
+                message: "Invalid email or password",
+              }),
+            );
+          }
 
-        const email = normalizeEmail(input.email);
-        if (!email) {
-          return yield* Effect.fail(
-            new Errors.InvalidCredentialsError({
-              message: "Invalid email or password",
-            }),
+          const user = yield* store.getUserByEmail(email);
+          const passwordHash = user !== null ? yield* store.getPasswordHash(user.id) : null;
+          // Always verify against a real or decoy hash so timing is constant
+          // regardless of whether the account exists.  Route through
+          // MultiAlgorithmVerifier when present so that a hasher switch does not
+          // lock out existing users.  Convert HashingError to false so sign-in
+          // always returns InvalidCredentialsError and never a 500.
+          const hashToVerify = passwordHash ?? (yield* getDecoyHash);
+          const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
+          const verifyEffect = Option.isSome(multiVerifier)
+            ? multiVerifier.value.verify(input.password, hashToVerify)
+            : passwordHasher.verify(input.password, hashToVerify);
+          const isValid = yield* verifyEffect.pipe(
+            Effect.catchTag("HashingError", () => Effect.succeed(false)),
           );
-        }
+          if (user === null || passwordHash === null || !isValid) {
+            return yield* Effect.fail(
+              new Errors.InvalidCredentialsError({
+                message: "Invalid email or password",
+              }),
+            );
+          }
 
-        const user = yield* store.getUserByEmail(email);
-        const passwordHash = user !== null ? yield* store.getPasswordHash(user.id) : null;
-        // Always verify against a real or decoy hash so timing is constant
-        // regardless of whether the account exists.  Route through
-        // MultiAlgorithmVerifier when present so that a hasher switch does not
-        // lock out existing users.  Convert HashingError to false so sign-in
-        // always returns InvalidCredentialsError and never a 500.
-        const hashToVerify = passwordHash ?? (yield* getDecoyHash);
-        const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
-        const verifyEffect = Option.isSome(multiVerifier)
-          ? multiVerifier.value.verify(input.password, hashToVerify)
-          : passwordHasher.verify(input.password, hashToVerify);
-        const isValid = yield* verifyEffect.pipe(
-          Effect.catchTag("HashingError", () => Effect.succeed(false)),
-        );
-        if (user === null || passwordHash === null || !isValid) {
-          return yield* Effect.fail(
-            new Errors.InvalidCredentialsError({
-              message: "Invalid email or password",
-            }),
-          );
-        }
+          // Silently upgrade the stored hash when the current hasher considers
+          // it outdated (e.g. iteration count raised, algorithm switched).  A
+          // failure here must never abort sign-in — the user is already
+          // authenticated at this point.
+          if (passwordHasher.needsRehash?.(passwordHash!)) {
+            yield* passwordHasher.hash(input.password).pipe(
+              Effect.flatMap((newHash) => store.setPasswordHash(user.id, newHash.hash)),
+              Effect.ignore,
+            );
+          }
 
-        // Silently upgrade the stored hash when the current hasher considers
-        // it outdated (e.g. iteration count raised, algorithm switched).  A
-        // failure here must never abort sign-in — the user is already
-        // authenticated at this point.
-        if (passwordHasher.needsRehash?.(passwordHash!)) {
-          yield* passwordHasher.hash(input.password).pipe(
-            Effect.flatMap((newHash) => store.setPasswordHash(user.id, newHash.hash)),
-            Effect.ignore,
-          );
-        }
+          if (resolved.requireEmailVerification && !isEmailVerified(user)) {
+            return yield* Effect.fail(
+              new Errors.EmailNotVerifiedError({
+                message: "Email must be verified before sign-in",
+                email,
+              }),
+            );
+          }
 
-        if (resolved.requireEmailVerification && !isEmailVerified(user)) {
-          return yield* Effect.fail(
-            new Errors.EmailNotVerifiedError({
-              message: "Email must be verified before sign-in",
-              email,
-            }),
-          );
-        }
+          // Second factor: when a gate is present and required for this user,
+          // return a challenge instead of a session.
+          const gate = yield* Effect.serviceOption(SecondFactorGate);
+          if (Option.isSome(gate) && (yield* gate.value.required(user))) {
+            const secondFactor = yield* gate.value.begin(user);
+            return yield* hooks.afterSignIn({ user, secondFactor, method: "email-password" });
+          }
 
-        // Second factor: when a gate is present and required for this user,
-        // return a challenge instead of a session.
-        const gate = yield* Effect.serviceOption(SecondFactorGate);
-        if (Option.isSome(gate) && (yield* gate.value.required(user))) {
-          const secondFactor = yield* gate.value.begin(user);
-          return yield* hooks.afterSignIn({ user, secondFactor, method: "email-password" });
-        }
+          const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
+          const signInResult = {
+            user,
+            session,
+            method: "email-password" as const,
+            ...(input.rememberMe !== undefined && { rememberMe: input.rememberMe }),
+          };
 
-        const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
-        const signInResult = {
-          user,
-          session,
-          method: "email-password" as const,
-          ...(input.rememberMe !== undefined && { rememberMe: input.rememberMe }),
-        };
-
-        // Session is now live in the store. If afterSignIn fails we must not
-        // return an error (that would leave a dangling session the caller
-        // doesn't know about). Log and swallow so the caller receives the
-        // auth result.
-        return yield* hooks
-          .afterSignIn(signInResult)
-          .pipe(
-            Effect.catch((error) =>
-              Effect.logError(
-                "[effect-auth] afterSignIn hook failed after session creation",
-                error,
-              ).pipe(Effect.as(signInResult)),
-            ),
-          );
-      }).pipe(
-        Effect.withSpan("effect-auth.sign-in", { attributes: { method: "email-password" } }),
-        Effect.tap(() => Obs.recordSignIn("email-password", "success")),
-        Effect.tapError(() => Obs.recordSignIn("email-password", "failure")),
+          // Session is now live in the store. If afterSignIn fails we must not
+          // return an error (that would leave a dangling session the caller
+          // doesn't know about). Log and swallow so the caller receives the
+          // auth result.
+          return yield* hooks
+            .afterSignIn(signInResult)
+            .pipe(
+              Effect.catch((error) =>
+                Effect.logError(
+                  "[effect-auth] afterSignIn hook failed after session creation",
+                  error,
+                ).pipe(Effect.as(signInResult)),
+              ),
+            );
+        }).pipe(
+          Effect.withSpan("effect-auth.sign-in", { attributes: { method: "email-password" } }),
+          Effect.tap(() => Obs.recordSignIn("email-password", "success")),
+          Effect.tapError(() => Obs.recordSignIn("email-password", "failure")),
+        ),
       ),
 
-    changePassword: (input) =>
-      Effect.gen(function* () {
-        const store = yield* EmailPasswordStore;
-        const passwordHasher = yield* PasswordHasher;
-        const sessionManager = yield* SessionService;
-
+      changePassword: Effect.fn("EmailPasswordService.changePassword")(function* (
+        input: ChangePasswordInput,
+      ) {
         yield* validatePasswordLength(input.newPassword, {
           minPasswordLength: resolved.minPasswordLength,
           maxPasswordLength: resolved.maxPasswordLength,
@@ -450,11 +442,10 @@ export const makeEmailPasswordService = (
         }
       }),
 
-    setPassword: (userId, newPassword) =>
-      Effect.gen(function* () {
-        const store = yield* EmailPasswordStore;
-        const passwordHasher = yield* PasswordHasher;
-
+      setPassword: Effect.fn("EmailPasswordService.setPassword")(function* (
+        userId: string,
+        newPassword: string,
+      ) {
         yield* validatePasswordLength(newPassword, {
           minPasswordLength: resolved.minPasswordLength,
           maxPasswordLength: resolved.maxPasswordLength,
@@ -470,5 +461,5 @@ export const makeEmailPasswordService = (
         const hashedPassword = yield* passwordHasher.hash(newPassword);
         yield* store.setPasswordHash(userId, hashedPassword.hash);
       }),
-  }));
-};
+    };
+  });

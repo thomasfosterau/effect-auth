@@ -63,9 +63,14 @@ const makeFixture = () => {
     Layer.succeed(EmailPasswordStore)(emailPasswordStore),
     Layer.succeed(PasswordHasher)(hasher),
   );
+  // SessionService.layer needs SessionStore | UserStore | Hooks at construction
+  // time. It only ever calls before/afterCreateSession (untouched by the
+  // last-login-method plugin, which taps afterSignIn/afterSignUp instead), so a
+  // plain Hooks.Default is fine here — using the final plugin-composed `hooks`
+  // would be circular, since that layer itself depends on `sessionManager`.
   const sessionManager = SessionService.layer({
     sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
-  }).pipe(Layer.provide(stores));
+  }).pipe(Layer.provide(Layer.mergeAll(stores, Hooks.Default)));
 
   // Hooks stack: the last-login-method plugin over the no-op base.
   const hooks = composePlugins([makeLastLoginMethodPlugin()]).pipe(

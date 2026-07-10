@@ -165,7 +165,7 @@ describe("GoogleOneTapService", () => {
 
   it("verifies a credential and provisions the user once", async () => {
     const { layer, users, nonceStore } = makeStores();
-    const service = await Effect.runPromise(makeGoogleOneTapService(config));
+    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
 
     const nonce1 = "test-nonce-1";
     const nonce2 = "test-nonce-2";
@@ -205,7 +205,7 @@ describe("GoogleOneTapService", () => {
 
   it("accepts the bare `accounts.google.com` issuer", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(makeGoogleOneTapService(config));
+    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
     const nonce = "test-nonce-bare-iss";
     await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
     const result = await withJwks(() =>
@@ -223,7 +223,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects wrong audience, wrong issuer, expiry, unverified email, and bad signatures", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(makeGoogleOneTapService(config));
+    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
 
     const nonces = ["n1", "n2", "n3", "n4", "n5"];
     for (const n of nonces) {
@@ -269,7 +269,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects a replayed id_token (nonce already consumed)", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(makeGoogleOneTapService(config));
+    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
     const nonce = "replay-nonce";
     await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
 
@@ -290,7 +290,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects a nonce that was never issued", async () => {
     const { layer } = makeStores();
-    const service = await Effect.runPromise(makeGoogleOneTapService(config));
+    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
     const nonce = "never-issued";
     const credential = signCredential(validClaims({ nonce: hashNonce(nonce) }));
 
@@ -303,7 +303,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects an expired nonce", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(makeGoogleOneTapService(config));
+    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
     const nonce = "expired-nonce";
     // Create with a timestamp that is already in the past
     await Effect.runPromise(nonceStore.create(nonce, Date.now() - 1));
@@ -318,7 +318,7 @@ describe("GoogleOneTapService", () => {
 
   it("rejects when nonce in id_token does not match the supplied nonce", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(makeGoogleOneTapService(config));
+    const service = await Effect.runPromise(Effect.provide(makeGoogleOneTapService(config), layer));
     const nonce = "correct-nonce";
     await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
 
@@ -385,17 +385,20 @@ const makeHttpFixture = () => {
 
   const nonceStore = makeMemoryNonceStore();
 
-  const base = Layer.mergeAll(
-    SessionService.layer({
-      sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
-    }).pipe(
-      Layer.provide(
-        Layer.mergeAll(
-          Layer.succeed(SessionStore)(sessionStore as never),
-          Layer.succeed(UserStore)(userStore),
-        ),
+  const sessionServiceLayer = SessionService.layer({
+    sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
+  }).pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.succeed(SessionStore)(sessionStore as never),
+        Layer.succeed(UserStore)(userStore),
+        Hooks.Default,
       ),
     ),
+  );
+
+  const base = Layer.mergeAll(
+    sessionServiceLayer,
     UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
     Layer.succeed(UserServiceStore)(userServiceStore),
     Hooks.Default,
@@ -409,8 +412,16 @@ const makeHttpFixture = () => {
     Layer.succeed(PasswordResetUserStore)(undefined as never),
   );
 
+  const oneTapDeps = Layer.mergeAll(
+    Layer.succeed(OAuthUserStore)(oauthUserStore),
+    Layer.succeed(GoogleOneTapNonceStore)(nonceStore),
+    sessionServiceLayer,
+  );
+
   const oneTapLayer = Layer.mergeAll(
-    GoogleOneTapService.layer({ clientId: CLIENT_ID, jwksEndpoint: JWKS_ENDPOINT }),
+    GoogleOneTapService.layer({ clientId: CLIENT_ID, jwksEndpoint: JWKS_ENDPOINT }).pipe(
+      Layer.provide(oneTapDeps),
+    ),
     Layer.succeed(OAuthUserStore)(oauthUserStore),
     Layer.succeed(GoogleOneTapNonceStore)(nonceStore),
   );

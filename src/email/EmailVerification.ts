@@ -71,17 +71,12 @@ export class EmailVerificationService extends Context.Service<
       email: string,
     ) => Effect.Effect<
       { token: string; expiresAt: number },
-      AuthError | EmailVerificationError | HookError,
-      EmailVerificationStore | Hooks
+      AuthError | EmailVerificationError | HookError
     >;
 
     readonly verifyToken: (
       token: string,
-    ) => Effect.Effect<
-      EmailVerificationResult,
-      EmailVerificationError | AuthError | HookError,
-      EmailVerificationStore | Hooks
-    >;
+    ) => Effect.Effect<EmailVerificationResult, EmailVerificationError | AuthError | HookError>;
 
     /**
      * Validate a token (run `beforeVerifyEmail` hook, check expiry) without
@@ -91,11 +86,7 @@ export class EmailVerificationService extends Context.Service<
      */
     readonly peekToken: (
       rawToken: string,
-    ) => Effect.Effect<
-      EmailVerification,
-      EmailVerificationError | AuthError | HookError,
-      EmailVerificationStore | Hooks
-    >;
+    ) => Effect.Effect<EmailVerification, EmailVerificationError | AuthError | HookError>;
 
     /**
      * Delete the token from the store and fire the `afterVerifyEmail` hook.
@@ -109,11 +100,7 @@ export class EmailVerificationService extends Context.Service<
     readonly burnToken: (
       token: string,
       result: EmailVerificationResult,
-    ) => Effect.Effect<
-      EmailVerificationResult,
-      AuthError | HookError,
-      EmailVerificationStore | Hooks
-    >;
+    ) => Effect.Effect<EmailVerificationResult, AuthError | HookError>;
 
     /**
      * Invalidate any outstanding verification tokens for the user and send a
@@ -125,8 +112,7 @@ export class EmailVerificationService extends Context.Service<
       email: string,
     ) => Effect.Effect<
       { token: string; expiresAt: number },
-      AuthError | RateLimitError | EmailVerificationError | HookError,
-      EmailVerificationStore | Hooks
+      AuthError | RateLimitError | EmailVerificationError | HookError
     >;
   }
 >()("@effect-auth/EmailVerificationService") {
@@ -148,18 +134,21 @@ export const generateVerificationToken = (): Effect.Effect<string, AuthError> =>
  */
 export const makeEmailVerificationService = (
   config: EmailVerificationConfig,
-): Effect.Effect<typeof EmailVerificationService.Service, never> => {
-  const expiresIn = config.expiresIn ?? 24 * 60 * 60 * 1000; // 24 hours default
+): Effect.Effect<typeof EmailVerificationService.Service, never, EmailVerificationStore | Hooks> =>
+  Effect.gen(function* () {
+    const expiresIn = config.expiresIn ?? 24 * 60 * 60 * 1000; // 24 hours default
+    const store = yield* EmailVerificationStore;
+    const hooks = yield* Hooks;
 
-  const createVerification = (rawUserId: string, rawEmail: string) =>
-    Effect.gen(function* () {
-      const hooks = yield* Hooks;
+    const createVerification = Effect.fn("EmailVerificationService.createVerification")(function* (
+      rawUserId: string,
+      rawEmail: string,
+    ) {
       const { userId, email } = yield* hooks.beforeCreateVerification({
         userId: rawUserId,
         email: rawEmail,
       });
 
-      const store = yield* EmailVerificationStore;
       const rawToken = yield* generateVerificationToken();
 
       const verification: EmailVerification = {
@@ -191,16 +180,13 @@ export const makeEmailVerificationService = (
       };
     });
 
-  return Effect.sync((): typeof EmailVerificationService.Service => ({
-    createVerification,
+    return {
+      createVerification,
 
-    verifyToken: (rawToken: string) =>
-      Effect.gen(function* () {
-        const hooks = yield* Hooks;
+      verifyToken: Effect.fn("EmailVerificationService.verifyToken")(function* (rawToken: string) {
         // Hook receives the raw token from the URL; hash after any hook transform.
         const { token } = yield* hooks.beforeVerifyEmail({ token: rawToken });
 
-        const store = yield* EmailVerificationStore;
         const tokenHash = hashToken(token);
 
         const verification = yield* store.get(tokenHash);
@@ -235,11 +221,8 @@ export const makeEmailVerificationService = (
         return yield* hooks.afterVerifyEmail(result);
       }),
 
-    peekToken: (rawToken: string) =>
-      Effect.gen(function* () {
-        const hooks = yield* Hooks;
+      peekToken: Effect.fn("EmailVerificationService.peekToken")(function* (rawToken: string) {
         const { token } = yield* hooks.beforeVerifyEmail({ token: rawToken });
-        const store = yield* EmailVerificationStore;
         const tokenHash = hashToken(token);
         const verification = yield* store.get(tokenHash);
         if (!verification) {
@@ -260,20 +243,21 @@ export const makeEmailVerificationService = (
         return verification;
       }),
 
-    burnToken: (token: string, result: EmailVerificationResult) =>
-      Effect.gen(function* () {
-        const store = yield* EmailVerificationStore;
+      burnToken: Effect.fn("EmailVerificationService.burnToken")(function* (
+        token: string,
+        result: EmailVerificationResult,
+      ) {
         yield* store.delete(token);
-        const hooks = yield* Hooks;
         return yield* hooks.afterVerifyEmail(result);
       }),
 
-    resendVerification: (userId: string, email: string) =>
-      Effect.gen(function* () {
-        const store = yield* EmailVerificationStore;
+      resendVerification: Effect.fn("EmailVerificationService.resendVerification")(function* (
+        userId: string,
+        email: string,
+      ) {
         // Invalidate outstanding tokens so only the latest one is usable.
         yield* store.deleteByUserId(userId);
         return yield* createVerification(userId, email);
       }),
-  }));
-};
+    };
+  });

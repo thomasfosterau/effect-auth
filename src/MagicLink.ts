@@ -11,7 +11,7 @@
 import { Context, Effect, Layer } from "effect";
 import * as crypto from "node:crypto";
 import * as Errors from "./Errors.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
+import { type HookError } from "./Hooks.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
@@ -121,11 +121,7 @@ export class MagicLinkService extends Context.Service<
      */
     readonly send: (
       email: string,
-    ) => Effect.Effect<
-      void,
-      Errors.AuthError | Errors.MagicLinkError | Errors.ResendTooSoonError,
-      MagicLinkStore | MagicLinkUserStore
-    >;
+    ) => Effect.Effect<void, Errors.AuthError | Errors.MagicLinkError | Errors.ResendTooSoonError>;
 
     /**
      * Verify a magic link token (single use) and sign the user in. A
@@ -135,11 +131,7 @@ export class MagicLinkService extends Context.Service<
     readonly verify: (
       token: string,
       options?: MagicLinkVerifyOptions,
-    ) => Effect.Effect<
-      MagicLinkResult,
-      Errors.MagicLinkError | Errors.AuthError | HookError,
-      MagicLinkStore | MagicLinkUserStore | SessionService | Hooks
-    >;
+    ) => Effect.Effect<MagicLinkResult, Errors.MagicLinkError | Errors.AuthError | HookError>;
   }
 >()("@effect-auth/MagicLinkService") {
   /**
@@ -160,16 +152,21 @@ export const generateMagicLinkToken = (): Effect.Effect<string, Errors.AuthError
  */
 export const makeMagicLinkService = (
   config: MagicLinkConfig,
-): Effect.Effect<typeof MagicLinkService.Service, never> => {
-  const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
-  const disableSignUp = config.disableSignUp ?? false;
+): Effect.Effect<
+  typeof MagicLinkService.Service,
+  never,
+  MagicLinkStore | MagicLinkUserStore | SessionService
+> =>
+  Effect.gen(function* () {
+    const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
+    const disableSignUp = config.disableSignUp ?? false;
 
-  return Effect.sync((): typeof MagicLinkService.Service => ({
-    send: (rawEmail: string) =>
-      Effect.gen(function* () {
-        const store = yield* MagicLinkStore;
-        const userStore = yield* MagicLinkUserStore;
+    const store = yield* MagicLinkStore;
+    const userStore = yield* MagicLinkUserStore;
+    const sessionManager = yield* SessionService;
 
+    return {
+      send: Effect.fn("MagicLinkService.send")(function* (rawEmail: string) {
         const email = normalizeEmail(rawEmail);
         if (!email) {
           return;
@@ -228,12 +225,10 @@ export const makeMagicLinkService = (
         );
       }),
 
-    verify: (rawToken: string, options?: MagicLinkVerifyOptions) =>
-      Effect.gen(function* () {
-        const store = yield* MagicLinkStore;
-        const userStore = yield* MagicLinkUserStore;
-        const sessionManager = yield* SessionService;
-
+      verify: Effect.fn("MagicLinkService.verify")(function* (
+        rawToken: string,
+        options?: MagicLinkVerifyOptions,
+      ) {
         if (!rawToken) {
           return yield* Effect.fail(
             new Errors.MagicLinkError({
@@ -289,5 +284,5 @@ export const makeMagicLinkService = (
           session,
         } satisfies MagicLinkResult;
       }),
-  }));
-};
+    };
+  });

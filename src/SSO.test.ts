@@ -160,7 +160,7 @@ const ACME = {
 describe("SSOService", () => {
   it("registers a provider and routes sign-in by email domain", async () => {
     const { layer } = makeStores();
-    const sso = await Effect.runPromise(makeSSOService());
+    const sso = await Effect.runPromise(makeSSOService().pipe(Effect.provide(layer)));
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -181,7 +181,9 @@ describe("SSOService", () => {
 
   it("provisions a user + org membership on first login and reuses on the second", async () => {
     const { layer, users, members } = makeStores();
-    const sso = await Effect.runPromise(makeSSOService({ defaultRole: "member" }));
+    const sso = await Effect.runPromise(
+      makeSSOService({ defaultRole: "member" }).pipe(Effect.provide(layer)),
+    );
 
     const idpRoutes = {
       "https://idp.acme.test/token": { access_token: "at", token_type: "bearer" },
@@ -222,7 +224,7 @@ describe("SSOService", () => {
 
   it("populates endpoints from OIDC discovery", async () => {
     const { layer, providers } = makeStores();
-    const sso = await Effect.runPromise(makeSSOService());
+    const sso = await Effect.runPromise(makeSSOService().pipe(Effect.provide(layer)));
 
     const discovered = await withFetch(
       {
@@ -257,7 +259,7 @@ describe("SSOService", () => {
 
   it("fails sign-in for an unknown domain", async () => {
     const { layer } = makeStores();
-    const sso = await Effect.runPromise(makeSSOService());
+    const sso = await Effect.runPromise(makeSSOService().pipe(Effect.provide(layer)));
     const err = await Effect.runPromise(
       Effect.flip(sso.signIn({ email: "nobody@unknown.test" })).pipe(Effect.provide(layer)),
     );
@@ -266,7 +268,7 @@ describe("SSOService", () => {
 
   it("rejects a callback whose profile email is unverified", async () => {
     const { layer } = makeStores();
-    const sso = await Effect.runPromise(makeSSOService());
+    const sso = await Effect.runPromise(makeSSOService().pipe(Effect.provide(layer)));
     await Effect.runPromise(sso.registerProvider("admin", ACME).pipe(Effect.provide(layer)));
 
     const err = await withFetch(
@@ -401,17 +403,17 @@ const makeHttpFixture = () => {
       ),
   };
 
+  const coreStoreLayer = Layer.mergeAll(
+    Layer.succeed(SessionStore)(sessionStore as never),
+    Layer.succeed(UserStore)(userStore),
+  );
+
+  const sessionServiceLayer = SessionService.layer({
+    sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
+  }).pipe(Layer.provide(Layer.mergeAll(coreStoreLayer, Hooks.Default)));
+
   const base = Layer.mergeAll(
-    SessionService.layer({
-      sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
-    }).pipe(
-      Layer.provide(
-        Layer.mergeAll(
-          Layer.succeed(SessionStore)(sessionStore as never),
-          Layer.succeed(UserStore)(userStore),
-        ),
-      ),
-    ),
+    sessionServiceLayer,
     UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
     Layer.succeed(UserServiceStore)(userServiceStore),
     Hooks.Default,
@@ -425,13 +427,20 @@ const makeHttpFixture = () => {
     Layer.succeed(PasswordResetUserStore)(undefined as never),
   );
 
-  const ssoLayer = Layer.mergeAll(
-    SSOService.layer(),
+  // `SSOService` only needs `SSOProviderStore` to construct; `OAuthStateStore`/
+  // `OAuthUserStore`/`SessionService` are required dynamically by its
+  // `signIn`/`handleCallback` methods, and `OrganizationStore` is resolved
+  // optionally at call time — all are provided here as ambient context.
+  const ssoDeps = Layer.mergeAll(
     Layer.succeed(SSOProviderStore)(ssoStore),
     Layer.succeed(OAuthStateStore)(stateStore),
     Layer.succeed(OAuthUserStore)(oauthUserStore),
     Layer.succeed(OrganizationStore)(orgStore as never),
   );
+
+  const ssoServiceLayer = SSOService.layer().pipe(Layer.provide(ssoDeps));
+
+  const ssoLayer = Layer.mergeAll(ssoDeps, ssoServiceLayer);
 
   const withSSO = Layer.mergeAll(base, ssoLayer) as Layer.Layer<AuthServices>;
   const withoutSSO = base as Layer.Layer<AuthServices>;

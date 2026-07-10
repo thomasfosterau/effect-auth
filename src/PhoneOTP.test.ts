@@ -122,7 +122,7 @@ const makeTestContext = async () => {
     Effect.provide(
       makeSessionService(sessionConfig),
       Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-    ),
+    ).pipe(Effect.provide(Hooks.Default)),
   );
   return Context.merge(
     Context.make(SessionService, sessionManager),

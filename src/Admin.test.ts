@@ -181,7 +181,7 @@ const sessionConfig: SessionConfig = {
   },
 };
 
-const makeTestContext = async () => {
+const makeTestContext = async (hooksLayer: Layer.Layer<Hooks> = Hooks.Default) => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       make(sessionConfig),
@@ -189,7 +189,7 @@ const makeTestContext = async () => {
         Context.make(SessionStore, sessionStore),
         Context.make(UserStore, sessionUserStore),
       ),
-    ),
+    ).pipe(Effect.provide(hooksLayer)),
   );
 
   return Context.make(SessionService, sessionManager).pipe(
@@ -399,11 +399,14 @@ describe("AdminService", () => {
   });
 
   it("BannedUserPlugin blocks session validation for banned users", async () => {
-    const testContext = await makeTestContext();
     const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
     seedUser("user-1", "user@example.com");
 
+    // SessionService now resolves Hooks once, at construction time, so the
+    // plugin must be baked in when building the SessionService instance used
+    // by this test rather than layered over the whole program afterward.
     const hooksWithPlugin = BannedUserPlugin.pipe(Layer.provide(Hooks.Default));
+    const testContext = await makeTestContext(hooksWithPlugin);
 
     const program = Effect.gen(function* () {
       const service = yield* makeAdminService({});
@@ -426,9 +429,7 @@ describe("AdminService", () => {
       return { blocked, allowed, lapsed };
     });
 
-    const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(hooksWithPlugin)),
-    );
+    const result = await Effect.runPromise(Effect.provide(program, testContext));
 
     expect(result.blocked._tag).toBe("Failure");
     if (result.blocked._tag === "Failure") {

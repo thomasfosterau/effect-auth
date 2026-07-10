@@ -179,6 +179,19 @@ const _authSecurity = {
  *
  * Requires `SessionService` and `Hooks` in the application's service context.
  *
+ * `requires` is intentionally per-request, not resolved at Layer construction:
+ * an `HttpApiMiddleware` runs once per incoming request and needs the
+ * request-scoped framework services (`HttpServerRequest`,
+ * `ParsedSearchParams`, `RouteContext`) plus the ambient `SessionService`/
+ * `Hooks` to validate that specific request's session — there is no
+ * construction-time value to resolve them to.
+ *
+ * @effect-expect-leaking SessionService
+ * @effect-expect-leaking Hooks
+ * @effect-expect-leaking HttpServerRequest
+ * @effect-expect-leaking ParsedSearchParams
+ * @effect-expect-leaking RouteContext
+ *
  * @since 1.0.0
  * @category middleware
  */
@@ -203,6 +216,15 @@ export class AuthMiddleware extends HttpApiMiddleware.Service<
  * `MaybeCurrentSession` with `Option.none()`.
  *
  * Requires `SessionService` and `Hooks` in the application's service context.
+ *
+ * `requires` is intentionally per-request — see {@link AuthMiddleware} for why
+ * this middleware's dependencies cannot be resolved at Layer construction.
+ *
+ * @effect-expect-leaking SessionService
+ * @effect-expect-leaking Hooks
+ * @effect-expect-leaking HttpServerRequest
+ * @effect-expect-leaking ParsedSearchParams
+ * @effect-expect-leaking RouteContext
  *
  * @since 1.0.0
  * @category middleware

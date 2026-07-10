@@ -107,18 +107,32 @@ describe("OIDCProviderService", () => {
 
   const setup = () => {
     const stores = makeOIDCStores();
+    // `makeOIDCProviderService` also resolves `UserStore` and `JWTService` at
+    // construction time (even though these service-level tests never exercise
+    // the userinfo/token-signing paths), so both must be satisfiable here too.
+    const userStore: typeof UserStore.Service = {
+      get: () => Effect.succeed(null),
+      getCredentials: () => Effect.succeed(null),
+    };
+    const jwtServiceLayer = JWTService.layer({ issuer: ISSUER }).pipe(
+      Layer.provide(Layer.succeed(JWTKeyStore)(stores.jwtKeyStore)),
+    );
     const layer = Layer.mergeAll(
       Layer.succeed(OIDCClientStore)(stores.clientStore),
       Layer.succeed(OIDCCodeStore)(stores.codeStore),
       Layer.succeed(OIDCTokenStore)(stores.tokenStore),
       Layer.succeed(OIDCConsentStore)(stores.consentStore),
+      Layer.succeed(UserStore)(userStore),
+      jwtServiceLayer,
     );
     return { stores, layer };
   };
 
   it("registers web clients with a secret and native clients without", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(makeOIDCProviderService(config));
+    const service = await Effect.runPromise(
+      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
+    );
 
     const { web, native } = await Effect.runPromise(
       Effect.gen(function* () {
@@ -144,7 +158,9 @@ describe("OIDCProviderService", () => {
 
   it("rejects registration without redirect URIs", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(makeOIDCProviderService(config));
+    const service = await Effect.runPromise(
+      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
+    );
     const err = await Effect.runPromise(
       Effect.flip(service.registerClient({ name: "x", redirectUris: [] })).pipe(
         Effect.provide(layer),
@@ -155,7 +171,9 @@ describe("OIDCProviderService", () => {
 
   it("refuses to redirect for unknown clients or unregistered redirect URIs", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(makeOIDCProviderService(config));
+    const service = await Effect.runPromise(
+      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
+    );
     const user = makeUser("u1", "u1@test");
 
     const { unknownClient, badRedirect } = await Effect.runPromise(
@@ -190,7 +208,9 @@ describe("OIDCProviderService", () => {
 
   it("redirects spec-level errors back to the client", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(makeOIDCProviderService(config));
+    const service = await Effect.runPromise(
+      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
+    );
     const user = makeUser("u1", "u1@test");
 
     const results = await Effect.runPromise(
@@ -247,7 +267,9 @@ describe("OIDCProviderService", () => {
 
   it("requires PKCE from native (public) clients", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(makeOIDCProviderService(config));
+    const service = await Effect.runPromise(
+      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
+    );
     const user = makeUser("u1", "u1@test");
 
     const result = await Effect.runPromise(
@@ -273,7 +295,9 @@ describe("OIDCProviderService", () => {
 
   it("rejects redirect URIs that are not https or loopback http", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(makeOIDCProviderService(config));
+    const service = await Effect.runPromise(
+      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
+    );
 
     const bad = [
       "javascript:alert(1)",
@@ -308,7 +332,9 @@ describe("OIDCProviderService", () => {
 
   it("returns interaction_required for prompt=none when consent is needed", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(makeOIDCProviderService(config));
+    const service = await Effect.runPromise(
+      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
+    );
     const user = makeUser("u1", "u1@test");
 
     const result = await Effect.runPromise(
@@ -337,7 +363,9 @@ describe("OIDCProviderService", () => {
 
   it("prompt=none succeeds when consent has already been granted", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(makeOIDCProviderService(config));
+    const service = await Effect.runPromise(
+      makeOIDCProviderService(config).pipe(Effect.provide(layer)),
+    );
     const user = makeUser("u1", "u1@test");
 
     const result = await Effect.runPromise(
@@ -382,7 +410,7 @@ describe("OIDCProviderService", () => {
             redirectUris: ["https://fp.test/cb"],
           },
         ],
-      }),
+      }).pipe(Effect.provide(layer)),
     );
     const user = makeUser("u1", "u1@test");
 
@@ -466,17 +494,17 @@ const makeHttpFixture = () => {
       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
   };
 
+  const coreStoreLayer = Layer.mergeAll(
+    Layer.succeed(SessionStore)(sessionStore as never),
+    Layer.succeed(UserStore)(userStore),
+  );
+
+  const sessionServiceLayer = SessionService.layer({
+    sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
+  }).pipe(Layer.provide(Layer.mergeAll(coreStoreLayer, Hooks.Default)));
+
   const base = Layer.mergeAll(
-    SessionService.layer({
-      sessionExpiresIn: { activePeriod: 3600_000, idlePeriod: 3600_000 },
-    }).pipe(
-      Layer.provide(
-        Layer.mergeAll(
-          Layer.succeed(SessionStore)(sessionStore as never),
-          Layer.succeed(UserStore)(userStore),
-        ),
-      ),
-    ),
+    sessionServiceLayer,
     UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
     Layer.succeed(UserServiceStore)(userServiceStore),
     Hooks.Default,
@@ -490,21 +518,31 @@ const makeHttpFixture = () => {
     Layer.succeed(PasswordResetUserStore)(undefined as never),
   );
 
-  const oidcLayer = Layer.mergeAll(
-    OIDCProviderService.layer({
-      issuer: ISSUER,
-      loginPage: "http://idp.test/login",
-      consentPage: "http://idp.test/consent",
-    }),
-    JWTService.layer({ issuer: ISSUER }),
+  const jwtKeyStoreLayer = Layer.succeed(JWTKeyStore)(oidc.jwtKeyStore);
+  const jwtServiceLayer = JWTService.layer({ issuer: ISSUER }).pipe(
+    Layer.provide(jwtKeyStoreLayer),
+  );
+
+  // `OIDCProviderService` resolves the OIDC stores, the core `UserStore`, and
+  // `JWTService` at construction time, so all of them must already be built.
+  const oidcDeps = Layer.mergeAll(
     Layer.succeed(OIDCClientStore)(oidc.clientStore),
     Layer.succeed(OIDCCodeStore)(oidc.codeStore),
     Layer.succeed(OIDCTokenStore)(oidc.tokenStore),
     Layer.succeed(OIDCConsentStore)(oidc.consentStore),
-    Layer.succeed(JWTKeyStore)(oidc.jwtKeyStore),
+    jwtKeyStoreLayer,
+    jwtServiceLayer,
     // resolveOIDCProvider needs the core user store in the ambient context.
     Layer.succeed(UserStore)(userStore),
   );
+
+  const oidcServiceLayer = OIDCProviderService.layer({
+    issuer: ISSUER,
+    loginPage: "http://idp.test/login",
+    consentPage: "http://idp.test/consent",
+  }).pipe(Layer.provide(oidcDeps));
+
+  const oidcLayer = Layer.mergeAll(oidcDeps, oidcServiceLayer);
 
   const withOIDC = Layer.mergeAll(base, oidcLayer) as Layer.Layer<AuthServices>;
   const withoutOIDC = base as Layer.Layer<AuthServices>;

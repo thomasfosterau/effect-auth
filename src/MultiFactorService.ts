@@ -18,7 +18,7 @@ import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
-import { Hooks, type HookError } from "./Hooks.ts";
+import { type HookError } from "./Hooks.ts";
 import { generateBase32Secret, generateOTPURI, verifyTOTP, type TOTPConfig } from "./OTP.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import { SessionService } from "./session/SessionService.ts";
@@ -177,8 +177,7 @@ export class TwoFactorService extends Context.Service<
       | Errors.InvalidCredentialsError
       | Errors.HashingError
       | Errors.AuthError
-      | Errors.UserNotFoundError,
-      TwoFactorStore | EmailPasswordStore | PasswordHasher | UserStore
+      | Errors.UserNotFoundError
     >;
 
     /**
@@ -188,11 +187,7 @@ export class TwoFactorService extends Context.Service<
     readonly confirmEnable: (
       userId: string,
       code: string,
-    ) => Effect.Effect<
-      void,
-      TwoFactorError | Errors.HashingError | Errors.AuthError,
-      TwoFactorStore
-    >;
+    ) => Effect.Effect<void, TwoFactorError | Errors.HashingError | Errors.AuthError>;
 
     /**
      * Disable two-factor after re-verifying the user's password.
@@ -202,16 +197,13 @@ export class TwoFactorService extends Context.Service<
       password: string,
     ) => Effect.Effect<
       void,
-      Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
-      TwoFactorStore | EmailPasswordStore | PasswordHasher
+      Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError
     >;
 
     /**
      * Whether the user has a verified two-factor record.
      */
-    readonly isEnabled: (
-      userId: string,
-    ) => Effect.Effect<boolean, Errors.AuthError, TwoFactorStore>;
+    readonly isEnabled: (userId: string) => Effect.Effect<boolean, Errors.AuthError>;
 
     /**
      * Start a second-factor challenge for a user whose first factor (e.g.
@@ -220,11 +212,7 @@ export class TwoFactorService extends Context.Service<
      */
     readonly beginChallenge: (
       userId: string,
-    ) => Effect.Effect<
-      TwoFactorChallenge,
-      TwoFactorError | Errors.AuthError,
-      TwoFactorStore | PendingTwoFactorStore
-    >;
+    ) => Effect.Effect<TwoFactorChallenge, TwoFactorError | Errors.AuthError>;
 
     /**
      * Redeem a pending challenge with a TOTP code. On success the pending
@@ -236,8 +224,7 @@ export class TwoFactorService extends Context.Service<
       options?: TwoFactorVerifyOptions,
     ) => Effect.Effect<
       TwoFactorVerifyResult,
-      TwoFactorError | Errors.HashingError | Errors.AuthError | HookError,
-      TwoFactorStore | PendingTwoFactorStore | SessionService | Hooks
+      TwoFactorError | Errors.HashingError | Errors.AuthError | HookError
     >;
 
     /**
@@ -248,11 +235,7 @@ export class TwoFactorService extends Context.Service<
       pendingToken: string,
       code: string,
       options?: TwoFactorVerifyOptions,
-    ) => Effect.Effect<
-      TwoFactorVerifyResult,
-      TwoFactorError | Errors.AuthError | HookError,
-      TwoFactorStore | PendingTwoFactorStore | SessionService | Hooks
-    >;
+    ) => Effect.Effect<TwoFactorVerifyResult, TwoFactorError | Errors.AuthError | HookError>;
 
     /**
      * Replace all backup codes after re-verifying the user's password.
@@ -263,8 +246,7 @@ export class TwoFactorService extends Context.Service<
       password: string,
     ) => Effect.Effect<
       readonly string[],
-      TwoFactorError | Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError,
-      TwoFactorStore | EmailPasswordStore | PasswordHasher
+      TwoFactorError | Errors.InvalidCredentialsError | Errors.HashingError | Errors.AuthError
     >;
   }
 >()("@effect-auth/TwoFactorService") {
@@ -357,100 +339,107 @@ const findBackupCodeIndex = (hashes: readonly string[], candidateHash: string): 
  */
 export const make = (
   config: TwoFactorConfig,
-): Effect.Effect<typeof TwoFactorService.Service, never> => {
-  const backupCodeCount = config.backupCodeCount ?? 10;
-  const pendingExpiresIn = config.pendingExpiresIn ?? 5 * 60 * 1000; // 5 minutes default
-  const skipVerificationOnEnable = config.skipVerificationOnEnable ?? false;
+): Effect.Effect<
+  typeof TwoFactorService.Service,
+  never,
+  | TwoFactorStore
+  | PendingTwoFactorStore
+  | EmailPasswordStore
+  | PasswordHasher
+  | UserStore
+  | SessionService
+> =>
+  Effect.gen(function* () {
+    const backupCodeCount = config.backupCodeCount ?? 10;
+    const pendingExpiresIn = config.pendingExpiresIn ?? 5 * 60 * 1000; // 5 minutes default
+    const skipVerificationOnEnable = config.skipVerificationOnEnable ?? false;
 
-  const cipher: TokenCipher | null = config.encryptSecret
-    ? "cipher" in config.encryptSecret
-      ? config.encryptSecret.cipher
-      : makeAes256GcmCipher(Redacted.value(config.encryptSecret.secret))
-    : null;
+    const cipher: TokenCipher | null = config.encryptSecret
+      ? "cipher" in config.encryptSecret
+        ? config.encryptSecret.cipher
+        : makeAes256GcmCipher(Redacted.value(config.encryptSecret.secret))
+      : null;
 
-  /**
-   * Verify the user's password against the hash held by the email/password
-   * store. Fails with InvalidCredentialsError on mismatch or missing hash.
-   */
-  const verifyPassword = (userId: string, password: string) =>
-    Effect.gen(function* () {
-      const store = yield* EmailPasswordStore;
-      const passwordHasher = yield* PasswordHasher;
+    const store = yield* TwoFactorStore;
+    const pendingStore = yield* PendingTwoFactorStore;
+    const emailPasswordStore = yield* EmailPasswordStore;
+    const passwordHasher = yield* PasswordHasher;
+    const userStore = yield* UserStore;
+    const sessionManager = yield* SessionService;
 
-      const passwordHash = yield* store.getPasswordHash(userId);
-      if (!passwordHash) {
-        return yield* Effect.fail(
-          new Errors.InvalidCredentialsError({
-            message: "Invalid password",
-          }),
-        );
-      }
-
-      const isValid = yield* passwordHasher.verify(password, passwordHash);
-      if (!isValid) {
-        return yield* Effect.fail(
-          new Errors.InvalidCredentialsError({
-            message: "Invalid password",
-          }),
-        );
-      }
-    });
-
-  /**
-   * Resolve a pending challenge token, enforcing expiry. Expired tokens are
-   * deleted eagerly; the token itself is only consumed on successful
-   * verification (see verifyTotp/verifyBackupCode).
-   */
-  const resolvePending = (pendingToken: string) =>
-    Effect.gen(function* () {
-      const pendingStore = yield* PendingTwoFactorStore;
-
-      const pending = yield* pendingStore.get(pendingToken);
-      if (!pending) {
-        return yield* Effect.fail(
-          new TwoFactorError({
-            message: "Invalid or expired two-factor challenge token",
-          }),
-        );
-      }
-
-      if (Date.now() > pending.expiresAt) {
-        yield* pendingStore.delete(pendingToken);
-        return yield* Effect.fail(
-          new TwoFactorError({
-            message: "Two-factor challenge token has expired",
-          }),
-        );
-      }
-
-      return pending;
-    });
-
-  /**
-   * Load the verified two-factor record for a user, failing if two-factor
-   * is not (fully) enabled.
-   */
-  const getVerifiedRecord = (userId: string) =>
-    Effect.gen(function* () {
-      const store = yield* TwoFactorStore;
-      const record = yield* store.get(userId);
-      if (!record || !record.verified) {
-        return yield* Effect.fail(
-          new TwoFactorError({
-            message: "Two-factor authentication is not enabled for this user",
-          }),
-        );
-      }
-      return record;
-    });
-
-  return Effect.sync((): typeof TwoFactorService.Service => ({
-    enable: (userId: string, password: string) =>
+    /**
+     * Verify the user's password against the hash held by the email/password
+     * store. Fails with InvalidCredentialsError on mismatch or missing hash.
+     */
+    const verifyPassword = (userId: string, password: string) =>
       Effect.gen(function* () {
-        yield* verifyPassword(userId, password);
+        const passwordHash = yield* emailPasswordStore.getPasswordHash(userId);
+        if (!passwordHash) {
+          return yield* Effect.fail(
+            new Errors.InvalidCredentialsError({
+              message: "Invalid password",
+            }),
+          );
+        }
 
-        const store = yield* TwoFactorStore;
-        const userStore = yield* UserStore;
+        const isValid = yield* passwordHasher.verify(password, passwordHash);
+        if (!isValid) {
+          return yield* Effect.fail(
+            new Errors.InvalidCredentialsError({
+              message: "Invalid password",
+            }),
+          );
+        }
+      });
+
+    /**
+     * Resolve a pending challenge token, enforcing expiry. Expired tokens are
+     * deleted eagerly; the token itself is only consumed on successful
+     * verification (see verifyTotp/verifyBackupCode).
+     */
+    const resolvePending = (pendingToken: string) =>
+      Effect.gen(function* () {
+        const pending = yield* pendingStore.get(pendingToken);
+        if (!pending) {
+          return yield* Effect.fail(
+            new TwoFactorError({
+              message: "Invalid or expired two-factor challenge token",
+            }),
+          );
+        }
+
+        if (Date.now() > pending.expiresAt) {
+          yield* pendingStore.delete(pendingToken);
+          return yield* Effect.fail(
+            new TwoFactorError({
+              message: "Two-factor challenge token has expired",
+            }),
+          );
+        }
+
+        return pending;
+      });
+
+    /**
+     * Load the verified two-factor record for a user, failing if two-factor
+     * is not (fully) enabled.
+     */
+    const getVerifiedRecord = (userId: string) =>
+      Effect.gen(function* () {
+        const record = yield* store.get(userId);
+        if (!record || !record.verified) {
+          return yield* Effect.fail(
+            new TwoFactorError({
+              message: "Two-factor authentication is not enabled for this user",
+            }),
+          );
+        }
+        return record;
+      });
+
+    return {
+      enable: Effect.fn("TwoFactorService.enable")(function* (userId: string, password: string) {
+        yield* verifyPassword(userId, password);
 
         // The otpauth:// label is the user's email
         const user = yield* userStore.get(userId);
@@ -499,10 +488,10 @@ export const make = (
         } satisfies TwoFactorEnableResult;
       }),
 
-    confirmEnable: (userId: string, code: string) =>
-      Effect.gen(function* () {
-        const store = yield* TwoFactorStore;
-
+      confirmEnable: Effect.fn("TwoFactorService.confirmEnable")(function* (
+        userId: string,
+        code: string,
+      ) {
         const record = yield* store.get(userId);
         if (!record) {
           return yield* Effect.fail(
@@ -525,117 +514,113 @@ export const make = (
         yield* store.upsert({ ...record, verified: true });
       }),
 
-    disable: (userId: string, password: string) =>
-      Effect.gen(function* () {
+      disable: Effect.fn("TwoFactorService.disable")(function* (userId: string, password: string) {
         yield* verifyPassword(userId, password);
-
-        const store = yield* TwoFactorStore;
         yield* store.delete(userId);
       }),
 
-    isEnabled: (userId: string) =>
-      Effect.gen(function* () {
-        const store = yield* TwoFactorStore;
+      isEnabled: Effect.fn("TwoFactorService.isEnabled")(function* (userId: string) {
         const record = yield* store.get(userId);
         return record !== null && record.verified;
       }),
 
-    beginChallenge: (userId: string) =>
-      Effect.gen(function* () {
-        // Only users with a verified record can be challenged
-        yield* getVerifiedRecord(userId);
+      beginChallenge: Effect.fn("TwoFactorService.beginChallenge")((userId: string) =>
+        Effect.gen(function* () {
+          // Only users with a verified record can be challenged
+          yield* getVerifiedRecord(userId);
 
-        const pendingStore = yield* PendingTwoFactorStore;
-        const token = yield* generatePendingToken();
+          const token = yield* generatePendingToken();
 
-        const pending: PendingTwoFactor = {
-          token,
-          userId,
-          createdAt: Date.now(),
-          expiresAt: Date.now() + pendingExpiresIn,
-        };
+          const pending: PendingTwoFactor = {
+            token,
+            userId,
+            createdAt: Date.now(),
+            expiresAt: Date.now() + pendingExpiresIn,
+          };
 
-        yield* pendingStore.create(pending);
+          yield* pendingStore.create(pending);
 
-        return {
-          token,
-          expiresAt: pending.expiresAt,
-        } satisfies TwoFactorChallenge;
-      }),
+          return {
+            token,
+            expiresAt: pending.expiresAt,
+          } satisfies TwoFactorChallenge;
+        }),
+      ),
 
-    verifyTotp: (pendingToken: string, code: string, options?: TwoFactorVerifyOptions) =>
-      Effect.gen(function* () {
-        const pending = yield* resolvePending(pendingToken);
-        const record = yield* getVerifiedRecord(pending.userId);
+      verifyTotp: Effect.fn("TwoFactorService.verifyTotp")(
+        (pendingToken: string, code: string, options?: TwoFactorVerifyOptions) =>
+          Effect.gen(function* () {
+            const pending = yield* resolvePending(pendingToken);
+            const record = yield* getVerifiedRecord(pending.userId);
 
-        const plainSecret = cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
-        const isValid = yield* verifyTOTP(code, plainSecret, config.totp);
-        if (!isValid) {
-          return yield* Effect.fail(
-            new TwoFactorError({
-              message: "Invalid two-factor code",
-            }),
-          );
-        }
+            const plainSecret =
+              cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
+            const isValid = yield* verifyTOTP(code, plainSecret, config.totp);
+            if (!isValid) {
+              return yield* Effect.fail(
+                new TwoFactorError({
+                  message: "Invalid two-factor code",
+                }),
+              );
+            }
 
-        // Consume the pending token (one-time use)
-        const pendingStore = yield* PendingTwoFactorStore;
-        yield* pendingStore.delete(pendingToken);
+            // Consume the pending token (one-time use)
+            yield* pendingStore.delete(pendingToken);
 
-        const sessionManager = yield* SessionService;
-        const session = yield* sessionManager.createSession(
-          pending.userId,
-          options?.sessionAttributes,
-        );
+            const session = yield* sessionManager.createSession(
+              pending.userId,
+              options?.sessionAttributes,
+            );
 
-        return {
-          userId: pending.userId,
-          session,
-        } satisfies TwoFactorVerifyResult;
-      }),
+            return {
+              userId: pending.userId,
+              session,
+            } satisfies TwoFactorVerifyResult;
+          }),
+      ),
 
-    verifyBackupCode: (pendingToken: string, code: string, options?: TwoFactorVerifyOptions) =>
-      Effect.gen(function* () {
-        const pending = yield* resolvePending(pendingToken);
-        const record = yield* getVerifiedRecord(pending.userId);
+      verifyBackupCode: Effect.fn("TwoFactorService.verifyBackupCode")(
+        (pendingToken: string, code: string, options?: TwoFactorVerifyOptions) =>
+          Effect.gen(function* () {
+            const pending = yield* resolvePending(pendingToken);
+            const record = yield* getVerifiedRecord(pending.userId);
 
-        const index = findBackupCodeIndex(record.backupCodes, hashBackupCode(code));
-        if (index === -1) {
-          return yield* Effect.fail(
-            new TwoFactorError({
-              message: "Invalid backup code",
-            }),
-          );
-        }
+            const index = findBackupCodeIndex(record.backupCodes, hashBackupCode(code));
+            if (index === -1) {
+              return yield* Effect.fail(
+                new TwoFactorError({
+                  message: "Invalid backup code",
+                }),
+              );
+            }
 
-        // Remove the used code (single use)
-        const store = yield* TwoFactorStore;
-        yield* store.upsert({
-          ...record,
-          backupCodes: record.backupCodes.filter((_, i) => i !== index),
-        });
+            // Remove the used code (single use)
+            yield* store.upsert({
+              ...record,
+              backupCodes: record.backupCodes.filter((_, i) => i !== index),
+            });
 
-        // Consume the pending token (one-time use)
-        const pendingStore = yield* PendingTwoFactorStore;
-        yield* pendingStore.delete(pendingToken);
+            // Consume the pending token (one-time use)
+            yield* pendingStore.delete(pendingToken);
 
-        const sessionManager = yield* SessionService;
-        const session = yield* sessionManager.createSession(
-          pending.userId,
-          options?.sessionAttributes,
-        );
+            const session = yield* sessionManager.createSession(
+              pending.userId,
+              options?.sessionAttributes,
+            );
 
-        return {
-          userId: pending.userId,
-          session,
-        } satisfies TwoFactorVerifyResult;
-      }),
+            return {
+              userId: pending.userId,
+              session,
+            } satisfies TwoFactorVerifyResult;
+          }),
+      ),
 
-    regenerateBackupCodes: (userId: string, password: string) =>
-      Effect.gen(function* () {
+      regenerateBackupCodes: Effect.fn("TwoFactorService.regenerateBackupCodes")(function* (
+        userId: string,
+        password: string,
+      ) {
         yield* verifyPassword(userId, password);
 
-        const store = yield* TwoFactorStore;
         const record = yield* store.get(userId);
         if (!record) {
           return yield* Effect.fail(
@@ -654,5 +639,5 @@ export const make = (
 
         return backupCodes;
       }),
-  }));
-};
+    };
+  });
