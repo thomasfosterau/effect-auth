@@ -36,7 +36,7 @@ import { SecondFactorGate } from "../email/EmailPassword.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { hashToken, timingSafeEqualBytes } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
-import { TwoFactorService } from "../TwoFactor.ts";
+import { MultiFactorService } from "../secondfactor/MultiFactor.ts";
 
 // ---------------------------------------------------------------------------
 // Record + Store
@@ -306,14 +306,14 @@ export const gate = (
  *
  * When a valid device token is present in `TrustedDeviceCookieRef`, sign-in
  * skips the second factor entirely. Otherwise, TOTP enrollment is checked and
- * a TOTP challenge is started via `TwoFactorService`.
+ * a TOTP challenge is started via `MultiFactorService`.
  *
  * ```ts
  * const services = Layer.mergeAll(
  *   EmailPasswordService.layer(),
- *   TrustedDeviceWithTwoFactorGateLayer.pipe(
+ *   TrustedDeviceWithMultiFactorGateLayer.pipe(
  *     Layer.provide(TrustedDeviceService.layer({ secret: Redacted.make("...") }).pipe(Layer.provide(trustedDeviceStore))),
- *     Layer.provide(TwoFactorService.layer({ issuer: "MyApp" }).pipe(Layer.provide(twoFactorStores))),
+ *     Layer.provide(MultiFactorService.layer({ issuer: "MyApp" }).pipe(Layer.provide(multiFactorStores))),
  *   ),
  * )
  * ```
@@ -321,23 +321,23 @@ export const gate = (
  * Remember to call `TrustedDeviceService.revokeAll` whenever the user changes
  * their password, disables 2FA, or signs out everywhere.
  */
-export const TrustedDeviceWithTwoFactorGateLayer: Layer.Layer<
+export const TrustedDeviceWithMultiFactorGateLayer: Layer.Layer<
   SecondFactorGate,
   never,
-  TrustedDeviceService | TwoFactorService
+  TrustedDeviceService | MultiFactorService
 > = Layer.effect(
   SecondFactorGate,
   Effect.gen(function* () {
     const trustedDeviceService = yield* TrustedDeviceService;
-    const twoFactor = yield* TwoFactorService;
+    const multiFactor = yield* MultiFactorService;
 
     const totpGate: typeof SecondFactorGate.Service = {
-      required: (user) => twoFactor.isEnabled(user.id),
+      required: (user) => multiFactor.isEnabled(user.id),
       begin: (user) =>
-        twoFactor
+        multiFactor
           .beginChallenge(user.id)
           .pipe(
-            Effect.catchTag("TwoFactorError", (err) =>
+            Effect.catchTag("MultiFactorError", (err) =>
               Effect.fail(new Errors.AuthError({ message: err.message })),
             ),
           ),

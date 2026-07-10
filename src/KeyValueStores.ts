@@ -3,7 +3,7 @@
  *
  * These stores hold short-lived token/state data (OAuth states, WebAuthn
  * challenges, rate-limit counters, verification / reset / magic-link tokens,
- * email OTPs and pending two-factor challenges) — a natural fit for a
+ * email OTPs and pending multi-factor challenges) — a natural fit for a
  * key-value backend such as Redis, Cloudflare KV, or an in-memory map.
  *
  * Each layer requires the `KeyValueStore` service from
@@ -50,8 +50,8 @@ import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
 import { type OAuthState, OAuthStateStore } from "./oauth/OAuth.ts";
 import { PasswordResetStore, type PasswordResetToken } from "./password/PasswordReset.ts";
 import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
-import { type PendingTwoFactor, PendingTwoFactorStore } from "./TwoFactor.ts";
-import { ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.ts";
+import { type PendingMultiFactor, PendingMultiFactorStore } from "./secondfactor/MultiFactor.ts";
+import { ChallengeStore, type WebAuthnChallenge } from "./secondfactor/WebAuthn.ts";
 import { type GoogleOneTapNonceEntry, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 
 // ---------------------------------------------------------------------------
@@ -515,16 +515,16 @@ export const EmailOTPStoreKV: Layer.Layer<EmailOTPStore, never, KeyValueStore.Ke
   Layer.effect(EmailOTPStore, emailOTPStoreKV);
 
 // ---------------------------------------------------------------------------
-// PendingTwoFactorStore
+// PendingMultiFactorStore
 // ---------------------------------------------------------------------------
 
-const pendingTwoFactorKey = (token: string) => `pending-two-factor:${token}`;
+const pendingMultiFactorKey = (token: string) => `pending-multi-factor:${token}`;
 
 /**
- * Build a {@link PendingTwoFactorStore} over the ambient `KeyValueStore`.
+ * Build a {@link PendingMultiFactorStore} over the ambient `KeyValueStore`.
  */
-export const pendingTwoFactorStoreKV: Effect.Effect<
-  typeof PendingTwoFactorStore.Service,
+export const pendingMultiFactorStoreKV: Effect.Effect<
+  typeof PendingMultiFactorStore.Service,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -532,21 +532,22 @@ export const pendingTwoFactorStoreKV: Effect.Effect<
   return {
     create: (pending) =>
       kv
-        .write(pendingTwoFactorKey(pending.token), pending, "pendingTwoFactor.create")
+        .write(pendingMultiFactorKey(pending.token), pending, "pendingMultiFactor.create")
         .pipe(Effect.as(pending)),
-    get: (token) => kv.read<PendingTwoFactor>(pendingTwoFactorKey(token), "pendingTwoFactor.get"),
-    delete: (token) => kv.remove(pendingTwoFactorKey(token), "pendingTwoFactor.delete"),
-  } satisfies typeof PendingTwoFactorStore.Service;
+    get: (token) =>
+      kv.read<PendingMultiFactor>(pendingMultiFactorKey(token), "pendingMultiFactor.get"),
+    delete: (token) => kv.remove(pendingMultiFactorKey(token), "pendingMultiFactor.delete"),
+  } satisfies typeof PendingMultiFactorStore.Service;
 });
 
 /**
- * `PendingTwoFactorStore` layer backed by `KeyValueStore`.
+ * `PendingMultiFactorStore` layer backed by `KeyValueStore`.
  */
-export const PendingTwoFactorStoreKV: Layer.Layer<
-  PendingTwoFactorStore,
+export const PendingMultiFactorStoreKV: Layer.Layer<
+  PendingMultiFactorStore,
   never,
   KeyValueStore.KeyValueStore
-> = Layer.effect(PendingTwoFactorStore, pendingTwoFactorStoreKV);
+> = Layer.effect(PendingMultiFactorStore, pendingMultiFactorStoreKV);
 
 // ---------------------------------------------------------------------------
 // IdentifierStore
@@ -765,7 +766,7 @@ export const layerKV: Layer.Layer<
   | PasswordResetStore
   | MagicLinkStore
   | EmailOTPStore
-  | PendingTwoFactorStore,
+  | PendingMultiFactorStore,
   never,
   KeyValueStore.KeyValueStore
 > = Layer.mergeAll(
@@ -776,5 +777,5 @@ export const layerKV: Layer.Layer<
   PasswordResetStoreKV,
   MagicLinkStoreKV,
   EmailOTPStoreKV,
-  PendingTwoFactorStoreKV,
+  PendingMultiFactorStoreKV,
 );

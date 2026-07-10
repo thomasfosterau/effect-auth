@@ -130,29 +130,31 @@ directories, each with its own `index.ts` barrel and matching
   `HTTPMiddleware.ts` (`AuthMiddleware`/`OptionalAuthMiddleware` for
   consumer apps), plus `SessionCookieCache.ts` (signed session-data cookie,
   re-exported here from its root file).
+- **`secondfactor/` cluster** (also the `Auth.SecondFactor` namespace):
+  `MultiFactor.ts` (TOTP + backup codes, integrating into password sign-in
+  via the `SecondFactorGate` seam), `OTPSecondFactor.ts` (OTP-based
+  alternative second-factor gate), `WebAuthn.ts` (passkeys, merged from
+  `WebAuthnService.ts`), `OTP.ts` (RFC 6238/4226 TOTP/HOTP primitives).
 - **Sign-in methods** (root, not yet clustered): `Username.ts`,
-  `MagicLink.ts`, `PhoneOTP.ts`, `Anonymous.ts`, `WebAuthn.ts` (passkeys,
-  merged from `WebAuthnService.ts`), `SSO.ts` (OIDC relying party),
-  `GoogleOneTap.ts`, `DeviceAuthorization.ts` (RFC 8628).
+  `MagicLink.ts`, `PhoneOTP.ts`, `Anonymous.ts`, `SSO.ts` (OIDC relying
+  party), `GoogleOneTap.ts`, `DeviceAuthorization.ts` (RFC 8628).
 - **Account lifecycle** (root): `AuthLifecycle.ts` (sign-up/sign-in
-  orchestration), `AccountManagement.ts` (email change / account deletion),
-  `TwoFactor.ts` (TOTP + backup codes, integrating into password sign-in via
-  the `SecondFactorGate` seam), `OTP.ts` (RFC 6238/4226 TOTP/HOTP
-  primitives).
+  orchestration), `AccountManagement.ts` (email change / account deletion).
 - **Platform features** (root): `Organization.ts`, `Admin.ts`, `APIKey.ts`,
   `JWT.ts` (ES256/EdDSA + JWKS), `OIDCProvider.ts` (act as an OIDC identity
   provider), `RateLimit.ts`/`RateLimitPersistence.ts`, `ClientIP.ts`,
   `OneTimeToken.ts`.
 - **Storage helpers** (root): `KeyValueStores.ts` — layers implementing the
   ephemeral stores (OAuth state, WebAuthn challenges, rate limits,
-  tokens/OTPs, pending two-factor) over `effect/unstable/persistence`
+  tokens/OTPs, pending multi-factor) over `effect/unstable/persistence`
   `KeyValueStore` (in-memory, file system, Redis, …).
 
 Every cluster namespace is also re-exported from the package root (`Auth.Email`,
-`Auth.HTTP`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`, `Auth.Authz`), so
-`import * as Auth from "effect-auth"` reaches the whole surface; the
-per-cluster subpaths (`effect-auth/email`, `/http`, `/oauth`, `/password`,
-`/plugins`, `/authz`) exist for consumers who want a narrower import.
+`Auth.HTTP`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`, `Auth.Authz`,
+`Auth.SecondFactor`), so `import * as Auth from "effect-auth"` reaches the
+whole surface; the per-cluster subpaths (`effect-auth/email`, `/http`,
+`/oauth`, `/password`, `/plugins`, `/authz`, `/secondfactor`) exist for
+consumers who want a narrower import.
 
 ## Stores
 
@@ -166,12 +168,12 @@ Users persist state by implementing plain store interfaces (DESIGN.md D3):
 
 Two mechanisms, by boundary (DESIGN.md D4):
 
-- **Domain errors** are `Data.TaggedError` classes — shared ones in `Errors.ts` (`AuthError`, `InvalidCredentialsError`, `SessionExpiredError`, …), module-local ones (`TwoFactorError`, `OrganizationError`, …) where only one module raises them. `AuthError` means _infrastructure/unexpected_ failure; flow outcomes get specific tags. Nothing subclasses `AuthError` — errors compose in unions, keeping method signatures honest.
+- **Domain errors** are `Data.TaggedError` classes — shared ones in `Errors.ts` (`AuthError`, `InvalidCredentialsError`, `SessionExpiredError`, …), module-local ones (`MultiFactorError`, `OrganizationError`, …) where only one module raises them. `AuthError` means _infrastructure/unexpected_ failure; flow outcomes get specific tags. Nothing subclasses `AuthError` — errors compose in unions, keeping method signatures honest.
 - **HTTP boundary errors** are `Schema.TaggedErrorClass` classes in `HTTPApiSchemas.ts` with fixed status codes (400/401/403/404/409/429/500). Handlers in `HTTPServer.ts` map domain errors to these per endpoint; `RateLimitError` is always 429, `AuthError` is always 500, and typed flow errors carry the specific statuses (e.g. `EmailInUseError` → 409).
 
 ## HTTP protocol
 
-- `HTTPApi.ts` defines the full contract with `effect/unstable/httpapi` — one `auth` group, kebab-case paths (`/sign-in/email-otp`, `/two-factor/enable`), camelCase operationIds. OpenAPI 3.1 (`HTTP.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`HTTP.make({ docs: true })`).
+- `HTTPApi.ts` defines the full contract with `effect/unstable/httpapi` — one `auth` group, kebab-case paths (`/sign-in/email-otp`, `/multi-factor/enable`), camelCase operationIds. OpenAPI 3.1 (`HTTP.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`HTTP.make({ docs: true })`).
 - **404-until-configured**: optional features resolve their service with `Effect.serviceOption`; when the layer isn't provided the endpoint fails `NotFound` — a server only exposes what it configures.
 - **Cookies**: HttpOnly, SameSite, `Secure` by default; optional HMAC-signed session-data cache cookie to skip store reads; multi-session and last-login-method helper cookies.
 - **CSRF**: a trusted-origin gate runs before any handler — requests with an `Origin` header must match the request origin or the configured `trustedOrigins`; requests without one (curl, server-to-server) pass.

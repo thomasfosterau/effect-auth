@@ -39,13 +39,13 @@ import {
   EmailOTPService,
 } from "../email/EmailOTP.ts";
 import {
-  PendingTwoFactorStore,
-  TwoFactorGateLayer,
-  TwoFactorStore,
-  type PendingTwoFactor,
-  type TwoFactorRecord,
-  TwoFactorService,
-} from "../TwoFactor.ts";
+  PendingMultiFactorStore,
+  MultiFactorGateLayer,
+  MultiFactorStore,
+  type PendingMultiFactor,
+  type MultiFactorRecord,
+  MultiFactorService,
+} from "../secondfactor/MultiFactor.ts";
 import {
   AccountManagementStore,
   type AccountToken,
@@ -65,7 +65,7 @@ import {
   type DeviceAuthorizationRecord,
   DeviceAuthorizationService,
 } from "../DeviceAuthorization.ts";
-import { generateTOTP } from "../OTP.ts";
+import { generateTOTP } from "../secondfactor/OTP.ts";
 import { UserNotFoundError } from "../Errors.ts";
 import type * as Types from "../Types.ts";
 
@@ -83,7 +83,7 @@ const hasher = Password.scryptHasher({ cost: 16384 });
 interface Fixture {
   /** The base `AuthServices` layer (no optional features). */
   readonly services: Layer.Layer<AuthServices>;
-  /** Base layer + magic link, email OTP, two-factor (and the 2FA gate). */
+  /** Base layer + magic link, email OTP, multi-factor (and the 2FA gate). */
   readonly featureServices: Layer.Layer<AuthServices>;
   readonly sentVerificationTokens: string[];
   readonly sentResetTokens: string[];
@@ -330,25 +330,25 @@ const makeFixture = (): Fixture => {
     createUser: (input) => Effect.sync(() => createUser(input)),
   };
 
-  const twoFactorRecords = new Map<string, TwoFactorRecord>();
-  const twoFactorStore: typeof TwoFactorStore.Service = {
-    get: (userId) => Effect.sync(() => twoFactorRecords.get(userId) ?? null),
+  const multiFactorRecords = new Map<string, MultiFactorRecord>();
+  const multiFactorStore: typeof MultiFactorStore.Service = {
+    get: (userId) => Effect.sync(() => multiFactorRecords.get(userId) ?? null),
     upsert: (record) =>
       Effect.sync(() => {
-        twoFactorRecords.set(record.userId, record);
+        multiFactorRecords.set(record.userId, record);
         return record;
       }),
-    delete: (userId) => Effect.sync(() => void twoFactorRecords.delete(userId)),
+    delete: (userId) => Effect.sync(() => void multiFactorRecords.delete(userId)),
   };
-  const pendingTwoFactors = new Map<string, PendingTwoFactor>();
-  const pendingTwoFactorStore: typeof PendingTwoFactorStore.Service = {
+  const pendingMultiFactors = new Map<string, PendingMultiFactor>();
+  const pendingMultiFactorStore: typeof PendingMultiFactorStore.Service = {
     create: (pending) =>
       Effect.sync(() => {
-        pendingTwoFactors.set(pending.token, pending);
+        pendingMultiFactors.set(pending.token, pending);
         return pending;
       }),
-    get: (token) => Effect.sync(() => pendingTwoFactors.get(token) ?? null),
-    delete: (token) => Effect.sync(() => void pendingTwoFactors.delete(token)),
+    get: (token) => Effect.sync(() => pendingMultiFactors.get(token) ?? null),
+    delete: (token) => Effect.sync(() => void pendingMultiFactors.delete(token)),
   };
 
   const accountTokens = new Map<string, AccountToken>();
@@ -497,11 +497,11 @@ const makeFixture = (): Fixture => {
     Layer.succeed(MagicLinkUserStore)(magicLinkUserStore),
     Layer.succeed(EmailOTPStore)(emailOTPStore),
     Layer.succeed(EmailOTPUserStore)(emailOTPUserStore),
-    Layer.succeed(TwoFactorStore)(twoFactorStore),
-    Layer.succeed(PendingTwoFactorStore)(pendingTwoFactorStore),
+    Layer.succeed(MultiFactorStore)(multiFactorStore),
+    Layer.succeed(PendingMultiFactorStore)(pendingMultiFactorStore),
   );
 
-  const twoFactorServiceLayer = TwoFactorService.layer({ issuer: "effect-auth-test" }).pipe(
+  const multiFactorServiceLayer = MultiFactorService.layer({ issuer: "effect-auth-test" }).pipe(
     Layer.provide(featureBase),
   );
 
@@ -532,9 +532,9 @@ const makeFixture = (): Fixture => {
       sendVerificationOTP: (email, otp, purpose) =>
         Effect.sync(() => void sentOTPs.push({ email, otp, purpose })),
     }).pipe(Layer.provide(featureBase)),
-    twoFactorServiceLayer,
+    multiFactorServiceLayer,
     // The gate makes password sign-in return `secondFactor` for enrolled users.
-    TwoFactorGateLayer.pipe(Layer.provide(twoFactorServiceLayer)),
+    MultiFactorGateLayer.pipe(Layer.provide(multiFactorServiceLayer)),
   );
 
   return {
@@ -1126,7 +1126,7 @@ describe("mount prefix: 404 for out-of-prefix paths", () => {
 
 describe("optional features return 404 when not configured", () => {
   it("answers 404 on feature endpoints with the base fixture", async () => {
-    const handler = handlerFor(); // base services: no MagicLink/EmailOTP/TwoFactor layers
+    const handler = handlerFor(); // base services: no MagicLink/EmailOTP/MultiFactor layers
     const sid = await signUp(handler, "a@b.com");
 
     const magicLink = await handler(jsonRequest("/magic-link/send", { email: "a@b.com" }));
@@ -1139,12 +1139,12 @@ describe("optional features return 404 when not configured", () => {
     expect(emailOTP.status).toBe(404);
 
     const verifyTotp = await handler(
-      jsonRequest("/two-factor/verify-totp", { token: "x", code: "000000" }),
+      jsonRequest("/multi-factor/verify-totp", { token: "x", code: "000000" }),
     );
     expect(verifyTotp.status).toBe(404);
 
     const enable = await handler(
-      jsonRequest("/two-factor/enable", { password: PW }, asCookie(sid)),
+      jsonRequest("/multi-factor/enable", { password: PW }, asCookie(sid)),
     );
     expect(enable.status).toBe(404);
   });
@@ -1230,7 +1230,7 @@ describe("email OTP", () => {
   });
 });
 
-describe("two-factor", () => {
+describe("multi-factor", () => {
   const totpFor = (secret: string) => Effect.runPromise(generateTOTP(secret));
 
   it("enables, confirms, gates sign-in, and redeems a TOTP challenge", async () => {
@@ -1240,12 +1240,12 @@ describe("two-factor", () => {
 
     // Wrong password cannot enable.
     const denied = await handler(
-      jsonRequest("/two-factor/enable", { password: "wrong-password" }, asCookie(sid)),
+      jsonRequest("/multi-factor/enable", { password: "wrong-password" }, asCookie(sid)),
     );
     expect(denied.status).toBe(400);
 
     const enable = await handler(
-      jsonRequest("/two-factor/enable", { password: PW }, asCookie(sid)),
+      jsonRequest("/multi-factor/enable", { password: PW }, asCookie(sid)),
     );
     expect(enable.status).toBe(200);
     const enrollment = (await enable.json()) as {
@@ -1263,7 +1263,11 @@ describe("two-factor", () => {
     expect(ungated.headers.get("set-cookie")).toContain("conduit_session=");
 
     const confirm = await handler(
-      jsonRequest("/two-factor/confirm", { code: await totpFor(enrollment.secret) }, asCookie(sid)),
+      jsonRequest(
+        "/multi-factor/confirm",
+        { code: await totpFor(enrollment.secret) },
+        asCookie(sid),
+      ),
     );
     expect(confirm.status).toBe(200);
     expect(await confirm.json()).toEqual({ status: true });
@@ -1284,7 +1288,7 @@ describe("two-factor", () => {
     const code = await totpFor(enrollment.secret);
     const badCode = code === "000000" ? "111111" : "000000";
     const rejected = await handler(
-      jsonRequest("/two-factor/verify-totp", {
+      jsonRequest("/multi-factor/verify-totp", {
         token: gatedBody.secondFactor!.token,
         code: badCode,
       }),
@@ -1293,7 +1297,7 @@ describe("two-factor", () => {
 
     // Correct TOTP code redeems the challenge into a session.
     const verified = await handler(
-      jsonRequest("/two-factor/verify-totp", { token: gatedBody.secondFactor!.token, code }),
+      jsonRequest("/multi-factor/verify-totp", { token: gatedBody.secondFactor!.token, code }),
     );
     expect(verified.status).toBe(200);
     const verifiedBody = (await verified.json()) as { user: { email: string } };
@@ -1303,7 +1307,7 @@ describe("two-factor", () => {
 
     // The pending token was consumed (one-time use).
     const replay = await handler(
-      jsonRequest("/two-factor/verify-totp", { token: gatedBody.secondFactor!.token, code }),
+      jsonRequest("/multi-factor/verify-totp", { token: gatedBody.secondFactor!.token, code }),
     );
     expect(replay.status).toBe(401);
   });
@@ -1314,11 +1318,15 @@ describe("two-factor", () => {
     const sid = await signUp(handler, "2fa@example.com");
 
     const enable = await handler(
-      jsonRequest("/two-factor/enable", { password: PW }, asCookie(sid)),
+      jsonRequest("/multi-factor/enable", { password: PW }, asCookie(sid)),
     );
     const enrollment = (await enable.json()) as { secret: string; backupCodes: string[] };
     await handler(
-      jsonRequest("/two-factor/confirm", { code: await totpFor(enrollment.secret) }, asCookie(sid)),
+      jsonRequest(
+        "/multi-factor/confirm",
+        { code: await totpFor(enrollment.secret) },
+        asCookie(sid),
+      ),
     );
 
     const challengeToken = async (): Promise<string> => {
@@ -1332,7 +1340,7 @@ describe("two-factor", () => {
 
     const backupCode = enrollment.backupCodes[0];
     const first = await handler(
-      jsonRequest("/two-factor/verify-backup-code", {
+      jsonRequest("/multi-factor/verify-backup-code", {
         token: await challengeToken(),
         code: backupCode,
       }),
@@ -1342,7 +1350,7 @@ describe("two-factor", () => {
 
     // The same backup code cannot be used again.
     const second = await handler(
-      jsonRequest("/two-factor/verify-backup-code", {
+      jsonRequest("/multi-factor/verify-backup-code", {
         token: await challengeToken(),
         code: backupCode,
       }),
@@ -1350,21 +1358,25 @@ describe("two-factor", () => {
     expect(second.status).toBe(401);
   });
 
-  it("regenerates backup codes and disables two-factor with the password", async () => {
+  it("regenerates backup codes and disables multi-factor with the password", async () => {
     const fixture = makeFixture();
     const handler = handlerFor(fixture, { features: true });
     const sid = await signUp(handler, "2fa@example.com");
 
     const enable = await handler(
-      jsonRequest("/two-factor/enable", { password: PW }, asCookie(sid)),
+      jsonRequest("/multi-factor/enable", { password: PW }, asCookie(sid)),
     );
     const enrollment = (await enable.json()) as { secret: string; backupCodes: string[] };
     await handler(
-      jsonRequest("/two-factor/confirm", { code: await totpFor(enrollment.secret) }, asCookie(sid)),
+      jsonRequest(
+        "/multi-factor/confirm",
+        { code: await totpFor(enrollment.secret) },
+        asCookie(sid),
+      ),
     );
 
     const regen = await handler(
-      jsonRequest("/two-factor/regenerate-backup-codes", { password: PW }, asCookie(sid)),
+      jsonRequest("/multi-factor/regenerate-backup-codes", { password: PW }, asCookie(sid)),
     );
     expect(regen.status).toBe(200);
     const regenBody = (await regen.json()) as { backupCodes: string[] };
@@ -1377,7 +1389,7 @@ describe("two-factor", () => {
     );
     const gatedBody = (await gated.json()) as { secondFactor?: { token: string } };
     const staleCode = await handler(
-      jsonRequest("/two-factor/verify-backup-code", {
+      jsonRequest("/multi-factor/verify-backup-code", {
         token: gatedBody.secondFactor!.token,
         code: enrollment.backupCodes[0],
       }),
@@ -1386,12 +1398,12 @@ describe("two-factor", () => {
 
     // Disable requires the password; afterwards sign-in is no longer gated.
     const disableDenied = await handler(
-      jsonRequest("/two-factor/disable", { password: "wrong-password" }, asCookie(sid)),
+      jsonRequest("/multi-factor/disable", { password: "wrong-password" }, asCookie(sid)),
     );
     expect(disableDenied.status).toBe(400);
 
     const disable = await handler(
-      jsonRequest("/two-factor/disable", { password: PW }, asCookie(sid)),
+      jsonRequest("/multi-factor/disable", { password: PW }, asCookie(sid)),
     );
     expect(disable.status).toBe(200);
     expect(await disable.json()).toEqual({ status: true });

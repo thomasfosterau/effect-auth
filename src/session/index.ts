@@ -10,5 +10,5 @@ export {
   TrustedDeviceService,
   trustedDeviceConfig,
   gate,
-  TrustedDeviceWithTwoFactorGateLayer,
+  TrustedDeviceWithMultiFactorGateLayer,
 } from "./TrustedDevice.ts";

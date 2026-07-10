@@ -133,7 +133,7 @@ existing test suite plus a new static-layer test guard behavior.
 
 A service class carries only the layers defined in its own module. Layers that
 implement a tag from _another_ module keep their standalone names to avoid
-import cycles: `TwoFactorGateLayer` (`TwoFactor.ts:631`, provides
+import cycles: `MultiFactorGateLayer` (`MultiFactor.ts:631`, provides
 `SecondFactorGateTag` from EmailPassword), `RateLimiterPersistenceLayer`
 (`RateLimitPersistence.ts:114`, provides `RateLimiterTag` from RateLimit), and
 the KV store layers (`KeyValueStores.ts`, provide store tags from many modules).
@@ -144,7 +144,8 @@ the KV store layers (`KeyValueStores.ts`, provide store tags from many modules).
 no-config functions (`RateLimiterLayer()` `RateLimit.ts:212`,
 `AuthorizationPolicyLayer()` `authz/Authorization.ts` (then flat `Authorization.ts`), `UserServiceLayer()`
 `User.ts:153`); 4 bare Layer values (`RateLimiterPersistenceLayer`,
-`ScryptHasherLayer`, `PasswordHasherLayer`, `TwoFactorGateLayer`); one
+`ScryptHasherLayer`, `PasswordHasherLayer`, `MultiFactorGateLayer` — `secondfactor/MultiFactor.ts`
+(then flat `TwoFactor.ts`)); one
 `make`-prefixed (`makeMultiAlgorithmVerifierLayer` `password/Password.ts` (then flat `Password.ts`)); one
 lowercase two-arg (`authGroupLayer(config?, multiSession?)` `http/HTTPServer.ts` (then flat `HttpServer.ts`));
 plus `PasswordHasherLive`/`PBKDF2HasherLive` (`password/Password.ts` (then flat `Password.ts`)) which are
@@ -224,7 +225,7 @@ Changeset with a migration table.
 
 `@effect-auth/sql` and `@effect-auth/alchemy` both implement the same 20
 stores (the alchemy gap — MagicLink, MagicLinkUser, EmailOTP, EmailOTPUser,
-TwoFactor, PendingTwoFactor — was closed 2026-07-04). Neither implements the
+MultiFactor, PendingMultiFactor — was closed 2026-07-04). Neither implements the
 advanced-feature stores (Organization, APIKey, SSO, OIDC\*,
 DeviceAuthorization, …); that remains a tracked feature gap, not an API
 question.
@@ -391,7 +392,7 @@ correct).
 **Decision.**
 
 - **operationId scheme:** `<feature><Action>` noun-first for feature endpoints
-  (`orgList`, `apiKeyCreate`, `twoFactorEnable` are canonical), with the single
+  (`orgList`, `apiKeyCreate`, `multiFactorEnable` are canonical), with the single
   exception of the cross-feature `signIn<Method>` family, which is verb-first
   because "sign in" _is_ the feature. Top-level session/user endpoints keep
   their short verb forms (`signUp`, `signIn`, `signOut`, `getSession`).
@@ -423,7 +424,7 @@ they're batched for one 0.x minor with a rename table.
 **Status quo.** Two clients: the generated Effect client
 (`http/HTTPClient.ts`, then flat `HttpClient.ts:26`, full parity by construction) and the hand-written
 zero-dependency browser client (`packages/client/src/Client.ts:136`) covering
-23/84 endpoints (core flows + magicLink/emailOtp/twoFactor namespaces). No
+23/84 endpoints (core flows + magicLink/emailOtp/multiFactor namespaces). No
 dead methods; the missing 61 are the optional/advanced surface. Framework
 bindings: React has `useSession` + `useListSessions` (`react.ts:24,37`); Svelte
 has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`

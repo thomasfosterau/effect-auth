@@ -11,10 +11,10 @@ import {
   PasswordResetStoreKV,
   MagicLinkStoreKV,
   EmailOTPStoreKV,
-  PendingTwoFactorStoreKV,
+  PendingMultiFactorStoreKV,
 } from "./KeyValueStores.ts";
 import { OAuthStateStore, type OAuthState } from "./oauth/OAuth.ts";
-import { ChallengeStore, type WebAuthnChallenge } from "./WebAuthn.ts";
+import { ChallengeStore, type WebAuthnChallenge } from "./secondfactor/WebAuthn.ts";
 import { RateLimitStore, type RateLimitEntry } from "./RateLimit.ts";
 import {
   EmailVerificationStore,
@@ -24,7 +24,7 @@ import * as EmailVerification from "./email/EmailVerification.ts";
 import { PasswordResetStore, type PasswordResetToken } from "./password/PasswordReset.ts";
 import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
 import { EmailOTPStore, type EmailOTPRecord } from "./email/EmailOTP.ts";
-import { PendingTwoFactorStore, type PendingTwoFactor } from "./TwoFactor.ts";
+import { PendingMultiFactorStore, type PendingMultiFactor } from "./secondfactor/MultiFactor.ts";
 import { Hooks } from "./Hooks.ts";
 
 /** Fresh in-memory KV per invocation so tests are isolated. */
@@ -41,7 +41,7 @@ const run = <A, E>(
     | PasswordResetStore
     | MagicLinkStore
     | EmailOTPStore
-    | PendingTwoFactorStore
+    | PendingMultiFactorStore
   >,
 ): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(testLayer())) as Effect.Effect<A, E>);
 
@@ -54,7 +54,7 @@ describe("KeyValueStores", () => {
     expect(PasswordResetStoreKV).toBeDefined();
     expect(MagicLinkStoreKV).toBeDefined();
     expect(EmailOTPStoreKV).toBeDefined();
-    expect(PendingTwoFactorStoreKV).toBeDefined();
+    expect(PendingMultiFactorStoreKV).toBeDefined();
   });
 
   describe("OAuthStateStoreKV", () => {
@@ -322,9 +322,9 @@ describe("KeyValueStores", () => {
     });
   });
 
-  describe("PendingTwoFactorStoreKV", () => {
+  describe("PendingMultiFactorStoreKV", () => {
     it("roundtrips create/get/delete", async () => {
-      const pending: PendingTwoFactor = {
+      const pending: PendingMultiFactor = {
         token: "2fa-1",
         userId: "user-1",
         createdAt: Date.now(),
@@ -332,7 +332,7 @@ describe("KeyValueStores", () => {
       };
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* PendingTwoFactorStore;
+          const store = yield* PendingMultiFactorStore;
           yield* store.create(pending);
           const loaded = yield* store.get("2fa-1");
           yield* store.delete("2fa-1");

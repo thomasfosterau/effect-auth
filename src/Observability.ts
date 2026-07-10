@@ -62,16 +62,19 @@ export const rateLimitHits = Metric.counter("effect-auth.rate_limit_hits.total",
 });
 
 /** Two-factor challenges started. */
-export const twoFactorChallenges = Metric.counter("effect-auth.two_factor_challenges.total", {
+export const multiFactorChallenges = Metric.counter("effect-auth.multi_factor_challenges.total", {
   description: "Two-factor challenges started",
   incremental: true,
 });
 
 /** Two-factor verification attempts. Attributes: `{ type, outcome }`. */
-export const twoFactorVerifications = Metric.counter("effect-auth.two_factor_verifications.total", {
-  description: "Two-factor verification attempts — tagged by type and outcome",
-  incremental: true,
-});
+export const multiFactorVerifications = Metric.counter(
+  "effect-auth.multi_factor_verifications.total",
+  {
+    description: "Two-factor verification attempts — tagged by type and outcome",
+    incremental: true,
+  },
+);
 
 /** OAuth callback completions. Attributes: `{ outcome }`. */
 export const oauthCallbacks = Metric.counter("effect-auth.oauth_callbacks.total", {
@@ -134,14 +137,14 @@ export const recordTokenVerification = (
 export const recordRateLimitHit = (operation: string): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(rateLimitHits, { operation }), 1);
 
-export const recordTwoFactorChallenge = (): Effect.Effect<void> =>
-  Metric.update(twoFactorChallenges, 1);
+export const recordMultiFactorChallenge = (): Effect.Effect<void> =>
+  Metric.update(multiFactorChallenges, 1);
 
-export const recordTwoFactorVerification = (
+export const recordMultiFactorVerification = (
   type: "totp" | "backup-code",
   outcome: "success" | "failure",
 ): Effect.Effect<void> =>
-  Metric.update(Metric.withAttributes(twoFactorVerifications, { type, outcome }), 1);
+  Metric.update(Metric.withAttributes(multiFactorVerifications, { type, outcome }), 1);
 
 export const recordOAuthCallback = (outcome: "success" | "failure"): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(oauthCallbacks, { outcome }), 1);

@@ -24,7 +24,7 @@ import { PhoneOTPService } from "../PhoneOTP.ts";
 import { UsernameService } from "../Username.ts";
 import { DeviceAuthorizationService, normalizeUserCode } from "../DeviceAuthorization.ts";
 import { EmailOTPService } from "../email/EmailOTP.ts";
-import { TwoFactorService } from "../TwoFactor.ts";
+import { MultiFactorService } from "../secondfactor/MultiFactor.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { EmailVerificationService } from "../email/EmailVerification.ts";
 import { PasswordResetService } from "../password/PasswordReset.ts";
@@ -324,7 +324,7 @@ const signUpInput = (payload: S.SignUpPayload) => ({
 // -----------------------------------------------------------------------------
 // Optional feature resolution
 //
-// Magic link, email OTP and two-factor are optional plugins: their services
+// Magic link, email OTP and multi-factor are optional plugins: their services
 // are NOT part of `AuthServices`. Handlers resolve them with
 // `Effect.serviceOption` and answer 404 when absent. Because the service
 // METHODS declare their store requirements in `R`, the store tags are
@@ -353,9 +353,9 @@ const resolveMagicLink = resolveOptional(MagicLinkService, "Magic link is not en
 /** Resolve the email OTP service, or fail with 404. */
 const resolveEmailOTP = resolveOptional(EmailOTPService, "Email OTP is not enabled");
 
-/** Resolve the two-factor service, or fail with 404. */
-const resolveTwoFactor = resolveOptional(
-  TwoFactorService,
+/** Resolve the multi-factor service, or fail with 404. */
+const resolveMultiFactor = resolveOptional(
+  MultiFactorService,
   "Two-factor authentication is not enabled",
 );
 
@@ -1504,14 +1504,14 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return yield* withSessionCookie(body, result.session, cfg, "phone-otp");
         }),
       )
-      .handle("twoFactorEnable", ({ payload, request }) =>
+      .handle("multiFactorEnable", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const twoFactor = yield* resolveTwoFactor;
-          return yield* twoFactor.service.enable(resolved.user.id, payload.password).pipe(
+          const multiFactor = yield* resolveMultiFactor;
+          return yield* multiFactor.service.enable(resolved.user.id, payload.password).pipe(
             Effect.catchTags({
               InvalidCredentialsError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-              TwoFactorError: (e) => internalServerError(e),
+              MultiFactorError: (e) => internalServerError(e),
               UserNotFoundError: (e) => internalServerError(e),
               HashingError: (e) => internalServerError(e),
               AuthError: (e) => internalServerError(e),
@@ -1519,13 +1519,13 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           );
         }),
       )
-      .handle("twoFactorConfirm", ({ payload, request }) =>
+      .handle("multiFactorConfirm", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const twoFactor = yield* resolveTwoFactor;
-          yield* twoFactor.service.confirmEnable(resolved.user.id, payload.code).pipe(
+          const multiFactor = yield* resolveMultiFactor;
+          yield* multiFactor.service.confirmEnable(resolved.user.id, payload.code).pipe(
             Effect.catchTags({
-              TwoFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              MultiFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               HashingError: (e) => internalServerError(e),
               AuthError: (e) => internalServerError(e),
             }),
@@ -1533,11 +1533,11 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return { status: true };
         }),
       )
-      .handle("twoFactorDisable", ({ payload, request }) =>
+      .handle("multiFactorDisable", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const twoFactor = yield* resolveTwoFactor;
-          yield* twoFactor.service.disable(resolved.user.id, payload.password).pipe(
+          const multiFactor = yield* resolveMultiFactor;
+          yield* multiFactor.service.disable(resolved.user.id, payload.password).pipe(
             Effect.catchTags({
               InvalidCredentialsError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               HashingError: (e) => internalServerError(e),
@@ -1547,15 +1547,15 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return { status: true };
         }),
       )
-      .handle("twoFactorRegenerateBackupCodes", ({ payload, request }) =>
+      .handle("multiFactorRegenerateBackupCodes", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const twoFactor = yield* resolveTwoFactor;
-          const backupCodes = yield* twoFactor.service
+          const multiFactor = yield* resolveMultiFactor;
+          const backupCodes = yield* multiFactor.service
             .regenerateBackupCodes(resolved.user.id, payload.password)
             .pipe(
               Effect.catchTags({
-                TwoFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                MultiFactorError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 InvalidCredentialsError: (e) =>
                   Effect.fail(new S.BadRequest({ message: e.message })),
                 HashingError: (e) => internalServerError(e),
@@ -1565,12 +1565,12 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return { backupCodes };
         }),
       )
-      .handle("twoFactorVerifyTotp", ({ payload }) =>
+      .handle("multiFactorVerifyTotp", ({ payload }) =>
         Effect.gen(function* () {
-          const twoFactor = yield* resolveTwoFactor;
-          const result = yield* twoFactor.service.verifyTotp(payload.token, payload.code).pipe(
+          const multiFactor = yield* resolveMultiFactor;
+          const result = yield* multiFactor.service.verifyTotp(payload.token, payload.code).pipe(
             Effect.catchTags({
-              TwoFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+              MultiFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
               HashingError: (e) => internalServerError(e),
               AuthError: (e) => internalServerError(e),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
@@ -1600,17 +1600,17 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 ),
             }),
           );
-          return yield* secondFactorSuccess(result, cfg, "two-factor");
+          return yield* secondFactorSuccess(result, cfg, "multi-factor");
         }),
       )
-      .handle("twoFactorVerifyBackupCode", ({ payload }) =>
+      .handle("multiFactorVerifyBackupCode", ({ payload }) =>
         Effect.gen(function* () {
-          const twoFactor = yield* resolveTwoFactor;
-          const result = yield* twoFactor.service
+          const multiFactor = yield* resolveMultiFactor;
+          const result = yield* multiFactor.service
             .verifyBackupCode(payload.token, payload.code)
             .pipe(
               Effect.catchTags({
-                TwoFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+                MultiFactorError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
                 AuthError: (e) => internalServerError(e),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
                 AccountLockedError: (e) =>
@@ -1639,7 +1639,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                   ),
               }),
             );
-          return yield* secondFactorSuccess(result, cfg, "two-factor");
+          return yield* secondFactorSuccess(result, cfg, "multi-factor");
         }),
       )
       // --- Organization -----------------------------------------------------
@@ -2531,7 +2531,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
 
 /**
  * Build the `AuthSuccess` response (with session cookie) for a redeemed
- * second-factor challenge. The two-factor service returns only `userId` +
+ * second-factor challenge. The multi-factor service returns only `userId` +
  * `session`, so the full user is fetched through the core `UserService`.
  */
 const secondFactorSuccess = (
@@ -2718,7 +2718,7 @@ export interface HTTPIPRateLimitConfig {
  * | `/magic-link/send`, `/email-otp/send`  | 5 req            | 10 min   | 30 min   |
  * | `/phone-otp/send`                      | 5 req            | 10 min   | 30 min   |
  * | `/password-reset/request`              | 5 req            | 1 hr     | 2 hr     |
- * | `/two-factor/verify-*`                 | 10 req           | 5 min    | 30 min   |
+ * | `/multi-factor/verify-*`                 | 10 req           | 5 min    | 30 min   |
  */
 export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
   {
@@ -2750,7 +2750,7 @@ export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
     blockDurationMs: 2 * 60 * 60 * 1000,
   },
   {
-    path: /^\/two-factor\/verify-/,
+    path: /^\/multi-factor\/verify-/,
     methods: ["POST"],
     maxRequests: 10,
     windowMs: 5 * 60 * 1000,

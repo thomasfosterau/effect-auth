@@ -1,29 +1,29 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect, Redacted } from "effect";
-import { Hooks } from "./Hooks.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { SessionService, make as makeSessionService } from "./session/SessionService.ts";
-import { SessionStore } from "./session/SessionStore.ts";
-import { UserStore } from "./session/UserStore.ts";
+import { Hooks } from "../Hooks.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { SessionService, make as makeSessionService } from "../session/SessionService.ts";
+import { SessionStore } from "../session/SessionStore.ts";
+import { UserStore } from "../session/UserStore.ts";
 import {
-  type PendingTwoFactor,
-  type TwoFactorRecord,
-  TwoFactorStore,
-  PendingTwoFactorStore,
-} from "./TwoFactor.ts";
-import * as TwoFactor from "./TwoFactor.ts";
-import * as Cipher from "./Cipher.ts";
-import { type CreateUserInput, EmailPasswordStore } from "./email/EmailPassword.ts";
+  type PendingMultiFactor,
+  type MultiFactorRecord,
+  MultiFactorStore,
+  PendingMultiFactorStore,
+} from "./MultiFactor.ts";
+import * as MultiFactor from "./MultiFactor.ts";
+import * as Cipher from "../Cipher.ts";
+import { type CreateUserInput, EmailPasswordStore } from "../email/EmailPassword.ts";
 import { generateTOTP } from "./OTP.ts";
-import { PasswordHasher } from "./password/Password.ts";
-import * as Password from "./password/Password.ts";
-import type { Session, User, SessionConfig } from "./Types.ts";
+import { PasswordHasher } from "../password/Password.ts";
+import * as Password from "../password/Password.ts";
+import type { Session, User, SessionConfig } from "../Types.ts";
 
 const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
 const passwordHashes = new Map<string, string>();
-const twoFactorRecords = new Map<string, TwoFactorRecord>();
-const pendingChallenges = new Map<string, PendingTwoFactor>();
+const multiFactorRecords = new Map<string, MultiFactorRecord>();
+const pendingChallenges = new Map<string, PendingMultiFactor>();
 const sessions = new Map<string, Session>();
 
 const sessionStore = {
@@ -96,23 +96,23 @@ const emailPasswordStore = {
     }),
 };
 
-const twoFactorStore = {
-  get: (userId: string) => Effect.sync(() => twoFactorRecords.get(userId) ?? null),
+const multiFactorStore = {
+  get: (userId: string) => Effect.sync(() => multiFactorRecords.get(userId) ?? null),
 
-  upsert: (record: TwoFactorRecord) =>
+  upsert: (record: MultiFactorRecord) =>
     Effect.sync(() => {
-      twoFactorRecords.set(record.userId, record);
+      multiFactorRecords.set(record.userId, record);
       return record;
     }),
 
   delete: (userId: string) =>
     Effect.sync(() => {
-      twoFactorRecords.delete(userId);
+      multiFactorRecords.delete(userId);
     }),
 };
 
-const pendingTwoFactorStore = {
-  create: (pending: PendingTwoFactor) =>
+const pendingMultiFactorStore = {
+  create: (pending: PendingMultiFactor) =>
     Effect.sync(() => {
       pendingChallenges.set(pending.token, pending);
       return pending;
@@ -153,10 +153,10 @@ const makeTestContext = async () => {
         Context.merge(
           Context.make(EmailPasswordStore, emailPasswordStore),
           Context.merge(
-            Context.make(TwoFactorStore, twoFactorStore),
+            Context.make(MultiFactorStore, multiFactorStore),
             Context.merge(
               Context.merge(
-                Context.make(PendingTwoFactorStore, pendingTwoFactorStore),
+                Context.make(PendingMultiFactorStore, pendingMultiFactorStore),
                 Context.make(PasswordHasher, Password.pbkdf2Hasher()),
               ),
               Context.make(Crypto.Crypto, PlatformCrypto.instance),
@@ -187,22 +187,22 @@ const seedUser = async (id: string, email: string, password: string): Promise<Us
   return user;
 };
 
-describe("TwoFactorService", () => {
+describe("MultiFactorService", () => {
   beforeEach(() => {
     users.clear();
     usersByEmail.clear();
     passwordHashes.clear();
-    twoFactorRecords.clear();
+    multiFactorRecords.clear();
     pendingChallenges.clear();
     sessions.clear();
   });
 
-  it("should enable, confirm with a TOTP code, and report two-factor as enabled", async () => {
+  it("should enable, confirm with a TOTP code, and report multi-factor as enabled", async () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-1", "totp@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({ issuer: "TestApp" });
+      const service = yield* MultiFactor.make({ issuer: "TestApp" });
 
       const enableResult = yield* service.enable("user-2fa-1", "correct-password");
       const enabledBeforeConfirm = yield* service.isEnabled("user-2fa-1");
@@ -229,7 +229,7 @@ describe("TwoFactorService", () => {
     }
 
     // Backup codes are stored hashed, never in plaintext
-    const record = twoFactorRecords.get("user-2fa-1");
+    const record = multiFactorRecords.get("user-2fa-1");
     expect(record?.verified).toBe(true);
     for (const plaintext of enableResult.backupCodes) {
       expect(record?.backupCodes).not.toContain(plaintext);
@@ -244,7 +244,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-2", "badcode@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({ issuer: "TestApp" });
+      const service = yield* MultiFactor.make({ issuer: "TestApp" });
       yield* service.enable("user-2fa-2", "correct-password");
       return yield* Effect.result(service.confirmEnable("user-2fa-2", "000000"));
     });
@@ -255,9 +255,9 @@ describe("TwoFactorService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("TwoFactorError");
+      expect(result.failure._tag).toBe("MultiFactorError");
     }
-    expect(twoFactorRecords.get("user-2fa-2")?.verified).toBe(false);
+    expect(multiFactorRecords.get("user-2fa-2")?.verified).toBe(false);
   });
 
   it("should fail to enable with a wrong password", async () => {
@@ -265,7 +265,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-3", "wrongpw@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({ issuer: "TestApp" });
+      const service = yield* MultiFactor.make({ issuer: "TestApp" });
       return yield* Effect.result(service.enable("user-2fa-3", "wrong-password"));
     });
 
@@ -277,7 +277,7 @@ describe("TwoFactorService", () => {
     if (result._tag === "Failure") {
       expect(result.failure._tag).toBe("InvalidCredentialsError");
     }
-    expect(twoFactorRecords.size).toBe(0);
+    expect(multiFactorRecords.size).toBe(0);
   });
 
   it("should fail to disable with a wrong password and remove the record on success", async () => {
@@ -285,7 +285,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-4", "disable@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({
+      const service = yield* MultiFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
       });
@@ -311,7 +311,7 @@ describe("TwoFactorService", () => {
     }
     expect(stillEnabled).toBe(true);
     expect(enabledAfterDisable).toBe(false);
-    expect(twoFactorRecords.size).toBe(0);
+    expect(multiFactorRecords.size).toBe(0);
   });
 
   it("should create a session on the challenge + verifyTotp happy path", async () => {
@@ -319,7 +319,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-5", "challenge@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({
+      const service = yield* MultiFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
       });
@@ -350,7 +350,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-6", "expired@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({
+      const service = yield* MultiFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
         pendingExpiresIn: -1000, // Already expired on creation
@@ -369,7 +369,7 @@ describe("TwoFactorService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("TwoFactorError");
+      expect(result.failure._tag).toBe("MultiFactorError");
     }
     expect(sessions.size).toBe(0);
     // Expired tokens are deleted eagerly
@@ -381,7 +381,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-7", "replay@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({
+      const service = yield* MultiFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
       });
@@ -402,7 +402,7 @@ describe("TwoFactorService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("TwoFactorError");
+      expect(result.failure._tag).toBe("MultiFactorError");
     }
     // Only the first verification created a session
     expect(sessions.size).toBe(1);
@@ -413,7 +413,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-8", "backup@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({
+      const service = yield* MultiFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
       });
@@ -441,11 +441,11 @@ describe("TwoFactorService", () => {
     expect(firstUse.userId).toBe("user-2fa-8");
     expect(reuse._tag).toBe("Failure");
     if (reuse._tag === "Failure") {
-      expect(reuse.failure._tag).toBe("TwoFactorError");
+      expect(reuse.failure._tag).toBe("MultiFactorError");
     }
     expect(secondUse.userId).toBe("user-2fa-8");
     expect(sessions.size).toBe(2);
-    expect(twoFactorRecords.get("user-2fa-8")?.backupCodes).toHaveLength(8);
+    expect(multiFactorRecords.get("user-2fa-8")?.backupCodes).toHaveLength(8);
   });
 
   it("should invalidate old backup codes on regeneration", async () => {
@@ -453,7 +453,7 @@ describe("TwoFactorService", () => {
     await seedUser("user-2fa-9", "regen@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({
+      const service = yield* MultiFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
         backupCodeCount: 4,
@@ -491,12 +491,12 @@ describe("TwoFactorService", () => {
     expect(newCodeResult.userId).toBe("user-2fa-9");
   });
 
-  it("should not begin a challenge for a user without verified two-factor", async () => {
+  it("should not begin a challenge for a user without verified multi-factor", async () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-10", "nochallenge@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({ issuer: "TestApp" });
+      const service = yield* MultiFactor.make({ issuer: "TestApp" });
 
       const withoutRecord = yield* Effect.result(service.beginChallenge("user-2fa-10"));
 
@@ -513,22 +513,22 @@ describe("TwoFactorService", () => {
 
     expect(withoutRecord._tag).toBe("Failure");
     if (withoutRecord._tag === "Failure") {
-      expect(withoutRecord.failure._tag).toBe("TwoFactorError");
+      expect(withoutRecord.failure._tag).toBe("MultiFactorError");
     }
     expect(unverified._tag).toBe("Failure");
     if (unverified._tag === "Failure") {
-      expect(unverified.failure._tag).toBe("TwoFactorError");
+      expect(unverified.failure._tag).toBe("MultiFactorError");
     }
     expect(pendingChallenges.size).toBe(0);
   });
 });
 
-describe("TwoFactorService with TOTP secret encryption", () => {
+describe("MultiFactorService with TOTP secret encryption", () => {
   beforeEach(() => {
     users.clear();
     usersByEmail.clear();
     passwordHashes.clear();
-    twoFactorRecords.clear();
+    multiFactorRecords.clear();
     pendingChallenges.clear();
     sessions.clear();
   });
@@ -538,7 +538,7 @@ describe("TwoFactorService with TOTP secret encryption", () => {
     await seedUser("user-enc-1", "enc-totp@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({
+      const service = yield* MultiFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: false,
         encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
@@ -567,7 +567,7 @@ describe("TwoFactorService with TOTP secret encryption", () => {
     expect(sessions.size).toBe(1);
 
     // The stored secret must be ciphertext, not the plaintext base32 secret
-    const record = twoFactorRecords.get("user-enc-1");
+    const record = multiFactorRecords.get("user-enc-1");
     expect(record?.secret).toBeDefined();
     expect(record?.secret).not.toBe(enableResult.secret);
     expect(record?.secret).not.toMatch(/^[A-Z2-7]+=*$/);
@@ -580,7 +580,7 @@ describe("TwoFactorService with TOTP secret encryption", () => {
     const cipher = Cipher.aes256GcmCipher("custom-cipher-secret");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({
+      const service = yield* MultiFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
         encryptSecret: { cipher },
@@ -602,7 +602,7 @@ describe("TwoFactorService with TOTP secret encryption", () => {
     expect(verifyResult.userId).toBe("user-enc-2");
 
     // Stored secret is ciphertext
-    const record = twoFactorRecords.get("user-enc-2");
+    const record = multiFactorRecords.get("user-enc-2");
     expect(record?.secret).not.toBe(enableResult.secret);
   });
 
@@ -611,7 +611,7 @@ describe("TwoFactorService with TOTP secret encryption", () => {
     await seedUser("user-enc-3", "enc-uri@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({
+      const service = yield* MultiFactor.make({
         issuer: "TestApp",
         encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },
       });
@@ -634,7 +634,7 @@ describe("TwoFactorService with TOTP secret encryption", () => {
     await seedUser("user-enc-4", "enc-backup@example.com", "correct-password");
 
     const program = Effect.gen(function* () {
-      const service = yield* TwoFactor.make({
+      const service = yield* MultiFactor.make({
         issuer: "TestApp",
         skipVerificationOnEnable: true,
         encryptSecret: { secret: Redacted.make("totp-encryption-secret-32-bytes!!") },

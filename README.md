@@ -10,7 +10,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🧩 **Composable**: Use Effect's powerful composition capabilities
 - 🔄 **Bring Your Own Storage**: Implement storage adapters for any database or backend
 - 📦 **Zero Lock-in**: No vendor lock-in, works with any storage backend
-- 🔑 **Two-Factor Authentication**: TOTP enrollment with backup codes, integrated into sign-in (RFC 6238/4226 primitives included)
+- 🔑 **Multi-Factor Authentication**: TOTP enrollment with backup codes, integrated into sign-in (RFC 6238/4226 primitives included)
 - 🌐 **OAuth 2.0 / Social Login**: Pre-built providers for Google, GitHub, Discord, Microsoft with PKCE and a complete sign-in flow (user creation, verified-email account linking, sessions)
 - ✉️ **Email Verification & Password Reset**: Secure token-based flows with anti-enumeration behavior
 - 🧾 **Account Management**: Verification-gated email change and self-service account deletion (single-use tokens, session revocation, `beforeDelete` cleanup hook)
@@ -18,7 +18,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 📱 **Phone (SMS) OTP**: Sign-in and phone-number verification via SMS one-time codes (`attributes.phoneNumber`, pluggable E.164 normalizer)
 - 📺 **Device Authorization Grant**: RFC 8628 `device_code`/`user_code` flow for CLIs and TVs (`POST /device/code` → approve → `POST /device/token`)
 - 👤 **Anonymous Auth**: Guest sessions (`POST /sign-in/anonymous`) with account linking on sign-up (`isAnonymousUser` helper, `linkAccount` migration callback)
-- 🪪 **Username Auth**: Sign in with a username + password (`POST /sign-in/username`), case-insensitive uniqueness, honouring the two-factor gate
+- 🪪 **Username Auth**: Sign in with a username + password (`POST /sign-in/username`), case-insensitive uniqueness, honouring the multi-factor gate
 - 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets, an optional `effect/unstable/persistence` backend (in-memory or Redis) via `rateLimiterPersistenceLayer`, and an `AccountLockoutPlugin` (OWASP-style lockout after N failed sign-ins)
 - 🚫 **Abuse Protection**: Captcha verification (Turnstile/reCAPTCHA/hCaptcha) and Have-I-Been-Pwned compromised-password checks as composable hooks plugins
 - 🔓 **WebAuthn / Passkeys**: Passwordless authentication with FIDO2 compliance
@@ -53,7 +53,7 @@ This library follows best practices from multiple authentication frameworks:
 
 - **Sessions**: Secure session management with automatic expiration and renewal (Lucia/Copenhagen)
 - **Password Hashing**: PBKDF2-SHA256 with recommended iterations (600,000+) (Oslo/OWASP)
-- **Two-Factor Authentication**: TOTP and HOTP for multi-factor authentication (RFC 6238/4226)
+- **Multi-Factor Authentication**: TOTP and HOTP second-factor verification (RFC 6238/4226)
 - **OAuth 2.0**: Social login with major providers (BetterAuth-inspired)
 - **Email Verification**: Secure verification flows with rate limiting (BetterAuth-inspired)
 - **Rate Limiting**: Protection against brute force attacks (BetterAuth-inspired)
@@ -214,9 +214,9 @@ const program = Effect.gen(function* () {
 const result = await Effect.runPromise(Effect.provide(program, layer));
 ```
 
-## Two-Factor Authentication (TOTP/HOTP)
+## Multi-Factor Authentication (TOTP/HOTP)
 
-Implement two-factor authentication using Time-based One-Time Passwords (TOTP, RFC 6238) or HMAC-based One-Time Passwords (HOTP, RFC 4226):
+Implement multi-factor authentication using Time-based One-Time Passwords (TOTP, RFC 6238) or HMAC-based One-Time Passwords (HOTP, RFC 4226):
 
 ### TOTP (Time-based)
 
@@ -242,10 +242,10 @@ const program = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   // Generate a secret for the user
-  const secret = yield* Auth.generateBase32Secret(crypto, 20);
+  const secret = yield* Auth.SecondFactor.generateBase32Secret(crypto, 20);
 
   // Generate a QR code URI for the user to scan
-  const uri = Auth.generateOTPURI({
+  const uri = Auth.SecondFactor.generateOTPURI({
     type: "totp",
     label: "user@example.com",
     issuer: "MyApp",
@@ -257,7 +257,7 @@ const program = Effect.gen(function* () {
 
   // When the user submits a token, verify it
   const userToken = "123456"; // From user input
-  const isValid = yield* Auth.verifyTOTP(userToken, secret);
+  const isValid = yield* Auth.SecondFactor.verifyTOTP(userToken, secret);
 
   if (isValid) {
     // Token is valid, proceed with authentication
@@ -281,13 +281,13 @@ const program = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   // Generate a secret for the user
-  const secret = yield* Auth.generateBase32Secret(crypto, 20);
+  const secret = yield* Auth.SecondFactor.generateBase32Secret(crypto, 20);
 
   // Store initial counter (typically 0) for the user
   let counter = 0;
 
   // Generate a QR code URI
-  const uri = Auth.generateOTPURI({
+  const uri = Auth.SecondFactor.generateOTPURI({
     type: "hotp",
     label: "user@example.com",
     issuer: "MyApp",
@@ -300,7 +300,7 @@ const program = Effect.gen(function* () {
 
   // When the user submits a token, verify it
   const userToken = "123456"; // From user input
-  const isValid = yield* Auth.verifyHOTP(userToken, secret, counter);
+  const isValid = yield* Auth.SecondFactor.verifyHOTP(userToken, secret, counter);
 
   if (isValid) {
     // Token is valid, increment counter for next use
@@ -324,23 +324,23 @@ Both TOTP and HOTP support custom configurations:
 
 ```typescript
 // TOTP with custom settings
-const totpConfig: Auth.TOTPConfig = {
+const totpConfig: Auth.SecondFactor.TOTPConfig = {
   period: 60, // 60-second time window (default: 30)
   digits: 8, // 8-digit codes (default: 6)
   algorithm: "sha256", // Use SHA-256 (default: "sha1")
   window: 2, // Accept tokens from ±2 time steps (default: 1)
 };
 
-const token = yield * Auth.generateTOTP(secret, totpConfig);
-const isValid = yield * Auth.verifyTOTP(token, secret, totpConfig);
+const token = yield * Auth.SecondFactor.generateTOTP(secret, totpConfig);
+const isValid = yield * Auth.SecondFactor.verifyTOTP(token, secret, totpConfig);
 
 // HOTP with custom settings
-const hotpConfig: Auth.HOTPConfig = {
+const hotpConfig: Auth.SecondFactor.HOTPConfig = {
   digits: 8, // 8-digit codes (default: 6)
   algorithm: "sha512", // Use SHA-512 (default: "sha1")
 };
 
-const hotpToken = yield * Auth.generateHOTP(secret, counter, hotpConfig);
+const hotpToken = yield * Auth.SecondFactor.generateHOTP(secret, counter, hotpConfig);
 ```
 
 ## WebAuthn / Passkeys
@@ -354,14 +354,14 @@ import * as Auth from "effect-auth";
 // Implement challenge store (temporary storage for challenges). Stores are
 // "dumb persistence" — lookups return `null` on a miss; the service converts
 // that into a typed `ChallengeNotFoundError`/`CredentialNotFoundError`.
-const challengeStore: typeof Auth.ChallengeStore.Service = {
+const challengeStore: typeof Auth.SecondFactor.ChallengeStore.Service = {
   create: (challenge) => Effect.succeed(challenge), // Store in Redis/memory
   get: (challenge) => Effect.succeed(null), // null if not found
   delete: (challenge) => Effect.void,
 };
 
 // Implement credential store (persistent storage for passkeys)
-const credentialStore: typeof Auth.CredentialStore.Service = {
+const credentialStore: typeof Auth.SecondFactor.CredentialStore.Service = {
   create: (credential) => Effect.succeed(credential), // Store in database
   get: (credentialId) => Effect.succeed(null), // null if not found
   // Resolve by the raw credential id; used on the discoverable/usernameless login path.
@@ -371,7 +371,7 @@ const credentialStore: typeof Auth.CredentialStore.Service = {
   listByUserId: (userId) => Effect.succeed([]), // Return all user's credentials
 };
 
-const webAuthnConfig: Auth.WebAuthnConfig = {
+const webAuthnConfig: Auth.SecondFactor.WebAuthnConfig = {
   relyingPartyId: "example.com",
   relyingPartyName: "Example Corp",
   expectedOrigin: "https://example.com",
@@ -380,18 +380,18 @@ const webAuthnConfig: Auth.WebAuthnConfig = {
 
 // `WebAuthnService` only exposes `.layer()` (its raw `make` isn't re-exported
 // from the package root), so provide it as a Layer.
-const WebAuthnLive = Auth.WebAuthnService.layer(webAuthnConfig).pipe(
+const WebAuthnLive = Auth.SecondFactor.WebAuthnService.layer(webAuthnConfig).pipe(
   Layer.provide(
     Layer.mergeAll(
-      Layer.succeed(Auth.ChallengeStore)(challengeStore),
-      Layer.succeed(Auth.CredentialStore)(credentialStore),
+      Layer.succeed(Auth.SecondFactor.ChallengeStore)(challengeStore),
+      Layer.succeed(Auth.SecondFactor.CredentialStore)(credentialStore),
     ),
   ),
 );
 
 // Registration flow
 const registerPasskey = Effect.gen(function* () {
-  const service = yield* Auth.WebAuthnService;
+  const service = yield* Auth.SecondFactor.WebAuthnService;
 
   // Step 1: Generate challenge
   const { challenge } = yield* service.generateRegistrationChallenge({
@@ -416,7 +416,7 @@ const registerPasskey = Effect.gen(function* () {
 
 // Authentication flow
 const authenticateWithPasskey = Effect.gen(function* () {
-  const service = yield* Auth.WebAuthnService;
+  const service = yield* Auth.SecondFactor.WebAuthnService;
 
   // Step 1: Generate challenge
   const { challenge } = yield* service.generateAuthenticationChallenge("user-123");
@@ -917,7 +917,7 @@ Security is our top priority. See our [Security Policy](./SECURITY.md) for:
 - ✅ Secure session management following Copenhagen Book guidelines
 - ✅ Input validation and error handling
 
-### Two-Factor Authentication
+### Multi-Factor Authentication
 
 Following RFC 6238 (TOTP) and RFC 4226 (HOTP) guidelines:
 

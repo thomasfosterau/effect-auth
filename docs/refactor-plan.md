@@ -39,7 +39,7 @@ in `src/`.
   `RBAC.ts`, `HTTPServer.ts`, `IPRateLimit`, `ClientIP`. Directories stay
   lowercase.
 - **Service classes keep the `-Service` suffix** (`SessionService`,
-  `TwoFactorService`, `EmailOTPService`) to avoid collisions with same-domain
+  `MultiFactorService`, `EmailOTPService`) to avoid collisions with same-domain
   record types (`Types.Session` etc.). Store tags keep the `Store` suffix.
 - **Tag strings match final class names**: `"@effect-auth/EmailOTPService"`.
 
@@ -49,17 +49,18 @@ Class-style `Context.Service` per the effect-solutions guide (verified
 first-class in Effect v4 — `Context.ts` `@since 4.0.0`, `ServiceClass`):
 
 ```ts
-export class TwoFactorService extends Context.Service<
-  TwoFactorService,
+export class MultiFactorService extends Context.Service<
+  MultiFactorService,
   {
     readonly enable: (
       userId: string,
       password: string,
-    ) => Effect.Effect<TwoFactorEnableResult, TwoFactorError | Errors.AuthError>;
+    ) => Effect.Effect<MultiFactorEnableResult, MultiFactorError | Errors.AuthError>;
     // ...
   }
->()("@effect-auth/TwoFactorService") {
-  static readonly layer = (config: TwoFactorConfig) => Layer.effect(TwoFactorService, make(config));
+>()("@effect-auth/MultiFactorService") {
+  static readonly layer = (config: MultiFactorConfig) =>
+    Layer.effect(MultiFactorService, make(config));
 }
 ```
 

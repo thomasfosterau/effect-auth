@@ -10,7 +10,7 @@ The library has exactly three top-level categories:
 
 1. **Credentials** — persistent registered facts that authenticate or modify authentication.
    - _Primary_ (sufficient alone): `Account`, `Passkey`, `ApiKey`.
-   - _Secondary_ (modify a primary sign-in): `TwoFactorEnrollment`, `TrustedDevice`.
+   - _Secondary_ (modify a primary sign-in): `MultiFactorEnrollment`, `TrustedDevice`.
 2. **Verifications** — single-use artifacts whose consumption proves something.
    - _Issued-on-demand, user-facing_: `EmailVerificationToken`, `PasswordResetToken`, `MagicLink`,
      `EmailOtp`, `PhoneOtp`, `OneTimeToken`.

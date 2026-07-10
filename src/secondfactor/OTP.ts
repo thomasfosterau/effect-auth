@@ -1,7 +1,7 @@
 import { Crypto, Effect } from "effect";
-import * as Cipher from "./Cipher.ts";
-import * as Errors from "./Errors.ts";
-import { timingSafeEqualBytes } from "./TokenHash.ts";
+import * as Cipher from "../Cipher.ts";
+import * as Errors from "../Errors.ts";
+import { timingSafeEqualBytes } from "../TokenHash.ts";
 
 /**
  * OTP (One-Time Password) utilities for HOTP and TOTP
