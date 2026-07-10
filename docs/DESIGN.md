@@ -29,7 +29,7 @@ classes named after the service, layers as camelCase `static` members (`layer`,
 ## The settled surface in one screen
 
 ```ts
-import * as Auth from "effect-auth";
+import * as Auth from "@thomasfosterau/effect-auth";
 
 // Canonical: the service name IS the export; layers are statics on it.
 const app = Effect.gen(function* () {

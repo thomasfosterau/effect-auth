@@ -11,7 +11,7 @@
  * @example
  * ```ts
  * import { Layer } from "effect"
- * import { composePlugins, Hooks, IPRateLimitPlugin, RateLimiter, RateLimitStore } from "effect-auth"
+ * import { composePlugins, Hooks, IPRateLimitPlugin, RateLimiter, RateLimitStore } from "@thomasfosterau/effect-auth"
  *
  * const layer = composePlugins([IPRateLimitPlugin()])
  *   .pipe(Layer.provide(Hooks.Default))

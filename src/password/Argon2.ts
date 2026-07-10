@@ -39,7 +39,7 @@ export interface Argon2Options {
  *
  * @example
  * ```ts
- * import { Password } from "effect-auth";
+ * import { Password } from "@thomasfosterau/effect-auth";
  *
  * const hasher = Password.argon2Hasher();          // OWASP defaults
  * const layer = Password.argon2HasherLayer({ timeCost: 3 });

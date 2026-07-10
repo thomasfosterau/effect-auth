@@ -8,7 +8,7 @@
  *
  * Usage:
  * ```ts
- * import { Auth } from "effect-auth"
+ * import { Auth } from "@thomasfosterau/effect-auth"
  *
  * // Default English – no configuration needed.
  * const app = myEffect.pipe(

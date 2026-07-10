@@ -1,6 +1,6 @@
 {
-  "name": "@effect-auth/client",
-  "version": "0.1.1",
+  "name": "@thomasfosterau/effect-auth-client",
+  "version": "0.1.0",
   "description": "Framework client libraries for effect-auth: a typed vanilla client with an observable session store, plus React, Svelte, and Vue bindings.",
   "keywords": [
     "auth",
@@ -52,13 +52,16 @@
       "import": "./dist/types.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "test": "vp test run",
     "typecheck": "tsc --noEmit && vp test --typecheck --run"
   },
   "dependencies": {
-    "effect-auth": "workspace:*"
+    "@thomasfosterau/effect-auth": "workspace:*"
   },
   "devDependencies": {
     "@testing-library/react": "^16.1.0",

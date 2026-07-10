@@ -10,7 +10,7 @@
  * ```ts
  * import { Layer } from "effect";
  * import { RateLimiter as PersistenceRateLimiter } from "effect/unstable/persistence";
- * import { rateLimiterPersistenceLayer } from "effect-auth";
+ * import { rateLimiterPersistenceLayer } from "@thomasfosterau/effect-auth";
  *
  * const RateLimiterLive = rateLimiterPersistenceLayer.pipe(
  *   Layer.provide(PersistenceRateLimiter.layer),

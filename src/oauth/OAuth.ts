@@ -1582,7 +1582,7 @@ export const profile = (
  * can be just as terse.
  *
  * @example
- * import { provider, ProfileMap } from "effect-auth";
+ * import { provider, ProfileMap } from "@thomasfosterau/effect-auth";
  *
  * const LinearProvider = (config: OAuthClientConfig): OAuthProvider =>
  *   provider("linear", {
