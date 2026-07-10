@@ -35,7 +35,7 @@ field shape is disjoint from Account, so it lives as its own entity rather than 
 into Account as another `providerId`.
 _Avoid_: WebAuthnAccount, FIDOCredential when referring to the stored record.
 
-**ApiKey**:
+**APIKey**:
 A bearer-style credential for programmatic clients. The hashed key value is the verifier; the
 plaintext is shown once at creation. Has its own scopes/permissions.
 _Avoid_: AccessToken (that's the OAuth-provider-issued token on an Account), Token.
@@ -64,8 +64,8 @@ never persisted.
 **PasswordResetToken**: single-use token authorising a password reset for a known User.
 **MagicLink**: single-use token whose consumption creates a Session — same channel-verification
 mechanism as `EmailVerificationToken`, different terminal action.
-**EmailOtp**: short numeric code delivered by email for sign-in or step-up.
-**PhoneOtp**: short numeric code delivered by SMS for phone verification or step-up.
+**EmailOTP**: short numeric code delivered by email for sign-in or step-up.
+**PhoneOTP**: short numeric code delivered by SMS for phone verification or step-up.
 **OneTimeToken**: generic single-use token for ad-hoc flows.
 
 #### Pre-issued, user-facing
@@ -86,7 +86,7 @@ Never seen by the user — round-tripped via redirect.
 
 **Session**: stateful auth state — a server-stored row with active and idle expiry, identified
 by a secure random id.
-**Jwt**: stateless auth state — issued to a holder, verified by signature against JWKS, no
+**JWT**: stateless auth state — issued to a holder, verified by signature against JWKS, no
 server-side row.
 
 ### Feature-local state entities — _opt-in entities augmenting a canonical entity with feature state_

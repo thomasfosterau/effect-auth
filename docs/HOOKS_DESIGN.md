@@ -1,12 +1,18 @@
 # Hooks / Plugin Architecture — Design Document
 
 **Status:** Implemented and shipped — kept as historical design rationale.
-The hooks system described here exists in `packages/effect-auth/src/Hooks.ts`
-(with first-party plugins under `src/plugins/`) on Effect v4; details below may
-diverge from the shipped code (e.g. the shipped plugin is `NormalizeEmailPlugin`,
-not `EmailNormalizePlugin`, and the service uses `Context.Service`, not the v3
-`Effect.Service` API). The current API conventions live in [DESIGN.md](./DESIGN.md).
-**Target package:** `packages/effect-auth`
+The hooks system described here exists in `src/Hooks.ts` (with first-party
+plugins under `src/plugins/`) on Effect v4; details below may diverge from the
+shipped code (e.g. the shipped plugin is `NormalizeEmailPlugin`, not
+`EmailNormalizePlugin`, and the service uses `Context.Service`, not the v3
+`Effect.Service` API). The API restructure milestone (`docs/refactor-plan.md`,
+`docs/migration.md`) also postdates this document: `SessionManager` below is
+now `SessionService` (`src/session/SessionService.ts`), and module paths
+referenced here as flat `<Feature>.ts` files may now live under a lowercase
+cluster directory (e.g. `EmailPassword.ts` → `src/email/EmailPassword.ts`) —
+see `docs/migration.md` for the full rename/move table. The current API
+conventions live in [DESIGN.md](./DESIGN.md).
+**Target package:** `effect-auth` (this repository's root package)
 **Effect version at time of writing:** v3.21.2 (resolved from `effect@^3.19.15`)
 
 ---
@@ -45,24 +51,24 @@ types (`User`, `Session`, `SessionWithUser`, `Credentials`) live in `Types.ts`.
 
 Relevant operations, where a hook could fire, and the services involved:
 
-| Module (`src/…`)       | Operation                                                   | Input                          | Output (success)                    | Deps in scope                                                               |
-| ---------------------- | ----------------------------------------------------------- | ------------------------------ | ----------------------------------- | --------------------------------------------------------------------------- |
-| `EmailPassword.ts`     | `signUp`                                                    | `SignUpInput`                  | `AuthResult` `{user, session?}`     | `EmailPasswordStore`, `PasswordHasher`, `SessionManager`                    |
-| `EmailPassword.ts`     | `signIn`                                                    | `SignInInput`                  | `AuthResult`                        | same                                                                        |
-| `AuthLifecycle.ts`     | `signUp`                                                    | `SignUpInput`                  | `AuthLifecycleResult`               | + `EmailVerificationService/Store`                                          |
-| `AuthLifecycle.ts`     | `signIn`                                                    | `SignInInput`                  | `AuthLifecycleResult`               | same                                                                        |
-| `AuthLifecycle.ts`     | `verifyEmail`                                               | `VerifyEmailInput` `{token,…}` | `AuthLifecycleResult`               | `UserService(+Store)`, `SessionManager`, `EmailVerificationService(+Store)` |
-| `Session.ts`           | `createSession`                                             | `(userId, attributes?)`        | `Session`                           | `SessionStore`, `UserStore`                                                 |
-| `Session.ts`           | `validateSession`                                           | `(sessionId)`                  | `SessionWithUser`                   | same                                                                        |
-| `Session.ts`           | `invalidateSession`                                         | `(sessionId)`                  | `void`                              | `SessionStore`                                                              |
-| `Session.ts`           | `invalidateUserSessions`                                    | `(userId)`                     | `void`                              | `SessionStore`                                                              |
-| `PasswordReset.ts`     | `requestPasswordReset`                                      | `(email)`                      | `void`                              | `PasswordResetStore`, `PasswordResetUserStore`                              |
-| `PasswordReset.ts`     | `resetPassword`                                             | `(token, newPassword)`         | `PasswordResetResult`               | + `PasswordHasher`, `SessionManager`                                        |
-| `EmailVerification.ts` | `createVerification`                                        | `(userId, email)`              | `{token, expiresAt}`                | `EmailVerificationStore`                                                    |
-| `EmailVerification.ts` | `verifyToken`                                               | `(token)`                      | `EmailVerificationResult`           | same                                                                        |
-| `OAuth.ts`             | `generateAuthorizationUrl` / `exchangeCode` / `getUserInfo` | various                        | `OAuthResult`/`OAuthAccount`        | `OAuthStateStore`, `OAuthAccountStore`                                      |
-| `WebAuthn.ts`          | `verifyRegistration` / `verifyAuthentication`               | challenge + response           | `Registration/AuthenticationResult` | `ChallengeStore`, `CredentialStore`                                         |
-| `Authorization.ts`     | `checkPermission`                                           | `(userId, resource, action)`   | `boolean`/`Permission`              | `RoleStore`                                                                 |
+| Module (`src/…`)            | Operation                                                   | Input                          | Output (success)                    | Deps in scope                                                               |
+| --------------------------- | ----------------------------------------------------------- | ------------------------------ | ----------------------------------- | --------------------------------------------------------------------------- |
+| `EmailPassword.ts`          | `signUp`                                                    | `SignUpInput`                  | `AuthResult` `{user, session?}`     | `EmailPasswordStore`, `PasswordHasher`, `SessionService`                    |
+| `EmailPassword.ts`          | `signIn`                                                    | `SignInInput`                  | `AuthResult`                        | same                                                                        |
+| `AuthLifecycle.ts`          | `signUp`                                                    | `SignUpInput`                  | `AuthLifecycleResult`               | + `EmailVerificationService/Store`                                          |
+| `AuthLifecycle.ts`          | `signIn`                                                    | `SignInInput`                  | `AuthLifecycleResult`               | same                                                                        |
+| `AuthLifecycle.ts`          | `verifyEmail`                                               | `VerifyEmailInput` `{token,…}` | `AuthLifecycleResult`               | `UserService(+Store)`, `SessionService`, `EmailVerificationService(+Store)` |
+| `session/SessionService.ts` | `createSession`                                             | `(userId, attributes?)`        | `Session`                           | `SessionStore`, `UserStore`                                                 |
+| `session/SessionService.ts` | `validateSession`                                           | `(sessionId)`                  | `SessionWithUser`                   | same                                                                        |
+| `session/SessionService.ts` | `invalidateSession`                                         | `(sessionId)`                  | `void`                              | `SessionStore`                                                              |
+| `session/SessionService.ts` | `invalidateUserSessions`                                    | `(userId)`                     | `void`                              | `SessionStore`                                                              |
+| `PasswordReset.ts`          | `requestPasswordReset`                                      | `(email)`                      | `void`                              | `PasswordResetStore`, `PasswordResetUserStore`                              |
+| `PasswordReset.ts`          | `resetPassword`                                             | `(token, newPassword)`         | `PasswordResetResult`               | + `PasswordHasher`, `SessionService`                                        |
+| `EmailVerification.ts`      | `createVerification`                                        | `(userId, email)`              | `{token, expiresAt}`                | `EmailVerificationStore`                                                    |
+| `EmailVerification.ts`      | `verifyToken`                                               | `(token)`                      | `EmailVerificationResult`           | same                                                                        |
+| `OAuth.ts`                  | `generateAuthorizationUrl` / `exchangeCode` / `getUserInfo` | various                        | `OAuthResult`/`OAuthAccount`        | `OAuthStateStore`, `OAuthAccountStore`                                      |
+| `WebAuthn.ts`               | `verifyRegistration` / `verifyAuthentication`               | challenge + response           | `Registration/AuthenticationResult` | `ChallengeStore`, `CredentialStore`                                         |
+| `Authorization.ts`          | `checkPermission`                                           | `(userId, resource, action)`   | `boolean`/`Permission`              | `RoleStore`                                                                 |
 
 > **Note on "token refresh":** the library has **no separate refresh-token
 > endpoint**. `Session.validateSession` implements _sliding_ expiry (it extends
@@ -380,14 +386,14 @@ considered:
 - **(i)** thread `Hooks` into the existing `make*Service` factories (they gain
   `Hooks` in their `R`), or
 - **(ii)** add hook calls only in `AuthLifecycle` (the orchestrator) and in
-  `SessionManager` (for create/validate/invalidate).
+  `SessionService` (for create/validate/invalidate).
 
 **Recommendation: (ii) + EmailPassword.** Wire hooks where the operation is
 _owned_:
 
 - `EmailPassword.signUp/signIn` gain `beforeSignUp/afterSignUp`,
   `beforeSignIn/afterSignIn`.
-- `SessionManager.createSession/validateSession/invalidateSession` gain the
+- `SessionService.createSession/validateSession/invalidateSession` gain the
   session hooks (this also covers "sign-out" via `invalidateSession` and
   "token refresh" via `validateSession`).
 - `PasswordReset` and `EmailVerification` services gain their respective hooks.
@@ -445,7 +451,7 @@ Using `vite-plus/test` + `Effect.provide` (matching the existing test style):
 
 ## 11. Public API surface (final)
 
-From `packages/effect-auth/src/Hooks.ts`, re-exported via `index.ts`:
+From `src/Hooks.ts`, re-exported via `index.ts`:
 
 - `class Hooks` (the `Effect.Service`) + `Hooks.Default`
 - `Hooks.tap`, `Hooks.transform` (R1 constructors)
