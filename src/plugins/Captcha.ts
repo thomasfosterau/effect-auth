@@ -56,9 +56,12 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
           }
           const success = yield* client
             .execute(
-              HttpClientRequest.post(url, {
-                urlParams: { secret: Redacted.value(config.secretKey), response: token },
-              }),
+              HttpClientRequest.post(url).pipe(
+                HttpClientRequest.bodyUrlParams({
+                  secret: Redacted.value(config.secretKey),
+                  response: token,
+                }),
+              ),
             )
             .pipe(
               Effect.flatMap((response) => response.json),
