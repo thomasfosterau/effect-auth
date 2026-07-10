@@ -181,7 +181,7 @@ const sessionConfig: SessionConfig = {
   },
 };
 
-const makeTestContext = async () => {
+const makeTestContext = async (hooksLayer: Layer.Layer<Hooks> = Hooks.Default) => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       make(sessionConfig),
@@ -189,7 +189,7 @@ const makeTestContext = async () => {
         Context.make(SessionStore, sessionStore),
         Context.make(UserStore, sessionUserStore),
       ),
-    ).pipe(Effect.provide(Hooks.Default)),
+    ).pipe(Effect.provide(hooksLayer)),
   );
 
   return Context.make(SessionService, sessionManager).pipe(
