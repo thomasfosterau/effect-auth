@@ -77,10 +77,6 @@ examples/
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
-# Changesets - ignore the temporary changeset markdown files
-.changeset/*.md
-!.changeset/README.md
-
 .claude/settings.local.json
 
 .DS_Store

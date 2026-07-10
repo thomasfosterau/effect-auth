@@ -270,14 +270,14 @@ Our test suite currently includes:
 - Password hashing security tests
 - Session expiration tests
 
-Run tests with: `bun run test`
+Run tests with: `pnpm run test`
 
 ### Manual Security Review
 
 Before each release, we perform:
 
 - Code review of all security-sensitive changes
-- Dependency vulnerability scanning (`bun audit`)
+- Dependency vulnerability scanning (`pnpm audit`)
 - Review of error messages for information leakage
 - Review of logging for sensitive data
 
@@ -291,7 +291,7 @@ We welcome security researchers to audit this library. Please report any finding
 
 We monitor dependencies for known vulnerabilities:
 
-- `bun audit` is run regularly
+- `pnpm audit` is run regularly
 - GitHub Dependabot alerts are enabled
 - Security patches are prioritized
 
@@ -345,7 +345,7 @@ Security updates are announced through:
 When a security update is released:
 
 1. **Read the advisory**: Understand the vulnerability
-2. **Update immediately**: Run `bun update effect-auth`
+2. **Update immediately**: Run `pnpm update effect-auth`
 3. **Review your code**: Check if you're affected
 4. **Test thoroughly**: Run your test suite
 5. **Deploy quickly**: Deploy to production as soon as possible

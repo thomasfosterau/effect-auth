@@ -41,7 +41,8 @@ Before contributing, please:
 
 ### Prerequisites
 
-- **Bun**: Version 1.2+ recommended
+- **Node.js**: Version 22.18+ recommended
+- **pnpm**: Version 11+ recommended
 - **TypeScript**: Included as dev dependency
 
 ### Installation
@@ -58,13 +59,13 @@ Before contributing, please:
 3. **Install dependencies**:
 
    ```bash
-   bun install
+   pnpm install
    ```
 
 4. **Verify setup**:
    ```bash
-   bun run build  # Should compile successfully
-   bun run test   # Should pass all tests
+   pnpm run build  # Should compile successfully
+   pnpm run test   # Should pass all tests
    ```
 
 ### Project Structure
@@ -78,7 +79,7 @@ everything not listed in a cluster stays flat in `src/`. See
 old-path → new-path table.
 
 ```
-effect-auth/                       # Bun workspaces monorepo (Vite+ toolchain)
+effect-auth/                       # pnpm workspaces monorepo (Vite+ toolchain)
 ├── src/                           # Core library (root package `effect-auth`)
 │   ├── Types.ts                   # Core domain types (schema'd User, Session, ...)
 │   ├── Errors.ts                  # Shared tagged error definitions
@@ -141,8 +142,8 @@ effect-auth/                       # Bun workspaces monorepo (Vite+ toolchain)
 
 4. **Test your changes**:
    ```bash
-   bun run build  # Ensure it compiles
-   bun run test   # Ensure tests pass
+   pnpm run build  # Ensure it compiles
+   pnpm run test   # Ensure tests pass
    ```
 
 ### Code Style
@@ -190,10 +191,10 @@ Example: Adding a new password algorithm
 
 ```bash
 # Run all tests
-bun run test
+pnpm run test
 
 # Run tests in watch mode
-bun run test:watch
+pnpm run test:watch
 ```
 
 ### Writing Tests
@@ -239,7 +240,7 @@ All changes should include:
 1. **Create a changeset** (for features, fixes, or breaking changes):
 
    ```bash
-   bun run changeset
+   pnpm run changeset
    ```
 
    This will prompt you to:
@@ -256,9 +257,9 @@ All changes should include:
 3. **Ensure quality**:
 
    ```bash
-   bun run build  # Must compile successfully
-   bun run test   # All tests must pass
-   bun audit      # Check for vulnerabilities
+   pnpm run build  # Must compile successfully
+   pnpm run test   # All tests must pass
+   pnpm audit      # Check for vulnerabilities
    ```
 
 4. **Push to your fork**:

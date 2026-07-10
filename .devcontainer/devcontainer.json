@@ -3,12 +3,12 @@
   "image": "mcr.microsoft.com/devcontainers/typescript-node",
   "remoteUser": "node",
   "features": {
-    "ghcr.io/devcontainers-extra/features/bun:1": {},
     "ghcr.io/devcontainers-extra/features/ripgrep:1": {}
   },
   "customizations": {
     "vscode": {
       "extensions": ["Anthropic.claude-code"]
     }
-  }
+  },
+  "postCreateCommand": "corepack enable && corepack install"
 }

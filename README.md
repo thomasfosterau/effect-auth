@@ -44,7 +44,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 ## Installation
 
 ```bash
-bun add effect-auth effect
+pnpm add effect-auth effect
 ```
 
 ## Core Concepts
