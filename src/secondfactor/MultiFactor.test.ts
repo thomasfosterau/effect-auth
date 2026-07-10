@@ -14,7 +14,7 @@ import {
 import * as MultiFactor from "./MultiFactor.ts";
 import * as Cipher from "../Cipher.ts";
 import { type CreateUserInput, EmailPasswordStore } from "../email/EmailPassword.ts";
-import { generateTOTP } from "./OTP.ts";
+import { generateHOTP, generateTOTP } from "./OTP.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as Password from "../password/Password.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
@@ -408,6 +408,40 @@ describe("MultiFactorService", () => {
     expect(sessions.size).toBe(1);
   });
 
+  it("should reject a replayed TOTP code on a fresh challenge", async () => {
+    const testContext = await makeTestContext();
+    await seedUser("user-2fa-7b", "replay2@example.com", "correct-password");
+
+    const program = Effect.gen(function* () {
+      const service = yield* MultiFactor.make({
+        issuer: "TestApp",
+        skipVerificationOnEnable: true,
+      });
+
+      const { secret } = yield* service.enable("user-2fa-7b", "correct-password");
+
+      // First challenge: verify with code C1 → success
+      const challenge1 = yield* service.beginChallenge("user-2fa-7b");
+      const code = yield* generateTOTP(secret);
+      yield* service.verifyTotp(challenge1.token, code);
+
+      // Second challenge: a fresh pending token, but same code C1 within window
+      const challenge2 = yield* service.beginChallenge("user-2fa-7b");
+      return yield* Effect.result(service.verifyTotp(challenge2.token, code));
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("MultiFactorError");
+    }
+    // Only the first challenge produced a session
+    expect(sessions.size).toBe(1);
+  });
+
   it("should accept a backup code only once", async () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-8", "backup@example.com", "correct-password");
@@ -546,8 +580,12 @@ describe("MultiFactorService with TOTP secret encryption", () => {
 
       const enableResult = yield* service.enable("user-enc-1", "correct-password");
 
-      const code = yield* generateTOTP(enableResult.secret);
-      yield* service.confirmEnable("user-enc-1", code);
+      // Confirm with the previous time step's code (within the default ±1
+      // window) so the challenge verification below can use the current
+      // step's code without tripping the replay guard.
+      const currentCounter = Math.floor(Date.now() / 1000 / 30);
+      const confirmCode = yield* generateHOTP(enableResult.secret, currentCounter - 1);
+      yield* service.confirmEnable("user-enc-1", confirmCode);
 
       const enabled = yield* service.isEnabled("user-enc-1");
 

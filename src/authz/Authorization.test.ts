@@ -211,7 +211,7 @@ describe("Authorization", () => {
     it("allOf grants only if every policy grants", async () => {
       expect(await run(allOf(allowAll, allowAll))).toBe(true);
       expect(await run(allOf(allowAll, denyAll))).toBe(false);
-      expect(await run(allOf())).toBe(true);
+      expect(await run(allOf())).toBe(false);
     });
 
     it("fromPredicate builds a policy from a rule", async () => {
@@ -280,6 +280,26 @@ describe("Authorization", () => {
       if (result._tag === "Failure") {
         expect(result.failure._tag).toBe("PermissionDeniedError");
         expect(result.failure.message).toContain("any of");
+      }
+    });
+
+    it("requireAllPermissions denies on empty list (fail-closed)", async () => {
+      const result = await Effect.runPromise(
+        Effect.result(Effect.provide(requireAllPermissions("u", []), PolicyTest)),
+      );
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("PermissionDeniedError");
+      }
+    });
+
+    it("requireAnyPermission denies on empty list (fail-closed)", async () => {
+      const result = await Effect.runPromise(
+        Effect.result(Effect.provide(requireAnyPermission("u", []), PolicyTest)),
+      );
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("PermissionDeniedError");
       }
     });
   });

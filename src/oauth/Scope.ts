@@ -33,16 +33,19 @@ export const hasScope = (granted: string | Iterable<string>, required: string): 
 
 /**
  * Check whether the granted scopes include *all* of the required scopes.
+ * Returns `false` when `required` is empty (consistent with `hasAnyScope`).
  */
 export const hasAllScopes = (
   granted: string | Iterable<string>,
   required: Iterable<string>,
 ): boolean => {
   const set = toSet(granted);
+  let count = 0;
   for (const scope of required) {
+    count++;
     if (!set.has(scope)) return false;
   }
-  return true;
+  return count > 0;
 };
 
 /**
@@ -80,15 +83,27 @@ export const requireScope = (
 
 /**
  * Require all of the given scopes, failing with `InsufficientScopeError` listing
- * the missing scopes if any are not granted.
+ * the missing scopes if any are not granted, or immediately when `required` is
+ * empty (consistent with `requireAnyScope` / `requireScope`).
  */
 export const requireAllScopes = (
   granted: string | Iterable<string>,
   required: Iterable<string>,
 ): Effect.Effect<void, Errors.InsufficientScopeError> => {
   const set = toSet(granted);
-  const missing = [...required].filter((scope) => !set.has(scope));
+  const requiredArr = [...required];
 
+  if (requiredArr.length === 0) {
+    return Effect.fail(
+      new Errors.InsufficientScopeError({
+        message: "Insufficient scope: no scopes provided",
+        requiredScope: "",
+        grantedScopes: [...set],
+      }),
+    );
+  }
+
+  const missing = requiredArr.filter((scope) => !set.has(scope));
   return missing.length === 0
     ? Effect.void
     : Effect.fail(

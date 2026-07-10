@@ -174,20 +174,20 @@ describe("TOTP (RFC 6238)", () => {
       OTP.generateTOTP(base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
     );
 
-    const isValid = await Effect.runPromise(
+    const counter = await Effect.runPromise(
       OTP.verifyTOTP(token, base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
     );
 
-    expect(isValid).toBe(true);
+    expect(counter).not.toBeNull();
   });
 
   it("should reject incorrect TOTP token", async () => {
     const base32Secret = OTP.encodeBase32(rfcSecret);
-    const isValid = await Effect.runPromise(
+    const counter = await Effect.runPromise(
       OTP.verifyTOTP("000000", base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
     );
 
-    expect(isValid).toBe(false);
+    expect(counter).toBeNull();
   });
 
   it("should work with default config", async () => {
@@ -196,9 +196,9 @@ describe("TOTP (RFC 6238)", () => {
 
     expect(token.length).toBe(6);
 
-    const isValid = await Effect.runPromise(OTP.verifyTOTP(token, base32Secret));
+    const counter = await Effect.runPromise(OTP.verifyTOTP(token, base32Secret));
 
-    expect(isValid).toBe(true);
+    expect(counter).not.toBeNull();
   });
 
   it("should support different algorithms", async () => {
@@ -216,9 +216,9 @@ describe("TOTP (RFC 6238)", () => {
 
     const token = await Effect.runPromise(OTP.generateTOTP(base32Secret, { period: 60 }));
 
-    const isValid = await Effect.runPromise(OTP.verifyTOTP(token, base32Secret, { period: 60 }));
+    const counter = await Effect.runPromise(OTP.verifyTOTP(token, base32Secret, { period: 60 }));
 
-    expect(isValid).toBe(true);
+    expect(counter).not.toBeNull();
   });
 
   it("should verify tokens within window", async () => {
@@ -230,11 +230,11 @@ describe("TOTP (RFC 6238)", () => {
     );
 
     // Verify with a window of 1 (should accept previous and next time steps)
-    const isValid = await Effect.runPromise(
+    const counter = await Effect.runPromise(
       OTP.verifyTOTP(token, base32Secret, { digits: 6, period: 30, algorithm: "sha1", window: 1 }),
     );
 
-    expect(isValid).toBe(true);
+    expect(counter).not.toBeNull();
   });
 });
 
@@ -330,9 +330,9 @@ describe("Integration Tests", () => {
     const token = await Effect.runPromise(OTP.generateTOTP(secret));
 
     // Step 4: Verify TOTP
-    const isValid = await Effect.runPromise(OTP.verifyTOTP(token, secret));
+    const counter = await Effect.runPromise(OTP.verifyTOTP(token, secret));
 
-    expect(isValid).toBe(true);
+    expect(counter).not.toBeNull();
   });
 
   it("should work end-to-end for HOTP enrollment", async () => {
@@ -492,7 +492,7 @@ describe("Input Validation and Edge Cases", () => {
       // Verify with zero period should fall back to default (30)
       const result = await Effect.runPromise(OTP.verifyTOTP(token, validSecret, { period: 0 }));
 
-      expect(result).toBe(true);
+      expect(result).not.toBeNull();
     });
 
     it("should handle negative period by using default", async () => {
@@ -501,7 +501,7 @@ describe("Input Validation and Edge Cases", () => {
       // Verify with negative period should fall back to default (30)
       const result = await Effect.runPromise(OTP.verifyTOTP(token, validSecret, { period: -10 }));
 
-      expect(result).toBe(true);
+      expect(result).not.toBeNull();
     });
 
     it("should handle negative window by using default", async () => {
@@ -510,7 +510,7 @@ describe("Input Validation and Edge Cases", () => {
       // Verify with negative window should fall back to default (1)
       const result = await Effect.runPromise(OTP.verifyTOTP(token, validSecret, { window: -5 }));
 
-      expect(result).toBe(true);
+      expect(result).not.toBeNull();
     });
 
     it("should floor non-integer period", async () => {
@@ -519,7 +519,7 @@ describe("Input Validation and Edge Cases", () => {
       // Should floor 30.9 to 30 and work correctly
       const result = await Effect.runPromise(OTP.verifyTOTP(token, validSecret, { period: 30.9 }));
 
-      expect(result).toBe(true);
+      expect(result).not.toBeNull();
     });
   });
 

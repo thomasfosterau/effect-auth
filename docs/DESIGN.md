@@ -134,8 +134,8 @@ existing test suite plus a new static-layer test guard behavior.
 A service class carries only the layers defined in its own module. Layers that
 implement a tag from _another_ module keep their standalone names to avoid
 import cycles: `MultiFactorGateLayer` (`MultiFactor.ts:631`, provides
-`SecondFactorGateTag` from EmailPassword), `RateLimiterPersistenceLayer`
-(`RateLimitPersistence.ts:114`, provides `RateLimiterTag` from RateLimit), and
+`SecondFactorGate` from EmailPassword), `rateLimiterPersistenceLayer`
+(`RateLimitPersistence.ts:114`, provides `RateLimiter` from RateLimit), and
 the KV store layers (`KeyValueStores.ts`, provide store tags from many modules).
 
 ## D2. Layer constructor naming
@@ -164,7 +164,8 @@ plus `PasswordHasherLive`/`PBKDF2HasherLive` (`password/Password.ts` (then flat 
   `PasswordHasher.layerScrypt(options)`; `MultiAlgorithmVerifier.layer(hashers)`
   replaces `makeMultiAlgorithmVerifierLayer`. Removed: `PasswordHasherLayer`,
   `ScryptHasherLayer`, `PasswordHasherLive`, `PBKDF2HasherLive`,
-  `makePasswordHasher` (use `makePBKDF2Hasher`). `Argon2HasherLayer` stays a
+  `makePasswordHasher` (use `makePBKDF2Hasher`, since renamed to
+  `pbkdf2Hasher`). `Argon2HasherLayer` stays a
   package export in `@effect-auth/argon2` — native dependencies never enter
   core. Still open: the `authGroupLayer` naming (unasked; revisit with any
   future HTTP-surface change).
@@ -424,7 +425,7 @@ they're batched for one 0.x minor with a rename table.
 **Status quo.** Two clients: the generated Effect client
 (`http/HTTPClient.ts`, then flat `HttpClient.ts:26`, full parity by construction) and the hand-written
 zero-dependency browser client (`packages/client/src/Client.ts:136`) covering
-23/84 endpoints (core flows + magicLink/emailOtp/multiFactor namespaces). No
+23/84 endpoints (core flows + magicLink/emailOTP/multiFactor namespaces). No
 dead methods; the missing 61 are the optional/advanced surface. Framework
 bindings: React has `useSession` + `useListSessions` (`react.ts:24,37`); Svelte
 has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`

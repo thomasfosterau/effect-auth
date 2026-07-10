@@ -52,6 +52,12 @@ export interface MultiFactorRecord {
   /** False until the first successful TOTP confirmation */
   readonly verified: boolean;
   readonly createdAt: number;
+  /**
+   * The TOTP time-step counter of the last accepted code. Any code whose
+   * matched counter is ≤ this value is a replay and must be rejected.
+   * Stores must persist this field; absent means no code has been accepted yet.
+   */
+  readonly lastUsedCounter?: number;
 }
 
 /**
@@ -521,8 +527,8 @@ export const make = (
         }
 
         const plainSecret = cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
-        const isValid = yield* verifyTOTP(code, plainSecret, config.totp);
-        if (!isValid) {
+        const matchedCounter = yield* verifyTOTP(code, plainSecret, config.totp);
+        if (matchedCounter === null) {
           return yield* Effect.fail(
             new MultiFactorError({
               message: "Invalid multi-factor code",
@@ -530,7 +536,7 @@ export const make = (
           );
         }
 
-        yield* store.upsert({ ...record, verified: true });
+        yield* store.upsert({ ...record, verified: true, lastUsedCounter: matchedCounter });
       }),
 
       disable: Effect.fn("MultiFactorService.disable")(function* (
@@ -580,14 +586,28 @@ export const make = (
 
             const plainSecret =
               cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
-            const isValid = yield* verifyTOTP(code, plainSecret, config.totp);
-            if (!isValid) {
+            const matchedCounter = yield* verifyTOTP(code, plainSecret, config.totp);
+            if (matchedCounter === null) {
               return yield* Effect.fail(
                 new MultiFactorError({
                   message: "Invalid multi-factor code",
                 }),
               );
             }
+
+            // Reject replays: a code whose matched counter has already been used.
+            if (record.lastUsedCounter !== undefined && matchedCounter <= record.lastUsedCounter) {
+              return yield* Effect.fail(
+                new MultiFactorError({
+                  message: "Multi-factor code has already been used",
+                }),
+              );
+            }
+
+            // Persist the counter before creating the session so concurrent
+            // submissions of the same code are rejected even if the session
+            // write has not completed yet.
+            yield* store.upsert({ ...record, lastUsedCounter: matchedCounter });
 
             // Consume the pending token (one-time use)
             yield* pendingStore.delete(pendingToken);

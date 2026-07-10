@@ -42,9 +42,17 @@ describe("Scope", () => {
       expect(hasAllScopes("a b", ["a", "c"])).toBe(false);
     });
 
+    it("denies on empty required list (fail-closed)", () => {
+      expect(hasAllScopes("a b c", [])).toBe(false);
+    });
+
     it("checks any scope", () => {
       expect(hasAnyScope("a b", ["x", "b"])).toBe(true);
       expect(hasAnyScope("a b", ["x", "y"])).toBe(false);
+    });
+
+    it("hasAnyScope denies on empty required list", () => {
+      expect(hasAnyScope("a b c", [])).toBe(false);
     });
   });
 
@@ -79,6 +87,14 @@ describe("Scope", () => {
       if (result._tag === "Failure") {
         expect(result.failure._tag).toBe("InsufficientScopeError");
         expect(result.failure.requiredScope).toBe("b c");
+      }
+    });
+
+    it("denies on empty required list (fail-closed)", async () => {
+      const result = await Effect.runPromise(Effect.result(requireAllScopes("a b c", [])));
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("InsufficientScopeError");
       }
     });
   });

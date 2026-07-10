@@ -116,7 +116,7 @@ Stage behind a Changeset (major for `effect-auth`, major for sql/alchemy).
 **Steps:**
 
 1. Remove `email` / `emailVerified` from the `UserResponse` schema in
-   `HttpApiSchemas.ts` (or expose them via the `UserWithIdentifiers` read view).
+   `HTTPApiSchemas.ts` (or expose them via the `UserWithIdentifiers` read view).
 2. Add `GET /identifiers` endpoint to list a user's identifiers.
 3. Add `DELETE /identifiers/:id` endpoint.
 4. Update `signUp` request bodies that currently include an `email` field to

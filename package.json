@@ -69,6 +69,7 @@
   "scripts": {
     "prepare": "vp config && pnpm exec effect-language-service patch",
     "build": "tsc",
+    "check": "vp check",
     "test": "vp test run",
     "typecheck": "tsc --noEmit && vp test --typecheck --run",
     "docs": "docgen",

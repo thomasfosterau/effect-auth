@@ -65,7 +65,7 @@ import {
   type DeviceAuthorizationRecord,
   DeviceAuthorizationService,
 } from "../DeviceAuthorization.ts";
-import { generateTOTP } from "../secondfactor/OTP.ts";
+import { generateHOTP, generateTOTP } from "../secondfactor/OTP.ts";
 import { UserNotFoundError } from "../Errors.ts";
 import type * as Types from "../Types.ts";
 
@@ -1232,6 +1232,11 @@ describe("email OTP", () => {
 
 describe("multi-factor", () => {
   const totpFor = (secret: string) => Effect.runPromise(generateTOTP(secret));
+  // The previous time step's code (within the default ±1 window). Confirming
+  // enrollment with it leaves the current step's code unused, so the replay
+  // guard doesn't reject the later challenge redemption.
+  const previousTotpFor = (secret: string) =>
+    Effect.runPromise(generateHOTP(secret, Math.floor(Date.now() / 1000 / 30) - 1));
 
   it("enables, confirms, gates sign-in, and redeems a TOTP challenge", async () => {
     const fixture = makeFixture();
@@ -1265,7 +1270,7 @@ describe("multi-factor", () => {
     const confirm = await handler(
       jsonRequest(
         "/multi-factor/confirm",
-        { code: await totpFor(enrollment.secret) },
+        { code: await previousTotpFor(enrollment.secret) },
         asCookie(sid),
       ),
     );
