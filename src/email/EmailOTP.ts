@@ -8,10 +8,10 @@
  *
  * @module email-otp
  */
-import { randomInt } from "node:crypto";
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
 import type { HookError } from "../Hooks.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService } from "../session/SessionService.ts";
 import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
@@ -181,21 +181,24 @@ export class EmailOTPService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: EmailOTPConfig) =>
-    Layer.effect(EmailOTPService, makeEmailOTPService(config));
+    Layer.effect(EmailOTPService, makeEmailOTPService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
 
 /** @deprecated Use {@link hashToken} from `"effect-auth"` instead. */
 export const hashOTP = hashToken;
 
 /**
- * Generate a numeric OTP with crypto-secure randomness (one uniform
- * `crypto.randomInt` draw per digit).
+ * Generate a numeric OTP with crypto-secure randomness (one unbiased
+ * `randomIntBetween` draw per digit — no modulo bias).
  */
-export const generateOTP = (length: number): Effect.Effect<string, Errors.AuthError> =>
-  Effect.sync(() => {
+export const generateOTP = (crypto: Crypto.Crypto, length: number): Effect.Effect<string> =>
+  Effect.gen(function* () {
     let otp = "";
     for (let i = 0; i < length; i++) {
-      otp += randomInt(0, 10).toString();
+      const digit = yield* crypto.randomIntBetween(0, 10, { halfOpen: true });
+      otp += digit.toString();
     }
     return otp;
   });
@@ -208,7 +211,7 @@ export const makeEmailOTPService = (
 ): Effect.Effect<
   typeof EmailOTPService.Service,
   never,
-  EmailOTPStore | EmailOTPUserStore | SessionService
+  EmailOTPStore | EmailOTPUserStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
@@ -219,6 +222,7 @@ export const makeEmailOTPService = (
     const store = yield* EmailOTPStore;
     const userStore = yield* EmailOTPUserStore;
     const sessionManager = yield* SessionService;
+    const crypto = yield* Crypto.Crypto;
 
     const invalidOTP = () =>
       Effect.fail(
@@ -330,7 +334,7 @@ export const makeEmailOTPService = (
           }
         }
 
-        const otp = yield* generateOTP(otpLength);
+        const otp = yield* generateOTP(crypto, otpLength);
         const record: EmailOTPRecord = {
           email,
           otpHash: hashToken(otp),

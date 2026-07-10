@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import { KeyValueStore } from "effect/unstable/persistence";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 import {
   layerKV,
   OAuthStateStoreKV,
@@ -364,6 +365,7 @@ describe("KeyValueStores", () => {
       const layer = Layer.mergeAll(
         EmailVerificationStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
         Hooks.Default,
+        PlatformCrypto.layer,
       );
       // The flipped verifications leave failure types in the error channel;
       // any unexpected failure should crash the test, so treat them as defects.

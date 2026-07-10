@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Effect, Layer } from "effect";
-import * as nodeCrypto from "node:crypto";
+import { Context, Crypto, Effect, Layer } from "effect";
 import { Hooks, makePlugin, composePlugins } from "../Hooks.js";
+import * as PlatformCrypto from "../PlatformCrypto.js";
 import * as Errors from "../Errors.js";
 import { makeEmailPasswordService, EmailPasswordStore } from "./EmailPassword.js";
 import { make, SessionService } from "../session/SessionService.js";
@@ -112,7 +112,10 @@ const makeTestContext = async () => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       make(sessionConfig),
-      Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+      Context.merge(
+        Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+      ),
     ).pipe(Effect.provide(Hooks.Default)),
   );
 
@@ -123,8 +126,11 @@ const makeTestContext = async () => {
       Context.merge(
         Context.make(UserStore, userStore),
         Context.merge(
-          Context.make(EmailPasswordStore, emailPasswordStore),
-          Context.make(PasswordHasher, makePBKDF2Hasher()),
+          Context.merge(
+            Context.make(EmailPasswordStore, emailPasswordStore),
+            Context.make(PasswordHasher, makePBKDF2Hasher()),
+          ),
+          Context.make(Crypto.Crypto, PlatformCrypto.instance),
         ),
       ),
     ),
@@ -306,15 +312,24 @@ describe("EmailPasswordService constant-work sign-in", () => {
     const sessionManager = await Effect.runPromise(
       Effect.provide(
         make({ sessionExpiresIn: { activePeriod: 86400000, idlePeriod: 43200000 } }),
-        Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+        Context.merge(
+          Context.merge(
+            Context.make(SessionStore, sessionStore),
+            Context.make(UserStore, userStore),
+          ),
+          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
 
     const ctx = Context.merge(
       Context.make(SessionService, sessionManager),
       Context.merge(
-        Context.make(EmailPasswordStore, emailPasswordStore),
-        Context.make(PasswordHasher, spyHasher),
+        Context.merge(
+          Context.make(EmailPasswordStore, emailPasswordStore),
+          Context.make(PasswordHasher, spyHasher),
+        ),
+        Context.make(Crypto.Crypto, PlatformCrypto.instance),
       ),
     );
 
@@ -360,15 +375,24 @@ describe("EmailPasswordService constant-work sign-in", () => {
     const sessionManager = await Effect.runPromise(
       Effect.provide(
         make({ sessionExpiresIn: { activePeriod: 86400000, idlePeriod: 43200000 } }),
-        Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+        Context.merge(
+          Context.merge(
+            Context.make(SessionStore, sessionStore),
+            Context.make(UserStore, userStore),
+          ),
+          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
 
     const ctx = Context.merge(
       Context.make(SessionService, sessionManager),
       Context.merge(
-        Context.make(EmailPasswordStore, emailPasswordStore),
-        Context.make(PasswordHasher, spyHasher),
+        Context.merge(
+          Context.make(EmailPasswordStore, emailPasswordStore),
+          Context.make(PasswordHasher, spyHasher),
+        ),
+        Context.make(Crypto.Crypto, PlatformCrypto.instance),
       ),
     );
 
@@ -491,15 +515,22 @@ describe("EmailPasswordService — migration and security hardening", () => {
   });
 
   /** Build an old-style PBKDF2 hash (210 000 iterations, 64-byte key). */
-  const makeOldPbkdf2Hash = (password: string): Promise<string> => {
-    const salt = nodeCrypto.randomBytes(16);
-    return new Promise<string>((resolve, reject) =>
-      nodeCrypto.pbkdf2(password, salt, 210000, 64, "sha256", (err, key) =>
-        err
-          ? reject(err)
-          : resolve(`pbkdf2-sha256$210000$${salt.toString("hex")}$${key.toString("hex")}`),
-      ),
+  const makeOldPbkdf2Hash = async (password: string): Promise<string> => {
+    const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
+    const keyMaterial = await globalThis.crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(password),
+      "PBKDF2",
+      false,
+      ["deriveBits"],
     );
+    const bits = await globalThis.crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt, iterations: 210000, hash: "SHA-256" },
+      keyMaterial,
+      64 * 8,
+    );
+    const key = Buffer.from(bits);
+    return `pbkdf2-sha256$210000$${Buffer.from(salt).toString("hex")}$${key.toString("hex")}`;
   };
 
   it("verifies an old PBKDF2 hash and rehashes it to current params on sign-in", async () => {
@@ -731,16 +762,22 @@ describe("EmailPasswordService - dangling session protection", () => {
           sessionExpiresIn: { activePeriod: 3_600_000, idlePeriod: 1_800_000 },
         }),
         Context.merge(
-          Context.make(SessionStore, localSessionStore),
-          Context.make(UserStore, localUserStore),
+          Context.merge(
+            Context.make(SessionStore, localSessionStore),
+            Context.make(UserStore, localUserStore),
+          ),
+          Context.make(Crypto.Crypto, PlatformCrypto.instance),
         ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
     return Context.merge(
       Context.make(SessionService, sessionManager),
       Context.merge(
-        Context.make(EmailPasswordStore, localEmailPasswordStore),
-        Context.make(PasswordHasher, makePBKDF2Hasher()),
+        Context.merge(
+          Context.make(EmailPasswordStore, localEmailPasswordStore),
+          Context.make(PasswordHasher, makePBKDF2Hasher()),
+        ),
+        Context.make(Crypto.Crypto, PlatformCrypto.instance),
       ),
     );
   };

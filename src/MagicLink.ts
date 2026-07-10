@@ -8,10 +8,10 @@
  *
  * @module magic-link
  */
-import { Context, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
+import { Context, Crypto, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { type HookError } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
@@ -138,14 +138,23 @@ export class MagicLinkService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: MagicLinkConfig) =>
-    Layer.effect(MagicLinkService, makeMagicLinkService(config));
+    Layer.effect(MagicLinkService, makeMagicLinkService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
 
 /**
  * Generate a cryptographically secure magic link token
  */
-export const generateMagicLinkToken = (): Effect.Effect<string, Errors.AuthError> =>
-  Effect.sync(() => crypto.randomBytes(32).toString("base64url"));
+export const generateMagicLinkToken = (
+  crypto: Crypto.Crypto,
+): Effect.Effect<string, Errors.AuthError> =>
+  crypto.randomBytes(32).pipe(
+    Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+    Effect.mapError(
+      (cause) => new Errors.AuthError({ message: "Failed to generate magic link token", cause }),
+    ),
+  );
 
 /**
  * Create a magic link service
@@ -155,7 +164,7 @@ export const makeMagicLinkService = (
 ): Effect.Effect<
   typeof MagicLinkService.Service,
   never,
-  MagicLinkStore | MagicLinkUserStore | SessionService
+  MagicLinkStore | MagicLinkUserStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
@@ -164,6 +173,7 @@ export const makeMagicLinkService = (
     const store = yield* MagicLinkStore;
     const userStore = yield* MagicLinkUserStore;
     const sessionManager = yield* SessionService;
+    const crypto = yield* Crypto.Crypto;
 
     return {
       send: Effect.fn("MagicLinkService.send")(function* (rawEmail: string) {
@@ -204,7 +214,7 @@ export const makeMagicLinkService = (
         // Invalidate outstanding tokens so only the latest link is usable.
         yield* store.deleteByEmail(email);
 
-        const rawToken = yield* generateMagicLinkToken();
+        const rawToken = yield* generateMagicLinkToken(crypto);
         const magicLink: MagicLinkToken = {
           // Store the hash — the raw token is delivered to the user via sendMagicLink.
           token: hashToken(rawToken),

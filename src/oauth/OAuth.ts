@@ -5,9 +5,11 @@
  * and related data structures.
  */
 
-import { Config, Context, Effect, Layer, Redacted } from "effect";
+import { Config, Context, Crypto, Effect, Layer, Redacted } from "effect";
+import * as Cipher from "../Cipher.ts";
 import { makeAes256GcmCipher } from "../Cipher.ts";
 import * as Obs from "../Observability.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import type { TokenCipher } from "../Cipher.ts";
 export type { TokenCipher } from "../Cipher.ts";
 export { makeAes256GcmCipher } from "../Cipher.ts";
@@ -192,7 +194,11 @@ export interface OAuthProvider {
    */
   readonly generateAuthorizationUrl: (
     scopes?: readonly string[],
-  ) => Effect.Effect<AuthorizationUrlResult, OAuthProviderError | AuthError, OAuthStateStore>;
+  ) => Effect.Effect<
+    AuthorizationUrlResult,
+    OAuthProviderError | AuthError,
+    OAuthStateStore | Crypto.Crypto
+  >;
   readonly exchangeCode: (
     code: string,
     codeVerifier?: string,
@@ -219,7 +225,6 @@ export interface OAuthProvider {
  *
  * @module oauth
  */
-import * as crypto from "node:crypto";
 
 /**
  * Storage interface for OAuth state (temporary, Redis/memory)
@@ -276,19 +281,31 @@ export class OAuthUserStore extends Context.Service<
 /**
  * Generate a cryptographically secure random state parameter
  */
-export const generateState = (): Effect.Effect<string, never> =>
-  Effect.sync(() => crypto.randomBytes(32).toString("base64url"));
+export const generateState = (): Effect.Effect<string, never, Crypto.Crypto> =>
+  Effect.gen(function* () {
+    const crypto = yield* Crypto.Crypto;
+    return yield* crypto.randomBytes(32).pipe(
+      Effect.orDie,
+      Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+    );
+  });
 
 /**
  * Generate PKCE code verifier and challenge
  */
 export const generatePKCE = (): Effect.Effect<
   { codeVerifier: string; codeChallenge: string },
-  never
+  never,
+  Crypto.Crypto
 > =>
-  Effect.sync(() => {
-    const codeVerifier = crypto.randomBytes(32).toString("base64url");
-    const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+  Effect.gen(function* () {
+    const crypto = yield* Crypto.Crypto;
+    const codeVerifierBytes = yield* crypto.randomBytes(32).pipe(Effect.orDie);
+    const codeVerifier = Buffer.from(codeVerifierBytes).toString("base64url");
+    const codeChallengeBytes = yield* crypto
+      .digest("SHA-256", new TextEncoder().encode(codeVerifier))
+      .pipe(Effect.orDie);
+    const codeChallenge = Buffer.from(codeChallengeBytes).toString("base64url");
     return { codeVerifier, codeChallenge };
   });
 
@@ -296,8 +313,14 @@ export const generatePKCE = (): Effect.Effect<
  * Generate a cryptographically secure random nonce for OIDC id_token replay
  * protection.
  */
-export const generateNonce = (): Effect.Effect<string, never> =>
-  Effect.sync(() => crypto.randomBytes(16).toString("base64url"));
+export const generateNonce = (): Effect.Effect<string, never, Crypto.Crypto> =>
+  Effect.gen(function* () {
+    const crypto = yield* Crypto.Crypto;
+    return yield* crypto.randomBytes(16).pipe(
+      Effect.orDie,
+      Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+    );
+  });
 
 const decodeJWTSegment = (segment: string): Record<string, unknown> =>
   JSON.parse(Buffer.from(segment, "base64url").toString("utf8")) as Record<string, unknown>;
@@ -378,24 +401,9 @@ export const verifyIdToken = (
 
     const verified = yield* Effect.try({
       try: () => {
-        const key = crypto.createPublicKey({
-          key: jwk as crypto.JsonWebKeyInput["key"],
-          format: "jwk",
-        });
         const signingInput = Buffer.from(`${headerSeg}.${payloadSeg}`);
         const signature = Buffer.from(signatureSeg, "base64url");
-        if (alg === "RS256") {
-          return crypto.verify("sha256", signingInput, key, signature);
-        }
-        if (alg === "ES256") {
-          return crypto.verify(
-            "sha256",
-            signingInput,
-            { key, dsaEncoding: "ieee-p1363" },
-            signature,
-          );
-        }
-        return crypto.verify(null, signingInput, key, signature);
+        return Cipher.verifyJws(alg, signingInput, signature, jwk);
       },
       catch: (cause) =>
         new OAuthProviderError({
@@ -720,7 +728,10 @@ export class OAuthService extends Context.Service<
   static readonly layer = (
     providers: Record<string, OAuthProvider>,
     options: OAuthServiceOptions = {},
-  ) => Layer.effect(OAuthService, makeOAuthService(providers, options));
+  ) =>
+    Layer.effect(OAuthService, makeOAuthService(providers, options)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
 
 /**
@@ -778,7 +789,7 @@ export const makeOAuthService = (
 ): Effect.Effect<
   typeof OAuthService.Service,
   never,
-  OAuthStateStore | OAuthAccountStore | OAuthUserStore | SessionService
+  OAuthStateStore | OAuthAccountStore | OAuthUserStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const autoLinkByVerifiedEmail = options.autoLinkByVerifiedEmail ?? true;
@@ -793,6 +804,15 @@ export const makeOAuthService = (
     const accountStore = yield* OAuthAccountStore;
     const userStore = yield* OAuthUserStore;
     const sessionManager = yield* SessionService;
+    const crypto = yield* Crypto.Crypto;
+
+    const randomAccountId = (): Effect.Effect<string, AuthError> =>
+      crypto.randomBytes(16).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
+        Effect.mapError(
+          (cause) => new AuthError({ message: "Failed to generate account id", cause }),
+        ),
+      );
 
     const encryptAccount = (account: OAuthAccount): Effect.Effect<OAuthAccount, AuthError> => {
       if (cipher === null) return Effect.succeed(account);
@@ -882,7 +902,10 @@ export const makeOAuthService = (
 
             const result = yield* providerInstance
               .generateAuthorizationUrl(options?.scopes)
-              .pipe(Effect.provideService(OAuthStateStore, stateStore));
+              .pipe(
+                Effect.provideService(OAuthStateStore, stateStore),
+                Effect.provideService(Crypto.Crypto, crypto),
+              );
 
             // Update state with returnTo if provided
             if (options?.returnTo) {
@@ -977,8 +1000,9 @@ export const makeOAuthService = (
         // Note: For new accounts without linkToUserId, we create an unlinked account
         // with empty userId. The caller should link it to a user after creating
         // the user record in their database.
+        const newAccountId = yield* randomAccountId();
         const newAccount: OAuthAccount = {
-          id: crypto.randomBytes(16).toString("hex"),
+          id: newAccountId,
           userId: options?.linkToUserId ?? "",
           provider: stateEntry.provider,
           providerId: userInfo.id,
@@ -1079,8 +1103,9 @@ export const makeOAuthService = (
               });
             }
 
+            const newAccountId = yield* randomAccountId();
             const account: OAuthAccount = {
-              id: crypto.randomBytes(16).toString("hex"),
+              id: newAccountId,
               userId: user.id,
               provider: stateEntry.provider,
               providerId: userInfo.id,
@@ -1181,8 +1206,9 @@ export const makeOAuthService = (
         }
 
         // Create or update the account linked to this user
+        const accountId = existingAccount?.id ?? (yield* randomAccountId());
         const account: OAuthAccount = {
-          id: existingAccount?.id ?? crypto.randomBytes(16).toString("hex"),
+          id: accountId,
           userId,
           provider,
           providerId: userInfo.id,
@@ -1531,10 +1557,9 @@ export const makeAppleClientSecret = (params: {
       const encode = (obj: unknown): string =>
         Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
       const signingInput = `${encode(header)}.${encode(payload)}`;
-      const key = crypto.createPrivateKey(Redacted.value(params.privateKey));
-      const signature = crypto
-        .sign("sha256", Buffer.from(signingInput), { key, dsaEncoding: "ieee-p1363" })
-        .toString("base64url");
+      const signature = Buffer.from(
+        Cipher.signJws("ES256", Buffer.from(signingInput), Redacted.value(params.privateKey)),
+      ).toString("base64url");
       return `${signingInput}.${signature}`;
     },
     catch: (cause) =>

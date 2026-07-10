@@ -17,13 +17,13 @@
  *
  * @module oidc-provider
  */
-import { Context, Data, Effect, Layer, Redacted } from "effect";
-import * as crypto from "node:crypto";
-import type { AuthError } from "./Errors.ts";
+import { Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
+import { AuthError } from "./Errors.ts";
 import { JWTService } from "./JWT.ts";
 import * as Obs from "./Observability.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { UserStore } from "./session/UserStore.ts";
-import { hashToken } from "./TokenHash.ts";
+import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 
 /** Failure to register a client or process an authorization request. */
@@ -380,7 +380,9 @@ export class OIDCProviderService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: OIDCProviderConfig) =>
-    Layer.effect(OIDCProviderService, makeOIDCProviderService(config));
+    Layer.effect(OIDCProviderService, makeOIDCProviderService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
 
 // -----------------------------------------------------------------------------
@@ -392,12 +394,7 @@ export const hashOIDCSecret = hashToken;
 
 /** Constant-time equality of two strings via their SHA-256 digests. */
 const secretEquals = (a: string, b: string): boolean =>
-  crypto.timingSafeEqual(
-    crypto.createHash("sha256").update(a).digest(),
-    crypto.createHash("sha256").update(b).digest(),
-  );
-
-const randomToken = (): string => crypto.randomBytes(32).toString("base64url");
+  constantTimeHashEqual(hashToken(a), hashToken(b));
 
 /** Append query parameters to a URL that may already carry a query string. */
 const buildRedirect = (base: string, params: Record<string, string | undefined>): string => {
@@ -441,7 +438,13 @@ export const makeOIDCProviderService = (
 ): Effect.Effect<
   typeof OIDCProviderService.Service,
   never,
-  OIDCClientStore | OIDCCodeStore | OIDCConsentStore | OIDCTokenStore | UserStore | JWTService
+  | OIDCClientStore
+  | OIDCCodeStore
+  | OIDCConsentStore
+  | OIDCTokenStore
+  | UserStore
+  | JWTService
+  | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const codeExpiresIn = config.codeExpiresIn ?? 10 * 60 * 1000;
@@ -493,6 +496,30 @@ export const makeOIDCProviderService = (
     const tokenStore = yield* OIDCTokenStore;
     const userStore = yield* UserStore;
     const jwt = yield* JWTService;
+    const crypto = yield* Crypto.Crypto;
+
+    const randomToken = (): Effect.Effect<string, AuthError> =>
+      crypto.randomBytes(32).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+        Effect.mapError((cause) => new AuthError({ message: "Failed to generate token", cause })),
+      );
+
+    const randomClientId = (): Effect.Effect<string, AuthError> =>
+      crypto.randomBytes(16).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
+        Effect.mapError(
+          (cause) => new AuthError({ message: "Failed to generate client id", cause }),
+        ),
+      );
+
+    /** SHA-256 digest of the PKCE code verifier, base64url-encoded. */
+    const hashCodeVerifier = (verifier: string): Effect.Effect<string, AuthError> =>
+      crypto.digest("SHA-256", new TextEncoder().encode(verifier)).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+        Effect.mapError(
+          (cause) => new AuthError({ message: "Failed to hash code verifier", cause }),
+        ),
+      );
 
     const getClient = (clientId: string) =>
       Effect.gen(function* () {
@@ -507,7 +534,7 @@ export const makeOIDCProviderService = (
       base: Omit<OIDCAuthorizationCode, "codeHash" | "kind" | "expiresAt" | "createdAt">,
     ) =>
       Effect.gen(function* () {
-        const value = randomToken();
+        const value = yield* randomToken();
         const now = Date.now();
         yield* codeStore.create({
           ...base,
@@ -579,7 +606,7 @@ export const makeOIDCProviderService = (
           idToken = signed.token;
         }
 
-        const accessToken = randomToken();
+        const accessToken = yield* randomToken();
         yield* tokenStore.create({
           tokenHash: hashOIDCSecret(accessToken),
           kind: "access",
@@ -592,8 +619,8 @@ export const makeOIDCProviderService = (
 
         let refreshToken: string | undefined;
         if (grant.scopes.includes("offline_access")) {
-          refreshToken = randomToken();
-          const familyId = grant.familyId ?? randomToken();
+          refreshToken = yield* randomToken();
+          const familyId = grant.familyId ?? (yield* randomToken());
           const absoluteExpiresAt = grant.absoluteExpiresAt ?? now + refreshTokenExpiresIn;
           yield* tokenStore.create({
             tokenHash: hashOIDCSecret(refreshToken),
@@ -671,10 +698,11 @@ export const makeOIDCProviderService = (
           }
         }
         const type = input.type ?? "web";
-        const clientSecret = type === "web" ? randomToken() : undefined;
+        const clientSecret = type === "web" ? yield* randomToken() : undefined;
+        const clientId = yield* randomClientId();
         const now = Date.now();
         const client = yield* clientStore.create({
-          clientId: crypto.randomBytes(16).toString("hex"),
+          clientId,
           ...(clientSecret !== undefined && { clientSecretHash: hashOIDCSecret(clientSecret) }),
           name: input.name,
           redirectUris: input.redirectUris,
@@ -915,12 +943,13 @@ export const makeOIDCProviderService = (
               });
             }
             if (record.codeChallenge !== undefined) {
+              const computedChallenge =
+                request.codeVerifier !== undefined
+                  ? yield* hashCodeVerifier(request.codeVerifier)
+                  : undefined;
               if (
-                request.codeVerifier === undefined ||
-                !secretEquals(
-                  crypto.createHash("sha256").update(request.codeVerifier).digest("base64url"),
-                  record.codeChallenge,
-                )
+                computedChallenge === undefined ||
+                !secretEquals(computedChallenge, record.codeChallenge)
               ) {
                 return yield* new OIDCTokenError({
                   error: "invalid_grant",
@@ -979,7 +1008,7 @@ export const makeOIDCProviderService = (
             yield* tokenStore.delete(record.tokenHash);
 
             // Carry the family lineage and absolute lifetime through all rotations.
-            const familyId = record.familyId ?? randomToken();
+            const familyId = record.familyId ?? (yield* randomToken());
             const absoluteExpiresAt = record.absoluteExpiresAt ?? record.expiresAt;
 
             // Record as consumed for reuse detection.

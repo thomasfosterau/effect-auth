@@ -26,12 +26,13 @@
  *
  * @module google-one-tap
  */
-import * as crypto from "node:crypto";
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Crypto, Data, Effect, Layer } from "effect";
 import type { AuthError } from "./Errors.ts";
 import type { HookError } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { OAuthUserStore, generateNonce, verifyIdToken } from "./oauth/OAuth.ts";
+import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 
 /** Failure to verify a One Tap credential or complete the sign-in. */
@@ -131,7 +132,9 @@ export class GoogleOneTapService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: GoogleOneTapConfig) =>
-    Layer.effect(GoogleOneTapService, makeGoogleOneTapService(config));
+    Layer.effect(GoogleOneTapService, makeGoogleOneTapService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -142,15 +145,14 @@ export class GoogleOneTapService extends Context.Service<
  * Google embeds the SHA-256 hex digest of the nonce — not the raw nonce —
  * in the id_token `nonce` claim.
  */
-const hashNonce = (nonce: string): string =>
-  crypto.createHash("sha256").update(nonce, "utf8").digest("hex");
+const hashNonce = hashToken;
 
 export const makeGoogleOneTapService = (
   config: GoogleOneTapConfig,
 ): Effect.Effect<
   typeof GoogleOneTapService.Service,
   never,
-  GoogleOneTapNonceStore | OAuthUserStore | SessionService
+  GoogleOneTapNonceStore | OAuthUserStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const jwksEndpoint = config.jwksEndpoint ?? GOOGLE_JWKS_ENDPOINT;
@@ -160,10 +162,11 @@ export const makeGoogleOneTapService = (
     const nonceStore = yield* GoogleOneTapNonceStore;
     const userStore = yield* OAuthUserStore;
     const sessionManager = yield* SessionService;
+    const crypto = yield* Crypto.Crypto;
 
     return {
       createNonce: Effect.fn("GoogleOneTapService.createNonce")(function* () {
-        const nonce = yield* generateNonce();
+        const nonce = yield* generateNonce().pipe(Effect.provideService(Crypto.Crypto, crypto));
         yield* nonceStore
           .create(nonce, Date.now() + nonceTtlMs)
           .pipe(Effect.mapError((e) => new GoogleOneTapError({ message: e.message, cause: e })));

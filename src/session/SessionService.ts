@@ -1,25 +1,36 @@
-import { Context, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
+import { Context, Crypto, Effect, Layer } from "effect";
 import type * as Types from "../Types.ts";
 import * as Errors from "../Errors.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { hashToken } from "../TokenHash.ts";
 import * as Obs from "../Observability.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
-
-const generateSessionId = (): string => crypto.randomBytes(20).toString("hex");
 
 /**
  * Create a SessionService implementation
  */
 export const make = (
   config: Types.SessionConfig,
-): Effect.Effect<typeof SessionService.Service, never, SessionStore | UserStore | Hooks> =>
+): Effect.Effect<
+  typeof SessionService.Service,
+  never,
+  SessionStore | UserStore | Hooks | Crypto.Crypto
+> =>
   Effect.gen(function* () {
     const sessionStore = yield* SessionStore;
     const userStore = yield* UserStore;
     const hooks = yield* Hooks;
+    const crypto = yield* Crypto.Crypto;
+
+    const generateSessionId = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomBytes(20).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate session id", cause }),
+        ),
+      );
 
     return {
       createSession: Effect.fn("SessionService.createSession")(
@@ -30,7 +41,7 @@ export const make = (
               attributes: rawAttributes,
             });
 
-            const rawToken = generateSessionId();
+            const rawToken = yield* generateSessionId();
             const now = new Date();
             const expiresAt = new Date(now.getTime() + config.sessionExpiresIn.activePeriod);
 
@@ -282,5 +293,5 @@ export class SessionService extends Context.Service<
 >()("@effect-auth/SessionService") {
   static readonly make = make;
   static readonly layer = (config: Types.SessionConfig) =>
-    Layer.effect(SessionService, make(config));
+    Layer.effect(SessionService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }

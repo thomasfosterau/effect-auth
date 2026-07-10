@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Effect } from "effect";
+import { Context, Crypto, Effect } from "effect";
 import {
   make as makeOneTimeTokenService,
   OneTimeTokenStore,
   type OneTimeTokenRecord,
 } from "./OneTimeToken.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { hashToken } from "./TokenHash.ts";
 
 const oneTimeTokens = new Map<string, OneTimeTokenRecord>();
@@ -24,7 +25,11 @@ const oneTimeTokenStore = {
     }),
 };
 
-const makeTestContext = () => Context.make(OneTimeTokenStore, oneTimeTokenStore);
+const makeTestContext = () =>
+  Context.merge(
+    Context.make(OneTimeTokenStore, oneTimeTokenStore),
+    Context.make(Crypto.Crypto, PlatformCrypto.instance),
+  );
 
 describe("OneTimeTokenService", () => {
   beforeEach(() => {

@@ -7,9 +7,9 @@
  * House module pattern: store tag + `Context.Service` tag + `make*` +
  * `*ServiceLayer`, module-local `Data.TaggedError`s, epoch-ms timestamps.
  */
-import { Context, Data, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
+import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type * as Types from "./Types.ts";
 import { SessionService } from "./session/SessionService.ts";
 import type { HookError } from "./Hooks.ts";
@@ -139,16 +139,27 @@ export class DeviceAuthorizationService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: DeviceAuthorizationConfig) =>
-    Layer.effect(DeviceAuthorizationService, makeDeviceAuthorizationService(config));
+    Layer.effect(DeviceAuthorizationService, makeDeviceAuthorizationService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
 
 const DEFAULT_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ0123456789";
 
-const randomCode = (length: number, alphabet: string): string => {
-  let out = "";
-  for (let i = 0; i < length; i++) out += alphabet[crypto.randomInt(0, alphabet.length)];
-  return out;
-};
+/** Generate a random code by drawing each character via unbiased rejection sampling. */
+const randomCode = (
+  crypto: Crypto.Crypto,
+  length: number,
+  alphabet: string,
+): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    let out = "";
+    for (let i = 0; i < length; i++) {
+      const index = yield* crypto.randomIntBetween(0, alphabet.length, { halfOpen: true });
+      out += alphabet[index];
+    }
+    return out;
+  });
 
 /** Format a raw code as two dash-separated halves, e.g. `BDWM-HQPK`. */
 const formatUserCode = (raw: string): string => {
@@ -165,7 +176,7 @@ export const makeDeviceAuthorizationService = (
 ): Effect.Effect<
   typeof DeviceAuthorizationService.Service,
   never,
-  DeviceAuthorizationStore | SessionService
+  DeviceAuthorizationStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 30 * 60 * 1000;
@@ -175,14 +186,23 @@ export const makeDeviceAuthorizationService = (
 
     const store = yield* DeviceAuthorizationStore;
     const sessionManager = yield* SessionService;
+    const crypto = yield* Crypto.Crypto;
+
+    const generateDeviceCode = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomBytes(32).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate device code", cause }),
+        ),
+      );
 
     return {
       begin: Effect.fn("DeviceAuthorizationService.begin")(function* (options?: {
         readonly clientId?: string;
         readonly scopes?: readonly string[];
       }) {
-        const rawDeviceCode = crypto.randomBytes(32).toString("base64url");
-        const rawUserCode = randomCode(userCodeLength, alphabet);
+        const rawDeviceCode = yield* generateDeviceCode();
+        const rawUserCode = yield* randomCode(crypto, userCodeLength, alphabet);
         const userCode = formatUserCode(rawUserCode);
         const normalizedUserCode = normalizeUserCode(userCode);
         const now = Date.now();

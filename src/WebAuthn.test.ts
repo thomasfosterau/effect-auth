@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Effect, Context } from "effect";
+import { Effect, Context, Crypto } from "effect";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 import {
   base64UrlDecode,
   ChallengeStore,
@@ -20,7 +21,6 @@ import {
   CredentialNotFoundError,
   AuthError,
 } from "./Errors.js";
-import * as crypto from "node:crypto";
 
 // Mock implementations for testing
 const mockChallengeStore = {
@@ -95,8 +95,11 @@ const testUser: WebAuthnUser = {
 };
 
 const dependencies = Context.merge(
-  Context.make(ChallengeStore, mockChallengeStore),
-  Context.make(CredentialStore, mockCredentialStore),
+  Context.merge(
+    Context.make(ChallengeStore, mockChallengeStore),
+    Context.make(CredentialStore, mockCredentialStore),
+  ),
+  Context.make(Crypto.Crypto, PlatformCrypto.instance),
 );
 
 describe("WebAuthn Service", () => {
@@ -180,7 +183,7 @@ describe("WebAuthn Service", () => {
 
       // Try to verify with expired challenge
       const mockResponse: RegistrationResponse = {
-        credentialId: crypto.randomBytes(16),
+        credentialId: globalThis.crypto.getRandomValues(new Uint8Array(16)),
         attestationObject: new Uint8Array([]),
         clientDataJSON: new Uint8Array([]),
       };
@@ -196,10 +199,10 @@ describe("WebAuthn Service", () => {
   it("should fail to verify with non-existent challenge", async () => {
     const program = Effect.gen(function* () {
       const service = yield* make(config);
-      const fakeChallenge = crypto.randomBytes(32);
+      const fakeChallenge = globalThis.crypto.getRandomValues(new Uint8Array(32));
 
       const mockResponse: RegistrationResponse = {
-        credentialId: crypto.randomBytes(16),
+        credentialId: globalThis.crypto.getRandomValues(new Uint8Array(16)),
         attestationObject: new Uint8Array([]),
         clientDataJSON: new Uint8Array([]),
       };
@@ -238,7 +241,7 @@ describe("WebAuthn Service", () => {
 
       // Try to verify with expired challenge - should fail
       const mockResponse: RegistrationResponse = {
-        credentialId: crypto.randomBytes(16),
+        credentialId: globalThis.crypto.getRandomValues(new Uint8Array(16)),
         attestationObject: new Uint8Array([]),
         clientDataJSON: new Uint8Array([]),
       };
@@ -263,7 +266,7 @@ describe("WebAuthn Service", () => {
       const mockCredential: WebAuthnCredential = {
         id: "test-credential-id",
         userId: testUser.id,
-        publicKey: crypto.randomBytes(65),
+        publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
         algorithm: -7, // ES256
         counter: 0,
         createdAt: Date.now(),
@@ -284,7 +287,7 @@ describe("WebAuthn Service", () => {
         {
           id: "cred-1",
           userId: testUser.id,
-          publicKey: crypto.randomBytes(65),
+          publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
           algorithm: -7,
           counter: 0,
           createdAt: Date.now(),
@@ -292,7 +295,7 @@ describe("WebAuthn Service", () => {
         {
           id: "cred-2",
           userId: testUser.id,
-          publicKey: crypto.randomBytes(65),
+          publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
           algorithm: -7,
           counter: 0,
           createdAt: Date.now(),
@@ -315,7 +318,7 @@ describe("WebAuthn Service", () => {
       const mockCredential: WebAuthnCredential = {
         id: "test-cred",
         userId: testUser.id,
-        publicKey: crypto.randomBytes(65),
+        publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
         algorithm: -7,
         counter: 5,
         createdAt: Date.now(),
@@ -359,7 +362,7 @@ describe("WebAuthn Service", () => {
       const cred1: WebAuthnCredential = {
         id: "cred-a",
         userId: testUser.id,
-        publicKey: crypto.randomBytes(65),
+        publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
         algorithm: -7,
         counter: 0,
         createdAt: Date.now(),
@@ -367,7 +370,7 @@ describe("WebAuthn Service", () => {
       const cred2: WebAuthnCredential = {
         id: "cred-b",
         userId: testUser.id,
-        publicKey: crypto.randomBytes(65),
+        publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
         algorithm: -7,
         counter: 0,
         createdAt: Date.now(),
@@ -375,7 +378,7 @@ describe("WebAuthn Service", () => {
       const other: WebAuthnCredential = {
         id: "cred-c",
         userId: "other-user",
-        publicKey: crypto.randomBytes(65),
+        publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
         algorithm: -7,
         counter: 0,
         createdAt: Date.now(),
@@ -397,7 +400,7 @@ describe("WebAuthn Service", () => {
       const cred: WebAuthnCredential = {
         id: "del-cred",
         userId: testUser.id,
-        publicKey: crypto.randomBytes(65),
+        publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
         algorithm: -7,
         counter: 0,
         createdAt: Date.now(),
@@ -427,7 +430,7 @@ describe("WebAuthn Service", () => {
       const cred: WebAuthnCredential = {
         id: "other-owned",
         userId: "owner-user",
-        publicKey: crypto.randomBytes(65),
+        publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
         algorithm: -7,
         counter: 0,
         createdAt: Date.now(),
@@ -446,7 +449,7 @@ describe("WebAuthn Service", () => {
       const cred: WebAuthnCredential = {
         id: "rename-cred",
         userId: testUser.id,
-        publicKey: crypto.randomBytes(65),
+        publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
         algorithm: -7,
         counter: 0,
         createdAt: Date.now(),
@@ -468,7 +471,7 @@ describe("WebAuthn Service", () => {
       const cred: WebAuthnCredential = {
         id: "rename-protected",
         userId: "owner-user",
-        publicKey: crypto.randomBytes(65),
+        publicKey: globalThis.crypto.getRandomValues(new Uint8Array(65)),
         algorithm: -7,
         counter: 0,
         createdAt: Date.now(),
@@ -520,11 +523,31 @@ const concatBytes = (...arrays: Uint8Array[]): Uint8Array => {
 
 type Alg = -7 | -257 | -8;
 
+const keyGenParams = (alg: Alg) =>
+  alg === -7
+    ? { name: "ECDSA", namedCurve: "P-256" }
+    : alg === -257
+      ? {
+          name: "RSASSA-PKCS1-v1_5",
+          modulusLength: 2048,
+          publicExponent: new Uint8Array([1, 0, 1]),
+          hash: "SHA-256",
+        }
+      : { name: "Ed25519" };
+
 /** Generate a keypair and its COSE-key CBOR bytes for the given algorithm. */
-const buildKey = (alg: Alg): { privateKey: crypto.KeyObject; cose: number[] } => {
+const buildKey = async (alg: Alg): Promise<{ privateKey: CryptoKey; cose: number[] }> => {
+  const { publicKey, privateKey } = (await globalThis.crypto.subtle.generateKey(
+    keyGenParams(alg),
+    true,
+    ["sign", "verify"],
+  )) as { publicKey: CryptoKey; privateKey: CryptoKey };
+
   if (alg === -7) {
-    const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
-    const jwk = publicKey.export({ format: "jwk" }) as { x: string; y: string };
+    const jwk = (await globalThis.crypto.subtle.exportKey("jwk", publicKey)) as {
+      x: string;
+      y: string;
+    };
     const x = new Uint8Array(Buffer.from(jwk.x, "base64url"));
     const y = new Uint8Array(Buffer.from(jwk.y, "base64url"));
     return {
@@ -539,8 +562,10 @@ const buildKey = (alg: Alg): { privateKey: crypto.KeyObject; cose: number[] } =>
     };
   }
   if (alg === -257) {
-    const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
-    const jwk = publicKey.export({ format: "jwk" }) as { n: string; e: string };
+    const jwk = (await globalThis.crypto.subtle.exportKey("jwk", publicKey)) as {
+      n: string;
+      e: string;
+    };
     const n = new Uint8Array(Buffer.from(jwk.n, "base64url"));
     const e = new Uint8Array(Buffer.from(jwk.e, "base64url"));
     return {
@@ -553,8 +578,7 @@ const buildKey = (alg: Alg): { privateKey: crypto.KeyObject; cose: number[] } =>
       ]),
     };
   }
-  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
-  const jwk = publicKey.export({ format: "jwk" }) as { x: string };
+  const jwk = (await globalThis.crypto.subtle.exportKey("jwk", publicKey)) as { x: string };
   const x = new Uint8Array(Buffer.from(jwk.x, "base64url"));
   return {
     privateKey,
@@ -567,7 +591,19 @@ const buildKey = (alg: Alg): { privateKey: crypto.KeyObject; cose: number[] } =>
   };
 };
 
-const rpIdHash = new Uint8Array(crypto.createHash("sha256").update(config.relyingPartyId).digest());
+/** SHA-256 of the relying party id, memoized since it never changes. */
+let rpIdHashCache: Uint8Array | undefined;
+const getRpIdHash = async (): Promise<Uint8Array> => {
+  if (rpIdHashCache === undefined) {
+    rpIdHashCache = new Uint8Array(
+      await globalThis.crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(config.relyingPartyId),
+      ),
+    );
+  }
+  return rpIdHashCache;
+};
 
 const clientDataJSON = (
   type: "webauthn.create" | "webauthn.get",
@@ -585,7 +621,7 @@ const clientDataJSON = (
   );
 
 /** Assemble a `none`-format attestation object embedding the COSE key. */
-const attestationObject = (cose: number[], credentialId: Uint8Array): Uint8Array => {
+const attestationObject = async (cose: number[], credentialId: Uint8Array): Promise<Uint8Array> => {
   const acd = concatBytes(
     new Uint8Array(16), // aaguid
     new Uint8Array([(credentialId.length >> 8) & 0xff, credentialId.length & 0xff]),
@@ -593,7 +629,7 @@ const attestationObject = (cose: number[], credentialId: Uint8Array): Uint8Array
     new Uint8Array(cose),
   );
   const authData = concatBytes(
-    rpIdHash,
+    await getRpIdHash(),
     new Uint8Array([0x45]), // UP | UV | AT
     new Uint8Array([0, 0, 0, 0]), // counter 0
     acd,
@@ -615,22 +651,50 @@ const signCounter = (counter: number): Uint8Array =>
     counter & 0xff,
   ]);
 
-const signAssertion = (
+/**
+ * DER-encode an unsigned big-endian integer (adds a leading 0x00 if the high
+ * bit is set, so it isn't misread as negative).
+ */
+const derInteger = (bytes: Uint8Array): Uint8Array => {
+  let start = 0;
+  while (start < bytes.length - 1 && bytes[start] === 0) start++;
+  const trimmed = bytes.subarray(start);
+  const needsPad = (trimmed[0]! & 0x80) !== 0;
+  const content = needsPad ? concatBytes(new Uint8Array([0]), trimmed) : trimmed;
+  return concatBytes(new Uint8Array([0x02, content.length]), content);
+};
+
+/**
+ * Real WebAuthn authenticators emit DER-encoded ECDSA signatures (which is
+ * what `WebAuthn.ts` verifies against). Web Crypto's ECDSA `sign` emits raw
+ * IEEE-P1363 `r || s`, so convert P-256 signatures (64 bytes: r[32] || s[32]).
+ */
+const p1363ToDer = (signature: Uint8Array): Uint8Array => {
+  const r = derInteger(signature.subarray(0, 32));
+  const s = derInteger(signature.subarray(32, 64));
+  const body = concatBytes(r, s);
+  return concatBytes(new Uint8Array([0x30, body.length]), body);
+};
+
+const signAssertion = async (
   alg: Alg,
-  privateKey: crypto.KeyObject,
+  privateKey: CryptoKey,
   authenticatorData: Uint8Array,
   clientData: Uint8Array,
-): Uint8Array => {
-  const message = concatBytes(
-    authenticatorData,
-    new Uint8Array(crypto.createHash("sha256").update(clientData).digest()),
+): Promise<Uint8Array> => {
+  const clientDataHash = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    clientData as NodeJS.BufferSource,
   );
-  // ES256/RS256 hash with SHA-256; Ed25519 hashes internally (digest null).
-  const signature =
-    alg === -8
-      ? crypto.sign(null, message, privateKey)
-      : crypto.sign("sha256", message, privateKey);
-  return new Uint8Array(signature);
+  const message = concatBytes(authenticatorData, new Uint8Array(clientDataHash));
+  // ES256/RS256 hash with SHA-256; Ed25519 hashes internally.
+  const signature = await globalThis.crypto.subtle.sign(
+    alg === -8 ? "Ed25519" : alg === -7 ? { name: "ECDSA", hash: "SHA-256" } : "RSASSA-PKCS1-v1_5",
+    privateKey,
+    message as NodeJS.BufferSource,
+  );
+  // ES256 (Web Crypto emits raw r||s; authenticators/WebAuthn.ts expect DER).
+  return alg === -7 ? p1363ToDer(new Uint8Array(signature)) : new Uint8Array(signature);
 };
 
 describe.each<{ name: string; alg: Alg }>([
@@ -644,8 +708,10 @@ describe.each<{ name: string; alg: Alg }>([
   });
 
   it("registers a credential and verifies an assertion", async () => {
-    const { privateKey, cose } = buildKey(alg);
-    const credentialId = crypto.randomBytes(20);
+    const { privateKey, cose } = await buildKey(alg);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+    const rpIdHash = await getRpIdHash();
 
     const program = Effect.gen(function* () {
       const service = yield* make(config);
@@ -654,7 +720,7 @@ describe.each<{ name: string; alg: Alg }>([
       const reg = yield* service.generateRegistrationChallenge(testUser);
       const registration = yield* service.verifyRegistration(reg.challenge, {
         credentialId,
-        attestationObject: attestationObject(cose, credentialId),
+        attestationObject: attestationObj,
         clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
       });
       expect(registration.credential.algorithm).toBe(alg);
@@ -664,11 +730,14 @@ describe.each<{ name: string; alg: Alg }>([
       const auth = yield* service.generateAuthenticationChallenge(testUser.id);
       const authenticatorData = concatBytes(rpIdHash, new Uint8Array([0x05]), signCounter(1));
       const clientData = clientDataJSON("webauthn.get", auth.challenge);
+      const signature = yield* Effect.promise(() =>
+        signAssertion(alg, privateKey, authenticatorData, clientData),
+      );
       const result = yield* service.verifyAuthentication(auth.challenge, {
         credentialId,
         authenticatorData,
         clientDataJSON: clientData,
-        signature: signAssertion(alg, privateKey, authenticatorData, clientData),
+        signature,
       });
       expect(result.newCounter).toBe(1);
       return result;
@@ -678,16 +747,18 @@ describe.each<{ name: string; alg: Alg }>([
   });
 
   it("rejects an assertion signed by the wrong key", async () => {
-    const { cose } = buildKey(alg);
-    const wrong = buildKey(alg);
-    const credentialId = crypto.randomBytes(20);
+    const { cose } = await buildKey(alg);
+    const wrong = await buildKey(alg);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+    const rpIdHash = await getRpIdHash();
 
     const program = Effect.gen(function* () {
       const service = yield* make(config);
       const reg = yield* service.generateRegistrationChallenge(testUser);
       yield* service.verifyRegistration(reg.challenge, {
         credentialId,
-        attestationObject: attestationObject(cose, credentialId),
+        attestationObject: attestationObj,
         clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
       });
 
@@ -695,12 +766,15 @@ describe.each<{ name: string; alg: Alg }>([
       const authenticatorData = concatBytes(rpIdHash, new Uint8Array([0x05]), signCounter(1));
       const clientData = clientDataJSON("webauthn.get", auth.challenge);
       // Sign with an unrelated private key.
+      const signature = yield* Effect.promise(() =>
+        signAssertion(alg, wrong.privateKey, authenticatorData, clientData),
+      );
       return yield* Effect.flip(
         service.verifyAuthentication(auth.challenge, {
           credentialId,
           authenticatorData,
           clientDataJSON: clientData,
-          signature: signAssertion(alg, wrong.privateKey, authenticatorData, clientData),
+          signature,
         }),
       );
     });
@@ -710,8 +784,10 @@ describe.each<{ name: string; alg: Alg }>([
   });
 
   it("completes a usernameless (discoverable) register+login round trip", async () => {
-    const { privateKey, cose } = buildKey(alg);
-    const credentialId = crypto.randomBytes(20);
+    const { privateKey, cose } = await buildKey(alg);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+    const rpIdHash = await getRpIdHash();
 
     const program = Effect.gen(function* () {
       const service = yield* make(config);
@@ -720,7 +796,7 @@ describe.each<{ name: string; alg: Alg }>([
       const reg = yield* service.generateRegistrationChallenge(testUser);
       const registration = yield* service.verifyRegistration(reg.challenge, {
         credentialId,
-        attestationObject: attestationObject(cose, credentialId),
+        attestationObject: attestationObj,
         clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
       });
       expect(registration.credential.userId).toBe(testUser.id);
@@ -732,11 +808,14 @@ describe.each<{ name: string; alg: Alg }>([
 
       const authenticatorData = concatBytes(rpIdHash, new Uint8Array([0x05]), signCounter(1));
       const clientData = clientDataJSON("webauthn.get", auth.challenge);
+      const signature = yield* Effect.promise(() =>
+        signAssertion(alg, privateKey, authenticatorData, clientData),
+      );
       const result = yield* service.verifyAuthentication(auth.challenge, {
         credentialId,
         authenticatorData,
         clientDataJSON: clientData,
-        signature: signAssertion(alg, privateKey, authenticatorData, clientData),
+        signature,
       });
 
       // The service resolves the user from the stored credential.
@@ -748,8 +827,11 @@ describe.each<{ name: string; alg: Alg }>([
   });
 
   it("rejects a usernameless assertion when the credential is from a different user", async () => {
-    const { cose } = buildKey(alg);
-    const credentialId = crypto.randomBytes(20);
+    const { cose } = await buildKey(alg);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+    const rpIdHash = await getRpIdHash();
+    const otherKey = await buildKey(alg);
 
     const program = Effect.gen(function* () {
       const service = yield* make(config);
@@ -758,7 +840,7 @@ describe.each<{ name: string; alg: Alg }>([
       const reg = yield* service.generateRegistrationChallenge(testUser);
       yield* service.verifyRegistration(reg.challenge, {
         credentialId,
-        attestationObject: attestationObject(cose, credentialId),
+        attestationObject: attestationObj,
         clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
       });
 
@@ -766,12 +848,15 @@ describe.each<{ name: string; alg: Alg }>([
       const auth = yield* service.generateAuthenticationChallenge("other-user-999");
       const authenticatorData = concatBytes(rpIdHash, new Uint8Array([0x05]), signCounter(1));
       const clientData = clientDataJSON("webauthn.get", auth.challenge);
+      const signature = yield* Effect.promise(() =>
+        signAssertion(alg, otherKey.privateKey, authenticatorData, clientData),
+      );
       return yield* Effect.flip(
         service.verifyAuthentication(auth.challenge, {
           credentialId,
           authenticatorData,
           clientDataJSON: clientData,
-          signature: signAssertion(alg, buildKey(alg).privateKey, authenticatorData, clientData),
+          signature,
         }),
       );
     });

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Effect } from "effect";
+import { Context, Crypto, Effect } from "effect";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 import {
   makePhoneOTPService,
   getPhoneNumber,
@@ -121,14 +122,20 @@ const makeTestContext = async () => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       makeSessionService(sessionConfig),
-      Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+      Context.merge(
+        Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
+        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+      ),
     ).pipe(Effect.provide(Hooks.Default)),
   );
   return Context.merge(
     Context.make(SessionService, sessionManager),
     Context.merge(
-      Context.make(PhoneOTPStore, phoneOTPStore),
-      Context.make(PhoneOTPUserStore, phoneOTPUserStore),
+      Context.merge(
+        Context.make(PhoneOTPStore, phoneOTPStore),
+        Context.make(PhoneOTPUserStore, phoneOTPUserStore),
+      ),
+      Context.make(Crypto.Crypto, PlatformCrypto.instance),
     ),
   );
 };

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Effect } from "effect";
+import { Context, Crypto, Effect } from "effect";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 import {
   type APIKeyService,
   APIKeyStore,
@@ -81,8 +82,11 @@ const makeRateLimitContext = async () => {
   return Context.merge(
     storeContext,
     Context.merge(
-      Context.make(RateLimiter, rateLimiter),
-      Context.make(RateLimitStore, rateLimitStore),
+      Context.merge(
+        Context.make(RateLimiter, rateLimiter),
+        Context.make(RateLimitStore, rateLimitStore),
+      ),
+      Context.make(Crypto.Crypto, PlatformCrypto.instance),
     ),
   );
 };

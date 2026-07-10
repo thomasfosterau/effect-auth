@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer, Redacted } from "effect";
+import { Crypto, Effect, Layer, Redacted } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
-import * as crypto from "node:crypto";
 import { Hooks } from "../Hooks.js";
 import { HaveIBeenPwnedPlugin } from "../password/HaveIBeenPwned.js";
+import * as PlatformCrypto from "../PlatformCrypto.js";
 import { CaptchaPlugin } from "./Captcha.js";
 import { PwnedPasswordError, CaptchaError } from "../Errors.js";
 import type { SignInInput, SignUpInput } from "../email/EmailPassword.js";
@@ -18,7 +18,7 @@ const stubHttpClient = (respond: (url: string) => Response) =>
   );
 
 const drive = <A, E>(
-  pluginLayer: Layer.Layer<Hooks, never, Hooks | HttpClient.HttpClient>,
+  pluginLayer: Layer.Layer<Hooks, never, Hooks | HttpClient.HttpClient | Crypto.Crypto>,
   clientLayer: Layer.Layer<HttpClient.HttpClient>,
   f: (hooks: typeof Hooks.Service) => Effect.Effect<A, E, never>,
 ) =>
@@ -27,7 +27,13 @@ const drive = <A, E>(
       const hooks = yield* Hooks;
       return yield* f(hooks);
     }).pipe(
-      Effect.provide(pluginLayer.pipe(Layer.provide(Hooks.Default), Layer.provide(clientLayer))),
+      Effect.provide(
+        pluginLayer.pipe(
+          Layer.provide(Hooks.Default),
+          Layer.provide(clientLayer),
+          Layer.provide(PlatformCrypto.layer),
+        ),
+      ),
     ),
   );
 
@@ -43,8 +49,10 @@ const signIn = (captchaToken?: string): SignInInput => ({
   ...(captchaToken !== undefined && { captchaToken }),
 });
 
-const sha1UpperSuffix = (password: string): string =>
-  crypto.createHash("sha1").update(password).digest("hex").toUpperCase().slice(5);
+const sha1UpperSuffix = async (password: string): Promise<string> => {
+  const digest = await globalThis.crypto.subtle.digest("SHA-1", new TextEncoder().encode(password));
+  return Buffer.from(digest).toString("hex").toUpperCase().slice(5);
+};
 
 describe("HaveIBeenPwnedPlugin", () => {
   it("allows a password whose suffix is not in the range response", async () => {
@@ -57,7 +65,7 @@ describe("HaveIBeenPwnedPlugin", () => {
 
   it("rejects (short-circuits) a breached password", async () => {
     const pwd = "password123";
-    const suffix = sha1UpperSuffix(pwd);
+    const suffix = await sha1UpperSuffix(pwd);
     const client = stubHttpClient(() => new Response(`${suffix}:4200\r\nAAAA:1\r\n`));
     const err = await drive(HaveIBeenPwnedPlugin(), client, (hooks) =>
       Effect.flip(hooks.beforeSignUp(signUp(pwd))),
@@ -67,7 +75,7 @@ describe("HaveIBeenPwnedPlugin", () => {
 
   it("also guards beforeResetPassword", async () => {
     const pwd = "hunter2hunter2";
-    const suffix = sha1UpperSuffix(pwd);
+    const suffix = await sha1UpperSuffix(pwd);
     const client = stubHttpClient(() => new Response(`${suffix}:9\r\n`));
     const err = await drive(HaveIBeenPwnedPlugin(), client, (hooks) =>
       Effect.flip(hooks.beforeResetPassword({ token: "t", newPassword: pwd })),

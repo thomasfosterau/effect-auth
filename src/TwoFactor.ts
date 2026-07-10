@@ -12,8 +12,7 @@
  * @module two-factor
  */
 
-import { Config, Context, Data, Effect, Layer, Redacted } from "effect";
-import * as crypto from "node:crypto";
+import { Config, Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
 import { makeAes256GcmCipher } from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import * as Errors from "./Errors.ts";
@@ -22,6 +21,8 @@ import { EmailPasswordStore, SecondFactorGate } from "./email/EmailPassword.ts";
 import { type HookError } from "./Hooks.ts";
 import { generateBase32Secret, generateOTPURI, verifyTOTP, type TOTPConfig } from "./OTP.ts";
 import { PasswordHasher } from "./password/Password.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { hashToken, timingSafeEqualBytes } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { UserStore } from "./session/UserStore.ts";
 import { SessionService } from "./session/SessionService.ts";
@@ -255,7 +256,9 @@ export class TwoFactorService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: TwoFactorConfig) =>
-    Layer.effect(TwoFactorService, makeTwoFactorService(config));
+    Layer.effect(TwoFactorService, makeTwoFactorService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 
   /**
    * Construct a Layer from environment variables via {@link twoFactorConfig}.
@@ -272,7 +275,7 @@ export class TwoFactorService extends Context.Service<
         ...(cfg.encryptSecret !== undefined && { encryptSecret: cfg.encryptSecret }),
       });
     }),
-  );
+  ).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /**
@@ -290,21 +293,6 @@ export const twoFactorConfig = Config.all({
 });
 
 /**
- * Generate a cryptographically secure pending-challenge token
- */
-const generatePendingToken = (): Effect.Effect<string, Errors.AuthError> =>
-  Effect.sync(() => crypto.randomBytes(32).toString("base64url"));
-
-/**
- * Generate a single plaintext backup code: 10 crypto-random hex characters
- * formatted as `xxxxx-xxxxx`.
- */
-const generateBackupCode = (): string => {
-  const raw = crypto.randomBytes(5).toString("hex");
-  return `${raw.slice(0, 5)}-${raw.slice(5)}`;
-};
-
-/**
  * Normalize a backup code for hashing/comparison (strip separators and
  * whitespace, lowercase) so `xxxxx-xxxxx` and `xxxxxxxxxx` both match.
  */
@@ -313,8 +301,7 @@ const normalizeBackupCode = (code: string): string => code.replace(/[\s-]/g, "")
 /**
  * sha256 hex digest of a normalized backup code
  */
-export const hashBackupCode = (code: string): string =>
-  crypto.createHash("sha256").update(normalizeBackupCode(code)).digest("hex");
+export const hashBackupCode = (code: string): string => hashToken(normalizeBackupCode(code));
 
 /**
  * Find the index of a backup-code hash using timing-safe comparison.
@@ -327,7 +314,7 @@ const findBackupCodeIndex = (hashes: readonly string[], candidateHash: string): 
     const stored = Buffer.from(hashes[i], "hex");
     if (
       stored.length === candidate.length &&
-      crypto.timingSafeEqual(stored, candidate) &&
+      timingSafeEqualBytes(stored, candidate) &&
       match === -1
     ) {
       match = i;
@@ -350,6 +337,7 @@ export const makeTwoFactorService = (
   | PasswordHasher
   | UserStore
   | SessionService
+  | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const backupCodeCount = config.backupCodeCount ?? 10;
@@ -368,6 +356,33 @@ export const makeTwoFactorService = (
     const passwordHasher = yield* PasswordHasher;
     const userStore = yield* UserStore;
     const sessionManager = yield* SessionService;
+    const crypto = yield* Crypto.Crypto;
+
+    /**
+     * Generate a cryptographically secure pending-challenge token
+     */
+    const generatePendingToken = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomBytes(32).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate pending token", cause }),
+        ),
+      );
+
+    /**
+     * Generate a single plaintext backup code: 10 crypto-random hex characters
+     * formatted as `xxxxx-xxxxx`.
+     */
+    const generateBackupCode = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomBytes(5).pipe(
+        Effect.map((bytes) => {
+          const raw = Buffer.from(bytes).toString("hex");
+          return `${raw.slice(0, 5)}-${raw.slice(5)}`;
+        }),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate backup code", cause }),
+        ),
+      );
 
     /**
      * Verify the user's password against the hash held by the email/password
@@ -449,10 +464,12 @@ export const makeTwoFactorService = (
           return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
         }
 
-        const secret = yield* generateBase32Secret();
+        const secret = yield* generateBase32Secret(crypto);
         const storedSecret = cipher !== null ? yield* cipher.encrypt(secret) : secret;
 
-        const backupCodes = Array.from({ length: backupCodeCount }, () => generateBackupCode());
+        const backupCodes = yield* Effect.all(
+          Array.from({ length: backupCodeCount }, () => generateBackupCode()),
+        );
 
         const record: TwoFactorRecord = {
           userId,
@@ -643,7 +660,9 @@ export const makeTwoFactorService = (
           );
         }
 
-        const backupCodes = Array.from({ length: backupCodeCount }, () => generateBackupCode());
+        const backupCodes = yield* Effect.all(
+          Array.from({ length: backupCodeCount }, () => generateBackupCode()),
+        );
 
         yield* store.upsert({
           ...record,

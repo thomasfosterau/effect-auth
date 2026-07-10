@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
-import * as crypto from "node:crypto";
 import { Hooks } from "./Hooks.js";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 import { SessionStore } from "./session/SessionStore.js";
 import { UserStore } from "./session/UserStore.js";
 import { SessionService } from "./session/SessionService.js";
@@ -124,6 +124,7 @@ describe("OIDCProviderService", () => {
       Layer.succeed(OIDCConsentStore)(stores.consentStore),
       Layer.succeed(UserStore)(userStore),
       jwtServiceLayer,
+      PlatformCrypto.layer,
     );
     return { stores, layer };
   };
@@ -457,7 +458,9 @@ const makeHttpFixture = () => {
     return id;
   };
   const makeSession = (userId: string): string => {
-    const rawToken = crypto.randomBytes(12).toString("hex");
+    const rawToken = Buffer.from(globalThis.crypto.getRandomValues(new Uint8Array(12))).toString(
+      "hex",
+    );
     const tokenHash = hashToken(rawToken);
     const now = new Date();
     sessions.set(tokenHash, {
@@ -630,7 +633,7 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(clientSecret).toBeTruthy();
 
     // 2. Authorize with the user's session cookie (+ PKCE + nonce).
-    const pkce = await Effect.runPromise(generatePKCE());
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -871,7 +874,7 @@ describe("HTTP OIDC provider endpoints", () => {
       clientSecret: string;
     };
 
-    const pkce = await Effect.runPromise(generatePKCE());
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorizeOnce = async () => {
       const res = await fx.handler(
         get(
@@ -1020,7 +1023,7 @@ describe("HTTP OIDC provider endpoints", () => {
       clientSecret: string;
     };
 
-    const pkce = await Effect.runPromise(generatePKCE());
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -1113,7 +1116,7 @@ describe("HTTP OIDC provider endpoints", () => {
       clientSecret: string;
     };
 
-    const pkce = await Effect.runPromise(generatePKCE());
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -1180,7 +1183,7 @@ describe("HTTP OIDC provider endpoints", () => {
       clientSecret: string;
     };
 
-    const pkce = await Effect.runPromise(generatePKCE());
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",

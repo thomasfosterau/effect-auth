@@ -21,12 +21,12 @@
  * @module admin
  */
 
-import { Context, Data, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
+import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { Hooks, makePlugin, type HookError } from "./Hooks.ts";
 import { IdentifierStore, type IdentifierType } from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./session/SessionService.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
@@ -289,7 +289,7 @@ export class AdminService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: AdminConfig = {}) =>
-    Layer.effect(AdminService, makeAdminService(config));
+    Layer.effect(AdminService, makeAdminService(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /**
@@ -300,7 +300,12 @@ export const makeAdminService = (
 ): Effect.Effect<
   typeof AdminService.Service,
   never,
-  AdminUserStore | UserServiceStore | SessionService | IdentifierStore | PasswordHasher
+  | AdminUserStore
+  | UserServiceStore
+  | SessionService
+  | IdentifierStore
+  | PasswordHasher
+  | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const defaultBanReason = config.defaultBanReason ?? "No reason";
@@ -317,6 +322,14 @@ export const makeAdminService = (
     const sessionManager = yield* SessionService;
     const identifierStore = yield* IdentifierStore;
     const hasher = yield* PasswordHasher;
+    const crypto = yield* Crypto.Crypto;
+
+    const randomId = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomUUIDv4.pipe(
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate identifier id", cause }),
+        ),
+      );
 
     return {
       listUsers: Effect.fn("AdminService.listUsers")(function* (
@@ -481,7 +494,7 @@ export const makeAdminService = (
           const now = new Date();
           for (const ident of input.identifiers) {
             yield* identifierStore.create({
-              id: crypto.randomUUID(),
+              id: yield* randomId(),
               userId: user.id,
               type: ident.type,
               value: ident.value,

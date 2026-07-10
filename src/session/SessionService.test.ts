@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Effect, Context } from "effect";
+import { Effect, Context, Layer } from "effect";
 import { Hooks } from "../Hooks.js";
+import * as PlatformCrypto from "../PlatformCrypto.js";
 import { make } from "./SessionService.js";
 import { SessionStore } from "./SessionStore.js";
 import { UserStore } from "./UserStore.js";
@@ -97,7 +98,7 @@ describe("SessionService", () => {
 
     const session = await Effect.runPromise(
       Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
-        Effect.provide(Hooks.Default),
+        Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer)),
       ),
     );
 
@@ -119,7 +120,7 @@ describe("SessionService", () => {
 
     const result = await Effect.runPromise(
       Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
-        Effect.provide(Hooks.Default),
+        Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer)),
       ),
     );
 
@@ -145,7 +146,7 @@ describe("SessionService", () => {
     const result = await Effect.runPromise(
       Effect.result(
         Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
-          Effect.provide(Hooks.Default),
+          Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer)),
         ),
       ),
     );
@@ -169,7 +170,7 @@ describe("SessionService", () => {
     const result = await Effect.runPromise(
       Effect.result(
         Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
-          Effect.provide(Hooks.Default),
+          Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer)),
         ),
       ),
     );
@@ -198,7 +199,7 @@ describe("SessionService", () => {
 
     const result = await Effect.runPromise(
       Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
-        Effect.provide(Hooks.Default),
+        Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer)),
       ),
     );
 
@@ -240,7 +241,7 @@ describe("SessionService", () => {
             Context.make(SessionStore, trackingStore),
             Context.make(UserStore, mockUserStore),
           ),
-        ).pipe(Effect.provide(Hooks.Default)),
+        ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
       );
 
       expect(updateCallCount).toBe(2);
@@ -281,7 +282,7 @@ describe("SessionService", () => {
             Context.make(SessionStore, trackingStore),
             Context.make(UserStore, mockUserStore),
           ),
-        ).pipe(Effect.provide(Hooks.Default)),
+        ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
       );
 
       expect(updateCallCount).toBe(0);
@@ -340,7 +341,7 @@ describe("SessionService", () => {
             Context.make(SessionStore, timedStore),
             Context.make(UserStore, mockUserStore),
           ),
-        ).pipe(Effect.provide(Hooks.Default)),
+        ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
       );
 
       expect(updateCallCount).toBe(0);
@@ -365,7 +366,7 @@ describe("SessionService", () => {
             Context.make(SessionStore, timedStore),
             Context.make(UserStore, mockUserStore),
           ),
-        ).pipe(Effect.provide(Hooks.Default)),
+        ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
       );
 
       expect(updateCallCount).toBe(1);
@@ -421,7 +422,7 @@ describe("SessionService", () => {
               Context.make(SessionStore, timedStore),
               Context.make(UserStore, mockUserStore),
             ),
-          ).pipe(Effect.provide(Hooks.Default)),
+          ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
         ),
       );
 
@@ -452,7 +453,7 @@ describe("SessionService", () => {
 
     const results = await Effect.runPromise(
       Effect.provide(program, Context.merge(SessionStoreTest, UserStoreTest)).pipe(
-        Effect.provide(Hooks.Default),
+        Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer)),
       ),
     );
 

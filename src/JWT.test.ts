@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vite-plus/test";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { Context, Effect, Redacted } from "effect";
+import { Context, Crypto, Effect, Redacted } from "effect";
 import {
   generateKeyPair,
   JWTKeyStore,
@@ -11,6 +11,7 @@ import {
   type JWTKeyPair,
 } from "./JWT.js";
 import { makeAes256GcmCipher } from "./Cipher.js";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 import type { User } from "./Types.js";
 
 const keyPairs: JWTKeyPair[] = [];
@@ -27,7 +28,10 @@ const jwtKeyStore = {
   list: () => Effect.sync(() => [...keyPairs]),
 };
 
-const storeContext = Context.make(JWTKeyStore, jwtKeyStore);
+const storeContext = Context.merge(
+  Context.make(JWTKeyStore, jwtKeyStore),
+  Context.make(Crypto.Crypto, PlatformCrypto.instance),
+);
 
 const user: User = {
   id: "user-1",
@@ -43,7 +47,7 @@ const baseConfig: JWTConfig = {
   audience: "https://api.example.com",
 };
 
-const run = <A, E>(program: Effect.Effect<A, E, JWTKeyStore>) =>
+const run = <A, E>(program: Effect.Effect<A, E, JWTKeyStore | Crypto.Crypto>) =>
   Effect.runPromise(Effect.provide(program, storeContext));
 
 describe("JWTService", () => {
@@ -231,7 +235,7 @@ describe("JWTService", () => {
       Effect.gen(function* () {
         const es256 = yield* makeJWTService({ ...baseConfig, algorithm: "ES256" });
         yield* es256.sign(user);
-        const ed25519 = yield* generateKeyPair("EdDSA");
+        const ed25519 = yield* generateKeyPair("EdDSA", PlatformCrypto.instance);
         const store = yield* JWTKeyStore;
         yield* store.create(ed25519);
 
@@ -267,7 +271,7 @@ describe("JWTService", () => {
         const { token } = yield* service.sign(user);
 
         // Rotate: a new key becomes active, the old one stays in the store
-        const rotated = yield* generateKeyPair("ES256");
+        const rotated = yield* generateKeyPair("ES256", PlatformCrypto.instance);
         const store = yield* JWTKeyStore;
         yield* store.create(rotated);
 
@@ -495,7 +499,7 @@ describe("JWTService with private key encryption", () => {
         const { token } = yield* service.sign(user);
 
         // Rotate: new unencrypted key becomes active in the store
-        const rotated = yield* generateKeyPair("ES256");
+        const rotated = yield* generateKeyPair("ES256", PlatformCrypto.instance);
         const store = yield* JWTKeyStore;
         yield* store.create(rotated);
 
@@ -524,8 +528,11 @@ describe("RemoteJwksVerifier", () => {
       }),
     list: () => Effect.sync(() => [...remotePairs]),
   };
-  const remoteContext = Context.make(JWTKeyStore, remoteStore);
-  const runRemote = <A, E>(program: Effect.Effect<A, E, JWTKeyStore>) =>
+  const remoteContext = Context.merge(
+    Context.make(JWTKeyStore, remoteStore),
+    Context.make(Crypto.Crypto, PlatformCrypto.instance),
+  );
+  const runRemote = <A, E>(program: Effect.Effect<A, E, JWTKeyStore | Crypto.Crypto>) =>
     Effect.runPromise(Effect.provide(program, remoteContext));
 
   let server: Server;

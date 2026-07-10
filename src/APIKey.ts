@@ -16,9 +16,9 @@
  * @module api-key
  */
 
-import { Context, Data, Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
-import type * as Errors from "./Errors.ts";
+import { Context, Crypto, Data, Effect, Layer } from "effect";
+import * as Errors from "./Errors.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { RateLimiter, RateLimitStore, type RateLimitConfig } from "./RateLimit.ts";
 import { hashToken } from "./TokenHash.ts";
 
@@ -255,7 +255,9 @@ export class APIKeyService extends Context.Service<
    * Construct a Layer providing this service.
    */
   static readonly layer = (config: APIKeyConfig = {}) =>
-    Layer.effect(APIKeyService, makeAPIKeyService(config));
+    Layer.effect(APIKeyService, makeAPIKeyService(config)).pipe(
+      Layer.provide(PlatformCrypto.layer),
+    );
 }
 
 /**
@@ -295,7 +297,7 @@ const hasRequiredPermissions = (
  */
 export const makeAPIKeyService = (
   config: APIKeyConfig = {},
-): Effect.Effect<typeof APIKeyService.Service, never, APIKeyStore | RateLimiter> =>
+): Effect.Effect<typeof APIKeyService.Service, never, APIKeyStore | RateLimiter | Crypto.Crypto> =>
   Effect.gen(function* () {
     const defaultPrefix = config?.defaultPrefix ?? "ak_";
     const keyLength = config?.keyLength ?? 32;
@@ -304,6 +306,22 @@ export const makeAPIKeyService = (
 
     const store = yield* APIKeyStore;
     const rateLimiter = yield* RateLimiter;
+    const crypto = yield* Crypto.Crypto;
+
+    const randomToken = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomBytes(keyLength).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate API key secret", cause }),
+        ),
+      );
+
+    const randomId = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomUUIDv4.pipe(
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate API key id", cause }),
+        ),
+      );
 
     /**
      * Load a key by id and enforce ownership.
@@ -408,7 +426,7 @@ export const makeAPIKeyService = (
         }
 
         const prefix = options?.prefix ?? defaultPrefix;
-        const secret = crypto.randomBytes(keyLength).toString("base64url");
+        const secret = yield* randomToken();
         const key = `${prefix}${secret}`;
 
         const now = Date.now();
@@ -418,7 +436,7 @@ export const makeAPIKeyService = (
           options?.refillAmount !== undefined && options?.refillInterval !== undefined;
 
         const apiKey: APIKey = {
-          id: crypto.randomUUID(),
+          id: yield* randomId(),
           ...(options?.name !== undefined && { name: options.name }),
           prefix,
           start: secret.slice(0, 6),

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import * as crypto from "node:crypto";
 import { UserNotFoundError } from "./Errors.js";
 import { Hooks } from "./Hooks.js";
+import * as PlatformCrypto from "./PlatformCrypto.js";
 import { SessionService } from "./session/SessionService.js";
 import { SessionStore } from "./session/SessionStore.js";
 import { UserStore } from "./session/UserStore.js";
@@ -140,6 +140,7 @@ const makeStores = () => {
     Layer.succeed(SessionService)(sessionManager),
     Layer.succeed(OrganizationStore)(orgStore),
     Hooks.Default,
+    PlatformCrypto.layer,
   );
 
   return { layer, providers, users, members };
@@ -320,7 +321,9 @@ const makeHttpFixture = () => {
     return id;
   };
   const makeSession = (userId: string): string => {
-    const rawToken = crypto.randomBytes(12).toString("hex");
+    const rawToken = Buffer.from(globalThis.crypto.getRandomValues(new Uint8Array(12))).toString(
+      "hex",
+    );
     const tokenHash = hashToken(rawToken);
     const now = new Date();
     sessions.set(tokenHash, {
@@ -428,14 +431,15 @@ const makeHttpFixture = () => {
   );
 
   // `SSOService` only needs `SSOProviderStore` to construct; `OAuthStateStore`/
-  // `OAuthUserStore`/`SessionService` are required dynamically by its
-  // `signIn`/`handleCallback` methods, and `OrganizationStore` is resolved
-  // optionally at call time — all are provided here as ambient context.
+  // `OAuthUserStore`/`SessionService`/`Crypto.Crypto` are required dynamically
+  // by its `signIn`/`handleCallback` methods, and `OrganizationStore` is
+  // resolved optionally at call time — all are provided here as ambient context.
   const ssoDeps = Layer.mergeAll(
     Layer.succeed(SSOProviderStore)(ssoStore),
     Layer.succeed(OAuthStateStore)(stateStore),
     Layer.succeed(OAuthUserStore)(oauthUserStore),
     Layer.succeed(OrganizationStore)(orgStore as never),
+    PlatformCrypto.layer,
   );
 
   const ssoServiceLayer = SSOService.layer().pipe(Layer.provide(ssoDeps));
