@@ -28,7 +28,7 @@ import type {
   SignInPayload,
   SignUpPayload,
   StatusResponse,
-  TwoFactorEnableView,
+  MultiFactorEnableView,
   UpdateUserPayload,
   UserView,
   UsernameSignInPayload,
@@ -212,8 +212,8 @@ export interface AuthClient {
     readonly signIn: (payload: { email: string; otp: string }) => Promise<AuthSuccess>;
   };
 
-  readonly twoFactor: {
-    readonly enable: (payload: { password: string }) => Promise<TwoFactorEnableView>;
+  readonly multiFactor: {
+    readonly enable: (payload: { password: string }) => Promise<MultiFactorEnableView>;
     readonly confirm: (payload: { code: string }) => Promise<StatusResponse>;
     readonly disable: (payload: { password: string }) => Promise<StatusResponse>;
     readonly regenerateBackupCodes: (payload: { password: string }) => Promise<BackupCodesView>;
@@ -225,7 +225,7 @@ export interface AuthClient {
      * ```ts
      * const result = await client.signIn({ email, password });
      * if (result.secondFactor) {
-     *   await client.twoFactor.challenge(result.secondFactor).verifyTotp(code);
+     *   await client.multiFactor.challenge(result.secondFactor).verifyTotp(code);
      * }
      * ```
      */
@@ -492,24 +492,24 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         mutating(() => request<AuthSuccess>("POST", "/sign-in/email-otp", payload)),
     },
 
-    twoFactor: {
-      enable: (payload) => request<TwoFactorEnableView>("POST", "/two-factor/enable", payload),
-      confirm: (payload) => request<StatusResponse>("POST", "/two-factor/confirm", payload),
-      disable: (payload) => request<StatusResponse>("POST", "/two-factor/disable", payload),
+    multiFactor: {
+      enable: (payload) => request<MultiFactorEnableView>("POST", "/multi-factor/enable", payload),
+      confirm: (payload) => request<StatusResponse>("POST", "/multi-factor/confirm", payload),
+      disable: (payload) => request<StatusResponse>("POST", "/multi-factor/disable", payload),
       regenerateBackupCodes: (payload) =>
-        request<BackupCodesView>("POST", "/two-factor/regenerate-backup-codes", payload),
+        request<BackupCodesView>("POST", "/multi-factor/regenerate-backup-codes", payload),
       verifyTotp: (payload) =>
-        mutating(() => request<AuthSuccess>("POST", "/two-factor/verify-totp", payload)),
+        mutating(() => request<AuthSuccess>("POST", "/multi-factor/verify-totp", payload)),
       verifyBackupCode: (payload) =>
-        mutating(() => request<AuthSuccess>("POST", "/two-factor/verify-backup-code", payload)),
+        mutating(() => request<AuthSuccess>("POST", "/multi-factor/verify-backup-code", payload)),
       challenge: (ch) => ({
         verifyTotp: (code) =>
           mutating(() =>
-            request<AuthSuccess>("POST", "/two-factor/verify-totp", { token: ch.token, code }),
+            request<AuthSuccess>("POST", "/multi-factor/verify-totp", { token: ch.token, code }),
           ),
         verifyBackupCode: (code) =>
           mutating(() =>
-            request<AuthSuccess>("POST", "/two-factor/verify-backup-code", {
+            request<AuthSuccess>("POST", "/multi-factor/verify-backup-code", {
               token: ch.token,
               code,
             }),

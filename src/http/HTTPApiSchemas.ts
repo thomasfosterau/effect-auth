@@ -83,7 +83,7 @@ export type SecondFactorChallengeView = typeof SecondFactorChallengeView.Type;
  * Successful authentication result. The session itself is conveyed via the
  * session cookie (`Set-Cookie`); `needsEmailVerification` lets a client branch
  * when verification is still required, and `secondFactor` is present when the
- * user must redeem a two-factor challenge to obtain a session.
+ * user must redeem a multi-factor challenge to obtain a session.
  */
 export const AuthSuccess = Schema.Struct({
   user: UserView,
@@ -267,40 +267,40 @@ export const EmailOTPSignInPayload = Schema.Struct({
 export type EmailOTPSignInPayload = typeof EmailOTPSignInPayload.Type;
 
 /**
- * Request body for two-factor operations that re-verify the user's password
+ * Request body for multi-factor operations that re-verify the user's password
  * (enable, disable, regenerate backup codes).
  */
-export const TwoFactorPasswordPayload = Schema.Struct({
+export const MultiFactorPasswordPayload = Schema.Struct({
   password: Schema.String,
 });
-export type TwoFactorPasswordPayload = typeof TwoFactorPasswordPayload.Type;
+export type MultiFactorPasswordPayload = typeof MultiFactorPasswordPayload.Type;
 
-/** Request body for confirming two-factor enrollment with a TOTP code. */
-export const TwoFactorConfirmPayload = Schema.Struct({
+/** Request body for confirming multi-factor enrollment with a TOTP code. */
+export const MultiFactorConfirmPayload = Schema.Struct({
   code: Schema.String,
 });
-export type TwoFactorConfirmPayload = typeof TwoFactorConfirmPayload.Type;
+export type MultiFactorConfirmPayload = typeof MultiFactorConfirmPayload.Type;
 
 /**
  * Request body for redeeming a pending second-factor challenge: the challenge
  * `token` (from sign-in's `secondFactor`) plus a TOTP or backup `code`.
  */
-export const TwoFactorVerifyPayload = Schema.Struct({
+export const MultiFactorVerifyPayload = Schema.Struct({
   token: Schema.String,
   code: Schema.String,
 });
-export type TwoFactorVerifyPayload = typeof TwoFactorVerifyPayload.Type;
+export type MultiFactorVerifyPayload = typeof MultiFactorVerifyPayload.Type;
 
 /**
- * Result of enabling two-factor. The secret and backup codes are returned in
+ * Result of enabling multi-factor. The secret and backup codes are returned in
  * plaintext exactly once - show them to the user, then discard.
  */
-export const TwoFactorEnableView = Schema.Struct({
+export const MultiFactorEnableView = Schema.Struct({
   secret: Schema.String,
   totpUri: Schema.String,
   backupCodes: Schema.Array(Schema.String),
 });
-export type TwoFactorEnableView = typeof TwoFactorEnableView.Type;
+export type MultiFactorEnableView = typeof MultiFactorEnableView.Type;
 
 /** Freshly regenerated plaintext backup codes (shown once). */
 export const BackupCodesView = Schema.Struct({

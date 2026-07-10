@@ -10,44 +10,44 @@ conventions sweep. There is no compat layer — update call sites to the new nam
 Feature modules moved into lowercase cluster directories. Update relative imports (internal) or
 subpath imports (external) accordingly.
 
-| Old path                                                           | New path                                       |
-| ------------------------------------------------------------------ | ---------------------------------------------- |
-| `src/EmailAddress.ts`                                              | `src/email/EmailAddress.ts`                    |
-| `src/EmailOtp.ts` + `src/EmailOTPService.ts`                       | `src/email/EmailOTP.ts` (merged)               |
-| `src/EmailPassword.ts`                                             | `src/email/EmailPassword.ts`                   |
-| `src/EmailVerification.ts`                                         | `src/email/EmailVerification.ts`               |
-| `src/Http.ts`                                                      | `src/http/Http.ts`                             |
-| `src/HttpApi.ts`                                                   | `src/http/HTTPApi.ts`                          |
-| `src/HttpApiSchemas.ts`                                            | `src/http/HTTPApiSchemas.ts`                   |
-| `src/HttpClient.ts`                                                | `src/http/HTTPClient.ts`                       |
-| `src/HttpMiddleware.ts`                                            | `src/http/HTTPMiddleware.ts`                   |
-| `src/HttpServer.ts`                                                | `src/http/HTTPServer.ts`                       |
-| `src/OAuth/OAuth.ts`, `OAuth/Scope.ts`                             | `src/oauth/OAuth.ts`, `oauth/Scope.ts`         |
-| `src/SessionService.ts`                                            | `src/session/SessionService.ts`                |
-| `src/SessionStore.ts`                                              | `src/session/SessionStore.ts`                  |
-| `src/UserStore.ts`                                                 | `src/session/UserStore.ts`                     |
-| `src/TrustedDevice.ts`                                             | `src/session/TrustedDevice.ts`                 |
-| `src/Session.ts` (compat barrel)                                   | **deleted** — import `SessionService` directly |
-| `src/Password.ts`                                                  | `src/password/Password.ts`                     |
-| `src/PasswordReset.ts`                                             | `src/password/PasswordReset.ts`                |
-| `src/HaveIBeenPwned.ts`                                            | `src/password/HaveIBeenPwned.ts`               |
-| `src/Argon2.ts`                                                    | `src/password/Argon2.ts`                       |
-| `src/Permission.ts`                                                | `src/authz/Permission.ts`                      |
-| `src/Authorization.ts`                                             | `src/authz/Authorization.ts`                   |
-| `src/Rbac.ts`                                                      | `src/authz/RBAC.ts`                            |
-| `src/AuditPlugin.ts`                                               | `src/plugins/Audit.ts`                         |
-| `src/NormalizeEmailPlugin.ts`                                      | `src/plugins/NormalizeEmail.ts`                |
-| `src/RateLimitPlugin.ts`                                           | `src/plugins/RateLimit.ts`                     |
-| `src/AccountLockoutPlugin.ts`                                      | `src/plugins/AccountLockout.ts`                |
-| `src/CaptchaPlugin.ts`                                             | `src/plugins/Captcha.ts`                       |
-| `src/LastLoginMethodPlugin.ts`                                     | `src/plugins/LastLoginMethod.ts`               |
-| `src/IpRateLimitPlugin.ts`                                         | `src/plugins/IPRateLimit.ts`                   |
-| `src/WebAuthnService.ts`                                           | merged into `src/WebAuthn.ts`                  |
-| `src/MultiFactorService.ts` (orphaned duplicate of `TwoFactor.ts`) | **deleted**                                    |
-| `src/TwoFactor.ts`                                                 | `src/secondfactor/TwoFactor.ts`                |
-| `src/OTPSecondFactor.ts`                                           | `src/secondfactor/OTPSecondFactor.ts`          |
-| `src/WebAuthn.ts`                                                  | `src/secondfactor/WebAuthn.ts`                 |
-| `src/OTP.ts`                                                       | `src/secondfactor/OTP.ts`                      |
+| Old path                                                           | New path                                             |
+| ------------------------------------------------------------------ | ---------------------------------------------------- |
+| `src/EmailAddress.ts`                                              | `src/email/EmailAddress.ts`                          |
+| `src/EmailOtp.ts` + `src/EmailOTPService.ts`                       | `src/email/EmailOTP.ts` (merged)                     |
+| `src/EmailPassword.ts`                                             | `src/email/EmailPassword.ts`                         |
+| `src/EmailVerification.ts`                                         | `src/email/EmailVerification.ts`                     |
+| `src/Http.ts`                                                      | `src/http/Http.ts`                                   |
+| `src/HttpApi.ts`                                                   | `src/http/HTTPApi.ts`                                |
+| `src/HttpApiSchemas.ts`                                            | `src/http/HTTPApiSchemas.ts`                         |
+| `src/HttpClient.ts`                                                | `src/http/HTTPClient.ts`                             |
+| `src/HttpMiddleware.ts`                                            | `src/http/HTTPMiddleware.ts`                         |
+| `src/HttpServer.ts`                                                | `src/http/HTTPServer.ts`                             |
+| `src/OAuth/OAuth.ts`, `OAuth/Scope.ts`                             | `src/oauth/OAuth.ts`, `oauth/Scope.ts`               |
+| `src/SessionService.ts`                                            | `src/session/SessionService.ts`                      |
+| `src/SessionStore.ts`                                              | `src/session/SessionStore.ts`                        |
+| `src/UserStore.ts`                                                 | `src/session/UserStore.ts`                           |
+| `src/TrustedDevice.ts`                                             | `src/session/TrustedDevice.ts`                       |
+| `src/Session.ts` (compat barrel)                                   | **deleted** — import `SessionService` directly       |
+| `src/Password.ts`                                                  | `src/password/Password.ts`                           |
+| `src/PasswordReset.ts`                                             | `src/password/PasswordReset.ts`                      |
+| `src/HaveIBeenPwned.ts`                                            | `src/password/HaveIBeenPwned.ts`                     |
+| `src/Argon2.ts`                                                    | `src/password/Argon2.ts`                             |
+| `src/Permission.ts`                                                | `src/authz/Permission.ts`                            |
+| `src/Authorization.ts`                                             | `src/authz/Authorization.ts`                         |
+| `src/Rbac.ts`                                                      | `src/authz/RBAC.ts`                                  |
+| `src/AuditPlugin.ts`                                               | `src/plugins/Audit.ts`                               |
+| `src/NormalizeEmailPlugin.ts`                                      | `src/plugins/NormalizeEmail.ts`                      |
+| `src/RateLimitPlugin.ts`                                           | `src/plugins/RateLimit.ts`                           |
+| `src/AccountLockoutPlugin.ts`                                      | `src/plugins/AccountLockout.ts`                      |
+| `src/CaptchaPlugin.ts`                                             | `src/plugins/Captcha.ts`                             |
+| `src/LastLoginMethodPlugin.ts`                                     | `src/plugins/LastLoginMethod.ts`                     |
+| `src/IpRateLimitPlugin.ts`                                         | `src/plugins/IPRateLimit.ts`                         |
+| `src/WebAuthnService.ts`                                           | merged into `src/WebAuthn.ts`                        |
+| `src/MultiFactorService.ts` (orphaned duplicate of `TwoFactor.ts`) | **deleted**                                          |
+| `src/TwoFactor.ts`                                                 | `src/secondfactor/MultiFactor.ts` (renamed — see §8) |
+| `src/OTPSecondFactor.ts`                                           | `src/secondfactor/OTPSecondFactor.ts`                |
+| `src/WebAuthn.ts`                                                  | `src/secondfactor/WebAuthn.ts`                       |
+| `src/OTP.ts`                                                       | `src/secondfactor/OTP.ts`                            |
 
 Flat feature modules that only got acronym-case fixes (still exported from the package root, not
 clustered):
@@ -220,7 +220,7 @@ const service = yield * EmailPassword.make(config);
 | `makeSSOService`                  | `SSO.ts`                          | `make`                        |
 | `makeTrustedDeviceService`        | `session/TrustedDevice.ts`        | `make`                        |
 | `makeTrustedDeviceGateShape`      | `session/TrustedDevice.ts`        | `gate`                        |
-| `makeTwoFactorService`            | `secondfactor/TwoFactor.ts`       | `make`                        |
+| `makeTwoFactorService`            | `secondfactor/MultiFactor.ts`     | `make`                        |
 | `makeUserService`                 | `User.ts`                         | `make`                        |
 | `makeUsernameService`             | `Username.ts`                     | `make`                        |
 | `makeWebAuthnService`             | `secondfactor/WebAuthn.ts`        | `make`                        |
@@ -231,7 +231,7 @@ const service = yield * EmailPassword.make(config);
 | `makePasswordResetStoreKV`        | `KeyValueStores.ts`               | `passwordResetStoreKV`        |
 | `makeMagicLinkStoreKV`            | `KeyValueStores.ts`               | `magicLinkStoreKV`            |
 | `makeEmailOTPStoreKV`             | `KeyValueStores.ts`               | `emailOTPStoreKV`             |
-| `makePendingTwoFactorStoreKV`     | `KeyValueStores.ts`               | `pendingTwoFactorStoreKV`     |
+| `makePendingTwoFactorStoreKV`     | `KeyValueStores.ts`               | `pendingMultiFactorStoreKV`   |
 | `makeIdentifierStoreKV`           | `KeyValueStores.ts`               | `identifierStoreKV`           |
 | `makeGoogleOneTapNonceStoreKV`    | `KeyValueStores.ts`               | `googleOneTapNonceStoreKV`    |
 | `makeMultiAlgorithmVerifier`      | `password/Password.ts`            | `multiAlgorithmVerifier`      |
@@ -240,6 +240,43 @@ const service = yield * EmailPassword.make(config);
 
 `makePlugin` (the generic plugin-Layer factory in `Hooks.ts`, shared across every plugin module —
 not a per-service constructor) is unchanged.
+
+## 8. Second-factor cluster: `TwoFactor` → `MultiFactor` rename
+
+The TOTP/backup-code module (moved into `src/secondfactor/` above) is renamed from `TwoFactor` to
+`MultiFactor` throughout — the class, its tag string, every exported identifier, the HTTP routes
+and wire schema types, the client SDK namespace, and the observability metrics. This reuses the
+`MultiFactorService` name freed up by the orphaned-duplicate deletion in §1 — it is not related to
+that deleted file.
+
+| Old                                                                                                                                                                                  | New                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/TwoFactor.ts`                                                                                                                                                                   | `src/secondfactor/MultiFactor.ts`                                                                                                                                                  |
+| `"@effect-auth/TwoFactorService"`                                                                                                                                                    | `"@effect-auth/MultiFactorService"`                                                                                                                                                |
+| `TwoFactorService`                                                                                                                                                                   | `MultiFactorService`                                                                                                                                                               |
+| `TwoFactorError`                                                                                                                                                                     | `MultiFactorError`                                                                                                                                                                 |
+| `TwoFactorRecord`                                                                                                                                                                    | `MultiFactorRecord`                                                                                                                                                                |
+| `TwoFactorStore`                                                                                                                                                                     | `MultiFactorStore`                                                                                                                                                                 |
+| `PendingTwoFactor` / `PendingTwoFactorStore`                                                                                                                                         | `PendingMultiFactor` / `PendingMultiFactorStore`                                                                                                                                   |
+| `TwoFactorConfig`                                                                                                                                                                    | `MultiFactorConfig`                                                                                                                                                                |
+| `TwoFactorEnableResult`                                                                                                                                                              | `MultiFactorEnableResult`                                                                                                                                                          |
+| `TwoFactorChallenge`                                                                                                                                                                 | `MultiFactorChallenge`                                                                                                                                                             |
+| `TwoFactorVerifyResult` / `TwoFactorVerifyOptions`                                                                                                                                   | `MultiFactorVerifyResult` / `MultiFactorVerifyOptions`                                                                                                                             |
+| `twoFactorConfig`                                                                                                                                                                    | `multiFactorConfig`                                                                                                                                                                |
+| `TwoFactorGateLayer`                                                                                                                                                                 | `MultiFactorGateLayer`                                                                                                                                                             |
+| `TrustedDeviceWithTwoFactorGateLayer`                                                                                                                                                | `TrustedDeviceWithMultiFactorGateLayer`                                                                                                                                            |
+| `Auth.SecondFactor.TwoFactorService` (and every other `TwoFactor*` export)                                                                                                           | `Auth.SecondFactor.MultiFactorService` (and every renamed export above)                                                                                                            |
+| `client.twoFactor.*` (client SDK)                                                                                                                                                    | `client.multiFactor.*`                                                                                                                                                             |
+| `TwoFactorEnableView`, `TwoFactorPasswordPayload`, `TwoFactorConfirmPayload`, `TwoFactorVerifyPayload` (wire schemas)                                                                | `MultiFactorEnableView`, `MultiFactorPasswordPayload`, `MultiFactorConfirmPayload`, `MultiFactorVerifyPayload`                                                                     |
+| `/two-factor/enable`, `/two-factor/confirm`, `/two-factor/disable`, `/two-factor/verify-totp`, `/two-factor/verify-backup-code`, `/two-factor/regenerate-backup-codes` (HTTP routes) | `/multi-factor/enable`, `/multi-factor/confirm`, `/multi-factor/disable`, `/multi-factor/verify-totp`, `/multi-factor/verify-backup-code`, `/multi-factor/regenerate-backup-codes` |
+| `twoFactorEnable`, `twoFactorConfirm`, `twoFactorDisable`, `twoFactorRegenerateBackupCodes`, `twoFactorVerifyTotp`, `twoFactorVerifyBackupCode` (HTTP API operationIds)              | `multiFactorEnable`, `multiFactorConfirm`, `multiFactorDisable`, `multiFactorRegenerateBackupCodes`, `multiFactorVerifyTotp`, `multiFactorVerifyBackupCode`                        |
+| `"two-factor"` (the `lastLoginMethod`/session-attribute value recorded on a successful redeem)                                                                                       | `"multi-factor"`                                                                                                                                                                   |
+| `effect-auth.two_factor_challenges.total`, `effect-auth.two_factor_verifications.total` (metrics)                                                                                    | `effect-auth.multi_factor_challenges.total`, `effect-auth.multi_factor_verifications.total`                                                                                        |
+| `recordTwoFactorChallenge`, `recordTwoFactorVerification`                                                                                                                            | `recordMultiFactorChallenge`, `recordMultiFactorVerification`                                                                                                                      |
+
+`SecondFactorGate`/`SecondFactorChallenge` (the generic gate abstraction in `email/EmailPassword.ts`,
+shared with `OTPSecondFactor`) and the `secondfactor/` directory name itself are **not** part of
+this rename — only the TOTP-specific module and its symbols changed.
 
 ## Validation
 

@@ -10,7 +10,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🧩 **Composable**: Use Effect's powerful composition capabilities
 - 🔄 **Bring Your Own Storage**: Implement storage adapters for any database or backend
 - 📦 **Zero Lock-in**: No vendor lock-in, works with any storage backend
-- 🔑 **Two-Factor Authentication**: TOTP enrollment with backup codes, integrated into sign-in (RFC 6238/4226 primitives included)
+- 🔑 **Multi-Factor Authentication**: TOTP enrollment with backup codes, integrated into sign-in (RFC 6238/4226 primitives included)
 - 🌐 **OAuth 2.0 / Social Login**: Pre-built providers for Google, GitHub, Discord, Microsoft with PKCE and a complete sign-in flow (user creation, verified-email account linking, sessions)
 - ✉️ **Email Verification & Password Reset**: Secure token-based flows with anti-enumeration behavior
 - 🧾 **Account Management**: Verification-gated email change and self-service account deletion (single-use tokens, session revocation, `beforeDelete` cleanup hook)
@@ -18,7 +18,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 📱 **Phone (SMS) OTP**: Sign-in and phone-number verification via SMS one-time codes (`attributes.phoneNumber`, pluggable E.164 normalizer)
 - 📺 **Device Authorization Grant**: RFC 8628 `device_code`/`user_code` flow for CLIs and TVs (`POST /device/code` → approve → `POST /device/token`)
 - 👤 **Anonymous Auth**: Guest sessions (`POST /sign-in/anonymous`) with account linking on sign-up (`isAnonymousUser` helper, `linkAccount` migration callback)
-- 🪪 **Username Auth**: Sign in with a username + password (`POST /sign-in/username`), case-insensitive uniqueness, honouring the two-factor gate
+- 🪪 **Username Auth**: Sign in with a username + password (`POST /sign-in/username`), case-insensitive uniqueness, honouring the multi-factor gate
 - 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets, an optional `effect/unstable/persistence` backend (in-memory or Redis) via `rateLimiterPersistenceLayer`, and an `AccountLockoutPlugin` (OWASP-style lockout after N failed sign-ins)
 - 🚫 **Abuse Protection**: Captcha verification (Turnstile/reCAPTCHA/hCaptcha) and Have-I-Been-Pwned compromised-password checks as composable hooks plugins
 - 🔓 **WebAuthn / Passkeys**: Passwordless authentication with FIDO2 compliance
@@ -53,7 +53,7 @@ This library follows best practices from multiple authentication frameworks:
 
 - **Sessions**: Secure session management with automatic expiration and renewal (Lucia/Copenhagen)
 - **Password Hashing**: PBKDF2-SHA256 with recommended iterations (600,000+) (Oslo/OWASP)
-- **Two-Factor Authentication**: TOTP and HOTP for multi-factor authentication (RFC 6238/4226)
+- **Multi-Factor Authentication**: TOTP and HOTP second-factor verification (RFC 6238/4226)
 - **OAuth 2.0**: Social login with major providers (BetterAuth-inspired)
 - **Email Verification**: Secure verification flows with rate limiting (BetterAuth-inspired)
 - **Rate Limiting**: Protection against brute force attacks (BetterAuth-inspired)
@@ -213,9 +213,9 @@ const program = Effect.gen(function* () {
 const result = await Effect.runPromise(Effect.provide(program, layer));
 ```
 
-## Two-Factor Authentication (TOTP/HOTP)
+## Multi-Factor Authentication (TOTP/HOTP)
 
-Implement two-factor authentication using Time-based One-Time Passwords (TOTP, RFC 6238) or HMAC-based One-Time Passwords (HOTP, RFC 4226):
+Implement multi-factor authentication using Time-based One-Time Passwords (TOTP, RFC 6238) or HMAC-based One-Time Passwords (HOTP, RFC 4226):
 
 ### TOTP (Time-based)
 
@@ -944,7 +944,7 @@ Security is our top priority. See our [Security Policy](./SECURITY.md) for:
 - ✅ Secure session management following Copenhagen Book guidelines
 - ✅ Input validation and error handling
 
-### Two-Factor Authentication
+### Multi-Factor Authentication
 
 Following RFC 6238 (TOTP) and RFC 4226 (HOTP) guidelines:
 

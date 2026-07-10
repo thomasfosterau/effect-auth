@@ -42,10 +42,10 @@ _Avoid_: AccessToken (that's the OAuth-provider-issued token on an Account), Tok
 
 #### Secondary Credentials (modify a primary sign-in)
 
-**TwoFactorEnrollment**:
+**MultiFactorEnrollment**:
 A User's stored TOTP/HOTP secret. **Not** an Account — 2FA is a second factor, not a primary
 credential.
-_Avoid_: TwoFactorAccount, OTPAccount, "TOTP credential."
+_Avoid_: MultiFactorAccount, OTPAccount, "TOTP credential."
 
 **TrustedDevice**:
 A device on which a User has completed 2FA, allowing the prompt to be skipped for a configured
@@ -73,7 +73,7 @@ mechanism as `EmailVerificationToken`, different terminal action.
 **BackupCode**:
 A single recovery code, hashed at rest, one row per code. Issued in batch at 2FA enrollment;
 consumed by deletion on first use. Sits in Verifications (not Factors) because each code is
-single-use — the "credential" being backed up is the `TwoFactorEnrollment` it accompanies.
+single-use — the "credential" being backed up is the `MultiFactorEnrollment` it accompanies.
 _Avoid_: storing codes as a JSON array on the enrollment record.
 
 #### System-internal
@@ -269,7 +269,7 @@ Things that look like they belong in the typology but don't. Don't add them.
 >
 > **Dev:** And backup codes for 2FA — those live with the TOTP secret?
 >
-> **Domain:** No. The TOTP secret is a Credential (`TwoFactorEnrollment`); the backup codes are
+> **Domain:** No. The TOTP secret is a Credential (`MultiFactorEnrollment`); the backup codes are
 > Verifications. Each `BackupCode` is single-use — consuming one is a row delete. The codes
 > _back up_ the TOTP credential, but they're not credentials themselves.
 >

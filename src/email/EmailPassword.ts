@@ -76,8 +76,8 @@ export interface SecondFactorChallenge {
 
 /**
  * Optional seam consulted by password sign-in after the first factor
- * succeeds. When present in context (see `TwoFactorGateLayer` in the
- * TwoFactor module) and `required` reports true, sign-in returns a
+ * succeeds. When present in context (see `MultiFactorGateLayer` in the
+ * MultiFactor module) and `required` reports true, sign-in returns a
  * {@link SecondFactorChallenge} instead of a session.
  */
 export class SecondFactorGate extends Context.Service<

@@ -20,7 +20,7 @@ describe("static service layers", () => {
       ["EmailVerificationService", Auth.Email.EmailVerificationService],
       ["PasswordResetService", Auth.Password.PasswordResetService],
       ["UsernameService", Auth.UsernameService],
-      ["TwoFactorService", Auth.SecondFactor.TwoFactorService],
+      ["MultiFactorService", Auth.SecondFactor.MultiFactorService],
       ["WebAuthnService", Auth.SecondFactor.WebAuthnService],
       ["APIKeyService", Auth.APIKeyService],
       ["JWTService", Auth.JWTService],

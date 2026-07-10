@@ -2,7 +2,7 @@
 
 `Account` unifies _primary_ credentials — the things a user signs in with — covering the
 `credential` provider (email+password) and every social/OAuth provider. **Second factors do not
-live on Account.** TOTP/HOTP enrolment lives in `TwoFactorEnrollment`, recovery codes in
+live on Account.** TOTP/HOTP enrolment lives in `MultiFactorEnrollment`, recovery codes in
 `BackupCode` (one row per code, hashed at rest, deleted on consume), and trusted-device state in
 `TrustedDevice` (independent of Session, so it survives sign-out).
 

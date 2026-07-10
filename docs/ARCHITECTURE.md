@@ -72,10 +72,10 @@ await Effect.runPromise(Effect.provide(program, layer));
 
 - **Foundations**: `Types.ts` (schema'd `User`, `Session`, `SessionConfig`, …), `Errors.ts` (shared tagged errors), `Password.ts` (PBKDF2/scrypt hashers, multi-algorithm verifier), `Session.ts` (`SessionStore`, `UserStore`, `SessionManager`), `User.ts`, `Authorization.ts`/`Rbac.ts`/`Permission.ts`/`Scope.ts` (RBAC, permission values, OAuth-style scopes), `Otp.ts` (RFC 6238/4226 TOTP/HOTP primitives).
 - **Sign-in methods**: `EmailPassword.ts`, `Username.ts`, `MagicLink.ts`, `EmailOtp.ts`, `PhoneOtp.ts`, `Anonymous.ts`, `WebAuthn.ts` (passkeys), `OAuth.ts` (social providers + PKCE), `Sso.ts` (OIDC relying party), `GoogleOneTap.ts`, `DeviceAuthorization.ts` (RFC 8628).
-- **Account lifecycle**: `AuthLifecycle.ts` (sign-up/sign-in orchestration), `EmailVerification.ts`, `PasswordReset.ts`, `AccountManagement.ts` (email change / account deletion), `TwoFactor.ts` (TOTP + backup codes, integrating into password sign-in via the `SecondFactorGate` seam).
+- **Account lifecycle**: `AuthLifecycle.ts` (sign-up/sign-in orchestration), `EmailVerification.ts`, `PasswordReset.ts`, `AccountManagement.ts` (email change / account deletion), `MultiFactor.ts` (TOTP + backup codes, integrating into password sign-in via the `SecondFactorGate` seam).
 - **Platform features**: `Organization.ts`, `Admin.ts`, `ApiKey.ts`, `Jwt.ts` (ES256/EdDSA + JWKS), `OidcProvider.ts` (act as an OIDC identity provider), `RateLimit.ts`/`RateLimitPersistence.ts`.
 - **Extension**: `Hooks.ts` (typed hooks/plugin system; see [HOOKS_DESIGN.md](./HOOKS_DESIGN.md) for the original design rationale) and `plugins/` (audit, email normalization, rate limiting, account lockout, captcha, Have-I-Been-Pwned, last-login-method).
-- **Storage helpers**: `KeyValueStores.ts` — layers implementing the ephemeral stores (OAuth state, WebAuthn challenges, rate limits, tokens/OTPs, pending two-factor) over `effect/unstable/persistence` `KeyValueStore` (in-memory, file system, Redis, …).
+- **Storage helpers**: `KeyValueStores.ts` — layers implementing the ephemeral stores (OAuth state, WebAuthn challenges, rate limits, tokens/OTPs, pending multi-factor) over `effect/unstable/persistence` `KeyValueStore` (in-memory, file system, Redis, …).
 - **HTTP** (exported as the `Auth.HTTP` namespace, also `effect-auth/http`): `HttpApiSchemas.ts` (wire schemas + HTTP error types), `HttpApi.ts` (the typed `AuthApi` contract), `HttpServer.ts` (handlers + mountable web handler), `SessionCookieCache.ts` (signed session-data cookie), `HttpClient.ts` (typed Effect client derived from the contract).
 
 ## Stores
@@ -90,12 +90,12 @@ Users persist state by implementing plain store interfaces (DESIGN.md D3):
 
 Two mechanisms, by boundary (DESIGN.md D4):
 
-- **Domain errors** are `Data.TaggedError` classes — shared ones in `Errors.ts` (`AuthError`, `InvalidCredentialsError`, `SessionExpiredError`, …), module-local ones (`TwoFactorError`, `OrganizationError`, …) where only one module raises them. `AuthError` means _infrastructure/unexpected_ failure; flow outcomes get specific tags. Nothing subclasses `AuthError` — errors compose in unions, keeping method signatures honest.
+- **Domain errors** are `Data.TaggedError` classes — shared ones in `Errors.ts` (`AuthError`, `InvalidCredentialsError`, `SessionExpiredError`, …), module-local ones (`MultiFactorError`, `OrganizationError`, …) where only one module raises them. `AuthError` means _infrastructure/unexpected_ failure; flow outcomes get specific tags. Nothing subclasses `AuthError` — errors compose in unions, keeping method signatures honest.
 - **HTTP boundary errors** are `Schema.TaggedErrorClass` classes in `HttpApiSchemas.ts` with fixed status codes (400/401/403/404/409/429/500). Handlers in `HttpServer.ts` map domain errors to these per endpoint; `RateLimitError` is always 429, `AuthError` is always 500, and typed flow errors carry the specific statuses (e.g. `EmailInUseError` → 409).
 
 ## HTTP protocol
 
-- `HttpApi.ts` defines the full contract with `effect/unstable/httpapi` — one `auth` group, kebab-case paths (`/sign-in/email-otp`, `/two-factor/enable`), camelCase operationIds. OpenAPI 3.1 and a Scalar reference UI can be served from the same contract (`makeAuthWebHandler({ docs: true })`).
+- `HttpApi.ts` defines the full contract with `effect/unstable/httpapi` — one `auth` group, kebab-case paths (`/sign-in/email-otp`, `/multi-factor/enable`), camelCase operationIds. OpenAPI 3.1 and a Scalar reference UI can be served from the same contract (`makeAuthWebHandler({ docs: true })`).
 - **404-until-configured**: optional features resolve their service with `Effect.serviceOption`; when the layer isn't provided the endpoint fails `NotFound` — a server only exposes what it configures.
 - **Cookies**: HttpOnly, SameSite, `Secure` by default; optional HMAC-signed session-data cache cookie to skip store reads; multi-session and last-login-method helper cookies.
 - **CSRF**: a trusted-origin gate runs before any handler — requests with an `Origin` header must match the request origin or the configured `trustedOrigins`; requests without one (curl, server-to-server) pass.

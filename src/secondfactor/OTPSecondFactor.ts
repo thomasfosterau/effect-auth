@@ -11,7 +11,7 @@
  * `constantTimeHashEqual`) without duplicating delivery or store concerns.
  *
  * Can serve as an **alternative** to TOTP (use `OTPSecondFactorGateLayer`
- * instead of `TwoFactorGateLayer`) or in **addition** to it by pairing with
+ * instead of `MultiFactorGateLayer`) or in **addition** to it by pairing with
  * `TrustedDevice.gate` from the TrustedDevice module.
  *
  * @module otp-second-factor
