@@ -15,6 +15,7 @@ import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import * as Model from "./Model.ts";
 import * as Policy from "./Policy.ts";
+import * as PolicyStore from "./PolicyStore.ts";
 
 // ---------------------------------------------------------------------------
 // Principal context
@@ -158,7 +159,7 @@ const toActionRef = (action: Entity.EntityRef | string): Entity.EntityRef =>
   typeof action === "string" ? Entity.ref("Action", action) : action;
 
 export interface AuthorizerConfig<E = unknown> {
-  /** The policy set every decision is made against. */
+  /** The static policy set every decision is made against. */
   readonly policies: ReadonlyArray<Policy.Policy<E, never>>;
   /**
    * Optional declared model. When present: declarative policies are
@@ -167,6 +168,16 @@ export interface AuthorizerConfig<E = unknown> {
    * action entities are merged into every slice so action groups work.
    */
   readonly model?: Model.Model;
+  /**
+   * Read stored policies (a `PolicyStore`'s {@link effectivePolicies},
+   * including instantiated template links) into every decision, on top of
+   * the static `policies`. When a `PolicyStore` is in context at layer
+   * construction this defaults to `true`; pass `false` to ignore it.
+   * Stored policies are fetched per decision (edits apply immediately) and
+   * are NOT validated against `model` at decision time — validate on write
+   * with `Model.validatePolicies` / `validateTemplates`.
+   */
+  readonly useStore?: boolean;
 }
 
 /** Raised by `Authorizer.layer` when policies do not validate against the model. */
@@ -212,6 +223,8 @@ export const make = <E = unknown>(
 ): Effect.Effect<typeof Authorizer.Service, Errors.AuthError, never> =>
   Effect.gen(function* () {
     const resolver = yield* Effect.serviceOption(EntityResolver);
+    const store = yield* Effect.serviceOption(PolicyStore.PolicyStore);
+    const useStore = (config.useStore ?? true) && Option.isSome(store);
     const modelEntities = config.model !== undefined ? Model.actionEntities(config.model) : [];
 
     if (config.model !== undefined) {
@@ -230,20 +243,35 @@ export const make = <E = unknown>(
       }
     }
 
+    // Stored policies (template links included) are fetched per decision so
+    // edits apply immediately; static policies are appended after them.
+    const allPolicies = (): Effect.Effect<
+      ReadonlyArray<Policy.Policy<E, never>>,
+      Errors.AuthError
+    > =>
+      useStore && Option.isSome(store)
+        ? Effect.map(PolicyStore.effectivePolicies(store.value), (stored) => [
+            ...stored,
+            ...config.policies,
+          ])
+        : Effect.succeed(config.policies);
+
     const sliceFor = (
+      policies: ReadonlyArray<Policy.Policy<E, never>>,
       request: Policy.PolicyRequest,
     ): Effect.Effect<Entity.EntitySlice, Errors.AuthError> =>
       Option.isSome(resolver)
         ? resolver.value
-            .resolve(requestRefs(config.policies, request))
+            .resolve(requestRefs(policies, request))
             .pipe(Effect.map((resolved) => Entity.slice([...modelEntities, ...resolved])))
         : Effect.succeed(Entity.slice(modelEntities));
 
     const decideRequest = Effect.fn("Authorizer.decideRequest")(function* (
       request: Policy.PolicyRequest,
     ) {
-      const slice = yield* sliceFor(request);
-      return yield* Policy.decide(config.policies, request, slice);
+      const policies = yield* allPolicies();
+      const slice = yield* sliceFor(policies, request);
+      return yield* Policy.decide(policies, request, slice);
     });
 
     const requestFrom = (

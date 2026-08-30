@@ -5,6 +5,7 @@ import * as Condition from "./Condition.ts";
 import * as Policy from "./Policy.ts";
 import * as Model from "./Model.ts";
 import * as Authorizer from "./Authorizer.ts";
+import * as PolicyStore from "./PolicyStore.ts";
 
 const alice = Entity.ref("User", "alice");
 const bob = Entity.ref("User", "bob");
@@ -287,5 +288,91 @@ describe("Authorizer", () => {
     );
     const roleAllowed = await Effect.runPromise(Effect.provide(roleProgram, roleLayer));
     expect(roleAllowed).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PolicyStore integration
+// ---------------------------------------------------------------------------
+
+describe("Authorizer + PolicyStore", () => {
+  const shareTemplate = PolicyStore.template({
+    id: "share-doc",
+    effect: "permit",
+    action: Policy.eq(readDoc),
+    principal: PolicyStore.eqSlot,
+    resource: PolicyStore.eqSlot,
+  });
+
+  const makeStoreLayer = () => {
+    const store = PolicyStore.memoryPolicyStore();
+    const seed = Effect.gen(function* () {
+      yield* store.createTemplate(shareTemplate);
+      yield* store.createLink(
+        PolicyStore.makeLink({ id: "l1", templateId: "share-doc", principal: bob, resource: doc1 }),
+      );
+      yield* store.createPolicy(
+        Policy.forbid({ id: "stored-deny-delete", action: Policy.eq(deleteDoc) }),
+      );
+    });
+    return { store, seed, layer: Layer.succeed(PolicyStore.PolicyStore)(store) };
+  };
+
+  it("stored policies and template links join every decision", async () => {
+    const { seed, layer: storeLayer } = makeStoreLayer();
+    const authorizerLayer = Authorizer.Authorizer.layer({ policies: [] }).pipe(
+      Layer.provideMerge(storeLayer),
+    );
+    const program = Effect.gen(function* () {
+      yield* seed;
+      const authz = yield* Authorizer.Authorizer;
+      const bobAllowed = yield* authz
+        .check({ action: readDoc, resource: doc1 })
+        .pipe(Authorizer.CurrentPrincipal.provide(bob));
+      const aliceAllowed = yield* authz
+        .check({ action: readDoc, resource: doc1 })
+        .pipe(Authorizer.CurrentPrincipal.provide(alice));
+      // The stored forbid overrides a static allow-all permit.
+      return { bobAllowed, aliceAllowed };
+    });
+    const result = await Effect.runPromise(Effect.provide(program, authorizerLayer));
+    expect(result.bobAllowed).toBe(true);
+    expect(result.aliceAllowed).toBe(false);
+  });
+
+  it("stored forbid overrides a static permit; edits apply immediately", async () => {
+    const { store, seed, layer: storeLayer } = makeStoreLayer();
+    const authorizerLayer = Authorizer.Authorizer.layer({
+      policies: [Policy.permit({ id: "allow-all" })],
+    }).pipe(Layer.provideMerge(storeLayer));
+    const program = Effect.gen(function* () {
+      yield* seed;
+      const authz = yield* Authorizer.Authorizer;
+      const check = authz
+        .check({ action: deleteDoc, resource: doc1 })
+        .pipe(Authorizer.CurrentPrincipal.provide(alice));
+      const denied = yield* check;
+      yield* store.deletePolicy("stored-deny-delete");
+      const allowedAfterDelete = yield* check;
+      return { denied, allowedAfterDelete };
+    });
+    const result = await Effect.runPromise(Effect.provide(program, authorizerLayer));
+    expect(result.denied).toBe(false);
+    expect(result.allowedAfterDelete).toBe(true);
+  });
+
+  it("useStore: false ignores the store in context", async () => {
+    const { seed, layer: storeLayer } = makeStoreLayer();
+    const authorizerLayer = Authorizer.Authorizer.layer({ policies: [], useStore: false }).pipe(
+      Layer.provideMerge(storeLayer),
+    );
+    const program = Effect.gen(function* () {
+      yield* seed;
+      const authz = yield* Authorizer.Authorizer;
+      return yield* authz
+        .check({ action: readDoc, resource: doc1 })
+        .pipe(Authorizer.CurrentPrincipal.provide(bob));
+    });
+    expect(await Effect.runPromise(Effect.provide(program, authorizerLayer))).toBe(false);
   });
 });
