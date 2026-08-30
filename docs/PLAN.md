@@ -6,7 +6,7 @@ first-class `Identifier`s with global uniqueness on `(type, value)`.
 Phase 1 (this PR) laid the foundations:
 
 - `Identifier` domain type and `IdentifierStore` contract in `Identifier.ts`
-- KeyValueStore-backed and `@effect-auth/sql` implementations
+- KeyValueStore-backed and `@thomasfosterau/effect-auth-sql` implementations
 - `auth_identifiers` SQL table/migration
 - `primaryEmail` / `primaryEmailValue` helpers and `UserWithIdentifiers` read view
 - Tests for the KV store and helpers
@@ -27,11 +27,11 @@ deprecated) so the record requires no natural key. `User` becomes purely:
 2. Update `typeof UserStore.Service` / `typeof UserServiceStore.Service` in `User.ts`: remove `getByEmail`,
    `getUserByEmail` (callers must now query `IdentifierStore.getByValue("email", ...)` to
    resolve a user id, then fetch the user by id).
-3. Update `@effect-auth/sql` `auth_users` DDL: remove `email` and `email_verified` columns
+3. Update `@thomasfosterau/effect-auth-sql` `auth_users` DDL: remove `email` and `email_verified` columns
    (behind a migration step for existing deployments).
-4. Update `@effect-auth/sql` `Stores.ts`: remove `email`/`email_verified` columns from
+4. Update `@thomasfosterau/effect-auth-sql` `Stores.ts`: remove `email`/`email_verified` columns from
    inserts/selects; drop the `auth_users_email_idx` unique index.
-5. Update `@effect-auth/alchemy` in parallel.
+5. Update `@thomasfosterau/effect-auth-alchemy` in parallel.
 6. Add a `DESIGN.md` decision entry for this breaking change.
 
 **Blast radius:** large — every module that reads/writes `user.email` directly.
@@ -121,7 +121,7 @@ Stage behind a Changeset (major for `effect-auth`, major for sql/alchemy).
 3. Add `DELETE /identifiers/:id` endpoint.
 4. Update `signUp` request bodies that currently include an `email` field to
    instead record the email through `IdentifierStore` internally.
-5. Update the generated `HTTPClient` and `@effect-auth/client`.
+5. Update the generated `HTTPClient` and `@thomasfosterau/effect-auth-client`.
 
 ---
 
@@ -144,7 +144,7 @@ Stage behind a Changeset (major for `effect-auth`, major for sql/alchemy).
 
 - Keep a Changeset for each phase; phases 2–8 are all breaking and should land in
   one coordinated 1.0 release or as a staged pre-release series.
-- `@effect-auth/alchemy` must be updated in lockstep with `@effect-auth/sql` for
+- `@thomasfosterau/effect-auth-alchemy` must be updated in lockstep with `@thomasfosterau/effect-auth-sql` for
   every schema change.
 - The `WorkOS` package must check whether its user model is affected.
 - All 13 examples need to be updated to the new API before 1.0.

@@ -1,5 +1,5 @@
 /**
- * Vue bindings for `@effect-auth/client`.
+ * Vue bindings for `@thomasfosterau/effect-auth-client`.
  *
  * ```vue
  * <script setup>

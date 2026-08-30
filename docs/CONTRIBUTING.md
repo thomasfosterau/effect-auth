@@ -70,40 +70,42 @@ Before contributing, please:
 
 ### Project Structure
 
-The core library (`effect-auth`) lives at the repository root — it is the
-root workspace package, not a nested `packages/effect-auth`. Related feature
-modules are grouped into lowercase cluster directories (each with its own
-`index.ts` barrel and matching `effect-auth/<cluster>` subpath export);
-everything not listed in a cluster stays flat in `src/`. See
+The core library (`@thomasfosterau/effect-auth`) lives at
+`packages/effect-auth`; the repository root is a plain pnpm workspace.
+Related feature modules are grouped into lowercase cluster directories (each
+with its own `index.ts` barrel and matching `<pkg>/<cluster>` subpath
+export); everything not listed in a cluster stays flat in `src/`. See
 `docs/refactor-plan.md` for the full rationale and `docs/migration.md` for the
 old-path → new-path table.
 
 ```
 effect-auth/                       # pnpm workspaces monorepo (Vite+ toolchain)
-├── src/                           # Core library (root package `effect-auth`)
-│   ├── Types.ts                   # Core domain types (schema'd User, Session, ...)
-│   ├── Errors.ts                  # Shared tagged error definitions
-│   ├── Hooks.ts                   # Hooks/plugin system
-│   ├── PlatformCrypto.ts          # Default Crypto.Crypto layer (Web Crypto API)
-│   ├── <Feature>.ts               # One module per flat, non-clustered feature
-│   │                               # (EmailPassword-style modules that haven't
-│   │                               #  earned a cluster: AuthLifecycle, WebAuthn,
-│   │                               #  JWT, Organization, Admin, ...)
-│   ├── session/                   # SessionService, SessionStore, UserStore, TrustedDevice
-│   ├── email/                     # EmailAddress, EmailOTP, EmailPassword, EmailVerification
-│   ├── password/                  # Password, Argon2, PasswordReset, HaveIBeenPwned
-│   ├── authz/                     # Authorization (AuthorizationPolicy, RoleStore), RBAC, Permission
-│   ├── oauth/                     # OAuth, Scope
-│   ├── http/                      # HTTPApi, HTTPApiSchemas, HTTPServer, HTTPClient, HTTPMiddleware
-│   ├── plugins/                   # First-party Hooks plugins (AccountLockout, Audit, Captcha, ...)
-│   ├── index.ts                   # Public API barrel (curated root + cluster namespace re-exports)
-│   └── *.test.ts                  # Tests alongside source
 ├── packages/
-│   ├── client/                    # @effect-auth/client (zero-dependency browser client)
-│   └── effect-auth/                # Publish target for the root package's build output
+│   ├── effect-auth/               # Core library (@thomasfosterau/effect-auth)
+│   │   └── src/
+│   │       ├── Types.ts           # Core domain types (schema'd User, Session, ...)
+│   │       ├── Errors.ts          # Shared tagged error definitions
+│   │       ├── Hooks.ts           # Hooks/plugin system
+│   │       ├── PlatformCrypto.ts  # Default Crypto.Crypto layer (Web Crypto API)
+│   │       ├── <Feature>.ts       # One module per flat, non-clustered feature
+│   │       │                       # (AuthLifecycle, JWT, Organization, Admin, ...)
+│   │       ├── session/           # SessionService, SessionStore, UserStore, TrustedDevice
+│   │       ├── email/             # EmailAddress, EmailOTP, EmailPassword, EmailVerification
+│   │       ├── password/          # Password, PasswordReset, HaveIBeenPwned
+│   │       ├── authz/             # Authorization (AuthorizationPolicy, RoleStore), RBAC, Permission
+│   │       ├── oauth/             # OAuth, Scope
+│   │       ├── secondfactor/      # MultiFactor, OTP, OTPSecondFactor, WebAuthn
+│   │       ├── http/              # HTTPApi, HTTPApiSchemas, HTTPServer, HTTPClient, HTTPMiddleware
+│   │       ├── plugins/           # First-party Hooks plugins (AccountLockout, Audit, Captcha, ...)
+│   │       ├── index.ts           # Public API barrel (curated root + cluster namespace re-exports)
+│   │       └── *.test.ts          # Tests alongside source
+│   ├── client/                    # @thomasfosterau/effect-auth-client (browser client + React/Svelte/Vue)
+│   ├── sql/                       # @thomasfosterau/effect-auth-sql (SqlClient store layers)
+│   ├── alchemy/                   # @thomasfosterau/effect-auth-alchemy (Alchemy v2 + Cloudflare D1)
+│   └── argon2/                    # @thomasfosterau/effect-auth-argon2 (Argon2id PasswordHasher)
 ├── docs/                          # ARCHITECTURE.md, DESIGN.md, SECURITY.md, CONTRIBUTING.md (this file), adr/, ...
 ├── README.md                      # Project overview
-└── package.json                   # Root package `effect-auth`
+└── package.json                   # Private workspace root
 ```
 
 ## Making Changes

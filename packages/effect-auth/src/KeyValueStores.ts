@@ -755,7 +755,7 @@ export const GoogleOneTapNonceStoreKV: Layer.Layer<
 /**
  * Every ephemeral store in one layer, backed by the ambient `KeyValueStore`.
  *
- * Combine with a persistent backend (e.g. `@effect-auth/sql`'s user/session
+ * Combine with a persistent backend (e.g. `@thomasfosterau/effect-auth-sql`'s user/session
  * stores) for a complete auth stack.
  */
 export const layerKV: Layer.Layer<

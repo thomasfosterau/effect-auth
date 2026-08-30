@@ -35,11 +35,13 @@ A generic authentication and authorization library for [Effect](https://effect.w
 
 ## Packages
 
-| Package                | Purpose                                                    |
-| ---------------------- | ---------------------------------------------------------- |
-| `effect-auth`          | The core library: every module above, `node:crypto` only   |
-| `@effect-auth/sql`     | Driver-agnostic SQL storage layers (`effect/unstable/sql`) |
-| `@effect-auth/alchemy` | Alchemy v2 infra resources + Cloudflare D1 storage layers  |
+| Package                               | Purpose                                                        |
+| ------------------------------------- | -------------------------------------------------------------- |
+| `@thomasfosterau/effect-auth`         | The core library: every module above, `effect` as the only dep |
+| `@thomasfosterau/effect-auth-client`  | Typed browser client with React/Svelte/Vue bindings            |
+| `@thomasfosterau/effect-auth-sql`     | Driver-agnostic SQL storage layers (`effect/unstable/sql`)     |
+| `@thomasfosterau/effect-auth-alchemy` | Alchemy v2 infra resources + Cloudflare D1 storage layers      |
+| `@thomasfosterau/effect-auth-argon2`  | Argon2id `PasswordHasher` backed by `@node-rs/argon2` (native) |
 
 ## Installation
 

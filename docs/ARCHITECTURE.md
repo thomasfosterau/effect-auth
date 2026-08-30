@@ -13,7 +13,7 @@ The settled API conventions — naming, export shapes, store contracts, error ta
 2. **Type-Safe**: schema'd domain models and precise tagged-error unions.
 3. **Composable**: features are independent layers; provide only what you use.
 4. **Storage-Agnostic**: bring your own store implementations (or use
-   `@effect-auth/sql`, `@effect-auth/alchemy`, or the built-in KeyValueStore
+   `@thomasfosterau/effect-auth-sql`, `@thomasfosterau/effect-auth-alchemy`, or the built-in KeyValueStore
    layers).
 5. **Secure by Default**: timing-safe comparisons, high-entropy tokens,
    HttpOnly/Secure cookies, trusted-origin CSRF checks, anti-enumeration
@@ -210,8 +210,8 @@ Any design change that would weaken timing-safety, entropy, cookie flags, CSRF/t
 
 ## Dependencies
 
-- **Core**: `effect`, `@node-rs/argon2` (native Argon2id hashing), `@oslojs/webauthn` (WebAuthn primitives). Most randomness/digest needs go through the `Crypto.Crypto` service (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC).
-- **Packages** isolate framework/storage-driver peer deps (e.g. `@effect-auth/client`) so core stays lean.
+- **Core**: `effect`, plus `@oslojs/webauthn` (pure-JS WebAuthn primitives — the single documented exception to the effect-only dependency rule). Most randomness/digest needs go through the `Crypto.Crypto` service (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC). Native dependencies never enter core: Argon2id hashing lives in `@thomasfosterau/effect-auth-argon2`.
+- **Packages** isolate framework/storage-driver/native peer deps (e.g. `@thomasfosterau/effect-auth-client`, `-sql`, `-alchemy`, `-argon2`) so core stays lean.
 
 ## References
 

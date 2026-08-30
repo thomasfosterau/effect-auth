@@ -1,5 +1,5 @@
 /**
- * Svelte bindings for `@effect-auth/client`.
+ * Svelte bindings for `@thomasfosterau/effect-auth-client`.
  *
  * `sessionStore` implements Svelte's readable-store contract directly (no
  * `svelte` import needed), so it works with the `$store` syntax:
