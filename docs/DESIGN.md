@@ -581,6 +581,51 @@ and future handle types (door open: passkey handles, wallet addresses) all
 become row operations on one table instead of schema surgery; verification
 state finally attaches to the handle it belongs to.
 
+## D13. Effect-native authorization (the `authz/` kernel)
+
+**Status quo (pre-M3).** `authz/` held an RBAC seed: `PermissionRef` wildcard
+matching, `RoleStore`, and an `AuthorizationPolicy` service whose checks were
+method calls — no reusable policy value, no resource/attribute model, no
+policies-as-data.
+
+**Decision (applied; owner decisions 2026-08-30, recorded in
+`better-auth-parity.md` §2.5).** Authorization is a first-class pillar built
+around the `Policy` **value** — Effect-native-first; Cedar contributes
+semantics adopted on merit and, at most, an interop serialization (door-open
+`packages/cedar`). The load-bearing choices:
+
+- **Two policy kinds, difference visible in types.** `DeclarativePolicy` is
+  pure data (permit/forbid + PARC scopes `any/eq/in/is` + a serializable
+  condition AST) and earns data powers: Schema-validated, storable,
+  tenant-editable, model-checkable. `Policy.custom` (arbitrary Effect
+  predicate) is first-class everywhere policies are accepted, but opaque —
+  its `E`/`R` surface in `Policy<E, R>` and it cannot be stored.
+- **Pure core, Effect shell.** Decisions are a pure, total function over a
+  pre-fetched `EntitySlice` (`decidePure`); services (`EntityResolver`,
+  `PolicyStore`, `CurrentPrincipal`) live in the `Authorizer` shell. Every
+  decision is deterministic and replayable from the logged `(request, slice)`.
+- **Semantics:** default deny; forbid overrides permit; order-independent;
+  the `Decision` carries determining policies + per-policy outcomes.
+  **Fail-closed both ways** (deliberate Cedar deviation): an erroring permit
+  cannot grant, an erroring forbid denies; errors land in the trace.
+- **Entities everywhere:** principals, resources, actions and roles are typed
+  entities in one hierarchy, so RBAC (`principal in Role::"admin"`), ReBAC
+  and action groups are the same data check. The declared `Model` doubles as
+  Cedar-style policy validation at `Authorizer` layer construction.
+- **Templates in v1:** `?principal`/`?resource` slots + link records;
+  instantiation is fail-closed (missing _or superfluous_ slot values error —
+  a link may never broaden its template); a broken link fails
+  `effectivePolicies` loudly rather than letting a forbid vanish.
+- **Schema-embedded enforcement:** `protectedField` runs the same policies at
+  the data boundary via v4 Schema effectful getters — decode denial fails
+  (write guard), encode denial redacts (viewer projection) — with
+  `CurrentPrincipal` flowing through the struct's Requirements channel, and
+  `AuthMiddleware` providing the principal per request.
+
+The M0-era `AuthorizationPolicy`/`RoleStore` API remains during the
+transition; M4 migrates Organization/Admin/APIKey onto `Policy` and decides
+its retirement.
+
 ---
 
 ## Maintainer decisions (2026-07-03)

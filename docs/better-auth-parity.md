@@ -314,19 +314,28 @@ the engine for org dynamic access control (M4), which with teams unblocks SCIM g
   email columns, and the upgrade path is `docs/migration.md` § 9 with design
   record `DESIGN.md` § D12. Release note: held on the shared M2+M3 breaking
   release (decision 7) — do not cut until M3 lands.
-- **M3 — Authorization framework (large; §2.5).** The batteries-included pillar,
-  built in the layer order that keeps each stage shippable — and released **together
-  with M2 as one breaking release** (decision 7):
-  1. Policy kernel: `Policy` values + combinators + `enforce`/`check`, decision
-     traces (default deny, forbid overrides permit, asymmetric fail-closed).
-  2. Entity model: Schema-declared entity types/actions, hierarchy,
-     `AttributeProvider`/`EntityStore` slice resolution; pure evaluator over the
-     slice.
-  3. Policies-as-data: the Schema-defined document format, `PolicyStore` with
-     templates + template-linked policies; wire #78's dynamic access control onto
-     it.
-  4. Schema-embedded authorization: `protectedField`/viewer projections/write-side
-     guards, plus route-level policies on `HttpApiMiddleware`.
+- **M3 — Authorization framework (done 2026-08-30; ships with M2, decision 7).**
+  All four stages landed in `src/authz/` (~150 tests):
+  1. Policy kernel (`Entity.ts`/`Condition.ts`/`Policy.ts`): `Policy` values
+     (declarative data + `Policy.custom` escape hatch, opacity visible in
+     `Policy<E, R>`), PARC scopes, serializable condition AST with pure total
+     evaluation, `decidePure`/`decide`/`check`/`enforce`, decision traces,
+     default deny + forbid-overrides-permit + fail-closed-both-ways errors.
+  2. Entity model (`Model.ts`/`Authorizer.ts`): Schema-declared entity types and
+     actions (`appliesTo`, action groups), `validatePolicies`,
+     `CurrentPrincipal`, `EntityResolver` slice resolution (ancestor-closure
+     contract), and the `Authorizer` service with layer-time validation.
+  3. Policies-as-data (`PolicyStore.ts`): versioned Schema-defined documents,
+     `?principal`/`?resource` templates + template-linked policies with
+     fail-closed instantiation, `effectivePolicies` joining every `Authorizer`
+     decision live. (#78's dynamic access control gets wired onto this in M4.)
+  4. Schema-embedded authorization (`Protected.ts`): `protectedField` — write
+     guards fail, viewer projections redact, any `Policy` accepted, R channel
+     carries `CurrentPrincipal` through the parent struct; `AuthMiddleware`
+     provides `CurrentPrincipal` per request so handlers call
+     `Authorizer.authorize` directly. Route-level policy _helpers_ on
+     `HttpApiMiddleware` (beyond principal provision) are deferred to M4
+     alongside the Organization migration.
 - **M4 — Organization parity (medium).** #78 teams; migrate the Organization
   plugin's static role map onto the M3 policy framework (kept as the zero-config
   default).
