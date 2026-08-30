@@ -1,6 +1,6 @@
 # Better Auth Parity Plan
 
-Status: accepted direction · Date: 2026-08-30 (rev 3: authorization pillar added)
+Status: accepted direction · Date: 2026-08-30 (rev 4: authz decisions settled)
 
 Goal: make effect-auth a suitable replacement for [Better Auth](https://www.better-auth.com/) —
 and beyond that, a **batteries-included auth library**: authorization (RBAC, ABAC,
@@ -140,55 +140,72 @@ service with combinators (`allOf`/`anyOf`/`not`/`fromPredicate`, `requirePermiss
 is no reusable policy _value_, no resource/attribute model, no policies-as-data, and
 the Organization plugin runs its own parallel role→permission map (#78).
 
-Four layers, each usable without the ones above it:
+**Governing principle (owner decision): Effect-native-first.** The `Policy` value is
+the primary object of the whole framework — not a builder for Cedar policies. Cedar
+contributes semantics adopted on their merits (reviewed against
+[docs.cedarpolicy.com](https://docs.cedarpolicy.com), 2026-08-30) and, at most, a
+serialization format for interop. Within the Policy universe there is a
+**declarative subset** — policies built from the entity/attribute vocabulary rather
+than arbitrary code — and policies in that subset get extra powers _because_ they are
+data: storable, tenant-editable, validated, sliceable, and exportable. A
+`Policy.custom` (arbitrary Effect predicate) is first-class everywhere policies are
+accepted; it just isn't storable/analyzable, and the types make that visible.
 
-1. **Policy kernel — a first-class `Policy` value.** A `Policy<E, R>` is a reusable,
-   composable decision: an Effect that pulls the principal (`CurrentUser`/
-   `CurrentSession` from #94's middleware context) and yields allow/deny — deny as a
-   typed `AuthorizationDeniedError` carrying a decision trace (which sub-policy
-   denied and why, feeding audit + spans). Constructors: `Policy.make(predicate)`,
-   `Policy.permission("doc:read")`, `Policy.role("admin")`. Combinators:
-   `Policy.all`, `Policy.any`, `Policy.not`, `Policy.when`. Application:
-   `effect.pipe(Policy.enforce(policy))` (fail) and `Policy.check(policy)`
-   (boolean, for UI hints). This evolves the existing `authz/` combinators from
-   service methods into values — RBAC becomes one policy source among several.
-   Default-deny, fail-closed throughout (the existing `authz` semantics).
-2. **ABAC — attributes and resources.** A PARC model (principal, action, resource,
-   context): policies over attributes of all four. The principal side is free
-   (user/session/org membership already in context); the resource side needs a seam —
-   an `AttributeProvider` contract the app implements per resource type (given a
-   resource ref, resolve its attributes as an Effect), so ownership checks
-   ("author == principal"), tenancy checks, and arbitrary attribute predicates
-   compose into the same `Policy` value.
-3. **Policies-as-data — Cedar-style.** A small declarative policy representation
-   (effect permit/forbid; principal/action/resource scopes; when/unless attribute
-   conditions) with Cedar's evaluation semantics: default deny, forbid overrides
-   permit. Defined either in TypeScript or as **Schema-validated JSON documents**, so
-   tenants can author and persist policies at runtime — this is exactly the engine
-   #78's "dynamic access control" needs, and per-org custom roles become stored
-   policy documents rather than a bespoke org feature. Explicitly _not_ a Cedar
-   language parser in core; a real Cedar engine (`packages/cedar` over cedar-wasm)
-   stays door-open as an adapter implementing the same `Policy` interface.
-4. **Schema-embedded authorization** (the Barake insight, generalized). Effect
+Settled decisions (design review, 2026-08-30):
+
+1. **Entity model (Cedar-shaped, Schema-declared).** The core authz vocabulary is
+   typed entity references (`User::"id"`-style), attributes, and a parent hierarchy
+   (a DAG), so RBAC (`principal in Role::"admin"`) and ReBAC are hierarchy checks.
+   Entity types and per-action `appliesTo` signatures are declared with **Effect
+   Schema**, which doubles as Cedar-style policy validation. Users, orgs, teams, and
+   roles become entities; actions are entities too (groupable).
+2. **Pure core, Effect shell.** Cedar's split, Effect-natively: `AttributeProvider`/
+   `EntityStore` services resolve the entity slice (an Effect); evaluation over the
+   slice is a **pure, total function**. Decisions are deterministic and replayable
+   from a logged slice; slicing determines what to fetch. `Policy.custom` is the
+   effectful escape hatch, marked opaque.
+3. **Evaluation semantics.** Default deny; forbid overrides permit;
+   order-independent; the decision carries its determining policies (the trace
+   feeds audit hooks + #83 spans). **Error posture deviates from Cedar
+   deliberately:** an erroring permit cannot grant, and an erroring forbid DENIES —
+   fail-closed in both directions, errors recorded in the trace. (Cedar skips
+   erroring policies, which fails open for forbids; the deviation is documented for
+   the cedar adapter.)
+4. **Canonical stored format: our own Schema-defined JSON.** The declarative subset
+   serializes to an Effect Schema-validated document format owned by this library
+   (validated on write, versioned). The TS eDSL and stored documents are two
+   authorings of the same subset. **Cedar text/JSON are import/export formats** in
+   the door-open `packages/cedar` adapter (which can also swap in cedar-wasm as an
+   evaluator) — never the source of truth.
+5. **Templates in v1.** The `PolicyStore` contract models Cedar-style templates
+   (`?principal`/`?resource` slots) and template-linked policies from the start —
+   per-instance grants ("share this doc with that user", per-tenant role
+   assignment) are tiny link records, and editing a template retroactively updates
+   its links. This is the mechanism org role assignment (M4) and resource sharing
+   ride on.
+6. **Schema-embedded authorization** (the Barake insight, generalized): Effect
    Schema transformations carry a Requirements channel, so schemas can demand the
-   policy context and enforce/redact **at the data boundary**:
-   - `Authz.protectedField(schema, policy)` — field-level decode/encode that redacts
-     (or fails) based on the viewer; annotation-driven variants for whole structs.
-   - Viewer projections: derive "what this principal may see" versions of a domain
-     schema, applied automatically at the HTTP boundary where the middleware already
-     provides `CurrentUser` — response shaping with no handler code.
-   - Write-side: schemas that reject fields the principal may not set (e.g. `role`
-     on self-serve update) before the handler ever sees them.
+   policy context and enforce/redact **at the data boundary** —
+   `Authz.protectedField(schema, policy)` for field-level decode/encode redaction,
+   derived viewer projections applied at the HTTP boundary, and write-side schemas
+   that reject fields the principal may not set. `protectedField` accepts **any**
+   `Policy`; a field rule becomes tenant-editable by using a declarative policy
+   that references a named action resolved through the store — opting into the data
+   plane field-by-field, no special mechanism. Schema embedding is one projection of
+   the same policies: everything remains usable imperatively (`Policy.enforce`/
+   `Policy.check`), at the HTTP layer (route/group policies on `HttpApiMiddleware`),
+   and eventually as client-side `check` hints.
+7. **Release mechanics.** The `authz/` rework is a breaking change; it ships **in
+   the same single breaking release as the M2 identifier epic** (one migration
+   guide, coherent User/entity model), per the repo's clean-break convention.
 
-   Schema embedding is one projection of the same policies, not the only one — every
-   policy remains usable imperatively (`Policy.enforce`), at the HTTP layer
-   (route/group-level policies on `HttpApiMiddleware`), and eventually as client-side
-   `check` hints.
-
-Integration points: org-scoped policy resolution replaces the Organization plugin's
-parallel role map (#78); Admin and APIKey permissions unify onto the same
-`PermissionRef`/`Policy` model; denies emit audit-hook events and span attributes
-(#83's redaction policy applies).
+The kernel evolves what exists today: `Policy<E, R>` values pulling the principal
+from #94's middleware context, deny as a typed `AuthorizationDeniedError` with the
+decision trace; constructors `Policy.make`/`Policy.permission`/`Policy.role`/
+`Policy.action`; combinators `Policy.all`/`any`/`not`/`when`. Integration points:
+org-scoped policy resolution replaces the Organization plugin's parallel role map
+(#78); Admin and APIKey permissions unify onto the same `PermissionRef`/`Policy`
+model.
 
 ## 3. Issue triage
 
@@ -283,14 +300,16 @@ the engine for org dynamic access control (M4), which with teams unblocks SCIM g
   `Identifier`s, migrate EmailPassword/Username/PhoneOTP/OAuth-linking/Anonymous/
   Admin/Org flows, ship as the breaking release with a migration guide.
 - **M3 — Authorization framework (large; §2.5).** The batteries-included pillar,
-  built in the layer order that keeps each stage shippable:
+  built in the layer order that keeps each stage shippable — and released **together
+  with M2 as one breaking release** (decision 7):
   1. Policy kernel: `Policy` values + combinators + `enforce`/`check`, decision
-     traces, evolved from the existing `authz/` combinators (breaking change to
-     `authz/` acceptable — fold into the M2 breaking release window if timing
-     allows).
-  2. ABAC: PARC attributes + the `AttributeProvider` resource seam.
-  3. Policies-as-data: Schema-validated Cedar-semantics policy documents +
-     `PolicyStore`; wire #78's dynamic access control onto it.
+     traces (default deny, forbid overrides permit, asymmetric fail-closed).
+  2. Entity model: Schema-declared entity types/actions, hierarchy,
+     `AttributeProvider`/`EntityStore` slice resolution; pure evaluator over the
+     slice.
+  3. Policies-as-data: the Schema-defined document format, `PolicyStore` with
+     templates + template-linked policies; wire #78's dynamic access control onto
+     it.
   4. Schema-embedded authorization: `protectedField`/viewer projections/write-side
      guards, plus route-level policies on `HttpApiMiddleware`.
 - **M4 — Organization parity (medium).** #78 teams; migrate the Organization
