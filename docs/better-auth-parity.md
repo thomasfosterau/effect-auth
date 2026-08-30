@@ -1,9 +1,12 @@
 # Better Auth Parity Plan
 
-Status: accepted direction · Date: 2026-08-30 (rev 2: target architecture added)
+Status: accepted direction · Date: 2026-08-30 (rev 3: authorization pillar added)
 
-Goal: make effect-auth a suitable replacement for [Better Auth](https://www.better-auth.com/).
-This document records the target architecture (§3), triages the 20 open issues against
+Goal: make effect-auth a suitable replacement for [Better Auth](https://www.better-auth.com/) —
+and beyond that, a **batteries-included auth library**: authorization (RBAC, ABAC,
+Cedar-style policies) as a first-class pillar alongside authentication, not an
+afterthought (§2.5).
+This document records the target architecture (§2), triages the 20 open issues against
 the code as it stands today (post-restructure, `3ff3bc6`), records two regressions
 discovered during the audit, inventories the remaining feature gaps versus Better
 Auth, and lays out an ordered roadmap.
@@ -50,9 +53,9 @@ package that implements a core service contract.
 | `packages/sql`                     | Store layers over `effect/unstable/sql` (driver-agnostic)                           | core; SQL drivers as peers                                          |
 | `packages/alchemy` _(reinstated)_  | Alchemy v2 infra resources + Cloudflare D1 storage layers                           | core; `alchemy` as optional peer                                    |
 | `packages/argon2` _(new, extract)_ | `PasswordHasher` layer over `@node-rs/argon2` (native dep moves out of core)        | core; `@node-rs/argon2`                                             |
-| `packages/drizzle` _(M5, #171)_    | `SessionStore`/`UserStore` (+ rest) via Drizzle                                     | core; `drizzle-orm` as peer                                         |
-| `packages/<email>` _(M5)_          | `EmailSender` adapters — first candidates: Resend, SES, Nodemailer                  | core; provider SDK                                                  |
-| `packages/<sms>` _(M5)_            | `SMSSender` adapters — first candidate: Twilio                                      | core; provider SDK                                                  |
+| `packages/drizzle` _(M6, #171)_    | `SessionStore`/`UserStore` (+ rest) via Drizzle                                     | core; `drizzle-orm` as peer                                         |
+| `packages/<email>` _(M6)_          | `EmailSender` adapters — first candidates: Resend, SES, Nodemailer                  | core; provider SDK                                                  |
+| `packages/<sms>` _(M6)_            | `SMSSender` adapters — first candidate: Twilio                                      | core; provider SDK                                                  |
 
 Consequences for the current tree:
 
@@ -117,7 +120,75 @@ as a design rule:
 - **Framework adapters (Next/Nuxt/SvelteKit/…):** not now. The Web-standard handler
   plus `HttpApiMiddleware` already mount everywhere; if dedicated packages ever prove
   necessary they slot in as `packages/<framework>` without touching core. Until then,
-  framework support is a docs/examples problem (M6).
+  framework support is a docs/examples problem (M7).
+
+### 2.5 Authorization as a first-class pillar
+
+Decision: effect-auth is a batteries-included **auth** library — authorization is a
+core pillar, not a bolt-on. Better Auth's authorization story is thin (per-plugin
+permission maps in admin/organization); this is where we leapfrog rather than chase
+parity. The design draws on Lucas Barake's Effect authorization work — the composable
+policy system ([video](https://www.youtube.com/watch?v=6IaEhu8epnA), article
+"Building a Composable Policy System in TypeScript with Effect") and schema-embedded
+ABAC ([video](https://www.youtube.com/watch?v=fKtpZ7STRKc), "Schemas are more than
+just validators").
+
+**What exists today** (`src/authz/`): `PermissionRef` (`resource:action` with
+wildcard matching), `RoleStore` + in-memory RBAC, and an `AuthorizationPolicy`
+service with combinators (`allOf`/`anyOf`/`not`/`fromPredicate`, `requirePermission`,
+`allowAll`/`denyAll`). A solid RBAC seed — but checks are service-method calls, there
+is no reusable policy _value_, no resource/attribute model, no policies-as-data, and
+the Organization plugin runs its own parallel role→permission map (#78).
+
+Four layers, each usable without the ones above it:
+
+1. **Policy kernel — a first-class `Policy` value.** A `Policy<E, R>` is a reusable,
+   composable decision: an Effect that pulls the principal (`CurrentUser`/
+   `CurrentSession` from #94's middleware context) and yields allow/deny — deny as a
+   typed `AuthorizationDeniedError` carrying a decision trace (which sub-policy
+   denied and why, feeding audit + spans). Constructors: `Policy.make(predicate)`,
+   `Policy.permission("doc:read")`, `Policy.role("admin")`. Combinators:
+   `Policy.all`, `Policy.any`, `Policy.not`, `Policy.when`. Application:
+   `effect.pipe(Policy.enforce(policy))` (fail) and `Policy.check(policy)`
+   (boolean, for UI hints). This evolves the existing `authz/` combinators from
+   service methods into values — RBAC becomes one policy source among several.
+   Default-deny, fail-closed throughout (the existing `authz` semantics).
+2. **ABAC — attributes and resources.** A PARC model (principal, action, resource,
+   context): policies over attributes of all four. The principal side is free
+   (user/session/org membership already in context); the resource side needs a seam —
+   an `AttributeProvider` contract the app implements per resource type (given a
+   resource ref, resolve its attributes as an Effect), so ownership checks
+   ("author == principal"), tenancy checks, and arbitrary attribute predicates
+   compose into the same `Policy` value.
+3. **Policies-as-data — Cedar-style.** A small declarative policy representation
+   (effect permit/forbid; principal/action/resource scopes; when/unless attribute
+   conditions) with Cedar's evaluation semantics: default deny, forbid overrides
+   permit. Defined either in TypeScript or as **Schema-validated JSON documents**, so
+   tenants can author and persist policies at runtime — this is exactly the engine
+   #78's "dynamic access control" needs, and per-org custom roles become stored
+   policy documents rather than a bespoke org feature. Explicitly _not_ a Cedar
+   language parser in core; a real Cedar engine (`packages/cedar` over cedar-wasm)
+   stays door-open as an adapter implementing the same `Policy` interface.
+4. **Schema-embedded authorization** (the Barake insight, generalized). Effect
+   Schema transformations carry a Requirements channel, so schemas can demand the
+   policy context and enforce/redact **at the data boundary**:
+   - `Authz.protectedField(schema, policy)` — field-level decode/encode that redacts
+     (or fails) based on the viewer; annotation-driven variants for whole structs.
+   - Viewer projections: derive "what this principal may see" versions of a domain
+     schema, applied automatically at the HTTP boundary where the middleware already
+     provides `CurrentUser` — response shaping with no handler code.
+   - Write-side: schemas that reject fields the principal may not set (e.g. `role`
+     on self-serve update) before the handler ever sees them.
+
+   Schema embedding is one projection of the same policies, not the only one — every
+   policy remains usable imperatively (`Policy.enforce`), at the HTTP layer
+   (route/group-level policies on `HttpApiMiddleware`), and eventually as client-side
+   `check` hints.
+
+Integration points: org-scoped policy resolution replaces the Organization plugin's
+parallel role map (#78); Admin and APIKey permissions unify onto the same
+`PermissionRef`/`Policy` model; denies emit audit-hook events and span attributes
+(#83's redaction policy applies).
 
 ## 3. Issue triage
 
@@ -131,10 +202,10 @@ checklist, add any missing test, then close.
 | #68   | Account-linking guard + controls                    | Landed in `78e377f`; `trustedProviders`/`allowDifferentEmails`/`updateUserInfoOnLink`/`LastCredential` in `oauth/OAuth.ts`                                                                                                        | Close after verification                                                                    |
 | #73   | **Identifier epic**                                 | Phase 1 only: `Identifier.ts` + KV store exist, but `EmailPassword` still keys on `getUserByEmail`, `User` still requires `email`/`emailVerified`. `docs/PLAN.md` holds the phase plan — which references the deleted SQL package | **Open — the core-model milestone (M2)**                                                    |
 | #74   | Trusted devices + email/SMS OTP factor              | `session/TrustedDevice.ts` (config-gated, signed, `Config` integration) + `secondfactor/OTPSecondFactor.ts` with gate layers                                                                                                      | Close after verification                                                                    |
-| #75   | **SAML SSO + SCIM**                                 | Not started; `SSO.ts` is OIDC-only                                                                                                                                                                                                | **Open — enterprise milestone (M4)**                                                        |
+| #75   | **SAML SSO + SCIM**                                 | Not started; `SSO.ts` is OIDC-only                                                                                                                                                                                                | **Open — enterprise milestone (M5)**                                                        |
 | #76   | Bearer-token issuance                               | `set-auth-token` handling in `http/HTTPServer.ts` (+ tests)                                                                                                                                                                       | Close after verification                                                                    |
-| #77   | OIDC DCR + MCP                                      | DCR done (`registerClient`, `registration_endpoint` advertised). No `.well-known/oauth-authorization-server`, no MCP preset                                                                                                       | **Part 2 open (M4)**                                                                        |
-| #78   | **Org teams + dynamic access control**              | Not started; no `Team` in `Organization.ts`, roles still config-static                                                                                                                                                            | **Open (M3)**                                                                               |
+| #77   | OIDC DCR + MCP                                      | DCR done (`registerClient`, `registration_endpoint` advertised). No `.well-known/oauth-authorization-server`, no MCP preset                                                                                                       | **Part 2 open (M5)**                                                                        |
+| #78   | **Org teams + dynamic access control**              | Not started; no `Team` in `Organization.ts`, roles still config-static                                                                                                                                                            | **Open — dynamic AC lands on the policy framework (M3), teams in M4**                       |
 | #83   | OTel spans                                          | `Observability.ts`, `Effect.withSpan` across 9 modules, `Effect.fn` naming throughout, `docs/OBSERVABILITY.md`                                                                                                                    | Close after a coverage/redaction check                                                      |
 | #84   | One-time token module                               | `OneTimeToken.ts` incl. `redeemOneTimeTokenForSession`                                                                                                                                                                            | Close after verification                                                                    |
 | #85   | AuthLifecycle bypasses/atomicity                    | All four FIXes visible in `AuthLifecycle.ts` (consumes app `EmailPasswordService`, email-match on verify, peek/burn token ordering, resend on unverified)                                                                         | Close after verification                                                                    |
@@ -146,7 +217,7 @@ checklist, add any missing test, then close.
 | #111  | **AccountLockout hardening**                        | **Not done.** Store contract still `get`/`set`/`delete` (`plugins/AccountLockout.ts:35-40`): no atomic increment, no second dimension, no isolation/fail-open decision                                                            | **Open (M1)**                                                                               |
 | #116  | HTTP boundary hardening                             | `__Host-` default-when-secure, generic 500 bodies, `maxBodySize` (64 KiB default), `Referer` fallback, out-of-prefix 404 — all present                                                                                            | Close after verification                                                                    |
 | #117  | Device authorization hardening                      | Atomic consume in store contract, `user_code` rate limit (`USER_CODE_RATE_LIMIT`), `slow_down` escalation without window reset                                                                                                    | Close after verification                                                                    |
-| #171  | Drizzle adapter                                     | Not started; lands as `packages/drizzle` per §2.1                                                                                                                                                                                 | **Open (M5)**                                                                               |
+| #171  | Drizzle adapter                                     | Not started; lands as `packages/drizzle` per §2.1                                                                                                                                                                                 | **Open (M6)**                                                                               |
 
 ## 4. Gap inventory vs Better Auth
 
@@ -166,27 +237,30 @@ composability (an Effect-native advantage Better Auth has no equivalent of).
 
 **Gaps, roughly in order of adoption impact:**
 
-| Gap                               | Better Auth has                                                    | effect-auth today                                                                          | Plan                                                                                  |
-| --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| Database adapters                 | Drizzle/Prisma/Kysely/Mongo adapters + CLI schema generate/migrate | Nothing in-tree (post-regression); KV layers + BYO stores                                  | M0 restore `packages/sql`; M5 Drizzle (#171); CLI/migration story a stretch goal      |
-| Email/SMS delivery adapters       | Docs-level integrations; callbacks                                 | Per-feature callbacks only; no unified sender seam                                         | M1 `EmailSender`/`SMSSender` seams (§2.2); M5 first adapter packages                  |
-| Surrogate-key identity            | Flexible via `additionalFields`; but BA also hardwires email       | Email hardwired in `User`; phase 1 of #73 done                                             | M2 — also a differentiator, not just parity                                           |
-| Org teams + dynamic AC            | `teams`, `createAccessControl` runtime roles                       | Static config roles, no teams                                                              | M3 (#78)                                                                              |
-| SAML SSO                          | SSO plugin supports SAML                                           | OIDC only                                                                                  | M4 (#75)                                                                              |
-| SCIM provisioning                 | Enterprise provisioning                                            | Absent                                                                                     | M4 (#75)                                                                              |
-| MCP auth server preset            | `mcp` plugin                                                       | OIDC provider + DCR exist; no `.well-known/oauth-authorization-server`, no preset          | M4 (#77.2) — small delta                                                              |
-| Client endpoint coverage          | Full inference via plugins                                         | Plugin mechanism exists; first-party coverage still partial (~26 of ~80 endpoints wrapped) | M6 (#92.2) — first-party plugins per feature area, derived from the httpapi contract  |
-| React/Solid client hooks          | React, Vue, Svelte, Solid                                          | Vanilla, Vue, Svelte (React regressed)                                                     | M0 restores React; Solid optional                                                     |
-| Social provider breadth           | ~25 presets                                                        | 4 presets (Google/GitHub/Discord/Microsoft) + Apple secret helper + custom config          | M6 — cheap, add top ~8 (Apple, Facebook, X, LinkedIn, GitLab, Slack, Spotify, Twitch) |
-| Framework guides                  | Next/Nuxt/SvelteKit/Astro/Hono/Express integrations                | One mountable Web handler (covers all of them technically); few guides                     | M6 — docs/examples per §2.4; dedicated adapter packages deferred                      |
-| Payments plugins (Stripe/Polar/…) | Yes                                                                | No                                                                                         | **Deferred by decision** (§2.4); door open as future adapter packages                 |
-| Sign in with Ethereum             | `siwe` plugin                                                      | No                                                                                         | **Deferred by decision** (§2.4); door open as a future adapter package                |
+| Gap                               | Better Auth has                                                    | effect-auth today                                                                               | Plan                                                                                                           |
+| --------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Authorization framework           | Thin: per-plugin permission maps (admin/org) only                  | RBAC seed in `authz/` (permissions, roles, combinators); no policy values/ABAC/schema embedding | M3 (§2.5) — **leapfrog, not parity**: policy kernel, ABAC, Cedar-style policies-as-data, schema-embedded authz |
+| Database adapters                 | Drizzle/Prisma/Kysely/Mongo adapters + CLI schema generate/migrate | Nothing in-tree (post-regression); KV layers + BYO stores                                       | M0 restore `packages/sql`; M6 Drizzle (#171); CLI/migration story a stretch goal                               |
+| Email/SMS delivery adapters       | Docs-level integrations; callbacks                                 | Per-feature callbacks only; no unified sender seam                                              | M1 `EmailSender`/`SMSSender` seams (§2.2); M6 first adapter packages                                           |
+| Surrogate-key identity            | Flexible via `additionalFields`; but BA also hardwires email       | Email hardwired in `User`; phase 1 of #73 done                                                  | M2 — also a differentiator, not just parity                                                                    |
+| Org teams + dynamic AC            | `teams`, `createAccessControl` runtime roles                       | Static config roles, no teams                                                                   | M3 (dynamic AC via policy framework) + M4 (teams) (#78)                                                        |
+| SAML SSO                          | SSO plugin supports SAML                                           | OIDC only                                                                                       | M5 (#75)                                                                                                       |
+| SCIM provisioning                 | Enterprise provisioning                                            | Absent                                                                                          | M5 (#75)                                                                                                       |
+| MCP auth server preset            | `mcp` plugin                                                       | OIDC provider + DCR exist; no `.well-known/oauth-authorization-server`, no preset               | M5 (#77.2) — small delta                                                                                       |
+| Client endpoint coverage          | Full inference via plugins                                         | Plugin mechanism exists; first-party coverage still partial (~26 of ~80 endpoints wrapped)      | M7 (#92.2) — first-party plugins per feature area, derived from the httpapi contract                           |
+| React/Solid client hooks          | React, Vue, Svelte, Solid                                          | Vanilla, Vue, Svelte (React regressed)                                                          | M0 restores React; Solid optional                                                                              |
+| Social provider breadth           | ~25 presets                                                        | 4 presets (Google/GitHub/Discord/Microsoft) + Apple secret helper + custom config               | M7 — cheap, add top ~8 (Apple, Facebook, X, LinkedIn, GitLab, Slack, Spotify, Twitch)                          |
+| Framework guides                  | Next/Nuxt/SvelteKit/Astro/Hono/Express integrations                | One mountable Web handler (covers all of them technically); few guides                          | M7 — docs/examples per §2.4; dedicated adapter packages deferred                                               |
+| Payments plugins (Stripe/Polar/…) | Yes                                                                | No                                                                                              | **Deferred by decision** (§2.4); door open as future adapter packages                                          |
+| Sign in with Ethereum             | `siwe` plugin                                                      | No                                                                                              | **Deferred by decision** (§2.4); door open as a future adapter package                                         |
 
 ## 5. Roadmap
 
 Ordering is dependency-driven: the monorepo restructure + SQL restore (M0) unblock
 the identifier epic's storage phases; the identifier model (M2) unblocks SCIM/SAML
-provisioning and cleans up org invitations; teams (M3) unblock SCIM groups.
+provisioning and cleans up org invitations; the authorization framework (M3) supplies
+the engine for org dynamic access control (M4), which with teams unblocks SCIM groups
+(M5).
 
 - **M0 — Monorepo restructure & regression repair (do first).**
   - Move core `src/` → `packages/effect-auth/src`; retire the dist symlink shim;
@@ -208,21 +282,34 @@ provisioning and cleans up org invitations; teams (M3) unblock SCIM groups.
   the restored SQL package: surrogate-keyed `User`, email/username/phone as
   `Identifier`s, migrate EmailPassword/Username/PhoneOTP/OAuth-linking/Anonymous/
   Admin/Org flows, ship as the breaking release with a migration guide.
-- **M3 — Organization parity (medium).** #78 teams + dynamic per-org roles, on top of
-  the identifier model.
-- **M4 — Enterprise & MCP (large).** #75 SAML (signature verification is the critical
+- **M3 — Authorization framework (large; §2.5).** The batteries-included pillar,
+  built in the layer order that keeps each stage shippable:
+  1. Policy kernel: `Policy` values + combinators + `enforce`/`check`, decision
+     traces, evolved from the existing `authz/` combinators (breaking change to
+     `authz/` acceptable — fold into the M2 breaking release window if timing
+     allows).
+  2. ABAC: PARC attributes + the `AttributeProvider` resource seam.
+  3. Policies-as-data: Schema-validated Cedar-semantics policy documents +
+     `PolicyStore`; wire #78's dynamic access control onto it.
+  4. Schema-embedded authorization: `protectedField`/viewer projections/write-side
+     guards, plus route-level policies on `HttpApiMiddleware`.
+- **M4 — Organization parity (medium).** #78 teams; migrate the Organization
+  plugin's static role map onto the M3 policy framework (kept as the zero-config
+  default).
+- **M5 — Enterprise & MCP (large).** #75 SAML (signature verification is the critical
   path — pick the XML-DSig approach deliberately; if it needs a dependency, SAML
   becomes `packages/saml` per the §2.1 rule) and SCIM 2.0 (maps onto identifiers +
   teams); #77.2 MCP preset (`.well-known/oauth-authorization-server` + a thin config
   over the existing provider) — do MCP first, it's days not weeks.
-- **M5 — Adapter ecosystem (medium).** `packages/drizzle` (#171, per its captured
+- **M6 — Adapter ecosystem (medium).** `packages/drizzle` (#171, per its captured
   spec — decide: wrap the SQL stores vs standalone); first `EmailSender`/`SMSSender`
   adapter packages (Resend, Twilio); document the BYO-store contract as the
-  Prisma/Kysely answer; evaluate a schema-generation CLI.
-- **M6 — DX & breadth (ongoing).** Client endpoint-coverage plugins + 2FA-challenge
+  Prisma/Kysely answer; evaluate a schema-generation CLI; door-open candidates
+  (`packages/cedar`, SIWE, payments) whenever demand appears.
+- **M7 — DX & breadth (ongoing).** Client endpoint-coverage plugins + 2FA-challenge
   continuation helper (#92.2), more social presets, framework guides/examples.
 
 After M0–M1 the library is an honest Better Auth replacement for non-enterprise apps
-whose stores it ships or that bring their own; M2–M4 close the enterprise gap and pull
-ahead of Better Auth on the identity model; M5–M6 close the onboarding/DX gap that
-drives most real-world adoption decisions.
+whose stores it ships or that bring their own; M2–M3 pull ahead of Better Auth on the
+identity model and authorization; M4–M5 close the enterprise gap; M6–M7 close the
+onboarding/DX gap that drives most real-world adoption decisions.
