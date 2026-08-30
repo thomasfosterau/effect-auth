@@ -19,7 +19,7 @@ export default defineConfig({
     alias: {
       // packages/*/dist/ is gitignored; resolve the core package to source so
       // packages/client tests work in CI without a separate build step.
-      "@thomasfosterau/effect-auth": resolve(__dirname, "src/index.ts"),
+      "@thomasfosterau/effect-auth": resolve(__dirname, "packages/effect-auth/src/index.ts"),
     },
   },
   test: {
