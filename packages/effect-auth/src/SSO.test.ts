@@ -9,16 +9,18 @@ import { UserStore } from "./session/UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
-import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { EmailPasswordService } from "./email/EmailPassword.ts";
 import { PasswordHasher } from "./password/Password.ts";
-import { EmailVerificationService, EmailVerificationStore } from "./email/EmailVerification.ts";
-import {
-  PasswordResetService,
-  PasswordResetStore,
-  PasswordResetUserStore,
-} from "./password/PasswordReset.ts";
+import { EmailVerificationService } from "./email/EmailVerification.ts";
+import { PasswordResetService } from "./password/PasswordReset.ts";
 import { type AuthServices } from "./http/HTTPServer.ts";
 import * as HTTPServer from "./http/HTTPServer.ts";
+import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "./Identifier.ts";
 import { OrganizationStore, type Member, type SSOProvider } from "./index.ts";
 import { OAuthStateStore, OAuthUserStore, type OAuthState } from "./oauth/OAuth.ts";
 import { SSOProviderStore, SSOError, SSOService } from "./SSO.ts";
@@ -49,7 +51,8 @@ const withFetch = async <A>(
 const makeStores = () => {
   const providers = new Map<string, SSOProvider>();
   const users = new Map<string, Types.User>();
-  const usersByEmail = new Map<string, Types.User>();
+  const identifierRecords = new Map<string, Identifier>();
+  const identifiers = memoryIdentifierStore(identifierRecords);
   const states = new Map<string, OAuthState>();
   const members: Member[] = [];
   let userSeq = 0;
@@ -67,14 +70,11 @@ const makeStores = () => {
       const u = users.get(userId);
       return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
     },
-    getUserByEmail: (email: string) => Effect.succeed(usersByEmail.get(email) ?? null),
-    createUser: (input: { email: string; emailVerified: boolean; name?: string; image?: string }) =>
+    createUser: (input: { name?: string; image?: string }) =>
       Effect.sync(() => {
         const now = new Date();
         const user: Types.User = {
           id: `u${++userSeq}`,
-          email: input.email,
-          emailVerified: input.emailVerified,
           ...(input.name !== undefined && { name: input.name }),
           ...(input.image !== undefined && { image: input.image }),
           createdAt: now,
@@ -82,9 +82,13 @@ const makeStores = () => {
           attributes: {},
         };
         users.set(user.id, user);
-        usersByEmail.set(user.email, user);
         return user;
       }),
+  };
+
+  const coreUserStore: typeof UserStore.Service = {
+    get: (userId) => Effect.sync(() => users.get(userId) ?? null),
+    getCredentials: () => Effect.succeed(null),
   };
 
   const stateStore = {
@@ -139,13 +143,15 @@ const makeStores = () => {
     Layer.succeed(SSOProviderStore)(ssoStore),
     Layer.succeed(OAuthStateStore)(stateStore),
     Layer.succeed(OAuthUserStore)(userStore),
+    Layer.succeed(IdentifierStore)(identifiers),
+    Layer.succeed(UserStore)(coreUserStore),
     Layer.succeed(SessionService)(sessionManager),
     Layer.succeed(OrganizationStore)(orgStore),
     Hooks.Default,
     PlatformCrypto.layer,
   );
 
-  return { layer, providers, users, members };
+  return { layer, providers, users, identifiers, members };
 };
 
 const ACME = {
@@ -183,7 +189,7 @@ describe("SSOService", () => {
   });
 
   it("provisions a user + org membership on first login and reuses on the second", async () => {
-    const { layer, users, members } = makeStores();
+    const { layer, users, identifiers, members } = makeStores();
     const sso = await Effect.runPromise(
       SSO.make({ defaultRole: "member" }).pipe(Effect.provide(layer)),
     );
@@ -210,7 +216,11 @@ describe("SSOService", () => {
     // First login: creates the user and the org membership.
     const first = await withFetch(idpRoutes, () => Effect.runPromise(signInFlow()));
     expect(first.isNewUser).toBe(true);
-    expect(first.user.email).toBe("worker@acme.test");
+    const emailIdentifier = await Effect.runPromise(
+      identifiers.getByValue("email", "worker@acme.test"),
+    );
+    expect(emailIdentifier?.userId).toBe(first.user.id);
+    expect(emailIdentifier?.verified).toBe(true);
     expect(first.session.userId).toBe(first.user.id);
     expect(members).toEqual([
       { ...members[0], organizationId: "org-1", userId: first.user.id, role: "member" },
@@ -300,7 +310,8 @@ describe("SSOService", () => {
 /** A web handler wired with the SSO endpoints over in-memory stores. */
 const makeHttpFixture = () => {
   const usersById = new Map<string, Types.User>();
-  const usersByEmail = new Map<string, Types.User>();
+  const identifierRecords = new Map<string, Identifier>();
+  const identifierStore = memoryIdentifierStore(identifierRecords);
   const sessions = new Map<string, Types.Session>();
   const providers = new Map<string, SSOProvider>();
   const states = new Map<string, OAuthState>();
@@ -312,14 +323,19 @@ const makeHttpFixture = () => {
     const now = new Date();
     const user: Types.User = {
       id,
-      email,
-      emailVerified: true,
       createdAt: now,
       updatedAt: now,
       attributes,
     };
     usersById.set(id, user);
-    usersByEmail.set(email, user);
+    const identifier = makeIdentifier({
+      userId: id,
+      type: "email",
+      value: email,
+      verified: true,
+      verifiedAt: now,
+    });
+    identifierRecords.set(identifier.id, identifier);
     return id;
   };
   const makeSession = (userId: string): string => {
@@ -345,9 +361,7 @@ const makeHttpFixture = () => {
   };
   const userServiceStore = {
     get: userStore.get,
-    getByEmail: (email: string) => Effect.succeed(usersByEmail.get(email) ?? null),
-    update: (user: Types.User) =>
-      Effect.sync(() => (usersById.set(user.id, user), usersByEmail.set(user.email, user), user)),
+    update: (user: Types.User) => Effect.sync(() => (usersById.set(user.id, user), user)),
     delete: () => Effect.void,
   };
   const sessionStore = {
@@ -367,15 +381,12 @@ const makeHttpFixture = () => {
       const u = usersById.get(userId);
       return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
     },
-    getUserByEmail: (email: string) => Effect.succeed(usersByEmail.get(email) ?? null),
-    createUser: (input: { email: string; emailVerified: boolean; name?: string; image?: string }) =>
+    createUser: (input: { name?: string; image?: string }) =>
       Effect.sync(() => {
         const id = `u${++userSeq}`;
         const now = new Date();
         const user: Types.User = {
           id,
-          email: input.email,
-          emailVerified: input.emailVerified,
           ...(input.name !== undefined && { name: input.name }),
           ...(input.image !== undefined && { image: input.image }),
           createdAt: now,
@@ -383,7 +394,6 @@ const makeHttpFixture = () => {
           attributes: {},
         };
         usersById.set(id, user);
-        usersByEmail.set(input.email, user);
         return user;
       }),
   };
@@ -421,25 +431,26 @@ const makeHttpFixture = () => {
     sessionServiceLayer,
     UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
     Layer.succeed(UserServiceStore)(userServiceStore),
+    Layer.succeed(IdentifierStore)(identifierStore),
     Hooks.Default,
     Layer.succeed(AuthLifecycleService)(undefined as never),
-    Layer.succeed(EmailPasswordStore)(undefined as never),
+    Layer.succeed(EmailPasswordService)(undefined as never),
     Layer.succeed(PasswordHasher)(undefined as never),
     Layer.succeed(EmailVerificationService)(undefined as never),
-    Layer.succeed(EmailVerificationStore)(undefined as never),
     Layer.succeed(PasswordResetService)(undefined as never),
-    Layer.succeed(PasswordResetStore)(undefined as never),
-    Layer.succeed(PasswordResetUserStore)(undefined as never),
   );
 
   // `SSOService` only needs `SSOProviderStore` to construct; `OAuthStateStore`/
-  // `OAuthUserStore`/`SessionService`/`Crypto.Crypto` are required dynamically
-  // by its `signIn`/`handleCallback` methods, and `OrganizationStore` is
-  // resolved optionally at call time — all are provided here as ambient context.
+  // `OAuthUserStore`/`IdentifierStore`/`UserStore`/`SessionService`/
+  // `Crypto.Crypto` are required dynamically by its `signIn`/`handleCallback`
+  // methods, and `OrganizationStore` is resolved optionally at call time — all
+  // are provided here as ambient context.
   const ssoDeps = Layer.mergeAll(
     Layer.succeed(SSOProviderStore)(ssoStore),
     Layer.succeed(OAuthStateStore)(stateStore),
     Layer.succeed(OAuthUserStore)(oauthUserStore),
+    Layer.succeed(IdentifierStore)(identifierStore),
+    Layer.succeed(UserStore)(userStore),
     Layer.succeed(OrganizationStore)(orgStore as never),
     PlatformCrypto.layer,
   );
@@ -457,7 +468,7 @@ const makeHttpFixture = () => {
     handler: HTTPServer.make({ services: withSSO, cookie: { secure: false } }).handler,
     handlerWithoutSSO: HTTPServer.make({ services: withoutSSO, cookie: { secure: false } }).handler,
     providers,
-    usersByEmail,
+    identifierRecords,
   };
 };
 

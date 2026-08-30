@@ -10,16 +10,13 @@ import { SessionStore } from "./session/SessionStore.ts";
 import { UserStore } from "./session/UserStore.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
-import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { EmailPasswordService } from "./email/EmailPassword.ts";
 import { PasswordHasher } from "./password/Password.ts";
-import { EmailVerificationService, EmailVerificationStore } from "./email/EmailVerification.ts";
-import {
-  PasswordResetService,
-  PasswordResetStore,
-  PasswordResetUserStore,
-} from "./password/PasswordReset.ts";
+import { EmailVerificationService } from "./email/EmailVerification.ts";
+import { PasswordResetService } from "./password/PasswordReset.ts";
 import { type AuthServices } from "./http/HTTPServer.ts";
 import * as HTTPServer from "./http/HTTPServer.ts";
+import { IdentifierStore, memoryIdentifierStore, type Identifier } from "./Identifier.ts";
 import { OAuthUserStore } from "./oauth/OAuth.ts";
 import { GoogleOneTapError, GoogleOneTapService, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 import * as GoogleOneTap from "./GoogleOneTap.ts";
@@ -99,7 +96,8 @@ const makeMemoryNonceStore = (): typeof GoogleOneTapNonceStore.Service => {
 
 const makeStores = () => {
   const users = new Map<string, Types.User>();
-  const usersByEmail = new Map<string, Types.User>();
+  const identifierRecords = new Map<string, Identifier>();
+  const identifiers = memoryIdentifierStore(identifierRecords);
   let userSeq = 0;
 
   const userStore: typeof OAuthUserStore.Service = {
@@ -107,14 +105,11 @@ const makeStores = () => {
       const u = users.get(userId);
       return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
     },
-    getUserByEmail: (email) => Effect.succeed(usersByEmail.get(email) ?? null),
     createUser: (input) =>
       Effect.sync(() => {
         const now = new Date();
         const user: Types.User = {
           id: `u${++userSeq}`,
-          email: input.email,
-          emailVerified: input.emailVerified,
           ...(input.name !== undefined && { name: input.name }),
           ...(input.image !== undefined && { image: input.image }),
           createdAt: now,
@@ -122,9 +117,12 @@ const makeStores = () => {
           attributes: {},
         };
         users.set(user.id, user);
-        usersByEmail.set(user.email, user);
         return user;
       }),
+  };
+  const coreUserStore: typeof UserStore.Service = {
+    get: (userId) => Effect.sync(() => users.get(userId) ?? null),
+    getCredentials: () => Effect.succeed(null),
   };
   const sessionManager: typeof SessionService.Service = {
     createSession: (userId) =>
@@ -148,19 +146,21 @@ const makeStores = () => {
 
   const layer = Layer.mergeAll(
     Layer.succeed(OAuthUserStore)(userStore),
+    Layer.succeed(IdentifierStore)(identifiers),
+    Layer.succeed(UserStore)(coreUserStore),
     Layer.succeed(SessionService)(sessionManager),
     Layer.succeed(GoogleOneTapNonceStore)(nonceStore),
     Hooks.Default,
     PlatformCrypto.layer,
   );
-  return { layer, users, nonceStore };
+  return { layer, users, identifiers, nonceStore };
 };
 
 describe("GoogleOneTapService", () => {
   const config = { clientId: CLIENT_ID, jwksEndpoint: JWKS_ENDPOINT };
 
   it("verifies a credential and provisions the user once", async () => {
-    const { layer, users, nonceStore } = makeStores();
+    const { layer, users, identifiers, nonceStore } = makeStores();
     const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
 
     const nonce1 = "test-nonce-1";
@@ -189,8 +189,11 @@ describe("GoogleOneTapService", () => {
     );
 
     expect(first.isNewUser).toBe(true);
-    expect(first.user.email).toBe("alice@gmail.test");
-    expect(first.user.emailVerified).toBe(true);
+    const emailIdentifier = await Effect.runPromise(
+      identifiers.getByValue("email", "alice@gmail.test"),
+    );
+    expect(emailIdentifier?.userId).toBe(first.user.id);
+    expect(emailIdentifier?.verified).toBe(true);
     expect(first.user.name).toBe("Alice");
     expect(first.session.userId).toBe(first.user.id);
     expect(first.claims["sub"]).toBe("google-user-1");
@@ -200,7 +203,7 @@ describe("GoogleOneTapService", () => {
   });
 
   it("accepts the bare `accounts.google.com` issuer", async () => {
-    const { layer, nonceStore } = makeStores();
+    const { layer, identifiers, nonceStore } = makeStores();
     const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
     const nonce = "test-nonce-bare-iss";
     await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
@@ -214,7 +217,10 @@ describe("GoogleOneTapService", () => {
           .pipe(Effect.provide(layer)),
       ),
     );
-    expect(result.user.email).toBe("alice@gmail.test");
+    const emailIdentifier = await Effect.runPromise(
+      identifiers.getByValue("email", "alice@gmail.test"),
+    );
+    expect(emailIdentifier?.userId).toBe(result.user.id);
   });
 
   it("rejects wrong audience, wrong issuer, expiry, unverified email, and bad signatures", async () => {
@@ -332,7 +338,8 @@ describe("GoogleOneTapService", () => {
 
 const makeHttpFixture = () => {
   const usersById = new Map<string, Types.User>();
-  const usersByEmail = new Map<string, Types.User>();
+  const identifierRecords = new Map<string, Identifier>();
+  const identifierStore = memoryIdentifierStore(identifierRecords);
   const sessions = new Map<string, Types.Session>();
   let userSeq = 0;
 
@@ -341,14 +348,11 @@ const makeHttpFixture = () => {
       const u = usersById.get(userId);
       return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
     },
-    getUserByEmail: (email) => Effect.succeed(usersByEmail.get(email) ?? null),
     createUser: (input) =>
       Effect.sync(() => {
         const now = new Date();
         const user: Types.User = {
           id: `u${++userSeq}`,
-          email: input.email,
-          emailVerified: input.emailVerified,
           ...(input.name !== undefined && { name: input.name }),
           ...(input.image !== undefined && { image: input.image }),
           createdAt: now,
@@ -356,7 +360,6 @@ const makeHttpFixture = () => {
           attributes: {},
         };
         usersById.set(user.id, user);
-        usersByEmail.set(user.email, user);
         return user;
       }),
   };
@@ -366,7 +369,6 @@ const makeHttpFixture = () => {
   };
   const userServiceStore = {
     get: userStore.get,
-    getByEmail: (email: string) => Effect.succeed(usersByEmail.get(email) ?? null),
     update: (user: Types.User) => Effect.sync(() => (usersById.set(user.id, user), user)),
     delete: () => Effect.void,
   };
@@ -397,19 +399,19 @@ const makeHttpFixture = () => {
     sessionServiceLayer,
     UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
     Layer.succeed(UserServiceStore)(userServiceStore),
+    Layer.succeed(IdentifierStore)(identifierStore),
     Hooks.Default,
     Layer.succeed(AuthLifecycleService)(undefined as never),
-    Layer.succeed(EmailPasswordStore)(undefined as never),
+    Layer.succeed(EmailPasswordService)(undefined as never),
     Layer.succeed(PasswordHasher)(undefined as never),
     Layer.succeed(EmailVerificationService)(undefined as never),
-    Layer.succeed(EmailVerificationStore)(undefined as never),
     Layer.succeed(PasswordResetService)(undefined as never),
-    Layer.succeed(PasswordResetStore)(undefined as never),
-    Layer.succeed(PasswordResetUserStore)(undefined as never),
   );
 
   const oneTapDeps = Layer.mergeAll(
     Layer.succeed(OAuthUserStore)(oauthUserStore),
+    Layer.succeed(IdentifierStore)(identifierStore),
+    Layer.succeed(UserStore)(userStore),
     Layer.succeed(GoogleOneTapNonceStore)(nonceStore),
     sessionServiceLayer,
   );

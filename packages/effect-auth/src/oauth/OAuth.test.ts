@@ -2,8 +2,15 @@ import { describe, it, expect } from "vite-plus/test";
 import { Crypto, Effect, Layer, Redacted } from "effect";
 import { AuthError, OAuthLastCredentialError, OAuthEmailMismatchError } from "../Errors.ts";
 import * as Cipher from "../Cipher.ts";
+import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "../Identifier.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService } from "../session/SessionService.ts";
+import { UserStore } from "../session/UserStore.ts";
 import type * as Types from "../Types.ts";
 import {
   verifyIdToken,
@@ -819,12 +826,15 @@ describe("Cipher.aes256GcmCipher", () => {
 
 describe("OAuthService encryptTokens", () => {
   // OAuth.make resolves OAuthStateStore | OAuthAccountStore | OAuthUserStore |
-  // SessionService at construction time. These tests only exercise
-  // refreshAccessToken (which only touches OAuthAccountStore, via closure), so the
-  // other three are stubbed out — never actually invoked.
+  // IdentifierStore | UserStore | SessionService at construction time. These
+  // tests only exercise refreshAccessToken (which only touches
+  // OAuthAccountStore, via closure), so the others are stubbed out — never
+  // actually invoked.
   const unusedDepsLayer = Layer.mergeAll(
     Layer.succeed(OAuthStateStore)(undefined as never),
     Layer.succeed(OAuthUserStore)(undefined as never),
+    Layer.succeed(IdentifierStore)(undefined as never),
+    Layer.succeed(UserStore)(undefined as never),
     Layer.succeed(SessionService)(undefined as never),
     PlatformCrypto.layer,
   );
@@ -1039,6 +1049,8 @@ describe("OAuthService unlinkAccount guard", () => {
   const unusedDeps = Layer.mergeAll(
     Layer.succeed(OAuthStateStore)(undefined as never),
     Layer.succeed(OAuthUserStore)(undefined as never),
+    Layer.succeed(IdentifierStore)(undefined as never),
+    Layer.succeed(UserStore)(undefined as never),
     Layer.succeed(SessionService)(undefined as never),
     PlatformCrypto.layer,
   );
@@ -1207,8 +1219,6 @@ describe("OAuthService linking controls", () => {
 
   const makeUser = (overrides?: Partial<Types.User>): Types.User => ({
     id: "u1",
-    email: "user@example.com",
-    emailVerified: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     attributes: {},
@@ -1224,7 +1234,6 @@ describe("OAuthService linking controls", () => {
         id === user.id
           ? Effect.succeed(user)
           : Effect.fail(new AuthError({ message: "not found" })),
-      getUserByEmail: (email) => Effect.succeed(email === user.email ? user : null),
       createUser: (input) => Effect.succeed(makeUser(input)),
       ...(onUpdate && {
         updateUser: (id: string, u: { name?: string; image?: string }) => {
@@ -1232,6 +1241,35 @@ describe("OAuthService linking controls", () => {
           return Effect.succeed({ ...user, ...u });
         },
       }),
+    });
+
+  /**
+   * Identifier fixture: a memory store optionally pre-seeded with email
+   * identifiers (the identifier-model equivalent of the old
+   * `user.email`/`emailVerified` seeding).
+   */
+  const makeIdentifiers = (
+    ...seeds: ReadonlyArray<{ userId: string; email: string; verified?: boolean }>
+  ) => {
+    const records = new Map<string, Identifier>();
+    for (const seed of seeds) {
+      const identifier = makeIdentifier({
+        userId: seed.userId,
+        type: "email",
+        value: seed.email,
+        verified: seed.verified ?? true,
+      });
+      records.set(identifier.id, identifier);
+    }
+    const store = memoryIdentifierStore(records);
+    return { records, store, layer: Layer.succeed(IdentifierStore)(store) };
+  };
+
+  /** Core user-by-id store used by signInWithCallback's auto-link resolution. */
+  const makeCoreUserLayer = (...users: ReadonlyArray<Types.User>) =>
+    Layer.succeed(UserStore, {
+      get: (id) => Effect.succeed(users.find((u) => u.id === id) ?? null),
+      getCredentials: () => Effect.succeed(null),
     });
 
   const makeSessionLayer = (userId: string) => {
@@ -1284,13 +1322,17 @@ describe("OAuthService linking controls", () => {
     withFetch((url) => (url.includes("/token") ? json(mockTokenResponse) : json(userInfo)), thunk);
 
   it("allowDifferentEmails: false (default) rejects linking when emails differ", async () => {
+    const user = makeUser();
+    const identifiers = makeIdentifiers({ userId: user.id, email: "other@example.com" });
     const service = await Effect.runPromise(
       OAuth.make({ github: makeTestProvider("github") }).pipe(
         Effect.provide(
           Layer.mergeAll(
             makeStateLayer(makeState("github")),
             makeAccountLayer(),
-            makeUserLayer(makeUser({ email: "other@example.com" })),
+            makeUserLayer(user),
+            identifiers.layer,
+            makeCoreUserLayer(user),
             noSession,
             PlatformCrypto.layer,
           ),
@@ -1306,13 +1348,17 @@ describe("OAuthService linking controls", () => {
   });
 
   it("allowDifferentEmails: true allows linking when emails differ", async () => {
+    const user = makeUser();
+    const identifiers = makeIdentifiers({ userId: user.id, email: "other@example.com" });
     const service = await Effect.runPromise(
       OAuth.make({ github: makeTestProvider("github") }, { allowDifferentEmails: true }).pipe(
         Effect.provide(
           Layer.mergeAll(
             makeStateLayer(makeState("github")),
             makeAccountLayer(),
-            makeUserLayer(makeUser({ email: "other@example.com" })),
+            makeUserLayer(user),
+            identifiers.layer,
+            makeCoreUserLayer(user),
             noSession,
             PlatformCrypto.layer,
           ),
@@ -1328,13 +1374,17 @@ describe("OAuthService linking controls", () => {
   });
 
   it("allowDifferentEmails: false succeeds when emails match", async () => {
+    const user = makeUser();
+    const identifiers = makeIdentifiers({ userId: user.id, email: "user@example.com" });
     const service = await Effect.runPromise(
       OAuth.make({ github: makeTestProvider("github") }).pipe(
         Effect.provide(
           Layer.mergeAll(
             makeStateLayer(makeState("github")),
             makeAccountLayer(),
-            makeUserLayer(makeUser({ email: "user@example.com" })),
+            makeUserLayer(user),
+            identifiers.layer,
+            makeCoreUserLayer(user),
             noSession,
             PlatformCrypto.layer,
           ),
@@ -1350,10 +1400,12 @@ describe("OAuthService linking controls", () => {
   });
 
   it("trustedProviders: trusted provider auto-links without email_verified in signInWithCallback", async () => {
-    const existingUser = makeUser({
-      id: "user-existing",
+    const existingUser = makeUser({ id: "user-existing" });
+    // The existing account's email identifier is itself unverified.
+    const identifiers = makeIdentifiers({
+      userId: existingUser.id,
       email: "user@example.com",
-      emailVerified: false,
+      verified: false,
     });
     const service = await Effect.runPromise(
       OAuth.make({ github: makeTestProvider("github") }, { trustedProviders: ["github"] }).pipe(
@@ -1362,6 +1414,8 @@ describe("OAuthService linking controls", () => {
             makeStateLayer(makeState("github", "trust-state")),
             makeAccountLayer(),
             makeUserLayer(existingUser),
+            identifiers.layer,
+            makeCoreUserLayer(existingUser),
             makeSessionLayer(existingUser.id),
             PlatformCrypto.layer,
           ),
@@ -1378,19 +1432,9 @@ describe("OAuthService linking controls", () => {
     expect(result.user.id).toBe(existingUser.id);
   });
 
-  it("trustedProviders: untrusted provider creates a new user without email_verified", async () => {
-    const newUser = makeUser({
-      id: "new-user-id",
-      email: "user@example.com",
-      emailVerified: false,
-    });
-    const existingUser = makeUser({ id: "existing-id", email: "user@example.com" });
-
-    const userLayer = Layer.succeed(OAuthUserStore, {
-      getUser: (id) => (id === newUser.id ? Effect.succeed(newUser) : Effect.succeed(existingUser)),
-      getUserByEmail: () => Effect.succeed(existingUser),
-      createUser: () => Effect.succeed(newUser),
-    });
+  it("trustedProviders: untrusted provider refuses a claimed email without email_verified", async () => {
+    const existingUser = makeUser({ id: "existing-id" });
+    const identifiers = makeIdentifiers({ userId: existingUser.id, email: "user@example.com" });
 
     const service = await Effect.runPromise(
       OAuth.make({ github: makeTestProvider("github") }, { trustedProviders: [] }).pipe(
@@ -1398,7 +1442,46 @@ describe("OAuthService linking controls", () => {
           Layer.mergeAll(
             makeStateLayer(makeState("github", "untrust-state")),
             makeAccountLayer(),
+            makeUserLayer(existingUser),
+            identifiers.layer,
+            makeCoreUserLayer(existingUser),
+            makeSessionLayer(existingUser.id),
+            PlatformCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
+    const err = await withProviderFetch(
+      mockUserInfo({ email: "user@example.com", id: "gh-untrusted", email_verified: false }),
+      () =>
+        Effect.runPromise(Effect.flip(service.signInWithCallback("untrust-state", "code-untrust"))),
+    );
+
+    // Without a trusted provider and without email_verified, the flow must not
+    // auto-link — and it must not double-claim the email either.
+    expect(err).toBeInstanceOf(AuthError);
+    expect((err as AuthError).message).toMatch(/already associated/i);
+  });
+
+  it("trustedProviders: unclaimed unverified email creates a new user with an unverified identifier", async () => {
+    const newUser = makeUser({ id: "new-user-id" });
+    const identifiers = makeIdentifiers();
+
+    const userLayer = Layer.succeed(OAuthUserStore, {
+      getUser: () => Effect.succeed(newUser),
+      createUser: () => Effect.succeed(newUser),
+    });
+
+    const service = await Effect.runPromise(
+      OAuth.make({ github: makeTestProvider("github") }, { trustedProviders: [] }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            makeStateLayer(makeState("github", "fresh-state")),
+            makeAccountLayer(),
             userLayer,
+            identifiers.layer,
+            makeCoreUserLayer(newUser),
             makeSessionLayer(newUser.id),
             PlatformCrypto.layer,
           ),
@@ -1407,25 +1490,32 @@ describe("OAuthService linking controls", () => {
     );
 
     const result = await withProviderFetch(
-      mockUserInfo({ email: "user@example.com", id: "gh-untrusted", email_verified: false }),
-      () => Effect.runPromise(service.signInWithCallback("untrust-state", "code-untrust")),
+      mockUserInfo({ email: "user@example.com", id: "gh-fresh", email_verified: false }),
+      () => Effect.runPromise(service.signInWithCallback("fresh-state", "code-fresh")),
     );
 
-    // Without a trusted provider and without email_verified, a new user is created.
     expect(result.isNewUser).toBe(true);
+    const claimed = await Effect.runPromise(
+      identifiers.store.getByValue("email", "user@example.com"),
+    );
+    expect(claimed?.userId).toBe(newUser.id);
+    expect(claimed?.verified).toBe(false);
   });
 
   it("updateUserInfoOnLink: false (default) does not update the user profile", async () => {
     let updateCalled = false;
+    const user = makeUser();
     const service = await Effect.runPromise(
       OAuth.make({ github: makeTestProvider("github") }, { allowDifferentEmails: true }).pipe(
         Effect.provide(
           Layer.mergeAll(
             makeStateLayer(makeState("github")),
             makeAccountLayer(),
-            makeUserLayer(makeUser(), () => {
+            makeUserLayer(user, () => {
               updateCalled = true;
             }),
+            makeIdentifiers().layer,
+            makeCoreUserLayer(user),
             noSession,
             PlatformCrypto.layer,
           ),
@@ -1443,6 +1533,7 @@ describe("OAuthService linking controls", () => {
 
   it("updateUserInfoOnLink: true updates the user name and image from the provider", async () => {
     const updates: { name?: string; image?: string }[] = [];
+    const user = makeUser();
     const service = await Effect.runPromise(
       OAuth.make(
         { github: makeTestProvider("github") },
@@ -1452,7 +1543,9 @@ describe("OAuthService linking controls", () => {
           Layer.mergeAll(
             makeStateLayer(makeState("github")),
             makeAccountLayer(),
-            makeUserLayer(makeUser(), (_, u) => updates.push(u)),
+            makeUserLayer(user, (_, u) => updates.push(u)),
+            makeIdentifiers().layer,
+            makeCoreUserLayer(user),
             noSession,
             PlatformCrypto.layer,
           ),
