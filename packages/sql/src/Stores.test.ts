@@ -253,7 +253,7 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     const result = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        const store = yield* Auth.Authz.RoleStore;
+        const store = yield* Auth.RoleStore;
         yield* sql`INSERT INTO auth_user_roles (user_id, role) VALUES ('user-1', 'admin')`;
         yield* sql`INSERT INTO auth_user_roles (user_id, role) VALUES ('user-1', 'editor')`;
         yield* sql`INSERT INTO auth_role_permissions (role, resource, action) VALUES ('admin', 'posts', 'delete')`;

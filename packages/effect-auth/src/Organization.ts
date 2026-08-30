@@ -34,7 +34,7 @@
 import { Context, Crypto, Data, Effect, Layer } from "effect";
 import { IdentifierStore } from "./Identifier.ts";
 import * as Errors from "./Errors.ts";
-import { parsePermission, permissionMatches } from "./authz/Permission.ts";
+import { parsePermission, permissionMatches } from "./Permission.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { normalizeEmail } from "./utils.ts";
 
@@ -135,7 +135,7 @@ export interface TeamMember {
  * of the same name, for that organization only: permission resolution never
  * merges the two, so a tenant's role grants exactly the permissions it lists.
  * Permissions are `"resource:action"` strings and may use the `"*"` wildcard
- * (`"team:*"`, `"*:*"`), matched with `Authz.permissionMatches`.
+ * (`"team:*"`, `"*:*"`), matched with `permissionMatches`.
  *
  * The protected owner role (`config.creatorRole`, default `owner`) can never
  * be redefined this way - see {@link OrganizationService.upsertOrgRole}.

@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect";
 import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";
 import * as Policy from "./Policy.ts";
-import * as Model from "./Model.ts";
+import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Authorizer from "./Authorizer.ts";
 import * as PolicyStore from "./PolicyStore.ts";
 
@@ -115,7 +115,7 @@ describe("Authorizer", () => {
       Layer.provide(Layer.succeed(Authorizer.EntityResolver)(resolver)),
     );
     const program = Authorizer.Authorizer.pipe(
-      Effect.flatMap((authz) => authz.authorize({ action: readDoc, resource: doc1 })),
+      Effect.flatMap((authorizer) => authorizer.authorize({ action: readDoc, resource: doc1 })),
       Authorizer.CurrentPrincipal.provide(alice),
     );
     const decision = await Effect.runPromise(Effect.provide(program, layer));
@@ -125,7 +125,7 @@ describe("Authorizer", () => {
   it("authorize fails with AuthorizationDeniedError carrying the decision trace on default deny", async () => {
     const layer = Authorizer.Authorizer.layer({ policies: [] });
     const program = Authorizer.Authorizer.pipe(
-      Effect.flatMap((authz) => authz.authorize({ action: readDoc, resource: doc1 })),
+      Effect.flatMap((authorizer) => authorizer.authorize({ action: readDoc, resource: doc1 })),
       Authorizer.CurrentPrincipal.provide(bob),
     );
     const error = await Effect.runPromise(Effect.provide(program, layer).pipe(Effect.flip));
@@ -142,11 +142,11 @@ describe("Authorizer", () => {
       Layer.provide(Layer.succeed(Authorizer.EntityResolver)(resolver)),
     );
     const program = Effect.gen(function* () {
-      const authz = yield* Authorizer.Authorizer;
-      const allowed = yield* authz
+      const authorizer = yield* Authorizer.Authorizer;
+      const allowed = yield* authorizer
         .check({ action: readDoc, resource: doc1 })
         .pipe(Authorizer.CurrentPrincipal.provide(alice));
-      const denied = yield* authz
+      const denied = yield* authorizer
         .check({ action: readDoc, resource: doc1 })
         .pipe(Authorizer.CurrentPrincipal.provide(bob));
       return { allowed, denied };
@@ -164,8 +164,10 @@ describe("Authorizer", () => {
       Layer.provide(Layer.succeed(Authorizer.EntityResolver)(resolver)),
     );
     const program = Authorizer.Authorizer.pipe(
-      Effect.flatMap((authz) =>
-        authz.decideRequest(Policy.request({ principal: alice, action: readDoc, resource: doc1 })),
+      Effect.flatMap((authorizer) =>
+        authorizer.decideRequest(
+          Policy.request({ principal: alice, action: readDoc, resource: doc1 }),
+        ),
       ),
     );
     const decision = await Effect.runPromise(Effect.provide(program, layer));
@@ -174,7 +176,7 @@ describe("Authorizer", () => {
   });
 
   it("RBAC via the model + resolver: principal with Role::admin parent", async () => {
-    const model: Model.Model = Model.make({
+    const model: AuthorizationModel.Model = AuthorizationModel.make({
       entities: { User: {}, Document: {}, Role: {} },
       actions: {
         "doc:read": { appliesTo: { principal: ["User"], resource: ["Document"] } },
@@ -188,11 +190,11 @@ describe("Authorizer", () => {
       Layer.provide(Layer.succeed(Authorizer.EntityResolver)(resolver)),
     );
     const program = Effect.gen(function* () {
-      const authz = yield* Authorizer.Authorizer;
-      const allowedForAdmin = yield* authz
+      const authorizer = yield* Authorizer.Authorizer;
+      const allowedForAdmin = yield* authorizer
         .check({ action: readDoc, resource: doc1 })
         .pipe(Authorizer.CurrentPrincipal.provide(alice));
-      const deniedForNonAdmin = yield* authz
+      const deniedForNonAdmin = yield* authorizer
         .check({ action: readDoc, resource: doc1 })
         .pipe(Authorizer.CurrentPrincipal.provide(bob));
       return { allowedForAdmin, deniedForNonAdmin };
@@ -203,7 +205,7 @@ describe("Authorizer", () => {
   });
 
   it("action groups: a member action is allowed via an in-scope group policy, without the resolver knowing about actions", async () => {
-    const model: Model.Model = Model.make({
+    const model: AuthorizationModel.Model = AuthorizationModel.make({
       entities: { User: {}, Document: {} },
       actions: {
         "doc:read": {
@@ -219,7 +221,7 @@ describe("Authorizer", () => {
     // No resolver in context at all — model action entities are merged into every slice.
     const layer = Authorizer.Authorizer.layer({ policies: [groupPolicy], model });
     const program = Authorizer.Authorizer.pipe(
-      Effect.flatMap((authz) => authz.check({ action: readDoc, resource: doc1 })),
+      Effect.flatMap((authorizer) => authorizer.check({ action: readDoc, resource: doc1 })),
       Authorizer.CurrentPrincipal.provide(alice),
     );
     const allowed = await Effect.runPromise(Effect.provide(program, layer));
@@ -229,7 +231,7 @@ describe("Authorizer", () => {
   it("CurrentPrincipal.provide supplies the principal for authorize/check", async () => {
     const layer = Authorizer.Authorizer.layer({ policies: [Policy.permit({ id: "allow-all" })] });
     const program = Authorizer.Authorizer.pipe(
-      Effect.flatMap((authz) => authz.check({ action: readDoc, resource: doc1 })),
+      Effect.flatMap((authorizer) => authorizer.check({ action: readDoc, resource: doc1 })),
     );
     const allowed = await Effect.runPromise(
       Effect.provide(program.pipe(Authorizer.CurrentPrincipal.provide(alice)), layer),
@@ -238,14 +240,14 @@ describe("Authorizer", () => {
   });
 
   it("layer construction fails with PolicyValidationError when a policy names an undeclared entity type", async () => {
-    const model: Model.Model = Model.make({
+    const model: AuthorizationModel.Model = AuthorizationModel.make({
       entities: { User: {} },
       actions: {},
     });
     const badPolicy = Policy.permit({ id: "bad", principal: Policy.isType("Robot") });
     const layer = Authorizer.Authorizer.layer({ policies: [badPolicy], model });
     const program = Authorizer.Authorizer.pipe(
-      Effect.flatMap((authz) => authz.check({ action: readDoc, resource: doc1 })),
+      Effect.flatMap((authorizer) => authorizer.check({ action: readDoc, resource: doc1 })),
       Authorizer.CurrentPrincipal.provide(alice),
     );
     const error = await Effect.runPromise(Effect.provide(program, layer).pipe(Effect.flip));
@@ -264,11 +266,11 @@ describe("Authorizer", () => {
     });
     const layer = Authorizer.Authorizer.layer({ policies: [contextOnlyPermit] });
     const program = Effect.gen(function* () {
-      const authz = yield* Authorizer.Authorizer;
-      const allowed = yield* authz
+      const authorizer = yield* Authorizer.Authorizer;
+      const allowed = yield* authorizer
         .check({ action: readDoc, resource: doc1, context: { mfa: true } })
         .pipe(Authorizer.CurrentPrincipal.provide(alice));
-      const denied = yield* authz
+      const denied = yield* authorizer
         .check({ action: readDoc, resource: doc1, context: { mfa: false } })
         .pipe(Authorizer.CurrentPrincipal.provide(alice));
       return { allowed, denied };
@@ -283,7 +285,7 @@ describe("Authorizer", () => {
     const rolePolicy = Policy.role("admin");
     const roleLayer = Authorizer.Authorizer.layer({ policies: [rolePolicy] });
     const roleProgram = Authorizer.Authorizer.pipe(
-      Effect.flatMap((authz) => authz.check({ action: readDoc, resource: doc1 })),
+      Effect.flatMap((authorizer) => authorizer.check({ action: readDoc, resource: doc1 })),
       Authorizer.CurrentPrincipal.provide(alice),
     );
     const roleAllowed = await Effect.runPromise(Effect.provide(roleProgram, roleLayer));
@@ -325,11 +327,11 @@ describe("Authorizer + PolicyStore", () => {
     );
     const program = Effect.gen(function* () {
       yield* seed;
-      const authz = yield* Authorizer.Authorizer;
-      const bobAllowed = yield* authz
+      const authorizer = yield* Authorizer.Authorizer;
+      const bobAllowed = yield* authorizer
         .check({ action: readDoc, resource: doc1 })
         .pipe(Authorizer.CurrentPrincipal.provide(bob));
-      const aliceAllowed = yield* authz
+      const aliceAllowed = yield* authorizer
         .check({ action: readDoc, resource: doc1 })
         .pipe(Authorizer.CurrentPrincipal.provide(alice));
       // The stored forbid overrides a static allow-all permit.
@@ -347,8 +349,8 @@ describe("Authorizer + PolicyStore", () => {
     }).pipe(Layer.provideMerge(storeLayer));
     const program = Effect.gen(function* () {
       yield* seed;
-      const authz = yield* Authorizer.Authorizer;
-      const check = authz
+      const authorizer = yield* Authorizer.Authorizer;
+      const check = authorizer
         .check({ action: deleteDoc, resource: doc1 })
         .pipe(Authorizer.CurrentPrincipal.provide(alice));
       const denied = yield* check;
@@ -368,8 +370,8 @@ describe("Authorizer + PolicyStore", () => {
     );
     const program = Effect.gen(function* () {
       yield* seed;
-      const authz = yield* Authorizer.Authorizer;
-      return yield* authz
+      const authorizer = yield* Authorizer.Authorizer;
+      return yield* authorizer
         .check({ action: readDoc, resource: doc1 })
         .pipe(Authorizer.CurrentPrincipal.provide(bob));
     });

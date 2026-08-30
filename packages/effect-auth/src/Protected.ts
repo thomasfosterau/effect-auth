@@ -29,12 +29,12 @@
  * @example Viewer projection + write guard on one field
  * ```ts
  * import { Schema } from "effect"
- * import { Authz } from "@thomasfosterau/effect-auth"
+ * import { protectedField, Policy } from "@thomasfosterau/effect-auth"
  *
  * const UserView = Schema.Struct({
  *   id: Schema.String,
- *   email: Authz.protectedField(Schema.String, {
- *     policies: Authz.Policy.role("admin"),
+ *   email: protectedField(Schema.String, {
+ *     policies: Policy.role("admin"),
  *     action: "user:read-email",
  *   }),
  * })
@@ -43,7 +43,7 @@
  * // decoding fails when such a principal supplies it.
  * ```
  *
- * @module authz/protected
+ * @module protected
  */
 import { Effect, Option, Schema, SchemaGetter, SchemaIssue } from "effect";
 import { CurrentPrincipal, EntityResolver, requestRefs } from "./Authorizer.ts";
@@ -206,8 +206,8 @@ export interface ProtectedField<S extends Schema.Constraint> extends Schema.opti
  *
  * @example Redact rather than reject on the write side
  * ```ts
- * Authz.protectedField(Schema.Boolean, {
- *   policies: Authz.Policy.role("admin"),
+ * protectedField(Schema.Boolean, {
+ *   policies: Policy.role("admin"),
  *   action: "user:set-banned",
  *   onDecodeDeny: "redact",
  * })

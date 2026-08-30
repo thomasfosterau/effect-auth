@@ -89,10 +89,11 @@ effect-auth/                       # pnpm workspaces monorepo (Vite+ toolchain)
 │   │       ├── PlatformCrypto.ts  # Default Crypto.Crypto layer (Web Crypto API)
 │   │       ├── <Feature>.ts       # One module per flat, non-clustered feature
 │   │       │                       # (AuthLifecycle, JWT, Organization, Admin, ...)
+│   │       │                       # incl. authorization: Policy, Entity, Condition,
+│   │       │                       # Authorizer, PolicyStore, Protected, RBAC, ...
 │   │       ├── session/           # SessionService, SessionStore, UserStore, TrustedDevice
 │   │       ├── email/             # EmailAddress, EmailOTP, EmailPassword, EmailVerification
 │   │       ├── password/          # Password, PasswordReset, HaveIBeenPwned
-│   │       ├── authz/             # Authorization (AuthorizationPolicy, RoleStore), RBAC, Permission
 │   │       ├── oauth/             # OAuth, Scope
 │   │       ├── secondfactor/      # MultiFactor, OTP, OTPSecondFactor, WebAuthn
 │   │       ├── http/              # HttpApi, HttpApiSchema, HttpServer, HttpClient, HttpMiddleware
@@ -175,7 +176,7 @@ store interfaces with nullable lookups, tagged errors):
 
 1. **Define shared types** in `src/Types.ts` (module-specific types live in the module)
 2. **Define errors** in `src/Errors.ts` if shared, or module-local if only that module raises them
-3. **Implement the module** in `src/<Feature>.ts`, or `src/<cluster>/<Feature>.ts` if it belongs to an existing cluster (`email/`, `http/`, `oauth/`, `session/`, `password/`, `plugins/`, `authz/`)
+3. **Implement the module** in `src/<Feature>.ts`, or `src/<cluster>/<Feature>.ts` if it belongs to an existing cluster (`email/`, `http/`, `oauth/`, `session/`, `password/`, `plugins/`, `secondfactor/`)
 4. **Add tests** in the sibling `<Feature>.test.ts` file
 5. **Export from** the module's `index.ts` — the cluster barrel if clustered, otherwise `src/index.ts` (with a one-line doc comment)
 6. **Document** in README.md and the site guides

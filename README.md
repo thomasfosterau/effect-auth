@@ -188,7 +188,7 @@ import { Effect, Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // Implement your role store
-const roleStore: typeof Auth.Authz.RoleStore.Service = {
+const roleStore: typeof Auth.RoleStore.Service = {
   getUserRoles: (userId) => Effect.succeed(["admin", "user"]),
   getRolePermissions: (role) =>
     Effect.succeed([
@@ -197,20 +197,20 @@ const roleStore: typeof Auth.Authz.RoleStore.Service = {
     ]),
 };
 
-// `Authz.AuthorizationPolicy` only exposes `.layer()` (its raw `make` isn't
-// re-exported from the `authz` barrel), so provide it as a Layer.
-const layer = Auth.Authz.AuthorizationPolicy.layer().pipe(
-  Layer.provide(Layer.succeed(Auth.Authz.RoleStore)(roleStore)),
+// `AuthorizationPolicy` only exposes `.layer()` (its raw `make` isn't
+// re-exported from the root barrel), so provide it as a Layer.
+const layer = Auth.AuthorizationPolicy.layer().pipe(
+  Layer.provide(Layer.succeed(Auth.RoleStore)(roleStore)),
 );
 
 const program = Effect.gen(function* () {
-  const policy = yield* Auth.Authz.AuthorizationPolicy;
+  const policy = yield* Auth.AuthorizationPolicy;
 
   // Check permission
   const canCreate = yield* policy.checkPermission("user-123", "posts", "create");
 
   // Or require permission (throws if denied)
-  yield* Auth.Authz.requirePermission("user-123", "posts", "create");
+  yield* Auth.requirePermission("user-123", "posts", "create");
 });
 
 const result = await Effect.runPromise(Effect.provide(program, layer));
@@ -797,8 +797,8 @@ Flat root exports (`Auth.X`) unless noted:
 - `UserStore`: Interface for user data retrieval
 - `SessionService`: Service for managing sessions
 - `Auth.Password.PasswordHasher`: Service for password hashing and verification
-- `Auth.Authz.AuthorizationPolicy`: Interface for permission checking
-- `Auth.Authz.RoleStore`: Interface for role-based authorization
+- `Auth.AuthorizationPolicy`: Interface for permission checking
+- `Auth.RoleStore`: Interface for role-based authorization
 - `ChallengeStore`: Interface for WebAuthn challenge storage
 - `CredentialStore`: Interface for WebAuthn credential storage
 - `WebAuthnService`: Service for passkey registration and authentication

@@ -7,13 +7,13 @@
  * `Policy.ts`. Every decision is deterministic and replayable from the
  * `(request, slice)` pair the trace hooks see.
  *
- * @module authz/authorizer
+ * @module authorizer
  */
 import { Context, Effect, Layer, Option } from "effect";
-import * as Errors from "../Errors.ts";
+import * as Errors from "./Errors.ts";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
-import * as Model from "./Model.ts";
+import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Policy from "./Policy.ts";
 import * as PolicyStore from "./PolicyStore.ts";
 
@@ -167,7 +167,7 @@ export interface AuthorizerConfig<E = unknown> {
    * that can never match — or a forbid that always denies), and the model's
    * action entities are merged into every slice so action groups work.
    */
-  readonly model?: Model.Model;
+  readonly model?: AuthorizationModel.Model;
   /**
    * Read stored policies (a `PolicyStore`'s {@link effectivePolicies},
    * including instantiated template links) into every decision, on top of
@@ -175,7 +175,7 @@ export interface AuthorizerConfig<E = unknown> {
    * construction this defaults to `true`; pass `false` to ignore it.
    * Stored policies are fetched per decision (edits apply immediately) and
    * are NOT validated against `model` at decision time — validate on write
-   * with `Model.validatePolicies` / `validateTemplates`.
+   * with `AuthorizationModel.validatePolicies` / `validateTemplates`.
    */
   readonly useStore?: boolean;
 }
@@ -225,13 +225,14 @@ export const make = <E = unknown>(
     const resolver = yield* Effect.serviceOption(EntityResolver);
     const store = yield* Effect.serviceOption(PolicyStore.PolicyStore);
     const useStore = (config.useStore ?? true) && Option.isSome(store);
-    const modelEntities = config.model !== undefined ? Model.actionEntities(config.model) : [];
+    const modelEntities =
+      config.model !== undefined ? AuthorizationModel.actionEntities(config.model) : [];
 
     if (config.model !== undefined) {
       const declarative = config.policies.filter(
         (policy): policy is Policy.DeclarativePolicy => policy._tag === "DeclarativePolicy",
       );
-      const issues = Model.validatePolicies(config.model, declarative);
+      const issues = AuthorizationModel.validatePolicies(config.model, declarative);
       if (issues.length > 0) {
         return yield* Effect.fail(
           new PolicyValidationError({

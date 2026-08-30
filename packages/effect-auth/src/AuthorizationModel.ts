@@ -14,7 +14,7 @@
  * `Schema.Struct` that validates `Document.attributes` in the model is the
  * one the app uses to build slice entities from its rows.
  *
- * @module authz/model
+ * @module authorization-model
  */
 import { Schema } from "effect";
 import * as Condition from "./Condition.ts";

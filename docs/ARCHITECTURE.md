@@ -116,8 +116,15 @@ directories, each with its own `index.ts` barrel and matching
 - **`password/` cluster**: `Password.ts` (PBKDF2/scrypt hashers,
   multi-algorithm verifier), `Argon2.ts`, `PasswordReset.ts`,
   `HaveIBeenPwned.ts`.
-- **`authz/` cluster**: `Authorization.ts` (`AuthorizationPolicy`,
-  `RoleStore`), `RBAC.ts`, `Permission.ts`.
+- **Authorization** (root, flat — a first-class feature, not a cluster): the
+  policy kernel `Entity.ts` / `Condition.ts` / `Policy.ts` /
+  `AuthorizationModel.ts` / `PolicyStore.ts` (namespaced at the root as
+  `Auth.Entity`, `Auth.Policy`, … because their member names are generic),
+  the `Authorizer.ts` shell, `Protected.ts` (schema-embedded field guards),
+  `OrganizationEntities.ts` (the organization → entity-graph bridge), and the
+  permission-string RBAC facade `Authorization.ts` (`AuthorizationPolicy`,
+  `RoleStore`), `RBAC.ts`, `Permission.ts`. Route-level gating lives in
+  `http/AuthorizationMiddleware.ts`.
 - **`oauth/` cluster**: `OAuth.ts` (providers + PKCE), `Scope.ts`.
 - **`plugins/` cluster**: `AccountLockout.ts`, `Audit.ts`, `Captcha.ts`,
   `IPRateLimit.ts`, `LastLoginMethod.ts`, `NormalizeEmail.ts`, `RateLimit.ts`
@@ -150,10 +157,10 @@ directories, each with its own `index.ts` barrel and matching
   `KeyValueStore` (in-memory, file system, Redis, …).
 
 Every cluster namespace is also re-exported from the package root (`Auth.Email`,
-`Auth.HTTP`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`, `Auth.Authz`,
+`Auth.HTTP`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`,
 `Auth.SecondFactor`), so `import * as Auth from "@thomasfosterau/effect-auth"` reaches the
 whole surface; the per-cluster subpaths (`effect-auth/email`, `/http`,
-`/oauth`, `/password`, `/plugins`, `/authz`, `/secondfactor`) exist for
+`/oauth`, `/password`, `/plugins`, `/secondfactor`) exist for
 consumers who want a narrower import.
 
 ## Stores

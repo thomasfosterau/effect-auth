@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import * as Errors from "../Errors.ts";
+import * as Errors from "./Errors.ts";
 import { formatPermission, permissionMatches, type PermissionRef } from "./Permission.ts";
 
 /**

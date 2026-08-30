@@ -10,44 +10,44 @@ conventions sweep. There is no compat layer — update call sites to the new nam
 Feature modules moved into lowercase cluster directories. Update relative imports (internal) or
 subpath imports (external) accordingly.
 
-| Old path                                                           | New path                                             |
-| ------------------------------------------------------------------ | ---------------------------------------------------- |
-| `src/EmailAddress.ts`                                              | `src/email/EmailAddress.ts`                          |
-| `src/EmailOtp.ts` + `src/EmailOTPService.ts`                       | `src/email/EmailOTP.ts` (merged)                     |
-| `src/EmailPassword.ts`                                             | `src/email/EmailPassword.ts`                         |
-| `src/EmailVerification.ts`                                         | `src/email/EmailVerification.ts`                     |
-| `src/Http.ts`                                                      | `src/http/Http.ts`                                   |
-| `src/HttpApi.ts`                                                   | `src/http/HttpApi.ts`                                |
-| `src/HttpApiSchemas.ts`                                            | `src/http/HttpApiSchema.ts`                          |
-| `src/HttpClient.ts`                                                | `src/http/HttpClient.ts`                             |
-| `src/HttpMiddleware.ts`                                            | `src/http/HttpMiddleware.ts`                         |
-| `src/HttpServer.ts`                                                | `src/http/HttpServer.ts`                             |
-| `src/OAuth/OAuth.ts`, `OAuth/Scope.ts`                             | `src/oauth/OAuth.ts`, `oauth/Scope.ts`               |
-| `src/SessionService.ts`                                            | `src/session/SessionService.ts`                      |
-| `src/SessionStore.ts`                                              | `src/session/SessionStore.ts`                        |
-| `src/UserStore.ts`                                                 | `src/session/UserStore.ts`                           |
-| `src/TrustedDevice.ts`                                             | `src/session/TrustedDevice.ts`                       |
-| `src/Session.ts` (compat barrel)                                   | **deleted** — import `SessionService` directly       |
-| `src/Password.ts`                                                  | `src/password/Password.ts`                           |
-| `src/PasswordReset.ts`                                             | `src/password/PasswordReset.ts`                      |
-| `src/HaveIBeenPwned.ts`                                            | `src/password/HaveIBeenPwned.ts`                     |
-| `src/Argon2.ts`                                                    | `src/password/Argon2.ts`                             |
-| `src/Permission.ts`                                                | `src/authz/Permission.ts`                            |
-| `src/Authorization.ts`                                             | `src/authz/Authorization.ts`                         |
-| `src/Rbac.ts`                                                      | `src/authz/RBAC.ts`                                  |
-| `src/AuditPlugin.ts`                                               | `src/plugins/Audit.ts`                               |
-| `src/NormalizeEmailPlugin.ts`                                      | `src/plugins/NormalizeEmail.ts`                      |
-| `src/RateLimitPlugin.ts`                                           | `src/plugins/RateLimit.ts`                           |
-| `src/AccountLockoutPlugin.ts`                                      | `src/plugins/AccountLockout.ts`                      |
-| `src/CaptchaPlugin.ts`                                             | `src/plugins/Captcha.ts`                             |
-| `src/LastLoginMethodPlugin.ts`                                     | `src/plugins/LastLoginMethod.ts`                     |
-| `src/IpRateLimitPlugin.ts`                                         | `src/plugins/IPRateLimit.ts`                         |
-| `src/WebAuthnService.ts`                                           | merged into `src/WebAuthn.ts`                        |
-| `src/MultiFactorService.ts` (orphaned duplicate of `TwoFactor.ts`) | **deleted**                                          |
-| `src/TwoFactor.ts`                                                 | `src/secondfactor/MultiFactor.ts` (renamed — see §8) |
-| `src/OTPSecondFactor.ts`                                           | `src/secondfactor/OTPSecondFactor.ts`                |
-| `src/WebAuthn.ts`                                                  | `src/secondfactor/WebAuthn.ts`                       |
-| `src/OTP.ts`                                                       | `src/secondfactor/OTP.ts`                            |
+| Old path                                                           | New path                                                  |
+| ------------------------------------------------------------------ | --------------------------------------------------------- |
+| `src/EmailAddress.ts`                                              | `src/email/EmailAddress.ts`                               |
+| `src/EmailOtp.ts` + `src/EmailOTPService.ts`                       | `src/email/EmailOTP.ts` (merged)                          |
+| `src/EmailPassword.ts`                                             | `src/email/EmailPassword.ts`                              |
+| `src/EmailVerification.ts`                                         | `src/email/EmailVerification.ts`                          |
+| `src/Http.ts`                                                      | `src/http/Http.ts`                                        |
+| `src/HttpApi.ts`                                                   | `src/http/HttpApi.ts`                                     |
+| `src/HttpApiSchemas.ts`                                            | `src/http/HttpApiSchema.ts`                               |
+| `src/HttpClient.ts`                                                | `src/http/HttpClient.ts`                                  |
+| `src/HttpMiddleware.ts`                                            | `src/http/HttpMiddleware.ts`                              |
+| `src/HttpServer.ts`                                                | `src/http/HttpServer.ts`                                  |
+| `src/OAuth/OAuth.ts`, `OAuth/Scope.ts`                             | `src/oauth/OAuth.ts`, `oauth/Scope.ts`                    |
+| `src/SessionService.ts`                                            | `src/session/SessionService.ts`                           |
+| `src/SessionStore.ts`                                              | `src/session/SessionStore.ts`                             |
+| `src/UserStore.ts`                                                 | `src/session/UserStore.ts`                                |
+| `src/TrustedDevice.ts`                                             | `src/session/TrustedDevice.ts`                            |
+| `src/Session.ts` (compat barrel)                                   | **deleted** — import `SessionService` directly            |
+| `src/Password.ts`                                                  | `src/password/Password.ts`                                |
+| `src/PasswordReset.ts`                                             | `src/password/PasswordReset.ts`                           |
+| `src/HaveIBeenPwned.ts`                                            | `src/password/HaveIBeenPwned.ts`                          |
+| `src/Argon2.ts`                                                    | `src/password/Argon2.ts`                                  |
+| `src/Permission.ts`                                                | `src/Permission.ts` (unchanged — briefly `src/authz/`)    |
+| `src/Authorization.ts`                                             | `src/Authorization.ts` (unchanged — briefly `src/authz/`) |
+| `src/Rbac.ts`                                                      | `src/RBAC.ts`                                             |
+| `src/AuditPlugin.ts`                                               | `src/plugins/Audit.ts`                                    |
+| `src/NormalizeEmailPlugin.ts`                                      | `src/plugins/NormalizeEmail.ts`                           |
+| `src/RateLimitPlugin.ts`                                           | `src/plugins/RateLimit.ts`                                |
+| `src/AccountLockoutPlugin.ts`                                      | `src/plugins/AccountLockout.ts`                           |
+| `src/CaptchaPlugin.ts`                                             | `src/plugins/Captcha.ts`                                  |
+| `src/LastLoginMethodPlugin.ts`                                     | `src/plugins/LastLoginMethod.ts`                          |
+| `src/IpRateLimitPlugin.ts`                                         | `src/plugins/IPRateLimit.ts`                              |
+| `src/WebAuthnService.ts`                                           | merged into `src/WebAuthn.ts`                             |
+| `src/MultiFactorService.ts` (orphaned duplicate of `TwoFactor.ts`) | **deleted**                                               |
+| `src/TwoFactor.ts`                                                 | `src/secondfactor/MultiFactor.ts` (renamed — see §8)      |
+| `src/OTPSecondFactor.ts`                                           | `src/secondfactor/OTPSecondFactor.ts`                     |
+| `src/WebAuthn.ts`                                                  | `src/secondfactor/WebAuthn.ts`                            |
+| `src/OTP.ts`                                                       | `src/secondfactor/OTP.ts`                                 |
 
 Flat feature modules that only got acronym-case fixes (still exported from the package root, not
 clustered):
@@ -79,7 +79,6 @@ exports):
     "./session": { "types": "./dist/session/index.d.ts", "import": "./dist/session/index.js" },
     "./password": { "types": "./dist/password/index.d.ts", "import": "./dist/password/index.js" },
     "./plugins": { "types": "./dist/plugins/index.d.ts", "import": "./dist/plugins/index.js" },
-    "./authz": { "types": "./dist/authz/index.d.ts", "import": "./dist/authz/index.js" },
     "./secondfactor": {
       "types": "./dist/secondfactor/index.d.ts",
       "import": "./dist/secondfactor/index.js",
@@ -89,7 +88,7 @@ exports):
 ```
 
 The root package (`effect-auth`) still re-exports every cluster as a namespace (`Email`, `HTTP`,
-`OAuth`, `Session`-flavored exports, `Password`, `Plugins`, `Authz`, `SecondFactor`) alongside the
+`OAuth`, `Session`-flavored exports, `Password`, `Plugins`, `SecondFactor`) alongside the
 flat, non-clustered feature modules (JWT, Admin, Organization, …) — no import changes needed there
 beyond the renames below.
 
@@ -199,7 +198,7 @@ const service = yield * EmailPassword.make(config);
 | `makeEmailPasswordService`        | `email/EmailPassword.ts`          | `make`                        |
 | `makeEmailVerificationService`    | `email/EmailVerification.ts`      | `make`                        |
 | `makeGoogleOneTapService`         | `GoogleOneTap.ts`                 | `make`                        |
-| `makeInMemoryRoleStore`           | `authz/RBAC.ts`                   | `make`                        |
+| `makeInMemoryRoleStore`           | `RBAC.ts`                         | `make`                        |
 | `makeJWTService`                  | `JWT.ts`                          | `make`                        |
 | `makeRemoteJwksVerifier`          | `JWT.ts`                          | `remoteJwksVerifier`          |
 | `makeLastLoginMethodPlugin`       | `plugins/LastLoginMethod.ts`      | `make`                        |
@@ -211,12 +210,12 @@ const service = yield * EmailPassword.make(config);
 | `makeOrganizationService`         | `Organization.ts`                 | `make`                        |
 | `makeOTPSecondFactorService`      | `secondfactor/OTPSecondFactor.ts` | `make`                        |
 | `makePasswordResetService`        | `password/PasswordReset.ts`       | `make`                        |
-| `makePermission`                  | `authz/Permission.ts`             | `make`                        |
+| `makePermission`                  | `Permission.ts`                   | `make`                        |
 | `makePhoneOTPService`             | `PhoneOTP.ts`                     | `make`                        |
 | `makeRateLimiter`                 | `RateLimit.ts`                    | `make`                        |
 | `makeRateLimiterPersistence`      | `RateLimitPersistence.ts`         | `rateLimiterPersistence`      |
 | `RateLimiterPersistenceLayer`     | `RateLimitPersistence.ts`         | `rateLimiterPersistenceLayer` |
-| `makeRoleBasedPolicy`             | `authz/Authorization.ts`          | `make`                        |
+| `makeRoleBasedPolicy`             | `Authorization.ts`                | `make`                        |
 | `makeSSOService`                  | `SSO.ts`                          | `make`                        |
 | `makeTrustedDeviceService`        | `session/TrustedDevice.ts`        | `make`                        |
 | `makeTrustedDeviceGateShape`      | `session/TrustedDevice.ts`        | `gate`                        |
@@ -336,6 +335,45 @@ convention), backfill those as `type = 'phone'` identifiers with
 `verified = attributes.phoneNumberVerified` the same way, then remove the
 attribute keys. Username deployments backfill from wherever the old
 `UsernameStore` implementation kept its mapping, with `verified = 1`.
+
+## 10. Authorization is flat: the `authz/` cluster dissolved
+
+Authorization is a first-class feature, not a side cluster, so the `authz`
+abbreviation is gone everywhere and `src/authz/` dissolved into flat top-level
+modules. `Auth.Authz.X` is now `Auth.X` (or, for the policy kernel's
+data-shaped modules, still a namespace — just one hop shallower:
+`Auth.Policy.permit`, `Auth.Entity.ref`, `Auth.Condition.eq`).
+
+The `./authz` subpath export was **removed with no replacement** — the root
+barrel covers everything it exported. `import { ... } from
+"@thomasfosterau/effect-auth/authz"` becomes `import { ... } from
+"@thomasfosterau/effect-auth"`.
+
+| Old                                   | New                                        |
+| ------------------------------------- | ------------------------------------------ |
+| `src/authz/*.ts`                      | `src/*.ts` (flat)                          |
+| `src/authz/Model.ts`                  | `src/AuthorizationModel.ts`                |
+| `src/http/AuthzMiddleware.ts`         | `src/http/AuthorizationMiddleware.ts`      |
+| `"@thomasfosterau/effect-auth/authz"` | `"@thomasfosterau/effect-auth"` (root)     |
+| `Auth.Authz.RoleStore`                | `Auth.RoleStore`                           |
+| `Auth.Authz.AuthorizationPolicy`      | `Auth.AuthorizationPolicy`                 |
+| `Auth.Authz.requirePermission`        | `Auth.requirePermission`                   |
+| `Auth.Authz.protectedField`           | `Auth.protectedField`                      |
+| `Auth.Authz.Authorizer`               | `Auth.Authorizer`                          |
+| `Auth.Authz.Policy.permit`            | `Auth.Policy.permit`                       |
+| `Auth.Authz.Entity.ref`               | `Auth.Entity.ref`                          |
+| `Auth.Authz.Model.validatePolicies`   | `Auth.AuthorizationModel.validatePolicies` |
+| `makeAuthzMiddleware`                 | `makeAuthorizationMiddleware`              |
+| `AuthzMiddlewareClass`                | `AuthorizationMiddlewareClass`             |
+| `AuthzInput`                          | `AuthorizationMiddlewareInput`             |
+
+The middleware tag-id prefix changed from `"@effect-auth/AuthzMiddleware#"` to
+`"@effect-auth/AuthorizationMiddleware#"`; ids stay per-instance and are not
+part of the public contract.
+
+`AuthorizationMiddlewareInput` is deliberately _not_ named `AuthorizationInput`:
+`AuthorizeInput` (the `Authorizer`'s own request shape) already exists at the
+root, and the two must stay distinguishable.
 
 ## Validation
 

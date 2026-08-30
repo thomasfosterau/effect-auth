@@ -66,8 +66,8 @@ import { HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi";
 import { HttpServerRequest } from "effect/unstable/http";
 import { Hooks } from "../Hooks.ts";
 import { SessionService } from "../session/SessionService.ts";
-import { CurrentPrincipal } from "../authz/Authorizer.ts";
-import * as Entity from "../authz/Entity.ts";
+import { CurrentPrincipal } from "../Authorizer.ts";
+import * as Entity from "../Entity.ts";
 import { resolveMessage } from "../Messages.ts";
 import * as S from "./HttpApiSchema.ts";
 import type * as Types from "../Types.ts";
@@ -132,7 +132,7 @@ export class MaybeCurrentSession extends Context.Service<
  *
  * Provided alongside `CurrentSession`/`CurrentUser` so an authenticated handler
  * can call `Authorizer.check`/`authorize` — or run a schema built from
- * `Authz.protectedField` — without restating who the principal is.
+ * `protectedField` — without restating who the principal is.
  */
 const principalOf = (user: Types.User): Entity.EntityRef => Entity.ref("User", user.id);
 

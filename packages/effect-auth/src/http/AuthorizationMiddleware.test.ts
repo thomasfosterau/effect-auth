@@ -1,16 +1,16 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Exit, Layer } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import * as Entity from "../authz/Entity.ts";
-import * as Condition from "../authz/Condition.ts";
-import * as Policy from "../authz/Policy.ts";
+import * as Entity from "../Entity.ts";
+import * as Condition from "../Condition.ts";
+import * as Policy from "../Policy.ts";
 import {
   Authorizer,
   CurrentPrincipal,
   EntityResolver,
   memoryEntityResolver,
-} from "../authz/Authorizer.ts";
-import { makeAuthzMiddleware } from "./AuthzMiddleware.ts";
+} from "../Authorizer.ts";
+import { makeAuthorizationMiddleware } from "./AuthorizationMiddleware.ts";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -47,16 +47,16 @@ const makeWebRequest = (headers: Record<string, string> = {}) =>
   HttpServerRequest.fromWeb(new Request("http://localhost/docs", { headers }));
 
 /**
- * Run one `makeAuthzMiddleware(...)` instance's handler against a fixture
+ * Run one `makeAuthorizationMiddleware(...)` instance's handler against a fixture
  * request, optionally with a `CurrentPrincipal` already resolved (as
  * `AuthMiddleware` would have provided it) and a custom `Authorizer.layer`.
  */
 const runGate = (
-  Guard: ReturnType<typeof makeAuthzMiddleware>,
+  Guard: ReturnType<typeof makeAuthorizationMiddleware>,
   options: {
     readonly principal?: Entity.EntityRef;
     readonly request?: HttpServerRequest.HttpServerRequest;
-    readonly authzLayer?: Layer.Layer<Authorizer>;
+    readonly overrideAuthorizerLayer?: Layer.Layer<Authorizer>;
   } = {},
 ) => {
   const request = options.request ?? makeWebRequest();
@@ -65,7 +65,10 @@ const runGate = (
     return yield* (svc as any)(Effect.succeed(ok), undefined).pipe(
       Effect.provideService(HttpServerRequest.HttpServerRequest, request),
     );
-  }).pipe(Effect.provide(Guard.layer), Effect.provide(options.authzLayer ?? authorizerLayer));
+  }).pipe(
+    Effect.provide(Guard.layer),
+    Effect.provide(options.overrideAuthorizerLayer ?? authorizerLayer),
+  );
 
   return options.principal !== undefined
     ? program.pipe(CurrentPrincipal.provide(options.principal))
@@ -76,9 +79,9 @@ const runGate = (
 // Allow path
 // ---------------------------------------------------------------------------
 
-describe("makeAuthzMiddleware – allow path", () => {
+describe("makeAuthorizationMiddleware – allow path", () => {
   it("the resource owner is authorized and the handler runs unchanged", async () => {
-    const Guard = makeAuthzMiddleware({ action: readDoc, resource: doc1 });
+    const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
     const response = await Effect.runPromise(runGate(Guard, { principal: alice }) as any);
     expect((response as HttpServerResponse.HttpServerResponse).status).toBe(200);
   });
@@ -88,9 +91,9 @@ describe("makeAuthzMiddleware – allow path", () => {
 // Deny path
 // ---------------------------------------------------------------------------
 
-describe("makeAuthzMiddleware – deny path", () => {
+describe("makeAuthorizationMiddleware – deny path", () => {
   it("a non-owner is refused with 403 Forbidden naming the decision reason (default-deny)", async () => {
-    const Guard = makeAuthzMiddleware({ action: readDoc, resource: doc1 });
+    const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
     const error = await Effect.runPromise(
       runGate(Guard, { principal: bob }).pipe(Effect.flip) as any,
     );
@@ -99,7 +102,7 @@ describe("makeAuthzMiddleware – deny path", () => {
   });
 
   it("the wire error carries only message/code — never the policy trace (determining/outcomes)", async () => {
-    const Guard = makeAuthzMiddleware({ action: readDoc, resource: doc1 });
+    const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
     const error = await Effect.runPromise(
       runGate(Guard, { principal: bob }).pipe(Effect.flip) as any,
     );
@@ -118,9 +121,9 @@ describe("makeAuthzMiddleware – deny path", () => {
     const layer = Authorizer.layer({ policies: [ownerPolicy, forbidPolicy] }).pipe(
       Layer.provide(Layer.succeed(EntityResolver)(resolver)),
     );
-    const Guard = makeAuthzMiddleware({ action: readDoc, resource: doc1 });
+    const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
     const error = await Effect.runPromise(
-      runGate(Guard, { principal: alice, authzLayer: layer }).pipe(Effect.flip) as any,
+      runGate(Guard, { principal: alice, overrideAuthorizerLayer: layer }).pipe(Effect.flip) as any,
     );
     expect(error._tag).toBe("Forbidden");
     expect(error.message).toContain("forbid");
@@ -132,9 +135,9 @@ describe("makeAuthzMiddleware – deny path", () => {
 // Composition: must run after CurrentPrincipal is established
 // ---------------------------------------------------------------------------
 
-describe("makeAuthzMiddleware – composition with AuthMiddleware", () => {
+describe("makeAuthorizationMiddleware – composition with AuthMiddleware", () => {
   it("without CurrentPrincipal in context (not composed after AuthMiddleware), the gate fails rather than silently allowing", async () => {
-    const Guard = makeAuthzMiddleware({ action: readDoc, resource: doc1 });
+    const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
     // No `CurrentPrincipal.provide(...)` anywhere in the pipeline — simulating
     // a route that attached this middleware without first resolving a
     // principal (e.g. forgot `AuthMiddleware`, or ran outside its scope).
@@ -150,12 +153,12 @@ describe("makeAuthzMiddleware – composition with AuthMiddleware", () => {
 // Dynamic (per-request) AuthorizeInput
 // ---------------------------------------------------------------------------
 
-describe("makeAuthzMiddleware – dynamic AuthorizeInput", () => {
+describe("makeAuthorizationMiddleware – dynamic AuthorizeInput", () => {
   // Resource named by an `x-doc-id` header — stands in for a path param a
   // real route would read via `HttpRouter.params`/`RouteContext`, which is
   // reachable the same way inside an effectful dynamic input (see the
   // "effectful" case below).
-  const byHeader = makeAuthzMiddleware((request) => ({
+  const byHeader = makeAuthorizationMiddleware((request) => ({
     action: readDoc,
     resource: Entity.ref("Document", request.headers["x-doc-id"] ?? "doc-1"),
   }));
@@ -181,7 +184,7 @@ describe("makeAuthzMiddleware – dynamic AuthorizeInput", () => {
   });
 
   it("effectful function-of-request (request) => Effect<AuthorizeInput>: allow and deny both resolve correctly", async () => {
-    const byHeaderEffectful = makeAuthzMiddleware((request) =>
+    const byHeaderEffectful = makeAuthorizationMiddleware((request) =>
       Effect.succeed({
         action: readDoc,
         resource: Entity.ref("Document", request.headers["x-doc-id"] ?? "doc-1"),
@@ -210,10 +213,10 @@ describe("makeAuthzMiddleware – dynamic AuthorizeInput", () => {
 // Distinct middleware instances do not collide
 // ---------------------------------------------------------------------------
 
-describe("makeAuthzMiddleware – instance isolation", () => {
+describe("makeAuthorizationMiddleware – instance isolation", () => {
   it("two instances guarding different resources are independent (no shared tag collision)", async () => {
-    const GuardDoc1 = makeAuthzMiddleware({ action: readDoc, resource: doc1 });
-    const GuardDoc2 = makeAuthzMiddleware({ action: readDoc, resource: doc2 });
+    const GuardDoc1 = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
+    const GuardDoc2 = makeAuthorizationMiddleware({ action: readDoc, resource: doc2 });
 
     const aliceOnDoc1 = await Effect.runPromiseExit(
       runGate(GuardDoc1, { principal: alice }) as any,

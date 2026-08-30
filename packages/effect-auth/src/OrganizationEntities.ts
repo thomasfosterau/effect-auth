@@ -3,7 +3,7 @@
  *
  * `Organization.ts` answers permission questions inside one organization
  * (`checkPermission(userId, organizationId, "team:create")`). The policy
- * kernel (`authz/`) answers them over an entity graph. This module is the
+ * kernel (`Policy` / `Authorizer`) answers them over an entity graph. This module is the
  * bridge: it projects organizations, teams, memberships and roles into
  * {@link Entity} values so application policies can talk about them directly:
  *
@@ -40,11 +40,11 @@
  * writing an `EntityResolver` that calls this one and concatenates the
  * result with its own - rather than expecting a combinator here.
  *
- * @module authz/organization-entities
+ * @module organization-entities
  */
 import { Effect, Layer } from "effect";
-import type * as Errors from "../Errors.ts";
-import { OrganizationStore } from "../Organization.ts";
+import type * as Errors from "./Errors.ts";
+import { OrganizationStore } from "./Organization.ts";
 import * as Entity from "./Entity.ts";
 import { EntityResolver } from "./Authorizer.ts";
 

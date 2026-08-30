@@ -56,10 +56,6 @@
       "types": "./dist/plugins/index.d.ts",
       "import": "./dist/plugins/index.js"
     },
-    "./authz": {
-      "types": "./dist/authz/index.d.ts",
-      "import": "./dist/authz/index.js"
-    },
     "./secondfactor": {
       "types": "./dist/secondfactor/index.d.ts",
       "import": "./dist/secondfactor/index.js"

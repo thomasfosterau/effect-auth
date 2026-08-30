@@ -24,7 +24,7 @@
  * permit cannot grant, and an erroring forbid DENIES (Cedar skips erroring
  * policies, which fails open for forbids). Errors are recorded in the trace.
  *
- * @module authz/policy
+ * @module policy
  */
 import { Data, Effect, Schema } from "effect";
 import * as Condition from "./Condition.ts";

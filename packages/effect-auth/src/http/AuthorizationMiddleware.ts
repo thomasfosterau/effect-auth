@@ -8,7 +8,7 @@
  * reading that principal, asking `Authorizer.authorize`, and gating the
  * handler on the answer. The two compose: attach `AuthMiddleware` (or
  * otherwise put `CurrentPrincipal` in context) first, then a middleware from
- * {@link makeAuthzMiddleware} for each route whose resource needs a policy
+ * {@link makeAuthorizationMiddleware} for each route whose resource needs a policy
  * check.
  *
  * ## Why a factory, not a single exported tag
@@ -17,7 +17,7 @@
  * route needs the exact same thing from it (a validated session). Authorization
  * is different: almost every route protects a *different* resource — `doc-1`
  * on one endpoint, `org-42` on the next — so `AuthorizeInput` is inherently
- * per-route, not a single static value. {@link makeAuthzMiddleware} therefore
+ * per-route, not a single static value. {@link makeAuthorizationMiddleware} therefore
  * builds a fresh `HttpApiMiddleware.Service` class (with its own unique tag
  * id and its own baked-in `Layer`) on every call, so each route attaches its
  * own instance carrying its own resource/action.
@@ -25,7 +25,7 @@
  * ## Static vs. per-request input
  *
  * Most resources are per-request (a path param, a value read from
- * `HttpServerRequest`, sometimes both), so `makeAuthzMiddleware` accepts
+ * `HttpServerRequest`, sometimes both), so `makeAuthorizationMiddleware` accepts
  * either:
  *
  * - a fixed {@link AuthorizeInput} — the resource is the same for every call
@@ -70,10 +70,10 @@
  * import { HttpRouter } from "effect/unstable/http"
  * import { Effect, Layer } from "effect"
  * import { AuthMiddleware, CurrentUser } from "@thomasfosterau/effect-auth/Http"
- * import { makeAuthzMiddleware } from "@thomasfosterau/effect-auth/Http"
- * import { Entity } from "@thomasfosterau/effect-auth/Authz"
+ * import { makeAuthorizationMiddleware } from "@thomasfosterau/effect-auth/Http"
+ * import { Entity } from "@thomasfosterau/effect-auth"
  *
- * const RequireDocRead = makeAuthzMiddleware((_request) =>
+ * const RequireDocRead = makeAuthorizationMiddleware((_request) =>
  *   Effect.gen(function* () {
  *     const params = yield* HttpRouter.params
  *     return { action: "doc:read", resource: Entity.ref("Document", params["docId"]!) }
@@ -97,13 +97,13 @@
  * )
  * ```
  *
- * @module http/authz-middleware
+ * @module http/authorization-middleware
  */
 
 import { Effect, Layer } from "effect";
 import { HttpApiMiddleware } from "effect/unstable/httpapi";
 import { HttpServerRequest } from "effect/unstable/http";
-import { Authorizer, CurrentPrincipal, type AuthorizeInput } from "../authz/Authorizer.ts";
+import { Authorizer, CurrentPrincipal, type AuthorizeInput } from "../Authorizer.ts";
 import * as S from "./HttpApiSchema.ts";
 
 // =============================================================================
@@ -130,16 +130,16 @@ export type DynamicAuthorizeInput<R = never> = (
 ) => AuthorizeInput | Effect.Effect<AuthorizeInput, never, R>;
 
 /**
- * What {@link makeAuthzMiddleware} accepts: a fixed {@link AuthorizeInput} for
+ * What {@link makeAuthorizationMiddleware} accepts: a fixed {@link AuthorizeInput} for
  * routes whose resource never varies, or a {@link DynamicAuthorizeInput} for
  * the common per-request case.
  *
  * @since 1.0.0
  * @category models
  */
-export type AuthzInput<R = never> = AuthorizeInput | DynamicAuthorizeInput<R>;
+export type AuthorizationMiddlewareInput<R = never> = AuthorizeInput | DynamicAuthorizeInput<R>;
 
-// Every call to `makeAuthzMiddleware` needs its own tag id: `Context` treats
+// Every call to `makeAuthorizationMiddleware` needs its own tag id: `Context` treats
 // two `Context.Service` classes constructed with the same string id as the
 // same key, and a real app attaches a different instance (a different
 // resource) to nearly every route. A shared id would make the second
@@ -147,7 +147,7 @@ export type AuthzInput<R = never> = AuthorizeInput | DynamicAuthorizeInput<R>;
 let _nextMiddlewareId = 0;
 
 const resolveAuthorizeInput = <R>(
-  input: AuthzInput<R>,
+  input: AuthorizationMiddlewareInput<R>,
   request: HttpServerRequest.HttpServerRequest,
 ): Effect.Effect<AuthorizeInput, never, R> => {
   if (typeof input !== "function") return Effect.succeed(input);
@@ -156,9 +156,9 @@ const resolveAuthorizeInput = <R>(
 };
 
 /**
- * The class type {@link makeAuthzMiddleware} returns: an
+ * The class type {@link makeAuthorizationMiddleware} returns: an
  * `HttpApiMiddleware.ServiceClass` requiring `Authorizer | CurrentPrincipal | R`
- * with its implementing {@link AuthzMiddlewareClass.layer | layer} attached.
+ * with its implementing {@link AuthorizationMiddlewareClass.layer | layer} attached.
  *
  * Every factory call gets its own runtime tag id, but all instances share
  * this TypeScript type — the type system cannot tell one instance's `layer`
@@ -169,8 +169,8 @@ const resolveAuthorizeInput = <R>(
  * @since 1.0.0
  * @category models
  */
-export interface AuthzMiddlewareClass<R = never> extends HttpApiMiddleware.ServiceClass<
-  AuthzMiddlewareClass<R>,
+export interface AuthorizationMiddlewareClass<R = never> extends HttpApiMiddleware.ServiceClass<
+  AuthorizationMiddlewareClass<R>,
   string,
   {
     requires: Authorizer | CurrentPrincipal | R;
@@ -186,11 +186,11 @@ export interface AuthzMiddlewareClass<R = never> extends HttpApiMiddleware.Servi
    * the application layer, next to wherever `AuthMiddleware`'s `layer()` and
    * `Authorizer.layer(...)` are provided.
    */
-  readonly layer: Layer.Layer<AuthzMiddlewareClass<R>>;
+  readonly layer: Layer.Layer<AuthorizationMiddlewareClass<R>>;
 }
 
 // =============================================================================
-// makeAuthzMiddleware
+// makeAuthorizationMiddleware
 // =============================================================================
 
 /**
@@ -234,11 +234,13 @@ export interface AuthzMiddlewareClass<R = never> extends HttpApiMiddleware.Servi
  * @since 1.0.0
  * @category constructors
  */
-export const makeAuthzMiddleware = <R = never>(input: AuthzInput<R>): AuthzMiddlewareClass<R> => {
-  const id = `@effect-auth/AuthzMiddleware#${_nextMiddlewareId++}`;
+export const makeAuthorizationMiddleware = <R = never>(
+  input: AuthorizationMiddlewareInput<R>,
+): AuthorizationMiddlewareClass<R> => {
+  const id = `@effect-auth/AuthorizationMiddleware#${_nextMiddlewareId++}`;
 
-  class AuthzMiddleware extends HttpApiMiddleware.Service<
-    AuthzMiddleware,
+  class AuthorizationMiddleware extends HttpApiMiddleware.Service<
+    AuthorizationMiddleware,
     { requires: Authorizer | CurrentPrincipal | R }
   >()(id, { error: S.ForbiddenError }) {
     /**
@@ -246,8 +248,8 @@ export const makeAuthzMiddleware = <R = never>(input: AuthzInput<R>): AuthzMiddl
      * alongside the application layer, next to wherever `AuthMiddleware`'s
      * `layer()` and `Authorizer.layer(...)` are provided.
      */
-    static readonly layer: Layer.Layer<AuthzMiddleware> = Layer.succeed(
-      AuthzMiddleware,
+    static readonly layer: Layer.Layer<AuthorizationMiddleware> = Layer.succeed(
+      AuthorizationMiddleware,
       (handler, _opts) =>
         Effect.gen(function* () {
           const authorizer = yield* Authorizer;
@@ -289,5 +291,5 @@ export const makeAuthzMiddleware = <R = never>(input: AuthzInput<R>): AuthzMiddl
   // The local class's Self brand can never equal the shared interface's —
   // the cast erases only that brand. Runtime identity lives in the unique
   // tag id, which the cast does not touch.
-  return AuthzMiddleware as unknown as AuthzMiddlewareClass<R>;
+  return AuthorizationMiddleware as unknown as AuthorizationMiddlewareClass<R>;
 };

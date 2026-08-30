@@ -288,7 +288,7 @@ interface PermissionRow {
   readonly action: string;
 }
 
-export const makeRoleStore = (db: D1Database): typeof Auth.Authz.RoleStore.Service => ({
+export const makeRoleStore = (db: D1Database): typeof Auth.RoleStore.Service => ({
   getUserRoles: (userId) =>
     d1All<RoleRow>(
       db,
@@ -1297,8 +1297,7 @@ export const EmailPasswordStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.Email.EmailPasswordStore, makeEmailPasswordStore(db));
 export const PasswordResetUserStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.Password.PasswordResetUserStore, makePasswordResetUserStore(db));
-export const RoleStoreLayer = (db: D1Database) =>
-  Layer.succeed(Auth.Authz.RoleStore, makeRoleStore(db));
+export const RoleStoreLayer = (db: D1Database) => Layer.succeed(Auth.RoleStore, makeRoleStore(db));
 export const RateLimitStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.RateLimitStore, makeRateLimitStore(db));
 export const EmailVerificationStoreLayer = (db: D1Database) =>

@@ -333,7 +333,7 @@ interface PermissionRow {
 }
 
 export const makeRoleStore: Effect.Effect<
-  typeof Auth.Authz.RoleStore.Service,
+  typeof Auth.RoleStore.Service,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -349,7 +349,7 @@ export const makeRoleStore: Effect.Effect<
         Effect.map((rows) => rows.map((row) => ({ resource: row.resource, action: row.action }))),
         Effect.orDie,
       ),
-  } satisfies typeof Auth.Authz.RoleStore.Service;
+  } satisfies typeof Auth.RoleStore.Service;
 });
 
 // ---------------------------------------------------------------------------
@@ -1243,8 +1243,10 @@ export const PasswordResetUserStoreLayer: Layer.Layer<
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.Password.PasswordResetUserStore, makePasswordResetUserStore);
-export const RoleStoreLayer: Layer.Layer<Auth.Authz.RoleStore, never, SqlClient.SqlClient> =
-  Layer.effect(Auth.Authz.RoleStore, makeRoleStore);
+export const RoleStoreLayer: Layer.Layer<Auth.RoleStore, never, SqlClient.SqlClient> = Layer.effect(
+  Auth.RoleStore,
+  makeRoleStore,
+);
 export const RateLimitStoreLayer: Layer.Layer<Auth.RateLimitStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.RateLimitStore, makeRateLimitStore);
 export const EmailVerificationStoreLayer: Layer.Layer<
@@ -1331,7 +1333,7 @@ export const layer: Layer.Layer<
   | Auth.UserServiceStore
   | Auth.Email.EmailPasswordStore
   | Auth.Password.PasswordResetUserStore
-  | Auth.Authz.RoleStore
+  | Auth.RoleStore
   | Auth.RateLimitStore
   | Auth.Email.EmailVerificationStore
   | Auth.SecondFactor.ChallengeStore

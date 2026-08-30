@@ -2,7 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect } from "effect";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
-import * as Model from "./Model.ts";
+import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Policy from "./Policy.ts";
 import * as PolicyStore from "./PolicyStore.ts";
 
@@ -395,7 +395,7 @@ describe("template-linked sharing (integration)", () => {
 });
 
 describe("validateTemplates", () => {
-  const model = Model.make({
+  const model = AuthorizationModel.make({
     entities: {
       User: {},
       Document: { memberOf: ["Folder"] },

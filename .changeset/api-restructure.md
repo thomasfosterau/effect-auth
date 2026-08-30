@@ -10,9 +10,11 @@ before/after mapping. Highlights:
 - The package is published as `@thomasfosterau/effect-auth` (the bare `effect-auth` npm name
   belongs to an unrelated package), and the client as `@thomasfosterau/effect-auth-client`.
 - Feature modules moved into lowercase cluster directories (`email/`, `http/`, `oauth/`,
-  `session/`, `password/`, `authz/`, `plugins/`), and the package now publishes per-cluster
-  subpath exports (`@thomasfosterau/effect-auth/email`, `.../http`, ...) alongside the root
-  export.
+  `session/`, `password/`, `plugins/`, `secondfactor/`), and the package now publishes
+  per-cluster subpath exports (`@thomasfosterau/effect-auth/email`, `.../http`, ...) alongside
+  the root export. Authorization is deliberately _not_ a cluster: its modules (`Policy.ts`,
+  `Entity.ts`, `Authorizer.ts`, `Protected.ts`, `RBAC.ts`, …) sit flat in `src/` and are
+  reached from the root (`Auth.Policy.permit`, `Auth.RoleStore`), with no `./authz` subpath.
 - Service tag strings and exported type names now match their class names exactly, with
   acronyms fully capitalized (`ApiKeyService` → `APIKeyService`, `JwtService` → `JWTService`,
   `OidcProviderService` → `OIDCProviderService`, etc.).

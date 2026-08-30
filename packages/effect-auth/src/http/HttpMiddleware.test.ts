@@ -13,9 +13,9 @@ import {
   OptionalAuthMiddleware,
 } from "./HttpMiddleware.ts";
 import * as HTTPMiddleware from "./HttpMiddleware.ts";
-import * as Entity from "../authz/Entity.ts";
-import * as Policy from "../authz/Policy.ts";
-import { Authorizer, CurrentPrincipal } from "../authz/Authorizer.ts";
+import * as Entity from "../Entity.ts";
+import * as Policy from "../Policy.ts";
+import { Authorizer, CurrentPrincipal } from "../Authorizer.ts";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures

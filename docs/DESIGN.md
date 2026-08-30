@@ -142,7 +142,7 @@ the KV store layers (`KeyValueStores.ts`, provide store tags from many modules).
 
 **Status quo.** 31 `*Layer` exports: 24 `XServiceLayer(config)` functions; 3
 no-config functions (`RateLimiterLayer()` `RateLimit.ts:212`,
-`AuthorizationPolicyLayer()` `authz/Authorization.ts` (then flat `Authorization.ts`), `UserServiceLayer()`
+`AuthorizationPolicyLayer()` `Authorization.ts`, `UserServiceLayer()`
 `User.ts:153`); 4 bare Layer values (`RateLimiterPersistenceLayer`,
 `ScryptHasherLayer`, `PasswordHasherLayer`, `MultiFactorGateLayer` — `secondfactor/MultiFactor.ts`
 (then flat `TwoFactor.ts`)); one
@@ -452,7 +452,7 @@ has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`
 
 > **Superseded** by `docs/refactor-plan.md` §6: `effect-auth` now also
 > publishes per-cluster subpath exports (`effect-auth/email`, `/http`,
-> `/oauth`, `/session`, `/password`, `/plugins`, `/authz`) alongside the root
+> `/oauth`, `/session`, `/password`, `/plugins`) alongside the root
 > barrel, with matching `Auth.Email` / `Auth.HTTP` / `Auth.OAuth` / ...
 > namespace re-exports from the root. The status quo/decision below reflects
 > the pre-refactor state.
@@ -581,11 +581,11 @@ and future handle types (door open: passkey handles, wallet addresses) all
 become row operations on one table instead of schema surgery; verification
 state finally attaches to the handle it belongs to.
 
-## D13. Effect-native authorization (the `authz/` kernel)
+## D13. Effect-native authorization (the policy kernel)
 
-**Status quo (pre-M3).** `authz/` held an RBAC seed: `PermissionRef` wildcard
-matching, `RoleStore`, and an `AuthorizationPolicy` service whose checks were
-method calls — no reusable policy value, no resource/attribute model, no
+**Status quo (pre-M3).** The authorization modules (then an `authz/` cluster)
+held an RBAC seed: `PermissionRef` wildcard matching, `RoleStore`, and an
+`AuthorizationPolicy` service whose checks were method calls — no reusable policy value, no resource/attribute model, no
 policies-as-data.
 
 **Decision (applied; owner decisions 2026-08-30, recorded in

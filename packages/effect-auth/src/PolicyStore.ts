@@ -35,13 +35,13 @@
  * *forbid* link would be a silent privilege escalation; refusing to produce a
  * policy set at all is the safe failure.
  *
- * @module authz/policy-store
+ * @module policy-store
  */
 import { Context, Effect, Schema } from "effect";
-import * as Errors from "../Errors.ts";
+import * as Errors from "./Errors.ts";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
-import * as Model from "./Model.ts";
+import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Policy from "./Policy.ts";
 
 // ---------------------------------------------------------------------------
@@ -507,7 +507,7 @@ export const memoryPolicyStore = (
  * The policy a template validates as: slots erased to `any`, since a slot's
  * value is not known until link time. Everything else — entity types, action
  * ids, `appliesTo` signatures, condition literals — is exactly the policy
- * check, so validation reuses {@link Model.validatePolicies} rather than
+ * check, so validation reuses {@link AuthorizationModel.validatePolicies} rather than
  * duplicating it.
  */
 const erased = (value: PolicyTemplate): Policy.DeclarativePolicy => {
@@ -526,8 +526,8 @@ const erased = (value: PolicyTemplate): Policy.DeclarativePolicy => {
 };
 
 /**
- * Validate templates against a {@link Model.Model}, the way
- * {@link Model.validatePolicies} validates policies: non-slot scopes and
+ * Validate templates against a {@link AuthorizationModel.Model}, the way
+ * {@link AuthorizationModel.validatePolicies} validates policies: non-slot scopes and
  * condition entity literals must name declared types and actions. Slots
  * validate trivially (their value arrives with the link), so a template with
  * `?principal` never constrains the principal side of an action's
@@ -536,6 +536,7 @@ const erased = (value: PolicyTemplate): Policy.DeclarativePolicy => {
  * Issues carry the template id in `policyId`.
  */
 export const validateTemplates = (
-  model: Model.Model,
+  model: AuthorizationModel.Model,
   templates: ReadonlyArray<PolicyTemplate>,
-): ReadonlyArray<Model.ValidationIssue> => Model.validatePolicies(model, templates.map(erased));
+): ReadonlyArray<AuthorizationModel.ValidationIssue> =>
+  AuthorizationModel.validatePolicies(model, templates.map(erased));

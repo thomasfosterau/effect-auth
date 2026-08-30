@@ -15,7 +15,7 @@
  * denies). `and`/`or` short-circuit, so `false && <error>` is `false` and
  * `true || <error>` is `true` — the same posture as Cedar's operators.
  *
- * @module authz/condition
+ * @module condition
  */
 import { Schema } from "effect";
 import * as Entity from "./Entity.ts";

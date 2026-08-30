@@ -2,7 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";
 import * as Policy from "./Policy.ts";
-import * as Model from "./Model.ts";
+import * as AuthorizationModel from "./AuthorizationModel.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -10,7 +10,7 @@ import * as Model from "./Model.ts";
 
 const alice = Entity.ref("User", "alice");
 
-const baseModel: Model.Model = Model.make({
+const baseModel: AuthorizationModel.Model = AuthorizationModel.make({
   entities: {
     User: {},
     Document: { memberOf: ["Folder"] },
@@ -27,7 +27,7 @@ const baseModel: Model.Model = Model.make({
 
 describe("actionEntities", () => {
   it("turns declared actions into Action entities with memberOf as parents", () => {
-    const entities = Model.actionEntities(baseModel);
+    const entities = AuthorizationModel.actionEntities(baseModel);
     const read = entities.find((e) => Entity.refEquals(e.ref, Entity.ref("Action", "doc:read")));
     const del = entities.find((e) => Entity.refEquals(e.ref, Entity.ref("Action", "doc:delete")));
     expect(read).toBeDefined();
@@ -37,7 +37,7 @@ describe("actionEntities", () => {
   });
 
   it("synthesizes group entities for groups that are not themselves declared actions", () => {
-    const entities = Model.actionEntities(baseModel);
+    const entities = AuthorizationModel.actionEntities(baseModel);
     const group = entities.find((e) => Entity.refEquals(e.ref, Entity.ref("Action", "doc:all")));
     expect(group).toBeDefined();
     expect(group?.parents).toEqual([]);
@@ -48,7 +48,7 @@ describe("actionEntities", () => {
   });
 
   it("does not duplicate a group that IS itself a declared action", () => {
-    const model = Model.make({
+    const model = AuthorizationModel.make({
       entities: {},
       actions: {
         "doc:all": { appliesTo: { principal: [], resource: [] } },
@@ -58,7 +58,7 @@ describe("actionEntities", () => {
         },
       },
     });
-    const entities = Model.actionEntities(model);
+    const entities = AuthorizationModel.actionEntities(model);
     const matches = entities.filter((e) =>
       Entity.refEquals(e.ref, Entity.ref("Action", "doc:all")),
     );
@@ -77,7 +77,7 @@ describe("validatePolicies", () => {
       action: Policy.eq(Entity.ref("Action", "doc:read")),
       resource: Policy.isType("Document"),
     });
-    expect(Model.validatePolicies(baseModel, [policy])).toEqual([]);
+    expect(AuthorizationModel.validatePolicies(baseModel, [policy])).toEqual([]);
   });
 
   it("flags an undeclared entity type in an eq principal scope", () => {
@@ -85,7 +85,7 @@ describe("validatePolicies", () => {
       id: "bad-principal-eq",
       principal: Policy.eq(Entity.ref("Robot", "r1")),
     });
-    const issues = Model.validatePolicies(baseModel, [policy]);
+    const issues = AuthorizationModel.validatePolicies(baseModel, [policy]);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.policyId).toBe("bad-principal-eq");
     expect(issues[0]?.message).toContain("Robot");
@@ -96,7 +96,7 @@ describe("validatePolicies", () => {
       id: "bad-resource-in",
       resource: Policy.inScope(Entity.ref("Robot", "r1")),
     });
-    const issues = Model.validatePolicies(baseModel, [policy]);
+    const issues = AuthorizationModel.validatePolicies(baseModel, [policy]);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.policyId).toBe("bad-resource-in");
   });
@@ -106,7 +106,7 @@ describe("validatePolicies", () => {
       id: "bad-is",
       resource: Policy.isType("Robot"),
     });
-    const issues = Model.validatePolicies(baseModel, [policy]);
+    const issues = AuthorizationModel.validatePolicies(baseModel, [policy]);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.policyId).toBe("bad-is");
     expect(issues[0]?.message).toContain("Robot");
@@ -117,7 +117,7 @@ describe("validatePolicies", () => {
       id: "bad-action-type",
       action: Policy.eq(Entity.ref("Document", "doc-1")),
     });
-    const issues = Model.validatePolicies(baseModel, [policy]);
+    const issues = AuthorizationModel.validatePolicies(baseModel, [policy]);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.policyId).toBe("bad-action-type");
     expect(issues[0]?.message).toContain("must reference Action entities");
@@ -128,7 +128,7 @@ describe("validatePolicies", () => {
       id: "bad-action-id",
       action: Policy.eq(Entity.ref("Action", "doc:archive")),
     });
-    const issues = Model.validatePolicies(baseModel, [policy]);
+    const issues = AuthorizationModel.validatePolicies(baseModel, [policy]);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.policyId).toBe("bad-action-id");
     expect(issues[0]?.message).toContain("doc:archive");
@@ -139,7 +139,7 @@ describe("validatePolicies", () => {
       id: "group-action",
       action: Policy.inScope(Entity.ref("Action", "doc:all")),
     });
-    expect(Model.validatePolicies(baseModel, [policy])).toEqual([]);
+    expect(AuthorizationModel.validatePolicies(baseModel, [policy])).toEqual([]);
   });
 
   it("flags an eq-action policy whose principal is-scope violates appliesTo", () => {
@@ -148,7 +148,7 @@ describe("validatePolicies", () => {
       action: Policy.eq(Entity.ref("Action", "doc:read")),
       principal: Policy.isType("Folder"),
     });
-    const issues = Model.validatePolicies(baseModel, [policy]);
+    const issues = AuthorizationModel.validatePolicies(baseModel, [policy]);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.policyId).toBe("bad-appliesto-principal");
     expect(issues[0]?.message).toContain("does not apply to principal type");
@@ -160,7 +160,7 @@ describe("validatePolicies", () => {
       action: Policy.eq(Entity.ref("Action", "doc:read")),
       resource: Policy.eq(Entity.ref("Folder", "f1")),
     });
-    const issues = Model.validatePolicies(baseModel, [policy]);
+    const issues = AuthorizationModel.validatePolicies(baseModel, [policy]);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.policyId).toBe("bad-appliesto-resource");
     expect(issues[0]?.message).toContain("does not apply to resource type");
@@ -178,8 +178,8 @@ describe("validatePolicies", () => {
       action: Policy.eq(Entity.ref("Action", "doc:read")),
       resource: Policy.inScope(Entity.ref("Folder", "f1")),
     });
-    expect(Model.validatePolicies(baseModel, [anyPolicy])).toEqual([]);
-    expect(Model.validatePolicies(baseModel, [inPolicy])).toEqual([]);
+    expect(AuthorizationModel.validatePolicies(baseModel, [anyPolicy])).toEqual([]);
+    expect(AuthorizationModel.validatePolicies(baseModel, [inPolicy])).toEqual([]);
   });
 
   it("flags entity literals inside when conditions with undeclared types", () => {
@@ -190,7 +190,7 @@ describe("validatePolicies", () => {
         Condition.entityLit(Entity.ref("Robot", "r1")),
       ),
     });
-    const issues = Model.validatePolicies(baseModel, [policy]);
+    const issues = AuthorizationModel.validatePolicies(baseModel, [policy]);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.policyId).toBe("bad-condition");
     expect(issues[0]?.message).toContain("condition references undeclared entity type");
@@ -201,14 +201,14 @@ describe("validatePolicies", () => {
       id: "ok-condition",
       when: Condition.eq(Condition.attr("resource", "owner"), Condition.entityLit(alice)),
     });
-    expect(Model.validatePolicies(baseModel, [policy])).toEqual([]);
+    expect(AuthorizationModel.validatePolicies(baseModel, [policy])).toEqual([]);
   });
 
   it("carries the offending policyId for every issue, even across multiple violations", () => {
     const good = Policy.permit({ id: "ok", principal: Policy.isType("User") });
     const bad1 = Policy.permit({ id: "bad-1", principal: Policy.isType("Robot") });
     const bad2 = Policy.permit({ id: "bad-2", resource: Policy.isType("Alien") });
-    const issues = Model.validatePolicies(baseModel, [good, bad1, bad2]);
+    const issues = AuthorizationModel.validatePolicies(baseModel, [good, bad1, bad2]);
     expect(issues.map((i) => i.policyId).sort()).toEqual(["bad-1", "bad-2"]);
   });
 });
