@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { BEARER_TOKEN_HEADER, type AuthServices } from "./HTTPServer.ts";
-import * as HTTPServer from "./HTTPServer.ts";
-import * as HTTPClient from "./HTTPClient.ts";
+import { BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.ts";
+import * as HTTPServer from "./HttpServer.ts";
+import * as HTTPClient from "./HttpClient.ts";
 import { SessionStore } from "../session/SessionStore.ts";
 import { UserStore } from "../session/UserStore.ts";
 import { SessionService } from "../session/SessionService.ts";

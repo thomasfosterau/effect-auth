@@ -95,7 +95,7 @@ effect-auth/                       # pnpm workspaces monorepo (Vite+ toolchain)
 │   │       ├── authz/             # Authorization (AuthorizationPolicy, RoleStore), RBAC, Permission
 │   │       ├── oauth/             # OAuth, Scope
 │   │       ├── secondfactor/      # MultiFactor, OTP, OTPSecondFactor, WebAuthn
-│   │       ├── http/              # HTTPApi, HTTPApiSchemas, HTTPServer, HTTPClient, HTTPMiddleware
+│   │       ├── http/              # HttpApi, HttpApiSchema, HttpServer, HttpClient, HttpMiddleware
 │   │       ├── plugins/           # First-party Hooks plugins (AccountLockout, Audit, Captcha, ...)
 │   │       ├── index.ts           # Public API barrel (curated root + cluster namespace re-exports)
 │   │       └── *.test.ts          # Tests alongside source
@@ -357,7 +357,7 @@ Security-sensitive areas:
 
 - Password hashing (`src/password/Password.ts`)
 - Session management (`src/session/SessionService.ts`, `src/SessionCookieCache.ts`)
-- Cookie flags, CSRF/trusted-origin checks (`src/http/HTTPServer.ts`)
+- Cookie flags, CSRF/trusted-origin checks (`src/http/HttpServer.ts`)
 - Cryptographic operations (token generation, timing-safe comparison)
 - Input validation
 - Error handling (avoid information leakage / user enumeration)

@@ -3,7 +3,7 @@
  * against a per-route `AuthorizeInput` and turns a deny into the wire-level
  * 403 `Forbidden` error.
  *
- * `AuthMiddleware` (`./HTTPMiddleware.ts`) answers *who* is calling by
+ * `AuthMiddleware` (`./HttpMiddleware.ts`) answers *who* is calling by
  * providing `CurrentPrincipal`; this module answers *may they do this* by
  * reading that principal, asking `Authorizer.authorize`, and gating the
  * handler on the answer. The two compose: attach `AuthMiddleware` (or
@@ -104,7 +104,7 @@ import { Effect, Layer } from "effect";
 import { HttpApiMiddleware } from "effect/unstable/httpapi";
 import { HttpServerRequest } from "effect/unstable/http";
 import { Authorizer, CurrentPrincipal, type AuthorizeInput } from "../authz/Authorizer.ts";
-import * as S from "./HTTPApiSchemas.ts";
+import * as S from "./HttpApiSchema.ts";
 
 // =============================================================================
 // Input shapes
@@ -155,6 +155,40 @@ const resolveAuthorizeInput = <R>(
   return Effect.isEffect(result) ? result : Effect.succeed(result);
 };
 
+/**
+ * The class type {@link makeAuthzMiddleware} returns: an
+ * `HttpApiMiddleware.ServiceClass` requiring `Authorizer | CurrentPrincipal | R`
+ * with its implementing {@link AuthzMiddlewareClass.layer | layer} attached.
+ *
+ * Every factory call gets its own runtime tag id, but all instances share
+ * this TypeScript type — the type system cannot tell one instance's `layer`
+ * from another's, while `Context` distinguishes them at runtime. Provide each
+ * instance's own `.layer`; a mixed-up pairing surfaces as a missing-service
+ * failure when the API layer is built, not as a compile error.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface AuthzMiddlewareClass<R = never> extends HttpApiMiddleware.ServiceClass<
+  AuthzMiddlewareClass<R>,
+  string,
+  {
+    requires: Authorizer | CurrentPrincipal | R;
+    provides: never;
+    error: typeof S.ForbiddenError;
+    clientError: never;
+    requiredForClient: false;
+    security: never;
+  }
+> {
+  /**
+   * The `Layer` implementing this middleware instance. Provide it alongside
+   * the application layer, next to wherever `AuthMiddleware`'s `layer()` and
+   * `Authorizer.layer(...)` are provided.
+   */
+  readonly layer: Layer.Layer<AuthzMiddlewareClass<R>>;
+}
+
 // =============================================================================
 // makeAuthzMiddleware
 // =============================================================================
@@ -200,7 +234,7 @@ const resolveAuthorizeInput = <R>(
  * @since 1.0.0
  * @category constructors
  */
-export const makeAuthzMiddleware = <R = never>(input: AuthzInput<R>) => {
+export const makeAuthzMiddleware = <R = never>(input: AuthzInput<R>): AuthzMiddlewareClass<R> => {
   const id = `@effect-auth/AuthzMiddleware#${_nextMiddlewareId++}`;
 
   class AuthzMiddleware extends HttpApiMiddleware.Service<
@@ -252,5 +286,8 @@ export const makeAuthzMiddleware = <R = never>(input: AuthzInput<R>) => {
     );
   }
 
-  return AuthzMiddleware;
+  // The local class's Self brand can never equal the shared interface's —
+  // the cast erases only that brand. Runtime identity lives in the unique
+  // tag id, which the cast does not touch.
+  return AuthzMiddleware as unknown as AuthzMiddlewareClass<R>;
 };

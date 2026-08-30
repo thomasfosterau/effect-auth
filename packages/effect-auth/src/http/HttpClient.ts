@@ -1,5 +1,5 @@
 import { HttpApiClient } from "effect/unstable/httpapi";
-import { AuthApi } from "./HTTPApi.ts";
+import { AuthApi } from "./HttpApi.ts";
 
 /**
  * Derive a typed, Effect-native client for the auth API.

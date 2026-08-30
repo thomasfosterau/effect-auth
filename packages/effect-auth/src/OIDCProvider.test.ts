@@ -21,8 +21,8 @@ import {
   PasswordResetStore,
   PasswordResetUserStore,
 } from "./password/PasswordReset.ts";
-import { type AuthServices } from "./http/HTTPServer.ts";
-import * as HTTPServer from "./http/HTTPServer.ts";
+import { type AuthServices } from "./http/HttpServer.ts";
+import * as HTTPServer from "./http/HttpServer.ts";
 import { JWTKeyStore, type JWTKeyPair, JWTService } from "./JWT.ts";
 import { generatePKCE, verifyIdToken } from "./oauth/OAuth.ts";
 import {

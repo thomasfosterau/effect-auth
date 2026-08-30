@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import * as Cipher from "../Cipher.ts";
-import { type AuthServices } from "./HTTPServer.ts";
-import * as HTTPServer from "./HTTPServer.ts";
+import { type AuthServices } from "./HttpServer.ts";
+import * as HTTPServer from "./HttpServer.ts";
 import { SessionStore } from "../session/SessionStore.ts";
 import { UserStore } from "../session/UserStore.ts";
 import { SessionService } from "../session/SessionService.ts";

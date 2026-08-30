@@ -147,7 +147,7 @@ no-config functions (`RateLimiterLayer()` `RateLimit.ts:212`,
 `ScryptHasherLayer`, `PasswordHasherLayer`, `MultiFactorGateLayer` — `secondfactor/MultiFactor.ts`
 (then flat `TwoFactor.ts`)); one
 `make`-prefixed (`makeMultiAlgorithmVerifierLayer` `password/Password.ts` (then flat `Password.ts`)); one
-lowercase two-arg (`authGroupLayer(config?, multiSession?)` `http/HTTPServer.ts` (then flat `HttpServer.ts`));
+lowercase two-arg (`authGroupLayer(config?, multiSession?)` `http/HttpServer.ts` (then flat `HttpServer.ts`));
 plus `PasswordHasherLive`/`PBKDF2HasherLive` (`password/Password.ts` (then flat `Password.ts`)) which are
 **`Context.make` values, not Layers**, wearing a `Live` suffix used nowhere else.
 
@@ -237,8 +237,8 @@ question.
 (`Errors.ts`) + 17 module-local. `AuthError` is a nominal base **nothing
 subclasses**; it composes via unions. 6 HTTP boundary errors use
 `Schema.TaggedErrorClass` + `HttpApiSchema.status`
-(`http/HTTPApiSchemas.ts`, then flat `HttpApiSchemas.ts:703–739`). Domain→HTTP mapping happens per-endpoint in ~40
-`Effect.catchTags` blocks in `http/HTTPServer.ts` (then flat `HttpServer.ts`), with real
+(`http/HttpApiSchema.ts`, then flat `HttpApiSchemas.ts:703–739`). Domain→HTTP mapping happens per-endpoint in ~40
+`Effect.catchTags` blocks in `http/HttpServer.ts` (then flat `HttpServer.ts`), with real
 inconsistencies: `AuthError` → 409 in `signUp` but → 500 in `signIn`
 (`:634`); `RateLimitError` → 400 in signUp (`:611`) but → 403 in signIn
 (`:638`); there is **no 429** anywhere.
@@ -378,7 +378,7 @@ batching/caching data access — a need this library's own code never exhibited.
 
 ## D7. HTTP contract conventions
 
-**Status quo.** One flat `auth` group with ~84 endpoints (`http/HTTPApi.ts` (then flat `HttpApi.ts:21,576`)).
+**Status quo.** One flat `auth` group with ~84 endpoints (`http/HttpApi.ts` (then flat `HttpApi.ts:21,576`)).
 Paths are consistently kebab-case. operationIds drift across four schemes:
 `signIn<Method>` family (6 endpoints) vs `ssoSignIn` (`:449`, sits at
 `/sign-in/sso`); `siweNonce` (`:462`) vs sibling `signInSiwe` (`:467`);
@@ -411,9 +411,9 @@ correct).
 - **Kept as settled conventions:** the single flat `auth` group (splitting into
   per-feature groups would break every `client.auth.*` call for cosmetic gain —
   revisit only if a 2.0 happens); `404-until-configured` via
-  `Effect.serviceOption` (`http/HTTPServer.ts`, then flat `HttpServer.ts:251–500`) — documented as the official
+  `Effect.serviceOption` (`http/HttpServer.ts`, then flat `HttpServer.ts:251–500`) — documented as the official
   behavior for optional features; the trusted-origin CSRF gate
-  (`http/HTTPServer.ts`, then flat `HttpServer.ts:2387–2437`) — no-Origin requests pass (server-to-server),
+  (`http/HttpServer.ts`, then flat `HttpServer.ts:2387–2437`) — no-Origin requests pass (server-to-server),
   browser requests must match request origin or `trustedOrigins`, enforced
   before any handler.
 
@@ -423,7 +423,7 @@ they're batched for one 0.x minor with a rename table.
 ## D8. Client API & framework parity
 
 **Status quo.** Two clients: the generated Effect client
-(`http/HTTPClient.ts`, then flat `HttpClient.ts:26`, full parity by construction) and the hand-written
+(`http/HttpClient.ts`, then flat `HttpClient.ts:26`, full parity by construction) and the hand-written
 zero-dependency browser client (`packages/client/src/Client.ts:136`) covering
 23/84 endpoints (core flows + magicLink/emailOTP/multiFactor namespaces). No
 dead methods; the missing 61 are the optional/advanced surface. Framework
@@ -462,7 +462,7 @@ has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`
 `Types`, `Errors`, all feature modules, all plugins, `Requests`/`Resolvers`,
 and re-exports `Effect`, `Context`, `Layer`, `RequestResolver` from `effect`
 (`index.ts:137–146`). SIWE — contrary to earlier planning notes — is still fully
-present (core `Siwe.ts`, `@effect-auth/siwe`, HTTP endpoints in `http/HTTPApi.ts`, then flat `HttpApi.ts:462–472`).
+present (core `Siwe.ts`, `@effect-auth/siwe`, HTTP endpoints in `http/HttpApi.ts`, then flat `HttpApi.ts:462–472`).
 
 **Decision.**
 

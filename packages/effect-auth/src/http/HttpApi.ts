@@ -6,7 +6,7 @@ import {
   HttpApiSchema,
   OpenApi,
 } from "effect/unstable/httpapi";
-import * as S from "./HTTPApiSchemas.ts";
+import * as S from "./HttpApiSchema.ts";
 
 /**
  * The auth HTTP contract.

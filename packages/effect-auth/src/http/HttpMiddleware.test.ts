@@ -11,8 +11,8 @@ import {
   CurrentUser,
   MaybeCurrentSession,
   OptionalAuthMiddleware,
-} from "./HTTPMiddleware.ts";
-import * as HTTPMiddleware from "./HTTPMiddleware.ts";
+} from "./HttpMiddleware.ts";
+import * as HTTPMiddleware from "./HttpMiddleware.ts";
 import * as Entity from "../authz/Entity.ts";
 import * as Policy from "../authz/Policy.ts";
 import { Authorizer, CurrentPrincipal } from "../authz/Authorizer.ts";

@@ -7,19 +7,19 @@
  */
 
 /** Wire schemas, views, encoders, and HTTP error types. */
-export * from "./HTTPApiSchemas.ts";
+export * from "./HttpApiSchema.ts";
 
 /** The `AuthApi` contract (groups + endpoints). */
-export * from "./HTTPApi.ts";
+export * from "./HttpApi.ts";
 
 /** Server: handler layers and the mountable web handler. */
-export * from "./HTTPServer.ts";
+export * from "./HttpServer.ts";
 
 /** Signed session-data cookie cache (config + codec). */
 export * from "../SessionCookieCache.ts";
 
 /** Typed, Effect-native client. */
-export * from "./HTTPClient.ts";
+export * from "./HttpClient.ts";
 
 /** Composable HttpApiMiddleware for consumer apps (AuthMiddleware, OptionalAuthMiddleware, …). */
-export * from "./HTTPMiddleware.ts";
+export * from "./HttpMiddleware.ts";

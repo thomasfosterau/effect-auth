@@ -8,10 +8,10 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "effect/unstable/http";
-import { AuthApi, getOpenApiSpec } from "./HTTPApi.ts";
+import { AuthApi, getOpenApiSpec } from "./HttpApi.ts";
 import { ClientIP, resolveClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import { RateLimiter, type RateLimitConfig } from "../RateLimit.ts";
-import * as S from "./HTTPApiSchemas.ts";
+import * as S from "./HttpApiSchema.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { Hooks } from "../Hooks.ts";
 import { SessionService } from "../session/SessionService.ts";

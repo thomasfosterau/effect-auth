@@ -13,8 +13,8 @@ import { EmailPasswordService } from "./email/EmailPassword.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";
 import { PasswordResetService } from "./password/PasswordReset.ts";
-import { type AuthServices } from "./http/HTTPServer.ts";
-import * as HTTPServer from "./http/HTTPServer.ts";
+import { type AuthServices } from "./http/HttpServer.ts";
+import * as HTTPServer from "./http/HttpServer.ts";
 import {
   IdentifierStore,
   makeIdentifier,

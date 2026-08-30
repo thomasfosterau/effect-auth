@@ -69,7 +69,7 @@ import { SessionService } from "../session/SessionService.ts";
 import { CurrentPrincipal } from "../authz/Authorizer.ts";
 import * as Entity from "../authz/Entity.ts";
 import { resolveMessage } from "../Messages.ts";
-import * as S from "./HTTPApiSchemas.ts";
+import * as S from "./HttpApiSchema.ts";
 import type * as Types from "../Types.ts";
 import {
   dataCookieName,
@@ -77,7 +77,7 @@ import {
   sessionIdFromRequest,
   type CookieConfig,
   type ResolvedCookieConfig,
-} from "./HTTPServer.ts";
+} from "./HttpServer.ts";
 import { decodeSessionCacheCookie } from "../SessionCookieCache.ts";
 
 // =============================================================================

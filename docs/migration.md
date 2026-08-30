@@ -17,11 +17,11 @@ subpath imports (external) accordingly.
 | `src/EmailPassword.ts`                                             | `src/email/EmailPassword.ts`                         |
 | `src/EmailVerification.ts`                                         | `src/email/EmailVerification.ts`                     |
 | `src/Http.ts`                                                      | `src/http/Http.ts`                                   |
-| `src/HttpApi.ts`                                                   | `src/http/HTTPApi.ts`                                |
-| `src/HttpApiSchemas.ts`                                            | `src/http/HTTPApiSchemas.ts`                         |
-| `src/HttpClient.ts`                                                | `src/http/HTTPClient.ts`                             |
-| `src/HttpMiddleware.ts`                                            | `src/http/HTTPMiddleware.ts`                         |
-| `src/HttpServer.ts`                                                | `src/http/HTTPServer.ts`                             |
+| `src/HttpApi.ts`                                                   | `src/http/HttpApi.ts`                                |
+| `src/HttpApiSchemas.ts`                                            | `src/http/HttpApiSchema.ts`                          |
+| `src/HttpClient.ts`                                                | `src/http/HttpClient.ts`                             |
+| `src/HttpMiddleware.ts`                                            | `src/http/HttpMiddleware.ts`                         |
+| `src/HttpServer.ts`                                                | `src/http/HttpServer.ts`                             |
 | `src/OAuth/OAuth.ts`, `OAuth/Scope.ts`                             | `src/oauth/OAuth.ts`, `oauth/Scope.ts`               |
 | `src/SessionService.ts`                                            | `src/session/SessionService.ts`                      |
 | `src/SessionStore.ts`                                              | `src/session/SessionStore.ts`                        |
@@ -188,11 +188,11 @@ const service = yield * EmailPassword.make(config);
 | `makeAPIKeyService`               | `APIKey.ts`                       | `make`                        |
 | `makeArgon2Hasher`                | `password/Argon2.ts`              | `argon2Hasher`                |
 | `Argon2HasherLayer`               | `password/Argon2.ts`              | `argon2HasherLayer`           |
-| `makeAuthClient`                  | `http/HTTPClient.ts`              | `client`                      |
+| `makeAuthClient`                  | `http/HttpClient.ts`              | `client`                      |
 | `makeAuthLifecycleService`        | `AuthLifecycle.ts`                | `make`                        |
-| `makeAuthMiddlewareLayer`         | `http/HTTPMiddleware.ts`          | `layer`                       |
-| `makeOptionalAuthMiddlewareLayer` | `http/HTTPMiddleware.ts`          | `optionalLayer`               |
-| `makeAuthWebHandler`              | `http/HTTPServer.ts`              | `make`                        |
+| `makeAuthMiddlewareLayer`         | `http/HttpMiddleware.ts`          | `layer`                       |
+| `makeOptionalAuthMiddlewareLayer` | `http/HttpMiddleware.ts`          | `optionalLayer`               |
+| `makeAuthWebHandler`              | `http/HttpServer.ts`              | `make`                        |
 | `makeClientIPLayer`               | `ClientIP.ts`                     | `clientIPLayer`               |
 | `makeDeviceAuthorizationService`  | `DeviceAuthorization.ts`          | `make`                        |
 | `makeEmailOTPService`             | `email/EmailOTP.ts`               | `make`                        |

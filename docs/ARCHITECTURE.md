@@ -123,11 +123,11 @@ directories, each with its own `index.ts` barrel and matching
   `IPRateLimit.ts`, `LastLoginMethod.ts`, `NormalizeEmail.ts`, `RateLimit.ts`
   — first-party Hooks plugins (exported values keep the `*Plugin` suffix,
   e.g. `AuditPlugin`, even though the file names dropped it).
-- **`http/` cluster** (also the `Auth.HTTP` namespace): `HTTPApiSchemas.ts`
-  (wire schemas + HTTP error types), `HTTPApi.ts` (the typed `AuthApi`
-  contract), `HTTPServer.ts` (handlers + mountable web handler),
-  `HTTPClient.ts` (typed Effect client derived from the contract),
-  `HTTPMiddleware.ts` (`AuthMiddleware`/`OptionalAuthMiddleware` for
+- **`http/` cluster** (also the `Auth.HTTP` namespace): `HttpApiSchema.ts`
+  (wire schemas + HTTP error types), `HttpApi.ts` (the typed `AuthApi`
+  contract), `HttpServer.ts` (handlers + mountable web handler),
+  `HttpClient.ts` (typed Effect client derived from the contract),
+  `HttpMiddleware.ts` (`AuthMiddleware`/`OptionalAuthMiddleware` for
   consumer apps), plus `SessionCookieCache.ts` (signed session-data cookie,
   re-exported here from its root file).
 - **`secondfactor/` cluster** (also the `Auth.SecondFactor` namespace):
@@ -169,15 +169,15 @@ Users persist state by implementing plain store interfaces (DESIGN.md D3):
 Two mechanisms, by boundary (DESIGN.md D4):
 
 - **Domain errors** are `Data.TaggedError` classes — shared ones in `Errors.ts` (`AuthError`, `InvalidCredentialsError`, `SessionExpiredError`, …), module-local ones (`MultiFactorError`, `OrganizationError`, …) where only one module raises them. `AuthError` means _infrastructure/unexpected_ failure; flow outcomes get specific tags. Nothing subclasses `AuthError` — errors compose in unions, keeping method signatures honest.
-- **HTTP boundary errors** are `Schema.TaggedErrorClass` classes in `HTTPApiSchemas.ts` with fixed status codes (400/401/403/404/409/429/500). Handlers in `HTTPServer.ts` map domain errors to these per endpoint; `RateLimitError` is always 429, `AuthError` is always 500, and typed flow errors carry the specific statuses (e.g. `EmailInUseError` → 409).
+- **HTTP boundary errors** are `Schema.TaggedErrorClass` classes in `HttpApiSchema.ts` with fixed status codes (400/401/403/404/409/429/500). Handlers in `HttpServer.ts` map domain errors to these per endpoint; `RateLimitError` is always 429, `AuthError` is always 500, and typed flow errors carry the specific statuses (e.g. `EmailInUseError` → 409).
 
 ## HTTP protocol
 
-- `HTTPApi.ts` defines the full contract with `effect/unstable/httpapi` — one `auth` group, kebab-case paths (`/sign-in/email-otp`, `/multi-factor/enable`), camelCase operationIds. OpenAPI 3.1 (`HTTP.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`HTTP.make({ docs: true })`).
+- `HttpApi.ts` defines the full contract with `effect/unstable/httpapi` — one `auth` group, kebab-case paths (`/sign-in/email-otp`, `/multi-factor/enable`), camelCase operationIds. OpenAPI 3.1 (`HTTP.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`HTTP.make({ docs: true })`).
 - **404-until-configured**: optional features resolve their service with `Effect.serviceOption`; when the layer isn't provided the endpoint fails `NotFound` — a server only exposes what it configures.
 - **Cookies**: HttpOnly, SameSite, `Secure` by default; optional HMAC-signed session-data cache cookie to skip store reads; multi-session and last-login-method helper cookies.
 - **CSRF**: a trusted-origin gate runs before any handler — requests with an `Origin` header must match the request origin or the configured `trustedOrigins`; requests without one (curl, server-to-server) pass.
-- **Clients**: `HTTPClient.ts` derives a full-parity Effect client from the contract (`client.auth.<operationId>`).
+- **Clients**: `HttpClient.ts` derives a full-parity Effect client from the contract (`client.auth.<operationId>`).
 
 ## Security Considerations
 
