@@ -13,6 +13,9 @@ import {
   OptionalAuthMiddleware,
 } from "./HTTPMiddleware.ts";
 import * as HTTPMiddleware from "./HTTPMiddleware.ts";
+import * as Entity from "../authz/Entity.ts";
+import * as Policy from "../authz/Policy.ts";
+import { Authorizer, CurrentPrincipal } from "../authz/Authorizer.ts";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -121,6 +124,56 @@ describe("HTTPMiddleware.layer – conduit_session handler", () => {
     expect(Exit.isFailure(exit)).toBe(true);
   });
 
+  it('valid session cookie → CurrentPrincipal is provided as User::"<id>"', async () => {
+    const principalCell = cell<Entity.EntityRef>();
+    const handler = Effect.gen(function* () {
+      principalCell.value = yield* CurrentPrincipal;
+      return ok;
+    });
+
+    const exit = await Effect.runPromiseExit(
+      runCookiePath(makeWebRequest({ cookie: RAW_TOKEN }), handler as any),
+    );
+
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(principalCell.value).toEqual(Entity.ref("User", USER_ID));
+  });
+
+  it("the provided principal drives an end-to-end Authorizer.check", async () => {
+    const allowedCell = cell<boolean>();
+    const deniedCell = cell<boolean>();
+    const authorizerLayer = Authorizer.layer({
+      policies: [
+        Policy.permit({
+          id: "self-read",
+          action: Policy.eq(Entity.ref("Action", "profile:read")),
+          resource: Policy.eq(Entity.ref("User", USER_ID)),
+        }),
+      ],
+    });
+
+    const handler = Effect.gen(function* () {
+      const authorizer = yield* Authorizer;
+      allowedCell.value = yield* authorizer.check({
+        action: "profile:read",
+        resource: Entity.ref("User", USER_ID),
+      });
+      deniedCell.value = yield* authorizer.check({
+        action: "profile:read",
+        resource: Entity.ref("User", "someone-else"),
+      });
+      return ok;
+    }).pipe(Effect.provide(authorizerLayer));
+
+    const exit = await Effect.runPromiseExit(
+      runCookiePath(makeWebRequest({ cookie: RAW_TOKEN }), handler as any),
+    );
+
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(allowedCell.value).toBe(true);
+    expect(deniedCell.value).toBe(false);
+  });
+
   it("Bearer Authorization header is also checked in conduit_session path", async () => {
     const userCell = cell<Types.User>();
     const handler = Effect.gen(function* () {
@@ -171,6 +224,19 @@ describe("HTTPMiddleware.layer – bearer handler", () => {
     expect(Exit.isSuccess(exit)).toBe(true);
     expect(sessionCell.value?.userId).toBe(USER_ID);
     expect(userCell.value?.id).toBe(USER_ID);
+  });
+
+  it("valid Bearer token → CurrentPrincipal is provided", async () => {
+    const principalCell = cell<Entity.EntityRef>();
+    const handler = Effect.gen(function* () {
+      principalCell.value = yield* CurrentPrincipal;
+      return ok;
+    });
+
+    const exit = await Effect.runPromiseExit(runBearerPath(RAW_TOKEN, handler as any));
+
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(principalCell.value).toEqual(Entity.ref("User", USER_ID));
   });
 
   it("invalid Bearer token → Unauthorized failure", async () => {
@@ -238,5 +304,38 @@ describe("HTTPMiddleware.optionalLayer", () => {
     const exit = await Effect.runPromiseExit(effect);
     expect(Exit.isSuccess(exit)).toBe(true);
     expect(Option.isNone(maybeCell.value!)).toBe(true);
+  });
+
+  // `CurrentPrincipal` is conditional here — present only when a session
+  // resolved — so handlers read it with `Effect.serviceOption`.
+  const runOptionalPrincipal = (request: HttpServerRequest.HttpServerRequest) => {
+    const principalCell = cell<Option.Option<Entity.EntityRef>>();
+    const handler = Effect.gen(function* () {
+      principalCell.value = yield* Effect.serviceOption(CurrentPrincipal);
+      return ok;
+    });
+    const effect = Effect.gen(function* () {
+      const svc = yield* OptionalAuthMiddleware;
+      yield* (svc as any)(handler, undefined).pipe(
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+      );
+    }).pipe(Effect.provide(optionalLayer), Effect.provide(baseLayer));
+    return { principalCell, effect };
+  };
+
+  it("valid session → CurrentPrincipal is in context", async () => {
+    const { principalCell, effect } = runOptionalPrincipal(makeWebRequest({ cookie: RAW_TOKEN }));
+    await Effect.runPromise(effect);
+    expect(Option.isSome(principalCell.value!)).toBe(true);
+    expect((principalCell.value as Option.Some<Entity.EntityRef>).value).toEqual(
+      Entity.ref("User", USER_ID),
+    );
+  });
+
+  it("no session → CurrentPrincipal is absent (anonymous, not a failure)", async () => {
+    const { principalCell, effect } = runOptionalPrincipal(makeWebRequest());
+    const exit = await Effect.runPromiseExit(effect);
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(Option.isNone(principalCell.value!)).toBe(true);
   });
 });

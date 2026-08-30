@@ -31,6 +31,12 @@ export * as Model from "./Model.ts";
 export * as PolicyStore from "./PolicyStore.ts";
 export { AuthorizationDeniedError, type Decision, type PolicyOutcome } from "./Policy.ts";
 export {
+  protectedField,
+  type DenyBehavior,
+  type ProtectedField,
+  type ProtectedFieldOptions,
+} from "./Protected.ts";
+export {
   CurrentPrincipal,
   EntityResolver,
   memoryEntityResolver,
