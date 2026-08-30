@@ -1,12 +1,12 @@
 # Better Auth Parity Plan
 
-Status: proposed · Date: 2026-08-30
+Status: accepted direction · Date: 2026-08-30 (rev 2: target architecture added)
 
 Goal: make effect-auth a suitable replacement for [Better Auth](https://www.better-auth.com/).
-This document triages the 20 open issues against the code as it stands today
-(post-restructure, `3ff3bc6`), records two regressions discovered during the audit,
-inventories the remaining feature gaps versus Better Auth, and lays out an ordered
-roadmap.
+This document records the target architecture (§3), triages the 20 open issues against
+the code as it stands today (post-restructure, `3ff3bc6`), records two regressions
+discovered during the audit, inventories the remaining feature gaps versus Better
+Auth, and lays out an ordered roadmap.
 
 ## 1. Headline findings
 
@@ -33,7 +33,93 @@ roadmap.
    SCIM (#75), the MCP provider preset (#77 part 2), the Drizzle adapter (#171), and
    the storage-adapter story generally (where #91's findings should be re-applied).
 
-## 2. Issue triage
+## 2. Target architecture (decided)
+
+### 2.1 Monorepo: monolithic core + thin adapter packages
+
+The core is deliberately a **maximal monolith**: every feature that can be built on
+`effect` v4 alone lives in one package, one dependency graph, one release. Anything
+that needs a third-party runtime dependency — a database driver, an ORM, an email or
+SMS provider SDK, a native module, infrastructure tooling — lives in its own adapter
+package that implements a core service contract.
+
+| Package                            | Role                                                                                | Allowed dependencies                                                |
+| ---------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `packages/effect-auth`             | The monolithic core: every service, store contract, plugin, and the HTTP projection | `effect` v4 only (+ possibly `@effect/platform-browser` — see §2.2) |
+| `packages/client`                  | Vanilla typed client + React/Svelte/Vue bindings                                    | core types; frameworks as optional peers                            |
+| `packages/sql`                     | Store layers over `effect/unstable/sql` (driver-agnostic)                           | core; SQL drivers as peers                                          |
+| `packages/alchemy` _(reinstated)_  | Alchemy v2 infra resources + Cloudflare D1 storage layers                           | core; `alchemy` as optional peer                                    |
+| `packages/argon2` _(new, extract)_ | `PasswordHasher` layer over `@node-rs/argon2` (native dep moves out of core)        | core; `@node-rs/argon2`                                             |
+| `packages/drizzle` _(M5, #171)_    | `SessionStore`/`UserStore` (+ rest) via Drizzle                                     | core; `drizzle-orm` as peer                                         |
+| `packages/<email>` _(M5)_          | `EmailSender` adapters — first candidates: Resend, SES, Nodemailer                  | core; provider SDK                                                  |
+| `packages/<sms>` _(M5)_            | `SMSSender` adapters — first candidate: Twilio                                      | core; provider SDK                                                  |
+
+Consequences for the current tree:
+
+- Core source moves from the repo root `src/` back to `packages/effect-auth/src`,
+  retiring the `packages/effect-auth/dist` symlink shim. The workspace root becomes a
+  plain monorepo root again.
+- Two current core dependencies violate the effect-only rule:
+  - `@node-rs/argon2` (native): extract to `packages/argon2`. `PasswordHasher` is
+    already the service seam, so this is a layer move; core's default remains
+    PBKDF2-SHA256 via `node:crypto`/WebCrypto (`PlatformCrypto`), which runs on edge
+    runtimes where native modules don't.
+  - `@oslojs/webauthn` (pure JS, zero-dependency, MIT): **vendor it into core**
+    rather than extracting — WebAuthn belongs in the maximal core, the library is
+    small and stable, and vendoring keeps the dependency rule absolute. (Fallback if
+    vendoring proves noisy: keep it as the single documented exception.)
+
+### 2.2 Delivery seams: unified `EmailSender` / `SMSSender` services
+
+Today every feature takes its own delivery callback (`EmailVerification.sendEmail`,
+`MagicLink.sendMagicLink`, `EmailOTP.sendVerificationOTP`, `PhoneOTP.sendOTP`). That's
+fine for BYO, but gives adapter packages no single contract to implement. Add core
+`EmailSender` and `SMSSender` `Context.Service` contracts (message = recipient +
+purpose + template params), with default layers that route the existing per-feature
+callbacks through them. Per-feature callbacks stay for full control; adapters
+implement the unified seam once and every feature lights up.
+
+`@effect/platform-browser` enters only if the client or WebCrypto plumbing needs it;
+core's `PlatformCrypto` already abstracts `node:crypto`/WebCrypto, so treat it as
+"allowed if needed", not a goal.
+
+### 2.3 Effect-native, not an HTTP-RPC wrapper
+
+Better Auth is architecturally an HTTP handler framework (built on better-call):
+features are endpoints first, and even server-side calls go through `auth.api.*`
+wrappers around those handlers. We take the opposite stance, and it should be stated
+as a design rule:
+
+1. **Services are the API.** Every feature is a `Context.Service` with a `layer`,
+   fully usable in-process with no HTTP anywhere — errors in the typed error channel,
+   storage/delivery as service contracts, config via `Config`/`Redacted`, tracing via
+   spans. This is already true and must stay true.
+2. **HTTP is a projection, not the foundation.** The `effect/unstable/httpapi`
+   contract (`http/HTTPApi.ts`) is derived _from_ the services; handlers only decode,
+   delegate, and encode. Guardrail: no business logic in `HTTPServer.ts` handlers —
+   every endpoint must correspond to a service method callable directly.
+3. **Composability over mounting.** `HttpApiMiddleware` + `CurrentUser`/
+   `CurrentSession` (#94, done) is the flagship integration: consumers compose auth
+   _into_ their own `HttpApi` rather than mounting a black box beside it. The mounted
+   Web handler remains as the zero-effort path (and is how "framework support" works
+   without framework adapters).
+4. **The typed client derives from the contract**, not from stringly-typed paths —
+   client plugins (#92) should build on the httpapi contract types so client and
+   server can't drift.
+
+### 2.4 Deliberate deferrals (door open, not closed)
+
+- **Ethereum / SIWE and payments (Stripe, Polar, …):** not now. The door stays open
+  structurally: each would land as `packages/<name>` implementing existing seams
+  (SIWE = a sign-in service + hooks like other methods; payments = hooks/plugins on
+  lifecycle events). No core changes are required to add them later, which is the
+  point of the adapter architecture.
+- **Framework adapters (Next/Nuxt/SvelteKit/…):** not now. The Web-standard handler
+  plus `HttpApiMiddleware` already mount everywhere; if dedicated packages ever prove
+  necessary they slot in as `packages/<framework>` without touching core. Until then,
+  framework support is a docs/examples problem (M6).
+
+## 3. Issue triage
 
 Verified against the current tree (`src/`, `packages/client/`). "Close after
 verification" means the feature is present; run the issue's acceptance criteria as a
@@ -53,39 +139,18 @@ checklist, add any missing test, then close.
 | #84   | One-time token module                               | `OneTimeToken.ts` incl. `redeemOneTimeTokenForSession`                                                                                                                                                                            | Close after verification                                                                    |
 | #85   | AuthLifecycle bypasses/atomicity                    | All four FIXes visible in `AuthLifecycle.ts` (consumes app `EmailPasswordService`, email-match on verify, peek/burn token ordering, resend on unverified)                                                                         | Close after verification                                                                    |
 | #88   | OIDC provider hardening                             | Refresh `familyId` + `absoluteExpiresAt` + family revocation, `prompt=none` handling present                                                                                                                                      | Verify residuals (scope down-scoping on refresh, registration scheme allowlist), then close |
-| #91   | `@effect-auth/sql` correctness                      | **Moot — package deleted.** Findings (orDie gets, non-atomic upserts, rate-limit undercount) must be re-applied when the SQL adapter is restored                                                                                  | Fold into M1/M5; update issue                                                               |
+| #91   | `@effect-auth/sql` correctness                      | **Moot — package deleted.** Findings (orDie gets, non-atomic upserts, rate-limit undercount) must be re-applied when the SQL adapter is restored                                                                                  | Fold into M0 restore; update issue                                                          |
 | #92   | Client lifecycle & parity                           | Focus/visibility refresh, `BroadcastChannel` cross-tab sync, plugin mechanism, Vue warn+`dispose()` all present                                                                                                                   | Verify endpoint coverage breadth; note the React regression is separate (M0)                |
 | #94   | HttpApiMiddleware / CurrentUser                     | `http/HTTPMiddleware.ts` with `CurrentUser`/`CurrentSession` + tests                                                                                                                                                              | Close after verification                                                                    |
 | #95   | Redacted + Config                                   | `Redacted` in 18 modules (incl. OAuth `clientSecret`), `Config`-based construction in OAuth/JWT/MultiFactor/TrustedDevice/SessionCookieCache                                                                                      | Sweep for stragglers, then close                                                            |
 | #111  | **AccountLockout hardening**                        | **Not done.** Store contract still `get`/`set`/`delete` (`plugins/AccountLockout.ts:35-40`): no atomic increment, no second dimension, no isolation/fail-open decision                                                            | **Open (M1)**                                                                               |
 | #116  | HTTP boundary hardening                             | `__Host-` default-when-secure, generic 500 bodies, `maxBodySize` (64 KiB default), `Referer` fallback, out-of-prefix 404 — all present                                                                                            | Close after verification                                                                    |
 | #117  | Device authorization hardening                      | Atomic consume in store contract, `user_code` rate limit (`USER_CODE_RATE_LIMIT`), `slow_down` escalation without window reset                                                                                                    | Close after verification                                                                    |
-| #171  | Drizzle adapter                                     | Not started; depends on the storage-adapter decision below                                                                                                                                                                        | **Open (M5)**                                                                               |
-
-## 3. Regressions to repair (M0)
-
-1. **Restore the SQL storage story.** The last version of `packages/sql` lives at
-   `abd5d13^`. It predates the restructure (old naming, old store contracts, `email`
-   column model), so restoration means porting to the current API, not a straight
-   revert. Re-apply #91's correctness findings (atomic `UPDATE … SET count = count+1`,
-   `ON CONFLICT` upserts, `AuthError` instead of `orDie`, preserved `cause`) as part of
-   the port — cheaper than porting the bugs and fixing them later. Decide `@effect-auth/alchemy`'s
-   fate at the same time (restore, or drop and delete its README/docs references).
-   Until restored, the only persistence path is BYO stores or
-   `KeyValueStores` over `KeyValueStore.layerSql` — well short of Better Auth's adapter story.
-2. **Restore the React client binding.** Last version at `f219705^`
-   (`packages/client/src/react.ts`); port to the current `Client.ts` store API. Until
-   then, either ship it or drop the `./react` export + keyword so the package isn't
-   advertising a module that 404s.
-3. **Make the docs true again.** `README.md`'s package table and
-   `docs/PLAN.md`/`KeyValueStores.ts` references to `@effect-auth/sql` describe a
-   package that isn't in the tree; reconcile once decision 1 lands.
-4. **Close the done issues** (per the table above) so the tracker reflects reality —
-   each close is a quick acceptance-criteria pass and possibly one added test.
+| #171  | Drizzle adapter                                     | Not started; lands as `packages/drizzle` per §2.1                                                                                                                                                                                 | **Open (M5)**                                                                               |
 
 ## 4. Gap inventory vs Better Auth
 
-Feature-by-feature, beyond what the issues already track. ✓ = at or beyond parity.
+Feature-by-feature, beyond what the issues already track.
 
 **At parity already:** email/password, email verification, password reset (+ HIBP,
 captcha), magic link, email OTP, phone OTP, username, anonymous, passkeys/WebAuthn,
@@ -103,43 +168,56 @@ composability (an Effect-native advantage Better Auth has no equivalent of).
 
 | Gap                               | Better Auth has                                                    | effect-auth today                                                                          | Plan                                                                                  |
 | --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| Database adapters                 | Drizzle/Prisma/Kysely/Mongo adapters + CLI schema generate/migrate | Nothing in-tree (post-regression); KV layers + BYO stores                                  | M0 restore SQL pkg; M5 Drizzle (#171); CLI/migration story a stretch goal             |
+| Database adapters                 | Drizzle/Prisma/Kysely/Mongo adapters + CLI schema generate/migrate | Nothing in-tree (post-regression); KV layers + BYO stores                                  | M0 restore `packages/sql`; M5 Drizzle (#171); CLI/migration story a stretch goal      |
+| Email/SMS delivery adapters       | Docs-level integrations; callbacks                                 | Per-feature callbacks only; no unified sender seam                                         | M1 `EmailSender`/`SMSSender` seams (§2.2); M5 first adapter packages                  |
 | Surrogate-key identity            | Flexible via `additionalFields`; but BA also hardwires email       | Email hardwired in `User`; phase 1 of #73 done                                             | M2 — also a differentiator, not just parity                                           |
 | Org teams + dynamic AC            | `teams`, `createAccessControl` runtime roles                       | Static config roles, no teams                                                              | M3 (#78)                                                                              |
 | SAML SSO                          | SSO plugin supports SAML                                           | OIDC only                                                                                  | M4 (#75)                                                                              |
 | SCIM provisioning                 | Enterprise provisioning                                            | Absent                                                                                     | M4 (#75)                                                                              |
 | MCP auth server preset            | `mcp` plugin                                                       | OIDC provider + DCR exist; no `.well-known/oauth-authorization-server`, no preset          | M4 (#77.2) — small delta                                                              |
-| Client endpoint coverage          | Full inference via plugins                                         | Plugin mechanism exists; first-party coverage still partial (~26 of ~80 endpoints wrapped) | M6 (#92.2) — ship first-party plugins per feature area                                |
+| Client endpoint coverage          | Full inference via plugins                                         | Plugin mechanism exists; first-party coverage still partial (~26 of ~80 endpoints wrapped) | M6 (#92.2) — first-party plugins per feature area, derived from the httpapi contract  |
 | React/Solid client hooks          | React, Vue, Svelte, Solid                                          | Vanilla, Vue, Svelte (React regressed)                                                     | M0 restores React; Solid optional                                                     |
 | Social provider breadth           | ~25 presets                                                        | 4 presets (Google/GitHub/Discord/Microsoft) + Apple secret helper + custom config          | M6 — cheap, add top ~8 (Apple, Facebook, X, LinkedIn, GitLab, Slack, Spotify, Twitch) |
-| Framework guides                  | Next/Nuxt/SvelteKit/Astro/Hono/Express integrations                | One mountable Web handler (covers all of them technically); few guides                     | M6 — docs/examples, not code                                                          |
-| Payments plugins (Stripe/Polar/…) | Yes                                                                | No                                                                                         | Recommend **out of scope** for core; revisit as community adapters                    |
-| Sign in with Ethereum             | `siwe` plugin                                                      | No                                                                                         | Recommend out of scope initially                                                      |
+| Framework guides                  | Next/Nuxt/SvelteKit/Astro/Hono/Express integrations                | One mountable Web handler (covers all of them technically); few guides                     | M6 — docs/examples per §2.4; dedicated adapter packages deferred                      |
+| Payments plugins (Stripe/Polar/…) | Yes                                                                | No                                                                                         | **Deferred by decision** (§2.4); door open as future adapter packages                 |
+| Sign in with Ethereum             | `siwe` plugin                                                      | No                                                                                         | **Deferred by decision** (§2.4); door open as a future adapter package                |
 
 ## 5. Roadmap
 
-Ordering is dependency-driven: the SQL restore (M0) unblocks the identifier epic's
-storage phases; the identifier model (M2) unblocks SCIM/SAML provisioning and cleans
-up org invitations; teams (M3) unblock SCIM groups.
+Ordering is dependency-driven: the monorepo restructure + SQL restore (M0) unblock
+the identifier epic's storage phases; the identifier model (M2) unblocks SCIM/SAML
+provisioning and cleans up org invitations; teams (M3) unblock SCIM groups.
 
-- **M0 — Repair & truth (small, do first).** Restore/port `@effect-auth/sql` (with
-  #91's fixes baked in) and `client/react.ts`; decide alchemy; fix README/docs; close
-  the ~12 verified-done issues.
-- **M1 — Security close-out (small).** #111 lockout hardening (atomic increment on the
-  store contract, isolate the reset tap, second dimension or documented tradeoff,
-  fail-open decision); verify the #88/#116/#117 residuals.
-- **M2 — Identifier epic (large, breaking).** Execute `docs/PLAN.md` phases 2–8 on the
-  restored SQL package: surrogate-keyed `User`, email/username/phone as `Identifier`s,
-  migrate EmailPassword/Username/PhoneOTP/OAuth-linking/Anonymous/Admin/Org flows,
-  ship as the breaking release with a migration guide.
+- **M0 — Monorepo restructure & regression repair (do first).**
+  - Move core `src/` → `packages/effect-auth/src`; retire the dist symlink shim;
+    root becomes a plain workspace.
+  - Restore/port `packages/sql` from `abd5d13^` onto the current store contracts,
+    with #91's fixes baked into the port (atomic `UPDATE … SET count = count + 1`,
+    `ON CONFLICT` upserts, `AuthError` instead of `orDie`, preserved `cause`).
+  - Reinstate `packages/alchemy` (same port treatment; `alchemy` as optional peer).
+  - Restore `packages/client/src/react.ts` from `f219705^` onto the current
+    `Client.ts` store API.
+  - Extract `packages/argon2`; vendor `@oslojs/webauthn`; core's dependency list
+    becomes `effect` only.
+  - Make README/docs match the tree; close the ~12 verified-done issues.
+- **M1 — Security close-out + delivery seams (small).** #111 lockout hardening
+  (atomic increment on the store contract, isolate the reset tap, second dimension or
+  documented tradeoff, fail-open decision); verify the #88/#116/#117 residuals; add
+  the `EmailSender`/`SMSSender` core seams (§2.2).
+- **M2 — Identifier epic (large, breaking).** Execute `docs/PLAN.md` phases 2–8 on
+  the restored SQL package: surrogate-keyed `User`, email/username/phone as
+  `Identifier`s, migrate EmailPassword/Username/PhoneOTP/OAuth-linking/Anonymous/
+  Admin/Org flows, ship as the breaking release with a migration guide.
 - **M3 — Organization parity (medium).** #78 teams + dynamic per-org roles, on top of
   the identifier model.
 - **M4 — Enterprise & MCP (large).** #75 SAML (signature verification is the critical
-  path — pick the XML-DSig approach deliberately) and SCIM 2.0 (maps onto identifiers
-  - teams); #77.2 MCP preset (`.well-known/oauth-authorization-server` + a thin config
-    over the existing provider) — do MCP first, it's days not weeks.
-- **M5 — Adapter ecosystem (medium).** #171 Drizzle adapter per its captured spec
-  (decide: wrap the SQL stores vs standalone); document the BYO-store contract as the
+  path — pick the XML-DSig approach deliberately; if it needs a dependency, SAML
+  becomes `packages/saml` per the §2.1 rule) and SCIM 2.0 (maps onto identifiers +
+  teams); #77.2 MCP preset (`.well-known/oauth-authorization-server` + a thin config
+  over the existing provider) — do MCP first, it's days not weeks.
+- **M5 — Adapter ecosystem (medium).** `packages/drizzle` (#171, per its captured
+  spec — decide: wrap the SQL stores vs standalone); first `EmailSender`/`SMSSender`
+  adapter packages (Resend, Twilio); document the BYO-store contract as the
   Prisma/Kysely answer; evaluate a schema-generation CLI.
 - **M6 — DX & breadth (ongoing).** Client endpoint-coverage plugins + 2FA-challenge
   continuation helper (#92.2), more social presets, framework guides/examples.
