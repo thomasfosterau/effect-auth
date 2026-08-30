@@ -19,3 +19,10 @@ export {
   permissionMatches,
 } from "./Permission.ts";
 export { type InMemoryRoleStoreConfig } from "./RBAC.ts";
+
+// The policy kernel (namespaced: `Authz.Policy.permit`, `Authz.Condition.eq`,
+// `Authz.Entity.ref`, ...). See docs/better-auth-parity.md §2.5.
+export * as Entity from "./Entity.ts";
+export * as Condition from "./Condition.ts";
+export * as Policy from "./Policy.ts";
+export { AuthorizationDeniedError, type Decision, type PolicyOutcome } from "./Policy.ts";
