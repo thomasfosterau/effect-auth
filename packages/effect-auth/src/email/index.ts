@@ -25,7 +25,6 @@ export {
   type AuthResult,
   type ChangePasswordInput,
   EmailPasswordService,
-  isEmailVerified,
 } from "./EmailPassword.ts";
 export {
   type EmailVerification,

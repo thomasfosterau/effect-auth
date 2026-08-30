@@ -106,7 +106,12 @@ const run = <A, E>(effect: Effect.Effect<A, E, StoreServices>): Promise<A> =>
 const makeUser = (email: string) =>
   Effect.gen(function* () {
     const store = yield* Auth.Email.EmailPasswordStore;
-    return yield* store.createUser({ email, name: "Test User", attributes: { plan: "pro" } });
+    const identifiers = yield* Auth.IdentifierStore;
+    const user = yield* store.createUser({ name: "Test User", attributes: { plan: "pro" } });
+    yield* identifiers.create(
+      Auth.makeIdentifier({ userId: user.id, type: "email", value: email }),
+    );
+    return user;
   });
 
 describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
@@ -184,10 +189,11 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     const result = await run(
       Effect.gen(function* () {
         const emailPassword = yield* Auth.Email.EmailPasswordStore;
+        const identifiers = yield* Auth.IdentifierStore;
         const users = yield* Auth.UserStore;
         const created = yield* makeUser("a@example.com");
-        const byEmail = yield* emailPassword.getUserByEmail("a@example.com");
-        const missingEmail = yield* emailPassword.getUserByEmail("nobody@example.com");
+        const byEmail = yield* identifiers.getByValue("email", "a@example.com");
+        const missingEmail = yield* identifiers.getByValue("email", "nobody@example.com");
         yield* emailPassword.setPasswordHash(created.id, "hash-1");
         const hash = yield* emailPassword.getPasswordHash(created.id);
         const credentials = yield* users.getCredentials(created.id);
@@ -196,10 +202,10 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
         return { created, byEmail, missingEmail, hash, credentials, loaded, missing };
       }),
     );
-    expect(result.created.emailVerified).toBe(false);
-    expect(result.byEmail?.id).toBe(result.created.id);
-    expect(result.byEmail?.attributes).toEqual({ plan: "pro" });
-    expect(result.byEmail?.name).toBe("Test User");
+    expect(result.byEmail?.userId).toBe(result.created.id);
+    expect(result.byEmail?.verified).toBe(false);
+    expect(result.loaded?.attributes).toEqual({ plan: "pro" });
+    expect(result.loaded?.name).toBe("Test User");
     expect(result.missingEmail).toBeNull();
     expect(result.hash).toBe("hash-1");
     expect(result.credentials).toBe("hash-1");
@@ -214,18 +220,16 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
         const created = yield* makeUser("b@example.com");
         const updated = yield* store.update({
           ...created,
-          emailVerified: true,
           name: "Renamed",
           image: "https://example.com/x.png",
           updatedAt: new Date(),
         });
         const loaded = yield* store.get(created.id);
         yield* store.delete(created.id);
-        const gone = yield* store.getByEmail("b@example.com");
+        const gone = yield* store.get(created.id);
         return { updated, loaded, gone };
       }),
     );
-    expect(result.loaded?.emailVerified).toBe(true);
     expect(result.loaded?.name).toBe("Renamed");
     expect(result.loaded?.image).toBe("https://example.com/x.png");
     expect(result.gone).toBeNull();
@@ -239,12 +243,10 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
         const created = yield* makeUser("c@example.com");
         yield* store.setPasswordHash(created.id, "reset-hash");
         const hash = yield* emailPassword.getPasswordHash(created.id);
-        const byEmail = yield* store.getUserByEmail("c@example.com");
-        return { hash, byEmail };
+        return { hash };
       }),
     );
     expect(result.hash).toBe("reset-hash");
-    expect(result.byEmail?.email).toBe("c@example.com");
   });
 
   it("RoleStore reads roles and permissions", async () => {
@@ -463,21 +465,17 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
       Effect.gen(function* () {
         const store = yield* Auth.OAuth.OAuthUserStore;
         const created = yield* store.createUser({
-          email: "oauth@example.com",
-          emailVerified: true,
           name: "OAuth User",
           image: "https://example.com/pic.png",
         });
         const loaded = yield* store.getUser(created.id);
-        const byEmail = yield* store.getUserByEmail("oauth@example.com");
         const missing = yield* Effect.flip(store.getUser("nope"));
         const renamed = yield* store.updateUser!(created.id, { name: "Renamed" });
-        return { created, loaded, byEmail, missing, renamed };
+        return { created, loaded, missing, renamed };
       }),
     );
-    expect(result.created.emailVerified).toBe(true);
     expect(result.loaded.name).toBe("OAuth User");
-    expect(result.byEmail?.image).toBe("https://example.com/pic.png");
+    expect(result.loaded.image).toBe("https://example.com/pic.png");
     expect(result.missing._tag).toBe("UserNotFoundError");
     expect(result.renamed.name).toBe("Renamed");
     expect(result.renamed.image).toBe("https://example.com/pic.png");
@@ -529,16 +527,14 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
         yield* store.deleteByEmail("a@example.com");
         const two = yield* store.get("ml-2");
         const three = yield* store.get("ml-3");
-        const user = yield* userStore.createUser({ email: "ml@example.com", emailVerified: true });
-        const byEmail = yield* userStore.getUserByEmail("ml@example.com");
-        return { loaded, two, three, user, byEmail };
+        const user = yield* userStore.createUser({ name: "Magic User" });
+        return { loaded, two, three, user };
       }),
     );
     expect(result.loaded?.email).toBe("a@example.com");
     expect(result.two).toBeNull();
     expect(result.three?.email).toBe("b@example.com");
-    expect(result.byEmail?.id).toBe(result.user.id);
-    expect(result.byEmail?.emailVerified).toBe(true);
+    expect(result.user.name).toBe("Magic User");
   });
 
   it("EmailOTPStore upserts per email+purpose and increments attempts", async () => {
@@ -566,9 +562,8 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
         const missingIncrement = yield* Effect.flip(
           store.incrementAttempts("otp@example.com", "sign-in"),
         );
-        const user = yield* userStore.createUser({ email: "otp@example.com", emailVerified: true });
-        const byEmail = yield* userStore.getUserByEmail("otp@example.com");
-        return { attempts1, attempts2, replaced, other, deleted, missingIncrement, user, byEmail };
+        const user = yield* userStore.createUser({ name: "OTP User" });
+        return { attempts1, attempts2, replaced, other, deleted, missingIncrement, user };
       }),
     );
     expect(result.attempts1).toBe(1);
@@ -578,7 +573,7 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     expect(result.other?.otpHash).toBe("other");
     expect(result.deleted).toBeNull();
     expect(result.missingIncrement._tag).toBe("AuthError");
-    expect(result.byEmail?.id).toBe(result.user.id);
+    expect(result.user.name).toBe("OTP User");
   });
 
   it("MultiFactorStore and PendingMultiFactorStore roundtrip incl. lastUsedCounter", async () => {
@@ -825,8 +820,8 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const now = Date.now();
-        yield* sql`INSERT INTO auth_users (id, email, email_verified, name, image, password_hash, attributes, created_at, updated_at)
-          VALUES (${"u-corrupt"}, ${"corrupt@example.com"}, ${0}, ${null}, ${null}, ${null}, ${"INVALID_JSON"}, ${now}, ${now})`;
+        yield* sql`INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)
+          VALUES (${"u-corrupt"}, ${null}, ${null}, ${null}, ${"INVALID_JSON"}, ${now}, ${now})`;
         const store = yield* Auth.UserServiceStore;
         return yield* Effect.flip(store.get("u-corrupt"));
       }),

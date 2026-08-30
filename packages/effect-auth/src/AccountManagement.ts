@@ -19,6 +19,7 @@ import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { normalizeEmail } from "./utils.ts";
+import { anyEmailValue, claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
 
 /** Which flow a pending token belongs to. */
 export type AccountTokenPurpose = "change-email" | "delete-account";
@@ -66,15 +67,20 @@ export interface AccountManagementConfig {
     readonly newEmail: string;
     readonly token: string;
   }) => Effect.Effect<void, Errors.AuthError>;
-  /** Deliver the account-deletion confirmation token to the user's address. */
+  /**
+   * Deliver the account-deletion confirmation token to the user's address.
+   * `email` is the user's resolved email identifier value, or `null` when the
+   * user has no email on file (deliver via another channel or fail).
+   */
   readonly sendDeleteAccountVerification: (params: {
     readonly user: Types.User;
+    readonly email: string | null;
     readonly token: string;
   }) => Effect.Effect<void, Errors.AuthError>;
   /** Optional notice to the OLD address once an email change is confirmed. */
   readonly notifyEmailChanged?: (params: {
     readonly user: Types.User;
-    readonly oldEmail: string;
+    readonly oldEmail: string | null;
     readonly newEmail: string;
   }) => Effect.Effect<void, Errors.AuthError>;
   /**
@@ -148,7 +154,7 @@ export const make = (
 ): Effect.Effect<
   typeof AccountManagementService.Service,
   never,
-  AccountManagementStore | UserServiceStore | SessionService | Crypto.Crypto
+  AccountManagementStore | UserServiceStore | IdentifierStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const changeEmailExpiresIn = config.changeEmailExpiresIn ?? 60 * 60 * 1000;
@@ -156,6 +162,7 @@ export const make = (
     const revokeSessionsOnEmailChange = config.revokeSessionsOnEmailChange ?? true;
 
     const users = yield* UserServiceStore;
+    const identifiers = yield* IdentifierStore;
     const store = yield* AccountManagementStore;
     const sessions = yield* SessionService;
     const crypto = yield* Crypto.Crypto;
@@ -180,8 +187,8 @@ export const make = (
         const newEmail = normalizeEmail(rawNewEmail);
 
         // Uniqueness: reject if another account already owns the address.
-        const existing = yield* users.getByEmail(newEmail);
-        if (existing !== null && existing.id !== userId) {
+        const existing = yield* identifiers.getByValue("email", newEmail);
+        if (existing !== null && existing.userId !== userId) {
           return yield* new Errors.EmailInUseError({ message: "Email already in use" });
         }
 
@@ -220,21 +227,47 @@ export const make = (
             userId: record.userId,
           });
         }
-        const oldEmail = user.email;
+        const currentIdentifiers = yield* identifiers.listByUser(user.id);
+        const oldEmail = anyEmailValue(currentIdentifiers);
         const newEmail = record.newEmail;
 
         // Re-check uniqueness at confirm time (the address may have been
         // taken between request and confirm).
-        const clash = yield* users.getByEmail(newEmail);
-        if (clash !== null && clash.id !== user.id) {
+        const clash = yield* identifiers.getByValue("email", newEmail);
+        if (clash !== null && clash.userId !== user.id) {
           yield* store.delete(token);
           return yield* new AccountTokenError({ message: "Email already in use" });
         }
 
+        // Swap the email identifier: remove existing email identifiers, then
+        // claim the confirmed one as verified (the token proved ownership).
+        if (clash === null) {
+          for (const id of currentIdentifiers) {
+            if (id.type === "email") {
+              yield* identifiers.delete(id.id);
+            }
+          }
+          yield* claimIdentifier(
+            identifiers,
+            makeIdentifier({
+              userId: user.id,
+              type: "email",
+              value: newEmail,
+              verified: true,
+              verifiedAt: new Date(),
+            }),
+          ).pipe(
+            Effect.catchTag("IdentifierTakenError", () =>
+              Effect.fail(new AccountTokenError({ message: "Email already in use" })),
+            ),
+          );
+        } else if (!clash.verified) {
+          // Already this user's identifier — the token proves ownership.
+          yield* identifiers.setVerified(clash.id, new Date());
+        }
+
         const updated = yield* users.update({
           ...user,
-          email: newEmail,
-          emailVerified: true,
           updatedAt: new Date(),
         });
 
@@ -269,7 +302,8 @@ export const make = (
             expiresAt: now + deleteAccountExpiresIn,
           });
 
-          yield* config.sendDeleteAccountVerification({ user, token });
+          const email = anyEmailValue(yield* identifiers.listByUser(userId));
+          yield* config.sendDeleteAccountVerification({ user, email, token });
 
           return { token, expiresAt: now + deleteAccountExpiresIn };
         },
@@ -301,6 +335,7 @@ export const make = (
 
           // Revoke sessions, then delete the user and the token.
           yield* sessions.invalidateUserSessions(user.id);
+          yield* identifiers.deleteByUser(user.id);
           yield* users.delete(user.id);
           yield* store.delete(token);
           yield* store.deleteByUserId(user.id);

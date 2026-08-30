@@ -2,24 +2,30 @@
  * Username authentication: sign in with a username + password instead of an
  * email.
  *
- * Username is a first-class *lookup key* but not a first-class `User` field —
- * implementers store it in `attributes.username` (normalized lowercase for
- * case-insensitive uniqueness). Sign-up validates + reserves the username then
- * delegates credential creation to {@link EmailPasswordService}; sign-in
- * resolves the user by username and verifies the password with the same
- * anti-enumeration error and the same `SecondFactorGate` seam as email/password
- * sign-in.
+ * Usernames are `Identifier` records (`type: "username"`, normalized lowercase
+ * for case-insensitive uniqueness) — there is no bespoke username store.
+ * Sign-up validates + reserves the username then delegates credential
+ * creation to {@link EmailPasswordService}; sign-in resolves the user by
+ * username identifier and verifies the password with the same
+ * anti-enumeration error and the same `SecondFactorGate` seam as
+ * email/password sign-in.
  */
 import { Context, Data, Effect, Layer, Option } from "effect";
 import * as Errors from "./Errors.ts";
-import type * as Types from "./Types.ts";
 import {
   EmailPasswordService,
   EmailPasswordStore,
   SecondFactorGate,
-  isEmailVerified,
   type AuthResult,
 } from "./email/EmailPassword.ts";
+import {
+  anyEmailValue,
+  claimIdentifier,
+  IdentifierStore,
+  makeIdentifier,
+  primaryEmail,
+} from "./Identifier.ts";
+import { UserStore } from "./session/UserStore.ts";
 import { MultiAlgorithmVerifier, PasswordHasher } from "./password/Password.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
@@ -28,24 +34,6 @@ import { Hooks, type HookError } from "./Hooks.ts";
 export class UsernameError extends Data.TaggedError("UsernameError")<{
   readonly message: string;
 }> {}
-
-/**
- * Username lookup / reservation. Keys are the normalized (trimmed, lowercased)
- * username; implementers persist it in `attributes.username`.
- */
-export class UsernameStore extends Context.Service<
-  UsernameStore,
-  {
-    readonly getUserByUsername: (
-      username: string,
-    ) => Effect.Effect<Types.User | null, Errors.AuthError>;
-    readonly isUsernameTaken: (username: string) => Effect.Effect<boolean, Errors.AuthError>;
-    readonly setUsername: (
-      userId: string,
-      username: string,
-    ) => Effect.Effect<void, Errors.AuthError>;
-  }
->()("@effect-auth/UsernameStore") {}
 
 export interface UsernameConfig {
   /** Minimum username length. Default 3. */
@@ -136,7 +124,8 @@ export const make = (
 ): Effect.Effect<
   typeof UsernameService.Service,
   never,
-  | UsernameStore
+  | IdentifierStore
+  | UserStore
   | EmailPasswordService
   | EmailPasswordStore
   | PasswordHasher
@@ -148,7 +137,8 @@ export const make = (
     const maxLength = config.maxUsernameLength ?? 30;
     const requireEmailVerification = config.requireEmailVerification ?? false;
 
-    const store = yield* UsernameStore;
+    const identifiers = yield* IdentifierStore;
+    const users = yield* UserStore;
     const emailPassword = yield* EmailPasswordService;
     const emailPasswordStore = yield* EmailPasswordStore;
     const passwordHasher = yield* PasswordHasher;
@@ -188,7 +178,7 @@ export const make = (
       signUp: Effect.fn("UsernameService.signUp")(function* (input: UsernameSignUpInput) {
         const username = yield* validate(input.username);
 
-        if (yield* store.isUsernameTaken(username)) {
+        if ((yield* identifiers.getByValue("username", username)) !== null) {
           return yield* new UsernameError({ message: "Username is already taken" });
         }
 
@@ -202,16 +192,23 @@ export const make = (
           }),
         });
 
-        yield* store.setUsername(result.user.id, username);
+        // Usernames carry no external proof-of-ownership, so the identifier
+        // is created verified.
+        yield* claimIdentifier(
+          identifiers,
+          makeIdentifier({
+            userId: result.user.id,
+            type: "username",
+            value: username,
+            verified: true,
+          }),
+        ).pipe(
+          Effect.catchTag("IdentifierTakenError", () =>
+            Effect.fail(new UsernameError({ message: "Username is already taken" })),
+          ),
+        );
 
-        // Reflect the reserved username on the returned user.
-        return {
-          ...result,
-          user: {
-            ...result.user,
-            attributes: { ...result.user.attributes, username },
-          },
-        };
+        return result;
       }),
 
       signIn: Effect.fn("UsernameService.signIn")(function* (input: UsernameSignInInput) {
@@ -225,7 +222,8 @@ export const make = (
           return yield* invalid();
         }
 
-        const user = yield* store.getUserByUsername(username);
+        const identifier = yield* identifiers.getByValue("username", username);
+        const user = identifier === null ? null : yield* users.get(identifier.userId);
         const passwordHash =
           user !== null ? yield* emailPasswordStore.getPasswordHash(user.id) : null;
         // Always verify against a real or decoy hash so timing is constant
@@ -244,14 +242,19 @@ export const make = (
           return yield* invalid();
         }
 
-        if (requireEmailVerification && !isEmailVerified(user)) {
-          return yield* Effect.fail(
-            new Errors.EmailNotVerifiedError({
-              message: "Email must be verified before sign-in",
-              email: user.email,
-            }),
-          );
+        if (requireEmailVerification) {
+          const userIdentifiers = yield* identifiers.listByUser(user.id);
+          if (primaryEmail(userIdentifiers) === null) {
+            return yield* Effect.fail(
+              new Errors.EmailNotVerifiedError({
+                message: "Email must be verified before sign-in",
+                email: anyEmailValue(userIdentifiers) ?? "",
+              }),
+            );
+          }
         }
+
+        const handle = { type: "username" as const, value: username };
 
         // Silently upgrade the stored hash when the current hasher considers it outdated.
         if (passwordHasher.needsRehash?.(passwordHash!)) {
@@ -265,13 +268,19 @@ export const make = (
         const gate = yield* Effect.serviceOption(SecondFactorGate);
         if (Option.isSome(gate) && (yield* gate.value.required(user))) {
           const secondFactor = yield* gate.value.begin(user);
-          return yield* hooks.afterSignIn({ user, secondFactor, method: "username" });
+          return yield* hooks.afterSignIn({
+            user,
+            secondFactor,
+            identifier: handle,
+            method: "username",
+          });
         }
 
         const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
         return yield* hooks.afterSignIn({
           user,
           session,
+          identifier: handle,
           method: "username",
           ...(input.rememberMe !== undefined && { rememberMe: input.rememberMe }),
         });
@@ -283,12 +292,29 @@ export const make = (
       ) {
         const username = yield* validate(rawUsername);
 
-        const existing = yield* store.getUserByUsername(username);
-        if (existing !== null && existing.id !== userId) {
+        const existing = yield* identifiers.getByValue("username", username);
+        if (existing !== null && existing.userId !== userId) {
           return yield* new UsernameError({ message: "Username is already taken" });
         }
+        if (existing !== null) {
+          return; // Already this user's username.
+        }
 
-        yield* store.setUsername(userId, username);
+        // Replace any previous username identifier, then claim the new one.
+        const current = yield* identifiers.listByUser(userId);
+        for (const id of current) {
+          if (id.type === "username") {
+            yield* identifiers.delete(id.id);
+          }
+        }
+        yield* claimIdentifier(
+          identifiers,
+          makeIdentifier({ userId, type: "username", value: username, verified: true }),
+        ).pipe(
+          Effect.catchTag("IdentifierTakenError", () =>
+            Effect.fail(new UsernameError({ message: "Username is already taken" })),
+          ),
+        );
       }),
     };
   });

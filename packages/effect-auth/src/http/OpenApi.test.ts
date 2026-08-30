@@ -5,7 +5,7 @@ import { type AuthServices } from "./HTTPServer.ts";
 import * as HTTPServer from "./HTTPServer.ts";
 import { SessionService } from "../session/SessionService.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
-import { EmailPasswordStore } from "../email/EmailPassword.ts";
+import { IdentifierStore } from "../Identifier.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { EmailVerificationService, EmailVerificationStore } from "../email/EmailVerification.ts";
 import {
@@ -24,7 +24,7 @@ const stubServices = (): Layer.Layer<AuthServices> =>
   Layer.mergeAll(
     Layer.succeed(AuthLifecycleService)(undefined as never),
     Layer.succeed(SessionService)(undefined as never),
-    Layer.succeed(EmailPasswordStore)(undefined as never),
+    Layer.succeed(IdentifierStore)(undefined as never),
     Layer.succeed(PasswordHasher)(undefined as never),
     Layer.succeed(EmailVerificationService)(undefined as never),
     Layer.succeed(EmailVerificationStore)(undefined as never),
@@ -45,6 +45,8 @@ const EXPECTED_PATHS = [
   "/sessions",
   "/sessions/revoke-others",
   "/sessions/{sessionId}",
+  "/identifiers",
+  "/identifiers/{identifierId}",
   "/user",
   "/change-password",
   "/email-verification/send",

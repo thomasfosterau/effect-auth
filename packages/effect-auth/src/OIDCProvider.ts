@@ -23,6 +23,7 @@ import { JWTService } from "./JWT.ts";
 import * as Obs from "./Observability.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { UserStore } from "./session/UserStore.ts";
+import { anyEmail, IdentifierStore } from "./Identifier.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 
@@ -441,6 +442,7 @@ export const make = (
   | OIDCConsentStore
   | OIDCTokenStore
   | UserStore
+  | IdentifierStore
   | JWTService
   | Crypto.Crypto
 > =>
@@ -493,6 +495,7 @@ export const make = (
     const consentStore = yield* OIDCConsentStore;
     const tokenStore = yield* OIDCTokenStore;
     const userStore = yield* UserStore;
+    const identifierStore = yield* IdentifierStore;
     const jwt = yield* JWTService;
     const crypto = yield* Crypto.Crypto;
 
@@ -544,19 +547,31 @@ export const make = (
         return value;
       });
 
-    /** Build the standard claims for a user, filtered by granted scopes. */
-    const claimsFor = (user: Types.User, scopes: readonly string[]): Record<string, unknown> => ({
-      sub: user.id,
-      ...(scopes.includes("profile") && {
-        ...(user.name !== undefined && { name: user.name }),
-        ...(user.image !== undefined && { picture: user.image }),
-        updated_at: Math.floor(user.updatedAt.getTime() / 1000),
-      }),
-      ...(scopes.includes("email") && {
-        email: user.email,
-        email_verified: user.emailVerified,
-      }),
-    });
+    /**
+     * Build the standard claims for a user, filtered by granted scopes. Email
+     * claims resolve the user's email identifier; omitted when none exists.
+     */
+    const claimsFor = (
+      user: Types.User,
+      scopes: readonly string[],
+    ): Effect.Effect<Record<string, unknown>, AuthError> =>
+      Effect.gen(function* () {
+        const email = scopes.includes("email")
+          ? anyEmail(yield* identifierStore.listByUser(user.id))
+          : null;
+        return {
+          sub: user.id,
+          ...(scopes.includes("profile") && {
+            ...(user.name !== undefined && { name: user.name }),
+            ...(user.image !== undefined && { picture: user.image }),
+            updated_at: Math.floor(user.updatedAt.getTime() / 1000),
+          }),
+          ...(email !== null && {
+            email: email.value,
+            email_verified: email.verified,
+          }),
+        };
+      });
 
     /** Mint access (+ refresh) tokens and the id_token for a grant. */
     const issueTokens = (grant: {
@@ -594,7 +609,7 @@ export const make = (
               iss: config.issuer,
               aud: grant.clientId,
               ...(grant.nonce !== undefined && { nonce: grant.nonce }),
-              ...claimsFor(user, grant.scopes),
+              ...(yield* claimsFor(user, grant.scopes)),
             })
             .pipe(
               Effect.catchTag("JWTError", (e) =>
@@ -1066,7 +1081,7 @@ export const make = (
           if (user === null) {
             return yield* new OIDCProviderError({ message: "Invalid or expired access token" });
           }
-          return claimsFor(user, record.scopes);
+          return yield* claimsFor(user, record.scopes);
         }).pipe(Effect.withSpan("effect-auth.oidc.userinfo")),
       ),
 

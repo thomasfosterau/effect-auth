@@ -6,9 +6,9 @@
  * (store tag + `Context.Service` tag + `make*` + `*ServiceLayer`), closely
  * mirroring `MagicLink.ts`.
  *
- * Convention: anonymous users carry `attributes.isAnonymous === true` and a
- * placeholder email (e.g. `anon-<id>@anonymous.local`) chosen by the store
- * implementer. Use {@link isAnonymousUser} to detect them.
+ * Convention: anonymous users carry `attributes.isAnonymous === true` and no
+ * identifiers at all — the surrogate-keyed `User` needs no placeholder email.
+ * Use {@link isAnonymousUser} to detect them.
  *
  * Account linking is triggered explicitly by the app/HTTP layer (hooks operate
  * on input values and cannot see the current session): after a guest signs up
@@ -23,8 +23,8 @@ import { SessionService } from "./session/SessionService.ts";
 import { type HookError } from "./Hooks.ts";
 
 /**
- * Persistence for anonymous users. The implementer generates an id and a
- * placeholder email, and sets `attributes.isAnonymous: true`.
+ * Persistence for anonymous users. The implementer generates an id and sets
+ * `attributes.isAnonymous: true`; anonymous users hold no identifiers.
  */
 export class AnonymousUserStore extends Context.Service<
   AnonymousUserStore,

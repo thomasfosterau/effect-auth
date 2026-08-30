@@ -14,13 +14,19 @@ import {
 import * as MultiFactor from "./MultiFactor.ts";
 import * as Cipher from "../Cipher.ts";
 import { type CreateUserInput, EmailPasswordStore } from "../email/EmailPassword.ts";
+import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "../Identifier.ts";
 import { generateHOTP, generateTOTP } from "./OTP.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as Password from "../password/Password.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 
 const users = new Map<string, User>();
-const usersByEmail = new Map<string, string>();
+const identifiers = new Map<string, Identifier>();
 const passwordHashes = new Map<string, string>();
 const multiFactorRecords = new Map<string, MultiFactorRecord>();
 const pendingChallenges = new Map<string, PendingMultiFactor>();
@@ -66,25 +72,16 @@ const userStore = {
 };
 
 const emailPasswordStore = {
-  getUserByEmail: (email: string) =>
-    Effect.sync(() => {
-      const userId = usersByEmail.get(email);
-      return userId ? (users.get(userId) ?? null) : null;
-    }),
-
   createUser: (input: CreateUserInput) =>
     Effect.sync(() => {
       const user: User = {
         id: `user-${users.size + 1}`,
-        email: input.email,
-        emailVerified: false,
         ...(input.name !== undefined && { name: input.name }),
         createdAt: new Date(),
         updatedAt: new Date(),
         attributes: input.attributes ?? {},
       };
       users.set(user.id, user);
-      usersByEmail.set(user.email, user.id);
       return user;
     }),
 
@@ -151,7 +148,10 @@ const makeTestContext = async () => {
       Context.merge(
         Context.make(UserStore, userStore),
         Context.merge(
-          Context.make(EmailPasswordStore, emailPasswordStore),
+          Context.merge(
+            Context.make(EmailPasswordStore, emailPasswordStore),
+            Context.make(IdentifierStore, memoryIdentifierStore(identifiers)),
+          ),
           Context.merge(
             Context.make(MultiFactorStore, multiFactorStore),
             Context.merge(
@@ -171,14 +171,19 @@ const makeTestContext = async () => {
 const seedUser = async (id: string, email: string, password: string): Promise<User> => {
   const user: User = {
     id,
-    email,
-    emailVerified: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     attributes: {},
   };
   users.set(id, user);
-  usersByEmail.set(email, id);
+  const identifier = makeIdentifier({
+    userId: id,
+    type: "email",
+    value: email,
+    verified: true,
+    verifiedAt: new Date(),
+  });
+  identifiers.set(identifier.id, identifier);
 
   const hasher = Password.pbkdf2Hasher();
   const hashed = await Effect.runPromise(hasher.hash(password));
@@ -190,7 +195,7 @@ const seedUser = async (id: string, email: string, password: string): Promise<Us
 describe("MultiFactorService", () => {
   beforeEach(() => {
     users.clear();
-    usersByEmail.clear();
+    identifiers.clear();
     passwordHashes.clear();
     multiFactorRecords.clear();
     pendingChallenges.clear();
@@ -560,7 +565,7 @@ describe("MultiFactorService", () => {
 describe("MultiFactorService with TOTP secret encryption", () => {
   beforeEach(() => {
     users.clear();
-    usersByEmail.clear();
+    identifiers.clear();
     passwordHashes.clear();
     multiFactorRecords.clear();
     pendingChallenges.clear();

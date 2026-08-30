@@ -16,7 +16,7 @@
  *
  * ```ts
  * const sender = yield* EmailSender; // provided by an adapter package
- * const send = emailCallbacks(sender);
+ * const send = emailCallbacks(sender, yield* IdentifierStore);
  *
  * MagicLinkService.layer({ sendMagicLink: send.sendMagicLink, ... })
  * EmailVerificationService.layer({ sendEmail: send.sendVerificationEmail, ... })
@@ -29,6 +29,7 @@ import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
 import type { EmailOTPPurpose } from "./email/EmailOTP.ts";
 import type { PhoneOTPPurpose } from "./PhoneOTP.ts";
+import { anyEmailValue, type IdentifierStore } from "./Identifier.ts";
 import { getPhoneNumber } from "./PhoneOTP.ts";
 
 // ---------------------------------------------------------------------------
@@ -98,7 +99,10 @@ export class SMSSender extends Context.Service<
  * config's callback signature (and error type) exactly, so wiring is
  * one-line per feature.
  */
-export const emailCallbacks = (sender: typeof EmailSender.Service) => ({
+export const emailCallbacks = (
+  sender: typeof EmailSender.Service,
+  identifiers: typeof IdentifierStore.Service,
+) => ({
   /** `EmailVerificationConfig.sendEmail` */
   sendVerificationEmail: (to: string, token: string) =>
     sender.send({ to, purpose: "email-verification", params: { token } }).pipe(
@@ -145,42 +149,63 @@ export const emailCallbacks = (sender: typeof EmailSender.Service) => ({
     sender.send({
       to: params.newEmail,
       purpose: "change-email",
-      params: { token: params.token, currentEmail: params.user.email },
-    }),
-
-  /** `AccountManagementConfig.sendDeleteAccountVerification` */
-  sendDeleteAccountVerification: (params: { readonly user: Types.User; readonly token: string }) =>
-    sender.send({
-      to: params.user.email,
-      purpose: "delete-account",
       params: { token: params.token },
     }),
 
-  /** `OTPSecondFactorConfig.sendOTP`, delivering the code to the user's email. */
+  /** `AccountManagementConfig.sendDeleteAccountVerification` */
+  sendDeleteAccountVerification: (params: {
+    readonly user: Types.User;
+    readonly email: string | null;
+    readonly token: string;
+  }) =>
+    params.email === null
+      ? Effect.fail(
+          new Errors.AuthError({ message: "User has no email for account-deletion delivery" }),
+        )
+      : sender.send({
+          to: params.email,
+          purpose: "delete-account",
+          params: { token: params.token },
+        }),
+
+  /** `OTPSecondFactorConfig.sendOTP`, delivering the code to the user's email identifier. */
   sendSecondFactorOTP: (user: Types.User, otp: string) =>
-    sender.send({ to: user.email, purpose: "second-factor-otp", params: { otp } }),
+    Effect.gen(function* () {
+      const email = anyEmailValue(yield* identifiers.listByUser(user.id));
+      if (email === null) {
+        return yield* Effect.fail(
+          new Errors.AuthError({ message: "User has no email for second-factor OTP" }),
+        );
+      }
+      yield* sender.send({ to: email, purpose: "second-factor-otp", params: { otp } });
+    }),
 });
 
 /**
  * Derive the SMS-based per-feature delivery callbacks from an
  * {@link SMSSender}.
  */
-export const smsCallbacks = (sender: typeof SMSSender.Service) => ({
+export const smsCallbacks = (
+  sender: typeof SMSSender.Service,
+  identifiers: typeof IdentifierStore.Service,
+) => ({
   /** `PhoneOTPConfig.sendOTP` */
   sendPhoneOTP: (phoneNumber: string, otp: string, purpose: PhoneOTPPurpose) =>
     sender.send({ to: phoneNumber, purpose: `phone-otp:${purpose}`, params: { otp } }),
 
   /**
-   * `OTPSecondFactorConfig.sendOTP`, delivering the code to the user's phone
-   * (`attributes.phoneNumber`). Fails with `AuthError` when the user has no
-   * phone number on file.
+   * `OTPSecondFactorConfig.sendOTP`, delivering the code to the user's
+   * `phone` identifier. Fails with `AuthError` when the user has no phone
+   * number on file.
    */
-  sendSecondFactorOTP: (user: Types.User, otp: string) => {
-    const phoneNumber = getPhoneNumber(user);
-    return phoneNumber === null
-      ? Effect.fail(
+  sendSecondFactorOTP: (user: Types.User, otp: string) =>
+    Effect.gen(function* () {
+      const phoneNumber = yield* getPhoneNumber(identifiers, user.id);
+      if (phoneNumber === null) {
+        return yield* Effect.fail(
           new Errors.AuthError({ message: "User has no phone number for second-factor OTP" }),
-        )
-      : sender.send({ to: phoneNumber, purpose: "second-factor-otp", params: { otp } });
-  },
+        );
+      }
+      yield* sender.send({ to: phoneNumber, purpose: "second-factor-otp", params: { otp } });
+    }),
 });

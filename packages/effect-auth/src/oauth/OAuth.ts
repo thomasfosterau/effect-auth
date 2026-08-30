@@ -29,6 +29,8 @@ import { type HookError } from "../Hooks.ts";
 import { SessionService } from "../session/SessionService.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
+import { claimIdentifier, IdentifierStore, makeIdentifier } from "../Identifier.ts";
+import { UserStore } from "../session/UserStore.ts";
 
 /**
  * OAuth2 provider configuration
@@ -157,9 +159,12 @@ export interface OAuthCallbackResult {
 /**
  * Input for creating a user from an OAuth provider profile.
  */
+/**
+ * Profile fields for a user created from an OAuth provider profile. The
+ * provider email is recorded as an email `Identifier` by the service (with
+ * the provider's `email_verified` claim carried over).
+ */
 export interface OAuthCreateUserInput {
-  readonly email: string;
-  readonly emailVerified: boolean;
   readonly name?: string;
   readonly image?: string;
 }
@@ -285,7 +290,6 @@ export class OAuthUserStore extends Context.Service<
   OAuthUserStore,
   {
     readonly getUser: (userId: string) => Effect.Effect<Types.User, AuthError | UserNotFoundError>;
-    readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, AuthError>;
     readonly createUser: (input: OAuthCreateUserInput) => Effect.Effect<Types.User, AuthError>;
     /**
      * Optional: update profile fields (`name` / `image`) on an existing user.
@@ -835,7 +839,13 @@ export const make = (
 ): Effect.Effect<
   typeof OAuthService.Service,
   never,
-  OAuthStateStore | OAuthAccountStore | OAuthUserStore | SessionService | Crypto.Crypto
+  | OAuthStateStore
+  | OAuthAccountStore
+  | OAuthUserStore
+  | IdentifierStore
+  | UserStore
+  | SessionService
+  | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const autoLinkByVerifiedEmail = options.autoLinkByVerifiedEmail ?? true;
@@ -852,6 +862,8 @@ export const make = (
     const stateStore = yield* OAuthStateStore;
     const accountStore = yield* OAuthAccountStore;
     const userStore = yield* OAuthUserStore;
+    const identifiers = yield* IdentifierStore;
+    const coreUsers = yield* UserStore;
     const sessionManager = yield* SessionService;
     const crypto = yield* Crypto.Crypto;
 
@@ -1138,19 +1150,49 @@ export const make = (
             }
 
             let user: Types.User | null = null;
+            const existingIdentifier = yield* identifiers.getByValue("email", email);
             const isTrustedProvider = trustedProviders.includes(stateEntry.provider);
-            if ((autoLinkByVerifiedEmail && emailVerified) || isTrustedProvider) {
-              user = yield* userStore.getUserByEmail(email);
+            if (
+              existingIdentifier !== null &&
+              ((autoLinkByVerifiedEmail && emailVerified) || isTrustedProvider)
+            ) {
+              user = yield* coreUsers.get(existingIdentifier.userId);
             }
 
             const isNewUser = user === null;
             if (user === null) {
+              if (existingIdentifier !== null) {
+                // The email belongs to an account we may not auto-link to
+                // (unverified provider email, untrusted provider, or a
+                // dangling identifier). Refuse rather than double-claim.
+                return yield* Effect.fail(
+                  new AuthError({
+                    message: "This email is already associated with an account",
+                  }),
+                );
+              }
               user = yield* userStore.createUser({
-                email,
-                emailVerified,
                 ...(userInfo.name !== undefined && { name: userInfo.name }),
                 ...(userInfo.picture !== undefined && { image: userInfo.picture }),
               });
+              yield* claimIdentifier(
+                identifiers,
+                makeIdentifier({
+                  userId: user.id,
+                  type: "email",
+                  value: email,
+                  verified: emailVerified,
+                  ...(emailVerified ? { verifiedAt: new Date() } : {}),
+                }),
+              ).pipe(
+                Effect.catchTag("IdentifierTakenError", () =>
+                  Effect.fail(
+                    new AuthError({
+                      message: "This email is already associated with an account",
+                    }),
+                  ),
+                ),
+              );
             }
 
             const newAccountId = yield* randomAccountId();
@@ -1246,13 +1288,15 @@ export const make = (
         // Email-mismatch guard: reject when the provider email differs from the
         // user's current account email (overridable with allowDifferentEmails).
         if (!allowDifferentEmails && userInfo.email) {
-          const currentUser = yield* userStore.getUser(userId);
           const providerEmail = normalizeEmail(userInfo.email);
-          const userEmail = normalizeEmail(currentUser.email);
-          if (providerEmail !== userEmail) {
+          const ownIdentifiers = yield* identifiers.listByUser(userId);
+          const ownsEmail = ownIdentifiers.some(
+            (id) => id.type === "email" && id.value === providerEmail,
+          );
+          if (!ownsEmail) {
             return yield* Effect.fail(
               new OAuthEmailMismatchError({
-                message: `Cannot link ${provider} account: provider email (${providerEmail}) differs from account email (${userEmail})`,
+                message: `Cannot link ${provider} account: provider email (${providerEmail}) does not belong to this account`,
                 provider,
               }),
             );

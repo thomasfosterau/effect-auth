@@ -19,6 +19,7 @@
  */
 
 import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { IdentifierStore } from "./Identifier.ts";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { normalizeEmail } from "./utils.ts";
@@ -299,21 +300,22 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Accept a pending invitation. Validates that the invitation is pending,
-     * unexpired, and addressed to `userEmail`. Creates the membership and marks
+     * unexpired, and addressed to one of the user's email identifiers.
+     * Creates the membership and marks
      * the invitation accepted.
      */
     readonly acceptInvitation: (
       userId: string,
       invitationId: string,
-      userEmail: string,
     ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
 
     /**
-     * Reject a pending invitation addressed to `userEmail`.
+     * Reject a pending invitation addressed to one of the user's email
+     * identifiers.
      */
     readonly rejectInvitation: (
+      userId: string,
       invitationId: string,
-      userEmail: string,
     ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
 
     /**
@@ -404,7 +406,11 @@ export class OrganizationService extends Context.Service<
  */
 export const make = (
   config: OrganizationConfig = {},
-): Effect.Effect<typeof OrganizationService.Service, never, OrganizationStore | Crypto.Crypto> =>
+): Effect.Effect<
+  typeof OrganizationService.Service,
+  never,
+  OrganizationStore | IdentifierStore | Crypto.Crypto
+> =>
   Effect.gen(function* () {
     const allowUserToCreateOrganization = config.allowUserToCreateOrganization ?? true;
     const organizationLimit = config.organizationLimit ?? 5;
@@ -414,6 +420,7 @@ export const make = (
     const roles = config.roles ?? defaultOrganizationRoles;
 
     const store = yield* OrganizationStore;
+    const identifiers = yield* IdentifierStore;
     const crypto = yield* Crypto.Crypto;
 
     /** Generate a random identifier for organizations, members, and invitations. */
@@ -489,8 +496,12 @@ export const make = (
         return yield* store.createMember(member);
       });
 
-    /** Load a pending invitation addressed to `userEmail`, enforcing expiry. */
-    const getPendingInvitationFor = (invitationId: string, userEmail: string) =>
+    /**
+     * Load a pending invitation addressed to one of `userId`'s email
+     * identifiers, enforcing expiry. (Matching mirrors the pre-identifier
+     * behavior: the identifier does not need to be verified.)
+     */
+    const getPendingInvitationFor = (invitationId: string, userId: string) =>
       Effect.gen(function* () {
         const invitation = yield* store.getInvitation(invitationId);
         if (!invitation) {
@@ -501,7 +512,11 @@ export const make = (
             new OrganizationError({ message: "Invitation is no longer pending" }),
           );
         }
-        if (invitation.email !== normalizeEmail(userEmail)) {
+        const userIdentifiers = yield* identifiers.listByUser(userId);
+        const ownsEmail = userIdentifiers.some(
+          (id) => id.type === "email" && id.value === normalizeEmail(invitation.email),
+        );
+        if (!ownsEmail) {
           return yield* Effect.fail(
             new OrganizationError({
               message: "This invitation is addressed to a different email",
@@ -670,9 +685,8 @@ export const make = (
       acceptInvitation: Effect.fn("OrganizationService.acceptInvitation")(function* (
         userId: string,
         invitationId: string,
-        userEmail: string,
       ) {
-        const invitation = yield* getPendingInvitationFor(invitationId, userEmail);
+        const invitation = yield* getPendingInvitationFor(invitationId, userId);
 
         const existingMember = yield* store.getMember(invitation.organizationId, userId);
         if (existingMember) {
@@ -691,10 +705,10 @@ export const make = (
       }),
 
       rejectInvitation: Effect.fn("OrganizationService.rejectInvitation")(function* (
+        userId: string,
         invitationId: string,
-        userEmail: string,
       ) {
-        const invitation = yield* getPendingInvitationFor(invitationId, userEmail);
+        const invitation = yield* getPendingInvitationFor(invitationId, userId);
         return yield* store.updateInvitation({ ...invitation, status: "rejected" });
       }),
 

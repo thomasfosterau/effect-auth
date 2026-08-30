@@ -7,29 +7,38 @@ import {
   type AccountToken,
 } from "./AccountManagement.ts";
 import { EmailInUseError } from "./Errors.ts";
+import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "./Identifier.ts";
 import { UserServiceStore } from "./User.ts";
 import { SessionService } from "./session/SessionService.ts";
 import type * as Types from "./Types.ts";
 
 interface Harness {
   readonly layer: Layer.Layer<
-    AccountManagementService | AccountManagementStore | UserServiceStore | SessionService
+    | AccountManagementService
+    | AccountManagementStore
+    | UserServiceStore
+    | IdentifierStore
+    | SessionService
   >;
   readonly users: Map<string, Types.User>;
+  readonly identifiers: Map<string, Identifier>;
   readonly tokens: Map<string, AccountToken>;
   readonly revoked: string[];
   readonly changeEmails: Array<{ newEmail: string; token: string }>;
-  readonly deleteSends: Array<{ email: string; token: string }>;
+  readonly deleteSends: Array<{ email: string | null; token: string }>;
   readonly beforeDeleteCalls: string[];
-  readonly notifiedOld: Array<{ oldEmail: string; newEmail: string }>;
+  readonly notifiedOld: Array<{ oldEmail: string | null; newEmail: string }>;
 }
 
-const makeUser = (id: string, email: string): Types.User => {
+const makeUser = (id: string): Types.User => {
   const now = new Date();
   return {
     id,
-    email,
-    emailVerified: true,
     createdAt: now,
     updatedAt: now,
     attributes: {},
@@ -38,44 +47,36 @@ const makeUser = (id: string, email: string): Types.User => {
 
 const makeHarness = (): Harness => {
   const users = new Map<string, Types.User>();
-  const emailToId = new Map<string, string>();
+  const identifiers = new Map<string, Identifier>();
   const tokens = new Map<string, AccountToken>();
   const revoked: string[] = [];
   const changeEmails: Array<{ newEmail: string; token: string }> = [];
-  const deleteSends: Array<{ email: string; token: string }> = [];
+  const deleteSends: Array<{ email: string | null; token: string }> = [];
   const beforeDeleteCalls: string[] = [];
-  const notifiedOld: Array<{ oldEmail: string; newEmail: string }> = [];
+  const notifiedOld: Array<{ oldEmail: string | null; newEmail: string }> = [];
 
-  const addUser = (user: Types.User) => {
+  const addUser = (user: Types.User, email: string) => {
     users.set(user.id, user);
-    emailToId.set(user.email, user.id);
+    const identifier = makeIdentifier({
+      userId: user.id,
+      type: "email",
+      value: email,
+      verified: true,
+      verifiedAt: new Date(),
+    });
+    identifiers.set(identifier.id, identifier);
   };
-  addUser(makeUser("user-1", "alice@example.com"));
-  addUser(makeUser("user-2", "bob@example.com"));
+  addUser(makeUser("user-1"), "alice@example.com");
+  addUser(makeUser("user-2"), "bob@example.com");
 
   const userStore: typeof UserServiceStore.Service = {
     get: (userId) => Effect.sync(() => users.get(userId) ?? null),
-    getByEmail: (email) =>
-      Effect.sync(() => {
-        const id = emailToId.get(email);
-        return id === undefined ? null : (users.get(id) ?? null);
-      }),
     update: (user) =>
       Effect.sync(() => {
-        // Keep the email index consistent (email may have changed).
-        for (const [mail, id] of emailToId) if (id === user.id) emailToId.delete(mail);
         users.set(user.id, user);
-        emailToId.set(user.email, user.id);
         return user;
       }),
-    delete: (userId) =>
-      Effect.sync(() => {
-        const user = users.get(userId);
-        if (user !== undefined) {
-          emailToId.delete(user.email);
-          users.delete(userId);
-        }
-      }),
+    delete: (userId) => Effect.sync(() => void users.delete(userId)),
   };
 
   const tokenStore: typeof AccountManagementStore.Service = {
@@ -106,8 +107,8 @@ const makeHarness = (): Harness => {
   const layer = AccountManagementService.layer({
     sendChangeEmailVerification: ({ newEmail, token }) =>
       Effect.sync(() => void changeEmails.push({ newEmail, token })),
-    sendDeleteAccountVerification: ({ user, token }) =>
-      Effect.sync(() => void deleteSends.push({ email: user.email, token })),
+    sendDeleteAccountVerification: ({ email, token }) =>
+      Effect.sync(() => void deleteSends.push({ email, token })),
     beforeDelete: (user) => Effect.sync(() => void beforeDeleteCalls.push(user.id)),
     notifyEmailChanged: ({ oldEmail, newEmail }) =>
       Effect.sync(() => void notifiedOld.push({ oldEmail, newEmail })),
@@ -115,6 +116,7 @@ const makeHarness = (): Harness => {
     Layer.provideMerge(
       Layer.mergeAll(
         Layer.succeed(UserServiceStore)(userStore),
+        Layer.succeed(IdentifierStore)(memoryIdentifierStore(identifiers)),
         Layer.succeed(AccountManagementStore)(tokenStore),
         Layer.succeed(SessionService)(sessionManager),
       ),
@@ -124,6 +126,7 @@ const makeHarness = (): Harness => {
   return {
     layer,
     users,
+    identifiers,
     tokens,
     revoked,
     changeEmails,
@@ -137,7 +140,11 @@ const run = <A, E>(
   h: Harness,
   f: (
     svc: typeof AccountManagementService.Service,
-  ) => Effect.Effect<A, E, AccountManagementStore | UserServiceStore | SessionService>,
+  ) => Effect.Effect<
+    A,
+    E,
+    AccountManagementStore | UserServiceStore | IdentifierStore | SessionService
+  >,
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -156,9 +163,17 @@ describe("AccountManagement — change email", () => {
     expect(h.changeEmails[0]!.newEmail).toBe("alice-new@example.com");
 
     const { user } = await run(h, (svc) => svc.confirmEmailChange(token));
-    expect(user.email).toBe("alice-new@example.com");
-    expect(user.emailVerified).toBe(true);
-    expect(h.users.get("user-1")!.email).toBe("alice-new@example.com");
+    expect(user.id).toBe("user-1");
+    // The old email identifier is gone; the new one belongs to the user and is verified.
+    const userEmails = [...h.identifiers.values()].filter(
+      (identifier) => identifier.userId === "user-1" && identifier.type === "email",
+    );
+    expect(userEmails).toHaveLength(1);
+    expect(userEmails[0]!.value).toBe("alice-new@example.com");
+    expect(userEmails[0]!.verified).toBe(true);
+    expect(
+      [...h.identifiers.values()].some((identifier) => identifier.value === "alice@example.com"),
+    ).toBe(false);
     // Sessions revoked on email change (default).
     expect(h.revoked).toContain("user-1");
     // Old address notified.
@@ -207,6 +222,10 @@ describe("AccountManagement — delete user", () => {
     expect(h.beforeDeleteCalls).toEqual(["user-2"]);
     expect(h.revoked).toContain("user-2");
     expect(h.users.has("user-2")).toBe(false);
+    // The user's identifiers are removed too.
+    expect([...h.identifiers.values()].some((identifier) => identifier.userId === "user-2")).toBe(
+      false,
+    );
   });
 
   it("rejects a change-email token at the deletion confirm endpoint (wrong purpose)", async () => {

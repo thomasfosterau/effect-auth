@@ -17,12 +17,11 @@ const signIn = (email: string): SignInInput => ({ email, password: "pw" });
 const authResult = (email: string): AuthResult => ({
   user: {
     id: "u1",
-    email,
-    emailVerified: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     attributes: {},
   } satisfies Types.User,
+  identifier: { type: "email", value: email },
 });
 
 interface Harness {
@@ -152,7 +151,7 @@ describe("AccountLockoutPlugin", () => {
 
     // The tap swallows the store error; the successful sign-in result flows on.
     const result = await h.afterSignIn("user@example.com");
-    expect(result.user.email).toBe("user@example.com");
+    expect(result.identifier).toEqual({ type: "email", value: "user@example.com" });
   });
 
   it("fails closed by default when the store errors during beforeSignIn", async () => {

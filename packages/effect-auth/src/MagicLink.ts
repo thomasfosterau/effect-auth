@@ -10,6 +10,8 @@
  */
 import { Context, Crypto, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
+import { claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
+import { UserStore } from "./session/UserStore.ts";
 import { type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./session/SessionService.ts";
@@ -28,11 +30,10 @@ export interface MagicLinkToken {
 }
 
 /**
- * Input for creating a user during magic link verification
+ * Profile fields for a user created during magic link verification. The email
+ * itself is recorded as a verified `Identifier` by the service.
  */
 export interface MagicLinkCreateUserInput {
-  readonly email: string;
-  readonly emailVerified: boolean;
   readonly name?: string;
 }
 
@@ -60,7 +61,6 @@ export class MagicLinkStore extends Context.Service<
 export class MagicLinkUserStore extends Context.Service<
   MagicLinkUserStore,
   {
-    readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
     readonly createUser: (
       input: MagicLinkCreateUserInput,
     ) => Effect.Effect<Types.User, Errors.AuthError>;
@@ -162,7 +162,7 @@ export const make = (
 ): Effect.Effect<
   typeof MagicLinkService.Service,
   never,
-  MagicLinkStore | MagicLinkUserStore | SessionService | Crypto.Crypto
+  MagicLinkStore | MagicLinkUserStore | IdentifierStore | UserStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
@@ -170,6 +170,8 @@ export const make = (
 
     const store = yield* MagicLinkStore;
     const userStore = yield* MagicLinkUserStore;
+    const identifiers = yield* IdentifierStore;
+    const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const crypto = yield* Crypto.Crypto;
 
@@ -185,8 +187,8 @@ export const make = (
         // succeed silently without sending anything. When sign-up is enabled
         // the link is always sent (the user is created at verify time).
         if (disableSignUp) {
-          const user = yield* userStore.getUserByEmail(email);
-          if (!user) {
+          const identifier = yield* identifiers.getByValue("email", email);
+          if (!identifier) {
             return;
           }
         }
@@ -268,7 +270,15 @@ export const make = (
         // Consume the token (one-time use)
         yield* store.delete(tokenHash);
 
-        let user = yield* userStore.getUserByEmail(magicLink.email);
+        const identifier = yield* identifiers.getByValue("email", magicLink.email);
+        let user = identifier === null ? null : yield* users.get(identifier.userId);
+        if (identifier !== null && user === null) {
+          // Dangling identifier (owner row is gone) — fail rather than
+          // silently creating a second claimant.
+          return yield* Effect.fail(
+            new Errors.MagicLinkError({ message: "Account is unavailable" }),
+          );
+        }
         if (!user) {
           if (disableSignUp) {
             return yield* Effect.fail(
@@ -279,10 +289,24 @@ export const make = (
           }
 
           // A verified magic link proves ownership of the email.
-          user = yield* userStore.createUser({
-            email: magicLink.email,
-            emailVerified: true,
-          });
+          user = yield* userStore.createUser({});
+          yield* claimIdentifier(
+            identifiers,
+            makeIdentifier({
+              userId: user.id,
+              type: "email",
+              value: magicLink.email,
+              verified: true,
+              verifiedAt: new Date(),
+            }),
+          ).pipe(
+            Effect.catchTag("IdentifierTakenError", () =>
+              Effect.fail(new Errors.MagicLinkError({ message: "This email is already in use" })),
+            ),
+          );
+        } else if (identifier !== null && !identifier.verified) {
+          // The link proves ownership — promote the identifier to verified.
+          yield* identifiers.setVerified(identifier.id, new Date());
         }
 
         const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);

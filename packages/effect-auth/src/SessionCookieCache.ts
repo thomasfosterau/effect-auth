@@ -75,8 +75,6 @@ const SerializedSession = Schema.Struct({
 
 const SerializedUser = Schema.Struct({
   id: Schema.String,
-  email: Schema.String,
-  emailVerified: Schema.Boolean,
   name: Schema.optional(Schema.String),
   image: Schema.optional(Schema.String),
   createdAt: Schema.Number,
@@ -169,8 +167,6 @@ export const decodeSessionCacheCookie = (
   const su = payload.user;
   const user: Types.User = {
     id: su.id,
-    email: su.email,
-    emailVerified: su.emailVerified,
     name: su.name,
     image: su.image,
     createdAt: new Date(su.createdAt),

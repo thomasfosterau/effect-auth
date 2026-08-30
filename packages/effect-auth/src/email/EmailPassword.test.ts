@@ -3,8 +3,14 @@ import { Context, Crypto, Effect, Layer } from "effect";
 import { Hooks, makePlugin, composePlugins } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import * as Errors from "../Errors.ts";
-import { EmailPasswordStore } from "./EmailPassword.ts";
+import { EmailPasswordStore, type CreateUserInput } from "./EmailPassword.ts";
 import * as EmailPassword from "./EmailPassword.ts";
+import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "../Identifier.ts";
 import { make, SessionService } from "../session/SessionService.ts";
 import { SessionStore } from "../session/SessionStore.ts";
 import { UserStore } from "../session/UserStore.ts";
@@ -14,9 +20,18 @@ import * as Password from "../password/Password.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 
 const users = new Map<string, User>();
-const usersByEmail = new Map<string, string>();
+const identifierRecords = new Map<string, Identifier>();
 const passwordHashes = new Map<string, string>();
 const sessions = new Map<string, Session>();
+
+const identifierStore = memoryIdentifierStore(identifierRecords);
+
+/** Seed an email identifier for a user (the old `email`/`emailVerified` fields). */
+const seedEmailIdentifier = (userId: string, email: string, verified: boolean): Identifier => {
+  const identifier = makeIdentifier({ userId, type: "email", value: email, verified });
+  identifierRecords.set(identifier.id, identifier);
+  return identifier;
+};
 
 const sessionStore = {
   create: (session: Session) =>
@@ -58,34 +73,18 @@ const userStore = {
 };
 
 const emailPasswordStore = {
-  getUserByEmail: (email: string) =>
-    Effect.sync(() => {
-      const userId = usersByEmail.get(email);
-      return userId ? (users.get(userId) ?? null) : null;
-    }),
-
-  createUser: ({
-    email,
-    name,
-    attributes,
-  }: {
-    email: string;
-    name?: string;
-    attributes?: Record<string, unknown>;
-  }) =>
+  createUser: ({ name, image, attributes }: CreateUserInput) =>
     Effect.sync(() => {
       const id = `user-${users.size + 1}`;
       const user: User = {
         id,
-        email,
-        emailVerified: false,
         ...(name !== undefined && { name }),
+        ...(image !== undefined && { image }),
         createdAt: new Date(),
         updatedAt: new Date(),
         attributes: attributes ?? {},
       };
       users.set(id, user);
-      usersByEmail.set(email, id);
       return user;
     }),
 
@@ -126,7 +125,10 @@ const makeTestContext = async () => {
             Context.make(EmailPasswordStore, emailPasswordStore),
             Context.make(PasswordHasher, Password.pbkdf2Hasher()),
           ),
-          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+          Context.merge(
+            Context.make(IdentifierStore, identifierStore),
+            Context.make(Crypto.Crypto, PlatformCrypto.instance),
+          ),
         ),
       ),
     ),
@@ -136,7 +138,7 @@ const makeTestContext = async () => {
 describe("EmailPasswordService", () => {
   beforeEach(() => {
     users.clear();
-    usersByEmail.clear();
+    identifierRecords.clear();
     passwordHashes.clear();
     sessions.clear();
   });
@@ -153,8 +155,7 @@ describe("EmailPasswordService", () => {
         name: "Tester",
       });
 
-      expect(result.user.email).toBe("test@example.com");
-      expect(result.user.emailVerified).toBe(false);
+      expect(result.identifier).toEqual({ type: "email", value: "test@example.com" });
       expect(result.session).toBeDefined();
 
       return result;
@@ -165,6 +166,13 @@ describe("EmailPasswordService", () => {
     );
 
     expect(result.session?.userId).toBe(result.user.id);
+
+    // The claimed email identifier belongs to the new user and starts unverified.
+    const stored = Array.from(identifierRecords.values()).find(
+      (identifier) => identifier.type === "email" && identifier.value === "test@example.com",
+    );
+    expect(stored?.userId).toBe(result.user.id);
+    expect(stored?.verified).toBe(false);
   });
 
   it("should sign in an existing user", async () => {
@@ -175,15 +183,13 @@ describe("EmailPasswordService", () => {
 
     const user: User = {
       id: "user-existing",
-      email: "existing@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
 
     users.set(user.id, user);
-    usersByEmail.set("existing@example.com", user.id);
+    seedEmailIdentifier(user.id, "existing@example.com", true);
     passwordHashes.set(user.id, hashResult.hash);
 
     const program = Effect.gen(function* () {
@@ -212,15 +218,13 @@ describe("EmailPasswordService", () => {
 
     const user: User = {
       id: "user-invalid-cred",
-      email: "invalid@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
 
     users.set(user.id, user);
-    usersByEmail.set("invalid@example.com", user.id);
+    seedEmailIdentifier(user.id, "invalid@example.com", true);
     passwordHashes.set(user.id, hashResult.hash);
 
     const program = Effect.gen(function* () {
@@ -251,15 +255,13 @@ describe("EmailPasswordService", () => {
 
     const user: User = {
       id: "user-unverified",
-      email: "unverified@example.com",
-      emailVerified: false,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
 
     users.set(user.id, user);
-    usersByEmail.set("unverified@example.com", user.id);
+    seedEmailIdentifier(user.id, "unverified@example.com", false);
     passwordHashes.set(user.id, hashResult.hash);
 
     const program = Effect.gen(function* () {
@@ -288,7 +290,7 @@ describe("EmailPasswordService", () => {
 describe("EmailPasswordService constant-work sign-in", () => {
   beforeEach(() => {
     users.clear();
-    usersByEmail.clear();
+    identifierRecords.clear();
     passwordHashes.clear();
     sessions.clear();
   });
@@ -325,7 +327,13 @@ describe("EmailPasswordService constant-work sign-in", () => {
           Context.make(EmailPasswordStore, emailPasswordStore),
           Context.make(PasswordHasher, spyHasher),
         ),
-        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        Context.merge(
+          Context.merge(
+            Context.make(UserStore, userStore),
+            Context.make(IdentifierStore, identifierStore),
+          ),
+          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        ),
       ),
     );
 
@@ -358,14 +366,12 @@ describe("EmailPasswordService constant-work sign-in", () => {
 
     const user: User = {
       id: "user-nohash",
-      email: "nohash@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
     users.set(user.id, user);
-    usersByEmail.set(user.email, user.id);
+    seedEmailIdentifier(user.id, "nohash@example.com", true);
     // Intentionally no password hash stored for this user.
 
     const sessionManager = await Effect.runPromise(
@@ -388,7 +394,13 @@ describe("EmailPasswordService constant-work sign-in", () => {
           Context.make(EmailPasswordStore, emailPasswordStore),
           Context.make(PasswordHasher, spyHasher),
         ),
-        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        Context.merge(
+          Context.merge(
+            Context.make(UserStore, userStore),
+            Context.make(IdentifierStore, identifierStore),
+          ),
+          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        ),
       ),
     );
 
@@ -411,7 +423,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
 describe("EmailPasswordService second-factor gate", () => {
   beforeEach(() => {
     users.clear();
-    usersByEmail.clear();
+    identifierRecords.clear();
     passwordHashes.clear();
     sessions.clear();
   });
@@ -425,14 +437,12 @@ describe("EmailPasswordService second-factor gate", () => {
 
     const user: User = {
       id: "user-gated",
-      email: "gated@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
     users.set(user.id, user);
-    usersByEmail.set(user.email, user.id);
+    seedEmailIdentifier(user.id, "gated@example.com", true);
     passwordHashes.set(user.id, hashResult.hash);
 
     const gate = {
@@ -442,7 +452,7 @@ describe("EmailPasswordService second-factor gate", () => {
 
     const program = Effect.gen(function* () {
       const service = yield* EmailPassword.make();
-      return yield* service.signIn({ email: user.email, password: "gate-password" });
+      return yield* service.signIn({ email: "gated@example.com", password: "gate-password" });
     });
 
     const result = await Effect.runPromise(
@@ -470,14 +480,12 @@ describe("EmailPasswordService second-factor gate", () => {
 
     const user: User = {
       id: "user-ungated",
-      email: "ungated@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
     users.set(user.id, user);
-    usersByEmail.set(user.email, user.id);
+    seedEmailIdentifier(user.id, "ungated@example.com", true);
     passwordHashes.set(user.id, hashResult.hash);
 
     const gate = {
@@ -487,7 +495,7 @@ describe("EmailPasswordService second-factor gate", () => {
 
     const program = Effect.gen(function* () {
       const service = yield* EmailPassword.make();
-      return yield* service.signIn({ email: user.email, password: "no-gate-password" });
+      return yield* service.signIn({ email: "ungated@example.com", password: "no-gate-password" });
     });
 
     const result = await Effect.runPromise(
@@ -505,7 +513,7 @@ describe("EmailPasswordService second-factor gate", () => {
 describe("EmailPasswordService — migration and security hardening", () => {
   beforeEach(() => {
     users.clear();
-    usersByEmail.clear();
+    identifierRecords.clear();
     passwordHashes.clear();
     sessions.clear();
   });
@@ -536,19 +544,20 @@ describe("EmailPasswordService — migration and security hardening", () => {
     const oldHash = await makeOldPbkdf2Hash("migration-password");
     const user: User = {
       id: "user-migration",
-      email: "migration@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
     users.set(user.id, user);
-    usersByEmail.set(user.email, user.id);
+    seedEmailIdentifier(user.id, "migration@example.com", true);
     passwordHashes.set(user.id, oldHash);
 
     const program = Effect.gen(function* () {
       const service = yield* EmailPassword.make();
-      return yield* service.signIn({ email: user.email, password: "migration-password" });
+      return yield* service.signIn({
+        email: "migration@example.com",
+        password: "migration-password",
+      });
     });
 
     // Use the current PBKDF2 hasher — it detects the outdated hash via needsRehash.
@@ -571,14 +580,12 @@ describe("EmailPasswordService — migration and security hardening", () => {
     const oldHash = await makeOldPbkdf2Hash("switch-password");
     const user: User = {
       id: "user-switch",
-      email: "switch@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
     users.set(user.id, user);
-    usersByEmail.set(user.email, user.id);
+    seedEmailIdentifier(user.id, "switch@example.com", true);
     passwordHashes.set(user.id, oldHash);
 
     const scryptHasher = Password.scryptHasher({ cost: 16384 });
@@ -586,7 +593,7 @@ describe("EmailPasswordService — migration and security hardening", () => {
 
     const program = Effect.gen(function* () {
       const service = yield* EmailPassword.make();
-      return yield* service.signIn({ email: user.email, password: "switch-password" });
+      return yield* service.signIn({ email: "switch@example.com", password: "switch-password" });
     });
 
     // testContext has PBKDF2 as PasswordHasher; override with scrypt + add verifier.
@@ -613,20 +620,20 @@ describe("EmailPasswordService — migration and security hardening", () => {
 
     const user: User = {
       id: "user-malformed",
-      email: "malformed@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
     users.set(user.id, user);
-    usersByEmail.set(user.email, user.id);
+    seedEmailIdentifier(user.id, "malformed@example.com", true);
     // Malformed hash: non-numeric iteration count — would previously cause a RangeError defect.
     passwordHashes.set(user.id, "pbkdf2-sha256$notanumber$aabbcc$ddeeff");
 
     const program = Effect.gen(function* () {
       const service = yield* EmailPassword.make();
-      return yield* Effect.result(service.signIn({ email: user.email, password: "any-password" }));
+      return yield* Effect.result(
+        service.signIn({ email: "malformed@example.com", password: "any-password" }),
+      );
     });
 
     const result = await Effect.runPromise(
@@ -646,21 +653,19 @@ describe("EmailPasswordService — migration and security hardening", () => {
 
     const user: User = {
       id: "user-long-pw",
-      email: "longpw@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
     users.set(user.id, user);
-    usersByEmail.set(user.email, user.id);
+    seedEmailIdentifier(user.id, "longpw@example.com", true);
     passwordHashes.set(user.id, hashResult.hash);
 
     const program = Effect.gen(function* () {
       const service = yield* EmailPassword.make();
       return yield* Effect.result(
         service.signIn({
-          email: user.email,
+          email: "longpw@example.com",
           // 2000 'a' chars — well over MAX_PASSWORD_BYTES (1024)
           password: "a".repeat(2000),
         }),
@@ -681,9 +686,11 @@ describe("EmailPasswordService — migration and security hardening", () => {
 describe("EmailPasswordService - dangling session protection", () => {
   // Shared in-memory stores for these tests.
   const localUsers = new Map<string, User>();
-  const localUsersByEmail = new Map<string, string>();
+  const localIdentifierRecords = new Map<string, Identifier>();
   const localPasswordHashes = new Map<string, string>();
   const localSessions = new Map<string, Session>();
+
+  const localIdentifierStore = memoryIdentifierStore(localIdentifierRecords);
 
   const localSessionStore = {
     create: (session: Session) =>
@@ -717,31 +724,17 @@ describe("EmailPasswordService - dangling session protection", () => {
   };
 
   const localEmailPasswordStore = {
-    getUserByEmail: (email: string) =>
-      Effect.sync(() => {
-        const id = localUsersByEmail.get(email);
-        return id ? (localUsers.get(id) ?? null) : null;
-      }),
-    createUser: ({
-      email,
-      attributes,
-    }: {
-      email: string;
-      name?: string;
-      attributes?: Record<string, unknown>;
-    }) =>
+    createUser: ({ name, attributes }: CreateUserInput) =>
       Effect.sync(() => {
         const id = `user-${localUsers.size + 1}`;
         const user: User = {
           id,
-          email,
-          emailVerified: false,
+          ...(name !== undefined && { name }),
           createdAt: new Date(),
           updatedAt: new Date(),
           attributes: attributes ?? {},
         };
         localUsers.set(id, user);
-        localUsersByEmail.set(email, id);
         return user;
       }),
     getPasswordHash: (userId: string) => Effect.sync(() => localPasswordHashes.get(userId) ?? null),
@@ -773,14 +766,20 @@ describe("EmailPasswordService - dangling session protection", () => {
           Context.make(EmailPasswordStore, localEmailPasswordStore),
           Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
-        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        Context.merge(
+          Context.merge(
+            Context.make(UserStore, localUserStore),
+            Context.make(IdentifierStore, localIdentifierStore),
+          ),
+          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        ),
       ),
     );
   };
 
   beforeEach(() => {
     localUsers.clear();
-    localUsersByEmail.clear();
+    localIdentifierRecords.clear();
     localPasswordHashes.clear();
     localSessions.clear();
   });
@@ -816,7 +815,7 @@ describe("EmailPasswordService - dangling session protection", () => {
 
     // signIn must succeed (no error propagated) even though the hook failed.
     expect(signInResult.session).toBeDefined();
-    expect(signInResult.user.email).toBe("alice@example.com");
+    expect(signInResult.identifier).toEqual({ type: "email", value: "alice@example.com" });
 
     // The session is live in the store — no dangling session.
     expect(signInResult.session && localSessions.has(hashToken(signInResult.session.id))).toBe(
@@ -843,7 +842,7 @@ describe("EmailPasswordService - dangling session protection", () => {
 
     // signUp must succeed (no error propagated) even though the hook failed.
     expect(signUpResult.session).toBeDefined();
-    expect(signUpResult.user.email).toBe("bob@example.com");
+    expect(signUpResult.identifier).toEqual({ type: "email", value: "bob@example.com" });
 
     // The session is live in the store — no dangling session.
     expect(signUpResult.session && localSessions.has(hashToken(signUpResult.session.id))).toBe(

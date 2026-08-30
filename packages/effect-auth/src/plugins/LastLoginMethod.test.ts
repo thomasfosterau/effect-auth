@@ -4,6 +4,7 @@ import { composePlugins, Hooks } from "../Hooks.ts";
 import * as LastLoginMethod from "./LastLoginMethod.ts";
 import * as EmailPassword from "../email/EmailPassword.ts";
 import { EmailPasswordStore } from "../email/EmailPassword.ts";
+import { IdentifierStore, memoryIdentifierStore, type Identifier } from "../Identifier.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as Password from "../password/Password.ts";
 import { SessionService } from "../session/SessionService.ts";
@@ -16,30 +17,23 @@ const hasher = Password.scryptHasher({ cost: 16384 });
 
 const makeFixture = () => {
   const usersById = new Map<string, Types.User>();
-  const userIdByEmail = new Map<string, string>();
+  const identifierRecords = new Map<string, Identifier>();
   const passwordHashes = new Map<string, string>();
   const sessions = new Map<string, Types.Session>();
   let userSeq = 0;
 
   const emailPasswordStore: typeof EmailPasswordStore.Service = {
-    getUserByEmail: (email) =>
-      Effect.sync(() => {
-        const id = userIdByEmail.get(email);
-        return id === undefined ? null : (usersById.get(id) ?? null);
-      }),
     createUser: (input) =>
       Effect.sync(() => {
         const now = new Date();
         const user: Types.User = {
           id: `user-${++userSeq}`,
-          email: input.email,
-          emailVerified: false,
+          ...(input.name !== undefined && { name: input.name }),
           createdAt: now,
           updatedAt: now,
-          attributes: {},
+          attributes: input.attributes ?? {},
         };
         usersById.set(user.id, user);
-        userIdByEmail.set(user.email, user.id);
         return user;
       }),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
@@ -62,6 +56,7 @@ const makeFixture = () => {
     Layer.succeed(SessionStore)(sessionStore),
     Layer.succeed(UserStore)(userStore),
     Layer.succeed(EmailPasswordStore)(emailPasswordStore),
+    Layer.succeed(IdentifierStore)(memoryIdentifierStore(identifierRecords)),
     Layer.succeed(PasswordHasher)(hasher),
   );
   // SessionService.layer needs SessionStore | UserStore | Hooks at construction
@@ -135,8 +130,6 @@ describe("LastLoginMethodPlugin", () => {
     const now = new Date();
     const user: Types.User = {
       id: "u1",
-      email: "a@b.c",
-      emailVerified: true,
       createdAt: now,
       updatedAt: now,
       attributes: {},

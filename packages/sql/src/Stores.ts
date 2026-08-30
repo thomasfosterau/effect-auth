@@ -98,8 +98,6 @@ const makeTx =
 
 interface UserRow {
   readonly id: string;
-  readonly email: string;
-  readonly email_verified: number;
   readonly name: string | null;
   readonly image: string | null;
   readonly password_hash: string | null;
@@ -112,8 +110,6 @@ const rowToUser = (row: UserRow, label: string): Effect.Effect<Auth.User, Auth.A
   decodeAttributes(row.attributes, label).pipe(
     Effect.map((attributes) => ({
       id: row.id,
-      email: row.email,
-      emailVerified: row.email_verified !== 0,
       createdAt: msToDate(row.created_at),
       updatedAt: msToDate(row.updated_at),
       attributes,
@@ -126,11 +122,6 @@ const rowToUser = (row: UserRow, label: string): Effect.Effect<Auth.User, Auth.A
 const userQueries = (sql: SqlClient.SqlClient) => {
   const getById = (userId: string, label: string) =>
     firstRow(label, sql<UserRow>`SELECT * FROM auth_users WHERE id = ${userId}`);
-
-  const getByEmail = (email: string, label: string) =>
-    firstRow(label, sql<UserRow>`SELECT * FROM auth_users WHERE email = ${email}`).pipe(
-      Effect.flatMap((row) => (row ? rowToUser(row, label) : Effect.succeed(null))),
-    );
 
   const findById = (userId: string, label: string) =>
     getById(userId, label).pipe(
@@ -150,14 +141,12 @@ const userQueries = (sql: SqlClient.SqlClient) => {
   const insert = (user: Auth.User, label: string) =>
     asVoid(
       label,
-      sql`INSERT INTO auth_users (id, email, email_verified, name, image, password_hash, attributes, created_at, updated_at)
-          VALUES (${user.id}, ${user.email}, ${user.emailVerified ? 1 : 0}, ${user.name ?? null}, ${user.image ?? null}, ${null}, ${encodeAttributes(user.attributes)}, ${dateToMs(user.createdAt)}, ${dateToMs(user.updatedAt)})`,
+      sql`INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)
+          VALUES (${user.id}, ${user.name ?? null}, ${user.image ?? null}, ${null}, ${encodeAttributes(user.attributes)}, ${dateToMs(user.createdAt)}, ${dateToMs(user.updatedAt)})`,
     );
 
   const create = (
     input: {
-      readonly email: string;
-      readonly emailVerified?: boolean;
       readonly name?: string;
       readonly image?: string;
       readonly attributes?: Record<string, unknown>;
@@ -168,8 +157,6 @@ const userQueries = (sql: SqlClient.SqlClient) => {
       const now = new Date();
       const user: Auth.User = {
         id: randomUUID(),
-        email: input.email,
-        emailVerified: input.emailVerified ?? false,
         createdAt: now,
         updatedAt: now,
         attributes: input.attributes ?? {},
@@ -186,7 +173,7 @@ const userQueries = (sql: SqlClient.SqlClient) => {
   const hasPassword = (userId: string, label: string) =>
     getById(userId, label).pipe(Effect.map((row) => row?.password_hash != null));
 
-  return { getById, getByEmail, findById, requireById, create, setPasswordHash, hasPassword };
+  return { getById, findById, requireById, create, setPasswordHash, hasPassword };
 };
 
 // ---------------------------------------------------------------------------
@@ -287,11 +274,10 @@ export const makeUserServiceStore: Effect.Effect<
   const users = userQueries(sql);
   return {
     get: (userId) => users.findById(userId, "userService.get"),
-    getByEmail: (email) => users.getByEmail(email, "userService.getByEmail"),
     update: (user) =>
       asVoid(
         "userService.update",
-        sql`UPDATE auth_users SET email = ${user.email}, email_verified = ${user.emailVerified ? 1 : 0}, name = ${user.name ?? null}, image = ${user.image ?? null}, attributes = ${encodeAttributes(user.attributes)}, updated_at = ${dateToMs(user.updatedAt)} WHERE id = ${user.id}`,
+        sql`UPDATE auth_users SET name = ${user.name ?? null}, image = ${user.image ?? null}, attributes = ${encodeAttributes(user.attributes)}, updated_at = ${dateToMs(user.updatedAt)} WHERE id = ${user.id}`,
       ).pipe(Effect.as(user)),
     delete: (userId) =>
       asVoid("userService.delete", sql`DELETE FROM auth_users WHERE id = ${userId}`),
@@ -310,7 +296,6 @@ export const makeEmailPasswordStore: Effect.Effect<
   const sql = yield* SqlClient.SqlClient;
   const users = userQueries(sql);
   return {
-    getUserByEmail: (email) => users.getByEmail(email, "emailPassword.getUserByEmail"),
     createUser: (input) => users.create(input, "emailPassword.createUser"),
     getPasswordHash: (userId) =>
       users
@@ -329,7 +314,6 @@ export const makePasswordResetUserStore: Effect.Effect<
   const sql = yield* SqlClient.SqlClient;
   const users = userQueries(sql);
   return {
-    getUserByEmail: (email) => users.getByEmail(email, "passwordResetUser.getUserByEmail"),
     setPasswordHash: (userId, hash) =>
       users.setPasswordHash(userId, hash, "passwordResetUser.setPasswordHash"),
   } satisfies typeof Auth.Password.PasswordResetUserStore.Service;
@@ -772,7 +756,6 @@ export const makeOAuthUserStore: Effect.Effect<
   const users = userQueries(sql);
   return {
     getUser: (userId) => users.requireById(userId, "oauthUser.getUser"),
-    getUserByEmail: (email) => users.getByEmail(email, "oauthUser.getUserByEmail"),
     createUser: (input) => users.create(input, "oauthUser.createUser"),
     // Supports `updateUserInfoOnLink`: refresh profile fields from the provider.
     updateUser: (userId, update) =>
@@ -900,7 +883,6 @@ export const makeMagicLinkUserStore: Effect.Effect<
   const sql = yield* SqlClient.SqlClient;
   const users = userQueries(sql);
   return {
-    getUserByEmail: (email) => users.getByEmail(email, "magicLinkUser.getUserByEmail"),
     createUser: (input) => users.create(input, "magicLinkUser.createUser"),
   } satisfies typeof Auth.MagicLinkUserStore.Service;
 });
@@ -995,7 +977,6 @@ export const makeEmailOTPUserStore: Effect.Effect<
   const sql = yield* SqlClient.SqlClient;
   const users = userQueries(sql);
   return {
-    getUserByEmail: (email) => users.getByEmail(email, "emailOtpUser.getUserByEmail"),
     createUser: (input) => users.create(input, "emailOtpUser.createUser"),
   } satisfies typeof Auth.Email.EmailOTPUserStore.Service;
 });

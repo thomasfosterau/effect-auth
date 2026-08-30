@@ -73,7 +73,6 @@ export {
 } from "./MagicLink.ts";
 export {
   UsernameError,
-  UsernameStore,
   type UsernameConfig,
   type UsernameSignUpInput,
   type UsernameSignInInput,

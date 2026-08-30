@@ -31,8 +31,6 @@ import * as Auth from "@thomasfosterau/effect-auth";
 export const schemaStatements: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS auth_users (
     id TEXT PRIMARY KEY,
-    email TEXT NOT NULL UNIQUE,
-    email_verified INTEGER NOT NULL DEFAULT 0,
     name TEXT,
     image TEXT,
     password_hash TEXT,
@@ -40,7 +38,6 @@ export const schemaStatements: readonly string[] = [
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL
   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS auth_users_email_idx ON auth_users (email)`,
   `CREATE TABLE IF NOT EXISTS auth_sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,

@@ -87,6 +87,16 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: HttpApiSchema.NoContent,
     error: [S.UnauthorizedError, S.BadRequestError, S.InternalError],
   }),
+  // Login-handle identifiers (email/username/phone) of the signed-in user.
+  HttpApiEndpoint.get("listIdentifiers", "/identifiers", {
+    success: S.IdentifierListView,
+    error: [S.UnauthorizedError, S.InternalError],
+  }),
+  HttpApiEndpoint.delete("deleteIdentifier", "/identifiers/:identifierId", {
+    params: { identifierId: Schema.String },
+    success: HttpApiSchema.NoContent,
+    error: [S.UnauthorizedError, S.BadRequestError, S.InternalError],
+  }),
   HttpApiEndpoint.post("revokeOtherSessions", "/sessions/revoke-others", {
     success: HttpApiSchema.NoContent,
     error: [S.UnauthorizedError, S.InternalError],

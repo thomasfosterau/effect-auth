@@ -8,6 +8,12 @@ import {
   PasswordResetUserStore,
 } from "./PasswordReset.ts";
 import * as PasswordReset from "./PasswordReset.ts";
+import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "../Identifier.ts";
 import { make, SessionService } from "../session/SessionService.ts";
 import { SessionStore } from "../session/SessionStore.ts";
 import { UserStore } from "../session/UserStore.ts";
@@ -17,11 +23,20 @@ import { hashToken } from "../TokenHash.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 
 const users = new Map<string, User>();
-const usersByEmail = new Map<string, string>();
+const identifierRecords = new Map<string, Identifier>();
 const passwordHashes = new Map<string, string>();
 const resetTokens = new Map<string, PasswordResetToken>();
 const sessions = new Map<string, Session>();
 const sentEmails: Array<{ email: string; token: string }> = [];
+
+const identifierStore = memoryIdentifierStore(identifierRecords);
+
+/** Seed an email identifier for a user (the old `email`/`emailVerified` fields). */
+const seedEmailIdentifier = (userId: string, email: string, verified: boolean): Identifier => {
+  const identifier = makeIdentifier({ userId, type: "email", value: email, verified });
+  identifierRecords.set(identifier.id, identifier);
+  return identifier;
+};
 
 const sessionStore = {
   create: (session: Session) =>
@@ -63,12 +78,6 @@ const userStore = {
 };
 
 const passwordResetUserStore = {
-  getUserByEmail: (email: string) =>
-    Effect.sync(() => {
-      const userId = usersByEmail.get(email);
-      return userId ? (users.get(userId) ?? null) : null;
-    }),
-
   setPasswordHash: (userId: string, hash: string) =>
     Effect.sync(() => {
       passwordHashes.set(userId, hash);
@@ -130,7 +139,10 @@ const makeTestContext = async () => {
               Context.make(PasswordResetUserStore, passwordResetUserStore),
               Context.make(PasswordHasher, Password.pbkdf2Hasher()),
             ),
-            Context.make(Crypto.Crypto, PlatformCrypto.instance),
+            Context.merge(
+              Context.make(IdentifierStore, identifierStore),
+              Context.make(Crypto.Crypto, PlatformCrypto.instance),
+            ),
           ),
         ),
       ),
@@ -141,7 +153,7 @@ const makeTestContext = async () => {
 describe("PasswordResetService", () => {
   beforeEach(() => {
     users.clear();
-    usersByEmail.clear();
+    identifierRecords.clear();
     passwordHashes.clear();
     resetTokens.clear();
     sessions.clear();
@@ -153,14 +165,12 @@ describe("PasswordResetService", () => {
 
     const user: User = {
       id: "user-reset-1",
-      email: "reset@example.com",
-      emailVerified: false,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
     users.set(user.id, user);
-    usersByEmail.set("reset@example.com", user.id);
+    seedEmailIdentifier(user.id, "reset@example.com", false);
 
     const program = Effect.gen(function* () {
       const service = yield* PasswordReset.make({
@@ -209,15 +219,13 @@ describe("PasswordResetService", () => {
 
     const user: User = {
       id: "user-reset-2",
-      email: "session-reset@example.com",
-      emailVerified: false,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
 
     users.set(user.id, user);
-    usersByEmail.set("session-reset@example.com", user.id);
+    seedEmailIdentifier(user.id, "session-reset@example.com", false);
     passwordHashes.set(user.id, oldHash.hash);
 
     // Seed with the hash as key (the service looks up by hash).
@@ -269,15 +277,13 @@ describe("PasswordResetService", () => {
 
     const user: User = {
       id: "user-reset-3",
-      email: "session-keep@example.com",
-      emailVerified: false,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
 
     users.set(user.id, user);
-    usersByEmail.set("session-keep@example.com", user.id);
+    seedEmailIdentifier(user.id, "session-keep@example.com", false);
     passwordHashes.set(user.id, oldHash.hash);
 
     const resetToken: PasswordResetToken = {

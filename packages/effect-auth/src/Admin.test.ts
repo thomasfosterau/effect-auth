@@ -12,7 +12,12 @@ import {
 } from "./Admin.ts";
 import * as Admin from "./Admin.ts";
 import { Hooks } from "./Hooks.ts";
-import { IdentifierStore, type Identifier } from "./Identifier.ts";
+import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import { make, SessionService } from "./session/SessionService.ts";
 import { SessionStore } from "./session/SessionStore.ts";
@@ -70,9 +75,6 @@ const sessionUserStore = {
 const userServiceStore = {
   get: getUser,
 
-  getByEmail: (email: string) =>
-    Effect.sync(() => Array.from(users.values()).find((user) => user.email === email) ?? null),
-
   update: (user: User) =>
     Effect.sync(() => {
       users.set(user.id, user);
@@ -85,30 +87,30 @@ const userServiceStore = {
     }),
 };
 
+/** Earliest email identifier value for a user, mirroring how a SQL store
+ * would resolve the email-of-record from its identifier records. */
+const emailOf = (userId: string): string =>
+  Array.from(identifiers.values())
+    .filter((identifier) => identifier.userId === userId && identifier.type === "email")
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0]?.value ?? "";
+
 const adminUserStore = {
   listUsers: (query: ListUsersQuery) =>
     Effect.sync(() => {
       const search = query.searchEmail?.toLowerCase();
       const matching = Array.from(users.values())
-        .filter((user) => (search ? user.email.toLowerCase().includes(search) : true))
-        .sort((a, b) => a.email.localeCompare(b.email));
+        .filter((user) => (search ? emailOf(user.id).toLowerCase().includes(search) : true))
+        .sort((a, b) => emailOf(a.id).localeCompare(emailOf(b.id)));
       const offset = query.offset ?? 0;
       const limit = query.limit ?? matching.length;
       return { users: matching.slice(offset, offset + limit), total: matching.length };
     }),
 
-  createUser: (input: {
-    email: string;
-    name?: string;
-    image?: string;
-    attributes?: Record<string, unknown>;
-  }) =>
+  createUser: (input: { name?: string; image?: string; attributes?: Record<string, unknown> }) =>
     Effect.sync(() => {
       const id = `user-${users.size + 1}`;
       const user: User = {
         id,
-        email: input.email,
-        emailVerified: false,
         name: input.name,
         image: input.image,
         createdAt: new Date(),
@@ -125,47 +127,7 @@ const adminUserStore = {
     }),
 };
 
-const identifierStore = {
-  getByValue: (type: string, value: string) =>
-    Effect.sync(() => {
-      return (
-        Array.from(identifiers.values()).find((id) => id.type === type && id.value === value) ??
-        null
-      );
-    }),
-
-  listByUser: (userId: string) =>
-    Effect.sync(() => Array.from(identifiers.values()).filter((id) => id.userId === userId)),
-
-  create: (identifier: Identifier) =>
-    Effect.sync(() => {
-      identifiers.set(identifier.id, identifier);
-      return identifier;
-    }),
-
-  setVerified: (id: string, verifiedAt: Date) =>
-    Effect.sync(() => {
-      const ident = identifiers.get(id);
-      if (ident === undefined) return null;
-      const updated = { ...ident, verified: true, verifiedAt };
-      identifiers.set(id, updated);
-      return updated;
-    }),
-
-  delete: (id: string) =>
-    Effect.sync(() => {
-      identifiers.delete(id);
-    }),
-
-  deleteByUser: (userId: string) =>
-    Effect.sync(() => {
-      for (const [id, ident] of identifiers.entries()) {
-        if (ident.userId === userId) {
-          identifiers.delete(id);
-        }
-      }
-    }),
-};
+const identifierStore = memoryIdentifierStore(identifiers);
 
 /** Fast test-only password hasher (not cryptographically secure). */
 const testHasher: typeof PasswordHasher.Service = {
@@ -210,13 +172,19 @@ const makeTestContext = async (hooksLayer: Layer.Layer<Hooks> = Hooks.Default) =
 const seedUser = (id: string, email: string, attributes: Record<string, unknown> = {}): User => {
   const user: User = {
     id,
-    email,
-    emailVerified: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     attributes,
   };
   users.set(id, user);
+  const identifier = makeIdentifier({
+    userId: id,
+    type: "email",
+    value: email,
+    verified: true,
+    verifiedAt: new Date(),
+  });
+  identifiers.set(identifier.id, identifier);
   return user;
 };
 
@@ -525,30 +493,31 @@ describe("AdminService", () => {
         // Minimal: email only
         const minimal = yield* service.createUser(admin, { email: "alice@example.com" });
 
-        // Full: role, password, and identifier records
+        // Full: role, password, and an extra identifier record
         const full = yield* service.createUser(admin, {
           email: "bob@example.com",
+          emailVerified: true,
           name: "Bob",
           role: "moderator",
           password: "s3cr3t",
           attributes: { theme: "dark" },
-          identifiers: [
-            { type: "email", value: "bob@example.com", verified: true },
-            { type: "username", value: "bobthemod" },
-          ],
+          identifiers: [{ type: "username", value: "bobthemod" }],
         });
 
         return { minimal, full };
       }),
     );
 
-    // Minimal user
-    expect(result.minimal.email).toBe("alice@example.com");
+    // Minimal user: the primary email identifier is claimed (unverified by default)
+    const minimalEmail = Array.from(identifiers.values()).find(
+      (id) => id.type === "email" && id.value === "alice@example.com",
+    );
+    expect(minimalEmail?.userId).toBe(result.minimal.id);
+    expect(minimalEmail?.verified).toBe(false);
     expect(result.minimal.attributes["role"]).toBeUndefined();
     expect(passwordHashes.has(result.minimal.id)).toBe(false);
 
     // Full user: role merged into attributes
-    expect(result.full.email).toBe("bob@example.com");
     expect(result.full.name).toBe("Bob");
     expect(result.full.attributes["role"]).toBe("moderator");
     expect(result.full.attributes["theme"]).toBe("dark");
@@ -556,7 +525,7 @@ describe("AdminService", () => {
     // Password was hashed and stored
     expect(passwordHashes.get(result.full.id)).toBe("test$s3cr3t");
 
-    // Identifier records created
+    // Identifier records created: the primary email plus the extra username
     const idents = Array.from(identifiers.values()).filter((id) => id.userId === result.full.id);
     expect(idents).toHaveLength(2);
     const emailIdent = idents.find((id) => id.type === "email");
@@ -565,6 +534,21 @@ describe("AdminService", () => {
     expect(emailIdent?.verified).toBe(true);
     expect(usernameIdent?.value).toBe("bobthemod");
     expect(usernameIdent?.verified).toBe(false);
+  });
+
+  it("createUser: rejects an email already claimed by another user", async () => {
+    const testContext = await makeTestContext();
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    seedUser("user-1", "taken@example.com");
+
+    const result = await runService(testContext, {}, (service) =>
+      Effect.result(service.createUser(admin, { email: "taken@example.com" })),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("AdminError");
+    }
   });
 
   it("createUser: authorization failure for non-admin", async () => {
@@ -723,14 +707,18 @@ describe("AdminService", () => {
     expect(result.all.total).toBe(5);
     expect(result.all.users).toHaveLength(5);
     // Store sorts by email: admin, alice, bob, carol, dave
-    expect(result.page.users.map((user) => user.email)).toEqual([
+    expect(result.page.users.map((user) => emailOf(user.id))).toEqual([
       "alice@example.com",
       "bob@example.com",
     ]);
     expect(result.page.total).toBe(5);
     expect(result.searched.total).toBe(4);
-    expect(result.searched.users.every((user) => user.email.endsWith("example.com"))).toBe(true);
-    expect(result.searchedPage.users.map((user) => user.email)).toEqual(["carol@example.com"]);
+    expect(result.searched.users.every((user) => emailOf(user.id).endsWith("example.com"))).toBe(
+      true,
+    );
+    expect(result.searchedPage.users.map((user) => emailOf(user.id))).toEqual([
+      "carol@example.com",
+    ]);
     expect(result.searchedPage.total).toBe(4);
   });
 });

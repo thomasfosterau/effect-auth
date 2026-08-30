@@ -28,7 +28,12 @@ import {
 import { AdminUserStore, AdminService } from "../Admin.ts";
 import { APIKeyStore, type APIKey, APIKeyService } from "../APIKey.ts";
 import { JWTKeyStore, type JWTKeyPair, JWTService } from "../JWT.ts";
-import { IdentifierStore } from "../Identifier.ts";
+import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "../Identifier.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
 import type * as Types from "../Types.ts";
 
@@ -37,7 +42,7 @@ const HOUR = 60 * 60 * 1000;
 /** Build a handler wired with real org/admin/api-key/jwt services + in-memory stores. */
 const makeFixture = () => {
   const usersById = new Map<string, Types.User>();
-  const usersByEmail = new Map<string, Types.User>();
+  const identifierRecords = new Map<string, Identifier>();
   const sessions = new Map<string, Types.Session>();
   const orgs = new Map<string, Organization>();
   const members: Member[] = [];
@@ -49,14 +54,21 @@ const makeFixture = () => {
     const now = new Date();
     const user: Types.User = {
       id,
-      email,
-      emailVerified: true,
       createdAt: now,
       updatedAt: now,
       attributes,
     };
     usersById.set(id, user);
-    usersByEmail.set(email, user);
+    // The login handle lives in the identifier store (verified email).
+    const identifier = makeIdentifier({
+      userId: id,
+      type: "email",
+      value: email,
+      verified: true,
+      verifiedAt: now,
+      now,
+    });
+    identifierRecords.set(identifier.id, identifier);
     return user;
   };
 
@@ -84,21 +96,12 @@ const makeFixture = () => {
 
   const userServiceStore = {
     get: userStore.get,
-    getByEmail: (email: string) => Effect.succeed(usersByEmail.get(email) ?? null),
     update: (user: Types.User) =>
       Effect.sync(() => {
         usersById.set(user.id, user);
-        usersByEmail.set(user.email, user);
         return user;
       }),
-    delete: (userId: string) =>
-      Effect.sync(() => {
-        const u = usersById.get(userId);
-        if (u) {
-          usersById.delete(userId);
-          usersByEmail.delete(u.email);
-        }
-      }),
+    delete: (userId: string) => Effect.sync(() => void usersById.delete(userId)),
   };
 
   const sessionStore = {
@@ -165,8 +168,14 @@ const makeFixture = () => {
       Effect.sync(() => {
         let all = [...usersById.values()];
         if (query.searchEmail !== undefined) {
+          // Emails live in the identifier store now; search resolves through it.
           const needle = query.searchEmail.toLowerCase();
-          all = all.filter((u) => u.email.toLowerCase().includes(needle));
+          const matching = new Set(
+            [...identifierRecords.values()]
+              .filter((i) => i.type === "email" && i.value.toLowerCase().includes(needle))
+              .map((i) => i.userId),
+          );
+          all = all.filter((u) => matching.has(u.id));
         }
         const total = all.length;
         const offset = query.offset ?? 0;
@@ -174,20 +183,13 @@ const makeFixture = () => {
         return { users: all.slice(offset, offset + limit), total };
       }),
 
-    createUser: (input: {
-      email: string;
-      name?: string;
-      image?: string;
-      attributes?: Record<string, unknown>;
-    }) =>
+    createUser: (input: { name?: string; image?: string; attributes?: Record<string, unknown> }) =>
       Effect.sync(() => {
         const id = `created-${Date.now()}`;
-        const user = {
+        const user: Types.User = {
           id,
-          email: input.email,
-          emailVerified: false,
-          name: input.name,
-          image: input.image,
+          ...(input.name !== undefined && { name: input.name }),
+          ...(input.image !== undefined && { image: input.image }),
           createdAt: new Date(),
           updatedAt: new Date(),
           attributes: input.attributes ?? {},
@@ -244,7 +246,7 @@ const makeFixture = () => {
     Layer.succeed(APIKeyStore)(apiKeyStore),
     Layer.succeed(JWTKeyStore)(jwtKeyStore),
     Layer.succeed(RateLimitStore)(rateLimitStore),
-    Layer.succeed(IdentifierStore)(undefined as never),
+    Layer.succeed(IdentifierStore)(memoryIdentifierStore(identifierRecords)),
     Hooks.Default,
     Layer.succeed(AuthLifecycleService)(undefined as never),
     Layer.succeed(EmailPasswordStore)(undefined as never),

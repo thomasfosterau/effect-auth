@@ -4,8 +4,9 @@ import { Hooks, composePlugins, makePlugin } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as Errors from "./Errors.ts";
 import type { AuthResult, SignInInput } from "./email/EmailPassword.ts";
-import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { EmailPasswordStore, type CreateUserInput } from "./email/EmailPassword.ts";
 import * as EmailPassword from "./email/EmailPassword.ts";
+import { IdentifierStore, memoryIdentifierStore, type Identifier } from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import * as Password from "./password/Password.ts";
 import { make, SessionService } from "./session/SessionService.ts";
@@ -19,12 +20,11 @@ const signIn = (email: string): SignInInput => ({ email, password: "secret" });
 const authResult: AuthResult = {
   user: {
     id: "user-1",
-    email: "user-1@example.com",
-    emailVerified: false,
     createdAt: new Date(),
     updatedAt: new Date(),
     attributes: {},
   },
+  identifier: { type: "email", value: "user-1@example.com" },
 };
 
 /** Run a program against a Hooks stack composed of the given plugin layers. */
@@ -326,7 +326,7 @@ describe("RateLimitPlugin - dependency composition + short-circuit", () => {
 describe("Hooks - integration with EmailPasswordService", () => {
   it("a beforeSignUp transform enriches the input the service consumes", async () => {
     const users = new Map<string, User>();
-    const usersByEmail = new Map<string, string>();
+    const identifierRecords = new Map<string, Identifier>();
     const passwordHashes = new Map<string, string>();
     const sessions = new Map<string, Session>();
 
@@ -364,31 +364,17 @@ describe("Hooks - integration with EmailPasswordService", () => {
     };
 
     const emailPasswordStore = {
-      getUserByEmail: (email: string) =>
-        Effect.sync(() => {
-          const id = usersByEmail.get(email);
-          return id ? (users.get(id) ?? null) : null;
-        }),
-      createUser: ({
-        email,
-        attributes,
-      }: {
-        email: string;
-        name?: string;
-        attributes?: Record<string, unknown>;
-      }) =>
+      createUser: ({ name, attributes }: CreateUserInput) =>
         Effect.sync(() => {
           const id = `user-${users.size + 1}`;
           const user: User = {
             id,
-            email,
-            emailVerified: false,
+            ...(name !== undefined && { name }),
             createdAt: new Date(),
             updatedAt: new Date(),
             attributes: attributes ?? {},
           };
           users.set(id, user);
-          usersByEmail.set(email, id);
           return user;
         }),
       getPasswordHash: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
@@ -422,7 +408,13 @@ describe("Hooks - integration with EmailPasswordService", () => {
           Context.make(EmailPasswordStore, emailPasswordStore),
           Context.make(PasswordHasher, Password.pbkdf2Hasher()),
         ),
-        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        Context.merge(
+          Context.merge(
+            Context.make(UserStore, userStore),
+            Context.make(IdentifierStore, memoryIdentifierStore(identifierRecords)),
+          ),
+          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        ),
       ),
     );
 

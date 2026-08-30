@@ -1,5 +1,16 @@
 # Surrogate-Keyed Identity Model — Remaining Phases
 
+> **Status (2026-08-30): DONE.** Phases 2–8 all landed in the M2 identifier
+> epic. `User` is surrogate-keyed, every flow resolves handles through
+> `IdentifierStore`, sql/alchemy schemas dropped the user email columns, the
+> HTTP contract exposes derived email fields + `/identifiers` endpoints, and
+> the upgrade path is documented in `docs/migration.md` § 9 with the design
+> record in `docs/DESIGN.md` § D12. Kept for historical reference. The two
+> deviations from the plan as written: `UserView.email`/`emailVerified` were
+> kept as _derived optional_ wire fields rather than removed (client
+> compatibility), and the `WorkOS`/examples cross-cutting notes are moot —
+> neither exists in the tree today.
+
 Epic goal: make `User` require no natural key; email, username, and phone become
 first-class `Identifier`s with global uniqueness on `(type, value)`.
 

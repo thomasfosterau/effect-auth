@@ -302,10 +302,18 @@ the engine for org dynamic access control (M4), which with teams unblocks SCIM g
   on store outage); the #88/#116/#117 residuals verified as already implemented;
   `EmailSender`/`SMSSender` seams + `emailCallbacks`/`smsCallbacks` added (§2.2).
   The 14 verified-done issues are closed with evidence comments.
-- **M2 — Identifier epic (large, breaking).** Execute `docs/PLAN.md` phases 2–8 on
-  the restored SQL package: surrogate-keyed `User`, email/username/phone as
-  `Identifier`s, migrate EmailPassword/Username/PhoneOTP/OAuth-linking/Anonymous/
-  Admin/Org flows, ship as the breaking release with a migration guide.
+- **M2 — Identifier epic (done 2026-08-30; breaking, ships with M3).**
+  `docs/PLAN.md` phases 2–8 executed: `User` is surrogate-keyed
+  (`{id, name?, image?, createdAt, updatedAt, attributes}`), email/username/
+  phone are `Identifier`s behind `IdentifierStore` (`claimIdentifier` race
+  pattern, verification-as-promotion), every flow migrated
+  (EmailPassword/Username/PhoneOTP/MagicLink/EmailOTP/OAuth-linking/SSO/
+  GoogleOneTap/Anonymous/Admin/Org/AccountManagement/OIDC/MultiFactor), the
+  HTTP contract carries derived optional `email`/`emailVerified` plus
+  `GET`/`DELETE /identifiers` endpoints, sql/alchemy schemas dropped the user
+  email columns, and the upgrade path is `docs/migration.md` § 9 with design
+  record `DESIGN.md` § D12. Release note: held on the shared M2+M3 breaking
+  release (decision 7) — do not cut until M3 lands.
 - **M3 — Authorization framework (large; §2.5).** The batteries-included pillar,
   built in the layer order that keeps each stage shippable — and released **together
   with M2 as one breaking release** (decision 7):

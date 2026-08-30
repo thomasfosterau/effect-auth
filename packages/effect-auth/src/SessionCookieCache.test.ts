@@ -30,11 +30,9 @@ const makeSession = (overrides?: Partial<Types.Session>): Types.Session => ({
 
 const makeUser = (overrides?: Partial<Types.User>): Types.User => ({
   id: "user_1",
-  email: "alice@example.com",
-  emailVerified: true,
   createdAt: new Date(now - 7 * 24 * 60 * 60 * 1000),
   updatedAt: new Date(now - 60 * 1000),
-  attributes: {},
+  attributes: { plan: "pro" },
   ...overrides,
 });
 
@@ -84,7 +82,8 @@ describe("encode/decode round-trip", () => {
     const result = decodeSessionCacheCookie(cookie, cache, now, SESSION_ID);
     expect(result).not.toBeNull();
     expect(result!.session.id).toBe(SESSION_ID);
-    expect(result!.user.email).toBe("alice@example.com");
+    expect(result!.user.id).toBe("user_1");
+    expect(result!.user.attributes["plan"]).toBe("pro");
   });
 
   it("preserves Date fields", () => {

@@ -24,7 +24,12 @@
 import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { Hooks, makePlugin, type HookError } from "./Hooks.ts";
-import { IdentifierStore, type IdentifierType } from "./Identifier.ts";
+import {
+  claimIdentifier,
+  makeIdentifier,
+  IdentifierStore,
+  type IdentifierType,
+} from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./session/SessionService.ts";
@@ -47,7 +52,10 @@ export interface ListUsersQuery {
   readonly limit?: number;
   /** Number of users to skip (for pagination) */
   readonly offset?: number;
-  /** Case-insensitive substring filter on email */
+  /**
+   * Case-insensitive substring filter on the users' email identifiers.
+   * Stores implement this against their identifier records.
+   */
   readonly searchEmail?: string;
 }
 
@@ -69,8 +77,10 @@ export interface ListUsersResult {
  * Input for admin-initiated user creation.
  */
 export interface AdminCreateUserInput {
-  /** Primary email address — also written to `User.email`. */
+  /** Primary email address — recorded as an email `Identifier`. */
   readonly email: string;
+  /** Whether the primary email identifier is created verified. Default false. */
+  readonly emailVerified?: boolean;
   readonly name?: string;
   readonly image?: string;
   /** Plain-text password; hashed via `PasswordHasher` before storage. */
@@ -80,8 +90,7 @@ export interface AdminCreateUserInput {
   readonly attributes?: Record<string, unknown>;
   /**
    * Additional identifier records created via `IdentifierStore` (email,
-   * username, or phone). These complement the `User.email` field and are
-   * the foundation for multi-identifier sign-in (Phase 1 identifier model).
+   * username, or phone), beyond the primary email.
    */
   readonly identifiers?: ReadonlyArray<{
     readonly type: IdentifierType;
@@ -97,7 +106,6 @@ export class AdminUserStore extends Context.Service<
 
     /** Create a new user record. The store is responsible for assigning `id` and timestamps. */
     readonly createUser: (input: {
-      readonly email: string;
       readonly name?: string;
       readonly image?: string;
       readonly attributes?: Record<string, unknown>;
@@ -250,10 +258,9 @@ export class AdminService extends Context.Service<
     >;
 
     /**
-     * Create a new user, optionally with initial identifier records (email,
-     * username, or phone via `IdentifierStore`), a hashed initial password, and
-     * a role. The `email` field is required and populates `User.email`; any
-     * additional entries in `identifiers` are persisted via `IdentifierStore`.
+     * Create a new user with a primary email identifier, optionally with
+     * additional identifier records (email, username, or phone), a hashed
+     * initial password, and a role.
      */
     readonly createUser: (
       actor: Types.User,
@@ -480,15 +487,31 @@ export const make = (
         }
 
         const createInput: {
-          email: string;
           name?: string;
           image?: string;
           attributes?: Record<string, unknown>;
-        } = { email: input.email, attributes };
+        } = { attributes };
         if (input.name !== undefined) createInput.name = input.name;
         if (input.image !== undefined) createInput.image = input.image;
 
         const user = yield* adminStore.createUser(createInput);
+
+        // Claim the primary email identifier.
+        const emailVerified = input.emailVerified ?? false;
+        yield* claimIdentifier(
+          identifierStore,
+          makeIdentifier({
+            userId: user.id,
+            type: "email",
+            value: input.email,
+            verified: emailVerified,
+            ...(emailVerified ? { verifiedAt: new Date() } : {}),
+          }),
+        ).pipe(
+          Effect.catchTag("IdentifierTakenError", () =>
+            Effect.fail(new AdminError({ message: "This email is already in use" })),
+          ),
+        );
 
         if (input.identifiers && input.identifiers.length > 0) {
           const now = new Date();

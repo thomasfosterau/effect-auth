@@ -2,6 +2,12 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "./Identifier.ts";
+import {
   OrganizationStore,
   defaultOrganizationRoles,
   type Invitation,
@@ -15,6 +21,14 @@ import * as OrganizationModule from "./Organization.ts";
 const organizations = new Map<string, Organization>();
 const members = new Map<string, Member>();
 const invitations = new Map<string, Invitation>();
+const identifierRecords = new Map<string, Identifier>();
+
+/** Give a user an email identifier so invitations addressed to it can be
+ * accepted/rejected by that user. */
+const seedEmail = (userId: string, email: string): void => {
+  const identifier = makeIdentifier({ userId, type: "email", value: email });
+  identifierRecords.set(identifier.id, identifier);
+};
 
 const organizationStore = {
   createOrganization: (organization: Organization) =>
@@ -122,13 +136,18 @@ const organizationStore = {
 };
 
 const testContext = Context.merge(
-  Context.make(OrganizationStore, organizationStore),
+  Context.merge(
+    Context.make(OrganizationStore, organizationStore),
+    Context.make(IdentifierStore, memoryIdentifierStore(identifierRecords)),
+  ),
   Context.make(Crypto.Crypto, PlatformCrypto.instance),
 );
 
 const runService = <A, E>(
   config: OrganizationConfig,
-  program: (service: typeof OrganizationService.Service) => Effect.Effect<A, E, OrganizationStore>,
+  program: (
+    service: typeof OrganizationService.Service,
+  ) => Effect.Effect<A, E, OrganizationStore | IdentifierStore>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.provide(
@@ -145,6 +164,7 @@ describe("OrganizationService", () => {
     organizations.clear();
     members.clear();
     invitations.clear();
+    identifierRecords.clear();
   });
 
   it("creates an organization with the creator as owner", async () => {
@@ -284,6 +304,8 @@ describe("OrganizationService", () => {
         }),
     };
 
+    seedEmail("invitee-user", "invitee@example.com");
+
     const result = await runService(config, (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
@@ -305,11 +327,7 @@ describe("OrganizationService", () => {
 
         const userInvitations = yield* service.listUserInvitations("invitee@example.com");
 
-        const member = yield* service.acceptInvitation(
-          "invitee-user",
-          invitation.id,
-          "invitee@example.com",
-        );
+        const member = yield* service.acceptInvitation("invitee-user", invitation.id);
 
         const afterAccept = yield* service.listUserInvitations("invitee@example.com");
         const full = yield* service.getFullOrganization(organization.id);
@@ -333,7 +351,9 @@ describe("OrganizationService", () => {
     expect(result.full.members).toHaveLength(2);
   });
 
-  it("rejects accepting an invitation with the wrong email", async () => {
+  it("rejects accepting an invitation addressed to a different email", async () => {
+    seedEmail("other-user", "other@example.com");
+
     const result = await runService({}, (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
@@ -344,9 +364,7 @@ describe("OrganizationService", () => {
           email: "invitee@example.com",
           role: "member",
         });
-        return yield* Effect.result(
-          service.acceptInvitation("other-user", invitation.id, "other@example.com"),
-        );
+        return yield* Effect.result(service.acceptInvitation("other-user", invitation.id));
       }),
     );
 
@@ -358,6 +376,8 @@ describe("OrganizationService", () => {
   });
 
   it("rejects accepting an expired invitation", async () => {
+    seedEmail("invitee-user", "invitee@example.com");
+
     const result = await runService({ invitationExpiresIn: -1000 }, (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
@@ -369,7 +389,7 @@ describe("OrganizationService", () => {
           role: "member",
         });
         const accept = yield* Effect.result(
-          service.acceptInvitation("invitee-user", invitation.id, "invitee@example.com"),
+          service.acceptInvitation("invitee-user", invitation.id),
         );
         const userInvitations = yield* service.listUserInvitations("invitee@example.com");
         return { accept, userInvitations };
@@ -385,6 +405,8 @@ describe("OrganizationService", () => {
   });
 
   it("supports rejecting an invitation and blocks re-acceptance", async () => {
+    seedEmail("invitee-user", "invitee@example.com");
+
     const result = await runService({}, (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
@@ -396,9 +418,9 @@ describe("OrganizationService", () => {
           role: "member",
         });
 
-        const rejected = yield* service.rejectInvitation(invitation.id, "invitee@example.com");
+        const rejected = yield* service.rejectInvitation("invitee-user", invitation.id);
         const acceptAfterReject = yield* Effect.result(
-          service.acceptInvitation("invitee-user", invitation.id, "invitee@example.com"),
+          service.acceptInvitation("invitee-user", invitation.id),
         );
 
         return { rejected, acceptAfterReject };

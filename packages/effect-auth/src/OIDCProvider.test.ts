@@ -8,7 +8,12 @@ import { SessionService } from "./session/SessionService.ts";
 import { hashToken } from "./TokenHash.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
-import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import { EmailVerificationService, EmailVerificationStore } from "./email/EmailVerification.ts";
 import {
@@ -86,12 +91,10 @@ const makeOIDCStores = () => {
 // Service-level tests
 // -----------------------------------------------------------------------------
 
-const makeUser = (id: string, email: string): Types.User => {
+const makeUser = (id: string): Types.User => {
   const now = new Date();
   return {
     id,
-    email,
-    emailVerified: true,
     name: "Test User",
     createdAt: now,
     updatedAt: now,
@@ -124,6 +127,7 @@ describe("OIDCProviderService", () => {
       Layer.succeed(OIDCTokenStore)(stores.tokenStore),
       Layer.succeed(OIDCConsentStore)(stores.consentStore),
       Layer.succeed(UserStore)(userStore),
+      Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
       jwtServiceLayer,
       PlatformCrypto.layer,
     );
@@ -170,7 +174,7 @@ describe("OIDCProviderService", () => {
   it("refuses to redirect for unknown clients or unregistered redirect URIs", async () => {
     const { layer } = setup();
     const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
-    const user = makeUser("u1", "u1@test");
+    const user = makeUser("u1");
 
     const { unknownClient, badRedirect } = await Effect.runPromise(
       Effect.gen(function* () {
@@ -205,7 +209,7 @@ describe("OIDCProviderService", () => {
   it("redirects spec-level errors back to the client", async () => {
     const { layer } = setup();
     const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
-    const user = makeUser("u1", "u1@test");
+    const user = makeUser("u1");
 
     const results = await Effect.runPromise(
       Effect.gen(function* () {
@@ -262,7 +266,7 @@ describe("OIDCProviderService", () => {
   it("requires PKCE from native (public) clients", async () => {
     const { layer } = setup();
     const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
-    const user = makeUser("u1", "u1@test");
+    const user = makeUser("u1");
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -323,7 +327,7 @@ describe("OIDCProviderService", () => {
   it("returns interaction_required for prompt=none when consent is needed", async () => {
     const { layer } = setup();
     const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
-    const user = makeUser("u1", "u1@test");
+    const user = makeUser("u1");
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -352,7 +356,7 @@ describe("OIDCProviderService", () => {
   it("prompt=none succeeds when consent has already been granted", async () => {
     const { layer } = setup();
     const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
-    const user = makeUser("u1", "u1@test");
+    const user = makeUser("u1");
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -398,7 +402,7 @@ describe("OIDCProviderService", () => {
         ],
       }).pipe(Effect.provide(layer)),
     );
-    const user = makeUser("u1", "u1@test");
+    const user = makeUser("u1");
 
     const result = await Effect.runPromise(
       service
@@ -424,6 +428,8 @@ describe("OIDCProviderService", () => {
 /** A web handler wired with the OIDC provider endpoints over in-memory stores. */
 const makeHttpFixture = () => {
   const usersById = new Map<string, Types.User>();
+  const identifiers = new Map<string, Identifier>();
+  const identifierStore = memoryIdentifierStore(identifiers);
   const sessions = new Map<string, Types.Session>();
   const oidc = makeOIDCStores();
   let userSeq = 0;
@@ -433,13 +439,19 @@ const makeHttpFixture = () => {
     const now = new Date();
     usersById.set(id, {
       id,
-      email,
-      emailVerified: true,
       name: `User ${id}`,
       createdAt: now,
       updatedAt: now,
       attributes,
     });
+    const identifier = makeIdentifier({
+      userId: id,
+      type: "email",
+      value: email,
+      verified: true,
+      verifiedAt: now,
+    });
+    identifiers.set(identifier.id, identifier);
     return id;
   };
   const makeSession = (userId: string): string => {
@@ -465,7 +477,6 @@ const makeHttpFixture = () => {
   };
   const userServiceStore = {
     get: userStore.get,
-    getByEmail: () => Effect.succeed(null),
     update: (user: Types.User) => Effect.sync(() => (usersById.set(user.id, user), user)),
     delete: () => Effect.void,
   };
@@ -497,7 +508,7 @@ const makeHttpFixture = () => {
     Layer.succeed(UserServiceStore)(userServiceStore),
     Hooks.Default,
     Layer.succeed(AuthLifecycleService)(undefined as never),
-    Layer.succeed(EmailPasswordStore)(undefined as never),
+    Layer.succeed(IdentifierStore)(identifierStore),
     Layer.succeed(PasswordHasher)(undefined as never),
     Layer.succeed(EmailVerificationService)(undefined as never),
     Layer.succeed(EmailVerificationStore)(undefined as never),
@@ -522,6 +533,7 @@ const makeHttpFixture = () => {
     jwtServiceLayer,
     // resolveOIDCProvider needs the core user store in the ambient context.
     Layer.succeed(UserStore)(userStore),
+    Layer.succeed(IdentifierStore)(identifierStore),
   );
 
   const oidcServiceLayer = OIDCProviderService.layer({

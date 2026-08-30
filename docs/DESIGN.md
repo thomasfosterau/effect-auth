@@ -538,6 +538,49 @@ pre-commit `vp check --fix` hook, so every regeneration appeared to churn all
 `vp check --fix site/src/content/docs/reference/api` after syncing, making
 regeneration idempotent (verified: a full regen produces zero spurious diffs).
 
+## D12. Surrogate-keyed identity (identifiers, not `user.email`)
+
+**Status quo (pre-2026-08).** `User` carried `email`/`emailVerified` as a
+natural key: `auth_users.email` was globally unique, every flow resolved
+accounts via `getUserByEmail`, usernames lived in a parallel `UsernameStore`,
+and phone numbers hid in `attributes`. One email per user, renames were
+UPDATEs on the primary record, and each new handle type grew its own store.
+
+**Decision (applied, breaking).** `User` is purely surrogate-keyed:
+`{ id, name?, image?, createdAt, updatedAt, attributes }`. Login handles are
+`Identifier` records — `(type: "email" | "username" | "phone", value)` with
+global uniqueness on the pair, a `verified`/`verifiedAt` promotion state, and
+`createdAt` ordering — behind the single `IdentifierStore` contract
+(`Identifier.ts`; KV, sql and alchemy implementations). Consequences:
+
+- **Resolution**: every "who owns this handle" goes through
+  `IdentifierStore.getByValue` (helper: `resolveUserByIdentifier`). The
+  removed members: `User.email`/`emailVerified`, `UserServiceStore.getByEmail`,
+  `UserService.getUserByEmail`/`markEmailVerified`, every feature store's
+  `getUserByEmail`, and `UsernameStore` outright.
+- **Claiming**: creation-time uniqueness rides the store's unique index;
+  `claimIdentifier` adds the check-first + race re-check pattern and a typed
+  `IdentifierTakenError`. Flows map it to their own conflict error
+  (`EmailInUseError`, `UsernameError`, ...).
+- **Verification is proof-of-ownership**: completing an email verification,
+  magic link, email OTP, phone OTP, or a trusted OAuth/SSO assertion promotes
+  the identifier via `setVerified`. `requireEmailVerification`-style gates
+  read `identifier.verified`, never a user field.
+- **Email-of-record** for delivery/display is derived: `primaryEmail`
+  (earliest verified) falling back to `anyEmail` (earliest of any state).
+  The HTTP `UserView` exposes derived optional `email`/`emailVerified`
+  (omitted on cookie-cache-served responses) plus `GET /identifiers` /
+  `DELETE /identifiers/:identifierId`; the wire shape stays compatible for
+  clients that read `user.email` from store-served responses.
+- **Storage**: `auth_users` drops `email`/`email_verified` and
+  `auth_users_email_idx`; `auth_identifiers` (unique `(type, value)`) is the
+  handle table. Upgrade path: `docs/migration.md` § "Surrogate-keyed identity".
+
+**Rationale.** Multiple emails per account, username renames, phone-as-handle
+and future handle types (door open: passkey handles, wallet addresses) all
+become row operations on one table instead of schema surgery; verification
+state finally attaches to the handle it belongs to.
+
 ---
 
 ## Maintainer decisions (2026-07-03)

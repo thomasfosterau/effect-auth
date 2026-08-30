@@ -15,8 +15,9 @@ import * as S from "./HTTPApiSchemas.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { Hooks } from "../Hooks.ts";
 import { SessionService } from "../session/SessionService.ts";
-import { EmailPasswordService, EmailPasswordStore } from "../email/EmailPassword.ts";
+import { EmailPasswordService } from "../email/EmailPassword.ts";
 import * as EmailPassword from "../email/EmailPassword.ts";
+import { IdentifierStore, type Identifier } from "../Identifier.ts";
 import { MagicLinkService } from "../MagicLink.ts";
 import { AccountManagementService } from "../AccountManagement.ts";
 import { AnonymousService } from "../Anonymous.ts";
@@ -62,14 +63,14 @@ import type * as Types from "../Types.ts";
  * providing it here — e.g.
  * `EmailPasswordService.layer(cfg).pipe(Layer.provide(emailPasswordStore))`.
  *
- * `EmailPasswordStore` is the one exception: some handlers (e.g.
- * `sendVerificationEmail`) read it directly, bypassing `EmailPasswordService`.
+ * `IdentifierStore` is the one exception: some handlers (e.g.
+ * `sendVerificationEmail`, `listIdentifiers`) read it directly.
  */
 export type AuthServices =
   | AuthLifecycleService
   | SessionService
   | EmailPasswordService
-  | EmailPasswordStore
+  | IdentifierStore
   | PasswordHasher
   | EmailVerificationService
   | PasswordResetService
@@ -583,7 +584,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           const body: S.AuthSuccess = {
-            user: S.encodeUser(result.user),
+            user: yield* encodeUserView(result.user),
             needsEmailVerification: result.needsEmailVerification,
           };
           return yield* withSessionCookie(body, result.session, cfg, "email-password");
@@ -635,7 +636,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               }),
             );
           const body: S.AuthSuccess = {
-            user: S.encodeUser(result.user),
+            user: yield* encodeUserView(result.user),
             needsEmailVerification: result.needsEmailVerification,
             ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
           };
@@ -687,7 +688,11 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("getSession", ({ request }) =>
         Effect.gen(function* () {
           const { resolved, cacheHit } = yield* resolveSession(request, cfg);
-          const body = S.encodeSessionWithUser(resolved);
+          // A cache-served response deliberately skips the store round-trip,
+          // so the derived email fields are omitted there.
+          const body = cacheHit
+            ? S.encodeSessionWithUser(resolved)
+            : yield* encodeSessionWithUserView(resolved);
           // On a store validation (cache miss) refresh the signed cache cookie
           // so subsequent reads within `maxAge` skip the store.
           if (cfg.cache !== undefined && !cacheHit) {
@@ -715,16 +720,18 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("sendVerificationEmail", ({ payload }) =>
         Effect.gen(function* () {
-          const store = yield* EmailPasswordStore;
+          const identifiers = yield* IdentifierStore;
           const verification = yield* EmailVerificationService;
           const email = payload.email.trim().toLowerCase();
 
-          const user = yield* store.getUserByEmail(email).pipe(Effect.catch(internalServerError));
+          const identifier = yield* identifiers
+            .getByValue("email", email)
+            .pipe(Effect.catch(internalServerError));
 
-          // Anti-enumeration: succeed uniformly whether or not the user exists
-          // (or is already verified).
-          if (user !== null && !user.emailVerified) {
-            yield* verification.resendVerification(user.id, email).pipe(
+          // Anti-enumeration: succeed uniformly whether or not the identifier
+          // exists (or is already verified).
+          if (identifier !== null && !identifier.verified) {
+            yield* verification.resendVerification(identifier.userId, email).pipe(
               Effect.catchTags({
                 AuthError: (e) => internalServerError(e),
                 EmailVerificationError: (e) => internalServerError(e),
@@ -796,7 +803,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           const body: S.AuthSuccess = {
-            user: S.encodeUser(result.user),
+            user: yield* encodeUserView(result.user),
             needsEmailVerification: result.needsEmailVerification,
           };
           return yield* withSessionCookie(body, result.session, cfg, "email-password");
@@ -923,7 +930,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 AuthError: (e) => internalServerError(e),
               }),
             );
-          return S.encodeUser(updated);
+          return yield* encodeUserView(updated);
         }),
       )
       .handle("changeEmailRequest", ({ payload, request }) =>
@@ -1048,6 +1055,41 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(Effect.catch(internalServerError));
         }),
       )
+      .handle("listIdentifiers", ({ request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const identifiers = yield* IdentifierStore;
+          const list = yield* identifiers
+            .listByUser(resolved.user.id)
+            .pipe(Effect.catch(internalServerError));
+          return list.map(S.encodeIdentifier);
+        }),
+      )
+      .handle("deleteIdentifier", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const identifiers = yield* IdentifierStore;
+          const list = yield* identifiers
+            .listByUser(resolved.user.id)
+            .pipe(Effect.catch(internalServerError));
+
+          // Only the owner may delete an identifier, and only their own — a
+          // foreign or unknown id gets the same answer (anti-enumeration).
+          const target = list.find((identifier) => identifier.id === params.identifierId);
+          if (target === undefined) {
+            return yield* new S.BadRequest({ message: "Identifier not found" });
+          }
+          // Refuse to orphan the account: the last identifier is the user's
+          // only login handle.
+          if (list.length === 1) {
+            return yield* new S.BadRequest({
+              message: "Cannot delete the only identifier on an account",
+            });
+          }
+
+          yield* identifiers.delete(target.id).pipe(Effect.catch(internalServerError));
+        }),
+      )
       .handle("magicLinkSend", ({ payload }) =>
         Effect.gen(function* () {
           const magicLink = yield* resolveMagicLink;
@@ -1099,7 +1141,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           const body: S.AuthSuccess = {
-            user: S.encodeUser(result.user),
+            user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
           return yield* withSessionCookie(body, result.session, cfg, "magic-link");
@@ -1156,7 +1198,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           const body: S.AuthSuccess = {
-            user: S.encodeUser(result.user),
+            user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
           return yield* withSessionCookie(body, result.session, cfg, "email-otp");
@@ -1196,7 +1238,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           const body: S.AuthSuccess = {
-            user: S.encodeUser(result.user),
+            user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
           return yield* withSessionCookie(body, result.session, cfg, "anonymous");
@@ -1248,7 +1290,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               }),
             );
           const body: S.AuthSuccess = {
-            user: S.encodeUser(result.user),
+            user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
             ...(result.secondFactor !== undefined && { secondFactor: result.secondFactor }),
           };
@@ -1270,7 +1312,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             const resolved = yield* sessionManager
               .validateSession(id)
               .pipe(Effect.catch(() => Effect.succeed(null)));
-            if (resolved !== null) views.push(S.encodeSessionWithUser(resolved));
+            if (resolved !== null) views.push(yield* encodeSessionWithUserView(resolved));
           }
           return views;
         }),
@@ -1409,7 +1451,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           const body: S.AuthSuccess = {
-            user: S.encodeUser(result.user),
+            user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
           return yield* withSessionCookie(body, result.session, cfg, "device");
@@ -1498,7 +1540,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           const body: S.AuthSuccess = {
-            user: S.encodeUser(result.user),
+            user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
           return yield* withSessionCookie(body, result.session, cfg, "phone-otp");
@@ -1773,7 +1815,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const resolved = yield* requireSession(request, cfg);
           const org = yield* resolveOrganization;
           const member = yield* org.service
-            .acceptInvitation(resolved.user.id, params.invitationId, resolved.user.email)
+            .acceptInvitation(resolved.user.id, params.invitationId)
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
@@ -1788,7 +1830,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const resolved = yield* requireSession(request, cfg);
           const org = yield* resolveOrganization;
           const invitation = yield* org.service
-            .rejectInvitation(params.invitationId, resolved.user.email)
+            .rejectInvitation(resolved.user.id, params.invitationId)
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
@@ -1874,7 +1916,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 AuthError: (e) => internalServerError(e),
               }),
             );
-          return { users: result.users.map(S.encodeUser), total: result.total };
+          const users = yield* Effect.forEach(result.users, encodeUserView);
+          return { users, total: result.total };
         }),
       )
       .handle("adminSetRole", ({ payload, request }) =>
@@ -1890,7 +1933,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 AuthError: (e) => internalServerError(e),
               }),
             );
-          return S.encodeUser(user);
+          return yield* encodeUserView(user);
         }),
       )
       .handle("adminBanUser", ({ payload, request }) =>
@@ -1909,7 +1952,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 AuthError: (e) => internalServerError(e),
               }),
             );
-          return S.encodeUser(user);
+          return yield* encodeUserView(user);
         }),
       )
       .handle("adminUnbanUser", ({ payload, request }) =>
@@ -1923,7 +1966,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               AuthError: (e) => internalServerError(e),
             }),
           );
-          return S.encodeUser(user);
+          return yield* encodeUserView(user);
         }),
       )
       .handle("adminRemoveUser", ({ payload, request }) =>
@@ -1992,7 +2035,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .getUser(session.userId)
             .pipe(Effect.catch(internalServerError));
           const body: S.AuthSuccess = {
-            user: S.encodeUser(user),
+            user: yield* encodeUserView(user),
             needsEmailVerification: false,
           };
           return yield* withSessionCookie(body, session, cfg);
@@ -2189,7 +2232,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           const body: S.AuthSuccess = {
-            user: S.encodeUser(result.user),
+            user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
           return yield* withSessionCookie(body, result.session, cfg, "sso");
@@ -2520,7 +2563,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           const body: S.AuthSuccess = {
-            user: S.encodeUser(result.user),
+            user: yield* encodeUserView(result.user),
             needsEmailVerification: false,
           };
           return yield* withSessionCookie(body, result.session, cfg, "google");
@@ -2528,6 +2571,36 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       ),
   );
 };
+
+/**
+ * Encode a user for the wire with the derived `email`/`emailVerified`
+ * convenience fields resolved from the identifier store. Enrichment is
+ * fail-soft: when the identifier lookup errors the fields are simply omitted
+ * (with a warning) rather than failing a flow that already succeeded.
+ */
+const encodeUserView = (user: Types.User): Effect.Effect<S.UserView, never, IdentifierStore> =>
+  Effect.gen(function* () {
+    const identifiers = yield* IdentifierStore;
+    const list = yield* identifiers
+      .listByUser(user.id)
+      .pipe(
+        Effect.catchTag("AuthError", (error) =>
+          Effect.logWarning("Failed to resolve identifiers for user view", { error }).pipe(
+            Effect.as<ReadonlyArray<Identifier>>([]),
+          ),
+        ),
+      );
+    return S.encodeUser(user, list);
+  });
+
+/** {@link encodeUserView} over a session+user pair. */
+const encodeSessionWithUserView = (
+  resolved: Types.SessionWithUser,
+): Effect.Effect<S.SessionWithUserView, never, IdentifierStore> =>
+  Effect.map(encodeUserView(resolved.user), (user) => ({
+    session: S.encodeSession(resolved.session),
+    user,
+  }));
 
 /**
  * Build the `AuthSuccess` response (with session cookie) for a redeemed
@@ -2543,7 +2616,7 @@ const secondFactorSuccess = (
     const userService = yield* UserService;
     const user = yield* userService.getUser(result.userId).pipe(Effect.catch(internalServerError));
     const body: S.AuthSuccess = {
-      user: S.encodeUser(user),
+      user: yield* encodeUserView(user),
       needsEmailVerification: false,
     };
     return yield* withSessionCookie(body, result.session, cfg, method);

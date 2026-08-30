@@ -32,6 +32,8 @@ import type { HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./session/SessionService.ts";
 import { OAuthUserStore, generateNonce, verifyIdToken } from "./oauth/OAuth.ts";
+import { claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
+import { UserStore } from "./session/UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 
@@ -150,7 +152,12 @@ export const make = (
 ): Effect.Effect<
   typeof GoogleOneTapService.Service,
   never,
-  GoogleOneTapNonceStore | OAuthUserStore | SessionService | Crypto.Crypto
+  | GoogleOneTapNonceStore
+  | OAuthUserStore
+  | IdentifierStore
+  | UserStore
+  | SessionService
+  | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const jwksEndpoint = config.jwksEndpoint ?? GOOGLE_JWKS_ENDPOINT;
@@ -159,6 +166,8 @@ export const make = (
 
     const nonceStore = yield* GoogleOneTapNonceStore;
     const userStore = yield* OAuthUserStore;
+    const identifiers = yield* IdentifierStore;
+    const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const crypto = yield* Crypto.Crypto;
 
@@ -212,15 +221,34 @@ export const make = (
         }
         const normalized = email.trim().toLowerCase();
 
-        let user = yield* userStore.getUserByEmail(normalized);
+        const identifier = yield* identifiers.getByValue("email", normalized);
+        let user = identifier === null ? null : yield* users.get(identifier.userId);
+        if (identifier !== null && user === null) {
+          return yield* new GoogleOneTapError({ message: "Account is unavailable" });
+        }
         const isNewUser = user === null;
         if (user === null) {
           user = yield* userStore.createUser({
-            email: normalized,
-            emailVerified: true,
             ...(typeof claims["name"] === "string" && { name: claims["name"] }),
             ...(typeof claims["picture"] === "string" && { image: claims["picture"] }),
           });
+          // Google attested the address as verified.
+          yield* claimIdentifier(
+            identifiers,
+            makeIdentifier({
+              userId: user.id,
+              type: "email",
+              value: normalized,
+              verified: true,
+              verifiedAt: new Date(),
+            }),
+          ).pipe(
+            Effect.catchTag("IdentifierTakenError", () =>
+              Effect.fail(new GoogleOneTapError({ message: "This email is already in use" })),
+            ),
+          );
+        } else if (identifier !== null && !identifier.verified) {
+          yield* identifiers.setVerified(identifier.id, new Date());
         }
 
         const session = yield* sessionManager.createSession(user.id);

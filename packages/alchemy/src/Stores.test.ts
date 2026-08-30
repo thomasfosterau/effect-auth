@@ -150,17 +150,22 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
     const { db } = await setup();
     const emailPassword = makeEmailPasswordStore(db);
     const users = makeUserStore(db);
+    const identifiers = makeIdentifierStore(db);
 
     const created = await Effect.runPromise(
-      emailPassword.createUser({ email: "a@b.com", name: "Ada", attributes: { plan: "pro" } }),
+      emailPassword.createUser({ name: "Ada", attributes: { plan: "pro" } }),
     );
-    expect(created.email).toBe("a@b.com");
-    expect(created.emailVerified).toBe(false);
     expect(created.name).toBe("Ada");
     expect(created.attributes).toEqual({ plan: "pro" });
 
-    const byEmail = await Effect.runPromise(emailPassword.getUserByEmail("a@b.com"));
-    expect(byEmail?.id).toBe(created.id);
+    await Effect.runPromise(
+      identifiers.create(
+        Auth.makeIdentifier({ userId: created.id, type: "email", value: "a@b.com" }),
+      ),
+    );
+    const byEmail = await Effect.runPromise(identifiers.getByValue("email", "a@b.com"));
+    expect(byEmail?.userId).toBe(created.id);
+    expect(byEmail?.verified).toBe(false);
 
     expect(await Effect.runPromise(emailPassword.getPasswordHash(created.id))).toBe(null);
     expect(await Effect.runPromise(users.getCredentials(created.id))).toBe(null);
@@ -170,7 +175,6 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
     expect(await Effect.runPromise(users.getCredentials(created.id))).toBe("hash:123");
 
     const user = await Effect.runPromise(users.get(created.id));
-    expect(user?.email).toBe("a@b.com");
     expect(user?.name).toBe("Ada");
     expect(user?.attributes).toEqual({ plan: "pro" });
     expect(user?.createdAt.getTime()).toBe(created.createdAt.getTime());
@@ -179,27 +183,26 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
     expect(await Effect.runPromise(users.get("nope"))).toBe(null);
   });
 
-  it("user service store: getByEmail / update / delete", async () => {
+  it("user service store: update / delete", async () => {
     const { db } = await setup();
     const emailPassword = makeEmailPasswordStore(db);
     const service = makeUserServiceStore(db);
 
-    const user = await Effect.runPromise(emailPassword.createUser({ email: "c@d.com" }));
-    expect((await Effect.runPromise(service.getByEmail("c@d.com")))?.id).toBe(user.id);
+    const user = await Effect.runPromise(emailPassword.createUser({}));
+    expect((await Effect.runPromise(service.get(user.id)))?.id).toBe(user.id);
 
     await Effect.runPromise(
       service.update({
         ...user,
-        email: "new@d.com",
-        emailVerified: true,
+        name: "Renamed",
+        image: "https://example.com/x.png",
         attributes: { role: "x" },
       }),
     );
     const updated = await Effect.runPromise(service.get(user.id));
-    expect(updated?.email).toBe("new@d.com");
-    expect(updated?.emailVerified).toBe(true);
+    expect(updated?.name).toBe("Renamed");
+    expect(updated?.image).toBe("https://example.com/x.png");
     expect(updated?.attributes["role"]).toBe("x");
-    expect(await Effect.runPromise(service.getByEmail("new@d.com"))).not.toBe(null);
 
     await Effect.runPromise(service.delete(user.id));
     expect(await Effect.runPromise(service.get(user.id))).toBe(null);
@@ -351,37 +354,30 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
 
     // hasPassword is backed by auth_users.password_hash.
     const emailPassword = makeEmailPasswordStore(db);
-    const user = await Effect.runPromise(emailPassword.createUser({ email: "haspw@example.com" }));
+    const user = await Effect.runPromise(emailPassword.createUser({}));
     expect(await Effect.runPromise(store.hasPassword!(user.id))).toBe(false);
     await Effect.runPromise(emailPassword.setPasswordHash(user.id, "hash"));
     expect(await Effect.runPromise(store.hasPassword!(user.id))).toBe(true);
   });
 
-  it("oauth user store: createUser / getUser / getUserByEmail / updateUser", async () => {
+  it("oauth user store: createUser / getUser / updateUser", async () => {
     const { db } = await setup();
     const store = makeOAuthUserStore(db);
 
     const created = await Effect.runPromise(
       store.createUser({
-        email: "o@o.com",
-        emailVerified: true,
         name: "Oda",
         image: "https://img.example/o.png",
       }),
     );
-    expect(created.email).toBe("o@o.com");
-    expect(created.emailVerified).toBe(true);
     expect(created.name).toBe("Oda");
     expect(created.image).toBe("https://img.example/o.png");
     expect(created.attributes).toEqual({});
 
     const fetched = await Effect.runPromise(store.getUser(created.id));
-    expect(fetched.email).toBe("o@o.com");
-    expect(fetched.emailVerified).toBe(true);
+    expect(fetched.name).toBe("Oda");
+    expect(fetched.image).toBe("https://img.example/o.png");
     expect(fetched.createdAt.getTime()).toBe(created.createdAt.getTime());
-
-    expect((await Effect.runPromise(store.getUserByEmail("o@o.com")))?.id).toBe(created.id);
-    expect(await Effect.runPromise(store.getUserByEmail("nobody@o.com"))).toBe(null);
 
     // updateUser refreshes profile fields; COALESCE keeps unspecified ones.
     const renamed = await Effect.runPromise(store.updateUser!(created.id, { name: "Renamed" }));
@@ -467,15 +463,8 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
     expect(await Effect.runPromise(store.get("ml-2"))).toBe(null);
     expect((await Effect.runPromise(store.get("ml-3")))?.email).toBe("b@example.com");
 
-    const user = await Effect.runPromise(
-      users.createUser({ email: "ml@example.com", emailVerified: true, name: "Mel" }),
-    );
-    expect(user.emailVerified).toBe(true);
+    const user = await Effect.runPromise(users.createUser({ name: "Mel" }));
     expect(user.name).toBe("Mel");
-    const byEmail = await Effect.runPromise(users.getUserByEmail("ml@example.com"));
-    expect(byEmail?.id).toBe(user.id);
-    expect(byEmail?.emailVerified).toBe(true);
-    expect(await Effect.runPromise(users.getUserByEmail("nobody@example.com"))).toBe(null);
   });
 
   it("email otp store: upserts per email+purpose and increments attempts", async () => {
@@ -515,10 +504,8 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
     );
     expect(Result.isFailure(missing) && missing.failure._tag).toBe("AuthError");
 
-    const user = await Effect.runPromise(
-      users.createUser({ email: "otp@example.com", emailVerified: true }),
-    );
-    expect((await Effect.runPromise(users.getUserByEmail("otp@example.com")))?.id).toBe(user.id);
+    const user = await Effect.runPromise(users.createUser({ name: "Otto" }));
+    expect(user.name).toBe("Otto");
   });
 
   it("multi factor + pending multi factor stores roundtrip incl. lastUsedCounter", async () => {
@@ -642,7 +629,7 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
       const rateLimit = yield* Auth.RateLimitStore;
       const count = yield* rateLimit.increment("layer-key", 60);
       const oauthUsers = yield* Auth.OAuth.OAuthUserStore;
-      const user = yield* oauthUsers.createUser({ email: "layer@l.com", emailVerified: false });
+      const user = yield* oauthUsers.createUser({ name: "Layer User" });
       const magicLinks = yield* Auth.MagicLinkStore;
       yield* magicLinks.create({
         token: "ml-layer",
@@ -676,7 +663,7 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
     const result = await Effect.runPromise(program.pipe(Effect.provide(layer(db))));
     expect(result.session?.userId).toBe("u9");
     expect(result.count).toBe(1);
-    expect(result.user.email).toBe("layer@l.com");
+    expect(result.user.name).toBe("Layer User");
     expect(result.magicLink?.email).toBe("layer@l.com");
     for (const store of result.stores) {
       expect(store).toBeDefined();
@@ -690,7 +677,7 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
     };
     const program = Effect.gen(function* () {
       const emailPassword = yield* Auth.Email.EmailPasswordStore;
-      const user = yield* emailPassword.createUser({ email: "manager@example.com" });
+      const user = yield* emailPassword.createUser({ name: "Manager" });
       const manager = yield* Auth.SessionService;
       const session = yield* manager.createSession(user.id, { ip: "127.0.0.1" });
       const validated = yield* manager.validateSession(session.id);

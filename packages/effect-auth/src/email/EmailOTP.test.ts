@@ -10,6 +10,12 @@ import {
   EmailOTPUserStore,
 } from "./EmailOTP.ts";
 import * as EmailOTP from "./EmailOTP.ts";
+import {
+  type Identifier,
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+} from "../Identifier.ts";
 import { hashToken } from "../TokenHash.ts";
 import { make, SessionService } from "../session/SessionService.ts";
 import { SessionStore } from "../session/SessionStore.ts";
@@ -18,10 +24,12 @@ import type { Session, User, SessionConfig } from "../Types.ts";
 import * as Errors from "../Errors.ts";
 
 const users = new Map<string, User>();
-const usersByEmail = new Map<string, string>();
+const identifierRecords = new Map<string, Identifier>();
 const otpRecords = new Map<string, EmailOTPRecord>();
 const sessions = new Map<string, Session>();
 const sentOTPs: Array<{ email: string; otp: string; purpose: EmailOTPPurpose }> = [];
+
+const identifierStore = memoryIdentifierStore(identifierRecords);
 
 const recordKey = (email: string, purpose: EmailOTPPurpose) => `${email}:${purpose}`;
 
@@ -66,22 +74,30 @@ const userStore = {
 
 const addUser = (user: User) => {
   users.set(user.id, user);
-  usersByEmail.set(user.email, user.id);
 };
 
-const emailOTPUserStore = {
-  getUserByEmail: (email: string) =>
-    Effect.sync(() => {
-      const userId = usersByEmail.get(email);
-      return userId ? (users.get(userId) ?? null) : null;
-    }),
+/** Seed an email identifier the way the store would persist it. */
+const addEmailIdentifier = (userId: string, email: string, verified: boolean) => {
+  const identifier = makeIdentifier({
+    userId,
+    type: "email",
+    value: email,
+    verified,
+    ...(verified ? { verifiedAt: new Date() } : {}),
+  });
+  identifierRecords.set(identifier.id, identifier);
+};
 
+const findEmailIdentifier = (email: string): Identifier | null =>
+  Array.from(identifierRecords.values()).find(
+    (identifier) => identifier.type === "email" && identifier.value === email,
+  ) ?? null;
+
+const emailOTPUserStore = {
   createUser: (input: EmailOTPCreateUserInput) =>
     Effect.sync(() => {
       const user: User = {
         id: `user-${users.size + 1}`,
-        email: input.email,
-        emailVerified: input.emailVerified,
         ...(input.name !== undefined && { name: input.name }),
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -150,7 +166,13 @@ const makeTestContext = async () => {
         Context.make(EmailOTPStore, emailOTPStore),
         Context.make(EmailOTPUserStore, emailOTPUserStore),
       ),
-      Context.make(Crypto.Crypto, PlatformCrypto.instance),
+      Context.merge(
+        Context.merge(
+          Context.make(IdentifierStore, identifierStore),
+          Context.make(UserStore, userStore),
+        ),
+        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+      ),
     ),
   );
 };
@@ -163,7 +185,7 @@ const recordingSend = (email: string, otp: string, purpose: EmailOTPPurpose) =>
 describe("EmailOTPService", () => {
   beforeEach(() => {
     users.clear();
-    usersByEmail.clear();
+    identifierRecords.clear();
     otpRecords.clear();
     sessions.clear();
     sentOTPs.splice(0, sentOTPs.length);
@@ -217,7 +239,7 @@ describe("EmailOTPService", () => {
     expect(otpRecords.get("repeat@example.com:sign-in")?.otpHash).toBe(hashToken(sentOTPs[1]!.otp));
   });
 
-  it("should sign in a new user with a valid OTP, creating a verified user and session", async () => {
+  it("should sign in a new user with a valid OTP, creating a verified email identifier and session", async () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
@@ -232,9 +254,11 @@ describe("EmailOTPService", () => {
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
-    expect(result.user.email).toBe("fresh@example.com");
-    // The OTP proves email ownership, so the new user is verified.
-    expect(result.user.emailVerified).toBe(true);
+    // The OTP proves email ownership, so the new user's email identifier is
+    // created verified.
+    const identifier = findEmailIdentifier("fresh@example.com");
+    expect(identifier?.userId).toBe(result.user.id);
+    expect(identifier?.verified).toBe(true);
     expect(result.session.userId).toBe(result.user.id);
     expect(result.session.attributes).toEqual({ device: "test" });
     expect(sessions.size).toBe(1);
@@ -247,12 +271,11 @@ describe("EmailOTPService", () => {
 
     addUser({
       id: "user-known",
-      email: "known@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     });
+    addEmailIdentifier("user-known", "known@example.com", true);
 
     const program = Effect.gen(function* () {
       const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
@@ -369,7 +392,7 @@ describe("EmailOTPService", () => {
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
-    expect(result.user.email).toBe("fumble@example.com");
+    expect(findEmailIdentifier("fumble@example.com")?.userId).toBe(result.user.id);
     expect(sessions.size).toBe(1);
   });
 
@@ -422,6 +445,7 @@ describe("EmailOTPService", () => {
       expect(result.failure._tag).toBe("EmailOTPError");
     }
     expect(users.size).toBe(0);
+    expect(identifierRecords.size).toBe(0);
     expect(sessions.size).toBe(0);
   });
 
@@ -430,12 +454,11 @@ describe("EmailOTPService", () => {
 
     addUser({
       id: "user-member",
-      email: "member@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     });
+    addEmailIdentifier("user-member", "member@example.com", true);
 
     const program = Effect.gen(function* () {
       const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });

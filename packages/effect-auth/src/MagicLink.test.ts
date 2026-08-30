@@ -9,6 +9,12 @@ import {
   MagicLinkUserStore,
 } from "./MagicLink.ts";
 import * as MagicLink from "./MagicLink.ts";
+import {
+  type Identifier,
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+} from "./Identifier.ts";
 import { make, SessionService } from "./session/SessionService.ts";
 import { SessionStore } from "./session/SessionStore.ts";
 import { UserStore } from "./session/UserStore.ts";
@@ -16,10 +22,12 @@ import { hashToken } from "./TokenHash.ts";
 import type { Session, User, SessionConfig } from "./Types.ts";
 
 const users = new Map<string, User>();
-const usersByEmail = new Map<string, string>();
+const identifierRecords = new Map<string, Identifier>();
 const magicLinkTokens = new Map<string, MagicLinkToken>();
 const sessions = new Map<string, Session>();
 const sentLinks: Array<{ email: string; token: string }> = [];
+
+const identifierStore = memoryIdentifierStore(identifierRecords);
 
 const sessionStore = {
   create: (session: Session) =>
@@ -62,22 +70,30 @@ const userStore = {
 
 const addUser = (user: User) => {
   users.set(user.id, user);
-  usersByEmail.set(user.email, user.id);
 };
 
-const magicLinkUserStore = {
-  getUserByEmail: (email: string) =>
-    Effect.sync(() => {
-      const userId = usersByEmail.get(email);
-      return userId ? (users.get(userId) ?? null) : null;
-    }),
+/** Seed an email identifier the way the store would persist it. */
+const addEmailIdentifier = (userId: string, email: string, verified: boolean) => {
+  const identifier = makeIdentifier({
+    userId,
+    type: "email",
+    value: email,
+    verified,
+    ...(verified ? { verifiedAt: new Date() } : {}),
+  });
+  identifierRecords.set(identifier.id, identifier);
+};
 
+const findEmailIdentifier = (email: string): Identifier | null =>
+  Array.from(identifierRecords.values()).find(
+    (identifier) => identifier.type === "email" && identifier.value === email,
+  ) ?? null;
+
+const magicLinkUserStore = {
   createUser: (input: MagicLinkCreateUserInput) =>
     Effect.sync(() => {
       const user: User = {
         id: `user-${users.size + 1}`,
-        email: input.email,
-        emailVerified: input.emailVerified,
         ...(input.name !== undefined && { name: input.name }),
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -145,7 +161,13 @@ const makeTestContext = async () => {
         Context.make(MagicLinkStore, magicLinkStore),
         Context.make(MagicLinkUserStore, magicLinkUserStore),
       ),
-      Context.make(Crypto.Crypto, PlatformCrypto.instance),
+      Context.merge(
+        Context.merge(
+          Context.make(IdentifierStore, identifierStore),
+          Context.make(UserStore, userStore),
+        ),
+        Context.make(Crypto.Crypto, PlatformCrypto.instance),
+      ),
     ),
   );
 };
@@ -158,7 +180,7 @@ const recordingSend = (email: string, token: string) =>
 describe("MagicLinkService", () => {
   beforeEach(() => {
     users.clear();
-    usersByEmail.clear();
+    identifierRecords.clear();
     magicLinkTokens.clear();
     sessions.clear();
     sentLinks.splice(0, sentLinks.length);
@@ -248,12 +270,11 @@ describe("MagicLinkService", () => {
 
     addUser({
       id: "user-existing",
-      email: "member@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     });
+    addEmailIdentifier("user-existing", "member@example.com", true);
 
     const program = Effect.gen(function* () {
       const service = yield* MagicLink.make({
@@ -271,7 +292,7 @@ describe("MagicLinkService", () => {
     expect(magicLinkTokens.size).toBe(1);
   });
 
-  it("should verify a token, create a verified user and a session", async () => {
+  it("should verify a token, create a user with a verified email identifier and a session", async () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
@@ -286,9 +307,11 @@ describe("MagicLinkService", () => {
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
-    // Magic link proves email ownership, so the new user is verified.
-    expect(result.user.email).toBe("fresh@example.com");
-    expect(result.user.emailVerified).toBe(true);
+    // Magic link proves email ownership, so the new user's email identifier
+    // is created verified.
+    const identifier = findEmailIdentifier("fresh@example.com");
+    expect(identifier?.userId).toBe(result.user.id);
+    expect(identifier?.verified).toBe(true);
     expect(result.session.userId).toBe(result.user.id);
     expect(result.session.attributes).toEqual({ device: "test" });
     expect(sessions.size).toBe(1);
@@ -301,13 +324,12 @@ describe("MagicLinkService", () => {
 
     const existing: User = {
       id: "user-known",
-      email: "known@example.com",
-      emailVerified: false,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
     addUser(existing);
+    addEmailIdentifier("user-known", "known@example.com", false);
 
     const program = Effect.gen(function* () {
       const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
@@ -322,6 +344,9 @@ describe("MagicLinkService", () => {
     expect(result.user.id).toBe("user-known");
     expect(users.size).toBe(1);
     expect(result.session.userId).toBe("user-known");
+    // The verified link proves ownership: the previously unverified email
+    // identifier is promoted to verified.
+    expect(findEmailIdentifier("known@example.com")?.verified).toBe(true);
   });
 
   it("should reject expired tokens and delete them", async () => {
@@ -420,6 +445,7 @@ describe("MagicLinkService", () => {
       expect(result.failure._tag).toBe("MagicLinkError");
     }
     expect(users.size).toBe(0);
+    expect(identifierRecords.size).toBe(0);
     expect(sessions.size).toBe(0);
   });
 

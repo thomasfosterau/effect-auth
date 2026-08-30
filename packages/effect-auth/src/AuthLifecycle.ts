@@ -4,11 +4,12 @@ import { normalizeEmail } from "./utils.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import {
   EmailPasswordService,
-  EmailPasswordStore,
   type SecondFactorChallenge,
   type SignInInput,
   type SignUpInput,
 } from "./email/EmailPassword.ts";
+import { IdentifierStore } from "./Identifier.ts";
+import { UserStore } from "./session/UserStore.ts";
 import {
   type EmailVerificationResult,
   EmailVerificationService,
@@ -86,18 +87,14 @@ export class AuthLifecycleService extends Context.Service<
     Layer.effect(AuthLifecycleService, make(config));
 }
 
-const getEmailFromUser = (user: Types.User): string | undefined =>
-  user.email.length > 0 ? normalizeEmail(user.email) : undefined;
-
-const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
-
 export const make = (
   config: AuthLifecycleConfig = {},
 ): Effect.Effect<
   typeof AuthLifecycleService.Service,
   never,
   | EmailPasswordService
-  | EmailPasswordStore
+  | IdentifierStore
+  | UserStore
   | SessionService
   | EmailVerificationService
   | UserService
@@ -113,7 +110,8 @@ export const make = (
     // rather than reconstructing inline (which silently dropped disableSignUp,
     // minPasswordLength, maxPasswordLength, etc.).
     const emailPassword = yield* EmailPasswordService;
-    const emailPasswordStore = yield* EmailPasswordStore;
+    const identifiers = yield* IdentifierStore;
+    const userStore = yield* UserStore;
     const verification = yield* EmailVerificationService;
     const userService = yield* UserService;
     const sessionManager = yield* SessionService;
@@ -129,19 +127,20 @@ export const make = (
           Effect.map((r) => ({ recovered: false as const, result: r })),
           Effect.catchTag("EmailInUseError", (e) =>
             Effect.gen(function* () {
-              const existing = yield* emailPasswordStore.getUserByEmail(
+              const identifier = yield* identifiers.getByValue(
+                "email",
                 normalizeEmail(input.email),
               );
+              const existing = identifier === null ? null : yield* userStore.get(identifier.userId);
 
-              if (!existing || existing.emailVerified) {
+              if (!identifier || !existing || identifier.verified) {
                 return yield* Effect.fail(e);
               }
 
               // Unverified duplicate: resend (also invalidates stale tokens,
               // matching FIX 5 behaviour).
-              const email = getEmailFromUser(existing);
-              if (sendOnSignUp && email) {
-                yield* verification.resendVerification(existing.id, email);
+              if (sendOnSignUp) {
+                yield* verification.resendVerification(existing.id, identifier.value);
               }
 
               return { recovered: true as const, user: existing };
@@ -157,10 +156,11 @@ export const make = (
         }
 
         const result = outcome.result;
-        const email = getEmailFromUser(result.user);
-        const needsEmailVerification = requireEmailVerification && !isEmailVerified(result.user);
+        const email = result.identifier?.value;
+        // A freshly claimed email identifier is always unverified.
+        const needsEmailVerification = requireEmailVerification;
 
-        if (sendOnSignUp && needsEmailVerification && email) {
+        if (sendOnSignUp && needsEmailVerification && email !== undefined) {
           yield* verification.createVerification(result.user.id, email);
         }
 
@@ -178,7 +178,8 @@ export const make = (
           "EmailNotVerifiedError",
           (error) =>
             Effect.gen(function* () {
-              const user = yield* emailPasswordStore.getUserByEmail(error.email);
+              const identifier = yield* identifiers.getByValue("email", error.email);
+              const user = identifier === null ? null : yield* userStore.get(identifier.userId);
 
               if (!user) {
                 return yield* Effect.fail(
@@ -220,13 +221,15 @@ export const make = (
         input: VerifyEmailInput,
       ) {
         // FIX 4: peekToken validates and returns the record without burning it,
-        // so a failure in markEmailVerified leaves the token valid for retry.
+        // so a failure in setVerified leaves the token valid for retry.
         const verificationRecord = yield* verification.peekToken(input.token);
 
-        // FIX 2: reject if the token's email no longer matches the current user
-        // — a stale token for a since-changed address must not verify the new one.
-        const currentUser = yield* userService.getUser(verificationRecord.userId);
-        if (normalizeEmail(verificationRecord.email) !== normalizeEmail(currentUser.email)) {
+        // FIX 2: reject unless the token's email is still one of this user's
+        // identifiers — a stale token for a since-removed address must not
+        // verify anything.
+        const tokenEmail = normalizeEmail(verificationRecord.email);
+        const identifier = yield* identifiers.getByValue("email", tokenEmail);
+        if (identifier === null || identifier.userId !== verificationRecord.userId) {
           return yield* Effect.fail(
             new Errors.EmailVerificationError({
               message: "Verification token is no longer valid for this email address",
@@ -235,7 +238,8 @@ export const make = (
         }
 
         // FIX 4: durable state change BEFORE burning the token.
-        const verifiedUser = yield* userService.markEmailVerified(verificationRecord.userId);
+        yield* identifiers.setVerified(identifier.id, new Date());
+        const verifiedUser = yield* userService.getUser(verificationRecord.userId);
 
         // burnToken deletes the token and fires the afterVerifyEmail hook.
         const verificationResult = {

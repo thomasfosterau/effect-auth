@@ -9,20 +9,27 @@ import {
   PhoneOTPUserStore,
 } from "./PhoneOTP.ts";
 import * as PhoneOTP from "./PhoneOTP.ts";
+import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "./Identifier.ts";
 import { SessionStore } from "./session/SessionStore.ts";
 import { SessionService, make as makeSessionService } from "./session/SessionService.ts";
 import { UserStore } from "./session/UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import { Hooks } from "./Hooks.ts";
-import { UserNotFoundError } from "./Errors.ts";
 import type * as Types from "./Types.ts";
 
 // --- in-memory state ---------------------------------------------------------
 const users = new Map<string, Types.User>();
-const phoneToId = new Map<string, string>();
+const identifierRecords = new Map<string, Identifier>();
 const records = new Map<string, PhoneOTPRecord>();
 const sessions = new Map<string, Types.Session>();
 let seq = 0;
+
+const identifiers = memoryIdentifierStore(identifierRecords);
 
 const sentOTPs: Array<{ phoneNumber: string; otp: string; purpose: PhoneOTPPurpose }> = [];
 
@@ -47,45 +54,41 @@ const phoneOTPStore: typeof PhoneOTPStore.Service = {
 };
 
 const phoneOTPUserStore: typeof PhoneOTPUserStore.Service = {
-  getUserByPhoneNumber: (phone) =>
-    Effect.sync(() => {
-      const id = phoneToId.get(phone);
-      return id === undefined ? null : (users.get(id) ?? null);
-    }),
   createUser: (input) =>
     Effect.sync(() => {
       const now = new Date();
       const user: Types.User = {
         id: `user-${++seq}`,
-        email: `${input.phoneNumber}@phone.local`,
-        emailVerified: false,
         ...(input.name !== undefined && { name: input.name }),
         createdAt: now,
         updatedAt: now,
-        attributes: {
-          phoneNumber: input.phoneNumber,
-          phoneNumberVerified: input.phoneNumberVerified,
-        },
+        attributes: {},
       };
       users.set(user.id, user);
-      phoneToId.set(input.phoneNumber, user.id);
       return user;
     }),
-  setPhoneNumberVerified: (userId, phone) =>
-    Effect.suspend(() => {
-      const user = users.get(userId);
-      if (user === undefined) {
-        return Effect.fail(new UserNotFoundError({ message: "not found", userId }));
-      }
-      const updated: Types.User = {
-        ...user,
-        updatedAt: new Date(),
-        attributes: { ...user.attributes, phoneNumber: phone, phoneNumberVerified: true },
-      };
-      users.set(userId, updated);
-      phoneToId.set(phone, userId);
-      return Effect.succeed(updated);
-    }),
+};
+
+// Seed an existing user with a phone identifier (the phone number lives in the
+// identifier store now, not on the user record).
+const seedPhoneUser = (phoneNumber: string, verified: boolean): Types.User => {
+  const now = new Date();
+  const user: Types.User = {
+    id: `user-${++seq}`,
+    createdAt: now,
+    updatedAt: now,
+    attributes: {},
+  };
+  users.set(user.id, user);
+  const identifier = makeIdentifier({
+    userId: user.id,
+    type: "phone",
+    value: phoneNumber,
+    verified,
+    ...(verified ? { verifiedAt: now } : {}),
+  });
+  identifierRecords.set(identifier.id, identifier);
+  return user;
 };
 
 const sessionStore: typeof SessionStore.Service = {
@@ -129,7 +132,10 @@ const makeTestContext = async () => {
     ).pipe(Effect.provide(Hooks.Default)),
   );
   return Context.merge(
-    Context.make(SessionService, sessionManager),
+    Context.merge(
+      Context.make(SessionService, sessionManager),
+      Context.merge(Context.make(IdentifierStore, identifiers), Context.make(UserStore, userStore)),
+    ),
     Context.merge(
       Context.merge(
         Context.make(PhoneOTPStore, phoneOTPStore),
@@ -143,10 +149,12 @@ const makeTestContext = async () => {
 const recordingSend = (phoneNumber: string, otp: string, purpose: PhoneOTPPurpose) =>
   Effect.sync(() => void sentOTPs.push({ phoneNumber, otp, purpose }));
 
+const phoneNumberOf = (userId: string) => Effect.runPromise(getPhoneNumber(identifiers, userId));
+
 describe("PhoneOTPService", () => {
   beforeEach(() => {
     users.clear();
-    phoneToId.clear();
+    identifierRecords.clear();
     records.clear();
     sessions.clear();
     sentOTPs.length = 0;
@@ -171,7 +179,7 @@ describe("PhoneOTPService", () => {
     expect(record?.attempts).toBe(0);
   });
 
-  it("signs in a new user, creating a phone-verified user + session", async () => {
+  it("signs in a new user, creating a verified phone identifier + session", async () => {
     const testContext = await makeTestContext();
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -183,17 +191,17 @@ describe("PhoneOTPService", () => {
       }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
     );
 
-    expect(getPhoneNumber(result.user)).toBe("+15551231111");
-    expect(result.user.attributes["phoneNumberVerified"]).toBe(true);
+    expect(await phoneNumberOf(result.user.id)).toBe("+15551231111");
+    const identifier = await Effect.runPromise(identifiers.getByValue("phone", "+15551231111"));
+    expect(identifier?.userId).toBe(result.user.id);
+    expect(identifier?.verified).toBe(true);
     expect(result.session.userId).toBe(result.user.id);
   });
 
   it("signs in an existing user without creating a new one", async () => {
     const testContext = await makeTestContext();
     // Seed an existing phone user.
-    phoneOTPUserStore
-      .createUser({ phoneNumber: "+15551232222", phoneNumberVerified: true })
-      .pipe(Effect.runSync);
+    seedPhoneUser("+15551232222", true);
     const before = users.size;
 
     const result = await Effect.runPromise(
@@ -205,7 +213,7 @@ describe("PhoneOTPService", () => {
     );
 
     expect(users.size).toBe(before);
-    expect(getPhoneNumber(result.user)).toBe("+15551232222");
+    expect(await phoneNumberOf(result.user.id)).toBe("+15551232222");
   });
 
   it("rejects a replayed OTP (one-time use)", async () => {
@@ -275,9 +283,7 @@ describe("PhoneOTPService", () => {
 
   it("verifies an existing user's phone number", async () => {
     const testContext = await makeTestContext();
-    const created = phoneOTPUserStore
-      .createUser({ phoneNumber: "+15551237777", phoneNumberVerified: false })
-      .pipe(Effect.runSync);
+    const created = seedPhoneUser("+15551237777", false);
 
     const updated = await Effect.runPromise(
       Effect.gen(function* () {
@@ -286,7 +292,10 @@ describe("PhoneOTPService", () => {
         return yield* service.verifyPhoneNumber(created.id, "+15551237777", sentOTPs[0]!.otp);
       }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
     );
-    expect(updated.attributes["phoneNumberVerified"]).toBe(true);
+    expect(updated.id).toBe(created.id);
+    const identifier = await Effect.runPromise(identifiers.getByValue("phone", "+15551237777"));
+    expect(identifier?.userId).toBe(created.id);
+    expect(identifier?.verified).toBe(true);
   });
 
   it("applies the normalizePhoneNumber hook for storage and lookup", async () => {
@@ -301,7 +310,7 @@ describe("PhoneOTPService", () => {
         return yield* service.signIn("+15551238888", sentOTPs[0]!.otp);
       }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
     );
-    expect(getPhoneNumber(result.user)).toBe("+15551238888");
+    expect(await phoneNumberOf(result.user.id)).toBe("+15551238888");
   });
 
   it("fails with ResendTooSoonError when a resend is within the cooldown window", async () => {

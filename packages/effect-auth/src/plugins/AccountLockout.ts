@@ -214,8 +214,11 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
 
         afterSignIn: (result: AuthResult) =>
           Effect.gen(function* () {
-            // Successful sign-in clears the counter.
-            yield* store.delete(`${keyPrefix}${normalize(result.user.email)}`);
+            // Successful sign-in clears the counter (keyed by the email
+            // handle used to sign in; other handles have no counter).
+            if (result.identifier?.type === "email") {
+              yield* store.delete(`${keyPrefix}${normalize(result.identifier.value)}`);
+            }
             return result;
           }),
       };

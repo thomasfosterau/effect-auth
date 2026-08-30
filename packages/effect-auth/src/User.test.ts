@@ -2,33 +2,31 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { Context, Effect } from "effect";
 import { UserServiceStore } from "./User.ts";
 import * as User from "./User.ts";
+import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  resolveUserByIdentifier,
+  type Identifier,
+} from "./Identifier.ts";
+import { normalizeEmail } from "./utils.ts";
 import type { User as UserRecord } from "./Types.ts";
 
 const users = new Map<string, UserRecord>();
-const usersByEmail = new Map<string, string>();
+const identifierRecords = new Map<string, Identifier>();
+const identifiers = memoryIdentifierStore(identifierRecords);
 
 const userStore = {
   get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
 
-  getByEmail: (email: string) =>
-    Effect.sync(() => {
-      const userId = usersByEmail.get(email);
-      return userId ? (users.get(userId) ?? null) : null;
-    }),
-
   update: (user: UserRecord) =>
     Effect.sync(() => {
       users.set(user.id, user);
-      usersByEmail.set(user.email.toLowerCase(), user.id);
       return user;
     }),
 
   delete: (userId: string) =>
     Effect.sync(() => {
-      const existing = users.get(userId);
-      if (existing) {
-        usersByEmail.delete(existing.email.toLowerCase());
-      }
       users.delete(userId);
     }),
 };
@@ -38,12 +36,10 @@ const makeTestContext = () => Context.make(UserServiceStore, userStore);
 describe("UserService", () => {
   beforeEach(() => {
     users.clear();
-    usersByEmail.clear();
+    identifierRecords.clear();
 
     const seeded: UserRecord = {
       id: "user-1",
-      email: "user@example.com",
-      emailVerified: false,
       name: "User One",
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -53,7 +49,13 @@ describe("UserService", () => {
     };
 
     users.set(seeded.id, seeded);
-    usersByEmail.set("user@example.com", seeded.id);
+    // The login handle lives in the identifier store now, not on the user.
+    const emailIdentifier = makeIdentifier({
+      userId: seeded.id,
+      type: "email",
+      value: "user@example.com",
+    });
+    identifierRecords.set(emailIdentifier.id, emailIdentifier);
   });
 
   it("should get user by id", async () => {
@@ -65,18 +67,27 @@ describe("UserService", () => {
     const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
 
     expect(result.id).toBe("user-1");
-    expect(result.email).toBe("user@example.com");
+    expect(result.name).toBe("User One");
   });
 
-  it("should get user by normalized email", async () => {
+  it("should resolve a user by normalized email identifier", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* User.make();
-      return yield* service.getUserByEmail("  USER@EXAMPLE.COM  ");
+      const store = yield* IdentifierStore;
+      return yield* resolveUserByIdentifier(
+        store,
+        userStore.get,
+        "email",
+        normalizeEmail("  USER@EXAMPLE.COM  "),
+      );
     });
 
-    const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
+    const result = await Effect.runPromise(
+      Effect.provide(program, Context.make(IdentifierStore, identifiers)),
+    );
 
-    expect(result.id).toBe("user-1");
+    expect(result).not.toBeNull();
+    expect(result!.user.id).toBe("user-1");
+    expect(result!.identifier.value).toBe("user@example.com");
   });
 
   it("should merge attributes when updating user", async () => {
@@ -90,20 +101,24 @@ describe("UserService", () => {
 
     const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
 
-    expect(result.email).toBe("user@example.com");
     expect(result.attributes.role).toBe("admin");
     expect(result.attributes.displayName).toBe("Updated User");
   });
 
-  it("should mark user email as verified", async () => {
+  it("should mark the user's email identifier as verified", async () => {
     const program = Effect.gen(function* () {
-      const service = yield* User.make();
-      return yield* service.markEmailVerified("user-1");
+      const store = yield* IdentifierStore;
+      const identifier = yield* store.getByValue("email", "user@example.com");
+      yield* store.setVerified(identifier!.id, new Date());
+      return yield* store.getByValue("email", "user@example.com");
     });
 
-    const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
+    const result = await Effect.runPromise(
+      Effect.provide(program, Context.make(IdentifierStore, identifiers)),
+    );
 
-    expect(result.emailVerified).toBe(true);
+    expect(result!.verified).toBe(true);
+    expect(result!.verifiedAt).toBeInstanceOf(Date);
   });
 
   it("should delete user", async () => {

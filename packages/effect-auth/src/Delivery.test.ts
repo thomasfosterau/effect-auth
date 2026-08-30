@@ -9,16 +9,37 @@ import {
   type SMSMessage,
 } from "./Delivery.ts";
 import { AuthError, EmailVerificationError, MagicLinkError, PasswordResetError } from "./Errors.ts";
+import {
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+  type IdentifierType,
+} from "./Identifier.ts";
 import type * as Types from "./Types.ts";
 
 const user = (attributes: Record<string, unknown> = {}): Types.User => ({
   id: "u1",
-  email: "alice@example.com",
-  emailVerified: true,
   createdAt: new Date(),
   updatedAt: new Date(),
   attributes,
 });
+
+/** An in-memory IdentifierStore pre-seeded with identifiers for user `u1`. */
+const identifierStoreWith = (
+  ...entries: Array<{ type: IdentifierType; value: string; verified?: boolean }>
+) => {
+  const records = new Map<string, Identifier>();
+  for (const entry of entries) {
+    const identifier = makeIdentifier({
+      userId: "u1",
+      type: entry.type,
+      value: entry.value,
+      verified: entry.verified ?? true,
+    });
+    records.set(identifier.id, identifier);
+  }
+  return memoryIdentifierStore(records);
+};
 
 const captureEmailSender = () => {
   const sent: EmailMessage[] = [];
@@ -35,7 +56,10 @@ const failingEmailSender: typeof EmailSender.Service = {
 describe("emailCallbacks", () => {
   it("routes every email flow through the sender with stable purposes", async () => {
     const { sent, sender } = captureEmailSender();
-    const cb = emailCallbacks(sender);
+    const cb = emailCallbacks(
+      sender,
+      identifierStoreWith({ type: "email", value: "alice@example.com" }),
+    );
 
     await Effect.runPromise(cb.sendVerificationEmail("a@example.com", "tok-1"));
     await Effect.runPromise(cb.sendMagicLink("b@example.com", "tok-2"));
@@ -44,7 +68,13 @@ describe("emailCallbacks", () => {
     await Effect.runPromise(
       cb.sendChangeEmailVerification({ user: user(), newEmail: "new@example.com", token: "tok-4" }),
     );
-    await Effect.runPromise(cb.sendDeleteAccountVerification({ user: user(), token: "tok-5" }));
+    await Effect.runPromise(
+      cb.sendDeleteAccountVerification({
+        user: user(),
+        email: "alice@example.com",
+        token: "tok-5",
+      }),
+    );
     await Effect.runPromise(cb.sendSecondFactorOTP(user(), "654321"));
 
     expect(sent).toEqual([
@@ -52,18 +82,31 @@ describe("emailCallbacks", () => {
       { to: "b@example.com", purpose: "magic-link", params: { token: "tok-2" } },
       { to: "c@example.com", purpose: "email-otp:sign-in", params: { otp: "123456" } },
       { to: "d@example.com", purpose: "password-reset", params: { token: "tok-3" } },
-      {
-        to: "new@example.com",
-        purpose: "change-email",
-        params: { token: "tok-4", currentEmail: "alice@example.com" },
-      },
+      { to: "new@example.com", purpose: "change-email", params: { token: "tok-4" } },
       { to: "alice@example.com", purpose: "delete-account", params: { token: "tok-5" } },
       { to: "alice@example.com", purpose: "second-factor-otp", params: { otp: "654321" } },
     ]);
   });
 
+  it("fails when the user has no email identifier for email-bound deliveries", async () => {
+    const { sent, sender } = captureEmailSender();
+    const cb = emailCallbacks(sender, identifierStoreWith());
+
+    const otpError = await Effect.runPromise(Effect.flip(cb.sendSecondFactorOTP(user(), "1")));
+    expect(otpError).toBeInstanceOf(AuthError);
+    expect(otpError.message).toMatch(/no email/);
+
+    const deleteError = await Effect.runPromise(
+      Effect.flip(cb.sendDeleteAccountVerification({ user: user(), email: null, token: "t" })),
+    );
+    expect(deleteError).toBeInstanceOf(AuthError);
+    expect(deleteError.message).toMatch(/no email/);
+
+    expect(sent).toEqual([]);
+  });
+
   it("maps sender failures to each feature's error type with cause preserved", async () => {
-    const cb = emailCallbacks(failingEmailSender);
+    const cb = emailCallbacks(failingEmailSender, identifierStoreWith());
 
     const verification = await Effect.runPromise(
       Effect.flip(cb.sendVerificationEmail("a@example.com", "t")),
@@ -90,12 +133,10 @@ describe("smsCallbacks", () => {
     const sender: typeof SMSSender.Service = {
       send: (message) => Effect.sync(() => void sent.push(message)),
     };
-    const cb = smsCallbacks(sender);
+    const cb = smsCallbacks(sender, identifierStoreWith({ type: "phone", value: "+15559876543" }));
 
     await Effect.runPromise(cb.sendPhoneOTP("+15551234567", "111222", "sign-in"));
-    await Effect.runPromise(
-      cb.sendSecondFactorOTP(user({ phoneNumber: "+15559876543" }), "333444"),
-    );
+    await Effect.runPromise(cb.sendSecondFactorOTP(user(), "333444"));
 
     expect(sent).toEqual([
       { to: "+15551234567", purpose: "phone-otp:sign-in", params: { otp: "111222" } },
@@ -105,7 +146,7 @@ describe("smsCallbacks", () => {
 
   it("fails when the user has no phone number for second-factor OTP", async () => {
     const sender: typeof SMSSender.Service = { send: () => Effect.void };
-    const cb = smsCallbacks(sender);
+    const cb = smsCallbacks(sender, identifierStoreWith());
 
     const error = await Effect.runPromise(Effect.flip(cb.sendSecondFactorOTP(user(), "1")));
     expect(error).toBeInstanceOf(AuthError);

@@ -62,8 +62,6 @@ const msToDate = (ms: number): Date => new Date(ms);
 
 interface UserRow {
   readonly id: string;
-  readonly email: string;
-  readonly email_verified: number;
   readonly name: string | null;
   readonly image: string | null;
   readonly password_hash: string | null;
@@ -76,8 +74,6 @@ const rowToUser = (row: UserRow, label: string): Effect.Effect<Auth.User, Auth.A
   decodeAttributes(row.attributes, label).pipe(
     Effect.map((attributes) => ({
       id: row.id,
-      email: row.email,
-      emailVerified: row.email_verified !== 0,
       createdAt: msToDate(row.created_at),
       updatedAt: msToDate(row.updated_at),
       attributes,
@@ -86,13 +82,11 @@ const rowToUser = (row: UserRow, label: string): Effect.Effect<Auth.User, Auth.A
     })),
   );
 
-const insertUser = `INSERT INTO auth_users (id, email, email_verified, name, image, password_hash, attributes, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+const insertUser = `INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?)`;
 
 const insertUserParams = (user: Auth.User): readonly unknown[] => [
   user.id,
-  user.email,
-  user.emailVerified ? 1 : 0,
   user.name ?? null,
   user.image ?? null,
   null,
@@ -213,24 +207,11 @@ export const makeUserServiceStore = (db: D1Database): typeof Auth.UserServiceSto
     d1First<UserRow>(db, `SELECT * FROM auth_users WHERE id = ?`, [userId], "userService.get").pipe(
       Effect.flatMap((row) => (row ? rowToUser(row, "userService.get") : Effect.succeed(null))),
     ),
-  getByEmail: (email) =>
-    d1First<UserRow>(
-      db,
-      `SELECT * FROM auth_users WHERE email = ?`,
-      [email],
-      "userService.getByEmail",
-    ).pipe(
-      Effect.flatMap((row) =>
-        row ? rowToUser(row, "userService.getByEmail") : Effect.succeed(null),
-      ),
-    ),
   update: (user) =>
     d1Run(
       db,
-      `UPDATE auth_users SET email = ?, email_verified = ?, name = ?, image = ?, attributes = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE auth_users SET name = ?, image = ?, attributes = ?, updated_at = ? WHERE id = ?`,
       [
-        user.email,
-        user.emailVerified ? 1 : 0,
         user.name ?? null,
         user.image ?? null,
         encodeAttributes(user.attributes),
@@ -252,24 +233,11 @@ export const makeUserServiceStore = (db: D1Database): typeof Auth.UserServiceSto
 export const makeEmailPasswordStore = (
   db: D1Database,
 ): typeof Auth.Email.EmailPasswordStore.Service => ({
-  getUserByEmail: (email) =>
-    d1First<UserRow>(
-      db,
-      `SELECT * FROM auth_users WHERE email = ?`,
-      [email],
-      "emailPassword.getUserByEmail",
-    ).pipe(
-      Effect.flatMap((row) =>
-        row ? rowToUser(row, "emailPassword.getUserByEmail") : Effect.succeed(null),
-      ),
-    ),
   createUser: (input) =>
     Effect.gen(function* () {
       const now = new Date();
       const user: Auth.User = {
         id: randomUUID(),
-        email: input.email,
-        emailVerified: false,
         createdAt: now,
         updatedAt: now,
         attributes: input.attributes ?? {},
@@ -298,17 +266,6 @@ export const makeEmailPasswordStore = (
 export const makePasswordResetUserStore = (
   db: D1Database,
 ): typeof Auth.Password.PasswordResetUserStore.Service => ({
-  getUserByEmail: (email) =>
-    d1First<UserRow>(
-      db,
-      `SELECT * FROM auth_users WHERE email = ?`,
-      [email],
-      "passwordResetUser.getUserByEmail",
-    ).pipe(
-      Effect.flatMap((row) =>
-        row ? rowToUser(row, "passwordResetUser.getUserByEmail") : Effect.succeed(null),
-      ),
-    ),
   setPasswordHash: (userId, hash) =>
     d1Run(
       db,
@@ -813,24 +770,11 @@ export const makeOAuthUserStore = (db: D1Database): typeof Auth.OAuth.OAuthUserS
 
   return {
     getUser: (userId) => requireById(userId, "oauthUser.getUser"),
-    getUserByEmail: (email) =>
-      d1First<UserRow>(
-        db,
-        `SELECT * FROM auth_users WHERE email = ?`,
-        [email],
-        "oauthUser.getUserByEmail",
-      ).pipe(
-        Effect.flatMap((row) =>
-          row ? rowToUser(row, "oauthUser.getUserByEmail") : Effect.succeed(null),
-        ),
-      ),
     createUser: (input) =>
       Effect.gen(function* () {
         const now = new Date();
         const user: Auth.User = {
           id: randomUUID(),
-          email: input.email,
-          emailVerified: input.emailVerified,
           createdAt: now,
           updatedAt: now,
           attributes: {},
@@ -966,31 +910,17 @@ export const makeMagicLinkStore = (db: D1Database): typeof Auth.MagicLinkStore.S
 
 /**
  * `MagicLinkUserStore` and `EmailOTPUserStore` are structurally identical
- * (getUserByEmail + createUser over auth_users), so both stores share this
- * implementation.
+ * (createUser over auth_users), so both stores share this implementation.
  */
 const makeEmailSignInUserStore = (
   db: D1Database,
   label: string,
 ): typeof Auth.MagicLinkUserStore.Service & typeof Auth.Email.EmailOTPUserStore.Service => ({
-  getUserByEmail: (email) =>
-    d1First<UserRow>(
-      db,
-      `SELECT * FROM auth_users WHERE email = ?`,
-      [email],
-      `${label}.getUserByEmail`,
-    ).pipe(
-      Effect.flatMap((row) =>
-        row ? rowToUser(row, `${label}.getUserByEmail`) : Effect.succeed(null),
-      ),
-    ),
   createUser: (input) =>
     Effect.gen(function* () {
       const now = new Date();
       const user: Auth.User = {
         id: randomUUID(),
-        email: input.email,
-        emailVerified: input.emailVerified,
         createdAt: now,
         updatedAt: now,
         attributes: {},

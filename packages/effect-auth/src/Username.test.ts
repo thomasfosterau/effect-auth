@@ -1,11 +1,17 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { UsernameService, UsernameStore, UsernameError, type UsernameConfig } from "./Username.ts";
+import { UsernameService, UsernameError, type UsernameConfig } from "./Username.ts";
 import {
   EmailPasswordService,
   EmailPasswordStore,
   SecondFactorGate,
 } from "./email/EmailPassword.ts";
+import {
+  IdentifierStore,
+  memoryIdentifierStore,
+  type Identifier,
+  type IdentifierType,
+} from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import * as Password from "./password/Password.ts";
 import { SessionService } from "./session/SessionService.ts";
@@ -19,56 +25,35 @@ const sessionConfig: Types.SessionConfig = {
   sessionExpiresIn: { activePeriod: 1000 * 60 * 60, idlePeriod: 1000 * 60 * 60 },
 };
 
-// Shared in-memory state, reset per test.
+// Shared in-memory state, reset per test. Login handles (emails, usernames)
+// live in the identifier store now, not on the user record.
 const usersById = new Map<string, Types.User>();
-const userIdByEmail = new Map<string, string>();
-const usernameToId = new Map<string, string>();
+const identifierRecords = new Map<string, Identifier>();
 const passwordHashes = new Map<string, string>();
 const sessions = new Map<string, Types.Session>();
 let seq = 0;
 
-const usernameStore: typeof UsernameStore.Service = {
-  getUserByUsername: (username) =>
-    Effect.sync(() => {
-      const id = usernameToId.get(username);
-      return id === undefined ? null : (usersById.get(id) ?? null);
-    }),
-  isUsernameTaken: (username) => Effect.sync(() => usernameToId.has(username)),
-  setUsername: (userId, username) =>
-    Effect.sync(() => {
-      // Drop any previous username mapping for this user.
-      for (const [name, id] of usernameToId) if (id === userId) usernameToId.delete(name);
-      usernameToId.set(username, userId);
-      const user = usersById.get(userId);
-      if (user !== undefined) {
-        usersById.set(userId, {
-          ...user,
-          attributes: { ...user.attributes, username },
-        });
-      }
-    }),
+const identifierStore = memoryIdentifierStore(identifierRecords);
+
+const findIdentifier = (type: IdentifierType, value: string): Identifier | null => {
+  for (const record of identifierRecords.values()) {
+    if (record.type === type && record.value === value) return record;
+  }
+  return null;
 };
 
 const emailPasswordStore: typeof EmailPasswordStore.Service = {
-  getUserByEmail: (email) =>
-    Effect.sync(() => {
-      const id = userIdByEmail.get(email);
-      return id === undefined ? null : (usersById.get(id) ?? null);
-    }),
   createUser: (input) =>
     Effect.sync(() => {
       const now = new Date();
       const user: Types.User = {
         id: `user-${++seq}`,
-        email: input.email,
-        emailVerified: false,
         ...(input.name !== undefined && { name: input.name }),
         createdAt: now,
         updatedAt: now,
         attributes: input.attributes ?? {},
       };
       usersById.set(user.id, user);
-      userIdByEmail.set(user.email, user.id);
       return user;
     }),
   getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
@@ -105,7 +90,7 @@ const hasherLayer = Layer.succeed(PasswordHasher)(hasher);
 
 // Stage 0: raw stores + hasher + Hooks (no construction-time deps of their own).
 const storesLayer = Layer.mergeAll(
-  Layer.succeed(UsernameStore)(usernameStore),
+  Layer.succeed(IdentifierStore)(identifierStore),
   Layer.succeed(EmailPasswordStore)(emailPasswordStore),
   Layer.succeed(SessionStore)(sessionStore),
   Layer.succeed(UserStore)(userStore),
@@ -118,8 +103,8 @@ const sessionServiceLayer = SessionService.layer(sessionConfig).pipe(Layer.provi
 
 const stage1 = Layer.mergeAll(storesLayer, sessionServiceLayer);
 
-// Stage 2: EmailPasswordService.layer needs EmailPasswordStore | PasswordHasher |
-// SessionService | Hooks, all now available from stage1.
+// Stage 2: EmailPasswordService.layer needs EmailPasswordStore | IdentifierStore |
+// UserStore | PasswordHasher | SessionService | Hooks, all now available from stage1.
 const emailPasswordServiceLayer = EmailPasswordService.layer({}).pipe(Layer.provide(stage1));
 
 const baseDeps = Layer.mergeAll(stage1, emailPasswordServiceLayer);
@@ -130,7 +115,8 @@ const gate = (required: boolean): typeof SecondFactorGate.Service => ({
 });
 
 type UsernameDeps =
-  | UsernameStore
+  | IdentifierStore
+  | UserStore
   | EmailPasswordService
   | EmailPasswordStore
   | PasswordHasher
@@ -141,8 +127,9 @@ const run = <A, E>(
   f: (svc: typeof UsernameService.Service) => Effect.Effect<A, E, UsernameDeps>,
   opts?: { config?: UsernameConfig; gate?: typeof SecondFactorGate.Service },
 ) => {
-  // UsernameService.layer needs UsernameStore | EmailPasswordService | EmailPasswordStore |
-  // PasswordHasher | SessionService | Hooks at construction time — all satisfied by baseDeps.
+  // UsernameService.layer needs IdentifierStore | UserStore | EmailPasswordService |
+  // EmailPasswordStore | PasswordHasher | SessionService | Hooks at construction time —
+  // all satisfied by baseDeps.
   const usernameLayer = UsernameService.layer(opts?.config).pipe(Layer.provide(baseDeps));
   const layer = opts?.gate
     ? Layer.mergeAll(usernameLayer, baseDeps, Layer.succeed(SecondFactorGate)(opts.gate))
@@ -158,8 +145,7 @@ const run = <A, E>(
 describe("UsernameService", () => {
   beforeEach(() => {
     usersById.clear();
-    userIdByEmail.clear();
-    usernameToId.clear();
+    identifierRecords.clear();
     passwordHashes.clear();
     sessions.clear();
     seq = 0;
@@ -169,8 +155,10 @@ describe("UsernameService", () => {
     const result = await run((svc) =>
       svc.signUp({ username: "Alice_01", email: "alice@example.com", password: "password-123" }),
     );
-    expect(result.user.attributes["username"]).toBe("alice_01");
-    expect(usernameToId.get("alice_01")).toBe(result.user.id);
+    const identifier = findIdentifier("username", "alice_01");
+    expect(identifier?.userId).toBe(result.user.id);
+    // Usernames carry no external proof-of-ownership: created verified.
+    expect(identifier?.verified).toBe(true);
     expect(result.session).toBeDefined();
   });
 
@@ -205,7 +193,8 @@ describe("UsernameService", () => {
     );
     const result = await run((svc) => svc.signIn({ username: "Carol", password: "password-123" }));
     expect(result.session).toBeDefined();
-    expect(result.user.attributes["username"]).toBe("carol");
+    expect(result.identifier).toEqual({ type: "username", value: "carol" });
+    expect(result.user.id).toBe(findIdentifier("username", "carol")?.userId);
   });
 
   it("returns a uniform error for a wrong password or unknown username", async () => {
@@ -243,9 +232,13 @@ describe("UsernameService", () => {
     );
     expect(err._tag).toBe("EmailNotVerifiedError");
 
-    // Once the email is marked verified the same credentials succeed.
-    const userId = usernameToId.get("hector")!;
-    usersById.set(userId, { ...usersById.get(userId)!, emailVerified: true });
+    // Once the email identifier is marked verified the same credentials succeed.
+    const emailIdentifier = findIdentifier("email", "hector@example.com")!;
+    identifierRecords.set(emailIdentifier.id, {
+      ...emailIdentifier,
+      verified: true,
+      verifiedAt: new Date(),
+    });
     const result = await run(
       (svc) => svc.signIn({ username: "hector", password: "password-123" }),
       { config: { requireEmailVerification: true } },
@@ -268,7 +261,7 @@ describe("UsernameService", () => {
     const spyHasherLayer = Layer.succeed(PasswordHasher)(spyHasher);
 
     const spyStoresLayer = Layer.mergeAll(
-      Layer.succeed(UsernameStore)(usernameStore),
+      Layer.succeed(IdentifierStore)(identifierStore),
       Layer.succeed(EmailPasswordStore)(emailPasswordStore),
       Layer.succeed(SessionStore)(sessionStore),
       Layer.succeed(UserStore)(userStore),
@@ -315,9 +308,9 @@ describe("UsernameService", () => {
     const clash = await run((svc) => Effect.flip(svc.updateUsername(a.user.id, "grace")));
     expect(clash).toBeInstanceOf(UsernameError);
 
-    // Changing to a free username succeeds.
+    // Changing to a free username succeeds and drops the old identifier.
     await run((svc) => svc.updateUsername(a.user.id, "franklin"));
-    expect(usernameToId.get("franklin")).toBe(a.user.id);
-    expect(usernameToId.has("frank")).toBe(false);
+    expect(findIdentifier("username", "franklin")?.userId).toBe(a.user.id);
+    expect(findIdentifier("username", "frank")).toBeNull();
   });
 });

@@ -15,7 +15,7 @@ const hasher = Auth.Password.scryptHasher({ cost: 16384 });
 
 export const makeServerFixture = () => {
   const usersById = new Map<string, Auth.User>();
-  const userIdByEmail = new Map<string, string>();
+  const identifierRecords = new Map<string, Auth.Identifier>();
   const passwordHashes = new Map<string, string>();
   const sessions = new Map<string, Auth.Session>();
   const verifications = new Map<string, Auth.Email.EmailVerification>();
@@ -23,32 +23,24 @@ export const makeServerFixture = () => {
   let userSeq = 0;
 
   const createUser = (input: {
-    readonly email: string;
-    readonly emailVerified?: boolean;
     readonly name?: string;
     readonly attributes?: Record<string, unknown>;
   }): Auth.User => {
     const now = new Date();
     const user: Auth.User = {
       id: `user-${++userSeq}`,
-      email: input.email,
-      emailVerified: input.emailVerified ?? false,
       ...(input.name !== undefined && { name: input.name }),
       createdAt: now,
       updatedAt: now,
       attributes: input.attributes ?? {},
     };
     usersById.set(user.id, user);
-    userIdByEmail.set(user.email, user.id);
     return user;
   };
 
-  const userByEmail = (email: string): Auth.User | null => {
-    const id = userIdByEmail.get(email);
-    return id === undefined ? null : (usersById.get(id) ?? null);
-  };
-
   const getUserById = (userId: string) => Effect.sync(() => usersById.get(userId) ?? null);
+
+  const identifierStore = Auth.memoryIdentifierStore(identifierRecords);
 
   const sessionStore: typeof Auth.SessionStore.Service = {
     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
@@ -69,7 +61,6 @@ export const makeServerFixture = () => {
   };
 
   const emailPasswordStore: typeof Auth.Email.EmailPasswordStore.Service = {
-    getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
@@ -77,21 +68,12 @@ export const makeServerFixture = () => {
 
   const userServiceStore: typeof Auth.UserServiceStore.Service = {
     get: getUserById,
-    getByEmail: (email) => Effect.sync(() => userByEmail(email)),
     update: (user) =>
       Effect.sync(() => {
         usersById.set(user.id, user);
-        userIdByEmail.set(user.email, user.id);
         return user;
       }),
-    delete: (userId) =>
-      Effect.sync(() => {
-        const user = usersById.get(userId);
-        if (user !== undefined) {
-          userIdByEmail.delete(user.email);
-          usersById.delete(userId);
-        }
-      }),
+    delete: (userId) => Effect.sync(() => void usersById.delete(userId)),
   };
 
   const emailVerificationStore: typeof Auth.Email.EmailVerificationStore.Service = {
@@ -116,13 +98,13 @@ export const makeServerFixture = () => {
   };
 
   const passwordResetUserStore: typeof Auth.Password.PasswordResetUserStore.Service = {
-    getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
 
   const storeLayer = Layer.mergeAll(
     Layer.succeed(Auth.SessionStore)(sessionStore),
     Layer.succeed(Auth.UserStore)(userStore),
+    Layer.succeed(Auth.IdentifierStore)(identifierStore),
     Layer.succeed(Auth.Email.EmailPasswordStore)(emailPasswordStore),
     Layer.succeed(Auth.Password.PasswordHasher)(hasher),
     Layer.succeed(Auth.Email.EmailVerificationStore)(emailVerificationStore),

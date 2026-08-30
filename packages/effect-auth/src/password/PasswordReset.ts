@@ -1,10 +1,11 @@
 import { Context, Crypto, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
+import { IdentifierStore, resolveUserByIdentifier } from "../Identifier.ts";
+import { UserStore } from "../session/UserStore.ts";
 import { hashToken } from "../TokenHash.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import { PasswordHasher } from "./Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import type * as Types from "../Types.ts";
 import { SessionService } from "../session/SessionService.ts";
 import { normalizeEmail } from "../utils.ts";
 
@@ -31,7 +32,6 @@ export class PasswordResetStore extends Context.Service<
 export class PasswordResetUserStore extends Context.Service<
   PasswordResetUserStore,
   {
-    readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
     readonly setPasswordHash: (
       userId: string,
       hash: string,
@@ -109,6 +109,8 @@ export const make = (
   never,
   | PasswordResetStore
   | PasswordResetUserStore
+  | IdentifierStore
+  | UserStore
   | PasswordHasher
   | SessionService
   | Hooks
@@ -122,6 +124,8 @@ export const make = (
 
     const resetStore = yield* PasswordResetStore;
     const userStore = yield* PasswordResetUserStore;
+    const identifiers = yield* IdentifierStore;
+    const users = yield* UserStore;
     const passwordHasher = yield* PasswordHasher;
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
@@ -147,7 +151,13 @@ export const make = (
           return;
         }
 
-        const user = yield* userStore.getUserByEmail(normalizedEmail);
+        const resolved = yield* resolveUserByIdentifier(
+          identifiers,
+          users.get,
+          "email",
+          normalizedEmail,
+        );
+        const user = resolved?.user ?? null;
 
         // Do not reveal whether the user exists to reduce email enumeration risk.
         // The after-hook fires uniformly (existence is not signalled to plugins).

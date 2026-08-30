@@ -26,6 +26,12 @@ import { UserServiceStore, UserService } from "../User.ts";
 import { hashToken } from "../TokenHash.ts";
 import { Hooks } from "../Hooks.ts";
 import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "../Identifier.ts";
+import {
   MagicLinkStore,
   MagicLinkUserStore,
   type MagicLinkToken,
@@ -59,14 +65,13 @@ import {
   type PhoneOTPRecord,
   PhoneOTPService,
 } from "../PhoneOTP.ts";
-import { UsernameStore, UsernameService } from "../Username.ts";
+import { UsernameService } from "../Username.ts";
 import {
   DeviceAuthorizationStore,
   type DeviceAuthorizationRecord,
   DeviceAuthorizationService,
 } from "../DeviceAuthorization.ts";
 import { generateHOTP, generateTOTP } from "../secondfactor/OTP.ts";
-import { UserNotFoundError } from "../Errors.ts";
 import type * as Types from "../Types.ts";
 
 const HOUR = 60 * 60 * 1000;
@@ -93,7 +98,7 @@ interface Fixture {
   readonly sentDeleteTokens: string[];
   readonly beforeDeleteCalls: string[];
   readonly sentPhoneOTPs: Array<{ phoneNumber: string; otp: string; purpose: PhoneOTPPurpose }>;
-  /** Register a username -> userId mapping for the username sign-in tests. */
+  /** Register a verified `username` identifier for the username sign-in tests. */
   readonly registerUsername: (userId: string, username: string) => void;
   /** Number of session-store `get` reads so far (for the cookie-cache tests). */
   readonly sessionStoreReads: () => number;
@@ -107,7 +112,7 @@ interface Fixture {
 const makeFixture = (): Fixture => {
   // --- shared in-memory state -----------------------------------------------
   const usersById = new Map<string, Types.User>();
-  const userIdByEmail = new Map<string, string>();
+  const identifierRecords = new Map<string, Identifier>();
   const passwordHashes = new Map<string, string>();
   const sessions = new Map<string, Types.Session>();
   const verifications = new Map<string, EmailVerification>();
@@ -124,9 +129,9 @@ const makeFixture = (): Fixture => {
   const beforeDeleteCalls: string[] = [];
   const sentPhoneOTPs: Array<{ phoneNumber: string; otp: string; purpose: PhoneOTPPurpose }> = [];
 
+  // Users are surrogate-keyed: login handles (email/username/phone) live in
+  // `identifierRecords` and are claimed by the services themselves.
   const createUser = (input: {
-    readonly email: string;
-    readonly emailVerified?: boolean;
     readonly name?: string;
     readonly image?: string;
     readonly attributes?: Record<string, unknown>;
@@ -134,8 +139,6 @@ const makeFixture = (): Fixture => {
     const now = new Date();
     const user: Types.User = {
       id: `user-${++userSeq}`,
-      email: input.email,
-      emailVerified: input.emailVerified ?? false,
       ...(input.name !== undefined && { name: input.name }),
       ...(input.image !== undefined && { image: input.image }),
       createdAt: now,
@@ -143,13 +146,7 @@ const makeFixture = (): Fixture => {
       attributes: input.attributes ?? {},
     };
     usersById.set(user.id, user);
-    userIdByEmail.set(user.email, user.id);
     return user;
-  };
-
-  const userByEmail = (email: string): Types.User | null => {
-    const id = userIdByEmail.get(email);
-    return id === undefined ? null : (usersById.get(id) ?? null);
   };
 
   const getUserById = (userId: string) => Effect.sync(() => usersById.get(userId) ?? null);
@@ -186,7 +183,6 @@ const makeFixture = (): Fixture => {
   };
 
   const emailPasswordStore: typeof EmailPasswordStore.Service = {
-    getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
@@ -194,21 +190,12 @@ const makeFixture = (): Fixture => {
 
   const userServiceStore: typeof UserServiceStore.Service = {
     get: getUserById,
-    getByEmail: (email) => Effect.sync(() => userByEmail(email)),
     update: (user) =>
       Effect.sync(() => {
         usersById.set(user.id, user);
-        userIdByEmail.set(user.email, user.id);
         return user;
       }),
-    delete: (userId) =>
-      Effect.sync(() => {
-        const user = usersById.get(userId);
-        if (user !== undefined) {
-          userIdByEmail.delete(user.email);
-          usersById.delete(userId);
-        }
-      }),
+    delete: (userId) => Effect.sync(() => void usersById.delete(userId)),
   };
 
   const emailVerificationStore: typeof EmailVerificationStore.Service = {
@@ -241,7 +228,6 @@ const makeFixture = (): Fixture => {
   };
 
   const passwordResetUserStore: typeof PasswordResetUserStore.Service = {
-    getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
 
@@ -249,6 +235,7 @@ const makeFixture = (): Fixture => {
     Layer.succeed(SessionStore)(sessionStore),
     Layer.succeed(UserStore)(userStore),
     Layer.succeed(EmailPasswordStore)(emailPasswordStore),
+    Layer.succeed(IdentifierStore)(memoryIdentifierStore(identifierRecords)),
     Layer.succeed(PasswordHasher)(hasher),
     Layer.succeed(EmailVerificationStore)(emailVerificationStore),
     Layer.succeed(PasswordResetStore)(passwordResetStore),
@@ -302,7 +289,6 @@ const makeFixture = (): Fixture => {
       }),
   };
   const magicLinkUserStore: typeof MagicLinkUserStore.Service = {
-    getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
   };
 
@@ -326,7 +312,6 @@ const makeFixture = (): Fixture => {
       }),
   };
   const emailOTPUserStore: typeof EmailOTPUserStore.Service = {
-    getUserByEmail: (email) => Effect.sync(() => userByEmail(email)),
     createUser: (input) => Effect.sync(() => createUser(input)),
   };
 
@@ -367,7 +352,6 @@ const makeFixture = (): Fixture => {
   };
 
   const phoneRecords = new Map<string, PhoneOTPRecord>();
-  const phoneToUserId = new Map<string, string>();
   const phoneKey = (phone: string, purpose: PhoneOTPPurpose) => `${phone}:${purpose}`;
   const phoneOTPStore: typeof PhoneOTPStore.Service = {
     upsert: (record) =>
@@ -387,39 +371,10 @@ const makeFixture = (): Fixture => {
         return updated.attempts;
       }),
   };
+  // The phone number itself is claimed as a verified `phone` identifier by the
+  // service; the user store only creates the bare profile row.
   const phoneOTPUserStore: typeof PhoneOTPUserStore.Service = {
-    getUserByPhoneNumber: (phone) =>
-      Effect.sync(() => {
-        const id = phoneToUserId.get(phone);
-        return id === undefined ? null : (usersById.get(id) ?? null);
-      }),
-    createUser: (input) =>
-      Effect.sync(() => {
-        const user = createUser({
-          email: `${input.phoneNumber}@phone.local`,
-          attributes: {
-            phoneNumber: input.phoneNumber,
-            phoneNumberVerified: input.phoneNumberVerified,
-          },
-        });
-        phoneToUserId.set(input.phoneNumber, user.id);
-        return user;
-      }),
-    setPhoneNumberVerified: (userId, phone) =>
-      Effect.suspend(() => {
-        const user = usersById.get(userId);
-        if (user === undefined) {
-          return Effect.fail(new UserNotFoundError({ message: "not found", userId }));
-        }
-        const updated: Types.User = {
-          ...user,
-          updatedAt: new Date(),
-          attributes: { ...user.attributes, phoneNumber: phone, phoneNumberVerified: true },
-        };
-        usersById.set(userId, updated);
-        phoneToUserId.set(phone, userId);
-        return Effect.succeed(updated);
-      }),
+    createUser: (input) => Effect.sync(() => createUser(input)),
   };
 
   const deviceRecords = new Map<string, DeviceAuthorizationRecord>();
@@ -447,48 +402,30 @@ const makeFixture = (): Fixture => {
       }),
   };
 
-  const usernameToId = new Map<string, string>();
-  const usernameStore: typeof UsernameStore.Service = {
-    getUserByUsername: (username) =>
-      Effect.sync(() => {
-        const id = usernameToId.get(username);
-        return id === undefined ? null : (usersById.get(id) ?? null);
-      }),
-    isUsernameTaken: (username) => Effect.sync(() => usernameToId.has(username)),
-    setUsername: (userId, username) =>
-      Effect.sync(() => {
-        for (const [name, id] of usernameToId) if (id === userId) usernameToId.delete(name);
-        usernameToId.set(username, userId);
-      }),
+  // Username handles are `username` identifiers (created verified); the old
+  // dedicated UsernameStore no longer exists.
+  const registerUsername = (userId: string, username: string): void => {
+    const identifier = makeIdentifier({
+      userId,
+      type: "username",
+      value: username,
+      verified: true,
+    });
+    identifierRecords.set(identifier.id, identifier);
   };
 
-  let anonSeq = 0;
   const anonymousUserStore: typeof AnonymousUserStore.Service = {
-    createAnonymousUser: () =>
-      Effect.sync(() =>
-        createUser({
-          email: `anon-${++anonSeq}@anonymous.local`,
-          attributes: { isAnonymous: true },
-        }),
-      ),
-    deleteUser: (userId) =>
-      Effect.sync(() => {
-        const user = usersById.get(userId);
-        if (user !== undefined) {
-          userIdByEmail.delete(user.email);
-          usersById.delete(userId);
-        }
-      }),
+    createAnonymousUser: () => Effect.sync(() => createUser({ attributes: { isAnonymous: true } })),
+    deleteUser: (userId) => Effect.sync(() => void usersById.delete(userId)),
   };
 
   // Every optional-feature store, merged with the base `services` layer:
   // enough to satisfy any feature service's construction-time dependencies
-  // (their own store(s) plus SessionService/EmailPasswordStore/PasswordHasher/
+  // (their own store(s) plus SessionService/IdentifierStore/PasswordHasher/
   // UserStore/Hooks already provided by `services`).
   const featureBase = Layer.mergeAll(
     services,
     Layer.succeed(AnonymousUserStore)(anonymousUserStore),
-    Layer.succeed(UsernameStore)(usernameStore),
     Layer.succeed(DeviceAuthorizationStore)(deviceStore),
     Layer.succeed(PhoneOTPStore)(phoneOTPStore),
     Layer.succeed(PhoneOTPUserStore)(phoneOTPUserStore),
@@ -548,7 +485,7 @@ const makeFixture = (): Fixture => {
     sentDeleteTokens,
     beforeDeleteCalls,
     sentPhoneOTPs,
-    registerUsername: (userId, username) => void usernameToId.set(username, userId),
+    registerUsername,
     sessionStoreReads: () => sessionStoreReads,
   };
 };
@@ -804,6 +741,73 @@ describe("session management endpoints", () => {
     expect((await handler(getRequest("/session", asCookie(sid1)))).status).toBe(200);
     expect((await handler(getRequest("/session", asCookie(sid2)))).status).toBe(401);
     expect((await handler(getRequest("/session", asCookie(sid3)))).status).toBe(401);
+  });
+});
+
+describe("identifier endpoints", () => {
+  it("lists the signed-in user's identifiers", async () => {
+    const handler = handlerFor();
+    const sid = await signUp(handler, "a@b.com");
+
+    const res = await handler(getRequest("/identifiers", asCookie(sid)));
+    expect(res.status).toBe(200);
+    const list = (await res.json()) as Array<{
+      id: string;
+      type: string;
+      value: string;
+      verified: boolean;
+      createdAt: number;
+    }>;
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ type: "email", value: "a@b.com", verified: false });
+  });
+
+  it("requires authentication to list identifiers", async () => {
+    const handler = handlerFor();
+    const res = await handler(getRequest("/identifiers"));
+    expect(res.status).toBe(401);
+  });
+
+  it("deletes an identifier but refuses foreign, unknown, and last ones", async () => {
+    const fixture = makeFixture();
+    const handler = handlerFor(fixture);
+    const up = await handler(jsonRequest("/sign-up", { email: "a@b.com", password: PW }));
+    expect(up.status).toBe(200);
+    const userId = ((await up.json()) as { user: { id: string } }).user.id;
+    const sid = sessionIdFromSetCookie(up.headers.get("set-cookie"));
+    fixture.registerUsername(userId, "cooluser");
+    const otherSid = await signUp(handler, "other@b.com");
+
+    const listRes = await handler(getRequest("/identifiers", asCookie(sid)));
+    const list = (await listRes.json()) as Array<{ id: string; type: string }>;
+    expect(list).toHaveLength(2);
+    const username = list.find((identifier) => identifier.type === "username")!;
+    const email = list.find((identifier) => identifier.type === "email")!;
+
+    // Another user cannot delete an identifier they do not own.
+    const foreign = await handler(deleteRequest(`/identifiers/${username.id}`, asCookie(otherSid)));
+    expect(foreign.status).toBe(400);
+
+    // Unknown ids get the same 400 (anti-enumeration).
+    const unknown = await handler(deleteRequest("/identifiers/nope", asCookie(sid)));
+    expect(unknown.status).toBe(400);
+
+    // The owner deletes their username identifier.
+    const deleted = await handler(deleteRequest(`/identifiers/${username.id}`, asCookie(sid)));
+    expect(deleted.status).toBe(204);
+    const after = await handler(getRequest("/identifiers", asCookie(sid)));
+    const remaining = (await after.json()) as Array<{ id: string }>;
+    expect(remaining.map((identifier) => identifier.id)).toEqual([email.id]);
+
+    // The account's only remaining identifier cannot be deleted.
+    const last = await handler(deleteRequest(`/identifiers/${email.id}`, asCookie(sid)));
+    expect(last.status).toBe(400);
+  });
+
+  it("requires authentication to delete an identifier", async () => {
+    const handler = handlerFor();
+    const res = await handler(deleteRequest("/identifiers/some-id"));
+    expect(res.status).toBe(401);
   });
 });
 
@@ -1522,9 +1526,18 @@ describe("HTTP phone OTP", () => {
     const sid = sessionIdFromSetCookie(signIn.headers.get("set-cookie"));
 
     const sess = await handler(getRequest("/session", asCookie(sid)));
-    const body = (await sess.json()) as { user: { attributes: Record<string, unknown> } };
-    expect(body.user.attributes["phoneNumber"]).toBe("+15551234567");
-    expect(body.user.attributes["phoneNumberVerified"]).toBe(true);
+    expect(sess.status).toBe(200);
+
+    // The phone number was claimed as a verified `phone` identifier.
+    const identifiers = await handler(getRequest("/identifiers", asCookie(sid)));
+    expect(identifiers.status).toBe(200);
+    const list = (await identifiers.json()) as Array<{
+      type: string;
+      value: string;
+      verified: boolean;
+    }>;
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ type: "phone", value: "+15551234567", verified: true });
   });
 
   it("rejects a wrong OTP with 400", async () => {
@@ -1557,9 +1570,10 @@ describe("HTTP anonymous sign-in", () => {
     const sess = await handler(getRequest("/session", asCookie(sid)));
     expect(sess.status).toBe(200);
     const body = (await sess.json()) as {
-      user: { email: string; attributes: Record<string, unknown> };
+      user: { email?: string; attributes: Record<string, unknown> };
     };
-    expect(body.user.email).toMatch(/@anonymous\.local$/);
+    // Guest users have no login handle, so no derived email fields.
+    expect(body.user.email).toBeUndefined();
     expect(body.user.attributes["isAnonymous"]).toBe(true);
   });
 
@@ -1665,20 +1679,26 @@ describe("HTTP session cookie cache", () => {
     const handler = handlerFor(fixture, { cache: { secret: SECRET } });
     const sid = await signUp(handler, "cache@example.com");
 
-    // First /session: cache miss -> store read + issues the data cookie.
+    // First /session: cache miss -> store read + issues the data cookie. The
+    // store-served response carries the derived email fields.
     const before = fixture.sessionStoreReads();
     const first = await handler(getRequest("/session", asCookie(sid)));
     expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as { user: { id: string; email?: string } };
+    expect(firstBody.user.email).toBe("cache@example.com");
     const data = dataCookieFromSetCookie(first.headers.get("set-cookie"));
     expect(data).not.toBeNull();
     const afterFirst = fixture.sessionStoreReads();
     expect(afterFirst).toBeGreaterThan(before);
 
-    // Second /session with the data cookie: cache hit -> no store read.
+    // Second /session with the data cookie: cache hit -> no store read. The
+    // cache-served response skips the identifier lookup, so the derived
+    // email fields are omitted.
     const second = await handler(getRequest("/session", bothCookies(sid, data!)));
     expect(second.status).toBe(200);
-    const body = (await second.json()) as { user: { email: string } };
-    expect(body.user.email).toBe("cache@example.com");
+    const body = (await second.json()) as { user: { id: string; email?: string } };
+    expect(body.user.id).toBe(firstBody.user.id);
+    expect(body.user.email).toBeUndefined();
     expect(fixture.sessionStoreReads()).toBe(afterFirst);
   });
 

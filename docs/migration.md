@@ -278,6 +278,65 @@ that deleted file.
 shared with `OTPSecondFactor`) and the `secondfactor/` directory name itself are **not** part of
 this rename — only the TOTP-specific module and its symbols changed.
 
+## 9. Surrogate-keyed identity: `user.email` → identifiers
+
+Design rationale: `docs/DESIGN.md` § D12. `User` no longer carries
+`email`/`emailVerified`; login handles (email, username, phone) are
+`Identifier` records with global uniqueness on `(type, value)` behind the
+`IdentifierStore` contract.
+
+### API changes
+
+| Old                                                                                        | New                                                                                                        |
+| ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `user.email` / `user.emailVerified`                                                        | `IdentifierStore.listByUser(user.id)` + `anyEmail`/`primaryEmail` helpers                                  |
+| `UserService.getUserByEmail` / `UserServiceStore.getByEmail`                               | `resolveUserByIdentifier(identifiers, users.get, "email", value)`                                          |
+| `UserService.markEmailVerified`                                                            | `IdentifierStore.setVerified(identifier.id, new Date())`                                                   |
+| `EmailPasswordStore.getUserByEmail` (also OAuth/MagicLink/EmailOTP/PasswordReset variants) | removed — services resolve via `IdentifierStore`; stores only create users and manage password hashes      |
+| `createUser({ email, emailVerified?, ... })` store inputs                                  | `createUser({ name?, image?, attributes? })` — the **service** claims the identifier via `claimIdentifier` |
+| `UsernameStore`                                                                            | removed — usernames are `type: "username"` identifiers (created verified)                                  |
+| `PhoneOTPUserStore.getUserByPhoneNumber` / `setPhoneNumberVerified`                        | phone identifiers; effectful `getPhoneNumber(identifierStore, userId)`                                     |
+| `OrganizationService.acceptInvitation(userId, invitationId, userEmail)`                    | `acceptInvitation(userId, invitationId)` — invitation email checked against the user's identifiers         |
+| `OrganizationService.rejectInvitation(invitationId, userEmail)`                            | `rejectInvitation(userId, invitationId)`                                                                   |
+| `Auth.HTTP.AuthServices` includes `EmailPasswordStore`                                     | includes `IdentifierStore` instead                                                                         |
+| `UserView.email` / `UserView.emailVerified` (required)                                     | optional, derived from the primary/any email identifier; omitted on cookie-cache-served responses          |
+
+New HTTP endpoints: `GET /identifiers` (list the signed-in user's identifiers)
+and `DELETE /identifiers/:identifierId` (refuses foreign ids and the account's
+last identifier). New test/single-instance helper: `memoryIdentifierStore()`.
+
+### Data migration (sql/alchemy deployments)
+
+`auth_users` drops `email` and `email_verified` (and `auth_users_email_idx`);
+`auth_identifiers` becomes the handle table. Backfill **before** deploying the
+new schema, then drop the columns:
+
+```sql
+-- 1. Backfill: one email identifier per existing user.
+INSERT INTO auth_identifiers (id, user_id, type, value, verified, verified_at, created_at)
+SELECT
+  lower(hex(randomblob(16))),        -- Postgres: gen_random_uuid()::text
+  id,
+  'email',
+  email,
+  email_verified,
+  CASE WHEN email_verified = 1 THEN updated_at ELSE NULL END,
+  created_at
+FROM auth_users
+WHERE email IS NOT NULL;
+
+-- 2. Then drop the legacy columns/index.
+DROP INDEX IF EXISTS auth_users_email_idx;
+ALTER TABLE auth_users DROP COLUMN email;
+ALTER TABLE auth_users DROP COLUMN email_verified;
+```
+
+If your app stored phone numbers in `attributes.phoneNumber` (the old PhoneOTP
+convention), backfill those as `type = 'phone'` identifiers with
+`verified = attributes.phoneNumberVerified` the same way, then remove the
+attribute keys. Username deployments backfill from wherever the old
+`UsernameStore` implementation kept its mapping, with `verified = 1`.
+
 ## Validation
 
 - `vp check`, `bunx tsc --noEmit`, `vp test --typecheck --run` — all green

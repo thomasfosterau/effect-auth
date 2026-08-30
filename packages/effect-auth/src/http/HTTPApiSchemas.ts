@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { HttpApiSchema } from "effect/unstable/httpapi";
+import * as Identifier from "../Identifier.ts";
 import type * as Types from "../Types.ts";
 
 /**
@@ -15,11 +16,34 @@ import type * as Types from "../Types.ts";
 /** Arbitrary JSON attributes bag. */
 export const Attributes = Schema.Record(Schema.String, Schema.Unknown);
 
-/** Public view of a user (timestamps as epoch millis). */
+/** Public view of a login-handle identifier (timestamps as epoch millis). */
+export const IdentifierView = Schema.Struct({
+  id: Schema.String,
+  type: Schema.Literals(["email", "username", "phone"]),
+  value: Schema.String,
+  verified: Schema.Boolean,
+  verifiedAt: Schema.optional(Schema.Number),
+  createdAt: Schema.Number,
+});
+export type IdentifierView = typeof IdentifierView.Type;
+
+/** The authenticated user's identifiers (`GET /identifiers`). */
+export const IdentifierListView = Schema.Array(IdentifierView);
+export type IdentifierListView = typeof IdentifierListView.Type;
+
+/**
+ * Public view of a user (timestamps as epoch millis).
+ *
+ * Since the surrogate-key migration the `User` record carries no email;
+ * `email`/`emailVerified` are derived from the user's email identifiers when
+ * the responding handler has them at hand (the primary — earliest verified —
+ * email identifier, falling back to the earliest unverified one). Responses
+ * served from the signed session-cookie cache omit them.
+ */
 export const UserView = Schema.Struct({
   id: Schema.String,
-  email: Schema.String,
-  emailVerified: Schema.Boolean,
+  email: Schema.optional(Schema.String),
+  emailVerified: Schema.optional(Schema.Boolean),
   name: Schema.optional(Schema.String),
   image: Schema.optional(Schema.String),
   createdAt: Schema.Number,
@@ -761,15 +785,36 @@ export const InternalError = InternalServerError.pipe(HttpApiSchema.status(500))
 // Encoders: domain types -> wire views
 // -----------------------------------------------------------------------------
 
-export const encodeUser = (user: Types.User): UserView => ({
-  id: user.id,
-  email: user.email,
-  emailVerified: user.emailVerified,
-  ...(user.name !== undefined && { name: user.name }),
-  ...(user.image !== undefined && { image: user.image }),
-  createdAt: user.createdAt.getTime(),
-  updatedAt: user.updatedAt.getTime(),
-  attributes: user.attributes,
+/**
+ * Encode a user for the wire. When the caller has the user's identifiers at
+ * hand, the derived `email`/`emailVerified` convenience fields are populated
+ * from the email-of-record (primary verified email, else earliest email);
+ * without identifiers both fields are omitted.
+ */
+export const encodeUser = (
+  user: Types.User,
+  identifiers?: ReadonlyArray<Identifier.Identifier>,
+): UserView => {
+  const email = identifiers === undefined ? null : Identifier.anyEmail(identifiers);
+  return {
+    id: user.id,
+    ...(email !== null && { email: email.value, emailVerified: email.verified }),
+    ...(user.name !== undefined && { name: user.name }),
+    ...(user.image !== undefined && { image: user.image }),
+    createdAt: user.createdAt.getTime(),
+    updatedAt: user.updatedAt.getTime(),
+    attributes: user.attributes,
+  };
+};
+
+/** Encode an identifier for the wire (timestamps to epoch millis). */
+export const encodeIdentifier = (identifier: Identifier.Identifier): IdentifierView => ({
+  id: identifier.id,
+  type: identifier.type,
+  value: identifier.value,
+  verified: identifier.verified,
+  ...(identifier.verifiedAt !== undefined && { verifiedAt: identifier.verifiedAt.getTime() }),
+  createdAt: identifier.createdAt.getTime(),
 });
 
 export const encodeSession = (session: Types.Session): SessionView => ({
@@ -781,7 +826,10 @@ export const encodeSession = (session: Types.Session): SessionView => ({
   attributes: session.attributes,
 });
 
-export const encodeSessionWithUser = (value: Types.SessionWithUser): SessionWithUserView => ({
+export const encodeSessionWithUser = (
+  value: Types.SessionWithUser,
+  identifiers?: ReadonlyArray<Identifier.Identifier>,
+): SessionWithUserView => ({
   session: encodeSession(value.session),
-  user: encodeUser(value.user),
+  user: encodeUser(value.user, identifiers),
 });

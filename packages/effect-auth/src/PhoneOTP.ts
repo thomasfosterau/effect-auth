@@ -6,15 +6,17 @@
  * number) differ. Two purposes are supported: `sign-in` and
  * `phone-verification`.
  *
- * Convention: phone identity lives in `attributes.phoneNumber` /
- * `attributes.phoneNumberVerified` (there is no first-class `User.phoneNumber`
- * column). Use {@link getPhoneNumber} to read it.
+ * Phone identity lives in a `phone` `Identifier` (globally unique, E.164 by
+ * app policy) — there is no `User.phoneNumber` field or attribute convention.
+ * Use {@link getPhoneNumber} to read a user's phone identifier.
  *
  * E.164 normalization is application policy: the default `normalizePhoneNumber`
  * only trims whitespace. Apps should plug a real E.164 normalizer via config.
  */
 import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
+import { claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
+import { UserStore } from "./session/UserStore.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
@@ -63,31 +65,21 @@ export class PhoneOTPStore extends Context.Service<
   }
 >()("@effect-auth/PhoneOTPStore") {}
 
-/** Input for creating a user from a verified phone number. */
+/**
+ * Profile fields for a user created during phone OTP sign-in. The phone number
+ * itself is recorded as a verified `phone` `Identifier` by the service.
+ */
 export interface PhoneOTPCreateUserInput {
-  readonly phoneNumber: string;
-  readonly phoneNumberVerified: boolean;
   readonly name?: string;
 }
 
-/**
- * User lookup/creation keyed by phone number. Implementers store the number in
- * `attributes.phoneNumber` and the verification flag in
- * `attributes.phoneNumberVerified`.
- */
+/** User creation seam for phone-OTP sign-up. */
 export class PhoneOTPUserStore extends Context.Service<
   PhoneOTPUserStore,
   {
-    readonly getUserByPhoneNumber: (
-      phoneNumber: string,
-    ) => Effect.Effect<Types.User | null, Errors.AuthError>;
     readonly createUser: (
       input: PhoneOTPCreateUserInput,
     ) => Effect.Effect<Types.User, Errors.AuthError>;
-    readonly setPhoneNumberVerified: (
-      userId: string,
-      phoneNumber: string,
-    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
   }
 >()("@effect-auth/PhoneOTPUserStore") {}
 
@@ -145,7 +137,7 @@ export class PhoneOTPService extends Context.Service<
 
     /**
      * Verify a `sign-in` OTP (single use) and sign the user in, creating a new
-     * `phoneNumberVerified: true` user when none exists (unless `disableSignUp`).
+     * user with a verified `phone` identifier when none exists (unless `disableSignUp`).
      */
     readonly signIn: (
       phoneNumber: string,
@@ -171,18 +163,28 @@ export class PhoneOTPService extends Context.Service<
     Layer.effect(PhoneOTPService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
-/** Read the phone number from a user's attributes, or `null`. */
-export const getPhoneNumber = (user: Types.User): string | null => {
-  const value = user.attributes["phoneNumber"];
-  return typeof value === "string" ? value : null;
-};
+/**
+ * Resolve a user's phone number from their `phone` identifier, or `null`.
+ * Prefers a verified phone identifier; falls back to the earliest unverified
+ * one.
+ */
+export const getPhoneNumber = (
+  identifierStore: typeof IdentifierStore.Service,
+  userId: string,
+): Effect.Effect<string | null, Errors.AuthError> =>
+  Effect.map(identifierStore.listByUser(userId), (all) => {
+    const phones = all
+      .filter((id) => id.type === "phone")
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    return (phones.find((id) => id.verified) ?? phones[0])?.value ?? null;
+  });
 
 export const make = (
   config: PhoneOTPConfig,
 ): Effect.Effect<
   typeof PhoneOTPService.Service,
   never,
-  PhoneOTPStore | PhoneOTPUserStore | SessionService | Crypto.Crypto
+  PhoneOTPStore | PhoneOTPUserStore | IdentifierStore | UserStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
@@ -192,6 +194,8 @@ export const make = (
 
     const store = yield* PhoneOTPStore;
     const userStore = yield* PhoneOTPUserStore;
+    const identifiers = yield* IdentifierStore;
+    const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const crypto = yield* Crypto.Crypto;
 
@@ -264,8 +268,8 @@ export const make = (
         // Anti-enumeration: sign-in with sign-up disabled and no user, and
         // phone-verification with no user, succeed silently without sending.
         if (purpose === "sign-in" && disableSignUp) {
-          const user = yield* userStore.getUserByPhoneNumber(phoneNumber);
-          if (!user) {
+          const identifier = yield* identifiers.getByValue("phone", phoneNumber);
+          if (!identifier) {
             return;
           }
         }
@@ -316,13 +320,34 @@ export const make = (
 
         yield* verifyOTP(phoneNumber, otp, "sign-in");
 
-        let user = yield* userStore.getUserByPhoneNumber(phoneNumber);
+        const identifier = yield* identifiers.getByValue("phone", phoneNumber);
+        let user = identifier === null ? null : yield* users.get(identifier.userId);
+        if (identifier !== null && user === null) {
+          return yield* Effect.fail(new PhoneOTPError({ message: "Account is unavailable" }));
+        }
         if (!user) {
           if (disableSignUp) {
             return yield* Effect.fail(new PhoneOTPError({ message: "Sign-up is disabled" }));
           }
           // A verified OTP proves ownership of the phone number.
-          user = yield* userStore.createUser({ phoneNumber, phoneNumberVerified: true });
+          user = yield* userStore.createUser({});
+          yield* claimIdentifier(
+            identifiers,
+            makeIdentifier({
+              userId: user.id,
+              type: "phone",
+              value: phoneNumber,
+              verified: true,
+              verifiedAt: new Date(),
+            }),
+          ).pipe(
+            Effect.catchTag("IdentifierTakenError", () =>
+              Effect.fail(new PhoneOTPError({ message: "This phone number is already in use" })),
+            ),
+          );
+        } else if (identifier !== null && !identifier.verified) {
+          // The OTP proves ownership — promote the identifier to verified.
+          yield* identifiers.setVerified(identifier.id, new Date());
         }
 
         const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);
@@ -339,7 +364,39 @@ export const make = (
 
         yield* verifyOTP(phoneNumber, otp, "phone-verification");
 
-        return yield* userStore.setPhoneNumberVerified(userId, phoneNumber);
+        // Attach (or verify) the phone identifier for this user.
+        const existing = yield* identifiers.getByValue("phone", phoneNumber);
+        if (existing !== null && existing.userId !== userId) {
+          return yield* Effect.fail(
+            new PhoneOTPError({ message: "This phone number is already in use" }),
+          );
+        }
+        if (existing === null) {
+          yield* claimIdentifier(
+            identifiers,
+            makeIdentifier({
+              userId,
+              type: "phone",
+              value: phoneNumber,
+              verified: true,
+              verifiedAt: new Date(),
+            }),
+          ).pipe(
+            Effect.catchTag("IdentifierTakenError", () =>
+              Effect.fail(new PhoneOTPError({ message: "This phone number is already in use" })),
+            ),
+          );
+        } else if (!existing.verified) {
+          yield* identifiers.setVerified(existing.id, new Date());
+        }
+
+        const user = yield* users.get(userId);
+        if (user === null) {
+          return yield* Effect.fail(
+            new Errors.UserNotFoundError({ message: "User not found", userId }),
+          );
+        }
+        return user;
       }),
     };
   });

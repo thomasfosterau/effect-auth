@@ -19,15 +19,15 @@ export type Attributes = typeof Attributes.Type;
 /**
  * Represents a user in the authentication system.
  *
- * Core identity fields are first-class (mirroring the common auth data
- * model): `email` (unique, normalized lowercase), `emailVerified`, optional
- * `name` and `image`, plus `createdAt`/`updatedAt` timestamps. App-specific
- * fields go in `attributes`.
+ * The `User` record is **surrogate-keyed**: it carries no natural key. Login
+ * handles (email, username, phone) are first-class `Identifier` records (see
+ * `Identifier.ts`) with global uniqueness on `(type, value)` — a user may
+ * hold several, or none at all (passkey-only, anonymous, agent users).
+ * Optional profile fields (`name`, `image`) and `createdAt`/`updatedAt`
+ * timestamps are first-class; app-specific fields go in `attributes`.
  */
 export const User = Schema.Struct({
   id: Schema.String,
-  email: Schema.String,
-  emailVerified: Schema.Boolean,
   name: Schema.optional(Schema.String),
   image: Schema.optional(Schema.String),
   createdAt: Schema.Date,

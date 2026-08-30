@@ -15,6 +15,8 @@
  */
 import { Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
 import { AuthError } from "./Errors.ts";
+import { claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
+import { UserStore } from "./session/UserStore.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./session/SessionService.ts";
@@ -151,7 +153,7 @@ export class SSOService extends Context.Service<
     ) => Effect.Effect<
       SSOSignInResult,
       SSOError | AuthError | HookError,
-      OAuthStateStore | OAuthUserStore | SessionService | Hooks
+      OAuthStateStore | OAuthUserStore | IdentifierStore | UserStore | SessionService | Hooks
     >;
   }
 >()("@effect-auth/SSOService") {
@@ -305,6 +307,8 @@ export const make = (
       ) {
         const stateStore = yield* OAuthStateStore;
         const userStore = yield* OAuthUserStore;
+        const identifiers = yield* IdentifierStore;
+        const users = yield* UserStore;
         const sessionManager = yield* SessionService;
 
         const stateEntry = yield* stateStore
@@ -350,15 +354,34 @@ export const make = (
         }
         const email = profile.email.trim().toLowerCase();
 
-        let user = yield* userStore.getUserByEmail(email);
+        const identifier = yield* identifiers.getByValue("email", email);
+        let user = identifier === null ? null : yield* users.get(identifier.userId);
+        if (identifier !== null && user === null) {
+          return yield* new SSOError({ message: "Account is unavailable" });
+        }
         const isNewUser = user === null;
         if (user === null) {
           user = yield* userStore.createUser({
-            email,
-            emailVerified: true,
             ...(profile.name !== undefined && { name: profile.name }),
             ...(profile.picture !== undefined && { image: profile.picture }),
           });
+          // The IdP attested the address as verified.
+          yield* claimIdentifier(
+            identifiers,
+            makeIdentifier({
+              userId: user.id,
+              type: "email",
+              value: email,
+              verified: true,
+              verifiedAt: new Date(),
+            }),
+          ).pipe(
+            Effect.catchTag("IdentifierTakenError", () =>
+              Effect.fail(new SSOError({ message: "This email is already in use" })),
+            ),
+          );
+        } else if (identifier !== null && !identifier.verified) {
+          yield* identifiers.setVerified(identifier.id, new Date());
         }
 
         // Provision organization membership on first login when configured.

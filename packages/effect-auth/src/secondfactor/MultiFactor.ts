@@ -25,6 +25,7 @@ import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { hashToken, timingSafeEqualBytes } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../session/UserStore.ts";
+import { anyEmailValue, IdentifierStore } from "../Identifier.ts";
 import { SessionService } from "../session/SessionService.ts";
 
 /**
@@ -340,6 +341,7 @@ export const make = (
   | MultiFactorStore
   | PendingMultiFactorStore
   | EmailPasswordStore
+  | IdentifierStore
   | PasswordHasher
   | UserStore
   | SessionService
@@ -361,6 +363,7 @@ export const make = (
     const emailPasswordStore = yield* EmailPasswordStore;
     const passwordHasher = yield* PasswordHasher;
     const userStore = yield* UserStore;
+    const identifierStore = yield* IdentifierStore;
     const sessionManager = yield* SessionService;
     const crypto = yield* Crypto.Crypto;
 
@@ -488,11 +491,15 @@ export const make = (
         yield* store.upsert(record);
 
         const totp = config.totp;
+        // otpauth URI label: prefer the user's email identifier for a
+        // recognizable authenticator entry; fall back to name, then id.
+        const label =
+          anyEmailValue(yield* identifierStore.listByUser(user.id)) ?? user.name ?? user.id;
         const totpUri = yield* Effect.try({
           try: () =>
             generateOTPURI({
               type: "totp",
-              label: user.email,
+              label,
               issuer: config.issuer,
               secret, // always use plaintext for URI generation
               ...(totp?.period !== undefined && { period: totp.period }),

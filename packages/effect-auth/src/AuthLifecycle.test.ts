@@ -9,6 +9,12 @@ import {
   EmailVerificationService,
 } from "./email/EmailVerification.ts";
 import * as EmailVerificationModule from "./email/EmailVerification.ts";
+import {
+  type Identifier,
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+} from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import * as Password from "./password/Password.ts";
 import { make, SessionService } from "./session/SessionService.ts";
@@ -20,16 +26,36 @@ import type { Session, SessionConfig, User } from "./Types.ts";
 import {
   EmailPasswordService,
   EmailPasswordStore,
+  type CreateUserInput,
   type EmailPasswordConfig,
 } from "./email/EmailPassword.ts";
 import * as EmailPassword from "./email/EmailPassword.ts";
 
 const users = new Map<string, User>();
-const usersByEmail = new Map<string, string>();
+const identifierRecords = new Map<string, Identifier>();
 const passwordHashes = new Map<string, string>();
 const sessions = new Map<string, Session>();
 const verifications = new Map<string, EmailVerification>();
 const sentEmails: Array<{ email: string; token: string }> = [];
+
+const identifierStore = memoryIdentifierStore(identifierRecords);
+
+/** Seed an email identifier the way the store would persist it. */
+const addEmailIdentifier = (userId: string, email: string, verified: boolean) => {
+  const identifier = makeIdentifier({
+    userId,
+    type: "email",
+    value: email,
+    verified,
+    ...(verified ? { verifiedAt: new Date() } : {}),
+  });
+  identifierRecords.set(identifier.id, identifier);
+};
+
+const findEmailIdentifier = (email: string): Identifier | null =>
+  Array.from(identifierRecords.values()).find(
+    (identifier) => identifier.type === "email" && identifier.value === email,
+  ) ?? null;
 
 const sessionStore = {
   create: (session: Session) =>
@@ -71,34 +97,17 @@ const userStore = {
 };
 
 const emailPasswordStore = {
-  getUserByEmail: (email: string) =>
-    Effect.sync(() => {
-      const userId = usersByEmail.get(email);
-      return userId ? (users.get(userId) ?? null) : null;
-    }),
-
-  createUser: ({
-    email,
-    name,
-    attributes,
-  }: {
-    email: string;
-    name?: string;
-    attributes?: Record<string, unknown>;
-  }) =>
+  createUser: ({ name, attributes }: CreateUserInput) =>
     Effect.sync(() => {
       const id = `user-${users.size + 1}`;
       const user: User = {
         id,
-        email,
-        emailVerified: false,
         ...(name !== undefined && { name }),
         createdAt: new Date(),
         updatedAt: new Date(),
         attributes: attributes ?? {},
       };
       users.set(id, user);
-      usersByEmail.set(email, id);
       return user;
     }),
 
@@ -136,12 +145,6 @@ const emailVerificationStore = {
 
 const userServiceStore = {
   get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
-
-  getByEmail: (email: string) =>
-    Effect.sync(() => {
-      const userId = usersByEmail.get(email);
-      return userId ? (users.get(userId) ?? null) : null;
-    }),
 
   update: (user: User) =>
     Effect.sync(() => {
@@ -193,10 +196,16 @@ const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) =>
     Effect.provide(
       EmailPassword.make(emailPasswordConfig),
       Context.merge(
-        Context.make(EmailPasswordStore, emailPasswordStore),
         Context.merge(
-          Context.make(PasswordHasher, hasher),
-          Context.make(SessionService, sessionManager),
+          Context.make(EmailPasswordStore, emailPasswordStore),
+          Context.make(IdentifierStore, identifierStore),
+        ),
+        Context.merge(
+          Context.make(UserStore, userStore),
+          Context.merge(
+            Context.make(PasswordHasher, hasher),
+            Context.make(SessionService, sessionManager),
+          ),
         ),
       ),
     ).pipe(Effect.provide(Hooks.Default)),
@@ -213,7 +222,10 @@ const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) =>
       Context.merge(
         Context.make(SessionStore, sessionStore),
         Context.merge(
-          Context.make(UserStore, userStore),
+          Context.merge(
+            Context.make(UserStore, userStore),
+            Context.make(IdentifierStore, identifierStore),
+          ),
           Context.merge(
             Context.make(EmailPasswordService, emailPasswordService),
             Context.merge(
@@ -242,7 +254,7 @@ const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) =>
 describe("AuthLifecycleService", () => {
   beforeEach(() => {
     users.clear();
-    usersByEmail.clear();
+    identifierRecords.clear();
     passwordHashes.clear();
     sessions.clear();
     verifications.clear();
@@ -272,6 +284,10 @@ describe("AuthLifecycleService", () => {
     expect(result.session).toBeUndefined();
     expect(sentEmails.length).toBe(1);
     expect(sentEmails[0]?.email).toBe("new@example.com");
+    // Sign-up claims an (unverified) email identifier for the new user.
+    const identifier = findEmailIdentifier("new@example.com");
+    expect(identifier?.userId).toBe(result.user.id);
+    expect(identifier?.verified).toBe(false);
   });
 
   it("should return verification-needed on sign-in and resend when enabled", async () => {
@@ -282,15 +298,13 @@ describe("AuthLifecycleService", () => {
 
     const user: User = {
       id: "user-sign-in-unverified",
-      email: "signin@example.com",
-      emailVerified: false,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
 
     users.set(user.id, user);
-    usersByEmail.set("signin@example.com", user.id);
+    addEmailIdentifier(user.id, "signin@example.com", false);
     passwordHashes.set(user.id, hashResult.hash);
 
     const program = Effect.gen(function* () {
@@ -321,15 +335,13 @@ describe("AuthLifecycleService", () => {
 
     const user: User = {
       id: "user-verify",
-      email: "verify@example.com",
-      emailVerified: false,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
 
     users.set(user.id, user);
-    usersByEmail.set("verify@example.com", user.id);
+    addEmailIdentifier(user.id, "verify@example.com", false);
 
     const token = await Effect.runPromise(
       Effect.provide(
@@ -356,7 +368,8 @@ describe("AuthLifecycleService", () => {
     expect(result.user.id).toBe(user.id);
     expect(result.session).toBeDefined();
     expect(result.needsEmailVerification).toBe(false);
-    expect(users.get(user.id)?.emailVerified).toBe(true);
+    // The email identifier was promoted to verified.
+    expect(findEmailIdentifier("verify@example.com")?.verified).toBe(true);
   });
 
   it("should sign in verified users normally", async () => {
@@ -367,15 +380,13 @@ describe("AuthLifecycleService", () => {
 
     const user: User = {
       id: "user-verified",
-      email: "verified@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
 
     users.set(user.id, user);
-    usersByEmail.set("verified@example.com", user.id);
+    addEmailIdentifier(user.id, "verified@example.com", true);
     passwordHashes.set(user.id, hashResult.hash);
 
     const program = Effect.gen(function* () {

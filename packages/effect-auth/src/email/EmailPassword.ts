@@ -1,14 +1,26 @@
 import { Context, Effect, Layer, Option } from "effect";
 import * as Errors from "../Errors.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
+import {
+  claimIdentifier,
+  IdentifierStore,
+  makeIdentifier,
+  resolveUserByIdentifier,
+  type IdentifierType,
+} from "../Identifier.ts";
 import { MultiAlgorithmVerifier, PasswordHasher } from "../password/Password.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 import { SessionService } from "../session/SessionService.ts";
+import { UserStore } from "../session/UserStore.ts";
 import * as Obs from "../Observability.ts";
 
+/**
+ * Profile fields for a new user record. The login handle (email/username/
+ * phone) is NOT part of this input — services record it as an `Identifier`
+ * after the user row exists.
+ */
 export interface CreateUserInput {
-  readonly email: string;
   readonly name?: string;
   readonly image?: string;
   readonly attributes?: Record<string, unknown>;
@@ -17,8 +29,6 @@ export interface CreateUserInput {
 export class EmailPasswordStore extends Context.Service<
   EmailPasswordStore,
   {
-    readonly getUserByEmail: (email: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
-
     readonly createUser: (input: CreateUserInput) => Effect.Effect<Types.User, Errors.AuthError>;
 
     readonly getPasswordHash: (userId: string) => Effect.Effect<string | null, Errors.AuthError>;
@@ -90,6 +100,12 @@ export class SecondFactorGate extends Context.Service<
 
 export interface AuthResult {
   readonly user: Types.User;
+  /**
+   * The login handle used for this sign-in/up, when one was involved.
+   * Hooks (account lockout reset, last-login-method) key off it; flows
+   * without a handle (passkey discoverable login, anonymous) omit it.
+   */
+  readonly identifier?: { readonly type: IdentifierType; readonly value: string };
   readonly session?: Types.Session;
   /** Present when a second factor is required to complete sign-in. */
   readonly secondFactor?: SecondFactorChallenge;
@@ -180,8 +196,6 @@ export class EmailPasswordService extends Context.Service<
     Layer.effect(EmailPasswordService, make(config));
 }
 
-export const isEmailVerified = (user: Types.User): boolean => user.emailVerified;
-
 const validatePasswordLength = (
   password: string,
   config: Required<Pick<EmailPasswordConfig, "minPasswordLength" | "maxPasswordLength">>,
@@ -213,7 +227,7 @@ export const make = (
 ): Effect.Effect<
   typeof EmailPasswordService.Service,
   never,
-  EmailPasswordStore | PasswordHasher | SessionService | Hooks
+  EmailPasswordStore | IdentifierStore | UserStore | PasswordHasher | SessionService | Hooks
 > =>
   Effect.gen(function* () {
     const resolved = {
@@ -225,6 +239,8 @@ export const make = (
     };
 
     const store = yield* EmailPasswordStore;
+    const identifiers = yield* IdentifierStore;
+    const users = yield* UserStore;
     const passwordHasher = yield* PasswordHasher;
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
@@ -267,32 +283,56 @@ export const make = (
             maxPasswordLength: resolved.maxPasswordLength,
           });
 
-          const existing = yield* store.getUserByEmail(email);
-          if (existing) {
+          const taken = yield* identifiers.getByValue("email", email);
+          if (taken) {
             return yield* new Errors.EmailInUseError({
               message: "A user with this email already exists",
             });
           }
 
           const user = yield* store.createUser({
-            email,
             ...(input.name !== undefined && { name: input.name }),
             ...(input.attributes !== undefined && { attributes: input.attributes }),
           });
 
+          // The identifier's unique (type, value) index is the real claim; a
+          // lost race surfaces as EmailInUseError. The just-created user row
+          // is then orphaned (no identifiers, no password) — harmless but
+          // worth a periodic sweep in high-contention deployments.
+          const emailIdentifier = yield* claimIdentifier(
+            identifiers,
+            makeIdentifier({ userId: user.id, type: "email", value: email }),
+          ).pipe(
+            Effect.catchTag("IdentifierTakenError", () =>
+              Effect.fail(
+                new Errors.EmailInUseError({
+                  message: "A user with this email already exists",
+                }),
+              ),
+            ),
+          );
+
           const hashedPassword = yield* passwordHasher.hash(input.password);
           yield* store.setPasswordHash(user.id, hashedPassword.hash);
 
+          const handle = { type: "email" as const, value: emailIdentifier.value };
+
           if (!resolved.autoSignIn) {
-            return yield* hooks.afterSignUp({ user, method: "email-password" });
+            return yield* hooks.afterSignUp({ user, identifier: handle, method: "email-password" });
           }
 
-          if (resolved.requireEmailVerification && !isEmailVerified(user)) {
-            return yield* hooks.afterSignUp({ user, method: "email-password" });
+          if (resolved.requireEmailVerification) {
+            // A freshly claimed email identifier is always unverified.
+            return yield* hooks.afterSignUp({ user, identifier: handle, method: "email-password" });
           }
 
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
-          const signUpResult = { user, session, method: "email-password" as const };
+          const signUpResult = {
+            user,
+            session,
+            identifier: handle,
+            method: "email-password" as const,
+          };
 
           // Session is now live in the store. If afterSignUp fails we must not
           // return an error (that would leave a dangling session the caller
@@ -328,7 +368,13 @@ export const make = (
             );
           }
 
-          const user = yield* store.getUserByEmail(email);
+          const resolvedUser = yield* resolveUserByIdentifier(
+            identifiers,
+            users.get,
+            "email",
+            email,
+          );
+          const user = resolvedUser?.user ?? null;
           const passwordHash = user !== null ? yield* store.getPasswordHash(user.id) : null;
           // Always verify against a real or decoy hash so timing is constant
           // regardless of whether the account exists.  Route through
@@ -362,7 +408,7 @@ export const make = (
             );
           }
 
-          if (resolved.requireEmailVerification && !isEmailVerified(user)) {
+          if (resolved.requireEmailVerification && !resolvedUser!.identifier.verified) {
             return yield* Effect.fail(
               new Errors.EmailNotVerifiedError({
                 message: "Email must be verified before sign-in",
@@ -371,18 +417,26 @@ export const make = (
             );
           }
 
+          const handle = { type: "email" as const, value: resolvedUser!.identifier.value };
+
           // Second factor: when a gate is present and required for this user,
           // return a challenge instead of a session.
           const gate = yield* Effect.serviceOption(SecondFactorGate);
           if (Option.isSome(gate) && (yield* gate.value.required(user))) {
             const secondFactor = yield* gate.value.begin(user);
-            return yield* hooks.afterSignIn({ user, secondFactor, method: "email-password" });
+            return yield* hooks.afterSignIn({
+              user,
+              secondFactor,
+              identifier: handle,
+              method: "email-password",
+            });
           }
 
           const session = yield* sessionManager.createSession(user.id, input.sessionAttributes);
           const signInResult = {
             user,
             session,
+            identifier: handle,
             method: "email-password" as const,
             ...(input.rememberMe !== undefined && { rememberMe: input.rememberMe }),
           };
