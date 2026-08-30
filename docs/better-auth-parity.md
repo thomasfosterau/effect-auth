@@ -282,7 +282,8 @@ provisioning and cleans up org invitations; the authorization framework (M3) sup
 the engine for org dynamic access control (M4), which with teams unblocks SCIM groups
 (M5).
 
-- **M0 — Monorepo restructure & regression repair (do first).**
+- **M0 — Monorepo restructure & regression repair (done 2026-08-30, except the
+  issue-close pass which awaits owner sign-off).**
   - Move core `src/` → `packages/effect-auth/src`; retire the dist symlink shim;
     root becomes a plain workspace.
   - Restore/port `packages/sql` from `abd5d13^` onto the current store contracts,
