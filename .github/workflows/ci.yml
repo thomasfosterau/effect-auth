@@ -3,10 +3,10 @@ name: CI
 on:
   push:
     branches:
-      - main
+      - trunk
   pull_request:
     branches:
-      - main
+      - trunk
 
 jobs:
   test:
@@ -30,6 +30,11 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # Dependent packages type-check against the core's built dist
+      # (workspace exports point at dist/), so build before checking.
+      - name: Build packages
+        run: pnpm run build
 
       - name: Format & lint
         run: pnpm run check
