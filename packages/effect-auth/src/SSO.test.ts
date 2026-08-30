@@ -21,10 +21,18 @@ import {
   memoryIdentifierStore,
   type Identifier,
 } from "./Identifier.ts";
-import { OrganizationStore, type Member, type SSOProvider } from "./index.ts";
+import { OrganizationStore, type Member, type AnySSOProvider } from "./index.ts";
 import { OAuthStateStore, OAuthUserStore, type OAuthState } from "./oauth/OAuth.ts";
 import { SSOProviderStore, SSOError, SSOService } from "./SSO.ts";
 import * as SSO from "./SSO.ts";
+import {
+  memorySAMLReplayStore,
+  SAMLReplayStore,
+  SAMLVerifier,
+  type SAMLAssertion,
+  type SAMLAuthnRequestInput,
+  type SAMLReplayRecord,
+} from "./SAML.ts";
 import type * as Types from "./Types.ts";
 
 /** Swap `globalThis.fetch` for a route handler while `thunk` runs. */
@@ -49,7 +57,7 @@ const withFetch = async <A>(
 };
 
 const makeStores = () => {
-  const providers = new Map<string, SSOProvider>();
+  const providers = new Map<string, AnySSOProvider>();
   const users = new Map<string, Types.User>();
   const identifierRecords = new Map<string, Identifier>();
   const identifiers = memoryIdentifierStore(identifierRecords);
@@ -318,6 +326,366 @@ describe("SSOService", () => {
   });
 });
 
+// --- SAML --------------------------------------------------------------------
+//
+// The crypto lives in `@thomasfosterau/effect-auth-saml` and is exercised
+// there, against hand-built XML fixtures. These tests are about the half core
+// owns: protocol routing, one-time use of the AuthnRequest and the assertion,
+// issuer pinning, and the fact that both protocols end in the *same*
+// provisioning tail. So the verifier is stubbed, and the stub's "SAMLResponse"
+// is just a JSON assertion — which lets each test state the exact assertion an
+// IdP is pretending to send.
+
+const SAML_IDP = "https://idp.acme.test/metadata";
+const SAML_SP = "https://app.test/saml/metadata";
+const SAML_ACS = "https://app.test/api/auth/sso/saml/acs";
+
+const ACME_SAML = {
+  protocol: "saml",
+  domain: "acme.test",
+  entityId: SAML_IDP,
+  ssoUrl: "https://idp.acme.test/sso",
+  idpCertificates: ["-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----"],
+  spEntityId: SAML_SP,
+  acsUrl: SAML_ACS,
+  organizationId: "org-1",
+} as const satisfies SSO.RegisterSAMLProviderInput;
+
+/** Encode the assertion the stub verifier should "find" in this response. */
+const samlResponse = (assertion: Partial<SAMLAssertion>): string =>
+  Buffer.from(JSON.stringify(assertion), "utf8").toString("base64");
+
+const makeSAMLFixture = () => {
+  const base = makeStores();
+  const replayRecords = new Map<string, SAMLReplayRecord>();
+  const replay = memorySAMLReplayStore(replayRecords);
+  const requests: SAMLAuthnRequestInput[] = [];
+
+  const verifier: typeof SAMLVerifier.Service = {
+    buildAuthnRequest: (input) => {
+      requests.push(input);
+      const url = new URL(input.ssoUrl);
+      url.searchParams.set("SAMLRequest", `stub:${input.requestId}`);
+      if (input.relayState !== undefined) url.searchParams.set("RelayState", input.relayState);
+      return Effect.succeed({ url: url.toString(), requestId: input.requestId });
+    },
+    verify: (input) =>
+      Effect.sync(() => {
+        const decoded = Buffer.from(input.samlResponse, "base64").toString("utf8");
+        const overrides = JSON.parse(decoded) as Partial<SAMLAssertion>;
+        return {
+          id: "_assertion-1",
+          issuer: input.idpEntityId,
+          nameId: "worker@acme.test",
+          nameIdFormat: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+          email: "worker@acme.test",
+          displayName: "Worker Bee",
+          attributes: {},
+          ...overrides,
+        } satisfies SAMLAssertion;
+      }),
+    spMetadataXml: (input) => Effect.succeed(`<EntityDescriptor entityID="${input.spEntityId}"/>`),
+  };
+
+  const layer = Layer.mergeAll(
+    base.layer,
+    Layer.succeed(SAMLVerifier)(verifier),
+    Layer.succeed(SAMLReplayStore)(replay),
+  );
+
+  return { ...base, layer, replay, replayRecords, requests };
+};
+
+describe("SSOService — SAML", () => {
+  it("starts a SAML sign-in and records the request id one-time", async () => {
+    const fx = makeSAMLFixture();
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(fx.layer)));
+
+    const { provider, start } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* sso.registerSAMLProvider("admin", ACME_SAML);
+        const start = yield* sso.signIn({ email: "worker@ACME.test" });
+        return { provider, start };
+      }).pipe(Effect.provide(fx.layer)),
+    );
+
+    expect(provider.protocol).toBe("saml");
+    expect(provider.idpCertificates).toEqual(ACME_SAML.idpCertificates);
+
+    const url = new URL(start.url);
+    expect(url.origin + url.pathname).toBe("https://idp.acme.test/sso");
+    expect(url.searchParams.get("RelayState")).toBe(start.state);
+
+    // The request id was minted by core and handed to the verifier, then
+    // banked so the response can be matched against it exactly once.
+    const requestId = fx.requests[0]?.requestId ?? "";
+    expect(requestId).toMatch(/^_[0-9a-f]{32}$/);
+    const banked = await Effect.runPromise(fx.replay.consume(requestId));
+    expect(banked?.kind).toBe("authn-request");
+    expect(banked?.relayState).toBe(start.state);
+    expect(await Effect.runPromise(fx.replay.consume(requestId))).toBeNull();
+  });
+
+  it("provisions through the same tail as OIDC, then reuses the user", async () => {
+    const fx = makeSAMLFixture();
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(fx.layer)));
+
+    const signIn = (assertionId: string) =>
+      Effect.gen(function* () {
+        const start = yield* sso.signIn({ email: "worker@acme.test" });
+        const requestId = fx.requests[fx.requests.length - 1]?.requestId ?? "";
+        return yield* sso.handleSAMLCallback(
+          providerId,
+          samlResponse({ id: assertionId, inResponseTo: requestId }),
+          start.state,
+        );
+      }).pipe(Effect.provide(fx.layer));
+
+    const providerId = (
+      await Effect.runPromise(
+        sso.registerSAMLProvider("admin", ACME_SAML).pipe(Effect.provide(fx.layer)),
+      )
+    ).id;
+
+    const first = await Effect.runPromise(signIn("_a1"));
+    expect(first.isNewUser).toBe(true);
+    expect(first.provider.protocol).toBe("saml");
+    expect(first.session.userId).toBe(first.user.id);
+    const identifier = await Effect.runPromise(
+      fx.identifiers.getByValue("email", "worker@acme.test"),
+    );
+    expect(identifier?.userId).toBe(first.user.id);
+    // The IdP attested the address inside a signed assertion, exactly as an
+    // OIDC `email_verified` claim would.
+    expect(identifier?.verified).toBe(true);
+    expect(fx.members).toEqual([
+      { ...fx.members[0], organizationId: "org-1", userId: first.user.id, role: "member" },
+    ]);
+
+    const second = await Effect.runPromise(signIn("_a2"));
+    expect(second.isNewUser).toBe(false);
+    expect(second.user.id).toBe(first.user.id);
+    expect(fx.users.size).toBe(1);
+    expect(fx.members.length).toBe(1);
+  });
+
+  it("refuses to spend the same assertion twice", async () => {
+    const fx = makeSAMLFixture();
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(fx.layer)));
+
+    const outcome = await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* sso.registerSAMLProvider("admin", ACME_SAML);
+        const first = yield* sso.signIn({ email: "worker@acme.test" });
+        const firstId = fx.requests[0]?.requestId ?? "";
+        const response = samlResponse({ id: "_replayed", inResponseTo: firstId });
+        const ok = yield* sso.handleSAMLCallback(provider.id, response, first.state);
+
+        // A captured response, replayed against a *fresh* request so the
+        // AuthnRequest check cannot be what stops it.
+        const second = yield* sso.signIn({ email: "worker@acme.test" });
+        const secondId = fx.requests[1]?.requestId ?? "";
+        const replayed = samlResponse({ id: "_replayed", inResponseTo: secondId });
+        const err = yield* Effect.flip(sso.handleSAMLCallback(provider.id, replayed, second.state));
+        return { ok, err };
+      }).pipe(Effect.provide(fx.layer)),
+    );
+
+    expect(outcome.ok.isNewUser).toBe(true);
+    expect(outcome.err).toBeInstanceOf(SSOError);
+    expect((outcome.err as SSOError).message).toMatch(/already been used/);
+  });
+
+  it("rejects a response answering an unknown or already-spent request", async () => {
+    const fx = makeSAMLFixture();
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(fx.layer)));
+
+    const err = await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* sso.registerSAMLProvider("admin", ACME_SAML);
+        const start = yield* sso.signIn({ email: "worker@acme.test" });
+        return yield* Effect.flip(
+          sso.handleSAMLCallback(
+            provider.id,
+            samlResponse({ inResponseTo: "_never-issued" }),
+            start.state,
+          ),
+        );
+      }).pipe(Effect.provide(fx.layer)),
+    );
+    expect((err as SSOError).message).toMatch(/unknown, expired, or already-used/);
+  });
+
+  it("rejects an assertion from a foreign issuer", async () => {
+    const fx = makeSAMLFixture();
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(fx.layer)));
+
+    const err = await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* sso.registerSAMLProvider("admin", ACME_SAML);
+        const start = yield* sso.signIn({ email: "worker@acme.test" });
+        const requestId = fx.requests[0]?.requestId ?? "";
+        return yield* Effect.flip(
+          sso.handleSAMLCallback(
+            provider.id,
+            samlResponse({ issuer: "https://evil.test/metadata", inResponseTo: requestId }),
+            start.state,
+          ),
+        );
+      }).pipe(Effect.provide(fx.layer)),
+    );
+    expect((err as SSOError).message).toMatch(/does not match this connection/);
+  });
+
+  it("rejects a RelayState that does not match the one it minted", async () => {
+    const fx = makeSAMLFixture();
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(fx.layer)));
+
+    const err = await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* sso.registerSAMLProvider("admin", ACME_SAML);
+        yield* sso.signIn({ email: "worker@acme.test" });
+        const requestId = fx.requests[0]?.requestId ?? "";
+        return yield* Effect.flip(
+          sso.handleSAMLCallback(
+            provider.id,
+            samlResponse({ inResponseTo: requestId }),
+            "not-the-relay-state",
+          ),
+        );
+      }).pipe(Effect.provide(fx.layer)),
+    );
+    expect((err as SSOError).message).toMatch(/RelayState/);
+  });
+
+  it("refuses an unsolicited (IdP-initiated) response unless configured for it", async () => {
+    const fx = makeSAMLFixture();
+    const strict = await Effect.runPromise(SSO.make().pipe(Effect.provide(fx.layer)));
+    const permissive = await Effect.runPromise(
+      SSO.make({ allowIdpInitiated: true }).pipe(Effect.provide(fx.layer)),
+    );
+
+    const providerId = (
+      await Effect.runPromise(
+        strict.registerSAMLProvider("admin", ACME_SAML).pipe(Effect.provide(fx.layer)),
+      )
+    ).id;
+
+    const err = await Effect.runPromise(
+      Effect.flip(strict.handleSAMLCallback(providerId, samlResponse({ id: "_u1" }))).pipe(
+        Effect.provide(fx.layer),
+      ),
+    );
+    expect((err as SSOError).message).toMatch(/IdP-initiated/);
+
+    const ok = await Effect.runPromise(
+      permissive
+        .handleSAMLCallback(providerId, samlResponse({ id: "_u2" }))
+        .pipe(Effect.provide(fx.layer)),
+    );
+    expect(ok.isNewUser).toBe(true);
+  });
+
+  it("keeps the two protocols' callbacks apart", async () => {
+    const fx = makeSAMLFixture();
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(fx.layer)));
+
+    const errors = await Effect.runPromise(
+      Effect.gen(function* () {
+        const oidc = yield* sso.registerProvider("admin", { ...ACME, domain: "oidc.test" });
+        const wrongProtocol = yield* Effect.flip(sso.handleSAMLCallback(oidc.id, samlResponse({})));
+        const unknown = yield* Effect.flip(sso.handleSAMLCallback("nope", samlResponse({})));
+        return { wrongProtocol, unknown };
+      }).pipe(Effect.provide(fx.layer)),
+    );
+
+    expect((errors.wrongProtocol as SSOError).message).toMatch(/is an OIDC connection/);
+    expect((errors.unknown as SSOError).message).toMatch(/not found/);
+  });
+
+  it("reports missing SAML support instead of half-working", async () => {
+    // No SAMLVerifier / SAMLReplayStore in context: the OIDC half still works,
+    // and the SAML half says exactly what is missing.
+    const { layer } = makeStores();
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(layer)));
+
+    const err = await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* sso.registerSAMLProvider("admin", ACME_SAML);
+        return yield* Effect.flip(sso.signIn({ providerId: provider.id }));
+      }).pipe(Effect.provide(layer)),
+    );
+    expect((err as SSOError).message).toMatch(/SAML support is not installed/);
+  });
+
+  it("validates a SAML registration before storing it", async () => {
+    const fx = makeSAMLFixture();
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(fx.layer)));
+
+    const errors = await Effect.runPromise(
+      Effect.gen(function* () {
+        const noCerts = yield* Effect.flip(
+          sso.registerSAMLProvider("admin", { ...ACME_SAML, idpCertificates: [] }),
+        );
+        const badUrl = yield* Effect.flip(
+          sso.registerSAMLProvider("admin", { ...ACME_SAML, acsUrl: "/relative" }),
+        );
+        return { noCerts, badUrl };
+      }).pipe(Effect.provide(fx.layer)),
+    );
+
+    expect((errors.noCerts as SSOError).message).toMatch(/idpCertificates must not be empty/);
+    expect((errors.badUrl as SSOError).message).toMatch(/acsUrl must be an absolute URL/);
+    expect(fx.providers.size).toBe(0);
+  });
+
+  it("renders SP metadata for a connection", async () => {
+    const fx = makeSAMLFixture();
+    const sso = await Effect.runPromise(SSO.make().pipe(Effect.provide(fx.layer)));
+
+    const xml = await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* sso.registerSAMLProvider("admin", ACME_SAML);
+        return yield* sso.samlMetadata(provider.id);
+      }).pipe(Effect.provide(fx.layer)),
+    );
+    expect(xml).toContain(SAML_SP);
+  });
+});
+
+describe("memorySAMLReplayStore", () => {
+  const record = (id: string, expiresAt: number): SAMLReplayRecord => ({
+    id,
+    kind: "assertion",
+    providerId: "p1",
+    createdAt: Date.now(),
+    expiresAt,
+  });
+
+  it("inserts if absent and reports a duplicate as null", async () => {
+    const store = memorySAMLReplayStore();
+    expect(await Effect.runPromise(store.create(record("a", Date.now() + 60_000)))).not.toBeNull();
+    expect(await Effect.runPromise(store.create(record("a", Date.now() + 60_000)))).toBeNull();
+  });
+
+  it("lets an expired id be re-used, since the window it guarded has passed", async () => {
+    const store = memorySAMLReplayStore();
+    await Effect.runPromise(store.create(record("a", Date.now() - 1)));
+    expect(await Effect.runPromise(store.create(record("a", Date.now() + 60_000)))).not.toBeNull();
+  });
+
+  it("consumes exactly once, and treats an expired record as absent", async () => {
+    const store = memorySAMLReplayStore();
+    await Effect.runPromise(store.create(record("a", Date.now() + 60_000)));
+    expect(await Effect.runPromise(store.consume("a"))).not.toBeNull();
+    expect(await Effect.runPromise(store.consume("a"))).toBeNull();
+
+    await Effect.runPromise(store.create(record("b", Date.now() - 1)));
+    expect(await Effect.runPromise(store.consume("b"))).toBeNull();
+    expect(await Effect.runPromise(store.consume("missing"))).toBeNull();
+  });
+});
+
 // --- HTTP layer --------------------------------------------------------------
 
 /** A web handler wired with the SSO endpoints over in-memory stores. */
@@ -326,7 +694,7 @@ const makeHttpFixture = () => {
   const identifierRecords = new Map<string, Identifier>();
   const identifierStore = memoryIdentifierStore(identifierRecords);
   const sessions = new Map<string, Types.Session>();
-  const providers = new Map<string, SSOProvider>();
+  const providers = new Map<string, AnySSOProvider>();
   const states = new Map<string, OAuthState>();
   const members: Member[] = [];
   let userSeq = 0;

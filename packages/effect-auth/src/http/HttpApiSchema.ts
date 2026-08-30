@@ -766,6 +766,49 @@ export const OIDCTokenView = Schema.Struct({
 });
 export type OIDCTokenView = typeof OIDCTokenView.Type;
 
+// -----------------------------------------------------------------------------
+// RFC 7591 dynamic client registration / RFC 7592 management
+// -----------------------------------------------------------------------------
+
+/**
+ * RFC 7591 §2 client metadata, as posted to `POST /register` (and `PUT` to the
+ * management endpoint). Members the provider does not implement (`logo_uri`,
+ * `contacts`, `software_statement`, ...) are accepted and ignored rather than
+ * rejected, as RFC 7591 §2 requires.
+ */
+export const OIDCRegistrationPayload = Schema.Struct({
+  redirect_uris: Schema.Array(Schema.String),
+  token_endpoint_auth_method: Schema.optional(Schema.String),
+  grant_types: Schema.optional(Schema.Array(Schema.String)),
+  response_types: Schema.optional(Schema.Array(Schema.String)),
+  client_name: Schema.optional(Schema.String),
+  scope: Schema.optional(Schema.String),
+});
+export type OIDCRegistrationPayload = typeof OIDCRegistrationPayload.Type;
+
+/**
+ * RFC 7591 §3.2.1 client information response. `client_secret` and
+ * `registration_access_token` are returned only by the registration call that
+ * mints them — both are stored hashed and cannot be read back afterwards.
+ */
+export const OIDCRegistrationView = Schema.Struct({
+  client_id: Schema.String,
+  /** Seconds since the epoch. */
+  client_id_issued_at: Schema.Number,
+  client_secret: Schema.optional(Schema.String),
+  /** `0` = the secret does not expire (RFC 7591 §3.2.1). */
+  client_secret_expires_at: Schema.optional(Schema.Number),
+  client_name: Schema.String,
+  redirect_uris: Schema.Array(Schema.String),
+  grant_types: Schema.Array(Schema.String),
+  response_types: Schema.Array(Schema.String),
+  token_endpoint_auth_method: Schema.String,
+  scope: Schema.String,
+  registration_access_token: Schema.optional(Schema.String),
+  registration_client_uri: Schema.optional(Schema.String),
+});
+export type OIDCRegistrationView = typeof OIDCRegistrationView.Type;
+
 /** UserInfo response / OpenID Provider Metadata: open-ended claim records. */
 export const ClaimsView = Schema.Record(Schema.String, Schema.Unknown);
 export type ClaimsView = typeof ClaimsView.Type;
@@ -833,6 +876,18 @@ export class InternalServerError extends Schema.TaggedErrorClass<InternalServerE
   { message: Schema.String },
 ) {}
 
+/**
+ * 400 — an OAuth error response body (`{ error, error_description }`) rather
+ * than this API's `{ message }` shape. RFC 7591 §3.2.2 specifies it verbatim
+ * for the dynamic client registration endpoint, and generic OAuth clients
+ * (MCP clients included) read `error` to decide what to do next.
+ */
+export class OAuthError extends Schema.TaggedErrorClass<OAuthError>()("OAuthError", {
+  /** RFC 7591 §3.2.2 code, e.g. `invalid_redirect_uri`, `invalid_client_metadata`. */
+  error: Schema.String,
+  error_description: Schema.optional(Schema.String),
+}) {}
+
 /** Each error class paired with its HTTP status for use in endpoint `error` fields. */
 export const UnauthorizedError = Unauthorized.pipe(HttpApiSchema.status(401));
 export const ForbiddenError = Forbidden.pipe(HttpApiSchema.status(403));
@@ -841,6 +896,8 @@ export const BadRequestError = BadRequest.pipe(HttpApiSchema.status(400));
 export const NotFoundError = NotFound.pipe(HttpApiSchema.status(404));
 export const TooManyRequestsError = TooManyRequests.pipe(HttpApiSchema.status(429));
 export const InternalError = InternalServerError.pipe(HttpApiSchema.status(500));
+/** 400 with an RFC 7591 §3.2.2 `{ error, error_description }` body. */
+export const OAuthBadRequestError = OAuthError.pipe(HttpApiSchema.status(400));
 
 // -----------------------------------------------------------------------------
 // Encoders: domain types -> wire views

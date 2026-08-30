@@ -31,10 +31,13 @@ import {
   OIDCTokenStore,
   OIDCConsentStore,
   OIDCProviderError,
+  OIDCRegistrationError,
   hashOIDCSecret,
+  mcpProviderPreset,
   type OIDCAuthorizationCode,
   type OIDCClient,
   type OIDCConsent,
+  type OIDCDynamicRegistrationConfig,
   type OIDCToken,
   OIDCProviderService,
 } from "./OIDCProvider.ts";
@@ -422,11 +425,319 @@ describe("OIDCProviderService", () => {
 });
 
 // -----------------------------------------------------------------------------
+// RFC 7591 dynamic client registration / RFC 7592 management (service level)
+// -----------------------------------------------------------------------------
+
+describe("OIDCProviderService dynamic client registration", () => {
+  const baseConfig = {
+    issuer: ISSUER,
+    loginPage: "http://idp.test/login",
+    consentPage: "http://idp.test/consent",
+  };
+
+  const setup = (dynamicRegistration?: OIDCDynamicRegistrationConfig) => {
+    const stores = makeOIDCStores();
+    const userStore: typeof UserStore.Service = {
+      get: () => Effect.succeed(null),
+      getCredentials: () => Effect.succeed(null),
+    };
+    const jwtServiceLayer = JWTService.layer({ issuer: ISSUER }).pipe(
+      Layer.provide(Layer.succeed(JWTKeyStore)(stores.jwtKeyStore)),
+    );
+    const layer = Layer.mergeAll(
+      Layer.succeed(OIDCClientStore)(stores.clientStore),
+      Layer.succeed(OIDCCodeStore)(stores.codeStore),
+      Layer.succeed(OIDCTokenStore)(stores.tokenStore),
+      Layer.succeed(OIDCConsentStore)(stores.consentStore),
+      Layer.succeed(UserStore)(userStore),
+      Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
+      jwtServiceLayer,
+      PlatformCrypto.layer,
+    );
+    const config = {
+      ...baseConfig,
+      ...(dynamicRegistration !== undefined && { dynamicRegistration }),
+    };
+    const service = Effect.runSync(OIDCProvider.make(config).pipe(Effect.provide(layer)));
+    return { stores, layer, service };
+  };
+
+  const publicMetadata = {
+    redirectUris: ["http://127.0.0.1:9876/callback"],
+    tokenEndpointAuthMethod: "none",
+    clientName: "MCP Client",
+    scope: "openid profile email",
+  };
+
+  it("issues a public client without a secret and a confidential one with a secret", async () => {
+    const { service } = setup({});
+
+    const publicClient = await Effect.runPromise(service.registerDynamicClient(publicMetadata));
+    expect(publicClient.clientSecret).toBeUndefined();
+    expect(publicClient.client.type).toBe("native");
+    expect(publicClient.client.tokenEndpointAuthMethod).toBe("none");
+    expect(publicClient.client.dynamicallyRegistered).toBe(true);
+    expect(publicClient.client.grantTypes).toEqual(["authorization_code"]);
+    expect(publicClient.client.responseTypes).toEqual(["code"]);
+    expect(publicClient.registrationAccessToken).toBeTruthy();
+    // Both one-time secrets are stored only as digests.
+    expect(publicClient.client.registrationAccessTokenHash).toBe(
+      hashOIDCSecret(publicClient.registrationAccessToken),
+    );
+
+    // RFC 7591 §2: an omitted token_endpoint_auth_method means client_secret_basic.
+    const confidential = await Effect.runPromise(
+      service.registerDynamicClient({ redirectUris: ["https://rp.test/cb"] }),
+    );
+    expect(confidential.clientSecret).toBeTruthy();
+    expect(confidential.client.type).toBe("web");
+    expect(confidential.client.tokenEndpointAuthMethod).toBe("client_secret_basic");
+    expect(confidential.client.clientSecretHash).toBe(hashOIDCSecret(confidential.clientSecret!));
+    // The default scope is the provider's full allowed set.
+    expect(confidential.client.scope).toBe("openid profile email offline_access");
+  });
+
+  it("fails with access_denied when dynamic registration is not configured", async () => {
+    const { service } = setup();
+    expect(service.dynamicRegistration.enabled).toBe(false);
+    const err = await Effect.runPromise(Effect.flip(service.registerDynamicClient(publicMetadata)));
+    expect(err).toBeInstanceOf(OIDCRegistrationError);
+    expect((err as OIDCRegistrationError).error).toBe("access_denied");
+  });
+
+  it("rejects redirect URIs that are not https, loopback, or a registered scheme", async () => {
+    const { service } = setup({});
+    const cases = [
+      [],
+      ["http://evil.test/cb"],
+      ["javascript:alert(1)"],
+      ["myapp://callback"],
+      ["https://rp.test/cb#fragment"],
+      ["not a url"],
+    ];
+    for (const redirectUris of cases) {
+      const err = await Effect.runPromise(
+        Effect.flip(service.registerDynamicClient({ ...publicMetadata, redirectUris })),
+      );
+      expect((err as OIDCRegistrationError).error).toBe("invalid_redirect_uri");
+    }
+
+    // Private-use URI schemes (RFC 8252 §7.1) are opt-in per deployment.
+    const withScheme = setup({ allowedRedirectUriSchemes: ["myapp"] });
+    const ok = await Effect.runPromise(
+      withScheme.service.registerDynamicClient({
+        ...publicMetadata,
+        redirectUris: ["myapp://callback"],
+      }),
+    );
+    expect(ok.client.redirectUris).toEqual(["myapp://callback"]);
+  });
+
+  it("rejects metadata the provider cannot honour with invalid_client_metadata", async () => {
+    const { service } = setup({});
+    const cases: ReadonlyArray<Record<string, unknown>> = [
+      { tokenEndpointAuthMethod: "private_key_jwt" },
+      { grantTypes: ["client_credentials"] },
+      { grantTypes: ["refresh_token"] },
+      { responseTypes: ["token"] },
+      { scope: "openid admin:everything" },
+      { scope: "profile" },
+      // refresh_token without offline_access can never mint a refresh token.
+      { grantTypes: ["authorization_code", "refresh_token"], scope: "openid" },
+    ];
+    for (const overrides of cases) {
+      const err = await Effect.runPromise(
+        Effect.flip(service.registerDynamicClient({ ...publicMetadata, ...overrides })),
+      );
+      expect((err as OIDCRegistrationError).error).toBe("invalid_client_metadata");
+    }
+  });
+
+  it("honours the registration policy for denial, error code, and consent", async () => {
+    const denyAll = setup({ policy: () => Effect.succeed(false) });
+    const denied = await Effect.runPromise(
+      Effect.flip(denyAll.service.registerDynamicClient(publicMetadata)),
+    );
+    expect((denied as OIDCRegistrationError).error).toBe("invalid_client_metadata");
+
+    const forbid = setup({
+      policy: () =>
+        Effect.succeed({ allow: false, error: "access_denied", errorDescription: "Closed" }),
+    });
+    const forbidden = await Effect.runPromise(
+      Effect.flip(forbid.service.registerDynamicClient(publicMetadata)),
+    );
+    expect((forbidden as OIDCRegistrationError).error).toBe("access_denied");
+    expect((forbidden as OIDCRegistrationError).description).toBe("Closed");
+
+    // The policy sees the NORMALIZED metadata and may opt the client into
+    // skipping the consent screen.
+    let seen: string | undefined;
+    const allow = setup({
+      policy: (metadata) => {
+        seen = metadata.tokenEndpointAuthMethod;
+        return Effect.succeed({ allow: true, skipConsent: true });
+      },
+    });
+    const registered = await Effect.runPromise(allow.service.registerDynamicClient(publicMetadata));
+    expect(seen).toBe("none");
+    expect(registered.client.skipConsent).toBe(true);
+  });
+
+  it("requires the initial access token when one is configured", async () => {
+    const secret = setup({ initialAccessToken: Redacted.make("s3cret-iat") });
+
+    const missing = await Effect.runPromise(
+      Effect.flip(secret.service.registerDynamicClient(publicMetadata)),
+    );
+    expect((missing as OIDCRegistrationError).error).toBe("invalid_token");
+
+    const wrong = await Effect.runPromise(
+      Effect.flip(
+        secret.service.registerDynamicClient(publicMetadata, { initialAccessToken: "nope" }),
+      ),
+    );
+    expect((wrong as OIDCRegistrationError).error).toBe("invalid_token");
+
+    const ok = await Effect.runPromise(
+      secret.service.registerDynamicClient(publicMetadata, {
+        initialAccessToken: "s3cret-iat",
+      }),
+    );
+    expect(ok.client.clientId).toBeTruthy();
+
+    // The verifier-hook form receives the presented token.
+    const seen: string[] = [];
+    const hook = setup({
+      initialAccessToken: (token) => {
+        seen.push(token);
+        return Effect.succeed(token.startsWith("tenant-"));
+      },
+    });
+    const viaHook = await Effect.runPromise(
+      hook.service.registerDynamicClient(publicMetadata, { initialAccessToken: "tenant-42" }),
+    );
+    expect(viaHook.client.clientId).toBeTruthy();
+    expect(seen).toEqual(["tenant-42"]);
+    const rejected = await Effect.runPromise(
+      Effect.flip(
+        hook.service.registerDynamicClient(publicMetadata, { initialAccessToken: "other" }),
+      ),
+    );
+    expect((rejected as OIDCRegistrationError).error).toBe("invalid_token");
+  });
+
+  it("gates RFC 7592 management on the registration access token", async () => {
+    const { service, stores } = setup({});
+    const registered = await Effect.runPromise(service.registerDynamicClient(publicMetadata));
+    const { clientId } = registered.client;
+    const rat = registered.registrationAccessToken;
+
+    const read = await Effect.runPromise(service.readDynamicClient(clientId, rat));
+    expect(read.name).toBe("MCP Client");
+
+    for (const [id, token] of [
+      [clientId, "wrong-token"],
+      ["unknown-client", rat],
+    ] as const) {
+      const err = await Effect.runPromise(Effect.flip(service.readDynamicClient(id, token)));
+      expect((err as OIDCRegistrationError).error).toBe("invalid_token");
+    }
+
+    const updated = await Effect.runPromise(
+      service.updateDynamicClient(clientId, rat, {
+        ...publicMetadata,
+        clientName: "Renamed",
+        redirectUris: ["http://127.0.0.1:9876/callback", "https://rp.test/cb"],
+      }),
+    );
+    expect(updated.name).toBe("Renamed");
+    expect(updated.redirectUris).toEqual(["http://127.0.0.1:9876/callback", "https://rp.test/cb"]);
+    // The secret and registration access token survive an update untouched.
+    expect(updated.registrationAccessTokenHash).toBe(hashOIDCSecret(rat));
+
+    // A client cannot promote itself from public to confidential.
+    const promote = await Effect.runPromise(
+      Effect.flip(
+        service.updateDynamicClient(clientId, rat, {
+          ...publicMetadata,
+          tokenEndpointAuthMethod: "client_secret_basic",
+        }),
+      ),
+    );
+    expect((promote as OIDCRegistrationError).error).toBe("invalid_client_metadata");
+
+    await Effect.runPromise(service.deleteDynamicClient(clientId, rat));
+    expect(stores.clients.has(clientId)).toBe(false);
+  });
+
+  it("holds a dynamic client to the scopes and grants it registered for", async () => {
+    const { service } = setup({ skipConsent: true });
+    const registered = await Effect.runPromise(
+      service.registerDynamicClient({
+        redirectUris: ["https://rp.test/cb"],
+        tokenEndpointAuthMethod: "none",
+        scope: "openid profile",
+      }),
+    );
+    const user = makeUser("u1");
+
+    const tooWide = await Effect.runPromise(
+      service.authorize(user, {
+        responseType: "code",
+        clientId: registered.client.clientId,
+        redirectUri: "https://rp.test/cb",
+        scope: "openid profile email",
+        codeChallenge: "challenge",
+      }),
+    );
+    expect(tooWide.type).toBe("error");
+    expect(new URL(tooWide.redirectTo).searchParams.get("error")).toBe("invalid_scope");
+
+    // The refresh_token grant was never registered for.
+    const err = await Effect.runPromise(
+      Effect.flip(
+        service.token({
+          grantType: "refresh_token",
+          clientId: registered.client.clientId,
+          refreshToken: "whatever",
+        }),
+      ),
+    );
+    expect(err).toMatchObject({ error: "unauthorized_client" });
+  });
+
+  it("mcpProviderPreset turns on PKCE and dynamic registration", () => {
+    const preset = mcpProviderPreset(baseConfig);
+    expect(preset.requirePKCE).toBe(true);
+    expect(preset.dynamicRegistration?.management).toBe(true);
+    expect(preset.dynamicRegistration?.skipConsent).toBe(false);
+
+    // Caller overrides win, and merge into (rather than replace) the defaults.
+    const policy = () => Effect.succeed(true);
+    const custom = mcpProviderPreset({
+      ...baseConfig,
+      requirePKCE: false,
+      dynamicRegistration: { policy, skipConsent: true },
+    });
+    expect(custom.requirePKCE).toBe(false);
+    expect(custom.dynamicRegistration?.policy).toBe(policy);
+    expect(custom.dynamicRegistration?.skipConsent).toBe(true);
+    expect(custom.dynamicRegistration?.management).toBe(true);
+  });
+});
+
+// -----------------------------------------------------------------------------
 // HTTP layer: full end-to-end flow
 // -----------------------------------------------------------------------------
 
-/** A web handler wired with the OIDC provider endpoints over in-memory stores. */
-const makeHttpFixture = () => {
+/**
+ * A web handler wired with the OIDC provider endpoints over in-memory stores.
+ * Pass `dynamicRegistration` to mount the RFC 7591/7592 endpoints.
+ */
+const makeHttpFixture = (
+  options: { readonly dynamicRegistration?: OIDCDynamicRegistrationConfig } = {},
+) => {
   const usersById = new Map<string, Types.User>();
   const identifiers = new Map<string, Identifier>();
   const identifierStore = memoryIdentifierStore(identifiers);
@@ -540,6 +851,9 @@ const makeHttpFixture = () => {
     issuer: ISSUER,
     loginPage: "http://idp.test/login",
     consentPage: "http://idp.test/consent",
+    ...(options.dynamicRegistration !== undefined && {
+      dynamicRegistration: options.dynamicRegistration,
+    }),
   }).pipe(Layer.provide(oidcDeps));
 
   const oidcLayer = Layer.mergeAll(oidcDeps, oidcServiceLayer);
@@ -563,6 +877,17 @@ const post = (path: string, body: unknown, sessionId?: string): Request =>
     headers: {
       "content-type": "application/json",
       ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+
+/** JSON request with an optional `Authorization: Bearer` (registration tokens). */
+const jsonRequest = (method: string, path: string, body: unknown, bearer?: string): Request =>
+  new Request(`http://idp.test${path}`, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      ...(bearer !== undefined ? { authorization: `Bearer ${bearer}` } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -1298,5 +1623,332 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(res.status).toBe(302);
     const loc = new URL(res.headers.get("location")!);
     expect(loc.origin + loc.pathname).toBe("http://idp.test/login");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// HTTP layer: RFC 7591 dynamic client registration + RFC 8414 metadata
+// -----------------------------------------------------------------------------
+
+interface RegistrationResponse {
+  readonly client_id: string;
+  readonly client_id_issued_at: number;
+  readonly client_secret?: string;
+  readonly client_secret_expires_at?: number;
+  readonly client_name: string;
+  readonly redirect_uris: readonly string[];
+  readonly grant_types: readonly string[];
+  readonly response_types: readonly string[];
+  readonly token_endpoint_auth_method: string;
+  readonly scope: string;
+  readonly registration_access_token?: string;
+  readonly registration_client_uri?: string;
+}
+
+describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
+  const MCP_REDIRECT = "http://127.0.0.1:33418/callback";
+
+  it("registers an MCP client and runs authorization_code + PKCE S256 to a token", async () => {
+    const fx = makeHttpFixture({ dynamicRegistration: { skipConsent: true } });
+    const userId = fx.seedUser("mcp-user@idp.test");
+    const userSid = fx.makeSession(userId);
+
+    // 1. Dynamic registration: a public client, no credentials of any kind.
+    //    Unknown members (client_uri, logo_uri, ...) are ignored, not rejected.
+    const registered = await fx.handler(
+      post("/register", {
+        redirect_uris: [MCP_REDIRECT],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        client_name: "Example MCP Client",
+        scope: "openid profile email offline_access",
+        client_uri: "https://mcp.example.com",
+        logo_uri: "https://mcp.example.com/logo.png",
+      }),
+    );
+    expect(registered.status).toBe(201);
+    const client = (await registered.json()) as RegistrationResponse;
+    expect(client.client_id).toBeTruthy();
+    expect(client.client_secret).toBeUndefined();
+    expect(client.token_endpoint_auth_method).toBe("none");
+    expect(client.client_name).toBe("Example MCP Client");
+    expect(client.redirect_uris).toEqual([MCP_REDIRECT]);
+    expect(client.grant_types).toEqual(["authorization_code", "refresh_token"]);
+    expect(client.registration_access_token).toBeTruthy();
+    expect(client.registration_client_uri).toBe(`${ISSUER}/register/${client.client_id}`);
+    expect(client.client_id_issued_at).toBeGreaterThan(0);
+
+    // 2. Authorization code with PKCE S256 — no client secret anywhere.
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const authorize = await fx.handler(
+      get(
+        "/oauth2/authorize",
+        {
+          response_type: "code",
+          client_id: client.client_id,
+          redirect_uri: MCP_REDIRECT,
+          scope: "openid profile email offline_access",
+          state: "mcp-state",
+          code_challenge: pkce.codeChallenge,
+          code_challenge_method: "S256",
+        },
+        { sessionId: userSid },
+      ),
+    );
+    expect(authorize.status).toBe(302);
+    const location = new URL(authorize.headers.get("location")!);
+    expect(location.origin + location.pathname).toBe(MCP_REDIRECT);
+    expect(location.searchParams.get("state")).toBe("mcp-state");
+    const code = location.searchParams.get("code")!;
+
+    // 3. Token exchange: public client authenticates with the PKCE verifier.
+    const tokenRes = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: MCP_REDIRECT,
+        code_verifier: pkce.codeVerifier,
+        client_id: client.client_id,
+      }),
+    );
+    expect(tokenRes.status).toBe(200);
+    const tokens = (await tokenRes.json()) as {
+      access_token: string;
+      token_type: string;
+      refresh_token: string;
+      id_token: string;
+      scope: string;
+    };
+    expect(tokens.token_type).toBe("Bearer");
+    expect(tokens.id_token).toBeTruthy();
+    expect(tokens.scope).toBe("openid profile email offline_access");
+
+    // The access token resolves the user's claims.
+    const userinfo = await fx.handler(get("/oauth2/userinfo", {}, { bearer: tokens.access_token }));
+    expect(userinfo.status).toBe(200);
+    expect(((await userinfo.json()) as Record<string, unknown>)["sub"]).toBe(userId);
+
+    // 4. The registered refresh_token grant works too.
+    const refreshed = await fx.handler(
+      post("/oauth2/token", {
+        grant_type: "refresh_token",
+        refresh_token: tokens.refresh_token,
+        client_id: client.client_id,
+      }),
+    );
+    expect(refreshed.status).toBe(200);
+  });
+
+  it("refuses a public client that omits PKCE", async () => {
+    const fx = makeHttpFixture({ dynamicRegistration: { skipConsent: true } });
+    const userSid = fx.makeSession(fx.seedUser("nopkce@idp.test"));
+
+    const registered = await fx.handler(
+      post("/register", {
+        redirect_uris: [MCP_REDIRECT],
+        token_endpoint_auth_method: "none",
+      }),
+    );
+    const client = (await registered.json()) as RegistrationResponse;
+
+    const authorize = await fx.handler(
+      get(
+        "/oauth2/authorize",
+        {
+          response_type: "code",
+          client_id: client.client_id,
+          redirect_uri: MCP_REDIRECT,
+          scope: "openid",
+        },
+        { sessionId: userSid },
+      ),
+    );
+    expect(authorize.status).toBe(302);
+    expect(new URL(authorize.headers.get("location")!).searchParams.get("error")).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("answers metadata failures with an RFC 7591 error body", async () => {
+    const fx = makeHttpFixture({ dynamicRegistration: {} });
+
+    const badRedirect = await fx.handler(
+      post("/register", { redirect_uris: ["http://evil.test/cb"] }),
+    );
+    expect(badRedirect.status).toBe(400);
+    const body = (await badRedirect.json()) as {
+      error: string;
+      error_description: string;
+    };
+    expect(body.error).toBe("invalid_redirect_uri");
+    expect(body.error_description).toContain("http://evil.test/cb");
+
+    const badGrant = await fx.handler(
+      post("/register", {
+        redirect_uris: ["https://rp.test/cb"],
+        grant_types: ["client_credentials"],
+      }),
+    );
+    expect(badGrant.status).toBe(400);
+    expect(((await badGrant.json()) as { error: string }).error).toBe("invalid_client_metadata");
+  });
+
+  it("requires the initial access token as a bearer credential when configured", async () => {
+    const fx = makeHttpFixture({
+      dynamicRegistration: { initialAccessToken: Redacted.make("iat-secret") },
+    });
+    const body = { redirect_uris: ["https://rp.test/cb"], token_endpoint_auth_method: "none" };
+
+    const anonymous = await fx.handler(post("/register", body));
+    expect(anonymous.status).toBe(401);
+    expect(((await anonymous.json()) as { code: string }).code).toBe("invalid_token");
+
+    const wrong = await fx.handler(jsonRequest("POST", "/register", body, "nope"));
+    expect(wrong.status).toBe(401);
+
+    const ok = await fx.handler(jsonRequest("POST", "/register", body, "iat-secret"));
+    expect(ok.status).toBe(201);
+  });
+
+  it("answers 403 when the registration policy refuses the caller", async () => {
+    const fx = makeHttpFixture({
+      dynamicRegistration: {
+        policy: (metadata) =>
+          Effect.succeed(
+            metadata.clientName === "Allowed"
+              ? true
+              : { allow: false, error: "access_denied", errorDescription: "Not on the allowlist" },
+          ),
+      },
+    });
+
+    const denied = await fx.handler(
+      post("/register", { redirect_uris: ["https://rp.test/cb"], client_name: "Other" }),
+    );
+    expect(denied.status).toBe(403);
+    expect(((await denied.json()) as { code: string }).code).toBe("access_denied");
+
+    const allowed = await fx.handler(
+      post("/register", { redirect_uris: ["https://rp.test/cb"], client_name: "Allowed" }),
+    );
+    expect(allowed.status).toBe(201);
+  });
+
+  it("serves the RFC 7592 management endpoints behind the registration access token", async () => {
+    const fx = makeHttpFixture({ dynamicRegistration: {} });
+    const registered = await fx.handler(
+      post("/register", {
+        redirect_uris: [MCP_REDIRECT],
+        token_endpoint_auth_method: "none",
+        client_name: "Managed",
+      }),
+    );
+    const client = (await registered.json()) as RegistrationResponse;
+    const rat = client.registration_access_token!;
+    const path = `/register/${client.client_id}`;
+
+    // Read.
+    const read = await fx.handler(get(path, {}, { bearer: rat }));
+    expect(read.status).toBe(200);
+    const readBody = (await read.json()) as RegistrationResponse;
+    expect(readBody.client_name).toBe("Managed");
+    // Neither one-time credential is recoverable after registration.
+    expect(readBody.client_secret).toBeUndefined();
+    expect(readBody.registration_access_token).toBeUndefined();
+
+    // No token at all, and a wrong token.
+    expect((await fx.handler(get(path))).status).toBe(401);
+    expect((await fx.handler(get(path, {}, { bearer: "wrong" }))).status).toBe(401);
+    // An unknown client is indistinguishable from a bad token.
+    expect((await fx.handler(get("/register/nope", {}, { bearer: rat }))).status).toBe(401);
+
+    // Update.
+    const updated = await fx.handler(
+      jsonRequest(
+        "PUT",
+        path,
+        {
+          redirect_uris: [MCP_REDIRECT, "https://rp.test/cb"],
+          token_endpoint_auth_method: "none",
+          client_name: "Managed v2",
+        },
+        rat,
+      ),
+    );
+    expect(updated.status).toBe(200);
+    const updatedBody = (await updated.json()) as RegistrationResponse;
+    expect(updatedBody.client_name).toBe("Managed v2");
+    expect(updatedBody.redirect_uris).toEqual([MCP_REDIRECT, "https://rp.test/cb"]);
+
+    // A rejected update keeps the RFC error shape.
+    const badUpdate = await fx.handler(
+      jsonRequest("PUT", path, { redirect_uris: ["http://evil.test/cb"] }, rat),
+    );
+    expect(badUpdate.status).toBe(400);
+    expect(((await badUpdate.json()) as { error: string }).error).toBe("invalid_redirect_uri");
+
+    // Delete, after which the registration is gone.
+    const deleted = await fx.handler(jsonRequest("DELETE", path, undefined, rat));
+    expect(deleted.status).toBe(204);
+    expect((await fx.handler(get(path, {}, { bearer: rat }))).status).toBe(401);
+  });
+
+  it("404s the registration endpoints until dynamic registration is configured", async () => {
+    const fx = makeHttpFixture();
+    const register = await fx.handler(post("/register", { redirect_uris: ["https://rp.test/cb"] }));
+    expect(register.status).toBe(404);
+
+    // Management can be switched off on its own.
+    const noManagement = makeHttpFixture({ dynamicRegistration: { management: false } });
+    const registered = await noManagement.handler(
+      post("/register", { redirect_uris: ["https://rp.test/cb"] }),
+    );
+    expect(registered.status).toBe(201);
+    const client = (await registered.json()) as RegistrationResponse;
+    const read = await noManagement.handler(
+      get(`/register/${client.client_id}`, {}, { bearer: client.registration_access_token! }),
+    );
+    expect(read.status).toBe(404);
+  });
+
+  it("serves RFC 8414 authorization server metadata pointing at the registration endpoint", async () => {
+    const withoutDCR = makeHttpFixture();
+    const base = await withoutDCR.handler(get("/.well-known/oauth-authorization-server"));
+    expect(base.status).toBe(200);
+    const baseDoc = (await base.json()) as Record<string, unknown>;
+    expect(baseDoc["issuer"]).toBe(ISSUER);
+    expect(baseDoc["authorization_endpoint"]).toBe(`${ISSUER}/oauth2/authorize`);
+    expect(baseDoc["token_endpoint"]).toBe(`${ISSUER}/oauth2/token`);
+    expect(baseDoc["jwks_uri"]).toBe(`${ISSUER}/.well-known/jwks.json`);
+    expect(baseDoc["code_challenge_methods_supported"]).toEqual(["S256"]);
+    expect(baseDoc["grant_types_supported"]).toEqual(["authorization_code", "refresh_token"]);
+    expect(baseDoc["response_types_supported"]).toEqual(["code"]);
+    expect(baseDoc["token_endpoint_auth_methods_supported"]).toEqual([
+      "client_secret_basic",
+      "client_secret_post",
+      "none",
+    ]);
+    // The OAuth document carries no OIDC-only members.
+    expect(baseDoc["claims_supported"]).toBeUndefined();
+    expect(baseDoc["registration_endpoint"]).toBe(`${ISSUER}/oauth2/register`);
+
+    // With DCR on, both documents advertise the RFC 7591 endpoint.
+    const withDCR = makeHttpFixture({ dynamicRegistration: {} });
+    const doc = (await (
+      await withDCR.handler(get("/.well-known/oauth-authorization-server"))
+    ).json()) as Record<string, unknown>;
+    expect(doc["registration_endpoint"]).toBe(`${ISSUER}/register`);
+    const oidcDoc = (await (
+      await withDCR.handler(get("/.well-known/openid-configuration"))
+    ).json()) as Record<string, unknown>;
+    expect(oidcDoc["registration_endpoint"]).toBe(`${ISSUER}/register`);
+    expect(oidcDoc["userinfo_endpoint"]).toBe(`${ISSUER}/oauth2/userinfo`);
+    expect(oidcDoc["claims_supported"]).toBeDefined();
+
+    // 404 while the provider itself is absent.
+    expect(
+      (await withoutDCR.handlerWithoutOIDC(get("/.well-known/oauth-authorization-server"))).status,
+    ).toBe(404);
   });
 });

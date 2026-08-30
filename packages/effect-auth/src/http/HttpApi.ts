@@ -786,11 +786,72 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.ClaimsView,
     error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
   }),
+  // --- RFC 7591 dynamic client registration. 404 unless the provider is
+  // --- configured with `dynamicRegistration`. Open to anonymous callers
+  // --- (optionally gated by an initial access token), so it is rate limited
+  // --- and errors use the RFC's `{ error, error_description }` body.
+  HttpApiEndpoint.post("oidcDynamicRegister", "/register", {
+    payload: S.OIDCRegistrationPayload,
+    success: S.OIDCRegistrationView.pipe(HttpApiSchema.status(201)),
+    error: [
+      S.OAuthBadRequestError,
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.TooManyRequestsError,
+      S.InternalError,
+    ],
+  }),
+  // --- RFC 7592 registration management, guarded by the registration access
+  // --- token issued at registration (`Authorization: Bearer`).
+  HttpApiEndpoint.get("oidcReadRegistration", "/register/:clientId", {
+    params: { clientId: Schema.String },
+    success: S.OIDCRegistrationView,
+    error: [
+      S.OAuthBadRequestError,
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.put("oidcUpdateRegistration", "/register/:clientId", {
+    params: { clientId: Schema.String },
+    payload: S.OIDCRegistrationPayload,
+    success: S.OIDCRegistrationView,
+    error: [
+      S.OAuthBadRequestError,
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.delete("oidcDeleteRegistration", "/register/:clientId", {
+    params: { clientId: Schema.String },
+    success: HttpApiSchema.NoContent,
+    error: [
+      S.OAuthBadRequestError,
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.InternalError,
+    ],
+  }),
   // OIDC discovery + JWKS (shared with the JWT module's signing keys).
   HttpApiEndpoint.get("oidcDiscovery", "/.well-known/openid-configuration", {
     success: S.ClaimsView,
     error: [S.NotFoundError, S.InternalError],
   }),
+  // RFC 8414 authorization server metadata — the document MCP clients fetch.
+  HttpApiEndpoint.get(
+    "oauthAuthorizationServerMetadata",
+    "/.well-known/oauth-authorization-server",
+    {
+      success: S.ClaimsView,
+      error: [S.NotFoundError, S.InternalError],
+    },
+  ),
   HttpApiEndpoint.get("oidcJwks", "/.well-known/jwks.json", {
     success: S.JwksView,
     error: [S.NotFoundError, S.InternalError],

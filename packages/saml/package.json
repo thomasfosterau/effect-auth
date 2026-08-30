@@ -1,0 +1,60 @@
+{
+  "name": "@thomasfosterau/effect-auth-saml",
+  "version": "0.1.0",
+  "description": "SAML 2.0 service-provider verifier for effect-auth — signed-assertion validation, AuthnRequest generation and SP metadata over @node-saml/node-saml.",
+  "keywords": [
+    "auth",
+    "effect",
+    "effect-auth",
+    "saml",
+    "saml2",
+    "sso"
+  ],
+  "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
+  "bugs": {
+    "url": "https://github.com/thomasfosterau/effect-auth/issues"
+  },
+  "license": "MIT",
+  "author": "Thomas Foster <me@thomasfoster.au>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thomasfosterau/effect-auth.git",
+    "directory": "packages/saml"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vp test run",
+    "typecheck": "tsc --noEmit && vp test --typecheck --run"
+  },
+  "dependencies": {
+    "@node-saml/node-saml": "^5.1.0",
+    "@thomasfosterau/effect-auth": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "effect": ">=4.0.0-beta.93",
+    "xml-crypto": "^6.1.2"
+  },
+  "peerDependencies": {
+    "effect": ">=4.0.0-beta.93"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.18.0 || >=24.11.0"
+  }
+}

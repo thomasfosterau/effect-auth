@@ -29,6 +29,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🍪 **Session Cookie Cache**: Optional HMAC-signed session-data cookie (`cookie.cache`) that serves authenticated requests without a session-store read for a short window
 - 🏛️ **Enterprise SSO**: OIDC relying party with per-organization connections, email-domain routing, and first-login provisioning
 - 🪞 **OIDC Provider**: Act as an OpenID Connect identity provider — client registry, authorization-code flow with PKCE, consent, opaque access/refresh tokens, id_tokens on a shared JWKS, and discovery metadata
+- 🔌 **MCP / dynamic client registration**: RFC 7591 self-registration (with RFC 7592 management) and RFC 8414 authorization-server metadata, so MCP clients can register and sign in unattended — see the [MCP provider guide](./docs/guides/mcp-provider.md)
 - 🅶 **Google One Tap**: Verify the One Tap credential against Google's JWKS and sign in by verified email
 - 🧠 **Last Login Method**: A hooks plugin + non-httpOnly cookie hint so login pages can highlight the user's previous sign-in method
 - 👥 **Multi-Session**: Several signed-in accounts per browser with list/switch/revoke endpoints
@@ -1001,6 +1002,7 @@ See the `examples/` directory for complete examples:
 - [Contributing Guide](./CONTRIBUTING.md) - How to contribute to this project
 - [Agent Guidelines](./AGENT_GUIDELINES.md) - Guidelines for agents and contributors
 - [Architecture](./ARCHITECTURE.md) - Architectural overview and design patterns
+- [MCP Provider Guide](./docs/guides/mcp-provider.md) - Dynamic client registration and PKCE auth-code for MCP clients
 - [Security Policy](./SECURITY.md) - Security best practices and vulnerability reporting
 - [BetterAuth Integration](./docs/BETTERAUTH_INTEGRATION.md) - Detailed BetterAuth feature integration guide
 - [Multi-Algorithm Support](./docs/MULTI_ALGORITHM.md) - Guide for multiple password hashing algorithms

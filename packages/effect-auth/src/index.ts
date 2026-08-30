@@ -108,13 +108,32 @@ export {
 export {
   SSOError,
   type SSOProvider,
+  type SAMLSSOProvider,
+  type AnySSOProvider,
   SSOProviderStore,
   type RegisterProviderInput,
+  type RegisterSAMLProviderInput,
   type SSOSignInResult,
   type SSOSignInSelector,
   SSOService,
   type SSOConfig,
 } from "./SSO.ts";
+export {
+  SAMLError,
+  type SAMLSignatureAlgorithm,
+  defaultSignatureAlgorithms,
+  defaultClockSkewMs,
+  type SAMLVerifyInput,
+  type SAMLAssertion,
+  type SAMLAuthnRequestInput,
+  type SAMLAuthnRequest,
+  type SAMLMetadataInput,
+  SAMLVerifier,
+  type SAMLReplayKind,
+  type SAMLReplayRecord,
+  SAMLReplayStore,
+  memorySAMLReplayStore,
+} from "./SAML.ts";
 export {
   GoogleOneTapError,
   GOOGLE_JWKS_ENDPOINT,
@@ -196,6 +215,7 @@ export {
 export {
   OIDCProviderError,
   OIDCTokenError,
+  OIDCRegistrationError,
   type OIDCClient,
   OIDCClientStore,
   type OIDCAuthorizationCode,
@@ -216,6 +236,21 @@ export {
   OIDCProviderService,
   hashOIDCSecret,
   DEFAULT_OIDC_SCOPES,
+  // RFC 7591 / 7592 dynamic client registration + the MCP preset.
+  type OIDCClientMetadata,
+  type NormalizedOIDCClientMetadata,
+  type OIDCTokenEndpointAuthMethod,
+  type OIDCRegistrationPolicy,
+  type OIDCRegistrationDisposition,
+  type OIDCInitialAccessTokenVerifier,
+  type OIDCDynamicRegistrationConfig,
+  type OIDCDynamicRegistrationInfo,
+  type DynamicallyRegisteredOIDCClient,
+  OIDC_TOKEN_ENDPOINT_AUTH_METHODS,
+  OIDC_DYNAMIC_GRANT_TYPES,
+  OIDC_DYNAMIC_RESPONSE_TYPES,
+  DEFAULT_OIDC_REGISTRATION_RATE_LIMIT,
+  mcpProviderPreset,
 } from "./OIDCProvider.ts";
 export * from "./ClientIP.ts";
 export * from "./SessionCookieCache.ts";

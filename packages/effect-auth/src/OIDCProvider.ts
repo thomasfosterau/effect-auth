@@ -22,6 +22,7 @@ import { AuthError } from "./Errors.ts";
 import { JWTService } from "./JWT.ts";
 import * as Obs from "./Observability.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import type { RateLimitConfig } from "./RateLimit.ts";
 import { UserStore } from "./session/UserStore.ts";
 import { anyEmail, IdentifierStore } from "./Identifier.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
@@ -39,6 +40,17 @@ export class OIDCProviderError extends Data.TaggedError("OIDCProviderError")<{
  * `unsupported_grant_type`, `invalid_scope`, `server_error`).
  */
 export class OIDCTokenError extends Data.TaggedError("OIDCTokenError")<{
+  readonly error: string;
+  readonly description?: string;
+}> {}
+
+/**
+ * Dynamic client registration failure carrying an RFC 7591 §3.2.2 error code
+ * (`invalid_redirect_uri`, `invalid_client_metadata`), plus the two codes the
+ * guarded endpoints need: `invalid_token` (bad initial-access or registration
+ * access token → 401) and `access_denied` (refused outright → 403).
+ */
+export class OIDCRegistrationError extends Data.TaggedError("OIDCRegistrationError")<{
   readonly error: string;
   readonly description?: string;
 }> {}
@@ -66,6 +78,29 @@ export interface OIDCClient {
   /** Epoch milliseconds. */
   readonly createdAt: number;
   readonly updatedAt: number;
+  /**
+   * sha256 hex digest of the RFC 7592 registration access token. Present only
+   * for clients created through dynamic registration; it authenticates the
+   * `GET`/`PUT`/`DELETE {issuer}/register/:clientId` management calls.
+   */
+  readonly registrationAccessTokenHash?: string;
+  /** RFC 7591 `token_endpoint_auth_method`. `none` marks a public client. */
+  readonly tokenEndpointAuthMethod?: OIDCTokenEndpointAuthMethod;
+  /**
+   * RFC 7591 `grant_types` the client registered for. When present the token
+   * endpoint refuses any other grant with `unauthorized_client`; when absent
+   * (statically/admin-registered clients) every supported grant is allowed.
+   */
+  readonly grantTypes?: readonly string[];
+  /** RFC 7591 `response_types` the client registered for. */
+  readonly responseTypes?: readonly string[];
+  /**
+   * Space-separated scopes the client registered for. When present the
+   * authorization endpoint rejects requests for anything outside this set.
+   */
+  readonly scope?: string;
+  /** `true` when the client was created via RFC 7591 dynamic registration. */
+  readonly dynamicallyRegistered?: boolean;
 }
 
 /** Persistent registry of OIDC clients. */
@@ -200,6 +235,155 @@ export interface UpdateOIDCClientInput {
   readonly metadata?: Record<string, unknown>;
 }
 
+// -----------------------------------------------------------------------------
+// RFC 7591 dynamic client registration
+// -----------------------------------------------------------------------------
+
+/** Client authentication methods the token endpoint implements. */
+export const OIDC_TOKEN_ENDPOINT_AUTH_METHODS = [
+  "client_secret_basic",
+  "client_secret_post",
+  "none",
+] as const;
+export type OIDCTokenEndpointAuthMethod = (typeof OIDC_TOKEN_ENDPOINT_AUTH_METHODS)[number];
+
+/** Grant types a dynamically registered client may ask for. */
+export const OIDC_DYNAMIC_GRANT_TYPES = ["authorization_code", "refresh_token"] as const;
+
+/** Response types a dynamically registered client may ask for. */
+export const OIDC_DYNAMIC_RESPONSE_TYPES = ["code"] as const;
+
+/**
+ * RFC 7591 §2 client metadata, camelCase (the HTTP layer decodes the
+ * snake_case wire form). Members the provider does not implement
+ * (`jwks`, `software_statement`, ...) are ignored rather than rejected.
+ */
+export interface OIDCClientMetadata {
+  /** Required. Exact-match redirect URIs; https or loopback http by default. */
+  readonly redirectUris: readonly string[];
+  /** Default `client_secret_basic` per RFC 7591 §2; `none` = public client. */
+  readonly tokenEndpointAuthMethod?: string;
+  /** Default `["authorization_code"]`. */
+  readonly grantTypes?: readonly string[];
+  /** Default `["code"]`. */
+  readonly responseTypes?: readonly string[];
+  readonly clientName?: string;
+  /** Space-separated scope list. */
+  readonly scope?: string;
+}
+
+/** {@link OIDCClientMetadata} after validation, with every RFC default applied. */
+export interface NormalizedOIDCClientMetadata {
+  readonly redirectUris: readonly string[];
+  readonly tokenEndpointAuthMethod: OIDCTokenEndpointAuthMethod;
+  readonly grantTypes: readonly string[];
+  readonly responseTypes: readonly string[];
+  readonly clientName: string;
+  readonly scope: string;
+}
+
+/**
+ * A registration policy's verdict. `allow: false` is answered with
+ * `invalid_client_metadata` (400) per RFC 7591 §3.2.2 unless `error` names a
+ * different code — use `access_denied` for a 403-shaped refusal that is not
+ * about the metadata itself.
+ */
+export interface OIDCRegistrationDisposition {
+  readonly allow: boolean;
+  /** RFC 7591 §3.2.2 error code when denying. Default `invalid_client_metadata`. */
+  readonly error?: string;
+  readonly errorDescription?: string;
+  /** Accepting: skip the consent screen for this client (default from config). */
+  readonly skipConsent?: boolean;
+}
+
+/**
+ * Gate for `POST {issuer}/register`, evaluated after the metadata is validated
+ * and normalized. Return `true`/`false`, or an {@link OIDCRegistrationDisposition}
+ * to choose the error code or opt the client out of the consent screen.
+ */
+export type OIDCRegistrationPolicy = (
+  metadata: NormalizedOIDCClientMetadata,
+) => Effect.Effect<boolean | OIDCRegistrationDisposition, AuthError>;
+
+/**
+ * Verifier for the optional initial access token (RFC 7591 §3.1) presented as
+ * `Authorization: Bearer` on `POST {issuer}/register`.
+ */
+export type OIDCInitialAccessTokenVerifier = (token: string) => Effect.Effect<boolean, AuthError>;
+
+/** Rate limit applied to `POST {issuer}/register` per client IP. */
+export const DEFAULT_OIDC_REGISTRATION_RATE_LIMIT: RateLimitConfig = {
+  maxRequests: 10,
+  windowMs: 60 * 60 * 1000,
+  blockDurationMs: 60 * 60 * 1000,
+};
+
+/**
+ * Enables RFC 7591 dynamic client registration. Registration is **off** until
+ * this is set: `POST {issuer}/register` answers 404 without it.
+ */
+export interface OIDCDynamicRegistrationConfig {
+  /**
+   * Deny/allow hook run against the normalized metadata. Without it every
+   * well-formed registration is accepted (open registration) — pair it with
+   * {@link initialAccessToken} for anything internet-facing.
+   */
+  readonly policy?: OIDCRegistrationPolicy;
+  /**
+   * Require `Authorization: Bearer <initial access token>` on `POST /register`.
+   * Either a shared secret (compared in constant time) or a verifier hook.
+   */
+  readonly initialAccessToken?: Redacted.Redacted<string> | OIDCInitialAccessTokenVerifier;
+  /**
+   * Scope granted when the request omits `scope`. Defaults to the provider's
+   * `allowedScopes`.
+   */
+  readonly defaultScope?: string;
+  /** Skip the consent screen for dynamically registered clients (default `false`). */
+  readonly skipConsent?: boolean;
+  /**
+   * Additional redirect-URI schemes accepted on top of https and loopback http
+   * — e.g. `["myapp"]` to allow the RFC 8252 §7.1 private-use scheme
+   * `myapp://callback`. Compared case-insensitively without the trailing `:`.
+   */
+  readonly allowedRedirectUriSchemes?: readonly string[];
+  /**
+   * Serve the RFC 7592 management endpoints
+   * (`GET`/`PUT`/`DELETE {issuer}/register/:clientId`). Default `true`.
+   */
+  readonly management?: boolean;
+  /**
+   * Per-IP rate limit for `POST /register`, applied by the HTTP layer when a
+   * `RateLimiter` is in scope. Defaults to
+   * {@link DEFAULT_OIDC_REGISTRATION_RATE_LIMIT}.
+   */
+  readonly rateLimit?: RateLimitConfig;
+}
+
+/**
+ * Result of a dynamic registration. The plaintext `clientSecret` (confidential
+ * clients only) and `registrationAccessToken` are returned exactly once — both
+ * are stored as sha256 digests.
+ */
+export interface DynamicallyRegisteredOIDCClient {
+  readonly client: OIDCClient;
+  /** Absent for public clients (`token_endpoint_auth_method: "none"`). */
+  readonly clientSecret?: string;
+  /** RFC 7592 registration access token for the management endpoints. */
+  readonly registrationAccessToken: string;
+}
+
+/** What the HTTP layer needs to know about the registration configuration. */
+export interface OIDCDynamicRegistrationInfo {
+  /** `POST /register` is served (404 otherwise). */
+  readonly enabled: boolean;
+  /** The RFC 7592 management endpoints are served. */
+  readonly management: boolean;
+  /** Per-IP rate limit for `POST /register`. */
+  readonly rateLimit: RateLimitConfig;
+}
+
 /** A parsed `GET /oauth2/authorize` request (snake_case per RFC 6749). */
 export interface OIDCAuthorizeRequest {
   readonly responseType: string;
@@ -295,6 +479,11 @@ export interface OIDCProviderConfig {
   readonly requirePKCE?: boolean;
   /** Statically configured first-party clients (consent skipped by default). */
   readonly trustedClients?: readonly TrustedOIDCClient[];
+  /**
+   * Enable RFC 7591 dynamic client registration (and, unless disabled, the
+   * RFC 7592 management endpoints). Omit to keep `POST /register` unmounted.
+   */
+  readonly dynamicRegistration?: OIDCDynamicRegistrationConfig;
 }
 
 export class OIDCProviderService extends Context.Service<
@@ -309,6 +498,47 @@ export class OIDCProviderService extends Context.Service<
       input: RegisterOIDCClientInput,
       registrarUserId?: string,
     ) => Effect.Effect<RegisteredOIDCClient, OIDCProviderError | AuthError>;
+
+    /**
+     * RFC 7591 dynamic client registration. Validates the metadata, runs the
+     * configured policy, and issues a `client_id` (plus a secret for
+     * confidential clients) and an RFC 7592 registration access token.
+     *
+     * Unlike {@link registerClient} this is reachable by anonymous callers, so
+     * it is only served when `dynamicRegistration` is configured and is gated
+     * by the optional initial access token, the policy hook, and the HTTP
+     * layer's per-IP rate limit.
+     */
+    readonly registerDynamicClient: (
+      metadata: OIDCClientMetadata,
+      options?: { readonly initialAccessToken?: string },
+    ) => Effect.Effect<DynamicallyRegisteredOIDCClient, OIDCRegistrationError | AuthError>;
+
+    /** RFC 7592 read: the client behind a registration access token. */
+    readonly readDynamicClient: (
+      clientId: string,
+      registrationAccessToken: string,
+    ) => Effect.Effect<OIDCClient, OIDCRegistrationError | AuthError>;
+
+    /**
+     * RFC 7592 update: replace a dynamically registered client's metadata.
+     * The metadata is validated and policy-checked exactly as at registration;
+     * the client secret and registration access token are left untouched.
+     */
+    readonly updateDynamicClient: (
+      clientId: string,
+      registrationAccessToken: string,
+      metadata: OIDCClientMetadata,
+    ) => Effect.Effect<OIDCClient, OIDCRegistrationError | AuthError>;
+
+    /** RFC 7592 delete: deregister a dynamically registered client. */
+    readonly deleteDynamicClient: (
+      clientId: string,
+      registrationAccessToken: string,
+    ) => Effect.Effect<void, OIDCRegistrationError | AuthError>;
+
+    /** Whether (and how) dynamic registration is served. */
+    readonly dynamicRegistration: OIDCDynamicRegistrationInfo;
 
     /** Look up a client (trusted config clients first, then the store). */
     readonly getClient: (clientId: string) => Effect.Effect<OIDCClient | null, AuthError>;
@@ -366,8 +596,15 @@ export class OIDCProviderService extends Context.Service<
       accessToken: string,
     ) => Effect.Effect<Record<string, unknown>, OIDCProviderError | AuthError>;
 
-    /** The OpenID Provider Metadata document (RFC 8414 / OIDC Discovery). */
+    /** The OpenID Provider Metadata document (OIDC Discovery). */
     readonly getMetadata: () => Record<string, unknown>;
+
+    /**
+     * The OAuth 2.0 Authorization Server Metadata document (RFC 8414), served
+     * at `/.well-known/oauth-authorization-server`. This is what MCP clients
+     * fetch to discover the registration, authorization, and token endpoints.
+     */
+    readonly getAuthorizationServerMetadata: () => Record<string, unknown>;
 
     /**
      * The login page URL for an unauthenticated authorization request, with the
@@ -428,6 +665,57 @@ const isAllowedRedirectUri = (uri: string): boolean => {
   return false;
 };
 
+/**
+ * Redirect-URI rule for dynamically registered clients: the {@link
+ * isAllowedRedirectUri} https/loopback rule, optionally widened with
+ * private-use URI schemes (RFC 8252 §7.1), and always rejecting a fragment
+ * component (RFC 6749 §3.1.2).
+ */
+const isAllowedDynamicRedirectUri = (uri: string, extraSchemes: readonly string[]): boolean => {
+  let parsed: URL;
+  try {
+    parsed = new URL(uri);
+  } catch {
+    return false;
+  }
+  if (parsed.hash !== "") return false;
+  const scheme = parsed.protocol.slice(0, -1).toLowerCase();
+  if (extraSchemes.some((s) => s.toLowerCase() === scheme)) return true;
+  return isAllowedRedirectUri(uri);
+};
+
+/**
+ * The OIDC provider configuration an MCP server needs: PKCE enforced for every
+ * client, dynamic client registration on, and the RFC 7592 management
+ * endpoints available so a client can maintain its own registration.
+ *
+ * ```ts
+ * OIDCProviderService.layer(
+ *   mcpProviderPreset({
+ *     issuer: "https://mcp.example.com/api/auth",
+ *     loginPage: "https://mcp.example.com/login",
+ *     consentPage: "https://mcp.example.com/consent",
+ *     dynamicRegistration: { initialAccessToken: Redacted.make(token) },
+ *   }),
+ * )
+ * ```
+ *
+ * Everything is overridable: the spread order keeps whatever the caller passes,
+ * and `dynamicRegistration` is merged field-by-field so adding a `policy` or an
+ * `initialAccessToken` does not drop the preset's defaults.
+ */
+export const mcpProviderPreset = (config: OIDCProviderConfig): OIDCProviderConfig => ({
+  // MCP clients are public + PKCE; requiring it of confidential clients too
+  // costs nothing and closes code-injection on any first-party client.
+  requirePKCE: true,
+  ...config,
+  dynamicRegistration: {
+    skipConsent: false,
+    management: true,
+    ...config.dynamicRegistration,
+  },
+});
+
 // -----------------------------------------------------------------------------
 // Service implementation
 // -----------------------------------------------------------------------------
@@ -451,6 +739,12 @@ export const make = (
     const accessTokenExpiresIn = config.accessTokenExpiresIn ?? 60 * 60 * 1000;
     const refreshTokenExpiresIn = config.refreshTokenExpiresIn ?? 30 * 24 * 60 * 60 * 1000;
     const allowedScopes = config.allowedScopes ?? DEFAULT_OIDC_SCOPES;
+    const dcr = config.dynamicRegistration;
+    const dynamicRegistration: OIDCDynamicRegistrationInfo = {
+      enabled: dcr !== undefined,
+      management: dcr !== undefined && (dcr.management ?? true),
+      rateLimit: dcr?.rateLimit ?? DEFAULT_OIDC_REGISTRATION_RATE_LIMIT,
+    };
 
     /**
      * In-process registry of consumed refresh-token hashes → their family.
@@ -693,7 +987,277 @@ export const make = (
         return client;
       });
 
+    // --- RFC 7591 / 7592 -----------------------------------------------------
+
+    /** The registration config, or an `access_denied` failure when DCR is off. */
+    const requireDynamicRegistration = Effect.suspend(() =>
+      dcr === undefined
+        ? Effect.fail(
+            new OIDCRegistrationError({
+              error: "access_denied",
+              description: "Dynamic client registration is not enabled",
+            }),
+          )
+        : Effect.succeed(dcr),
+    );
+
+    /** RFC 7591 §3.1 initial access token, when the deployment requires one. */
+    const verifyInitialAccessToken = (token: string | undefined) =>
+      Effect.gen(function* () {
+        const required = dcr?.initialAccessToken;
+        if (required === undefined) return;
+        const invalid = new OIDCRegistrationError({
+          error: "invalid_token",
+          description: "A valid initial access token is required to register a client",
+        });
+        if (token === undefined) return yield* invalid;
+        const ok =
+          typeof required === "function"
+            ? yield* required(token)
+            : secretEquals(token, Redacted.value(required));
+        if (!ok) return yield* invalid;
+      });
+
+    /**
+     * Validate RFC 7591 metadata and fill in the spec defaults. Anything the
+     * provider cannot honour is rejected rather than silently narrowed, so a
+     * client never believes it registered for a grant it will not receive.
+     */
+    const normalizeMetadata = (
+      metadata: OIDCClientMetadata,
+    ): Effect.Effect<NormalizedOIDCClientMetadata, OIDCRegistrationError> =>
+      Effect.gen(function* () {
+        const invalid = (description: string) =>
+          new OIDCRegistrationError({ error: "invalid_client_metadata", description });
+
+        if (metadata.redirectUris.length === 0) {
+          return yield* new OIDCRegistrationError({
+            error: "invalid_redirect_uri",
+            description: "At least one redirect_uri is required",
+          });
+        }
+        const extraSchemes = dcr?.allowedRedirectUriSchemes ?? [];
+        for (const uri of metadata.redirectUris) {
+          if (!isAllowedDynamicRedirectUri(uri, extraSchemes)) {
+            return yield* new OIDCRegistrationError({
+              error: "invalid_redirect_uri",
+              description: `redirect_uri must be https, loopback http, or a registered private-use scheme, without a fragment: ${uri}`,
+            });
+          }
+        }
+
+        // RFC 7591 §2: omitted `token_endpoint_auth_method` means client_secret_basic.
+        const authMethod = metadata.tokenEndpointAuthMethod ?? "client_secret_basic";
+        if (!(OIDC_TOKEN_ENDPOINT_AUTH_METHODS as readonly string[]).includes(authMethod)) {
+          return yield* invalid(`Unsupported token_endpoint_auth_method: ${authMethod}`);
+        }
+
+        const grantTypes = metadata.grantTypes ?? ["authorization_code"];
+        for (const grant of grantTypes) {
+          if (!(OIDC_DYNAMIC_GRANT_TYPES as readonly string[]).includes(grant)) {
+            return yield* invalid(`Unsupported grant_type: ${grant}`);
+          }
+        }
+        if (!grantTypes.includes("authorization_code")) {
+          return yield* invalid("grant_types must include authorization_code");
+        }
+
+        const responseTypes = metadata.responseTypes ?? ["code"];
+        for (const responseType of responseTypes) {
+          if (!(OIDC_DYNAMIC_RESPONSE_TYPES as readonly string[]).includes(responseType)) {
+            return yield* invalid(`Unsupported response_type: ${responseType}`);
+          }
+        }
+        // RFC 7591 §2: the two lists must agree — authorization_code needs `code`.
+        if (!responseTypes.includes("code")) {
+          return yield* invalid("response_types must include code");
+        }
+
+        const scope = metadata.scope ?? dcr?.defaultScope ?? allowedScopes.join(" ");
+        const scopes = parseScopes(scope);
+        for (const s of scopes) {
+          if (!allowedScopes.includes(s)) return yield* invalid(`Unsupported scope: ${s}`);
+        }
+        if (!scopes.includes("openid")) {
+          return yield* invalid("scope must include openid");
+        }
+        // A refresh_token grant is only reachable with offline_access.
+        if (grantTypes.includes("refresh_token") && !scopes.includes("offline_access")) {
+          return yield* invalid("the refresh_token grant requires the offline_access scope");
+        }
+
+        return {
+          redirectUris: metadata.redirectUris,
+          tokenEndpointAuthMethod: authMethod as OIDCTokenEndpointAuthMethod,
+          grantTypes,
+          responseTypes,
+          clientName: metadata.clientName ?? "Dynamic Client",
+          scope: scopes.join(" "),
+        } satisfies NormalizedOIDCClientMetadata;
+      });
+
+    /** Run the registration policy and turn its verdict into a disposition. */
+    const applyRegistrationPolicy = (metadata: NormalizedOIDCClientMetadata) =>
+      Effect.gen(function* () {
+        if (dcr?.policy === undefined) return { allow: true } as OIDCRegistrationDisposition;
+        const verdict = yield* dcr.policy(metadata);
+        const disposition: OIDCRegistrationDisposition =
+          typeof verdict === "boolean" ? { allow: verdict } : verdict;
+        if (!disposition.allow) {
+          return yield* new OIDCRegistrationError({
+            // RFC 7591 §3.2.2 has no generic refusal code: a policy that
+            // dislikes the metadata reports invalid_client_metadata, and one
+            // refusing the caller outright can ask for access_denied (403).
+            error: disposition.error ?? "invalid_client_metadata",
+            ...(disposition.errorDescription !== undefined && {
+              description: disposition.errorDescription,
+            }),
+          });
+        }
+        return disposition;
+      });
+
+    /**
+     * RFC 7592 §2: authenticate a management call with its registration access
+     * token. An unknown client is answered exactly like a bad token so the
+     * endpoint cannot be used to enumerate client ids.
+     */
+    const authenticateRegistrationAccess = (clientId: string, token: string) =>
+      Effect.gen(function* () {
+        const client = yield* clientStore.getByClientId(clientId);
+        if (
+          client === null ||
+          client.registrationAccessTokenHash === undefined ||
+          !secretEquals(hashOIDCSecret(token), client.registrationAccessTokenHash)
+        ) {
+          return yield* new OIDCRegistrationError({
+            error: "invalid_token",
+            description: "Invalid registration access token",
+          });
+        }
+        return client;
+      });
+
+    /**
+     * The RFC 8414 core: the fields an OAuth 2.0 client (an MCP client, say)
+     * needs, shared verbatim by the OIDC discovery document.
+     *
+     * `registration_endpoint` points at the RFC 7591 endpoint once dynamic
+     * registration is enabled, and otherwise at the admin-gated
+     * `/oauth2/register` — which is all this provider offers to advertise.
+     */
+    const authorizationServerMetadata = (): Record<string, unknown> => ({
+      issuer: config.issuer,
+      authorization_endpoint: `${config.issuer}/oauth2/authorize`,
+      token_endpoint: `${config.issuer}/oauth2/token`,
+      jwks_uri: `${config.issuer}/.well-known/jwks.json`,
+      registration_endpoint: dynamicRegistration.enabled
+        ? `${config.issuer}/register`
+        : `${config.issuer}/oauth2/register`,
+      scopes_supported: [...allowedScopes],
+      response_types_supported: ["code"],
+      response_modes_supported: ["query"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
+      token_endpoint_auth_methods_supported: [...OIDC_TOKEN_ENDPOINT_AUTH_METHODS],
+      code_challenge_methods_supported: ["S256"],
+    });
+
     return {
+      dynamicRegistration,
+
+      registerDynamicClient: Effect.fn("OIDCProviderService.registerDynamicClient")(
+        (metadata: OIDCClientMetadata, options?: { readonly initialAccessToken?: string }) =>
+          Effect.gen(function* () {
+            yield* requireDynamicRegistration;
+            yield* verifyInitialAccessToken(options?.initialAccessToken);
+            const normalized = yield* normalizeMetadata(metadata);
+            const disposition = yield* applyRegistrationPolicy(normalized);
+
+            const isPublic = normalized.tokenEndpointAuthMethod === "none";
+            const clientSecret = isPublic ? undefined : yield* randomToken();
+            const registrationAccessToken = yield* randomToken();
+            const clientId = yield* randomClientId();
+            const now = Date.now();
+            const client = yield* clientStore.create({
+              clientId,
+              ...(clientSecret !== undefined && {
+                clientSecretHash: hashOIDCSecret(clientSecret),
+              }),
+              name: normalized.clientName,
+              redirectUris: normalized.redirectUris,
+              // Public clients are `native`: the authorize endpoint then
+              // requires PKCE and the token endpoint refuses a code without it.
+              type: isPublic ? "native" : "web",
+              skipConsent: disposition.skipConsent ?? dcr?.skipConsent ?? false,
+              disabled: false,
+              metadata: {},
+              createdAt: now,
+              updatedAt: now,
+              registrationAccessTokenHash: hashOIDCSecret(registrationAccessToken),
+              tokenEndpointAuthMethod: normalized.tokenEndpointAuthMethod,
+              grantTypes: normalized.grantTypes,
+              responseTypes: normalized.responseTypes,
+              scope: normalized.scope,
+              dynamicallyRegistered: true,
+            });
+            return {
+              client,
+              ...(clientSecret !== undefined && { clientSecret }),
+              registrationAccessToken,
+            } satisfies DynamicallyRegisteredOIDCClient;
+          }).pipe(Effect.withSpan("effect-auth.oidc.registerDynamicClient")),
+      ),
+
+      readDynamicClient: Effect.fn("OIDCProviderService.readDynamicClient")(function* (
+        clientId: string,
+        registrationAccessToken: string,
+      ) {
+        yield* requireDynamicRegistration;
+        return yield* authenticateRegistrationAccess(clientId, registrationAccessToken);
+      }),
+
+      updateDynamicClient: Effect.fn("OIDCProviderService.updateDynamicClient")(function* (
+        clientId: string,
+        registrationAccessToken: string,
+        metadata: OIDCClientMetadata,
+      ) {
+        yield* requireDynamicRegistration;
+        const existing = yield* authenticateRegistrationAccess(clientId, registrationAccessToken);
+        const normalized = yield* normalizeMetadata(metadata);
+        const disposition = yield* applyRegistrationPolicy(normalized);
+        // RFC 7592 §2.2: the client cannot change its own authentication
+        // method (that would let a public client mint itself a secret, or a
+        // confidential one drop to `none`), so the registered method stands.
+        if (
+          existing.tokenEndpointAuthMethod !== undefined &&
+          normalized.tokenEndpointAuthMethod !== existing.tokenEndpointAuthMethod
+        ) {
+          return yield* new OIDCRegistrationError({
+            error: "invalid_client_metadata",
+            description: "token_endpoint_auth_method cannot be changed after registration",
+          });
+        }
+        return yield* clientStore.update({
+          ...existing,
+          name: normalized.clientName,
+          redirectUris: normalized.redirectUris,
+          grantTypes: normalized.grantTypes,
+          responseTypes: normalized.responseTypes,
+          scope: normalized.scope,
+          ...(disposition.skipConsent !== undefined && { skipConsent: disposition.skipConsent }),
+          updatedAt: Date.now(),
+        });
+      }),
+
+      deleteDynamicClient: Effect.fn("OIDCProviderService.deleteDynamicClient")(function* (
+        clientId: string,
+        registrationAccessToken: string,
+      ) {
+        yield* requireDynamicRegistration;
+        const client = yield* authenticateRegistrationAccess(clientId, registrationAccessToken);
+        yield* clientStore.delete(client.clientId);
+      }),
+
       registerClient: Effect.fn("OIDCProviderService.registerClient")(function* (
         input: RegisterOIDCClientInput,
         registrarUserId?: string,
@@ -795,10 +1359,25 @@ export const make = (
             if (request.responseType !== "code") {
               return errorRedirect("unsupported_response_type");
             }
+            // A dynamically registered client is held to the response_types it
+            // registered for; statically registered clients carry none.
+            if (
+              client.responseTypes !== undefined &&
+              !client.responseTypes.includes(request.responseType)
+            ) {
+              return errorRedirect("unsupported_response_type");
+            }
 
             const scopes = parseScopes(request.scope);
             if (!scopes.includes("openid") || scopes.some((s) => !allowedScopes.includes(s))) {
               return errorRedirect("invalid_scope");
+            }
+            // Likewise for the scopes it registered for (RFC 7591 §2 `scope`).
+            if (client.scope !== undefined) {
+              const registered = parseScopes(client.scope);
+              if (scopes.some((s) => !registered.includes(s))) {
+                return errorRedirect("invalid_scope");
+              }
             }
 
             // PKCE: mandatory for public clients (and everyone under `requirePKCE`).
@@ -924,6 +1503,16 @@ export const make = (
       token: Effect.fn("OIDCProviderService.token")((request: OIDCTokenRequest) =>
         Effect.gen(function* () {
           const client = yield* authenticateClient(request);
+
+          // RFC 6749 §5.2: a client may only use the grants it registered for.
+          // `grantTypes` is set by dynamic registration only — statically and
+          // admin-registered clients keep access to every supported grant.
+          if (client.grantTypes !== undefined && !client.grantTypes.includes(request.grantType)) {
+            return yield* new OIDCTokenError({
+              error: "unauthorized_client",
+              description: `The client is not registered for the ${request.grantType} grant`,
+            });
+          }
 
           if (request.grantType === "authorization_code") {
             if (request.code === undefined) {
@@ -1086,27 +1675,15 @@ export const make = (
       ),
 
       getMetadata: () => ({
-        issuer: config.issuer,
-        authorization_endpoint: `${config.issuer}/oauth2/authorize`,
-        token_endpoint: `${config.issuer}/oauth2/token`,
+        ...authorizationServerMetadata(),
         userinfo_endpoint: `${config.issuer}/oauth2/userinfo`,
-        jwks_uri: `${config.issuer}/.well-known/jwks.json`,
-        registration_endpoint: `${config.issuer}/oauth2/register`,
         end_session_endpoint: `${config.issuer}/oauth2/logout`,
-        scopes_supported: [...allowedScopes],
-        response_types_supported: ["code"],
-        response_modes_supported: ["query"],
-        grant_types_supported: ["authorization_code", "refresh_token"],
         subject_types_supported: ["public"],
         id_token_signing_alg_values_supported: ["ES256", "EdDSA"],
-        token_endpoint_auth_methods_supported: [
-          "client_secret_basic",
-          "client_secret_post",
-          "none",
-        ],
-        code_challenge_methods_supported: ["S256"],
         claims_supported: ["sub", "email", "email_verified", "name", "picture", "updated_at"],
       }),
+
+      getAuthorizationServerMetadata: authorizationServerMetadata,
 
       loginRedirect: (returnTo: string) =>
         buildRedirect(config.loginPage, { redirect_to: returnTo }),

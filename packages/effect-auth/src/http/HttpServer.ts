@@ -43,7 +43,12 @@ import {
 import { AdminService, isAdmin } from "../Admin.ts";
 import { APIKeyService, type APIKey } from "../APIKey.ts";
 import { JWTService } from "../JWT.ts";
-import { OIDCProviderService, type OIDCClient } from "../OIDCProvider.ts";
+import {
+  OIDCProviderService,
+  type OIDCClient,
+  type OIDCClientMetadata,
+  type OIDCRegistrationError,
+} from "../OIDCProvider.ts";
 import { SSOService, type SSOProvider } from "../SSO.ts";
 import { hashToken } from "../TokenHash.ts";
 import { GoogleOneTapService } from "../GoogleOneTap.ts";
@@ -490,6 +495,95 @@ const encodeOIDCClient = (c: OIDCClient): S.OIDCClientView => ({
   updatedAt: c.updatedAt,
 });
 
+/**
+ * Encode a client as an RFC 7591 §3.2.1 client information response. The
+ * one-time `client_secret` / `registration_access_token` are added by the
+ * registration handler; everything here is readable from the stored client.
+ */
+const encodeOIDCRegistration = (
+  c: OIDCClient,
+  registrationEndpoint: string,
+): S.OIDCRegistrationView => ({
+  client_id: c.clientId,
+  client_id_issued_at: Math.floor(c.createdAt / 1000),
+  client_name: c.name,
+  redirect_uris: c.redirectUris,
+  grant_types: c.grantTypes ?? ["authorization_code"],
+  response_types: c.responseTypes ?? ["code"],
+  token_endpoint_auth_method:
+    c.tokenEndpointAuthMethod ??
+    (c.clientSecretHash === undefined ? "none" : "client_secret_basic"),
+  scope: c.scope ?? "",
+  registration_client_uri: `${registrationEndpoint}/${c.clientId}`,
+});
+
+/**
+ * Map an `OIDCRegistrationError` onto the HTTP contract: RFC 7591 §3.2.2 keeps
+ * metadata failures at 400 with an `{ error, error_description }` body, while
+ * `invalid_token` (RFC 7592 §2) is a 401 and `access_denied` a 403 — both in
+ * this API's usual error shape, with the OAuth code carried in `code`.
+ */
+const registrationError = (
+  e: OIDCRegistrationError,
+): Effect.Effect<never, S.OAuthError | S.Unauthorized | S.Forbidden> => {
+  const message = e.description ?? e.error;
+  if (e.error === "invalid_token") {
+    return Effect.fail(new S.Unauthorized({ message, code: e.error }));
+  }
+  if (e.error === "access_denied") {
+    return Effect.fail(new S.Forbidden({ message, code: e.error }));
+  }
+  return Effect.fail(
+    new S.OAuthError({
+      error: e.error,
+      ...(e.description !== undefined && { error_description: e.description }),
+    }),
+  );
+};
+
+/** The `Authorization: Bearer` value of a request, if any. */
+const bearerToken = (request: HttpServerRequest.HttpServerRequest): string | undefined => {
+  const auth = request.headers["authorization"];
+  return auth !== undefined && auth.startsWith("Bearer ") ? auth.slice(7) : undefined;
+};
+
+/**
+ * Guard the RFC 7592 management endpoints: 404 when management is switched
+ * off, 401 when the caller presents no registration access token at all (the
+ * token itself is verified by the service, in constant time).
+ */
+const requireRegistrationAccessToken = (
+  service: typeof OIDCProviderService.Service,
+  request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<string, S.NotFound | S.Unauthorized> =>
+  Effect.gen(function* () {
+    if (!service.dynamicRegistration.management) {
+      return yield* new S.NotFound({
+        message: "Dynamic client registration management is not enabled",
+      });
+    }
+    const token = bearerToken(request);
+    if (token === undefined) {
+      return yield* new S.Unauthorized({
+        message: "Missing registration access token",
+        code: "invalid_token",
+      });
+    }
+    return token;
+  });
+
+/** Decode an RFC 7591 registration body into the service's camelCase input. */
+const registrationMetadata = (payload: S.OIDCRegistrationPayload): OIDCClientMetadata => ({
+  redirectUris: payload.redirect_uris,
+  ...(payload.token_endpoint_auth_method !== undefined && {
+    tokenEndpointAuthMethod: payload.token_endpoint_auth_method,
+  }),
+  ...(payload.grant_types !== undefined && { grantTypes: payload.grant_types }),
+  ...(payload.response_types !== undefined && { responseTypes: payload.response_types }),
+  ...(payload.client_name !== undefined && { clientName: payload.client_name }),
+  ...(payload.scope !== undefined && { scope: payload.scope }),
+});
+
 const encodeAPIKey = (k: APIKey): S.APIKeyView => ({
   id: k.id,
   ...(k.name !== undefined && { name: k.name }),
@@ -538,6 +632,27 @@ const applyUserCodeRateLimit = (
     if (Option.isNone(rateLimiterOpt)) return;
     const key = `device-user-code:${normalizeUserCode(userCode)}`;
     yield* rateLimiterOpt.value.consumeToken(key, USER_CODE_RATE_LIMIT).pipe(
+      Effect.catchTag("RateLimitError", (e) =>
+        Effect.fail(new S.TooManyRequests({ message: e.message })),
+      ),
+      Effect.catchTag("AuthError", (e) => internalServerError(e)),
+    );
+  });
+
+/**
+ * Per-IP rate limit for anonymous dynamic client registration. Applied when a
+ * `RateLimiter` is in scope (silent no-op otherwise), mirroring the device
+ * user-code limiter; the window comes from the provider's own configuration.
+ */
+const applyRegistrationRateLimit = (
+  limit: RateLimitConfig,
+): Effect.Effect<void, S.TooManyRequests | S.InternalServerError, never> =>
+  Effect.gen(function* () {
+    const rateLimiterOpt = yield* Effect.serviceOption(RateLimiter);
+    if (Option.isNone(rateLimiterOpt)) return;
+    const clientIp = yield* Effect.serviceOption(ClientIP);
+    const ip = Option.isSome(clientIp) ? clientIp.value.ip : undefined;
+    yield* rateLimiterOpt.value.consumeToken(`oidc-register:${ip ?? "unknown"}`, limit).pipe(
       Effect.catchTag("RateLimitError", (e) =>
         Effect.fail(new S.TooManyRequests({ message: e.message })),
       ),
@@ -2685,10 +2800,98 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           );
         }),
       )
+      // --- RFC 7591 dynamic client registration -------------------------------
+      .handle("oidcDynamicRegister", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const oidc = yield* resolveOIDCProvider;
+          const dcr = oidc.service.dynamicRegistration;
+          if (!dcr.enabled) {
+            return yield* new S.NotFound({
+              message: "Dynamic client registration is not enabled",
+            });
+          }
+          yield* applyRegistrationRateLimit(dcr.rateLimit);
+          const initialAccessToken = bearerToken(request);
+          const result = yield* oidc.service
+            .registerDynamicClient(registrationMetadata(payload), {
+              ...(initialAccessToken !== undefined && { initialAccessToken }),
+            })
+            .pipe(
+              Effect.catchTags({
+                OIDCRegistrationError: registrationError,
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          const registrationEndpoint = String(
+            oidc.service.getAuthorizationServerMetadata()["registration_endpoint"],
+          );
+          return {
+            ...encodeOIDCRegistration(result.client, registrationEndpoint),
+            ...(result.clientSecret !== undefined && {
+              client_secret: result.clientSecret,
+              // RFC 7591 §3.2.1: 0 means the secret never expires.
+              client_secret_expires_at: 0,
+            }),
+            registration_access_token: result.registrationAccessToken,
+          };
+        }),
+      )
+      .handle("oidcReadRegistration", ({ params, request }) =>
+        Effect.gen(function* () {
+          const oidc = yield* resolveOIDCProvider;
+          const token = yield* requireRegistrationAccessToken(oidc.service, request);
+          const client = yield* oidc.service.readDynamicClient(params.clientId, token).pipe(
+            Effect.catchTags({
+              OIDCRegistrationError: registrationError,
+              AuthError: (e) => internalServerError(e),
+            }),
+          );
+          return encodeOIDCRegistration(
+            client,
+            String(oidc.service.getAuthorizationServerMetadata()["registration_endpoint"]),
+          );
+        }),
+      )
+      .handle("oidcUpdateRegistration", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const oidc = yield* resolveOIDCProvider;
+          const token = yield* requireRegistrationAccessToken(oidc.service, request);
+          const client = yield* oidc.service
+            .updateDynamicClient(params.clientId, token, registrationMetadata(payload))
+            .pipe(
+              Effect.catchTags({
+                OIDCRegistrationError: registrationError,
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return encodeOIDCRegistration(
+            client,
+            String(oidc.service.getAuthorizationServerMetadata()["registration_endpoint"]),
+          );
+        }),
+      )
+      .handle("oidcDeleteRegistration", ({ params, request }) =>
+        Effect.gen(function* () {
+          const oidc = yield* resolveOIDCProvider;
+          const token = yield* requireRegistrationAccessToken(oidc.service, request);
+          yield* oidc.service.deleteDynamicClient(params.clientId, token).pipe(
+            Effect.catchTags({
+              OIDCRegistrationError: registrationError,
+              AuthError: (e) => internalServerError(e),
+            }),
+          );
+        }),
+      )
       .handle("oidcDiscovery", () =>
         Effect.gen(function* () {
           const oidc = yield* resolveOIDCProvider;
           return oidc.service.getMetadata();
+        }),
+      )
+      .handle("oauthAuthorizationServerMetadata", () =>
+        Effect.gen(function* () {
+          const oidc = yield* resolveOIDCProvider;
+          return oidc.service.getAuthorizationServerMetadata();
         }),
       )
       .handle("oidcJwks", () =>
@@ -2980,6 +3183,7 @@ export interface HTTPIPRateLimitConfig {
  * | `/phone-otp/send`                      | 5 req            | 10 min   | 30 min   |
  * | `/password-reset/request`              | 5 req            | 1 hr     | 2 hr     |
  * | `/multi-factor/verify-*`                 | 10 req           | 5 min    | 30 min   |
+ * | `/register` (dynamic client registration) | 10 req          | 1 hr     | 1 hr     |
  */
 export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
   {
@@ -3016,6 +3220,14 @@ export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
     maxRequests: 10,
     windowMs: 5 * 60 * 1000,
     blockDurationMs: 30 * 60 * 1000,
+  },
+  // RFC 7591 dynamic client registration is open to anonymous callers.
+  {
+    path: "/register",
+    methods: ["POST"],
+    maxRequests: 10,
+    windowMs: 60 * 60 * 1000,
+    blockDurationMs: 60 * 60 * 1000,
   },
 ];
 
