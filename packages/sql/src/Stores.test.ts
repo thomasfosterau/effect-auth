@@ -121,6 +121,7 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
       }),
     );
     expect(tables).toEqual([
+      "auth_account_lockouts",
       "auth_email_otps",
       "auth_email_verifications",
       "auth_identifiers",
@@ -832,6 +833,53 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     );
     expect(result._tag).toBe("AuthError");
     expect(result.cause).toBeDefined();
+  });
+
+  it("AccountLockoutStore registerAttempt is atomic and follows the transition semantics", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const store = yield* Auth.Plugins.AccountLockoutStore;
+        const now = Date.now();
+        const opts = { maxAttempts: 3, lockoutDurationMs: 60_000, now };
+
+        const before = yield* store.get("lockout:a");
+        const first = yield* store.registerAttempt("lockout:a", opts);
+        const second = yield* store.registerAttempt("lockout:a", opts);
+        const third = yield* store.registerAttempt("lockout:a", opts); // crosses threshold
+        const whileLocked = yield* store.registerAttempt("lockout:a", opts); // unchanged
+        // Expired lock resets the streak.
+        const afterExpiry = yield* store.registerAttempt("lockout:a", {
+          ...opts,
+          now: now + 120_000,
+        });
+        yield* store.delete("lockout:a");
+        const deleted = yield* store.get("lockout:a");
+
+        // Concurrency: 25 parallel attempts, none lost.
+        yield* Effect.all(
+          Array.from({ length: 25 }, () =>
+            store.registerAttempt("lockout:burst", {
+              maxAttempts: 100,
+              lockoutDurationMs: 60_000,
+              now,
+            }),
+          ),
+          { concurrency: "unbounded" },
+        );
+        const burst = yield* store.get("lockout:burst");
+
+        return { before, first, second, third, whileLocked, afterExpiry, deleted, burst };
+      }),
+    );
+    expect(result.before).toBeNull();
+    expect(result.first).toEqual({ failures: 1 });
+    expect(result.second).toEqual({ failures: 2 });
+    expect(result.third.failures).toBe(3);
+    expect(result.third.lockedUntil).toBeDefined();
+    expect(result.whileLocked).toEqual(result.third);
+    expect(result.afterExpiry).toEqual({ failures: 1 });
+    expect(result.deleted).toBeNull();
+    expect(result.burst?.failures).toBe(25);
   });
 
   it("concurrent rateLimit.increment does not undercount", async () => {

@@ -20,6 +20,7 @@ import {
   makePasswordResetStore,
   makePendingMultiFactorStore,
   makeRateLimitStore,
+  makeAccountLockoutStore,
   makeRoleStore,
   makeSessionStore,
   makeUserServiceStore,
@@ -221,6 +222,48 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
 
     await Effect.runPromise(store.delete("k"));
     expect(await Effect.runPromise(store.get("k"))).toBe(null);
+  });
+
+  it("account lockout store: atomic registerAttempt transition", async () => {
+    const { db } = await setup();
+    const store = makeAccountLockoutStore(db);
+    const now = Date.now();
+    const opts = { maxAttempts: 3, lockoutDurationMs: 60_000, now };
+
+    expect(await Effect.runPromise(store.get("lockout:a"))).toBe(null);
+    expect(await Effect.runPromise(store.registerAttempt("lockout:a", opts))).toEqual({
+      failures: 1,
+    });
+    expect(await Effect.runPromise(store.registerAttempt("lockout:a", opts))).toEqual({
+      failures: 2,
+    });
+    const third = await Effect.runPromise(store.registerAttempt("lockout:a", opts));
+    expect(third.failures).toBe(3);
+    expect(third.lockedUntil).toBe(now + 60_000);
+    // An active lock is returned unchanged (no increment, no extension).
+    expect(await Effect.runPromise(store.registerAttempt("lockout:a", opts))).toEqual(third);
+    // An expired lock resets the streak.
+    expect(
+      await Effect.runPromise(store.registerAttempt("lockout:a", { ...opts, now: now + 120_000 })),
+    ).toEqual({ failures: 1 });
+
+    await Effect.runPromise(store.delete("lockout:a"));
+    expect(await Effect.runPromise(store.get("lockout:a"))).toBe(null);
+
+    // Concurrency: no lost increments.
+    await Effect.runPromise(
+      Effect.all(
+        Array.from({ length: 25 }, () =>
+          store.registerAttempt("lockout:burst", {
+            maxAttempts: 100,
+            lockoutDurationMs: 60_000,
+            now,
+          }),
+        ),
+        { concurrency: "unbounded" },
+      ),
+    );
+    expect((await Effect.runPromise(store.get("lockout:burst")))?.failures).toBe(25);
   });
 
   it("email verification store: create / get / deleteByUserId", async () => {

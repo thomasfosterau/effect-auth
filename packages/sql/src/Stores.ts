@@ -1176,6 +1176,71 @@ export const makeIdentifierStore: Effect.Effect<
 });
 
 // ---------------------------------------------------------------------------
+// AccountLockoutStore
+// ---------------------------------------------------------------------------
+
+interface AccountLockoutRow {
+  readonly key: string;
+  readonly failures: number;
+  readonly locked_until: number | null;
+}
+
+const rowToLockout = (row: AccountLockoutRow): Auth.Plugins.AccountLockoutRecord =>
+  row.locked_until == null
+    ? { failures: row.failures }
+    : { failures: row.failures, lockedUntil: row.locked_until };
+
+export const makeAccountLockoutStore: Effect.Effect<
+  typeof Auth.Plugins.AccountLockoutStore.Service,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return {
+    get: (key) =>
+      firstRow(
+        "accountLockout.get",
+        sql<AccountLockoutRow>`SELECT * FROM auth_account_lockouts WHERE key = ${key}`,
+      ).pipe(Effect.map((row) => (row ? rowToLockout(row) : null))),
+    // The whole transition is one statement, so concurrent attempts can't
+    // lose increments: an active lock is returned unchanged; an expired lock
+    // (or missing row) resets to 1; otherwise increment; crossing the
+    // threshold sets locked_until.
+    registerAttempt: (key, { maxAttempts, lockoutDurationMs, now }) =>
+      Effect.gen(function* () {
+        const lockedUntil = now + lockoutDurationMs;
+        const rows = yield* allRows(
+          "accountLockout.registerAttempt",
+          sql<AccountLockoutRow>`
+            INSERT INTO auth_account_lockouts (key, failures, locked_until)
+              VALUES (${key}, 1, ${1 >= maxAttempts ? lockedUntil : null})
+              ON CONFLICT(key) DO UPDATE SET
+                failures = CASE
+                  WHEN locked_until IS NOT NULL AND locked_until > ${now} THEN failures
+                  WHEN locked_until IS NOT NULL AND locked_until <= ${now} THEN 1
+                  ELSE failures + 1 END,
+                locked_until = CASE
+                  WHEN locked_until IS NOT NULL AND locked_until > ${now} THEN locked_until
+                  WHEN (CASE
+                    WHEN locked_until IS NOT NULL AND locked_until <= ${now} THEN 1
+                    ELSE failures + 1 END) >= ${maxAttempts} THEN ${lockedUntil}
+                  ELSE NULL END
+              RETURNING key, failures, locked_until`,
+        );
+        const row = rows[0];
+        if (row === undefined) {
+          return yield* Effect.fail(
+            new Auth.AuthError({ message: "accountLockout.registerAttempt returned no row" }),
+          );
+        }
+        return rowToLockout(row);
+      }),
+    delete: (key) =>
+      asVoid("accountLockout.delete", sql`DELETE FROM auth_account_lockouts WHERE key = ${key}`),
+  } satisfies typeof Auth.Plugins.AccountLockoutStore.Service;
+});
+
+// ---------------------------------------------------------------------------
 // Layers
 // ---------------------------------------------------------------------------
 
@@ -1262,6 +1327,11 @@ export const PendingMultiFactorStoreLayer: Layer.Layer<
 > = Layer.effect(Auth.SecondFactor.PendingMultiFactorStore, makePendingMultiFactorStore);
 export const IdentifierStoreLayer: Layer.Layer<Auth.IdentifierStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.IdentifierStore, makeIdentifierStore);
+export const AccountLockoutStoreLayer: Layer.Layer<
+  Auth.Plugins.AccountLockoutStore,
+  never,
+  SqlClient.SqlClient
+> = Layer.effect(Auth.Plugins.AccountLockoutStore, makeAccountLockoutStore);
 
 /**
  * A single layer that provides every SQL-backed effect-auth store on top of
@@ -1295,7 +1365,8 @@ export const layer: Layer.Layer<
   | Auth.Email.EmailOTPUserStore
   | Auth.SecondFactor.MultiFactorStore
   | Auth.SecondFactor.PendingMultiFactorStore
-  | Auth.IdentifierStore,
+  | Auth.IdentifierStore
+  | Auth.Plugins.AccountLockoutStore,
   never,
   SqlClient.SqlClient
 > = Layer.mergeAll(
@@ -1320,4 +1391,5 @@ export const layer: Layer.Layer<
   MultiFactorStoreLayer,
   PendingMultiFactorStoreLayer,
   IdentifierStoreLayer,
+  AccountLockoutStoreLayer,
 );

@@ -165,6 +165,11 @@ export const schemaStatements: readonly string[] = [
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS auth_identifiers_type_value_idx ON auth_identifiers (type, value)`,
   `CREATE INDEX IF NOT EXISTS auth_identifiers_user_idx ON auth_identifiers (user_id)`,
+  `CREATE TABLE IF NOT EXISTS auth_account_lockouts (
+    key TEXT PRIMARY KEY,
+    failures INTEGER NOT NULL,
+    locked_until BIGINT
+  )`,
 ];
 
 /**

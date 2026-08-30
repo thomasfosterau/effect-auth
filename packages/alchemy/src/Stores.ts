@@ -1288,6 +1288,73 @@ export const makeIdentifierStore = (db: D1Database): typeof Auth.IdentifierStore
 });
 
 // ---------------------------------------------------------------------------
+// AccountLockoutStore
+// ---------------------------------------------------------------------------
+
+interface AccountLockoutRow {
+  readonly key: string;
+  readonly failures: number;
+  readonly locked_until: number | null;
+}
+
+const rowToLockout = (row: AccountLockoutRow): Auth.Plugins.AccountLockoutRecord =>
+  row.locked_until == null
+    ? { failures: row.failures }
+    : { failures: row.failures, lockedUntil: row.locked_until };
+
+export const makeAccountLockoutStore = (
+  db: D1Database,
+): typeof Auth.Plugins.AccountLockoutStore.Service => ({
+  get: (key) =>
+    d1First<AccountLockoutRow>(
+      db,
+      `SELECT * FROM auth_account_lockouts WHERE key = ?`,
+      [key],
+      "accountLockout.get",
+    ).pipe(Effect.map((row) => (row ? rowToLockout(row) : null))),
+  // The whole transition is one statement, so concurrent attempts can't lose
+  // increments: an active lock is returned unchanged; an expired lock (or
+  // missing row) resets to 1; otherwise increment; crossing the threshold
+  // sets locked_until.
+  registerAttempt: (key, { maxAttempts, lockoutDurationMs, now }) =>
+    Effect.gen(function* () {
+      const lockedUntil = now + lockoutDurationMs;
+      const row = yield* d1First<AccountLockoutRow>(
+        db,
+        `INSERT INTO auth_account_lockouts (key, failures, locked_until)
+           VALUES (?, 1, ?)
+           ON CONFLICT(key) DO UPDATE SET
+             failures = CASE
+               WHEN locked_until IS NOT NULL AND locked_until > ? THEN failures
+               WHEN locked_until IS NOT NULL AND locked_until <= ? THEN 1
+               ELSE failures + 1 END,
+             locked_until = CASE
+               WHEN locked_until IS NOT NULL AND locked_until > ? THEN locked_until
+               WHEN (CASE
+                 WHEN locked_until IS NOT NULL AND locked_until <= ? THEN 1
+                 ELSE failures + 1 END) >= ? THEN ?
+               ELSE NULL END
+           RETURNING key, failures, locked_until`,
+        [key, 1 >= maxAttempts ? lockedUntil : null, now, now, now, now, maxAttempts, lockedUntil],
+        "accountLockout.registerAttempt",
+      );
+      if (row == null) {
+        return yield* Effect.fail(
+          new Auth.AuthError({ message: "accountLockout.registerAttempt returned no row" }),
+        );
+      }
+      return rowToLockout(row);
+    }),
+  delete: (key) =>
+    d1Run(
+      db,
+      `DELETE FROM auth_account_lockouts WHERE key = ?`,
+      [key],
+      "accountLockout.delete",
+    ).pipe(Effect.asVoid),
+});
+
+// ---------------------------------------------------------------------------
 // Layers
 // ---------------------------------------------------------------------------
 
@@ -1332,6 +1399,8 @@ export const PendingMultiFactorStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.SecondFactor.PendingMultiFactorStore, makePendingMultiFactorStore(db));
 export const IdentifierStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.IdentifierStore, makeIdentifierStore(db));
+export const AccountLockoutStoreLayer = (db: D1Database) =>
+  Layer.succeed(Auth.Plugins.AccountLockoutStore, makeAccountLockoutStore(db));
 
 /**
  * A single layer that provides every effect-auth store backed by the given D1
@@ -1362,4 +1431,5 @@ export const layer = (db: D1Database) =>
     MultiFactorStoreLayer(db),
     PendingMultiFactorStoreLayer(db),
     IdentifierStoreLayer(db),
+    AccountLockoutStoreLayer(db),
   );

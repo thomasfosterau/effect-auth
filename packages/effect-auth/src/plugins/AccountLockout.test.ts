@@ -4,9 +4,11 @@ import { Hooks, type HookError } from "../Hooks.ts";
 import {
   AccountLockoutPlugin,
   AccountLockoutStore,
+  memoryAccountLockoutStore,
+  type AccountLockoutConfig,
   type AccountLockoutRecord,
 } from "./AccountLockout.ts";
-import { AccountLockedError } from "../Errors.ts";
+import { AccountLockedError, AuthError } from "../Errors.ts";
 import type { SignInInput, AuthResult } from "../email/EmailPassword.ts";
 import type * as Types from "../Types.ts";
 
@@ -30,13 +32,12 @@ interface Harness {
   readonly afterSignIn: (email: string) => Promise<AuthResult>;
 }
 
-const makeHarness = (config?: { maxAttempts?: number; lockoutDurationMs?: number }): Harness => {
+const makeHarness = (
+  config?: AccountLockoutConfig,
+  storeOverride?: typeof AccountLockoutStore.Service,
+): Harness => {
   const records = new Map<string, AccountLockoutRecord>();
-  const store: typeof AccountLockoutStore.Service = {
-    get: (key) => Effect.sync(() => records.get(key) ?? null),
-    set: (key, record) => Effect.sync(() => void records.set(key, record)),
-    delete: (key) => Effect.sync(() => void records.delete(key)),
-  };
+  const store = storeOverride ?? memoryAccountLockoutStore(records);
 
   const layer = AccountLockoutPlugin(config).pipe(
     Layer.provide(Hooks.Default),
@@ -111,5 +112,74 @@ describe("AccountLockoutPlugin", () => {
     await h.beforeSignIn("User@Example.com");
     await h.beforeSignIn("  user@example.com ");
     expect(h.records.get("lockout:user@example.com")?.failures).toBe(2);
+  });
+
+  it("concurrent attempts do not lose increments (atomic registerAttempt)", async () => {
+    const records = new Map<string, AccountLockoutRecord>();
+    const store = memoryAccountLockoutStore(records);
+    const options = { maxAttempts: 100, lockoutDurationMs: 60_000, now: Date.now() };
+
+    await Effect.runPromise(
+      Effect.all(
+        Array.from({ length: 25 }, () => store.registerAttempt("lockout:burst", options)),
+        { concurrency: "unbounded" },
+      ),
+    );
+
+    expect(records.get("lockout:burst")?.failures).toBe(25);
+  });
+
+  it("registerAttempt does not increment or extend an active lock", async () => {
+    const records = new Map<string, AccountLockoutRecord>();
+    const store = memoryAccountLockoutStore(records);
+    const now = Date.now();
+    records.set("lockout:k", { failures: 5, lockedUntil: now + 60_000 });
+
+    const result = await Effect.runPromise(
+      store.registerAttempt("lockout:k", { maxAttempts: 5, lockoutDurationMs: 60_000, now }),
+    );
+
+    expect(result).toEqual({ failures: 5, lockedUntil: now + 60_000 });
+  });
+
+  it("a delete failure after a successful sign-in is isolated (does not abort)", async () => {
+    const records = new Map<string, AccountLockoutRecord>();
+    const flaky: typeof AccountLockoutStore.Service = {
+      ...memoryAccountLockoutStore(records),
+      delete: () => Effect.fail(new AuthError({ message: "store down" })),
+    };
+    const h = makeHarness({ maxAttempts: 3, lockoutDurationMs: 60_000 }, flaky);
+
+    // The tap swallows the store error; the successful sign-in result flows on.
+    const result = await h.afterSignIn("user@example.com");
+    expect(result.user.email).toBe("user@example.com");
+  });
+
+  it("fails closed by default when the store errors during beforeSignIn", async () => {
+    const broken: typeof AccountLockoutStore.Service = {
+      get: () => Effect.fail(new AuthError({ message: "store down" })),
+      registerAttempt: () => Effect.fail(new AuthError({ message: "store down" })),
+      delete: () => Effect.void,
+    };
+    const h = makeHarness({ maxAttempts: 3, lockoutDurationMs: 60_000 }, broken);
+
+    const result = await h.beforeSignInResult("user@example.com");
+    expect(result).toBeInstanceOf(AuthError);
+  });
+
+  it("onStoreError: 'fail-open' lets the sign-in proceed when the store errors", async () => {
+    const broken: typeof AccountLockoutStore.Service = {
+      get: () => Effect.fail(new AuthError({ message: "store down" })),
+      registerAttempt: () => Effect.fail(new AuthError({ message: "store down" })),
+      delete: () => Effect.void,
+    };
+    const h = makeHarness(
+      { maxAttempts: 3, lockoutDurationMs: 60_000, onStoreError: "fail-open" },
+      broken,
+    );
+
+    const result = await h.beforeSignInResult("user@example.com");
+    expect(result).not.toBeInstanceOf(AuthError);
+    expect(result).toEqual(signIn("user@example.com"));
   });
 });
