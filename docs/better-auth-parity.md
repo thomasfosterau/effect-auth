@@ -295,10 +295,13 @@ the engine for org dynamic access control (M4), which with teams unblocks SCIM g
   - Extract `packages/argon2`; vendor `@oslojs/webauthn`; core's dependency list
     becomes `effect` only.
   - Make README/docs match the tree; close the ~12 verified-done issues.
-- **M1 — Security close-out + delivery seams (small).** #111 lockout hardening
-  (atomic increment on the store contract, isolate the reset tap, second dimension or
-  documented tradeoff, fail-open decision); verify the #88/#116/#117 residuals; add
-  the `EmailSender`/`SMSSender` core seams (§2.2).
+- **M1 — Security close-out + delivery seams (done 2026-08-30).** #111 lockout
+  hardening shipped (atomic `registerAttempt` on the store contract with memory/
+  SQL/D1 implementations, isolated reset tap, documented DoS tradeoff with
+  IPRateLimitPlugin as the second dimension, configurable fail-open/fail-closed
+  on store outage); the #88/#116/#117 residuals verified as already implemented;
+  `EmailSender`/`SMSSender` seams + `emailCallbacks`/`smsCallbacks` added (§2.2).
+  The 14 verified-done issues are closed with evidence comments.
 - **M2 — Identifier epic (large, breaking).** Execute `docs/PLAN.md` phases 2–8 on
   the restored SQL package: surrogate-keyed `User`, email/username/phone as
   `Identifier`s, migrate EmailPassword/Username/PhoneOTP/OAuth-linking/Anonymous/
