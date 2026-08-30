@@ -183,7 +183,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 ### Password Security
 
-- PBKDF2-SHA256 with 210,000 iterations (OWASP) by default; scrypt and Argon2id (`password/Argon2.ts`, native via `@node-rs/argon2`) also in core; a multi-algorithm verifier supports migration between algorithms.
+- PBKDF2-SHA256 with 210,000 iterations (OWASP) by default; scrypt also in core; Argon2id via `@thomasfosterau/effect-auth-argon2` (WASM by default, optional native fast-path); a multi-algorithm verifier supports migration between algorithms.
 - Random salt per password; timing-safe comparison; plaintext never stored.
 
 ### Session Security
