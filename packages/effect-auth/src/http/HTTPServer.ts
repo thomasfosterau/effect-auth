@@ -35,6 +35,8 @@ import {
   type Organization,
   type Member,
   type Invitation,
+  type Team,
+  type TeamMember,
   type FullOrganization,
 } from "../Organization.ts";
 import { AdminService, isAdmin } from "../Admin.ts";
@@ -430,6 +432,20 @@ const encodeInvitation = (i: Invitation): S.InvitationView => ({
   inviterId: i.inviterId,
   expiresAt: i.expiresAt,
   createdAt: i.createdAt,
+});
+
+const encodeTeam = (t: Team): S.TeamView => ({
+  id: t.id,
+  organizationId: t.organizationId,
+  name: t.name,
+  createdAt: t.createdAt,
+  updatedAt: t.updatedAt,
+});
+
+const encodeTeamMember = (m: TeamMember): S.TeamMemberView => ({
+  teamId: m.teamId,
+  userId: m.userId,
+  createdAt: m.createdAt,
 });
 
 const encodeFullOrganization = (f: FullOrganization): S.FullOrganizationView => ({
@@ -1897,6 +1913,121 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 AuthError: (e) => internalServerError(e),
               }),
             );
+        }),
+      )
+      // --- Organization teams -----------------------------------------------
+      .handle("orgCreateTeam", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const team = yield* org.service
+            .createTeam(resolved.user.id, params.organizationId, { name: payload.name })
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return encodeTeam(team);
+        }),
+      )
+      .handle("orgListTeams", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const teams = yield* org.service.listTeams(resolved.user.id, params.organizationId).pipe(
+            Effect.catchTags({
+              OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
+            }),
+          );
+          return teams.map(encodeTeam);
+        }),
+      )
+      .handle("orgListTeamsForMember", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const teams = yield* org.service
+            .listTeamsForMember(resolved.user.id, params.organizationId, params.userId)
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return teams.map(encodeTeam);
+        }),
+      )
+      .handle("orgUpdateTeam", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const team = yield* org.service
+            .updateTeam(resolved.user.id, params.teamId, {
+              ...(payload.name !== undefined && { name: payload.name }),
+            })
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return encodeTeam(team);
+        }),
+      )
+      .handle("orgDeleteTeam", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          yield* org.service.deleteTeam(resolved.user.id, params.teamId).pipe(
+            Effect.catchTags({
+              OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
+            }),
+          );
+        }),
+      )
+      .handle("orgAddTeamMember", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const member = yield* org.service
+            .addTeamMember(resolved.user.id, params.teamId, payload.userId)
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return encodeTeamMember(member);
+        }),
+      )
+      .handle("orgListTeamMembers", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const teamMembers = yield* org.service
+            .listTeamMembers(resolved.user.id, params.teamId)
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return teamMembers.map(encodeTeamMember);
+        }),
+      )
+      .handle("orgRemoveTeamMember", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          yield* org.service.removeTeamMember(resolved.user.id, params.teamId, params.userId).pipe(
+            Effect.catchTags({
+              OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
+            }),
+          );
         }),
       )
       // --- Admin ------------------------------------------------------------

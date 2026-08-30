@@ -15,12 +15,16 @@ import {
   type Organization,
   type OrganizationConfig,
   type OrganizationService,
+  type Team,
+  type TeamMember,
 } from "./Organization.ts";
 import * as OrganizationModule from "./Organization.ts";
 
 const organizations = new Map<string, Organization>();
 const members = new Map<string, Member>();
 const invitations = new Map<string, Invitation>();
+const teams = new Map<string, Team>();
+const teamMembers: TeamMember[] = [];
 const identifierRecords = new Map<string, Identifier>();
 
 /** Give a user an email identifier so invitations addressed to it can be
@@ -28,6 +32,13 @@ const identifierRecords = new Map<string, Identifier>();
 const seedEmail = (userId: string, email: string): void => {
   const identifier = makeIdentifier({ userId, type: "email", value: email });
   identifierRecords.set(identifier.id, identifier);
+};
+
+/** Drop every team-membership row matching `predicate` (in-place). */
+const removeTeamMemberRows = (predicate: (teamMember: TeamMember) => boolean): void => {
+  for (let i = teamMembers.length - 1; i >= 0; i--) {
+    if (predicate(teamMembers[i])) teamMembers.splice(i, 1);
+  }
 };
 
 const organizationStore = {
@@ -64,6 +75,12 @@ const organizationStore = {
       for (const [id, invitation] of invitations.entries()) {
         if (invitation.organizationId === organizationId) {
           invitations.delete(id);
+        }
+      }
+      for (const [id, team] of teams.entries()) {
+        if (team.organizationId === organizationId) {
+          teams.delete(id);
+          removeTeamMemberRows((teamMember) => teamMember.teamId === id);
         }
       }
     }),
@@ -133,6 +150,59 @@ const organizationStore = {
     Effect.sync(() =>
       Array.from(invitations.values()).filter((invitation) => invitation.email === email),
     ),
+
+  createTeam: (team: Team) =>
+    Effect.sync(() => {
+      teams.set(team.id, team);
+      return team;
+    }),
+
+  getTeam: (teamId: string) => Effect.sync(() => teams.get(teamId) ?? null),
+
+  updateTeam: (team: Team) =>
+    Effect.sync(() => {
+      if (!teams.has(team.id)) return null;
+      teams.set(team.id, team);
+      return team;
+    }),
+
+  deleteTeam: (teamId: string) =>
+    Effect.sync(() => {
+      teams.delete(teamId);
+      removeTeamMemberRows((teamMember) => teamMember.teamId === teamId);
+    }),
+
+  listTeams: (organizationId: string) =>
+    Effect.sync(() =>
+      Array.from(teams.values()).filter((team) => team.organizationId === organizationId),
+    ),
+
+  addTeamMember: (teamId: string, userId: string) =>
+    Effect.sync(() => {
+      const teamMember: TeamMember = { teamId, userId, createdAt: Date.now() };
+      teamMembers.push(teamMember);
+      return teamMember;
+    }),
+
+  removeTeamMember: (teamId: string, userId: string) =>
+    Effect.sync(() => {
+      removeTeamMemberRows(
+        (teamMember) => teamMember.teamId === teamId && teamMember.userId === userId,
+      );
+    }),
+
+  listTeamMembers: (teamId: string) =>
+    Effect.sync(() => teamMembers.filter((teamMember) => teamMember.teamId === teamId)),
+
+  listTeamsForMember: (organizationId: string, userId: string) =>
+    Effect.sync(() =>
+      teamMembers
+        .filter((teamMember) => teamMember.userId === userId)
+        .map((teamMember) => teams.get(teamMember.teamId))
+        .filter(
+          (team): team is Team => team !== undefined && team.organizationId === organizationId,
+        ),
+    ),
 };
 
 const testContext = Context.merge(
@@ -164,6 +234,8 @@ describe("OrganizationService", () => {
     organizations.clear();
     members.clear();
     invitations.clear();
+    teams.clear();
+    teamMembers.length = 0;
     identifierRecords.clear();
   });
 
@@ -664,5 +736,260 @@ describe("OrganizationService", () => {
     expect(result.collaboratorInvites.status).toBe("pending");
     expect(result.collaboratorRemoves._tag).toBe("Failure");
     expect(result.demoteLastFounder._tag).toBe("Failure");
+  });
+
+  it("creates teams and lists them in both directions", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Acme",
+          slug: "acme",
+        });
+        yield* service.addMember("owner-1", organization.id, "member-1", "member");
+
+        const engineering = yield* service.createTeam("owner-1", organization.id, {
+          name: "Engineering",
+        });
+        const design = yield* service.createTeam("owner-1", organization.id, { name: "Design" });
+
+        const added = yield* service.addTeamMember("owner-1", engineering.id, "member-1");
+
+        // Any organization member may read the team structure.
+        const listed = yield* service.listTeams("member-1", organization.id);
+        const teamMembership = yield* service.listTeamMembers("member-1", engineering.id);
+        const forMember = yield* service.listTeamsForMember(
+          "member-1",
+          organization.id,
+          "member-1",
+        );
+
+        const renamed = yield* service.updateTeam("owner-1", design.id, { name: "Design Ops" });
+
+        return { engineering, design, added, listed, teamMembership, forMember, renamed };
+      }),
+    );
+
+    expect(result.engineering.name).toBe("Engineering");
+    expect(result.engineering.createdAt).toBe(result.engineering.updatedAt);
+    expect(result.added.userId).toBe("member-1");
+    expect(result.added.teamId).toBe(result.engineering.id);
+    expect(result.listed.map((team) => team.name).sort()).toEqual(["Design", "Engineering"]);
+    expect(result.teamMembership).toHaveLength(1);
+    expect(result.teamMembership[0].userId).toBe("member-1");
+    expect(result.forMember.map((team) => team.id)).toEqual([result.engineering.id]);
+    expect(result.renamed.name).toBe("Design Ops");
+    expect(result.renamed.updatedAt).toBeGreaterThanOrEqual(result.design.createdAt);
+  });
+
+  it("permission-checks team management per role", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Acme",
+          slug: "acme",
+        });
+        yield* service.addMember("owner-1", organization.id, "admin-1", "admin");
+        yield* service.addMember("owner-1", organization.id, "member-1", "member");
+
+        // `member` holds none of the mutating team permissions.
+        const memberCreates = yield* Effect.result(
+          service.createTeam("member-1", organization.id, { name: "Rogue" }),
+        );
+
+        // `admin` holds all four.
+        const adminCreates = yield* service.createTeam("admin-1", organization.id, {
+          name: "Support",
+        });
+        const memberUpdates = yield* Effect.result(
+          service.updateTeam("member-1", adminCreates.id, { name: "Hijacked" }),
+        );
+        const memberAdds = yield* Effect.result(
+          service.addTeamMember("member-1", adminCreates.id, "member-1"),
+        );
+        const memberRemoves = yield* Effect.result(
+          service.removeTeamMember("member-1", adminCreates.id, "member-1"),
+        );
+        const memberDeletes = yield* Effect.result(service.deleteTeam("member-1", adminCreates.id));
+
+        // Non-members cannot even read.
+        const strangerLists = yield* Effect.result(service.listTeams("stranger", organization.id));
+        const strangerListsMembers = yield* Effect.result(
+          service.listTeamMembers("stranger", adminCreates.id),
+        );
+        const strangerListsForMember = yield* Effect.result(
+          service.listTeamsForMember("stranger", organization.id, "member-1"),
+        );
+
+        const adminDeletes = yield* service.deleteTeam("admin-1", adminCreates.id);
+
+        return {
+          memberCreates,
+          adminCreates,
+          memberUpdates,
+          memberAdds,
+          memberRemoves,
+          memberDeletes,
+          strangerLists,
+          strangerListsMembers,
+          strangerListsForMember,
+          adminDeletes,
+        };
+      }),
+    );
+
+    expect(result.memberCreates._tag).toBe("Failure");
+    if (result.memberCreates._tag === "Failure") {
+      expect(result.memberCreates.failure._tag).toBe("OrganizationError");
+    }
+    expect(result.adminCreates.name).toBe("Support");
+    expect(result.memberUpdates._tag).toBe("Failure");
+    expect(result.memberAdds._tag).toBe("Failure");
+    expect(result.memberRemoves._tag).toBe("Failure");
+    expect(result.memberDeletes._tag).toBe("Failure");
+    expect(result.strangerLists._tag).toBe("Failure");
+    expect(result.strangerListsMembers._tag).toBe("Failure");
+    expect(result.strangerListsForMember._tag).toBe("Failure");
+    expect(teams.size).toBe(0);
+  });
+
+  it("requires team members to already belong to the organization", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
+        const other = yield* service.createOrganization("owner-2", {
+          name: "Other",
+          slug: "other",
+        });
+        yield* service.addMember("owner-1", acme.id, "member-1", "member");
+
+        const team = yield* service.createTeam("owner-1", acme.id, { name: "Engineering" });
+
+        // Not a member of Acme at all.
+        const outsider = yield* Effect.result(
+          service.addTeamMember("owner-1", team.id, "stranger"),
+        );
+        // Member of a *different* organization.
+        const otherOrgMember = yield* Effect.result(
+          service.addTeamMember("owner-1", team.id, "owner-2"),
+        );
+
+        yield* service.addTeamMember("owner-1", team.id, "member-1");
+        const duplicate = yield* Effect.result(
+          service.addTeamMember("owner-1", team.id, "member-1"),
+        );
+
+        const missingTeam = yield* Effect.result(
+          service.addTeamMember("owner-1", "no-such-team", "member-1"),
+        );
+
+        const members = yield* service.listTeamMembers("owner-1", team.id);
+        return { other, outsider, otherOrgMember, duplicate, missingTeam, members };
+      }),
+    );
+
+    expect(result.outsider._tag).toBe("Failure");
+    if (result.outsider._tag === "Failure") {
+      expect(result.outsider.failure._tag).toBe("OrganizationError");
+    }
+    expect(result.otherOrgMember._tag).toBe("Failure");
+    expect(result.duplicate._tag).toBe("Failure");
+    expect(result.missingTeam._tag).toBe("Failure");
+    expect(result.members).toHaveLength(1);
+  });
+
+  it("cascades team memberships on deleteTeam", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Acme",
+          slug: "acme",
+        });
+        yield* service.addMember("owner-1", organization.id, "member-1", "member");
+
+        const team = yield* service.createTeam("owner-1", organization.id, {
+          name: "Engineering",
+        });
+        yield* service.addTeamMember("owner-1", team.id, "member-1");
+        yield* service.addTeamMember("owner-1", team.id, "owner-1");
+
+        yield* service.deleteTeam("owner-1", team.id);
+
+        const listed = yield* service.listTeams("owner-1", organization.id);
+        const forMember = yield* service.listTeamsForMember("owner-1", organization.id, "member-1");
+        const gone = yield* Effect.result(service.listTeamMembers("owner-1", team.id));
+        return { listed, forMember, gone };
+      }),
+    );
+
+    expect(result.listed).toHaveLength(0);
+    expect(result.forMember).toHaveLength(0);
+    expect(result.gone._tag).toBe("Failure");
+    expect(teamMembers).toHaveLength(0);
+  });
+
+  it("removes team memberships when a member leaves the organization", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* service.createOrganization("owner-1", {
+          name: "Acme",
+          slug: "acme",
+        });
+        const other = yield* service.createOrganization("owner-1", {
+          name: "Other",
+          slug: "other",
+        });
+        yield* service.addMember("owner-1", organization.id, "member-1", "member");
+        yield* service.addMember("owner-1", other.id, "member-1", "member");
+
+        const engineering = yield* service.createTeam("owner-1", organization.id, {
+          name: "Engineering",
+        });
+        const design = yield* service.createTeam("owner-1", organization.id, { name: "Design" });
+        const otherTeam = yield* service.createTeam("owner-1", other.id, { name: "Keep Me" });
+
+        yield* service.addTeamMember("owner-1", engineering.id, "member-1");
+        yield* service.addTeamMember("owner-1", design.id, "member-1");
+        yield* service.addTeamMember("owner-1", otherTeam.id, "member-1");
+
+        yield* service.removeMember("owner-1", organization.id, "member-1");
+
+        const inRemovedOrg = yield* service.listTeamsForMember(
+          "owner-1",
+          organization.id,
+          "member-1",
+        );
+        // Teams in other organizations are untouched.
+        const inOtherOrg = yield* service.listTeamsForMember("owner-1", other.id, "member-1");
+        const engineeringMembers = yield* service.listTeamMembers("owner-1", engineering.id);
+
+        return { inRemovedOrg, inOtherOrg, engineeringMembers, otherTeam };
+      }),
+    );
+
+    expect(result.inRemovedOrg).toHaveLength(0);
+    expect(result.inOtherOrg.map((team) => team.id)).toEqual([result.otherTeam.id]);
+    expect(result.engineeringMembers).toHaveLength(0);
+  });
+
+  it("fails team operations on an unknown team", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
+
+        const update = yield* Effect.result(
+          service.updateTeam("owner-1", "no-such-team", { name: "Nope" }),
+        );
+        const remove = yield* Effect.result(service.deleteTeam("owner-1", "no-such-team"));
+        const list = yield* Effect.result(service.listTeamMembers("owner-1", "no-such-team"));
+        return { update, remove, list };
+      }),
+    );
+
+    expect(result.update._tag).toBe("Failure");
+    if (result.update._tag === "Failure") {
+      expect(result.update.failure._tag).toBe("OrganizationError");
+    }
+    expect(result.remove._tag).toBe("Failure");
+    expect(result.list._tag).toBe("Failure");
   });
 });

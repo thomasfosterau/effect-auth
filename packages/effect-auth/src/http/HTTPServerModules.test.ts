@@ -23,6 +23,8 @@ import {
   type Organization,
   type Member,
   type Invitation,
+  type Team,
+  type TeamMember,
   OrganizationService,
 } from "../Organization.ts";
 import { AdminUserStore, AdminService } from "../Admin.ts";
@@ -47,6 +49,8 @@ const makeFixture = () => {
   const orgs = new Map<string, Organization>();
   const members: Member[] = [];
   const invitations = new Map<string, Invitation>();
+  const teams = new Map<string, Team>();
+  const teamMembers: TeamMember[] = [];
   const apiKeys = new Map<string, APIKey>();
   const jwtKeys: JWTKeyPair[] = [];
 
@@ -131,7 +135,17 @@ const makeFixture = () => {
     getOrganizationBySlug: (slug: string) =>
       Effect.succeed([...orgs.values()].find((o) => o.slug === slug) ?? null),
     updateOrganization: (o: Organization) => Effect.sync(() => (orgs.set(o.id, o), o)),
-    deleteOrganization: (id: string) => Effect.sync(() => void orgs.delete(id)),
+    deleteOrganization: (id: string) =>
+      Effect.sync(() => {
+        orgs.delete(id);
+        for (const [teamId, team] of teams) {
+          if (team.organizationId !== id) continue;
+          teams.delete(teamId);
+          for (let i = teamMembers.length - 1; i >= 0; i--) {
+            if (teamMembers[i].teamId === teamId) teamMembers.splice(i, 1);
+          }
+        }
+      }),
     createMember: (m: Member) => Effect.sync(() => (members.push(m), m)),
     getMember: (organizationId: string, userId: string) =>
       Effect.succeed(
@@ -161,6 +175,43 @@ const makeFixture = () => {
       Effect.succeed([...invitations.values()].filter((i) => i.organizationId === organizationId)),
     listInvitationsByEmail: (email: string) =>
       Effect.succeed([...invitations.values()].filter((i) => i.email === email)),
+    createTeam: (t: Team) => Effect.sync(() => (teams.set(t.id, t), t)),
+    getTeam: (teamId: string) => Effect.succeed(teams.get(teamId) ?? null),
+    updateTeam: (t: Team) =>
+      Effect.sync(() => {
+        if (!teams.has(t.id)) return null;
+        teams.set(t.id, t);
+        return t;
+      }),
+    deleteTeam: (teamId: string) =>
+      Effect.sync(() => {
+        teams.delete(teamId);
+        for (let i = teamMembers.length - 1; i >= 0; i--) {
+          if (teamMembers[i].teamId === teamId) teamMembers.splice(i, 1);
+        }
+      }),
+    listTeams: (organizationId: string) =>
+      Effect.succeed([...teams.values()].filter((t) => t.organizationId === organizationId)),
+    addTeamMember: (teamId: string, userId: string) =>
+      Effect.sync(() => {
+        const teamMember: TeamMember = { teamId, userId, createdAt: Date.now() };
+        teamMembers.push(teamMember);
+        return teamMember;
+      }),
+    removeTeamMember: (teamId: string, userId: string) =>
+      Effect.sync(() => {
+        const i = teamMembers.findIndex((m) => m.teamId === teamId && m.userId === userId);
+        if (i >= 0) teamMembers.splice(i, 1);
+      }),
+    listTeamMembers: (teamId: string) =>
+      Effect.succeed(teamMembers.filter((m) => m.teamId === teamId)),
+    listTeamsForMember: (organizationId: string, userId: string) =>
+      Effect.succeed(
+        teamMembers
+          .filter((m) => m.userId === userId)
+          .map((m) => teams.get(m.teamId))
+          .filter((t): t is Team => t !== undefined && t.organizationId === organizationId),
+      ),
   };
 
   const adminUserStore = {
@@ -395,6 +446,106 @@ describe("HTTP organization endpoints", () => {
     const fx = makeFixture();
     const res = await fx.handler(jsonReq("/organization/create", { name: "A", slug: "a" }));
     expect(res.status).toBe(401);
+  });
+
+  it("runs a full team lifecycle", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("member", "member@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const memberSid = fx.makeSession("member");
+
+    const created = await fx.handler(
+      jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
+    );
+    const org = (await created.json()) as { id: string };
+    await fx.handler(
+      jsonReq(`/organization/${org.id}/members`, { userId: "member", role: "member" }, ownerSid),
+    );
+
+    // Create.
+    const teamRes = await fx.handler(
+      jsonReq(`/organization/${org.id}/teams`, { name: "Engineering" }, ownerSid),
+    );
+    expect(teamRes.status).toBe(200);
+    const team = (await teamRes.json()) as { id: string; name: string; organizationId: string };
+    expect(team.name).toBe("Engineering");
+    expect(team.organizationId).toBe(org.id);
+
+    // Any organization member may list.
+    const listed = await fx.handler(req("GET", `/organization/${org.id}/teams`, memberSid));
+    expect(((await listed.json()) as Array<{ id: string }>).map((t) => t.id)).toEqual([team.id]);
+
+    // Add + list team members.
+    const added = await fx.handler(
+      jsonReq(`/teams/${team.id}/members`, { userId: "member" }, ownerSid),
+    );
+    expect(added.status).toBe(200);
+    expect((await added.json()) as { userId: string }).toMatchObject({
+      teamId: team.id,
+      userId: "member",
+    });
+
+    const teamMembersRes = await fx.handler(req("GET", `/teams/${team.id}/members`, memberSid));
+    expect(
+      ((await teamMembersRes.json()) as Array<{ userId: string }>).map((m) => m.userId),
+    ).toEqual(["member"]);
+
+    const forMember = await fx.handler(
+      req("GET", `/organization/${org.id}/members/member/teams`, memberSid),
+    );
+    expect(((await forMember.json()) as Array<{ id: string }>).map((t) => t.id)).toEqual([team.id]);
+
+    // Rename.
+    const renamed = await fx.handler(
+      req("PATCH", `/teams/${team.id}`, ownerSid, { name: "Platform" }),
+    );
+    expect(((await renamed.json()) as { name: string }).name).toBe("Platform");
+
+    // Remove the team member, then the team.
+    const removed = await fx.handler(req("DELETE", `/teams/${team.id}/members/member`, ownerSid));
+    expect(removed.status).toBe(204);
+    const emptied = await fx.handler(req("GET", `/teams/${team.id}/members`, ownerSid));
+    expect(((await emptied.json()) as unknown[]).length).toBe(0);
+
+    const deleted = await fx.handler(req("DELETE", `/teams/${team.id}`, ownerSid));
+    expect(deleted.status).toBe(204);
+    const afterDelete = await fx.handler(req("GET", `/organization/${org.id}/teams`, ownerSid));
+    expect(((await afterDelete.json()) as unknown[]).length).toBe(0);
+  });
+
+  it("returns 403 when a plain member tries to manage teams", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("member", "member@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const memberSid = fx.makeSession("member");
+
+    const created = await fx.handler(
+      jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
+    );
+    const org = (await created.json()) as { id: string };
+    await fx.handler(
+      jsonReq(`/organization/${org.id}/members`, { userId: "member", role: "member" }, ownerSid),
+    );
+
+    const denied = await fx.handler(
+      jsonReq(`/organization/${org.id}/teams`, { name: "Rogue" }, memberSid),
+    );
+    expect(denied.status).toBe(403);
+
+    const teamRes = await fx.handler(
+      jsonReq(`/organization/${org.id}/teams`, { name: "Engineering" }, ownerSid),
+    );
+    const team = (await teamRes.json()) as { id: string };
+
+    const deniedAdd = await fx.handler(
+      jsonReq(`/teams/${team.id}/members`, { userId: "member" }, memberSid),
+    );
+    expect(deniedAdd.status).toBe(403);
+
+    const deniedDelete = await fx.handler(req("DELETE", `/teams/${team.id}`, memberSid));
+    expect(deniedDelete.status).toBe(403);
   });
 });
 

@@ -6,6 +6,13 @@
  * is permission-checked against a configurable role → permission map using
  * `"resource:action"` permission strings.
  *
+ * **Teams:** organizations can be subdivided into teams (see {@link Team}).
+ * Team management is governed by the *organization*-scoped `team:*`
+ * permissions; team membership itself carries no roles - it is a plain
+ * `(teamId, userId)` association, and any organization member may read the
+ * team structure. A user must already be a member of the team's organization
+ * before they can be added to one of its teams.
+ *
  * **Active organization:** this module deliberately does not manage a
  * per-session "active organization" (better-auth's `setActiveOrganization`).
  * The conventional integration is to store the selected organization id on
@@ -85,14 +92,45 @@ export interface Invitation {
 }
 
 /**
+ * A team: a named sub-group of an organization.
+ *
+ * Teams are managed with the organization-scoped `team:*` permissions; the
+ * membership rows ({@link TeamMember}) deliberately carry no role of their own.
+ */
+export interface Team {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly name: string;
+  /** Epoch milliseconds */
+  readonly createdAt: number;
+  /** Epoch milliseconds */
+  readonly updatedAt: number;
+}
+
+/**
+ * A user's membership in a team.
+ *
+ * Team membership is orthogonal to the organization role: it grants no
+ * permissions by itself. The user is always also a {@link Member} of the
+ * team's organization.
+ */
+export interface TeamMember {
+  readonly teamId: string;
+  readonly userId: string;
+  /** Epoch milliseconds */
+  readonly createdAt: number;
+}
+
+/**
  * Default role → permission map, mirroring better-auth's built-in
  * organization roles. Permissions are `"resource:action"` strings.
  *
- * - `owner` - full control (organization update/delete, member and
- *   invitation management)
- * - `admin` - member and invitation management plus organization updates,
- *   but cannot delete the organization
- * - `member` - read-only participant (no management permissions)
+ * - `owner` - full control (organization update/delete, member, invitation
+ *   and team management)
+ * - `admin` - member, invitation and team management plus organization
+ *   updates, but cannot delete the organization
+ * - `member` - read-only participant (no management permissions; may still
+ *   read the organization's teams)
  *
  * Override via {@link OrganizationConfig.roles}.
  */
@@ -105,6 +143,10 @@ export const defaultOrganizationRoles: Record<string, ReadonlyArray<string>> = {
     "member:delete",
     "invitation:create",
     "invitation:cancel",
+    "team:create",
+    "team:update",
+    "team:delete",
+    "team:manage-members",
   ],
   admin: [
     "organization:update",
@@ -113,16 +155,25 @@ export const defaultOrganizationRoles: Record<string, ReadonlyArray<string>> = {
     "member:delete",
     "invitation:create",
     "invitation:cancel",
+    "team:create",
+    "team:update",
+    "team:delete",
+    "team:manage-members",
   ],
   member: [],
 };
 
 /**
- * Storage interface for organizations, members, and invitations.
+ * Storage interface for organizations, members, invitations, and teams.
  * Implement with your preferred backend (SQL, Redis, ...).
  *
- * Note: `deleteOrganization` should cascade - implementations are expected
- * to remove the organization's members and invitations as well.
+ * Note: `deleteOrganization` should cascade - implementations are expected to
+ * remove the organization's members, invitations, teams, and team memberships
+ * as well. `deleteTeam` cascades too: it must remove the team's team-member
+ * rows along with the team.
+ *
+ * Conventions: lookups answer `null` when the record does not exist, deletes
+ * of unknown ids are no-ops, and failures are reported as `AuthError`.
  */
 export class OrganizationStore extends Context.Service<
   OrganizationStore,
@@ -173,6 +224,34 @@ export class OrganizationStore extends Context.Service<
     readonly listInvitationsByEmail: (
       email: string,
     ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
+
+    readonly createTeam: (team: Team) => Effect.Effect<Team, Errors.AuthError>;
+    readonly getTeam: (teamId: string) => Effect.Effect<Team | null, Errors.AuthError>;
+    /** Persist an updated team; answers `null` when the team no longer exists. */
+    readonly updateTeam: (team: Team) => Effect.Effect<Team | null, Errors.AuthError>;
+    /** Delete a team *and* its team-member rows. A no-op for unknown ids. */
+    readonly deleteTeam: (teamId: string) => Effect.Effect<void, Errors.AuthError>;
+    readonly listTeams: (
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<Team>, Errors.AuthError>;
+
+    readonly addTeamMember: (
+      teamId: string,
+      userId: string,
+    ) => Effect.Effect<TeamMember, Errors.AuthError>;
+    /** Remove a team membership. A no-op when the user is not in the team. */
+    readonly removeTeamMember: (
+      teamId: string,
+      userId: string,
+    ) => Effect.Effect<void, Errors.AuthError>;
+    readonly listTeamMembers: (
+      teamId: string,
+    ) => Effect.Effect<ReadonlyArray<TeamMember>, Errors.AuthError>;
+    /** The teams of `organizationId` that `userId` belongs to. */
+    readonly listTeamsForMember: (
+      organizationId: string,
+      userId: string,
+    ) => Effect.Effect<ReadonlyArray<Team>, Errors.AuthError>;
   }
 >()("@effect-auth/OrganizationStore") {}
 
@@ -227,6 +306,20 @@ export interface UpdateOrganizationInput {
 export interface InviteMemberInput {
   readonly email: string;
   readonly role: string;
+}
+
+/**
+ * Input for creating a team
+ */
+export interface CreateTeamInput {
+  readonly name: string;
+}
+
+/**
+ * Partial update of a team's fields
+ */
+export interface UpdateTeamInput {
+  readonly name?: string;
 }
 
 /**
@@ -354,7 +447,9 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Remove a member. Requires the `member:delete` permission. An owner can
-     * only be removed by another owner, and the last owner can never be removed.
+     * only be removed by another owner, and the last owner can never be
+     * removed. Cascades: the member's memberships in the organization's teams
+     * are removed as well.
      */
     readonly removeMember: (
       actorId: string,
@@ -372,6 +467,82 @@ export class OrganizationService extends Context.Service<
       memberUserId: string,
       role: string,
     ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Create a team inside an organization. Requires the `team:create`
+     * permission.
+     */
+    readonly createTeam: (
+      actorUserId: string,
+      organizationId: string,
+      input: CreateTeamInput,
+    ) => Effect.Effect<Team, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Rename a team. Requires the `team:update` permission in the team's
+     * organization.
+     */
+    readonly updateTeam: (
+      actorUserId: string,
+      teamId: string,
+      input: UpdateTeamInput,
+    ) => Effect.Effect<Team, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Delete a team, along with its memberships. Requires the `team:delete`
+     * permission in the team's organization.
+     */
+    readonly deleteTeam: (
+      actorUserId: string,
+      teamId: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Add a user to a team. Requires the `team:manage-members` permission in
+     * the team's organization. The target user must already be a member of
+     * that organization, and must not already be in the team.
+     */
+    readonly addTeamMember: (
+      actorUserId: string,
+      teamId: string,
+      memberUserId: string,
+    ) => Effect.Effect<TeamMember, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Remove a user from a team. Requires the `team:manage-members` permission
+     * in the team's organization.
+     */
+    readonly removeTeamMember: (
+      actorUserId: string,
+      teamId: string,
+      memberUserId: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
+
+    /**
+     * List an organization's teams. Any member of the organization may do so.
+     */
+    readonly listTeams: (
+      actorUserId: string,
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<Team>, OrganizationError | Errors.AuthError>;
+
+    /**
+     * List a team's members. Any member of the team's organization may do so.
+     */
+    readonly listTeamMembers: (
+      actorUserId: string,
+      teamId: string,
+    ) => Effect.Effect<ReadonlyArray<TeamMember>, OrganizationError | Errors.AuthError>;
+
+    /**
+     * List the organization's teams a given user belongs to. Any member of the
+     * organization may do so.
+     */
+    readonly listTeamsForMember: (
+      actorUserId: string,
+      organizationId: string,
+      userId: string,
+    ) => Effect.Effect<ReadonlyArray<Team>, OrganizationError | Errors.AuthError>;
 
     /**
      * Whether the user's role in the organization grants the given
@@ -461,6 +632,42 @@ export const make = (
           );
         }
         return member;
+      });
+
+    /**
+     * Resolve the actor's membership without requiring any permission - used
+     * by the read-only team listings, which any organization member may call.
+     */
+    const requireMembership = (userId: string, organizationId: string) =>
+      Effect.gen(function* () {
+        const member = yield* store.getMember(organizationId, userId);
+        if (!member) {
+          return yield* Effect.fail(
+            new OrganizationError({ message: "You are not a member of this organization" }),
+          );
+        }
+        return member;
+      });
+
+    /** Load a team, failing when it does not exist. */
+    const getTeamOrFail = (teamId: string) =>
+      Effect.gen(function* () {
+        const team = yield* store.getTeam(teamId);
+        if (!team) {
+          return yield* Effect.fail(new OrganizationError({ message: "Team not found" }));
+        }
+        return team;
+      });
+
+    /**
+     * Load a team and enforce a permission in *its* organization, returning the
+     * team so callers can use its `organizationId`.
+     */
+    const requireTeamPermission = (userId: string, teamId: string, permission: string) =>
+      Effect.gen(function* () {
+        const team = yield* getTeamOrFail(teamId);
+        yield* requireMemberPermission(userId, team.organizationId, permission);
+        return team;
       });
 
     /** Enforce the per-organization membership limit before adding a member. */
@@ -798,6 +1005,9 @@ export const make = (
         }
 
         yield* store.deleteMember(target.id);
+        // Cascade: leaving the organization also leaves all of its teams.
+        const teams = yield* store.listTeamsForMember(organizationId, memberUserId);
+        yield* Effect.forEach(teams, (team) => store.removeTeamMember(team.id, memberUserId));
       }),
 
       updateMemberRole: Effect.fn("OrganizationService.updateMemberRole")(function* (
@@ -825,6 +1035,113 @@ export const make = (
         }
 
         return yield* store.updateMember({ ...target, role });
+      }),
+
+      createTeam: Effect.fn("OrganizationService.createTeam")(function* (
+        actorUserId: string,
+        organizationId: string,
+        input: CreateTeamInput,
+      ) {
+        yield* requireMemberPermission(actorUserId, organizationId, "team:create");
+        yield* getOrganizationOrFail(organizationId);
+
+        const now = Date.now();
+        const team: Team = {
+          id: yield* generateId(),
+          organizationId,
+          name: input.name,
+          createdAt: now,
+          updatedAt: now,
+        };
+        return yield* store.createTeam(team);
+      }),
+
+      updateTeam: Effect.fn("OrganizationService.updateTeam")(function* (
+        actorUserId: string,
+        teamId: string,
+        input: UpdateTeamInput,
+      ) {
+        const team = yield* requireTeamPermission(actorUserId, teamId, "team:update");
+
+        const updated = yield* store.updateTeam({
+          ...team,
+          ...(input.name !== undefined && { name: input.name }),
+          updatedAt: Date.now(),
+        });
+        if (!updated) {
+          return yield* Effect.fail(new OrganizationError({ message: "Team not found" }));
+        }
+        return updated;
+      }),
+
+      deleteTeam: Effect.fn("OrganizationService.deleteTeam")(function* (
+        actorUserId: string,
+        teamId: string,
+      ) {
+        yield* requireTeamPermission(actorUserId, teamId, "team:delete");
+        // The store cascades the team's memberships.
+        yield* store.deleteTeam(teamId);
+      }),
+
+      addTeamMember: Effect.fn("OrganizationService.addTeamMember")(function* (
+        actorUserId: string,
+        teamId: string,
+        memberUserId: string,
+      ) {
+        const team = yield* requireTeamPermission(actorUserId, teamId, "team:manage-members");
+
+        const member = yield* store.getMember(team.organizationId, memberUserId);
+        if (!member) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "User is not a member of this organization",
+            }),
+          );
+        }
+
+        const existing = yield* store.listTeamMembers(teamId);
+        if (existing.some((teamMember) => teamMember.userId === memberUserId)) {
+          return yield* Effect.fail(
+            new OrganizationError({ message: "User is already a member of this team" }),
+          );
+        }
+
+        return yield* store.addTeamMember(teamId, memberUserId);
+      }),
+
+      removeTeamMember: Effect.fn("OrganizationService.removeTeamMember")(function* (
+        actorUserId: string,
+        teamId: string,
+        memberUserId: string,
+      ) {
+        yield* requireTeamPermission(actorUserId, teamId, "team:manage-members");
+        yield* store.removeTeamMember(teamId, memberUserId);
+      }),
+
+      listTeams: Effect.fn("OrganizationService.listTeams")(function* (
+        actorUserId: string,
+        organizationId: string,
+      ) {
+        yield* requireMembership(actorUserId, organizationId);
+        return yield* store.listTeams(organizationId);
+      }),
+
+      listTeamMembers: Effect.fn("OrganizationService.listTeamMembers")(function* (
+        actorUserId: string,
+        teamId: string,
+      ) {
+        const team = yield* getTeamOrFail(teamId);
+        yield* requireMembership(actorUserId, team.organizationId);
+        return yield* store.listTeamMembers(teamId);
+      }),
+
+      listTeamsForMember: Effect.fn("OrganizationService.listTeamsForMember")(function* (
+        actorUserId: string,
+        organizationId: string,
+        userId: string,
+      ) {
+        yield* requireMembership(actorUserId, organizationId);
+        return yield* store.listTeamsForMember(organizationId, userId);
       }),
 
       checkPermission: Effect.fn("OrganizationService.checkPermission")(function* (

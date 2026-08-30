@@ -429,6 +429,104 @@ export const authGroup = HttpApiGroup.make("auth").add(
       S.InternalError,
     ],
   }),
+  // Teams are organization sub-groups; the `team:*` permissions that gate them
+  // are organization-scoped, so team-scoped routes resolve the organization
+  // through the team id.
+  HttpApiEndpoint.post("orgCreateTeam", "/organization/:organizationId/teams", {
+    params: { organizationId: Schema.String },
+    payload: S.CreateTeamPayload,
+    success: S.TeamView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.get("orgListTeams", "/organization/:organizationId/teams", {
+    params: { organizationId: Schema.String },
+    success: S.TeamListView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.get(
+    "orgListTeamsForMember",
+    "/organization/:organizationId/members/:userId/teams",
+    {
+      params: { organizationId: Schema.String, userId: Schema.String },
+      success: S.TeamListView,
+      error: [
+        S.NotFoundError,
+        S.UnauthorizedError,
+        S.ForbiddenError,
+        S.BadRequestError,
+        S.InternalError,
+      ],
+    },
+  ),
+  HttpApiEndpoint.patch("orgUpdateTeam", "/teams/:teamId", {
+    params: { teamId: Schema.String },
+    payload: S.UpdateTeamPayload,
+    success: S.TeamView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.delete("orgDeleteTeam", "/teams/:teamId", {
+    params: { teamId: Schema.String },
+    success: HttpApiSchema.NoContent,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.post("orgAddTeamMember", "/teams/:teamId/members", {
+    params: { teamId: Schema.String },
+    payload: S.AddTeamMemberPayload,
+    success: S.TeamMemberView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.get("orgListTeamMembers", "/teams/:teamId/members", {
+    params: { teamId: Schema.String },
+    success: S.TeamMemberListView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.delete("orgRemoveTeamMember", "/teams/:teamId/members/:userId", {
+    params: { teamId: Schema.String, userId: Schema.String },
+    success: HttpApiSchema.NoContent,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
   // --- Admin (session-authenticated; the actor must satisfy `isAdmin`).
   // --- Authorization failures answer 403.
   HttpApiEndpoint.post("adminListUsers", "/admin/users/list", {

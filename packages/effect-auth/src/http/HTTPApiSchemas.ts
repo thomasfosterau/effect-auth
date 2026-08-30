@@ -484,6 +484,48 @@ export const UpdateMemberRolePayload = Schema.Struct({
 });
 export type UpdateMemberRolePayload = typeof UpdateMemberRolePayload.Type;
 
+/** Public view of a team. */
+export const TeamView = Schema.Struct({
+  id: Schema.String,
+  organizationId: Schema.String,
+  name: Schema.String,
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+});
+export type TeamView = typeof TeamView.Type;
+
+/** Public view of a team membership. */
+export const TeamMemberView = Schema.Struct({
+  teamId: Schema.String,
+  userId: Schema.String,
+  createdAt: Schema.Number,
+});
+export type TeamMemberView = typeof TeamMemberView.Type;
+
+export const TeamListView = Schema.Array(TeamView);
+export type TeamListView = typeof TeamListView.Type;
+
+export const TeamMemberListView = Schema.Array(TeamMemberView);
+export type TeamMemberListView = typeof TeamMemberListView.Type;
+
+/** Request body for creating a team. */
+export const CreateTeamPayload = Schema.Struct({
+  name: Schema.String,
+});
+export type CreateTeamPayload = typeof CreateTeamPayload.Type;
+
+/** Request body for updating a team. */
+export const UpdateTeamPayload = Schema.Struct({
+  name: Schema.optional(Schema.String),
+});
+export type UpdateTeamPayload = typeof UpdateTeamPayload.Type;
+
+/** Request body for adding a user to a team. */
+export const AddTeamMemberPayload = Schema.Struct({
+  userId: Schema.String,
+});
+export type AddTeamMemberPayload = typeof AddTeamMemberPayload.Type;
+
 /** Request body for setting the session's active organization (null clears it). */
 export const SetActiveOrganizationPayload = Schema.Struct({
   organizationId: Schema.NullOr(Schema.String),
