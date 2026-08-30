@@ -67,10 +67,13 @@ Consequences for the current tree:
     already the service seam, so this is a layer move; core's default remains
     PBKDF2-SHA256 via `node:crypto`/WebCrypto (`PlatformCrypto`), which runs on edge
     runtimes where native modules don't.
-  - `@oslojs/webauthn` (pure JS, zero-dependency, MIT): **vendor it into core**
-    rather than extracting — WebAuthn belongs in the maximal core, the library is
-    small and stable, and vendoring keeps the dependency rule absolute. (Fallback if
-    vendoring proves noisy: keep it as the single documented exception.)
+  - `@oslojs/webauthn` (pure JS, MIT): **kept as the single documented
+    exception** (M0 outcome). Vendoring was assessed and rejected: the package is
+    not standalone — its closure spans five `@oslojs/*` packages (asn1, binary,
+    cbor, crypto, encoding, several thousand lines including crypto primitives),
+    and vendoring security-critical parsing/crypto code would cut us off from
+    upstream patches. WebAuthn stays in the maximal core with this one pure-JS
+    dependency, re-reviewed if the rule ever needs to be absolute.
 
 ### 2.2 Delivery seams: unified `EmailSender` / `SMSSender` services
 

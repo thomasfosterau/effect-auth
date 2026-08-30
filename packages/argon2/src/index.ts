@@ -13,8 +13,11 @@
  */
 import { Effect, Layer } from "effect";
 import { hash as argon2Hash, verify as argon2Verify } from "@node-rs/argon2";
-import { PasswordHasher, type HashedPassword } from "./Password.ts";
-import { HashingError } from "../Errors.ts";
+import { HashingError, Password } from "@thomasfosterau/effect-auth";
+
+const { PasswordHasher } = Password;
+type HashedPassword = Password.HashedPassword;
+type PasswordHasherService = typeof Password.PasswordHasher.Service;
 
 /** PHC/`parseAlgorithm` identifier for the hashes this hasher produces. */
 export const ARGON2ID = "argon2id";
@@ -39,13 +42,13 @@ export interface Argon2Options {
  *
  * @example
  * ```ts
- * import { Password } from "@thomasfosterau/effect-auth";
+ * import { argon2Hasher, argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2";
  *
- * const hasher = Password.argon2Hasher();          // OWASP defaults
- * const layer = Password.argon2HasherLayer({ timeCost: 3 });
+ * const hasher = argon2Hasher();          // OWASP defaults
+ * const layer = argon2HasherLayer({ timeCost: 3 });
  * ```
  */
-export const argon2Hasher = (options?: Argon2Options): typeof PasswordHasher.Service => {
+export const argon2Hasher = (options?: Argon2Options): PasswordHasherService => {
   // Omit `algorithm`/`version`: the binding already defaults to Argon2id / 0x13.
   const params = {
     memoryCost: options?.memoryCost ?? 19456,
@@ -94,5 +97,5 @@ export const argon2Hasher = (options?: Argon2Options): typeof PasswordHasher.Ser
  * of `PasswordHasher.layer()` to make Argon2id the default hasher for new
  * passwords.
  */
-export const argon2HasherLayer = (options?: Argon2Options): Layer.Layer<PasswordHasher> =>
+export const argon2HasherLayer = (options?: Argon2Options): Layer.Layer<Password.PasswordHasher> =>
   Layer.succeed(PasswordHasher, argon2Hasher(options));

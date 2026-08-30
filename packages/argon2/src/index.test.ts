@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect } from "effect";
-import { ARGON2ID } from "./Argon2.ts";
-import * as Argon2 from "./Argon2.ts";
-import * as Password from "./Password.ts";
+import { ARGON2ID } from "./index.ts";
+import * as Argon2 from "./index.ts";
+import { Password } from "@thomasfosterau/effect-auth";
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
 
