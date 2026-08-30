@@ -29,6 +29,10 @@ export * as Model from "./Model.ts";
 // Namespaced only: the module's service tag is also named `PolicyStore`
 // (`Authz.PolicyStore.PolicyStore`), so a top-level re-export would collide.
 export * as PolicyStore from "./PolicyStore.ts";
+// The organization → entity-graph bridge (`Authz.OrganizationEntities.layer`,
+// `...orgRoleId(orgId, "admin")`); namespaced so its generic `layer` /
+// `roleRef` names stay qualified.
+export * as OrganizationEntities from "./OrganizationEntities.ts";
 export { AuthorizationDeniedError, type Decision, type PolicyOutcome } from "./Policy.ts";
 export {
   protectedField,

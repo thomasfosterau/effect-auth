@@ -13,6 +13,12 @@
  * team structure. A user must already be a member of the team's organization
  * before they can be added to one of its teams.
  *
+ * **Dynamic access control:** on top of the static `roles` config map, each
+ * organization may define its own roles at runtime ({@link OrgRole}, managed
+ * with {@link OrganizationService.upsertOrgRole} and friends). A custom role
+ * *replaces* the static entry of the same name for that organization - the
+ * two are never merged, so what a tenant sees is exactly what it defined.
+ *
  * **Active organization:** this module deliberately does not manage a
  * per-session "active organization" (better-auth's `setActiveOrganization`).
  * The conventional integration is to store the selected organization id on
@@ -28,6 +34,7 @@
 import { Context, Crypto, Data, Effect, Layer } from "effect";
 import { IdentifierStore } from "./Identifier.ts";
 import * as Errors from "./Errors.ts";
+import { parsePermission, permissionMatches } from "./authz/Permission.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { normalizeEmail } from "./utils.ts";
 
@@ -122,13 +129,37 @@ export interface TeamMember {
 }
 
 /**
+ * A role defined at runtime by one organization (dynamic access control).
+ *
+ * An `OrgRole` **replaces** the static {@link OrganizationConfig.roles} entry
+ * of the same name, for that organization only: permission resolution never
+ * merges the two, so a tenant's role grants exactly the permissions it lists.
+ * Permissions are `"resource:action"` strings and may use the `"*"` wildcard
+ * (`"team:*"`, `"*:*"`), matched with `Authz.permissionMatches`.
+ *
+ * The protected owner role (`config.creatorRole`, default `owner`) can never
+ * be redefined this way - see {@link OrganizationService.upsertOrgRole}.
+ */
+export interface OrgRole {
+  readonly organizationId: string;
+  /** Role name, as it appears on a {@link Member} */
+  readonly role: string;
+  /** `"resource:action"` permission strings, `"*"` wildcards allowed */
+  readonly permissions: ReadonlyArray<string>;
+  /** Epoch milliseconds */
+  readonly createdAt: number;
+  /** Epoch milliseconds */
+  readonly updatedAt: number;
+}
+
+/**
  * Default role → permission map, mirroring better-auth's built-in
  * organization roles. Permissions are `"resource:action"` strings.
  *
  * - `owner` - full control (organization update/delete, member, invitation
- *   and team management)
+ *   and team management, plus `role:manage` for custom organization roles)
  * - `admin` - member, invitation and team management plus organization
- *   updates, but cannot delete the organization
+ *   updates, but cannot delete the organization or manage custom roles
  * - `member` - read-only participant (no management permissions; may still
  *   read the organization's teams)
  *
@@ -147,6 +178,7 @@ export const defaultOrganizationRoles: Record<string, ReadonlyArray<string>> = {
     "team:update",
     "team:delete",
     "team:manage-members",
+    "role:manage",
   ],
   admin: [
     "organization:update",
@@ -164,13 +196,14 @@ export const defaultOrganizationRoles: Record<string, ReadonlyArray<string>> = {
 };
 
 /**
- * Storage interface for organizations, members, invitations, and teams.
- * Implement with your preferred backend (SQL, Redis, ...).
+ * Storage interface for organizations, members, invitations, teams, and
+ * custom organization roles. Implement with your preferred backend (SQL,
+ * Redis, ...).
  *
  * Note: `deleteOrganization` should cascade - implementations are expected to
- * remove the organization's members, invitations, teams, and team memberships
- * as well. `deleteTeam` cascades too: it must remove the team's team-member
- * rows along with the team.
+ * remove the organization's members, invitations, teams, team memberships,
+ * and custom roles ({@link OrgRole}) as well. `deleteTeam` cascades too: it
+ * must remove the team's team-member rows along with the team.
  *
  * Conventions: lookups answer `null` when the record does not exist, deletes
  * of unknown ids are no-ops, and failures are reported as `AuthError`.
@@ -252,6 +285,24 @@ export class OrganizationStore extends Context.Service<
       organizationId: string,
       userId: string,
     ) => Effect.Effect<ReadonlyArray<Team>, Errors.AuthError>;
+
+    /**
+     * Create or replace a custom role definition, keyed by
+     * `(organizationId, role)`.
+     */
+    readonly upsertOrgRole: (orgRole: OrgRole) => Effect.Effect<OrgRole, Errors.AuthError>;
+    readonly getOrgRole: (
+      organizationId: string,
+      role: string,
+    ) => Effect.Effect<OrgRole | null, Errors.AuthError>;
+    readonly listOrgRoles: (
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<OrgRole>, Errors.AuthError>;
+    /** Delete a custom role definition. A no-op when it does not exist. */
+    readonly deleteOrgRole: (
+      organizationId: string,
+      role: string,
+    ) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/OrganizationStore") {}
 
@@ -271,7 +322,11 @@ export interface OrganizationConfig {
    * This role is also treated as the protected "owner" role for the
    * last-owner safeguards in `removeMember`/`updateMemberRole`. */
   readonly creatorRole?: string;
-  /** Role → permission map (default: {@link defaultOrganizationRoles}) */
+  /**
+   * Static role → permission map (default: {@link defaultOrganizationRoles}).
+   * A per-organization {@link OrgRole} of the same name replaces the entry
+   * here for that organization.
+   */
   readonly roles?: Record<string, ReadonlyArray<string>>;
   /** Optional invitation email delivery */
   readonly sendInvitationEmail?: (
@@ -320,6 +375,16 @@ export interface CreateTeamInput {
  */
 export interface UpdateTeamInput {
   readonly name?: string;
+}
+
+/**
+ * Input for defining (or redefining) a custom organization role
+ */
+export interface UpsertOrgRoleInput {
+  /** Role name; the protected owner role is rejected */
+  readonly role: string;
+  /** `"resource:action"` permission strings, `"*"` wildcards allowed */
+  readonly permissions: ReadonlyArray<string>;
 }
 
 /**
@@ -545,8 +610,48 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<Team>, OrganizationError | Errors.AuthError>;
 
     /**
+     * Define or redefine a custom role for the organization. Requires the
+     * `role:manage` permission (owner-only by default).
+     *
+     * The definition *replaces* the static `config.roles` entry of the same
+     * name for this organization, and takes effect immediately for every
+     * member holding the role. Redefining the protected owner role
+     * (`config.creatorRole`, default `owner`) is refused with an
+     * `OrganizationError`: owner semantics stay static, so a tenant can never
+     * lock itself out of role management.
+     */
+    readonly upsertOrgRole: (
+      actorUserId: string,
+      organizationId: string,
+      input: UpsertOrgRoleInput,
+    ) => Effect.Effect<OrgRole, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Remove a custom role definition, falling back to the static
+     * `config.roles` entry (if any) for members still holding the role.
+     * Requires the `role:manage` permission; deleting the protected owner
+     * role is refused, and deleting a role that was never defined is a no-op.
+     */
+    readonly deleteOrgRole: (
+      actorUserId: string,
+      organizationId: string,
+      role: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
+
+    /**
+     * List the organization's custom role definitions. Any member of the
+     * organization may do so.
+     */
+    readonly listOrgRoles: (
+      actorUserId: string,
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<OrgRole>, OrganizationError | Errors.AuthError>;
+
+    /**
      * Whether the user's role in the organization grants the given
-     * `"resource:action"` permission. Non-members simply get `false`.
+     * `"resource:action"` permission - resolved against the organization's
+     * custom {@link OrgRole} first, then the static `config.roles` map, and
+     * denied when neither defines the role. Non-members simply get `false`.
      */
     readonly checkPermission: (
       userId: string,
@@ -603,9 +708,52 @@ export const make = (
         ),
       );
 
-    /** Whether a role name grants a `"resource:action"` permission. */
-    const roleHasPermission = (role: string, permission: string): boolean =>
-      (roles[role] ?? []).includes(permission);
+    /**
+     * Whether one granted permission string satisfies a requested one.
+     *
+     * Exact equality first - that is the historical behavior of the static
+     * role map, and the only thing a string without a `:` separator can
+     * support - then `"*"` wildcard matching via `permissionMatches`, so
+     * `"team:*"` covers `"team:create"` exactly as an admin grant does.
+     * Unparseable grants never match anything but themselves.
+     */
+    const grantSatisfies = (granted: string, requested: string): boolean => {
+      if (granted === requested) return true;
+      try {
+        return permissionMatches(parsePermission(granted), parsePermission(requested));
+      } catch {
+        return false;
+      }
+    };
+
+    /**
+     * The permissions a role name resolves to in an organization: the custom
+     * {@link OrgRole} when one exists (it *replaces* the static entry - no
+     * merging), else the static `config.roles` entry, else `null` for an
+     * unknown role (fail closed: no permissions at all).
+     */
+    const resolveRolePermissions = (
+      organizationId: string,
+      role: string,
+    ): Effect.Effect<ReadonlyArray<string> | null, Errors.AuthError> =>
+      Effect.gen(function* () {
+        const custom = yield* store.getOrgRole(organizationId, role);
+        if (custom) return custom.permissions;
+        return roles[role] ?? null;
+      });
+
+    /** Whether a member's role grants a `"resource:action"` permission. */
+    const roleHasPermission = (
+      organizationId: string,
+      role: string,
+      permission: string,
+    ): Effect.Effect<boolean, Errors.AuthError> =>
+      Effect.map(
+        resolveRolePermissions(organizationId, role),
+        (permissions) =>
+          permissions !== null &&
+          permissions.some((granted) => grantSatisfies(granted, permission)),
+      );
 
     /** Load an organization, failing when it does not exist. */
     const getOrganizationOrFail = (organizationId: string) =>
@@ -624,7 +772,9 @@ export const make = (
     const requireMemberPermission = (userId: string, organizationId: string, permission: string) =>
       Effect.gen(function* () {
         const member = yield* store.getMember(organizationId, userId);
-        if (!member || !roleHasPermission(member.role, permission)) {
+        const granted =
+          member !== null && (yield* roleHasPermission(organizationId, member.role, permission));
+        if (!member || !granted) {
           return yield* Effect.fail(
             new OrganizationError({
               message: `Missing permission '${permission}' in this organization`,
@@ -689,6 +839,20 @@ export const make = (
         const members = yield* store.listMembersByOrganization(organizationId);
         return members.filter((member) => member.role === creatorRole).length;
       });
+
+    /**
+     * Refuse custom-role writes against the protected owner role: owner
+     * semantics stay static, so no tenant can define its way out of
+     * `role:manage` (or out of the last-owner safeguards).
+     */
+    const ensureNotOwnerRole = (role: string) =>
+      role === creatorRole
+        ? Effect.fail(
+            new OrganizationError({
+              message: `The '${creatorRole}' role is protected and cannot be redefined`,
+            }),
+          )
+        : Effect.void;
 
     /** Create a membership record (after all checks have passed). */
     const createMembership = (organizationId: string, userId: string, role: string) =>
@@ -1144,13 +1308,52 @@ export const make = (
         return yield* store.listTeamsForMember(organizationId, userId);
       }),
 
+      upsertOrgRole: Effect.fn("OrganizationService.upsertOrgRole")(function* (
+        actorUserId: string,
+        organizationId: string,
+        input: UpsertOrgRoleInput,
+      ) {
+        yield* requireMemberPermission(actorUserId, organizationId, "role:manage");
+        yield* getOrganizationOrFail(organizationId);
+        yield* ensureNotOwnerRole(input.role);
+
+        const now = Date.now();
+        const existing = yield* store.getOrgRole(organizationId, input.role);
+        return yield* store.upsertOrgRole({
+          organizationId,
+          role: input.role,
+          permissions: input.permissions,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        });
+      }),
+
+      deleteOrgRole: Effect.fn("OrganizationService.deleteOrgRole")(function* (
+        actorUserId: string,
+        organizationId: string,
+        role: string,
+      ) {
+        yield* requireMemberPermission(actorUserId, organizationId, "role:manage");
+        yield* ensureNotOwnerRole(role);
+        yield* store.deleteOrgRole(organizationId, role);
+      }),
+
+      listOrgRoles: Effect.fn("OrganizationService.listOrgRoles")(function* (
+        actorUserId: string,
+        organizationId: string,
+      ) {
+        yield* requireMembership(actorUserId, organizationId);
+        return yield* store.listOrgRoles(organizationId);
+      }),
+
       checkPermission: Effect.fn("OrganizationService.checkPermission")(function* (
         userId: string,
         organizationId: string,
         permission: string,
       ) {
         const member = yield* store.getMember(organizationId, userId);
-        return member !== null && roleHasPermission(member.role, permission);
+        if (!member) return false;
+        return yield* roleHasPermission(organizationId, member.role, permission);
       }),
 
       requirePermission: Effect.fn("OrganizationService.requirePermission")(

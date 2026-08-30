@@ -25,6 +25,7 @@ import {
   type Invitation,
   type Team,
   type TeamMember,
+  type OrgRole,
   OrganizationService,
 } from "../Organization.ts";
 import { AdminUserStore, AdminService } from "../Admin.ts";
@@ -51,6 +52,7 @@ const makeFixture = () => {
   const invitations = new Map<string, Invitation>();
   const teams = new Map<string, Team>();
   const teamMembers: TeamMember[] = [];
+  const orgRoles = new Map<string, OrgRole>();
   const apiKeys = new Map<string, APIKey>();
   const jwtKeys: JWTKeyPair[] = [];
 
@@ -138,6 +140,9 @@ const makeFixture = () => {
     deleteOrganization: (id: string) =>
       Effect.sync(() => {
         orgs.delete(id);
+        for (const [key, orgRole] of orgRoles) {
+          if (orgRole.organizationId === id) orgRoles.delete(key);
+        }
         for (const [teamId, team] of teams) {
           if (team.organizationId !== id) continue;
           teams.delete(teamId);
@@ -212,6 +217,14 @@ const makeFixture = () => {
           .map((m) => teams.get(m.teamId))
           .filter((t): t is Team => t !== undefined && t.organizationId === organizationId),
       ),
+    upsertOrgRole: (r: OrgRole) =>
+      Effect.sync(() => (orgRoles.set(`${r.organizationId} ${r.role}`, r), r)),
+    getOrgRole: (organizationId: string, role: string) =>
+      Effect.succeed(orgRoles.get(`${organizationId} ${role}`) ?? null),
+    listOrgRoles: (organizationId: string) =>
+      Effect.succeed([...orgRoles.values()].filter((r) => r.organizationId === organizationId)),
+    deleteOrgRole: (organizationId: string, role: string) =>
+      Effect.sync(() => void orgRoles.delete(`${organizationId} ${role}`)),
   };
 
   const adminUserStore = {
@@ -512,6 +525,98 @@ describe("HTTP organization endpoints", () => {
     expect(deleted.status).toBe(204);
     const afterDelete = await fx.handler(req("GET", `/organization/${org.id}/teams`, ownerSid));
     expect(((await afterDelete.json()) as unknown[]).length).toBe(0);
+  });
+
+  it("manages custom organization roles", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("member", "member@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const memberSid = fx.makeSession("member");
+
+    const created = await fx.handler(
+      jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
+    );
+    const org = (await created.json()) as { id: string };
+    await fx.handler(
+      jsonReq(`/organization/${org.id}/members`, { userId: "member", role: "member" }, ownerSid),
+    );
+
+    // Define a custom `member` role that may create teams.
+    const upserted = await fx.handler(
+      req("PUT", `/organization/${org.id}/roles/member`, ownerSid, {
+        permissions: ["team:create"],
+      }),
+    );
+    expect(upserted.status).toBe(200);
+    expect((await upserted.json()) as { role: string }).toMatchObject({
+      organizationId: org.id,
+      role: "member",
+      permissions: ["team:create"],
+    });
+
+    // Any member may list the definitions...
+    const listed = await fx.handler(req("GET", `/organization/${org.id}/roles`, memberSid));
+    expect(listed.status).toBe(200);
+    expect(((await listed.json()) as Array<{ role: string }>).map((r) => r.role)).toEqual([
+      "member",
+    ]);
+
+    // ...and the new permission is live for that member.
+    const teamRes = await fx.handler(
+      jsonReq(`/organization/${org.id}/teams`, { name: "Engineering" }, memberSid),
+    );
+    expect(teamRes.status).toBe(200);
+
+    // Deleting the definition restores the static (permission-less) role.
+    const deleted = await fx.handler(
+      req("DELETE", `/organization/${org.id}/roles/member`, ownerSid),
+    );
+    expect(deleted.status).toBe(204);
+    const afterDelete = await fx.handler(
+      jsonReq(`/organization/${org.id}/teams`, { name: "Rogue" }, memberSid),
+    );
+    expect(afterDelete.status).toBe(403);
+  });
+
+  it("returns 403 for role management without role:manage and for the owner role", async () => {
+    const fx = makeFixture();
+    fx.seedUser("owner", "owner@test.com");
+    fx.seedUser("admin", "admin@test.com");
+    const ownerSid = fx.makeSession("owner");
+    const adminSid = fx.makeSession("admin");
+
+    const created = await fx.handler(
+      jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
+    );
+    const org = (await created.json()) as { id: string };
+    await fx.handler(
+      jsonReq(`/organization/${org.id}/members`, { userId: "admin", role: "admin" }, ownerSid),
+    );
+
+    // `role:manage` is owner-only by default.
+    const adminUpsert = await fx.handler(
+      req("PUT", `/organization/${org.id}/roles/auditor`, adminSid, {
+        permissions: ["team:create"],
+      }),
+    );
+    expect(adminUpsert.status).toBe(403);
+    const adminDelete = await fx.handler(
+      req("DELETE", `/organization/${org.id}/roles/auditor`, adminSid),
+    );
+    expect(adminDelete.status).toBe(403);
+
+    // The owner role is protected even for the owner.
+    const ownerRoleUpsert = await fx.handler(
+      req("PUT", `/organization/${org.id}/roles/owner`, ownerSid, { permissions: ["*:*"] }),
+    );
+    expect(ownerRoleUpsert.status).toBe(403);
+
+    // Non-members cannot even list.
+    fx.seedUser("stranger", "stranger@test.com");
+    const strangerSid = fx.makeSession("stranger");
+    const strangerList = await fx.handler(req("GET", `/organization/${org.id}/roles`, strangerSid));
+    expect(strangerList.status).toBe(403);
   });
 
   it("returns 403 when a plain member tries to manage teams", async () => {

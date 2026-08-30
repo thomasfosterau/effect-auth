@@ -526,6 +526,25 @@ export const AddTeamMemberPayload = Schema.Struct({
 });
 export type AddTeamMemberPayload = typeof AddTeamMemberPayload.Type;
 
+/** Public view of a custom organization role. */
+export const OrgRoleView = Schema.Struct({
+  organizationId: Schema.String,
+  role: Schema.String,
+  permissions: Schema.Array(Schema.String),
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+});
+export type OrgRoleView = typeof OrgRoleView.Type;
+
+export const OrgRoleListView = Schema.Array(OrgRoleView);
+export type OrgRoleListView = typeof OrgRoleListView.Type;
+
+/** Request body for defining a custom organization role. */
+export const UpsertOrgRolePayload = Schema.Struct({
+  permissions: Schema.Array(Schema.String),
+});
+export type UpsertOrgRolePayload = typeof UpsertOrgRolePayload.Type;
+
 /** Request body for setting the session's active organization (null clears it). */
 export const SetActiveOrganizationPayload = Schema.Struct({
   organizationId: Schema.NullOr(Schema.String),

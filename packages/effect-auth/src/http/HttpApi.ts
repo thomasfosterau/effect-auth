@@ -429,6 +429,42 @@ export const authGroup = HttpApiGroup.make("auth").add(
       S.InternalError,
     ],
   }),
+  // Dynamic access control: per-organization role definitions. Writes need the
+  // `role:manage` permission (owner-only by default); any member may list.
+  HttpApiEndpoint.put("orgUpsertRole", "/organization/:organizationId/roles/:role", {
+    params: { organizationId: Schema.String, role: Schema.String },
+    payload: S.UpsertOrgRolePayload,
+    success: S.OrgRoleView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.get("orgListRoles", "/organization/:organizationId/roles", {
+    params: { organizationId: Schema.String },
+    success: S.OrgRoleListView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.delete("orgDeleteRole", "/organization/:organizationId/roles/:role", {
+    params: { organizationId: Schema.String, role: Schema.String },
+    success: HttpApiSchema.NoContent,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
   // Teams are organization sub-groups; the `team:*` permissions that gate them
   // are organization-scoped, so team-scoped routes resolve the organization
   // through the team id.

@@ -37,6 +37,7 @@ import {
   type Invitation,
   type Team,
   type TeamMember,
+  type OrgRole,
   type FullOrganization,
 } from "../Organization.ts";
 import { AdminService, isAdmin } from "../Admin.ts";
@@ -446,6 +447,14 @@ const encodeTeamMember = (m: TeamMember): S.TeamMemberView => ({
   teamId: m.teamId,
   userId: m.userId,
   createdAt: m.createdAt,
+});
+
+const encodeOrgRole = (r: OrgRole): S.OrgRoleView => ({
+  organizationId: r.organizationId,
+  role: r.role,
+  permissions: r.permissions,
+  createdAt: r.createdAt,
+  updatedAt: r.updatedAt,
 });
 
 const encodeFullOrganization = (f: FullOrganization): S.FullOrganizationView => ({
@@ -1907,6 +1916,54 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const org = yield* resolveOrganization;
           yield* org.service
             .removeMember(resolved.user.id, params.organizationId, params.userId)
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+        }),
+      )
+      // --- Organization roles (dynamic access control) -----------------------
+      .handle("orgUpsertRole", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const orgRole = yield* org.service
+            .upsertOrgRole(resolved.user.id, params.organizationId, {
+              role: params.role,
+              permissions: payload.permissions,
+            })
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return encodeOrgRole(orgRole);
+        }),
+      )
+      .handle("orgListRoles", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const orgRoles = yield* org.service
+            .listOrgRoles(resolved.user.id, params.organizationId)
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return orgRoles.map(encodeOrgRole);
+        }),
+      )
+      .handle("orgDeleteRole", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          yield* org.service
+            .deleteOrgRole(resolved.user.id, params.organizationId, params.role)
             .pipe(
               Effect.catchTags({
                 OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),

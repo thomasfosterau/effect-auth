@@ -153,6 +153,7 @@ export {
   type Invitation,
   type Team,
   type TeamMember,
+  type OrgRole,
   defaultOrganizationRoles,
   OrganizationStore,
   type OrganizationConfig,
@@ -161,6 +162,7 @@ export {
   type InviteMemberInput,
   type CreateTeamInput,
   type UpdateTeamInput,
+  type UpsertOrgRoleInput,
   type FullOrganization,
   OrganizationService,
 } from "./Organization.ts";

@@ -88,6 +88,8 @@ const EXPECTED_PATHS = [
   "/invitations/{invitationId}/cancel",
   "/organization/{organizationId}/members",
   "/organization/{organizationId}/members/{userId}",
+  "/organization/{organizationId}/roles",
+  "/organization/{organizationId}/roles/{role}",
   "/organization/{organizationId}/teams",
   "/organization/{organizationId}/members/{userId}/teams",
   "/teams/{teamId}",

@@ -146,6 +146,10 @@ const makeStores = () => {
     removeTeamMember: () => Effect.die("unused") as never,
     listTeamMembers: () => Effect.die("unused") as never,
     listTeamsForMember: () => Effect.die("unused") as never,
+    upsertOrgRole: () => Effect.die("unused") as never,
+    getOrgRole: () => Effect.die("unused") as never,
+    listOrgRoles: () => Effect.die("unused") as never,
+    deleteOrgRole: () => Effect.die("unused") as never,
   };
 
   const layer = Layer.mergeAll(
