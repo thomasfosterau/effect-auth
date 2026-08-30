@@ -905,7 +905,7 @@ Following Oslo guidelines:
 
 ## Security
 
-Security is our top priority. See our [Security Policy](./SECURITY.md) for:
+Security is our top priority. See our [Security Policy](./docs/SECURITY.md) for:
 
 - How to report security vulnerabilities
 - Security guarantees and considerations
@@ -984,38 +984,23 @@ Following BetterAuth and OWASP guidelines:
 6. Use distributed rate limiting for multi-server deployments
 7. Configure appropriate limits per operation type
 
-## Examples
-
-See the `examples/` directory for complete examples:
-
-- Basic session management
-- User authentication flow
-- Role-based access control
-- Custom storage adapters
-- WebAuthn passkey authentication
-- OAuth2 social login integration
-- Email verification flows
-- Rate limiting implementation
-
 ## Documentation
 
-- [Contributing Guide](./CONTRIBUTING.md) - How to contribute to this project
-- [Agent Guidelines](./AGENT_GUIDELINES.md) - Guidelines for agents and contributors
-- [Architecture](./ARCHITECTURE.md) - Architectural overview and design patterns
+- [Contributing Guide](./docs/CONTRIBUTING.md) - How to contribute to this project
+- [Architecture](./docs/ARCHITECTURE.md) - Architectural overview and design patterns
+- [Bring Your Own Store](./docs/guides/byo-stores.md) - Store-contract conventions, atomicity rules, and a worked example for any database
 - [MCP Provider Guide](./docs/guides/mcp-provider.md) - Dynamic client registration and PKCE auth-code for MCP clients
-- [Security Policy](./SECURITY.md) - Security best practices and vulnerability reporting
-- [BetterAuth Integration](./docs/BETTERAUTH_INTEGRATION.md) - Detailed BetterAuth feature integration guide
-- [Multi-Algorithm Support](./docs/MULTI_ALGORITHM.md) - Guide for multiple password hashing algorithms
+- [Security Policy](./docs/SECURITY.md) - Security best practices and vulnerability reporting
+- [Better Auth Parity Plan](./docs/better-auth-parity.md) - Target architecture, roadmap, and feature parity tracking
 
 ## Contributing
 
-Contributions are welcome! Please see our [Contributing Guide](./CONTRIBUTING.md) for details.
+Contributions are welcome! Please see our [Contributing Guide](./docs/CONTRIBUTING.md) for details.
 
 Before contributing, please review:
 
-- [Contributing Guide](./CONTRIBUTING.md) for the development workflow
-- [Agent Guidelines](./AGENT_GUIDELINES.md) for coding standards and security requirements
-- [Security Policy](./SECURITY.md) for security considerations
+- [Contributing Guide](./docs/CONTRIBUTING.md) for the development workflow
+- [Security Policy](./docs/SECURITY.md) for security considerations
 
 ## License
 

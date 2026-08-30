@@ -339,16 +339,46 @@ the engine for org dynamic access control (M4), which with teams unblocks SCIM g
 - **M4 — Organization parity (medium).** #78 teams; migrate the Organization
   plugin's static role map onto the M3 policy framework (kept as the zero-config
   default).
-- **M5 — Enterprise & MCP (large).** #75 SAML (signature verification is the critical
-  path — pick the XML-DSig approach deliberately; if it needs a dependency, SAML
-  becomes `packages/saml` per the §2.1 rule) and SCIM 2.0 (maps onto identifiers +
-  teams); #77.2 MCP preset (`.well-known/oauth-authorization-server` + a thin config
-  over the existing provider) — do MCP first, it's days not weeks.
-- **M6 — Adapter ecosystem (medium).** `packages/drizzle` (#171, per its captured
-  spec — decide: wrap the SQL stores vs standalone); first `EmailSender`/`SMSSender`
-  adapter packages (Resend, Twilio); document the BYO-store contract as the
-  Prisma/Kysely answer; evaluate a schema-generation CLI; door-open candidates
-  (`packages/cedar`, SIWE, payments) whenever demand appears.
+- **M5 — Enterprise & MCP (done 2026-08-30 for MCP + SAML SP; SCIM in flight
+  this wave).** #77.2 landed as RFC 7591 self-registration (`POST /register`,
+  201, snake_case, https/loopback redirect URIs, auth-method + grant/scope
+  validation) with RFC 7592 management (`GET`/`PUT`/`DELETE
+/register/:clientId` behind hashed registration access tokens, uniform
+  401s against client enumeration) and RFC 8414
+  `.well-known/oauth-authorization-server` discovery, guarded by a
+  registration policy hook, an optional initial access token, and per-IP
+  rate limiting; `mcpProviderPreset()` turns the OIDC provider into an
+  MCP-ready auth server (PKCE required + DCR on) and
+  `docs/guides/mcp-provider.md` walks a client through register → PKCE S256
+  authorize → token → userinfo → refresh. #75's SAML half landed as an SP:
+  core gained protocol-agnostic `SAMLVerifier`/`SAMLReplayStore` contracts
+  and an `SSO.ts` SAML provider variant (pinned `idpCertificates`,
+  `AnySSOProvider` union), while the XML stack lives in the new
+  `packages/saml` over `@node-saml/node-saml@5.1.0` (the release fixing
+  CVE-2025-54419/54369). Security posture: pinned-cert-only verification
+  (KeyInfo never trusted), signed-references-only reads, single-assertion
+  and duplicate-id rejection, audience/recipient/destination/conditions
+  checks with clock skew, a SHA-256+ signature floor (SHA-1 opt-in, HMAC
+  refused), encrypted assertions refused in v1, one-time AuthnRequest +
+  assertion-id replay protection via the atomic `SAMLReplayStore.consume`,
+  and IdP-initiated flows off by default — 26 crypto tests reproduce known
+  attack shapes (signature wrapping, decoy IDs, smuggled assertions) plus 14
+  service-level tests. SCIM 2.0 provisioning is in flight this wave,
+  tracked to close out #75.
+- **M6 — Adapter ecosystem (done 2026-08-30).** `packages/drizzle` (#171)
+  ships standalone `SessionStore`/`UserStore`/`IdentifierStore` layers over
+  `drizzle-orm/pg-core` (native `jsonb`/`timestamptz`, 15 tests against real
+  Postgres semantics via PGlite) — `IdentifierStore` beyond the captured
+  spec, since the identifier model makes it load-bearing; it stands alone
+  rather than wrapping the SQL stores. `packages/resend` and
+  `packages/twilio` are the first `EmailSender`/`SMSSender` adapters (§2.2),
+  both over plain `fetch` (no SDKs), with `Redacted` secrets that never leak
+  into errors, purpose-keyed default renderers, and 24 tests between them.
+  `docs/guides/byo-stores.md` documents the store-contract conventions, the
+  atomicity requirements, and a worked example — the Prisma/Kysely/Mongo
+  answer for every database this milestone doesn't ship an adapter for. A
+  schema-generation CLI and the `packages/cedar`/SIWE/payments door-open
+  candidates remain open whenever demand appears.
 - **M7 — DX & breadth (ongoing).** Client endpoint-coverage plugins + 2FA-challenge
   continuation helper (#92.2), more social presets, framework guides/examples.
 
