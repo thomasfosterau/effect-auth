@@ -59,11 +59,11 @@ export class SSOError extends Data.TaggedError("SSOError")<{
  * A registered **OIDC** SSO connection. Endpoints may be supplied directly or
  * populated from the issuer's discovery document at registration time.
  *
- * This is one arm of the {@link AnySSOProvider} union discriminated on
+ * This is one arm of the {@link SSOProvider} union discriminated on
  * `protocol`; {@link SAMLSSOProvider} is the other. Narrow before reaching for
  * protocol-specific fields.
  */
-export interface SSOProvider {
+export interface OIDCSSOProvider {
   readonly id: string;
   /** OIDC issuer identifier (`iss`). */
   readonly issuer: string;
@@ -129,29 +129,29 @@ export interface SAMLSSOProvider {
 }
 
 /**
- * A registered SSO connection of either protocol — a discriminated union on
+ * A registered SSO connection of **either** protocol — a discriminated union on
  * `protocol`.
  *
- * `SSOProvider` keeps its original, OIDC-shaped meaning so that existing
- * storage adapters and HTTP encoders continue to compile unchanged; this alias
- * is what the store and service speak in.
+ * This is the type the store and the service speak in, and the one to reach for
+ * when a value's protocol is not known statically; narrow on `protocol` to get
+ * at {@link OIDCSSOProvider}- or {@link SAMLSSOProvider}-specific fields.
  */
-export type AnySSOProvider = SSOProvider | SAMLSSOProvider;
+export type SSOProvider = OIDCSSOProvider | SAMLSSOProvider;
 
 /**
  * Persistent registry of SSO connections.
  *
- * The contract is protocol-agnostic: it stores whatever {@link AnySSOProvider}
+ * The contract is protocol-agnostic: it stores whatever {@link SSOProvider}
  * arm it is handed, so adding SAML needed no new methods. Adapters that
  * serialize to columns should key off `protocol` when reading a row back.
  */
 export class SSOProviderStore extends Context.Service<
   SSOProviderStore,
   {
-    readonly create: (provider: AnySSOProvider) => Effect.Effect<AnySSOProvider, AuthError>;
-    readonly getById: (id: string) => Effect.Effect<AnySSOProvider | null, AuthError>;
-    readonly getByDomain: (domain: string) => Effect.Effect<AnySSOProvider | null, AuthError>;
-    readonly list: () => Effect.Effect<ReadonlyArray<AnySSOProvider>, AuthError>;
+    readonly create: (provider: SSOProvider) => Effect.Effect<SSOProvider, AuthError>;
+    readonly getById: (id: string) => Effect.Effect<SSOProvider | null, AuthError>;
+    readonly getByDomain: (domain: string) => Effect.Effect<SSOProvider | null, AuthError>;
+    readonly list: () => Effect.Effect<ReadonlyArray<SSOProvider>, AuthError>;
   }
 >()("@effect-auth/SSOProviderStore") {}
 
@@ -201,7 +201,7 @@ export interface SSOSignInResult {
   readonly user: Types.User;
   readonly session: Types.Session;
   readonly isNewUser: boolean;
-  readonly provider: AnySSOProvider;
+  readonly provider: SSOProvider;
 }
 
 /** Where to start an SSO sign-in from. */
@@ -222,7 +222,7 @@ export class SSOService extends Context.Service<
     readonly registerProvider: (
       registrarUserId: string,
       input: RegisterProviderInput,
-    ) => Effect.Effect<SSOProvider, SSOError | AuthError>;
+    ) => Effect.Effect<OIDCSSOProvider, SSOError | AuthError>;
 
     /**
      * Register a SAML 2.0 connection. Kept separate from
@@ -243,7 +243,7 @@ export class SSOService extends Context.Service<
      */
     readonly resolveProviderForEmail: (
       email: string,
-    ) => Effect.Effect<AnySSOProvider | null, AuthError>;
+    ) => Effect.Effect<SSOProvider | null, AuthError>;
 
     /**
      * Begin an SSO sign-in: resolve the connection (by `providerId`, `domain`,
@@ -350,7 +350,7 @@ const idFromStateProvider = (name: string): string | null =>
   name.startsWith("sso:") ? name.slice(4) : null;
 
 /** Build the OAuth provider config for an SSO connection. */
-const toOAuthConfig = (provider: SSOProvider): OAuthProviderConfig => ({
+const toOAuthConfig = (provider: OIDCSSOProvider): OAuthProviderConfig => ({
   clientId: provider.clientId,
   clientSecret: Redacted.make(provider.clientSecret),
   redirectUri: provider.redirectUri,
@@ -442,7 +442,7 @@ export const make = (
      * proof of control over the address.
      */
     const provisionAndSignIn = Effect.fn("SSOService.provisionAndSignIn")(function* (
-      provider: AnySSOProvider,
+      provider: SSOProvider,
       profile: { readonly email: string; readonly name?: string; readonly image?: string },
     ) {
       const userStore = yield* OAuthUserStore;
@@ -569,7 +569,7 @@ export const make = (
         const userInfoEndpoint = input.userInfoEndpoint ?? discovered?.userInfoEndpoint;
         const jwksEndpoint = input.jwksEndpoint ?? discovered?.jwksEndpoint;
 
-        const provider: SSOProvider = {
+        const provider: OIDCSSOProvider = {
           id: yield* randomId(),
           issuer: input.issuer,
           domain: normalizeDomain(input.domain),
@@ -587,7 +587,7 @@ export const make = (
           userId: registrarUserId,
           createdAt: Date.now(),
         };
-        // The store speaks the `AnySSOProvider` union; narrow the record it
+        // The store speaks the `SSOProvider` union; narrow the record it
         // hands back to the arm we asked it to persist.
         const created = yield* store.create(provider);
         if (created.protocol !== "oidc") {

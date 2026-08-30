@@ -107,9 +107,9 @@ export {
 } from "./JWT.ts";
 export {
   SSOError,
-  type SSOProvider,
+  type OIDCSSOProvider,
   type SAMLSSOProvider,
-  type AnySSOProvider,
+  type SSOProvider,
   SSOProviderStore,
   type RegisterProviderInput,
   type RegisterSAMLProviderInput,
@@ -118,6 +118,28 @@ export {
   SSOService,
   type SSOConfig,
 } from "./SSO.ts";
+export {
+  SCIMError,
+  SCIM_USERNAME_ATTRIBUTE,
+  SCIM_DEACTIVATED_ATTRIBUTE,
+  SCIM_EXTERNAL_ID_ATTRIBUTE,
+  isSCIMDeactivated,
+  SCIMDeactivatedPlugin,
+  type SCIMConnection,
+  SCIMConnectionStore,
+  memorySCIMConnectionStore,
+  SCIMUserStore,
+  type SCIMEmail,
+  type SCIMUserResource,
+  type SCIMGroupResource,
+  type SCIMListResult,
+  type SCIMListQuery,
+  type SCIMPatchOperation,
+  type SCIMUserInput,
+  type SCIMGroupInput,
+  type SCIMConfig,
+  SCIMService,
+} from "./SCIM.ts";
 export {
   SAMLError,
   type SAMLSignatureAlgorithm,

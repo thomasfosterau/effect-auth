@@ -21,7 +21,7 @@ import {
   memoryIdentifierStore,
   type Identifier,
 } from "./Identifier.ts";
-import { OrganizationStore, type Member, type AnySSOProvider } from "./index.ts";
+import { OrganizationStore, type Member, type SSOProvider } from "./index.ts";
 import { OAuthStateStore, OAuthUserStore, type OAuthState } from "./oauth/OAuth.ts";
 import { SSOProviderStore, SSOError, SSOService } from "./SSO.ts";
 import * as SSO from "./SSO.ts";
@@ -57,7 +57,7 @@ const withFetch = async <A>(
 };
 
 const makeStores = () => {
-  const providers = new Map<string, AnySSOProvider>();
+  const providers = new Map<string, SSOProvider>();
   const users = new Map<string, Types.User>();
   const identifierRecords = new Map<string, Identifier>();
   const identifiers = memoryIdentifierStore(identifierRecords);
@@ -355,41 +355,47 @@ const ACME_SAML = {
 const samlResponse = (assertion: Partial<SAMLAssertion>): string =>
   Buffer.from(JSON.stringify(assertion), "utf8").toString("base64");
 
+/**
+ * A stub {@link SAMLVerifier} standing in for the XML/crypto implementation:
+ * it "signs" nothing and reads the assertion straight out of the base64 body,
+ * recording every `AuthnRequest` it is asked to build so a test can find the
+ * request id core minted.
+ */
+const stubSAMLVerifier = (requests: SAMLAuthnRequestInput[]): typeof SAMLVerifier.Service => ({
+  buildAuthnRequest: (input) => {
+    requests.push(input);
+    const url = new URL(input.ssoUrl);
+    url.searchParams.set("SAMLRequest", `stub:${input.requestId}`);
+    if (input.relayState !== undefined) url.searchParams.set("RelayState", input.relayState);
+    return Effect.succeed({ url: url.toString(), requestId: input.requestId });
+  },
+  verify: (input) =>
+    Effect.sync(() => {
+      const decoded = Buffer.from(input.samlResponse, "base64").toString("utf8");
+      const overrides = JSON.parse(decoded) as Partial<SAMLAssertion>;
+      return {
+        id: "_assertion-1",
+        issuer: input.idpEntityId,
+        nameId: "worker@acme.test",
+        nameIdFormat: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        email: "worker@acme.test",
+        displayName: "Worker Bee",
+        attributes: {},
+        ...overrides,
+      } satisfies SAMLAssertion;
+    }),
+  spMetadataXml: (input) => Effect.succeed(`<EntityDescriptor entityID="${input.spEntityId}"/>`),
+});
+
 const makeSAMLFixture = () => {
   const base = makeStores();
   const replayRecords = new Map<string, SAMLReplayRecord>();
   const replay = memorySAMLReplayStore(replayRecords);
   const requests: SAMLAuthnRequestInput[] = [];
 
-  const verifier: typeof SAMLVerifier.Service = {
-    buildAuthnRequest: (input) => {
-      requests.push(input);
-      const url = new URL(input.ssoUrl);
-      url.searchParams.set("SAMLRequest", `stub:${input.requestId}`);
-      if (input.relayState !== undefined) url.searchParams.set("RelayState", input.relayState);
-      return Effect.succeed({ url: url.toString(), requestId: input.requestId });
-    },
-    verify: (input) =>
-      Effect.sync(() => {
-        const decoded = Buffer.from(input.samlResponse, "base64").toString("utf8");
-        const overrides = JSON.parse(decoded) as Partial<SAMLAssertion>;
-        return {
-          id: "_assertion-1",
-          issuer: input.idpEntityId,
-          nameId: "worker@acme.test",
-          nameIdFormat: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
-          email: "worker@acme.test",
-          displayName: "Worker Bee",
-          attributes: {},
-          ...overrides,
-        } satisfies SAMLAssertion;
-      }),
-    spMetadataXml: (input) => Effect.succeed(`<EntityDescriptor entityID="${input.spEntityId}"/>`),
-  };
-
   const layer = Layer.mergeAll(
     base.layer,
-    Layer.succeed(SAMLVerifier)(verifier),
+    Layer.succeed(SAMLVerifier)(stubSAMLVerifier(requests)),
     Layer.succeed(SAMLReplayStore)(replay),
   );
 
@@ -694,7 +700,7 @@ const makeHttpFixture = () => {
   const identifierRecords = new Map<string, Identifier>();
   const identifierStore = memoryIdentifierStore(identifierRecords);
   const sessions = new Map<string, Types.Session>();
-  const providers = new Map<string, AnySSOProvider>();
+  const providers = new Map<string, SSOProvider>();
   const states = new Map<string, OAuthState>();
   const members: Member[] = [];
   let userSeq = 0;
@@ -826,6 +832,11 @@ const makeHttpFixture = () => {
   // `Crypto.Crypto` are required dynamically by its `signIn`/`handleCallback`
   // methods, and `OrganizationStore` is resolved optionally at call time — all
   // are provided here as ambient context.
+  // SAML is resolved optionally by `SSOService`, so the HTTP fixture installs
+  // the same stub verifier the service-level tests use plus an in-memory
+  // replay store — that is exactly what an app installing
+  // `@thomasfosterau/effect-auth-saml` would provide.
+  const samlRequests: SAMLAuthnRequestInput[] = [];
   const ssoDeps = Layer.mergeAll(
     Layer.succeed(SSOProviderStore)(ssoStore),
     Layer.succeed(OAuthStateStore)(stateStore),
@@ -833,6 +844,8 @@ const makeHttpFixture = () => {
     Layer.succeed(IdentifierStore)(identifierStore),
     Layer.succeed(UserStore)(userStore),
     Layer.succeed(OrganizationStore)(orgStore as never),
+    Layer.succeed(SAMLVerifier)(stubSAMLVerifier(samlRequests)),
+    Layer.succeed(SAMLReplayStore)(memorySAMLReplayStore()),
     PlatformCrypto.layer,
   );
 
@@ -850,6 +863,7 @@ const makeHttpFixture = () => {
     handlerWithoutSSO: HTTPServer.make({ services: withoutSSO, cookie: { secure: false } }).handler,
     providers,
     identifierRecords,
+    samlRequests,
   };
 };
 
@@ -920,6 +934,143 @@ describe("HTTP SSO endpoints", () => {
   it("returns 404 when SSO is not configured", async () => {
     const fx = makeHttpFixture();
     const res = await fx.handlerWithoutSSO(post("/sign-in/sso", { email: "a@b.test" }));
+    expect(res.status).toBe(404);
+  });
+});
+
+// --- HTTP: the SAML half -----------------------------------------------------
+
+const SAML_REGISTER_BODY = {
+  protocol: "saml",
+  domain: "acme.test",
+  entityId: SAML_IDP,
+  ssoUrl: "https://idp.acme.test/sso",
+  idpCertificates: ["-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----"],
+  spEntityId: SAML_SP,
+  acsUrl: SAML_ACS,
+};
+
+/** The IdP's ACS POST: an `application/x-www-form-urlencoded` browser form. */
+const acsPost = (providerId: string, fields: Record<string, string>): Request =>
+  new Request(`http://test/sso/saml/acs/${providerId}`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(fields).toString(),
+  });
+
+describe("HTTP SSO endpoints — SAML", () => {
+  it("registers a SAML connection through the same admin-gated endpoint", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+
+    const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
+    expect(registered.status).toBe(200);
+    const provider = (await registered.json()) as Record<string, unknown>;
+    expect(provider["protocol"]).toBe("saml");
+    expect(provider["entityId"]).toBe(SAML_IDP);
+    expect(provider["idpCertificates"]).toEqual(SAML_REGISTER_BODY.idpCertificates);
+    // The SAML arm has no client secret to leak, and neither arm echoes the
+    // registrar's user id.
+    expect(provider).not.toHaveProperty("clientSecret");
+    expect(provider).not.toHaveProperty("userId");
+    expect(fx.providers.size).toBe(1);
+  });
+
+  it("still registers an OIDC connection when the body carries no protocol", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+
+    const registered = await fx.handler(post("/sso/register", REGISTER_BODY, adminSid));
+    expect(registered.status).toBe(200);
+    const provider = (await registered.json()) as Record<string, unknown>;
+    expect(provider["protocol"]).toBe("oidc");
+    expect(provider["issuer"]).toBe("https://idp.acme.test");
+    expect(provider).not.toHaveProperty("clientSecret");
+    // The OIDC arm of the view carries no SAML fields.
+    expect(provider).not.toHaveProperty("idpCertificates");
+  });
+
+  it("rejects an invalid SAML registration with 400", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+
+    const res = await fx.handler(
+      post("/sso/register", { ...SAML_REGISTER_BODY, idpCertificates: [] }, adminSid),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { message: string }).message).toMatch(/idpCertificates/);
+  });
+
+  it("completes the ACS form POST and issues a session cookie", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+
+    const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
+    const { id: providerId } = (await registered.json()) as { id: string };
+
+    // Start the flow so the AuthnRequest id is banked, exactly as a browser
+    // redirect would.
+    const signIn = await fx.handler(post("/sign-in/sso", { email: "worker@acme.test" }));
+    expect(signIn.status).toBe(200);
+    const { state } = (await signIn.json()) as { url: string; state: string };
+    const requestId = fx.samlRequests[fx.samlRequests.length - 1]?.requestId ?? "";
+
+    const acs = await fx.handler(
+      acsPost(providerId, {
+        SAMLResponse: samlResponse({ id: "_http-a1", inResponseTo: requestId }),
+        RelayState: state,
+      }),
+    );
+    expect(acs.status).toBe(200);
+    expect(acs.headers.get("set-cookie")).toContain("conduit_session=");
+    expect(((await acs.json()) as { user: { email: string } }).user.email).toBe("worker@acme.test");
+  });
+
+  it("answers 400 when the ACS response cannot be trusted", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+    const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
+    const { id: providerId } = (await registered.json()) as { id: string };
+
+    // No AuthnRequest was ever issued, so there is nothing to spend.
+    const res = await fx.handler(
+      acsPost(providerId, { SAMLResponse: samlResponse({ inResponseTo: "_never-issued" }) }),
+    );
+    expect(res.status).toBe(400);
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("serves SP metadata as XML", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+    const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
+    const { id: providerId } = (await registered.json()) as { id: string };
+
+    const res = await fx.handler(
+      new Request(`http://test/sso/saml/metadata/${providerId}`, { method: "GET" }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/samlmetadata+xml");
+    expect(await res.text()).toContain(SAML_SP);
+  });
+
+  it("answers 400 for metadata on an OIDC connection", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+    const registered = await fx.handler(post("/sso/register", REGISTER_BODY, adminSid));
+    const { id: providerId } = (await registered.json()) as { id: string };
+
+    const res = await fx.handler(
+      new Request(`http://test/sso/saml/metadata/${providerId}`, { method: "GET" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 on the SAML routes when SSO is not configured", async () => {
+    const fx = makeHttpFixture();
+    const res = await fx.handlerWithoutSSO(
+      new Request("http://test/sso/saml/metadata/anything", { method: "GET" }),
+    );
     expect(res.status).toBe(404);
   });
 });

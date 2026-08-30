@@ -339,8 +339,7 @@ the engine for org dynamic access control (M4), which with teams unblocks SCIM g
 - **M4 — Organization parity (medium).** #78 teams; migrate the Organization
   plugin's static role map onto the M3 policy framework (kept as the zero-config
   default).
-- **M5 — Enterprise & MCP (done 2026-08-30 for MCP + SAML SP; SCIM in flight
-  this wave).** #77.2 landed as RFC 7591 self-registration (`POST /register`,
+- **M5 — Enterprise & MCP (done 2026-08-30).** #77.2 landed as RFC 7591 self-registration (`POST /register`,
   201, snake_case, https/loopback redirect URIs, auth-method + grant/scope
   validation) with RFC 7592 management (`GET`/`PUT`/`DELETE
 /register/:clientId` behind hashed registration access tokens, uniform
@@ -363,8 +362,17 @@ the engine for org dynamic access control (M4), which with teams unblocks SCIM g
   assertion-id replay protection via the atomic `SAMLReplayStore.consume`,
   and IdP-initiated flows off by default — 26 crypto tests reproduce known
   attack shapes (signature wrapping, decoy IDs, smuggled assertions) plus 14
-  service-level tests. SCIM 2.0 provisioning is in flight this wave,
-  tracked to close out #75.
+  service-level tests, with the ACS/metadata endpoints wired
+  (form-POST ACS, SP metadata XML, SAML registration arm; the OIDC-only
+  provider type renamed `OIDCSSOProvider`, `SSOProvider` now the union).
+  #75's SCIM half landed as `SCIM.ts` + a `/scim/v2` group: Users and
+  Groups mapped onto users/identifiers and org teams (userName pinned
+  against rename regressions, soft deactivation with session revocation +
+  `SCIMDeactivatedPlugin`, Okta and Entra patch dialects, eq filters,
+  pagination), per-organization bearer provisioning connections with
+  hashed tokens and 404-shaped cross-tenant isolation, RFC 7644 error
+  bodies, and the three discovery documents — 38 tests including a full
+  Okta lifecycle; guide at `docs/guides/scim.md`.
 - **M6 — Adapter ecosystem (done 2026-08-30).** `packages/drizzle` (#171)
   ships standalone `SessionStore`/`UserStore`/`IdentifierStore` layers over
   `drizzle-orm/pg-core` (native `jsonb`/`timestamptz`, 15 tests against real
@@ -379,8 +387,15 @@ the engine for org dynamic access control (M4), which with teams unblocks SCIM g
   answer for every database this milestone doesn't ship an adapter for. A
   schema-generation CLI and the `packages/cedar`/SIWE/payments door-open
   candidates remain open whenever demand appears.
-- **M7 — DX & breadth (ongoing).** Client endpoint-coverage plugins + 2FA-challenge
-  continuation helper (#92.2), more social presets, framework guides/examples.
+- **M7 — DX & breadth (#92.2 done 2026-08-30; breadth ongoing).** The client
+  now covers 89 of the contract's 101 endpoints as first-party typed
+  sections (identifiers, the full organization surface incl. teams and
+  dynamic roles, phone OTP, One Tap, SSO, device authorization, API keys,
+  JWKS, admin, OIDC client management; the 12 gaps are protocol endpoints
+  consumed by other clients), plus `multiFactor.continueChallenge` binding
+  `AuthSuccess.secondFactor` into the verify calls with client-side expiry
+  awareness; `docs/guides/client.md` documents the whole client. Still
+  open: more social presets, framework guides/examples.
 
 After M0–M1 the library is an honest Better Auth replacement for non-enterprise apps
 whose stores it ships or that bring their own; M2–M3 pull ahead of Better Auth on the

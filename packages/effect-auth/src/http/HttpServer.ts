@@ -50,6 +50,16 @@ import {
   type OIDCRegistrationError,
 } from "../OIDCProvider.ts";
 import { SSOService, type SSOProvider } from "../SSO.ts";
+import {
+  SCIMService,
+  type SCIMError,
+  type SCIMGroupInput,
+  type SCIMGroupResource,
+  type SCIMListQuery,
+  type SCIMUserInput,
+  type SCIMUserResource,
+} from "../SCIM.ts";
+import type * as Errors from "../Errors.ts";
 import { hashToken } from "../TokenHash.ts";
 import { GoogleOneTapService } from "../GoogleOneTap.ts";
 import {
@@ -467,21 +477,48 @@ const encodeFullOrganization = (f: FullOrganization): S.FullOrganizationView => 
   members: f.members.map(encodeMember),
 });
 
-const encodeSSOProvider = (p: SSOProvider): S.SSOProviderView => ({
-  id: p.id,
-  issuer: p.issuer,
-  domain: p.domain,
-  protocol: p.protocol,
-  clientId: p.clientId,
-  redirectUri: p.redirectUri,
-  authorizationEndpoint: p.authorizationEndpoint,
-  tokenEndpoint: p.tokenEndpoint,
-  ...(p.userInfoEndpoint !== undefined && { userInfoEndpoint: p.userInfoEndpoint }),
-  ...(p.jwksEndpoint !== undefined && { jwksEndpoint: p.jwksEndpoint }),
-  scopes: p.scopes,
-  ...(p.organizationId !== undefined && { organizationId: p.organizationId }),
-  createdAt: p.createdAt,
-});
+/**
+ * Encode an SSO connection for the wire, one arm of the `protocol` union at a
+ * time. Neither arm carries a secret: the OIDC arm drops `clientSecret`, and
+ * both drop the registrar's `userId`.
+ */
+const encodeSSOProvider = (p: SSOProvider): S.SSOProviderView =>
+  p.protocol === "saml"
+    ? {
+        id: p.id,
+        domain: p.domain,
+        protocol: p.protocol,
+        entityId: p.entityId,
+        ssoUrl: p.ssoUrl,
+        idpCertificates: p.idpCertificates,
+        spEntityId: p.spEntityId,
+        acsUrl: p.acsUrl,
+        ...(p.signatureAlgorithms !== undefined && { signatureAlgorithms: p.signatureAlgorithms }),
+        ...(p.wantAssertionsSigned !== undefined && {
+          wantAssertionsSigned: p.wantAssertionsSigned,
+        }),
+        ...(p.wantAuthnResponseSigned !== undefined && {
+          wantAuthnResponseSigned: p.wantAuthnResponseSigned,
+        }),
+        ...(p.forceAuthn !== undefined && { forceAuthn: p.forceAuthn }),
+        ...(p.organizationId !== undefined && { organizationId: p.organizationId }),
+        createdAt: p.createdAt,
+      }
+    : {
+        id: p.id,
+        issuer: p.issuer,
+        domain: p.domain,
+        protocol: p.protocol,
+        clientId: p.clientId,
+        redirectUri: p.redirectUri,
+        authorizationEndpoint: p.authorizationEndpoint,
+        tokenEndpoint: p.tokenEndpoint,
+        ...(p.userInfoEndpoint !== undefined && { userInfoEndpoint: p.userInfoEndpoint }),
+        ...(p.jwksEndpoint !== undefined && { jwksEndpoint: p.jwksEndpoint }),
+        scopes: p.scopes,
+        ...(p.organizationId !== undefined && { organizationId: p.organizationId }),
+        createdAt: p.createdAt,
+      };
 
 const encodeOIDCClient = (c: OIDCClient): S.OIDCClientView => ({
   clientId: c.clientId,
@@ -2449,6 +2486,40 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             return yield* new S.Forbidden({ message: "Admin privileges required" });
           }
           const sso = yield* resolveSSO;
+          // The payload is a union discriminated on `protocol`; a body without
+          // one is an OIDC registration (what every pre-SAML client sends).
+          if (payload.protocol === "saml") {
+            const samlProvider = yield* sso.service
+              .registerSAMLProvider(resolved.user.id, {
+                protocol: "saml",
+                domain: payload.domain,
+                entityId: payload.entityId,
+                ssoUrl: payload.ssoUrl,
+                idpCertificates: payload.idpCertificates,
+                spEntityId: payload.spEntityId,
+                acsUrl: payload.acsUrl,
+                ...(payload.signatureAlgorithms !== undefined && {
+                  signatureAlgorithms: payload.signatureAlgorithms,
+                }),
+                ...(payload.wantAssertionsSigned !== undefined && {
+                  wantAssertionsSigned: payload.wantAssertionsSigned,
+                }),
+                ...(payload.wantAuthnResponseSigned !== undefined && {
+                  wantAuthnResponseSigned: payload.wantAuthnResponseSigned,
+                }),
+                ...(payload.forceAuthn !== undefined && { forceAuthn: payload.forceAuthn }),
+                ...(payload.organizationId !== undefined && {
+                  organizationId: payload.organizationId,
+                }),
+              })
+              .pipe(
+                Effect.catchTags({
+                  SSOError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                  AuthError: (e) => internalServerError(e),
+                }),
+              );
+            return encodeSSOProvider(samlProvider);
+          }
           const provider = yield* sso.service
             .registerProvider(resolved.user.id, {
               issuer: payload.issuer,
@@ -2539,6 +2610,63 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             needsEmailVerification: false,
           };
           return yield* withSessionCookie(body, result.session, cfg, "sso");
+        }),
+      )
+      // SAML assertion consumer service. The IdP form-POSTs here through the
+      // user's browser, so the tail is the same session-issuing one the OIDC
+      // callback uses — cookie, last-login-method hint, bearer header and all.
+      .handle("samlAcs", ({ params, payload }) =>
+        Effect.gen(function* () {
+          const sso = yield* resolveSSO;
+          const result = yield* sso.service
+            .handleSAMLCallback(params.providerId, payload.SAMLResponse, payload.RelayState)
+            .pipe(
+              Effect.catchTags({
+                SSOError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+                AccountLockedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                UserBannedError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
+                    ),
+                  ),
+                CaptchaError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
+                PwnedPasswordError: (e) =>
+                  resolveMessage(e.code, e.message).pipe(
+                    Effect.flatMap((msg) =>
+                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                    ),
+                  ),
+              }),
+            );
+          const body: S.AuthSuccess = {
+            user: yield* encodeUserView(result.user),
+            needsEmailVerification: false,
+          };
+          return yield* withSessionCookie(body, result.session, cfg, "sso");
+        }),
+      )
+      .handle("samlMetadata", ({ params }) =>
+        Effect.gen(function* () {
+          const sso = yield* resolveSSO;
+          return yield* sso.service.samlMetadata(params.providerId).pipe(
+            Effect.catchTags({
+              SSOError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              AuthError: (e) => internalServerError(e),
+            }),
+          );
         }),
       )
       // --- JWT --------------------------------------------------------------
@@ -2962,6 +3090,495 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       ),
   );
 };
+
+// -----------------------------------------------------------------------------
+// SCIM 2.0 provisioning
+// -----------------------------------------------------------------------------
+
+/**
+ * Build a SCIM error body (RFC 7644 §3.12). `status` is a *string* there, and
+ * `scimType` is the machine-readable half an IdP branches on.
+ */
+const scimBadRequest = (detail: string, scimType?: string): S.SCIMBadRequest =>
+  new S.SCIMBadRequest({
+    schemas: [S.SCIM_ERROR_SCHEMA],
+    status: "400",
+    ...(scimType !== undefined && { scimType }),
+    detail,
+  });
+
+const scimUnauthorized = (detail: string): S.SCIMUnauthorized =>
+  new S.SCIMUnauthorized({ schemas: [S.SCIM_ERROR_SCHEMA], status: "401", detail });
+
+const scimNotFound = (detail: string): S.SCIMNotFound =>
+  new S.SCIMNotFound({ schemas: [S.SCIM_ERROR_SCHEMA], status: "404", detail });
+
+const scimConflict = (detail: string): S.SCIMConflict =>
+  new S.SCIMConflict({
+    schemas: [S.SCIM_ERROR_SCHEMA],
+    status: "409",
+    scimType: "uniqueness",
+    detail,
+  });
+
+/**
+ * Log the real error and answer with a generic SCIM 500, so internals never
+ * reach the IdP. The SCIM mirror of {@link internalServerError}.
+ */
+const scimInternalError = (e: unknown): Effect.Effect<never, S.SCIMInternalError, never> =>
+  Effect.logError("[effect-auth] internal error", e).pipe(
+    Effect.flatMap(() =>
+      Effect.fail(
+        new S.SCIMInternalError({
+          schemas: [S.SCIM_ERROR_SCHEMA],
+          status: "500",
+          detail: "Internal server error",
+        }),
+      ),
+    ),
+  );
+
+/** Translate a core {@link SCIMError} into the wire body its status calls for. */
+const scimFailure = (
+  e: SCIMError,
+): Effect.Effect<
+  never,
+  S.SCIMBadRequest | S.SCIMUnauthorized | S.SCIMNotFound | S.SCIMConflict | S.SCIMInternalError
+> => {
+  switch (e.status) {
+    case 400:
+      return Effect.fail(scimBadRequest(e.message, e.scimType));
+    case 401:
+      return Effect.fail(scimUnauthorized(e.message));
+    case 404:
+      return Effect.fail(scimNotFound(e.message));
+    case 409:
+      return Effect.fail(scimConflict(e.message));
+    default:
+      return scimInternalError(e);
+  }
+};
+
+/** The catch-set every SCIM handler applies to a `SCIMService` call. */
+const scimCatch = {
+  SCIMError: scimFailure,
+  AuthError: (e: Errors.AuthError) => scimInternalError(e),
+} as const;
+
+/**
+ * Resolve the SCIM service *and* authenticate the request's bearer token.
+ *
+ * Two guards in one, because they are inseparable: without the service the
+ * feature is not mounted (404, in SCIM's error shape), and with it every route
+ * is gated on an organization's provisioning token. A missing, malformed, or
+ * unknown token gets the same 401 — the service answers uniformly so a caller
+ * cannot probe which tokens exist.
+ */
+const requireSCIM = (request: HttpServerRequest.HttpServerRequest) =>
+  Effect.gen(function* () {
+    const service = yield* Effect.serviceOption(SCIMService);
+    if (Option.isNone(service)) {
+      return yield* scimNotFound("SCIM provisioning is not enabled");
+    }
+    const token = bearerToken(request);
+    if (token === undefined) {
+      return yield* scimUnauthorized("Missing SCIM provisioning token");
+    }
+    const connection = yield* service.value.authenticate(token).pipe(Effect.catchTags(scimCatch));
+    return { service: service.value, connection };
+  });
+
+/** The discovery documents are static, so resolving the service is the only gate. */
+const requireSCIMService = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(SCIMService);
+  if (Option.isNone(service)) {
+    return yield* scimNotFound("SCIM provisioning is not enabled");
+  }
+  return service.value;
+});
+
+const scimMeta = (
+  resourceType: string,
+  baseUrl: string,
+  id: string,
+  createdAt: number,
+  updatedAt: number,
+): S.SCIMMetaView => ({
+  resourceType,
+  created: new Date(createdAt).toISOString(),
+  lastModified: new Date(updatedAt).toISOString(),
+  location: `${baseUrl}/${resourceType}s/${id}`,
+});
+
+const encodeSCIMUser = (resource: SCIMUserResource, baseUrl: string): S.SCIMUserView => ({
+  schemas: [S.SCIM_USER_SCHEMA],
+  id: resource.id,
+  ...(resource.externalId !== undefined && { externalId: resource.externalId }),
+  userName: resource.userName,
+  ...(resource.displayName !== undefined && { displayName: resource.displayName }),
+  emails: resource.emails.map((email) => ({
+    value: email.value,
+    ...(email.primary !== undefined && { primary: email.primary }),
+    ...(email.type !== undefined && { type: email.type }),
+  })),
+  active: resource.active,
+  meta: scimMeta("User", baseUrl, resource.id, resource.createdAt, resource.updatedAt),
+});
+
+const encodeSCIMGroup = (resource: SCIMGroupResource, baseUrl: string): S.SCIMGroupView => ({
+  schemas: [S.SCIM_GROUP_SCHEMA],
+  id: resource.id,
+  displayName: resource.displayName,
+  members: resource.members.map((member) => ({ value: member.value })),
+  meta: scimMeta("Group", baseUrl, resource.id, resource.createdAt, resource.updatedAt),
+});
+
+/**
+ * SCIM list parameters arrive as query strings. `startIndex` and `count` must
+ * be integers; anything else is a client bug worth reporting rather than
+ * silently coercing to a surprising page.
+ */
+const scimListQuery = (query: {
+  readonly filter?: string | undefined;
+  readonly startIndex?: string | undefined;
+  readonly count?: string | undefined;
+}): Effect.Effect<SCIMListQuery, S.SCIMBadRequest> => {
+  const parseInteger = (raw: string | undefined): number | null | undefined => {
+    if (raw === undefined || raw.trim() === "") return undefined;
+    const value = Number(raw);
+    return Number.isInteger(value) ? value : null;
+  };
+  const startIndex = parseInteger(query.startIndex);
+  if (startIndex === null) {
+    return Effect.fail(scimBadRequest("startIndex must be an integer", "invalidValue"));
+  }
+  const count = parseInteger(query.count);
+  if (count === null) {
+    return Effect.fail(scimBadRequest("count must be an integer", "invalidValue"));
+  }
+  return Effect.succeed({
+    ...(query.filter !== undefined && query.filter !== "" && { filter: query.filter }),
+    ...(startIndex !== undefined && { startIndex }),
+    ...(count !== undefined && { count }),
+  });
+};
+
+/** Fold Okta's `name` sub-attributes into a display name when it sent no `displayName`. */
+const scimDisplayName = (payload: S.SCIMUserPayload): string | undefined => {
+  if (payload.displayName !== undefined && payload.displayName.trim() !== "") {
+    return payload.displayName;
+  }
+  const name = payload.name;
+  if (name === undefined) return undefined;
+  if (name.formatted !== undefined && name.formatted.trim() !== "") return name.formatted;
+  const parts = [name.givenName, name.familyName].filter(
+    (part): part is string => part !== undefined && part.trim() !== "",
+  );
+  return parts.length === 0 ? undefined : parts.join(" ");
+};
+
+const toSCIMUserInput = (payload: S.SCIMUserPayload): SCIMUserInput => {
+  const displayName = scimDisplayName(payload);
+  return {
+    userName: payload.userName,
+    ...(displayName !== undefined && { displayName }),
+    ...(payload.externalId !== undefined && { externalId: payload.externalId }),
+    ...(payload.emails !== undefined && {
+      emails: payload.emails.map((email) => ({
+        value: email.value,
+        ...(email.primary !== undefined && { primary: email.primary }),
+        ...(email.type !== undefined && { type: email.type }),
+      })),
+    }),
+    ...(payload.active !== undefined && { active: payload.active }),
+  };
+};
+
+const toSCIMGroupInput = (payload: S.SCIMGroupPayload): SCIMGroupInput => ({
+  displayName: payload.displayName,
+  ...(payload.members !== undefined && {
+    members: payload.members.map((member) => ({ value: member.value })),
+  }),
+});
+
+/**
+ * `GET /ServiceProviderConfig` (RFC 7643 §5) — what this server supports.
+ *
+ * Everything advertised here is implemented, and everything implemented is
+ * advertised: `patch` yes, `filter` yes (with `maxResults`), and `bulk`,
+ * `changePassword`, `sort` and `etag` all off, because pretending otherwise is
+ * how provisioning silently half-works.
+ */
+const scimServiceProviderConfig = (baseUrl: string, maxResults: number): S.SCIMDocumentView => ({
+  schemas: [S.SCIM_SERVICE_PROVIDER_CONFIG_SCHEMA],
+  documentationUri: "https://datatracker.ietf.org/doc/html/rfc7644",
+  patch: { supported: true },
+  bulk: { supported: false, maxOperations: 0, maxPayloadSize: 0 },
+  filter: { supported: true, maxResults },
+  changePassword: { supported: false },
+  sort: { supported: false },
+  etag: { supported: false },
+  authenticationSchemes: [
+    {
+      type: "oauthbearertoken",
+      name: "OAuth Bearer Token",
+      description:
+        "Authentication with the organization's SCIM provisioning token, sent as " +
+        "`Authorization: Bearer <token>`.",
+      specUri: "https://datatracker.ietf.org/doc/html/rfc6750",
+      primary: true,
+    },
+  ],
+  meta: {
+    resourceType: "ServiceProviderConfig",
+    location: `${baseUrl}/ServiceProviderConfig`,
+  },
+});
+
+/** `GET /ResourceTypes` (RFC 7643 §6) — the two resources this server exposes. */
+const scimResourceTypes = (baseUrl: string): S.SCIMDocumentView => {
+  const resource = (name: string, endpoint: string, schema: string) => ({
+    schemas: [S.SCIM_RESOURCE_TYPE_SCHEMA],
+    id: name,
+    name,
+    endpoint,
+    description: `${name} resource`,
+    schema,
+    meta: {
+      resourceType: "ResourceType",
+      location: `${baseUrl}/ResourceTypes/${name}`,
+    },
+  });
+  const resources = [
+    resource("User", "/Users", S.SCIM_USER_SCHEMA),
+    resource("Group", "/Groups", S.SCIM_GROUP_SCHEMA),
+  ];
+  return {
+    schemas: [S.SCIM_LIST_RESPONSE_SCHEMA],
+    totalResults: resources.length,
+    startIndex: 1,
+    itemsPerPage: resources.length,
+    Resources: resources,
+  };
+};
+
+/**
+ * `GET /Schemas` (RFC 7643 §7) — the attributes of the two resources, limited
+ * to the ones this server actually reads and writes.
+ */
+const scimSchemas = (baseUrl: string): S.SCIMDocumentView => {
+  const attribute = (
+    name: string,
+    type: string,
+    options: {
+      readonly multiValued?: boolean;
+      readonly required?: boolean;
+      readonly uniqueness?: string;
+      readonly mutability?: string;
+      readonly subAttributes?: ReadonlyArray<unknown>;
+    } = {},
+  ) => ({
+    name,
+    type,
+    multiValued: options.multiValued ?? false,
+    required: options.required ?? false,
+    caseExact: false,
+    mutability: options.mutability ?? "readWrite",
+    returned: "default",
+    uniqueness: options.uniqueness ?? "none",
+    ...(options.subAttributes !== undefined && { subAttributes: options.subAttributes }),
+  });
+
+  const resources = [
+    {
+      id: S.SCIM_USER_SCHEMA,
+      name: "User",
+      description: "SCIM core User",
+      attributes: [
+        attribute("userName", "string", { required: true, uniqueness: "server" }),
+        attribute("displayName", "string"),
+        attribute("externalId", "string"),
+        attribute("active", "boolean"),
+        attribute("emails", "complex", {
+          multiValued: true,
+          subAttributes: [
+            attribute("value", "string"),
+            attribute("primary", "boolean"),
+            attribute("type", "string"),
+          ],
+        }),
+      ],
+      meta: { resourceType: "Schema", location: `${baseUrl}/Schemas/${S.SCIM_USER_SCHEMA}` },
+    },
+    {
+      id: S.SCIM_GROUP_SCHEMA,
+      name: "Group",
+      description: "SCIM core Group",
+      attributes: [
+        attribute("displayName", "string", { required: true }),
+        attribute("members", "complex", {
+          multiValued: true,
+          subAttributes: [attribute("value", "string", { mutability: "immutable" })],
+        }),
+      ],
+      meta: { resourceType: "Schema", location: `${baseUrl}/Schemas/${S.SCIM_GROUP_SCHEMA}` },
+    },
+  ];
+
+  return {
+    schemas: [S.SCIM_LIST_RESPONSE_SCHEMA],
+    totalResults: resources.length,
+    startIndex: 1,
+    itemsPerPage: resources.length,
+    Resources: resources,
+  };
+};
+
+/**
+ * Layer implementing the `scim` group handlers.
+ *
+ * Every route resolves `SCIMService` optionally, so a deployment that never
+ * provisions answers `404` here and pays nothing for the feature.
+ */
+export const scimGroupLayer = () =>
+  HttpApiBuilder.group(AuthApi, "scim", (handlers) =>
+    handlers
+      .handle("scimCreateUser", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const scim = yield* requireSCIM(request);
+          const resource = yield* scim.service
+            .createUser(scim.connection, toSCIMUserInput(payload))
+            .pipe(Effect.catchTags(scimCatch));
+          return encodeSCIMUser(resource, scim.service.baseUrl);
+        }),
+      )
+      .handle("scimListUsers", ({ query, request }) =>
+        Effect.gen(function* () {
+          const scim = yield* requireSCIM(request);
+          const listQuery = yield* scimListQuery(query);
+          const page = yield* scim.service
+            .listUsers(scim.connection, listQuery)
+            .pipe(Effect.catchTags(scimCatch));
+          return {
+            schemas: [S.SCIM_LIST_RESPONSE_SCHEMA],
+            totalResults: page.totalResults,
+            startIndex: page.startIndex,
+            itemsPerPage: page.itemsPerPage,
+            Resources: page.resources.map((resource) =>
+              encodeSCIMUser(resource, scim.service.baseUrl),
+            ),
+          };
+        }),
+      )
+      .handle("scimGetUser", ({ params, request }) =>
+        Effect.gen(function* () {
+          const scim = yield* requireSCIM(request);
+          const resource = yield* scim.service
+            .getUser(scim.connection, params.id)
+            .pipe(Effect.catchTags(scimCatch));
+          return encodeSCIMUser(resource, scim.service.baseUrl);
+        }),
+      )
+      .handle("scimReplaceUser", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const scim = yield* requireSCIM(request);
+          const resource = yield* scim.service
+            .replaceUser(scim.connection, params.id, toSCIMUserInput(payload))
+            .pipe(Effect.catchTags(scimCatch));
+          return encodeSCIMUser(resource, scim.service.baseUrl);
+        }),
+      )
+      .handle("scimPatchUser", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const scim = yield* requireSCIM(request);
+          const resource = yield* scim.service
+            .patchUser(scim.connection, params.id, payload.Operations)
+            .pipe(Effect.catchTags(scimCatch));
+          return encodeSCIMUser(resource, scim.service.baseUrl);
+        }),
+      )
+      .handle("scimDeleteUser", ({ params, request }) =>
+        Effect.gen(function* () {
+          const scim = yield* requireSCIM(request);
+          yield* scim.service
+            .deactivateUser(scim.connection, params.id)
+            .pipe(Effect.catchTags(scimCatch));
+        }),
+      )
+      .handle("scimCreateGroup", ({ payload, request }) =>
+        Effect.gen(function* () {
+          const scim = yield* requireSCIM(request);
+          const resource = yield* scim.service
+            .createGroup(scim.connection, toSCIMGroupInput(payload))
+            .pipe(Effect.catchTags(scimCatch));
+          return encodeSCIMGroup(resource, scim.service.baseUrl);
+        }),
+      )
+      .handle("scimListGroups", ({ query, request }) =>
+        Effect.gen(function* () {
+          const scim = yield* requireSCIM(request);
+          const listQuery = yield* scimListQuery(query);
+          const page = yield* scim.service
+            .listGroups(scim.connection, listQuery)
+            .pipe(Effect.catchTags(scimCatch));
+          return {
+            schemas: [S.SCIM_LIST_RESPONSE_SCHEMA],
+            totalResults: page.totalResults,
+            startIndex: page.startIndex,
+            itemsPerPage: page.itemsPerPage,
+            Resources: page.resources.map((resource) =>
+              encodeSCIMGroup(resource, scim.service.baseUrl),
+            ),
+          };
+        }),
+      )
+      .handle("scimGetGroup", ({ params, request }) =>
+        Effect.gen(function* () {
+          const scim = yield* requireSCIM(request);
+          const resource = yield* scim.service
+            .getGroup(scim.connection, params.id)
+            .pipe(Effect.catchTags(scimCatch));
+          return encodeSCIMGroup(resource, scim.service.baseUrl);
+        }),
+      )
+      .handle("scimReplaceGroup", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const scim = yield* requireSCIM(request);
+          const resource = yield* scim.service
+            .replaceGroup(scim.connection, params.id, toSCIMGroupInput(payload))
+            .pipe(Effect.catchTags(scimCatch));
+          return encodeSCIMGroup(resource, scim.service.baseUrl);
+        }),
+      )
+      .handle("scimPatchGroup", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const scim = yield* requireSCIM(request);
+          const resource = yield* scim.service
+            .patchGroup(scim.connection, params.id, payload.Operations)
+            .pipe(Effect.catchTags(scimCatch));
+          return encodeSCIMGroup(resource, scim.service.baseUrl);
+        }),
+      )
+      .handle("scimDeleteGroup", ({ params, request }) =>
+        Effect.gen(function* () {
+          const scim = yield* requireSCIM(request);
+          yield* scim.service
+            .deleteGroup(scim.connection, params.id)
+            .pipe(Effect.catchTags(scimCatch));
+        }),
+      )
+      .handle("scimServiceProviderConfig", () =>
+        Effect.map(requireSCIMService, (service) =>
+          scimServiceProviderConfig(service.baseUrl, service.maxPageSize),
+        ),
+      )
+      .handle("scimResourceTypes", () =>
+        Effect.map(requireSCIMService, (service) => scimResourceTypes(service.baseUrl)),
+      )
+      .handle("scimSchemas", () =>
+        Effect.map(requireSCIMService, (service) => scimSchemas(service.baseUrl)),
+      ),
+  );
 
 /**
  * Encode a user for the wire with the derived `email`/`emailVerified`
@@ -3411,6 +4028,9 @@ export const make = (
 } => {
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
     Layer.provide(authGroupLayer(options.cookie, options.multiSession)),
+    // The SCIM group is always mounted; its handlers resolve `SCIMService`
+    // optionally and answer 404 when provisioning is not configured.
+    Layer.provide(scimGroupLayer()),
     Layer.provide(PlatformLayer),
   );
   // The handlers' service requirements are tracked as phantom

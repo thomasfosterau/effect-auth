@@ -108,6 +108,8 @@ const EXPECTED_PATHS = [
   "/sso/register",
   "/sign-in/sso",
   "/sso/callback",
+  "/sso/saml/acs/{providerId}",
+  "/sso/saml/metadata/{providerId}",
   "/token",
   "/jwks",
   "/oauth2/register",
@@ -124,6 +126,14 @@ const EXPECTED_PATHS = [
   "/.well-known/jwks.json",
   "/sign-in/google-one-tap/nonce",
   "/sign-in/google-one-tap",
+  // SCIM 2.0 provisioning (its own group, mounted under /scim/v2).
+  "/scim/v2/Users",
+  "/scim/v2/Users/{id}",
+  "/scim/v2/Groups",
+  "/scim/v2/Groups/{id}",
+  "/scim/v2/ServiceProviderConfig",
+  "/scim/v2/ResourceTypes",
+  "/scim/v2/Schemas",
 ];
 
 describe("getOpenApiSpec", () => {

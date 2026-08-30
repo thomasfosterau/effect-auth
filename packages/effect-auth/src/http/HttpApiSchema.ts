@@ -336,12 +336,18 @@ export type BackupCodesView = typeof BackupCodesView.Type;
 // Enterprise SSO
 // -----------------------------------------------------------------------------
 
-/** Public view of an SSO connection (never exposes the client secret). */
-export const SSOProviderView = Schema.Struct({
+/**
+ * Public view of an **OIDC** SSO connection.
+ *
+ * The client secret is never echoed back, and neither is the registrar's user
+ * id — both are stored on the connection but neither is part of its public
+ * description.
+ */
+export const OIDCSSOProviderView = Schema.Struct({
   id: Schema.String,
   issuer: Schema.String,
   domain: Schema.String,
-  protocol: Schema.Literals(["oidc"]),
+  protocol: Schema.Literal("oidc"),
   clientId: Schema.String,
   redirectUri: Schema.String,
   authorizationEndpoint: Schema.String,
@@ -352,10 +358,44 @@ export const SSOProviderView = Schema.Struct({
   organizationId: Schema.optional(Schema.String),
   createdAt: Schema.Number,
 });
+export type OIDCSSOProviderView = typeof OIDCSSOProviderView.Type;
+
+/**
+ * Public view of a **SAML 2.0** SSO connection.
+ *
+ * `idpCertificates` is echoed deliberately: they are public certificates, and
+ * an administrator rotating them needs to see what this connection currently
+ * pins. As with the OIDC arm the registrar's user id is omitted.
+ */
+export const SAMLSSOProviderView = Schema.Struct({
+  id: Schema.String,
+  domain: Schema.String,
+  protocol: Schema.Literal("saml"),
+  entityId: Schema.String,
+  ssoUrl: Schema.String,
+  idpCertificates: Schema.Array(Schema.String),
+  spEntityId: Schema.String,
+  acsUrl: Schema.String,
+  signatureAlgorithms: Schema.optional(Schema.Array(Schema.String)),
+  wantAssertionsSigned: Schema.optional(Schema.Boolean),
+  wantAuthnResponseSigned: Schema.optional(Schema.Boolean),
+  forceAuthn: Schema.optional(Schema.Boolean),
+  organizationId: Schema.optional(Schema.String),
+  createdAt: Schema.Number,
+});
+export type SAMLSSOProviderView = typeof SAMLSSOProviderView.Type;
+
+/**
+ * Public view of an SSO connection of either protocol, discriminated on
+ * `protocol` exactly as the core `SSOProvider` union is.
+ */
+export const SSOProviderView = Schema.Union([OIDCSSOProviderView, SAMLSSOProviderView]);
 export type SSOProviderView = typeof SSOProviderView.Type;
 
-/** Request body for registering an SSO connection (admin-gated). */
-export const SSORegisterPayload = Schema.Struct({
+/** Request body for registering an **OIDC** SSO connection (admin-gated). */
+export const SSORegisterOIDCPayload = Schema.Struct({
+  /** Optional for backwards compatibility: OIDC is the default protocol. */
+  protocol: Schema.optional(Schema.Literal("oidc")),
   issuer: Schema.String,
   domain: Schema.String,
   clientId: Schema.String,
@@ -370,6 +410,31 @@ export const SSORegisterPayload = Schema.Struct({
   usePKCE: Schema.optional(Schema.Boolean),
   organizationId: Schema.optional(Schema.String),
 });
+export type SSORegisterOIDCPayload = typeof SSORegisterOIDCPayload.Type;
+
+/** Request body for registering a **SAML 2.0** SSO connection (admin-gated). */
+export const SSORegisterSAMLPayload = Schema.Struct({
+  protocol: Schema.Literal("saml"),
+  domain: Schema.String,
+  entityId: Schema.String,
+  ssoUrl: Schema.String,
+  idpCertificates: Schema.Array(Schema.String),
+  spEntityId: Schema.String,
+  acsUrl: Schema.String,
+  signatureAlgorithms: Schema.optional(Schema.Array(Schema.Literals(["sha1", "sha256", "sha512"]))),
+  wantAssertionsSigned: Schema.optional(Schema.Boolean),
+  wantAuthnResponseSigned: Schema.optional(Schema.Boolean),
+  forceAuthn: Schema.optional(Schema.Boolean),
+  organizationId: Schema.optional(Schema.String),
+});
+export type SSORegisterSAMLPayload = typeof SSORegisterSAMLPayload.Type;
+
+/**
+ * Request body for registering an SSO connection, discriminated on `protocol`.
+ * A body without `protocol` is an OIDC registration, which is what every
+ * pre-SAML client sends.
+ */
+export const SSORegisterPayload = Schema.Union([SSORegisterOIDCPayload, SSORegisterSAMLPayload]);
 export type SSORegisterPayload = typeof SSORegisterPayload.Type;
 
 /** Request body for starting an SSO sign-in (any one of the fields). */
@@ -393,6 +458,29 @@ export const SSOCallbackPayload = Schema.Struct({
   code: Schema.String,
 });
 export type SSOCallbackPayload = typeof SSOCallbackPayload.Type;
+
+/**
+ * The SAML assertion consumer service (ACS) POST, exactly as the IdP sends it:
+ * an `application/x-www-form-urlencoded` body carrying the base64 `SAMLResponse`
+ * and, for an SP-initiated flow, the `RelayState` this server minted.
+ *
+ * Field names are the wire names from the SAML binding, capitals and all.
+ */
+export const SAMLACSPayload = Schema.Struct({
+  SAMLResponse: Schema.String,
+  RelayState: Schema.optional(Schema.String),
+}).pipe(HttpApiSchema.asFormUrlEncoded());
+export type SAMLACSPayload = typeof SAMLACSPayload.Type;
+
+/**
+ * SP metadata is XML, not JSON: an `EntityDescriptor` document served as
+ * `application/samlmetadata+xml` so an IdP's "import metadata by URL" flow
+ * accepts it.
+ */
+export const SAMLMetadataView = Schema.String.pipe(
+  HttpApiSchema.asText({ contentType: "application/samlmetadata+xml" }),
+);
+export type SAMLMetadataView = typeof SAMLMetadataView.Type;
 
 // -----------------------------------------------------------------------------
 // Organization
@@ -831,6 +919,159 @@ export const JwksView = Schema.Struct({
 export type JwksView = typeof JwksView.Type;
 
 // -----------------------------------------------------------------------------
+// SCIM 2.0 (RFC 7643 resources, RFC 7644 protocol)
+// -----------------------------------------------------------------------------
+
+/** Schema URN of the SCIM core `User` resource (RFC 7643 §4.1). */
+export const SCIM_USER_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:User";
+/** Schema URN of the SCIM core `Group` resource (RFC 7643 §4.2). */
+export const SCIM_GROUP_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:Group";
+/** Schema URN of the `ListResponse` envelope (RFC 7644 §3.4.2). */
+export const SCIM_LIST_RESPONSE_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
+/** Schema URN of a `PatchOp` request body (RFC 7644 §3.5.2). */
+export const SCIM_PATCH_OP_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
+/** Schema URN of an error response (RFC 7644 §3.12). */
+export const SCIM_ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error";
+/** Schema URN of the `ServiceProviderConfig` resource (RFC 7643 §5). */
+export const SCIM_SERVICE_PROVIDER_CONFIG_SCHEMA =
+  "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig";
+/** Schema URN of a `ResourceType` (RFC 7643 §6). */
+export const SCIM_RESOURCE_TYPE_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:ResourceType";
+/** Schema URN of a `Schema` resource (RFC 7643 §7). */
+export const SCIM_SCHEMA_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:Schema";
+
+/**
+ * The SCIM media type (RFC 7644 §3.1). Every SCIM request and response body on
+ * this API is served as `application/scim+json` rather than plain
+ * `application/json`, which is what a conformance test looks for.
+ */
+export const SCIM_CONTENT_TYPE = "application/scim+json";
+
+/** Mark a schema as a SCIM (`application/scim+json`) request or response body. */
+export const asSCIMJson = HttpApiSchema.asJson({ contentType: SCIM_CONTENT_TYPE });
+
+/** A resource's `meta` block (RFC 7643 §3.1). Timestamps are ISO-8601. */
+export const SCIMMetaView = Schema.Struct({
+  resourceType: Schema.String,
+  created: Schema.String,
+  lastModified: Schema.String,
+  location: Schema.String,
+});
+export type SCIMMetaView = typeof SCIMMetaView.Type;
+
+/** One entry of the multi-valued `emails` attribute. */
+export const SCIMEmailView = Schema.Struct({
+  value: Schema.String,
+  primary: Schema.optional(Schema.Boolean),
+  type: Schema.optional(Schema.String),
+});
+export type SCIMEmailView = typeof SCIMEmailView.Type;
+
+/** A SCIM `User` resource on the wire. */
+export const SCIMUserView = Schema.Struct({
+  schemas: Schema.Array(Schema.String),
+  id: Schema.String,
+  externalId: Schema.optional(Schema.String),
+  userName: Schema.String,
+  displayName: Schema.optional(Schema.String),
+  emails: Schema.Array(SCIMEmailView),
+  active: Schema.Boolean,
+  meta: SCIMMetaView,
+});
+export type SCIMUserView = typeof SCIMUserView.Type;
+
+/** A SCIM `Group` resource on the wire. */
+export const SCIMGroupView = Schema.Struct({
+  schemas: Schema.Array(Schema.String),
+  id: Schema.String,
+  displayName: Schema.String,
+  members: Schema.Array(Schema.Struct({ value: Schema.String })),
+  meta: SCIMMetaView,
+});
+export type SCIMGroupView = typeof SCIMGroupView.Type;
+
+/** The `ListResponse` envelope around a page of `User` resources. */
+export const SCIMUserListView = Schema.Struct({
+  schemas: Schema.Array(Schema.String),
+  totalResults: Schema.Number,
+  startIndex: Schema.Number,
+  itemsPerPage: Schema.Number,
+  Resources: Schema.Array(SCIMUserView),
+});
+export type SCIMUserListView = typeof SCIMUserListView.Type;
+
+/** The `ListResponse` envelope around a page of `Group` resources. */
+export const SCIMGroupListView = Schema.Struct({
+  schemas: Schema.Array(Schema.String),
+  totalResults: Schema.Number,
+  startIndex: Schema.Number,
+  itemsPerPage: Schema.Number,
+  Resources: Schema.Array(SCIMGroupView),
+});
+export type SCIMGroupListView = typeof SCIMGroupListView.Type;
+
+/**
+ * The discovery documents (`ServiceProviderConfig`, `ResourceTypes`,
+ * `Schemas`) are static, deeply-nested JSON that no client writes against
+ * field by field, so they travel as open records rather than being modelled
+ * attribute by attribute.
+ */
+export const SCIMDocumentView = Schema.Record(Schema.String, Schema.Unknown);
+export type SCIMDocumentView = typeof SCIMDocumentView.Type;
+
+/**
+ * A `User` write body (`POST`/`PUT`).
+ *
+ * `name` is accepted because Okta always sends it and often omits
+ * `displayName`; the handler folds it into a display name rather than storing
+ * the sub-attributes separately.
+ */
+export const SCIMUserPayload = Schema.Struct({
+  schemas: Schema.optional(Schema.Array(Schema.String)),
+  externalId: Schema.optional(Schema.String),
+  userName: Schema.String,
+  displayName: Schema.optional(Schema.String),
+  name: Schema.optional(
+    Schema.Struct({
+      formatted: Schema.optional(Schema.String),
+      givenName: Schema.optional(Schema.String),
+      familyName: Schema.optional(Schema.String),
+    }),
+  ),
+  emails: Schema.optional(Schema.Array(SCIMEmailView)),
+  active: Schema.optional(Schema.Boolean),
+});
+export type SCIMUserPayload = typeof SCIMUserPayload.Type;
+
+/** A `Group` write body (`POST`/`PUT`). */
+export const SCIMGroupPayload = Schema.Struct({
+  schemas: Schema.optional(Schema.Array(Schema.String)),
+  externalId: Schema.optional(Schema.String),
+  displayName: Schema.String,
+  members: Schema.optional(
+    Schema.Array(Schema.Struct({ value: Schema.String, display: Schema.optional(Schema.String) })),
+  ),
+});
+export type SCIMGroupPayload = typeof SCIMGroupPayload.Type;
+
+/**
+ * An RFC 7644 §3.5.2 `PatchOp` body. `value` is `Unknown` because SCIM's patch
+ * values are genuinely polymorphic — a boolean, a string, an attribute map, or
+ * an array of multi-valued entries, depending on the path.
+ */
+export const SCIMPatchPayload = Schema.Struct({
+  schemas: Schema.optional(Schema.Array(Schema.String)),
+  Operations: Schema.Array(
+    Schema.Struct({
+      op: Schema.String,
+      path: Schema.optional(Schema.String),
+      value: Schema.optional(Schema.Unknown),
+    }),
+  ),
+});
+export type SCIMPatchPayload = typeof SCIMPatchPayload.Type;
+
+// -----------------------------------------------------------------------------
 // Error schemas (mapped to HTTP status codes via HttpApiSchema.status)
 // -----------------------------------------------------------------------------
 
@@ -888,6 +1129,60 @@ export class OAuthError extends Schema.TaggedErrorClass<OAuthError>()("OAuthErro
   error_description: Schema.optional(Schema.String),
 }) {}
 
+/**
+ * SCIM error bodies (RFC 7644 §3.12).
+ *
+ * SCIM specifies the failure body exactly — `schemas`, a **string** `status`,
+ * an optional `scimType` detail code and a human-readable `detail` — and
+ * conformance suites check it, so these are `Schema.ErrorClass` rather than the
+ * repo's usual `Schema.TaggedErrorClass`: a `_tag` discriminator would be an
+ * extra member in a body that is meant to be verbatim.
+ *
+ * The `status` literal takes the discriminator's place. Effect encodes an
+ * endpoint's failures as a union of its error schemas, and since exactly one
+ * arm's `status` literal can match a given value, the right status code is
+ * always chosen.
+ */
+export class SCIMBadRequest extends Schema.ErrorClass<SCIMBadRequest>("SCIMBadRequest")({
+  schemas: Schema.Array(Schema.String),
+  status: Schema.Literal("400"),
+  /** RFC 7644 §3.12 code: `invalidFilter`, `invalidPath`, `invalidValue`, … */
+  scimType: Schema.optional(Schema.String),
+  detail: Schema.optional(Schema.String),
+}) {}
+
+/** 401 — missing or unknown provisioning token. */
+export class SCIMUnauthorized extends Schema.ErrorClass<SCIMUnauthorized>("SCIMUnauthorized")({
+  schemas: Schema.Array(Schema.String),
+  status: Schema.Literal("401"),
+  scimType: Schema.optional(Schema.String),
+  detail: Schema.optional(Schema.String),
+}) {}
+
+/** 404 — no such resource, or one outside the connection's organization. */
+export class SCIMNotFound extends Schema.ErrorClass<SCIMNotFound>("SCIMNotFound")({
+  schemas: Schema.Array(Schema.String),
+  status: Schema.Literal("404"),
+  scimType: Schema.optional(Schema.String),
+  detail: Schema.optional(Schema.String),
+}) {}
+
+/** 409 — the `uniqueness` conflict an IdP reconciles against. */
+export class SCIMConflict extends Schema.ErrorClass<SCIMConflict>("SCIMConflict")({
+  schemas: Schema.Array(Schema.String),
+  status: Schema.Literal("409"),
+  scimType: Schema.optional(Schema.String),
+  detail: Schema.optional(Schema.String),
+}) {}
+
+/** 500 — unexpected server error, in SCIM's shape. */
+export class SCIMInternalError extends Schema.ErrorClass<SCIMInternalError>("SCIMInternalError")({
+  schemas: Schema.Array(Schema.String),
+  status: Schema.Literal("500"),
+  scimType: Schema.optional(Schema.String),
+  detail: Schema.optional(Schema.String),
+}) {}
+
 /** Each error class paired with its HTTP status for use in endpoint `error` fields. */
 export const UnauthorizedError = Unauthorized.pipe(HttpApiSchema.status(401));
 export const ForbiddenError = Forbidden.pipe(HttpApiSchema.status(403));
@@ -898,6 +1193,30 @@ export const TooManyRequestsError = TooManyRequests.pipe(HttpApiSchema.status(42
 export const InternalError = InternalServerError.pipe(HttpApiSchema.status(500));
 /** 400 with an RFC 7591 §3.2.2 `{ error, error_description }` body. */
 export const OAuthBadRequestError = OAuthError.pipe(HttpApiSchema.status(400));
+
+/** The SCIM error bodies, each carrying its status and the SCIM media type. */
+export const SCIMBadRequestError = SCIMBadRequest.pipe(HttpApiSchema.status(400), asSCIMJson);
+export const SCIMUnauthorizedError = SCIMUnauthorized.pipe(HttpApiSchema.status(401), asSCIMJson);
+export const SCIMNotFoundError = SCIMNotFound.pipe(HttpApiSchema.status(404), asSCIMJson);
+export const SCIMConflictError = SCIMConflict.pipe(HttpApiSchema.status(409), asSCIMJson);
+export const SCIMInternalServerError = SCIMInternalError.pipe(
+  HttpApiSchema.status(500),
+  asSCIMJson,
+);
+
+/**
+ * Every SCIM endpoint answers with the same failure set: 400 for a body or
+ * filter it cannot act on, 401 for a bad token, 404 for a resource outside the
+ * connection's organization (or absent entirely), 409 for a uniqueness clash,
+ * and 500 for anything unexpected.
+ */
+export const SCIMErrors = [
+  SCIMBadRequestError,
+  SCIMUnauthorizedError,
+  SCIMNotFoundError,
+  SCIMConflictError,
+  SCIMInternalServerError,
+] as const;
 
 // -----------------------------------------------------------------------------
 // Encoders: domain types -> wire views

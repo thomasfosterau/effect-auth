@@ -681,6 +681,26 @@ export const authGroup = HttpApiGroup.make("auth").add(
       S.TooManyRequestsError,
     ],
   }),
+  // SAML assertion consumer service: the form POST the IdP makes on the user's
+  // behalf. Same session-issuing tail as `ssoCallback`.
+  HttpApiEndpoint.post("samlAcs", "/sso/saml/acs/:providerId", {
+    params: { providerId: Schema.String },
+    payload: S.SAMLACSPayload,
+    success: S.AuthSuccess,
+    error: [
+      S.NotFoundError,
+      S.BadRequestError,
+      S.ForbiddenError,
+      S.InternalError,
+      S.TooManyRequestsError,
+    ],
+  }),
+  // This SP's `EntityDescriptor` for a SAML connection, as XML.
+  HttpApiEndpoint.get("samlMetadata", "/sso/saml/metadata/:providerId", {
+    params: { providerId: Schema.String },
+    success: S.SAMLMetadataView,
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
+  }),
   // --- Google One Tap: generate a server-side nonce for the One Tap prompt.
   // --- 404 when unconfigured.
   HttpApiEndpoint.get("getGoogleOneTapNonce", "/sign-in/google-one-tap/nonce", {
@@ -858,16 +878,152 @@ export const authGroup = HttpApiGroup.make("auth").add(
   }),
 );
 
+/**
+ * SCIM 2.0 provisioning (RFC 7644), mounted under `/scim/v2`.
+ *
+ * A group of its own rather than more endpoints on `authGroup`, because SCIM
+ * is a different protocol with a different audience: every route here is
+ * authenticated by an organization's bearer provisioning token instead of a
+ * session cookie, speaks `application/scim+json`, and reports failures in
+ * SCIM's own error shape. Keeping it separate means none of that leaks into
+ * the session API — and an app that never provisions simply gets `404`s.
+ *
+ * Resource names are capitalized (`/Users`, `/Groups`) because SCIM says so and
+ * IdPs build the paths literally.
+ */
+export const scimGroup = HttpApiGroup.make("scim")
+  .add(
+    HttpApiEndpoint.post("scimCreateUser", "/Users", {
+      payload: S.SCIMUserPayload.pipe(S.asSCIMJson),
+      success: S.SCIMUserView.pipe(HttpApiSchema.status(201), S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("scimListUsers", "/Users", {
+      query: {
+        filter: Schema.optional(Schema.String),
+        startIndex: Schema.optional(Schema.String),
+        count: Schema.optional(Schema.String),
+      },
+      success: S.SCIMUserListView.pipe(S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("scimGetUser", "/Users/:id", {
+      params: { id: Schema.String },
+      success: S.SCIMUserView.pipe(S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.put("scimReplaceUser", "/Users/:id", {
+      params: { id: Schema.String },
+      payload: S.SCIMUserPayload.pipe(S.asSCIMJson),
+      success: S.SCIMUserView.pipe(S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.patch("scimPatchUser", "/Users/:id", {
+      params: { id: Schema.String },
+      payload: S.SCIMPatchPayload.pipe(S.asSCIMJson),
+      success: S.SCIMUserView.pipe(S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  // A soft disable, not a hard delete — see `SCIMService.deactivateUser`.
+  .add(
+    HttpApiEndpoint.delete("scimDeleteUser", "/Users/:id", {
+      params: { id: Schema.String },
+      success: HttpApiSchema.NoContent,
+      error: S.SCIMErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("scimCreateGroup", "/Groups", {
+      payload: S.SCIMGroupPayload.pipe(S.asSCIMJson),
+      success: S.SCIMGroupView.pipe(HttpApiSchema.status(201), S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("scimListGroups", "/Groups", {
+      query: {
+        filter: Schema.optional(Schema.String),
+        startIndex: Schema.optional(Schema.String),
+        count: Schema.optional(Schema.String),
+      },
+      success: S.SCIMGroupListView.pipe(S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("scimGetGroup", "/Groups/:id", {
+      params: { id: Schema.String },
+      success: S.SCIMGroupView.pipe(S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.put("scimReplaceGroup", "/Groups/:id", {
+      params: { id: Schema.String },
+      payload: S.SCIMGroupPayload.pipe(S.asSCIMJson),
+      success: S.SCIMGroupView.pipe(S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.patch("scimPatchGroup", "/Groups/:id", {
+      params: { id: Schema.String },
+      payload: S.SCIMPatchPayload.pipe(S.asSCIMJson),
+      success: S.SCIMGroupView.pipe(S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.delete("scimDeleteGroup", "/Groups/:id", {
+      params: { id: Schema.String },
+      success: HttpApiSchema.NoContent,
+      error: S.SCIMErrors,
+    }),
+  )
+  // Discovery (RFC 7644 §4). An IdP reads these before it provisions anything
+  // to learn which optional features to use; they are unauthenticated because
+  // they describe the server, not any tenant's data.
+  .add(
+    HttpApiEndpoint.get("scimServiceProviderConfig", "/ServiceProviderConfig", {
+      success: S.SCIMDocumentView.pipe(S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("scimResourceTypes", "/ResourceTypes", {
+      success: S.SCIMDocumentView.pipe(S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("scimSchemas", "/Schemas", {
+      success: S.SCIMDocumentView.pipe(S.asSCIMJson),
+      error: S.SCIMErrors,
+    }),
+  )
+  .prefix("/scim/v2");
+
 /** The complete auth API, annotated with OpenAPI document metadata. */
 export const AuthApi = HttpApi.make("AuthApi")
   .add(authGroup)
+  .add(scimGroup)
   .annotateMerge(
     OpenApi.annotations({
       title: "effect-auth",
       version: "1.0.0",
       description:
         "HTTP protocol for effect-auth: email/password, sessions, email verification and " +
-        "password reset, magic link, email OTP, and multi-factor authentication.",
+        "password reset, magic link, email OTP, multi-factor authentication, and SCIM 2.0 " +
+        "provisioning.",
     }),
   );
 
