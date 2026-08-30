@@ -25,4 +25,15 @@ export { type InMemoryRoleStoreConfig } from "./RBAC.ts";
 export * as Entity from "./Entity.ts";
 export * as Condition from "./Condition.ts";
 export * as Policy from "./Policy.ts";
+export * as Model from "./Model.ts";
 export { AuthorizationDeniedError, type Decision, type PolicyOutcome } from "./Policy.ts";
+export {
+  CurrentPrincipal,
+  EntityResolver,
+  memoryEntityResolver,
+  requestRefs,
+  type AuthorizeInput,
+  type AuthorizerConfig,
+  PolicyValidationError,
+  Authorizer,
+} from "./Authorizer.ts";

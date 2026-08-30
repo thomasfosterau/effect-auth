@@ -1,0 +1,284 @@
+/**
+ * The Effect shell around the pure policy kernel: principal context, entity
+ * slice resolution, and the batteries-included `Authorizer` service.
+ *
+ * Cedar's architecture split, Effect-natively: services fetch the entity
+ * slice (an Effect); the decision over the slice is the pure function in
+ * `Policy.ts`. Every decision is deterministic and replayable from the
+ * `(request, slice)` pair the trace hooks see.
+ *
+ * @module authz/authorizer
+ */
+import { Context, Effect, Layer, Option } from "effect";
+import * as Errors from "../Errors.ts";
+import * as Condition from "./Condition.ts";
+import * as Entity from "./Entity.ts";
+import * as Model from "./Model.ts";
+import * as Policy from "./Policy.ts";
+
+// ---------------------------------------------------------------------------
+// Principal context
+// ---------------------------------------------------------------------------
+
+/**
+ * The authenticated principal for the current execution, as an entity
+ * reference. Provided per-request (e.g. by the HTTP session middleware:
+ * `User::"<userId>"`; an API key or service principal works the same way).
+ * `Authorizer.authorize`/`check` read it from context so call sites only
+ * name the action and resource.
+ */
+export class CurrentPrincipal extends Context.Service<CurrentPrincipal, Entity.EntityRef>()(
+  "@effect-auth/CurrentPrincipal",
+) {
+  /** Provide a principal for a scoped effect. */
+  static readonly provide =
+    (ref: Entity.EntityRef) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, CurrentPrincipal>> =>
+      Effect.provideService(effect, CurrentPrincipal, ref);
+}
+
+// ---------------------------------------------------------------------------
+// Slice resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves entities for authorization slices. Implementations MUST return,
+ * for each requested reference they know, the entity **and its transitive
+ * ancestors** (parents' entities, recursively) — hierarchy (`in`) checks
+ * only see parents that made it into the slice. References the resolver
+ * does not know are simply omitted (unknown entities have no attributes and
+ * no parents).
+ */
+export class EntityResolver extends Context.Service<
+  EntityResolver,
+  {
+    readonly resolve: (
+      refs: ReadonlyArray<Entity.EntityRef>,
+    ) => Effect.Effect<ReadonlyArray<Entity.Entity>, Errors.AuthError>;
+  }
+>()("@effect-auth/EntityResolver") {}
+
+/**
+ * An {@link EntityResolver} over a fixed entity collection (tests,
+ * config-defined hierarchies). Returns the requested entities plus their
+ * transitive ancestors, per the contract.
+ */
+export const memoryEntityResolver = (
+  entities: ReadonlyArray<Entity.Entity>,
+): typeof EntityResolver.Service => {
+  const byKey = new Map(entities.map((e) => [Entity.refKey(e.ref), e]));
+  return {
+    resolve: (refs) =>
+      Effect.sync(() => {
+        const out = new Map<string, Entity.Entity>();
+        const queue = [...refs];
+        while (queue.length > 0) {
+          const ref = queue.pop()!;
+          const key = Entity.refKey(ref);
+          if (out.has(key)) continue;
+          const found = byKey.get(key);
+          if (found === undefined) continue;
+          out.set(key, found);
+          queue.push(...found.parents);
+        }
+        return [...out.values()];
+      }),
+  };
+};
+
+const collectOperandRefs = (operand: Condition.Operand, out: Entity.EntityRef[]): void => {
+  if (operand._tag === "Lit" && Entity.isEntityValue(operand.value)) {
+    out.push(operand.value.__entity);
+  }
+};
+
+const collectConditionRefs = (condition: Condition.Condition, out: Entity.EntityRef[]): void => {
+  switch (condition._tag) {
+    case "And":
+    case "Or":
+      for (const inner of condition.conditions) collectConditionRefs(inner, out);
+      return;
+    case "Not":
+      collectConditionRefs(condition.condition, out);
+      return;
+    case "Eq":
+    case "Compare":
+    case "In":
+      collectOperandRefs(condition.left, out);
+      collectOperandRefs(condition.right, out);
+      return;
+    case "Contains":
+      collectOperandRefs(condition.collection, out);
+      collectOperandRefs(condition.value, out);
+      return;
+    case "Has":
+      return;
+  }
+};
+
+/**
+ * The references a decision needs resolved: the request's principal, action
+ * and resource, plus every entity a declarative policy names in its scopes
+ * or condition literals (custom policies receive the same slice but resolve
+ * anything else themselves). Ancestors come from the resolver contract.
+ */
+export const requestRefs = <E, R>(
+  policies: ReadonlyArray<Policy.Policy<E, R>>,
+  request: Policy.PolicyRequest,
+): ReadonlyArray<Entity.EntityRef> => {
+  const refs: Entity.EntityRef[] = [request.principal, request.action, request.resource];
+  for (const policy of policies) {
+    if (policy._tag !== "DeclarativePolicy") continue;
+    for (const scope of [policy.principal, policy.action, policy.resource]) {
+      if (scope._tag === "eq" || scope._tag === "in") refs.push(scope.ref);
+    }
+    if (policy.when !== undefined) collectConditionRefs(policy.when, refs);
+  }
+  const seen = new Set<string>();
+  return refs.filter((ref) => {
+    const key = Entity.refKey(ref);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+// ---------------------------------------------------------------------------
+// The Authorizer service
+// ---------------------------------------------------------------------------
+
+/** The action/resource pair a call site names; the principal comes from context. */
+export interface AuthorizeInput {
+  readonly action: Entity.EntityRef | string;
+  readonly resource: Entity.EntityRef;
+  readonly context?: Readonly<Record<string, Entity.AttributeValue>>;
+}
+
+const toActionRef = (action: Entity.EntityRef | string): Entity.EntityRef =>
+  typeof action === "string" ? Entity.ref("Action", action) : action;
+
+export interface AuthorizerConfig<E = unknown> {
+  /** The policy set every decision is made against. */
+  readonly policies: ReadonlyArray<Policy.Policy<E, never>>;
+  /**
+   * Optional declared model. When present: declarative policies are
+   * validated at layer construction (a layer build failure beats a policy
+   * that can never match — or a forbid that always denies), and the model's
+   * action entities are merged into every slice so action groups work.
+   */
+  readonly model?: Model.Model;
+}
+
+/** Raised by `Authorizer.layer` when policies do not validate against the model. */
+export class PolicyValidationError extends Errors.AuthError {}
+
+export class Authorizer extends Context.Service<
+  Authorizer,
+  {
+    /** Decide a fully explicit request. Never fails: errors land in the trace. */
+    readonly decideRequest: (
+      request: Policy.PolicyRequest,
+    ) => Effect.Effect<Policy.Decision, Errors.AuthError>;
+
+    /**
+     * Decide for the {@link CurrentPrincipal}, failing with
+     * `AuthorizationDeniedError` (carrying the trace) on deny.
+     */
+    readonly authorize: (
+      input: AuthorizeInput,
+    ) => Effect.Effect<
+      Policy.Decision,
+      Policy.AuthorizationDeniedError | Errors.AuthError,
+      CurrentPrincipal
+    >;
+
+    /** Boolean form of {@link authorize} (never fails on deny). */
+    readonly check: (
+      input: AuthorizeInput,
+    ) => Effect.Effect<boolean, Errors.AuthError, CurrentPrincipal>;
+  }
+>()("@effect-auth/Authorizer") {
+  /**
+   * Construct a Layer providing this service. Requires an `EntityResolver`
+   * when one is in context; without one, decisions run over the model's
+   * action entities alone (pure-context/ownerless policies still work).
+   */
+  static readonly layer = <E = unknown>(config: AuthorizerConfig<E>) =>
+    Layer.effect(Authorizer, make(config));
+}
+
+export const make = <E = unknown>(
+  config: AuthorizerConfig<E>,
+): Effect.Effect<typeof Authorizer.Service, Errors.AuthError, never> =>
+  Effect.gen(function* () {
+    const resolver = yield* Effect.serviceOption(EntityResolver);
+    const modelEntities = config.model !== undefined ? Model.actionEntities(config.model) : [];
+
+    if (config.model !== undefined) {
+      const declarative = config.policies.filter(
+        (policy): policy is Policy.DeclarativePolicy => policy._tag === "DeclarativePolicy",
+      );
+      const issues = Model.validatePolicies(config.model, declarative);
+      if (issues.length > 0) {
+        return yield* Effect.fail(
+          new PolicyValidationError({
+            message: `Policy validation failed: ${issues
+              .map((issue) => `[${issue.policyId}] ${issue.message}`)
+              .join("; ")}`,
+          }),
+        );
+      }
+    }
+
+    const sliceFor = (
+      request: Policy.PolicyRequest,
+    ): Effect.Effect<Entity.EntitySlice, Errors.AuthError> =>
+      Option.isSome(resolver)
+        ? resolver.value
+            .resolve(requestRefs(config.policies, request))
+            .pipe(Effect.map((resolved) => Entity.slice([...modelEntities, ...resolved])))
+        : Effect.succeed(Entity.slice(modelEntities));
+
+    const decideRequest = Effect.fn("Authorizer.decideRequest")(function* (
+      request: Policy.PolicyRequest,
+    ) {
+      const slice = yield* sliceFor(request);
+      return yield* Policy.decide(config.policies, request, slice);
+    });
+
+    const requestFrom = (
+      input: AuthorizeInput,
+    ): Effect.Effect<Policy.PolicyRequest, never, CurrentPrincipal> =>
+      Effect.gen(function* () {
+        const principal = yield* CurrentPrincipal;
+        return Policy.request({
+          principal,
+          action: toActionRef(input.action),
+          resource: input.resource,
+          ...(input.context !== undefined ? { context: input.context } : {}),
+        });
+      });
+
+    return {
+      decideRequest,
+
+      authorize: Effect.fn("Authorizer.authorize")(function* (input: AuthorizeInput) {
+        const request = yield* requestFrom(input);
+        const decision = yield* decideRequest(request);
+        if (!decision.allowed) {
+          return yield* new Policy.AuthorizationDeniedError({
+            message: `Authorization denied: ${Entity.formatRef(request.principal)} may not ${Entity.formatRef(request.action)} on ${Entity.formatRef(request.resource)} (${decision.reason})`,
+            request,
+            decision,
+          });
+        }
+        return decision;
+      }),
+
+      check: Effect.fn("Authorizer.check")(function* (input: AuthorizeInput) {
+        const request = yield* requestFrom(input);
+        const decision = yield* decideRequest(request);
+        return decision.allowed;
+      }),
+    };
+  });
