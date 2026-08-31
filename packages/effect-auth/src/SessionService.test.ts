@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Context, Layer } from "effect";
-import { Hooks } from "../Hooks.ts";
-import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { Hooks } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { make } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
-import { hashToken } from "../TokenHash.ts";
-import type { Session, User, SessionConfig } from "../Types.ts";
+import { hashToken } from "./TokenHash.ts";
+import type { Session, User, SessionConfig } from "./Types.ts";
 
 // Mock implementations for testing
 const mockSessionStore = {

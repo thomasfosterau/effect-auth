@@ -10,58 +10,58 @@ conventions sweep. There is no compat layer — update call sites to the new nam
 Feature modules moved into lowercase cluster directories. Update relative imports (internal) or
 subpath imports (external) accordingly.
 
-| Old path                                                           | New path                                                  |
-| ------------------------------------------------------------------ | --------------------------------------------------------- |
-| `src/EmailAddress.ts`                                              | `src/email/EmailAddress.ts`                               |
-| `src/EmailOtp.ts` + `src/EmailOTPService.ts`                       | `src/email/EmailOTP.ts` (merged)                          |
-| `src/EmailPassword.ts`                                             | `src/email/EmailPassword.ts`                              |
-| `src/EmailVerification.ts`                                         | `src/email/EmailVerification.ts`                          |
-| `src/Http.ts`                                                      | `src/http/Http.ts`                                        |
-| `src/HttpApi.ts`                                                   | `src/http/HttpApi.ts`                                     |
-| `src/HttpApiSchemas.ts`                                            | `src/http/HttpApiSchema.ts`                               |
-| `src/HttpClient.ts`                                                | `src/http/HttpClient.ts`                                  |
-| `src/HttpMiddleware.ts`                                            | `src/http/HttpMiddleware.ts`                              |
-| `src/HttpServer.ts`                                                | `src/http/HttpServer.ts`                                  |
-| `src/OAuth/OAuth.ts`, `OAuth/Scope.ts`                             | `src/oauth/OAuth.ts`, `oauth/Scope.ts`                    |
-| `src/SessionService.ts`                                            | `src/session/SessionService.ts`                           |
-| `src/SessionStore.ts`                                              | `src/session/SessionStore.ts`                             |
-| `src/UserStore.ts`                                                 | `src/session/UserStore.ts`                                |
-| `src/TrustedDevice.ts`                                             | `src/session/TrustedDevice.ts`                            |
-| `src/Session.ts` (compat barrel)                                   | **deleted** — import `SessionService` directly            |
-| `src/Password.ts`                                                  | `src/password/Password.ts`                                |
-| `src/PasswordReset.ts`                                             | `src/password/PasswordReset.ts`                           |
-| `src/HaveIBeenPwned.ts`                                            | `src/password/HaveIBeenPwned.ts`                          |
-| `src/Argon2.ts`                                                    | `src/password/Argon2.ts`                                  |
-| `src/Permission.ts`                                                | `src/Permission.ts` (unchanged — briefly `src/authz/`)    |
-| `src/Authorization.ts`                                             | `src/Authorization.ts` (unchanged — briefly `src/authz/`) |
-| `src/Rbac.ts`                                                      | `src/RBAC.ts`                                             |
-| `src/AuditPlugin.ts`                                               | `src/plugins/Audit.ts`                                    |
-| `src/NormalizeEmailPlugin.ts`                                      | `src/plugins/NormalizeEmail.ts`                           |
-| `src/RateLimitPlugin.ts`                                           | `src/plugins/RateLimit.ts`                                |
-| `src/AccountLockoutPlugin.ts`                                      | `src/plugins/AccountLockout.ts`                           |
-| `src/CaptchaPlugin.ts`                                             | `src/plugins/Captcha.ts`                                  |
-| `src/LastLoginMethodPlugin.ts`                                     | `src/plugins/LastLoginMethod.ts`                          |
-| `src/IpRateLimitPlugin.ts`                                         | `src/plugins/IPRateLimit.ts`                              |
-| `src/WebAuthnService.ts`                                           | merged into `src/WebAuthn.ts`                             |
-| `src/MultiFactorService.ts` (orphaned duplicate of `TwoFactor.ts`) | **deleted**                                               |
-| `src/TwoFactor.ts`                                                 | `src/secondfactor/MultiFactor.ts` (renamed — see §8)      |
-| `src/OTPSecondFactor.ts`                                           | `src/secondfactor/OTPSecondFactor.ts`                     |
-| `src/WebAuthn.ts`                                                  | `src/secondfactor/WebAuthn.ts`                            |
-| `src/OTP.ts`                                                       | `src/secondfactor/OTP.ts`                                 |
+| Old path                                                           | New path                                                     |
+| ------------------------------------------------------------------ | ------------------------------------------------------------ |
+| `src/EmailAddress.ts`                                              | `src/email/EmailAddress.ts`                                  |
+| `src/EmailOtp.ts` + `src/EmailOTPService.ts`                       | `src/email/EmailOTP.ts` (merged)                             |
+| `src/EmailPassword.ts`                                             | `src/email/EmailPassword.ts`                                 |
+| `src/EmailVerification.ts`                                         | `src/email/EmailVerification.ts`                             |
+| `src/Http.ts`                                                      | `src/http/Http.ts`                                           |
+| `src/HttpApi.ts`                                                   | `src/http/HttpApi.ts`                                        |
+| `src/HttpApiSchemas.ts`                                            | `src/http/HttpApiSchema.ts`                                  |
+| `src/HttpClient.ts`                                                | `src/http/HttpClient.ts`                                     |
+| `src/HttpMiddleware.ts`                                            | `src/http/HttpMiddleware.ts`                                 |
+| `src/HttpServer.ts`                                                | `src/http/HttpServer.ts`                                     |
+| `src/OAuth/OAuth.ts`, `OAuth/Scope.ts`                             | `src/oauth/OAuth.ts`, `oauth/Scope.ts`                       |
+| `src/SessionService.ts`                                            | `src/SessionService.ts` (unchanged — briefly `src/session/`) |
+| `src/SessionStore.ts`                                              | `src/SessionStore.ts` (unchanged — briefly `src/session/`)   |
+| `src/UserStore.ts`                                                 | `src/UserStore.ts` (unchanged — briefly `src/session/`)      |
+| `src/TrustedDevice.ts`                                             | `src/TrustedDevice.ts` (unchanged — briefly `src/session/`)  |
+| `src/Session.ts` (compat barrel)                                   | **deleted** — import `SessionService` directly               |
+| `src/Password.ts`                                                  | `src/password/Password.ts`                                   |
+| `src/PasswordReset.ts`                                             | `src/password/PasswordReset.ts`                              |
+| `src/HaveIBeenPwned.ts`                                            | `src/password/HaveIBeenPwned.ts`                             |
+| `src/Argon2.ts`                                                    | `src/password/Argon2.ts`                                     |
+| `src/Permission.ts`                                                | `src/Permission.ts` (unchanged — briefly `src/authz/`)       |
+| `src/Authorization.ts`                                             | `src/Authorization.ts` (unchanged — briefly `src/authz/`)    |
+| `src/Rbac.ts`                                                      | `src/RBAC.ts`                                                |
+| `src/AuditPlugin.ts`                                               | `src/plugins/Audit.ts`                                       |
+| `src/NormalizeEmailPlugin.ts`                                      | `src/plugins/NormalizeEmail.ts`                              |
+| `src/RateLimitPlugin.ts`                                           | `src/plugins/RateLimit.ts`                                   |
+| `src/AccountLockoutPlugin.ts`                                      | `src/plugins/AccountLockout.ts`                              |
+| `src/CaptchaPlugin.ts`                                             | `src/plugins/Captcha.ts`                                     |
+| `src/LastLoginMethodPlugin.ts`                                     | `src/plugins/LastLoginMethod.ts`                             |
+| `src/IpRateLimitPlugin.ts`                                         | `src/plugins/IPRateLimit.ts`                                 |
+| `src/WebAuthnService.ts`                                           | merged into `src/WebAuthn.ts`                                |
+| `src/MultiFactorService.ts` (orphaned duplicate of `TwoFactor.ts`) | **deleted**                                                  |
+| `src/TwoFactor.ts`                                                 | `src/multifactor/MultiFactor.ts` (renamed — see §8)          |
+| `src/OTPSecondFactor.ts`                                           | `src/multifactor/OTPSecondFactor.ts`                         |
+| `src/WebAuthn.ts`                                                  | `src/multifactor/WebAuthn.ts`                                |
+| `src/OTP.ts`                                                       | `src/multifactor/OTP.ts`                                     |
 
 Flat feature modules that only got acronym-case fixes (still exported from the package root, not
 clustered):
 
-| Old file             | New file             |
-| -------------------- | -------------------- |
-| `ApiKey.ts`          | `APIKey.ts`          |
-| `ClientIp.ts`        | `ClientIP.ts`        |
-| `Jwt.ts`             | `JWT.ts`             |
-| `OidcProvider.ts`    | `OIDCProvider.ts`    |
-| `OtpSecondFactor.ts` | `OTPSecondFactor.ts` |
-| `PhoneOtp.ts`        | `PhoneOTP.ts`        |
-| `Sso.ts`             | `SSO.ts`             |
-| `Otp.ts`             | `OTP.ts`             |
+| Old file             | New file                                                           |
+| -------------------- | ------------------------------------------------------------------ |
+| `ApiKey.ts`          | `ApiKey.ts` (unchanged — briefly `APIKey.ts`, see §11)             |
+| `ClientIp.ts`        | `ClientIP.ts`                                                      |
+| `Jwt.ts`             | `JWT.ts`                                                           |
+| `OidcProvider.ts`    | `OidcProvider.ts` (unchanged — briefly `OIDCProvider.ts`, see §11) |
+| `OtpSecondFactor.ts` | `OTPSecondFactor.ts`                                               |
+| `PhoneOtp.ts`        | `PhoneOTP.ts`                                                      |
+| `Sso.ts`             | `SSO.ts`                                                           |
+| `Otp.ts`             | `OTP.ts`                                                           |
 
 ## 2. Package exports
 
@@ -76,43 +76,45 @@ exports):
     "./email": { "types": "./dist/email/index.d.ts", "import": "./dist/email/index.js" },
     "./http": { "types": "./dist/http/index.d.ts", "import": "./dist/http/index.js" },
     "./oauth": { "types": "./dist/oauth/index.d.ts", "import": "./dist/oauth/index.js" },
-    "./session": { "types": "./dist/session/index.d.ts", "import": "./dist/session/index.js" },
     "./password": { "types": "./dist/password/index.d.ts", "import": "./dist/password/index.js" },
     "./plugins": { "types": "./dist/plugins/index.d.ts", "import": "./dist/plugins/index.js" },
-    "./secondfactor": {
-      "types": "./dist/secondfactor/index.d.ts",
-      "import": "./dist/secondfactor/index.js",
+    "./multifactor": {
+      "types": "./dist/multifactor/index.d.ts",
+      "import": "./dist/multifactor/index.js",
     },
   },
 }
 ```
 
+There is no `./session` subpath (§11) and no `./authz` subpath (§10): both clusters dissolved into
+flat `src/` modules covered by the root export.
+
 The root package (`effect-auth`) still re-exports every cluster as a namespace (`Email`, `HTTP`,
-`OAuth`, `Session`-flavored exports, `Password`, `Plugins`, `SecondFactor`) alongside the
-flat, non-clustered feature modules (JWT, Admin, Organization, …) — no import changes needed there
-beyond the renames below.
+`OAuth`, `Password`, `Plugins`, `MultiFactor`) alongside the flat, non-clustered feature modules
+(SessionService, JWT, Admin, Organization, …) — no import changes needed there beyond the renames
+below.
 
 ## 3. Tag-string and identifier acronym fixes
 
 Service tag strings (the `"@effect-auth/…"` string passed to `Context.Service`) and exported type
 names now match their class names exactly, with acronyms fully capitalized:
 
-| Old                                                                                                                | New                                                                                                 |
-| ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `"@effect-auth/ApiKeyService"` / `ApiKeyStore`                                                                     | `APIKeyService` / `APIKeyStore`                                                                     |
-| `"@effect-auth/ClientIp"`                                                                                          | `ClientIP`                                                                                          |
-| `"@effect-auth/EmailOtpService"` / `EmailOtpStore` / `EmailOtpUserStore`                                           | `EmailOTPService` / `EmailOTPStore` / `EmailOTPUserStore`                                           |
-| `"@effect-auth/JwtService"` / `JwtKeyStore`                                                                        | `JWTService` / `JWTKeyStore`                                                                        |
-| `"@effect-auth/OidcClientStore"` / `OidcCodeStore` / `OidcConsentStore` / `OidcTokenStore` / `OidcProviderService` | `OIDCClientStore` / `OIDCCodeStore` / `OIDCConsentStore` / `OIDCTokenStore` / `OIDCProviderService` |
-| `"@effect-auth/OtpSecondFactorService"` / `OtpSecondFactorStore`                                                   | `OTPSecondFactorService` / `OTPSecondFactorStore`                                                   |
-| `"@effect-auth/PhoneOtpService"` / `PhoneOtpStore` / `PhoneOtpUserStore`                                           | `PhoneOTPService` / `PhoneOTPStore` / `PhoneOTPUserStore`                                           |
-| `"@effect-auth/SsoService"` / `SsoProviderStore`                                                                   | `SSOService` / `SSOProviderStore`                                                                   |
-| `"@effect-auth/http/AuthMiddleware"`                                                                               | `"@effect-auth/AuthMiddleware"`                                                                     |
-| `"@effect-auth/http/OptionalAuthMiddleware"`                                                                       | `"@effect-auth/OptionalAuthMiddleware"`                                                             |
-| `IpResolvableRequest`                                                                                              | `IPResolvableRequest`                                                                               |
-| `AuthorizationUrlResult`                                                                                           | `AuthorizationURLResult`                                                                            |
-| `SSOUrlView`                                                                                                       | `SSOURLView`                                                                                        |
-| `HttpIPRateLimitConfig`                                                                                            | `HTTPIPRateLimitConfig`                                                                             |
+| Old                                                                                                                | New                                                                        |
+| ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `"@effect-auth/ApiKeyService"` / `ApiKeyStore`                                                                     | unchanged — briefly `APIKeyService` / `APIKeyStore`, see §11               |
+| `"@effect-auth/ClientIp"`                                                                                          | `ClientIP`                                                                 |
+| `"@effect-auth/EmailOtpService"` / `EmailOtpStore` / `EmailOtpUserStore`                                           | `EmailOTPService` / `EmailOTPStore` / `EmailOTPUserStore`                  |
+| `"@effect-auth/JwtService"` / `JwtKeyStore`                                                                        | `JWTService` / `JWTKeyStore`                                               |
+| `"@effect-auth/OidcClientStore"` / `OidcCodeStore` / `OidcConsentStore` / `OidcTokenStore` / `OidcProviderService` | unchanged — briefly `OIDCClientStore` / … / `OIDCProviderService`, see §11 |
+| `"@effect-auth/OtpSecondFactorService"` / `OtpSecondFactorStore`                                                   | `OTPSecondFactorService` / `OTPSecondFactorStore`                          |
+| `"@effect-auth/PhoneOtpService"` / `PhoneOtpStore` / `PhoneOtpUserStore`                                           | `PhoneOTPService` / `PhoneOTPStore` / `PhoneOTPUserStore`                  |
+| `"@effect-auth/SsoService"` / `SsoProviderStore`                                                                   | `SSOService` / `SSOProviderStore`                                          |
+| `"@effect-auth/http/AuthMiddleware"`                                                                               | `"@effect-auth/AuthMiddleware"`                                            |
+| `"@effect-auth/http/OptionalAuthMiddleware"`                                                                       | `"@effect-auth/OptionalAuthMiddleware"`                                    |
+| `IpResolvableRequest`                                                                                              | `IPResolvableRequest`                                                      |
+| `AuthorizationUrlResult`                                                                                           | `AuthorizationURLResult`                                                   |
+| `SSOUrlView`                                                                                                       | `SSOURLView`                                                               |
+| `HttpIPRateLimitConfig`                                                                                            | `HTTPIPRateLimitConfig`                                                    |
 
 ## 4. Service classes: `*Shape` interfaces deleted
 
@@ -274,8 +276,9 @@ that deleted file.
 | `recordTwoFactorChallenge`, `recordTwoFactorVerification`                                                                                                                            | `recordMultiFactorChallenge`, `recordMultiFactorVerification`                                                                                                                      |
 
 `SecondFactorGate`/`SecondFactorChallenge` (the generic gate abstraction in `email/EmailPassword.ts`,
-shared with `OTPSecondFactor`) and the `secondfactor/` directory name itself are **not** part of
-this rename — only the TOTP-specific module and its symbols changed.
+shared with `OTPSecondFactor`) were **not** part of this rename — only the TOTP-specific module and
+its symbols changed. The directory itself was left as `secondfactor/` at the time; it became
+`multifactor/` later, in §11.
 
 ## 9. Surrogate-keyed identity: `user.email` → identifiers
 
@@ -374,6 +377,120 @@ part of the public contract.
 `AuthorizationMiddlewareInput` is deliberately _not_ named `AuthorizationInput`:
 `AuthorizeInput` (the `Authorizer`'s own request shape) already exists at the
 root, and the two must stay distinguishable.
+
+## 11. Pascal-case acronyms, `multifactor/`, and the flat session spine
+
+Four PR-review follow-ups, all mechanical.
+
+### 11.1 `OIDCProvider` → `OidcProvider`
+
+Effect's own convention writes a leading acronym as a Pascal-case word
+(`HttpApi`, not `HTTPApi` — §1's http-layer file renames), so the OIDC provider
+module follows it: `src/OIDCProvider.ts` → `src/OidcProvider.ts`, with every
+`OIDC`-prefixed identifier in that module respelled `Oidc`. §3 had briefly gone
+the other way; this supersedes it.
+
+| Old                                                                                                                                    | New                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `src/OIDCProvider.ts`                                                                                                                  | `src/OidcProvider.ts`                                                                                                  |
+| `"@effect-auth/OIDCProviderService"` (and the `OIDCClientStore` / `OIDCCodeStore` / `OIDCTokenStore` / `OIDCConsentStore` tag strings) | `"@effect-auth/OidcProviderService"` (and `OidcClientStore` / `OidcCodeStore` / `OidcTokenStore` / `OidcConsentStore`) |
+| `OIDCProviderService`, `OIDCProviderConfig`                                                                                            | `OidcProviderService`, `OidcProviderConfig`                                                                            |
+| `OIDCProviderError`, `OIDCTokenError`, `OIDCRegistrationError`                                                                         | `OidcProviderError`, `OidcTokenError`, `OidcRegistrationError`                                                         |
+| `OIDCClient`, `OIDCClientStore`, `OIDCClientMetadata`, `NormalizedOIDCClientMetadata`                                                  | `OidcClient`, `OidcClientStore`, `OidcClientMetadata`, `NormalizedOidcClientMetadata`                                  |
+| `OIDCAuthorizationCode`, `OIDCCodeStore`, `OIDCConsent`, `OIDCConsentStore`                                                            | `OidcAuthorizationCode`, `OidcCodeStore`, `OidcConsent`, `OidcConsentStore`                                            |
+| `OIDCToken`, `OIDCTokenStore`, `OIDCTokenEndpointAuthMethod`                                                                           | `OidcToken`, `OidcTokenStore`, `OidcTokenEndpointAuthMethod`                                                           |
+| `OIDCAuthorizeRequest`, `OIDCAuthorizeResult`, `OIDCTokenRequest`, `OIDCTokenResult`                                                   | `OidcAuthorizeRequest`, `OidcAuthorizeResult`, `OidcTokenRequest`, `OidcTokenResult`                                   |
+| `RegisterOIDCClientInput`, `RegisteredOIDCClient`, `UpdateOIDCClientInput`, `TrustedOIDCClient`                                        | `RegisterOidcClientInput`, `RegisteredOidcClient`, `UpdateOidcClientInput`, `TrustedOidcClient`                        |
+| `OIDCRegistrationPolicy`, `OIDCRegistrationDisposition`, `OIDCInitialAccessTokenVerifier`                                              | `OidcRegistrationPolicy`, `OidcRegistrationDisposition`, `OidcInitialAccessTokenVerifier`                              |
+| `OIDCDynamicRegistrationConfig`, `OIDCDynamicRegistrationInfo`, `DynamicallyRegisteredOIDCClient`                                      | `OidcDynamicRegistrationConfig`, `OidcDynamicRegistrationInfo`, `DynamicallyRegisteredOidcClient`                      |
+| `hashOIDCSecret`                                                                                                                       | `hashOidcSecret`                                                                                                       |
+| `recordOIDCTokenRequest` (`Observability.ts`)                                                                                          | `recordOidcTokenRequest`                                                                                               |
+| `OIDCClientView`, `OIDCClientCreatedView`, `OIDCClientListView`, `OIDCClientUpdatePayload` (wire)                                      | `OidcClientView`, `OidcClientCreatedView`, `OidcClientListView`, `OidcClientUpdatePayload`                             |
+| `OIDCConsentPayload`, `OIDCRedirectView`, `OIDCTokenPayload`, `OIDCTokenView` (wire)                                                   | `OidcConsentPayload`, `OidcRedirectView`, `OidcTokenPayload`, `OidcTokenView`                                          |
+| `OIDCRegisterClientPayload`, `OIDCRegistrationPayload`, `OIDCRegistrationView` (wire)                                                  | `OidcRegisterClientPayload`, `OidcRegistrationPayload`, `OidcRegistrationView`                                         |
+
+Unchanged: the `SCREAMING_SNAKE_CASE` constants keep the acronym as a whole word
+(`DEFAULT_OIDC_SCOPES`, `DEFAULT_OIDC_REGISTRATION_RATE_LIMIT`,
+`OIDC_TOKEN_ENDPOINT_AUTH_METHODS`, `OIDC_DYNAMIC_GRANT_TYPES`,
+`OIDC_DYNAMIC_RESPONSE_TYPES`); so do the client SDK's `client.oidc.*` methods,
+every HTTP path and operationId, and the metric
+`effect-auth.oidc_token_requests.total`. `SSO.ts`'s `OIDCSSOProvider` (with its
+`OIDCSSOProviderView` / `SSORegisterOIDCPayload` wire schemas) also stays as it
+is — it is an SSO type, and `SSO.ts` was not part of this round.
+
+### 11.2 `APIKey` → `ApiKey`
+
+The same convention, applied to the API-key module: `src/APIKey.ts` →
+`src/ApiKey.ts`. §3 had briefly gone the other way; this supersedes it.
+
+| Old                                                                               | New                                                                               |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `src/APIKey.ts`                                                                   | `src/ApiKey.ts`                                                                   |
+| `"@effect-auth/APIKeyService"`, `"@effect-auth/APIKeyStore"`                      | `"@effect-auth/ApiKeyService"`, `"@effect-auth/ApiKeyStore"`                      |
+| `APIKeyService`, `APIKeyStore`, `APIKeyError`, `APIKeyConfig`                     | `ApiKeyService`, `ApiKeyStore`, `ApiKeyError`, `ApiKeyConfig`                     |
+| `APIKey` (the record type)                                                        | `ApiKey`                                                                          |
+| `APIKeyCreateOptions`, `APIKeyCreateResult`, `APIKeyVerifyResult`, `APIKeyUpdate` | `ApiKeyCreateOptions`, `ApiKeyCreateResult`, `ApiKeyVerifyResult`, `ApiKeyUpdate` |
+| `hashAPIKey`                                                                      | `hashApiKey`                                                                      |
+| `APIKeyView`, `APIKeyCreatedView`, `APIKeyListView` (wire)                        | `ApiKeyView`, `ApiKeyCreatedView`, `ApiKeyListView`                               |
+| `APIKeyCreatePayload`, `APIKeyUpdatePayload`, `APIKeyRateLimit` (wire)            | `ApiKeyCreatePayload`, `ApiKeyUpdatePayload`, `ApiKeyRateLimit`                   |
+
+Unchanged: the client SDK's `client.apiKeys.*` methods, the `/api-key/*` paths
+and their `apiKey*` operationIds.
+
+### 11.3 `secondfactor/` → `multifactor/`
+
+The cluster is named after the feature it ships (`MultiFactorService`), not after
+the position of the factor in the flow.
+
+| Old                                          | New                                         |
+| -------------------------------------------- | ------------------------------------------- |
+| `src/secondfactor/*`                         | `src/multifactor/*`                         |
+| `"@thomasfosterau/effect-auth/secondfactor"` | `"@thomasfosterau/effect-auth/multifactor"` |
+| `Auth.SecondFactor.X`                        | `Auth.MultiFactor.X`                        |
+
+The module files inside keep their names (`MultiFactor.ts`,
+`OTPSecondFactor.ts`, `WebAuthn.ts`, `OTP.ts`), as do every exported identifier,
+tag string, HTTP route and wire schema in them — including the deliberately
+second-factor-specific `OTPSecondFactor*` symbols and the generic
+`SecondFactorGate` / `SecondFactorChallenge` seam in `email/EmailPassword.ts`.
+There was no collision at the root: nothing else exports the name `MultiFactor`.
+
+### 11.4 The `session/` cluster dissolved
+
+Session management is the spine nearly every feature module depends on, not a
+side cluster, so — exactly as with `authz/` in §10 — `src/session/` dissolved
+into flat top-level modules and the `./session` subpath was **removed with no
+replacement**. `import { ... } from "@thomasfosterau/effect-auth/session"`
+becomes `import { ... } from "@thomasfosterau/effect-auth"`.
+
+| Old                                     | New                                         |
+| --------------------------------------- | ------------------------------------------- |
+| `src/session/SessionService.ts`         | `src/SessionService.ts`                     |
+| `src/session/SessionStore.ts`           | `src/SessionStore.ts`                       |
+| `src/session/UserStore.ts`              | `src/UserStore.ts`                          |
+| `src/session/TrustedDevice.ts`          | `src/TrustedDevice.ts`                      |
+| `src/session/index.ts`                  | **deleted** — dissolved into `src/index.ts` |
+| `"@thomasfosterau/effect-auth/session"` | `"@thomasfosterau/effect-auth"` (root)      |
+
+`SessionService`, `SessionStore`, `UserStore` and `UserServiceStore` were already
+re-exported flat from the root, so they are unaffected. The `TrustedDevice`
+symbols were reachable **only** through the `./session` subpath before; they now
+sit on the flat spine:
+
+| Old                                                                      | New                                                       |
+| ------------------------------------------------------------------------ | --------------------------------------------------------- |
+| `TrustedDeviceStore` (from `.../effect-auth/session`)                    | `Auth.TrustedDeviceStore`                                 |
+| `TrustedDeviceService`                                                   | `Auth.TrustedDeviceService`                               |
+| `TrustedDeviceRecord`, `TrustedDeviceConfig`, `TrustedDeviceIssueResult` | `Auth.TrustedDeviceRecord`, …                             |
+| `TrustedDeviceCookieRef`, `trustedDeviceConfig`                          | `Auth.TrustedDeviceCookieRef`, `Auth.trustedDeviceConfig` |
+| `TrustedDeviceWithMultiFactorGateLayer`                                  | `Auth.TrustedDeviceWithMultiFactorGateLayer`              |
+| `gate`                                                                   | `Auth.TrustedDevice.gate`                                 |
+
+`make` and `gate` are too generic to sit at the root, so `TrustedDevice.ts` is
+_also_ re-exported as the namespace `Auth.TrustedDevice` — the same treatment
+`Auth.PolicyStore` got in §10. There is still no `Auth.Session` namespace, for
+the reason recorded in the root barrel's module comment: `Types.ts` owns that
+name for the flat `Session` record.
 
 ## Validation
 

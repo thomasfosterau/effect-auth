@@ -28,8 +28,8 @@ import {
   SCIM_EXTERNAL_ID_ATTRIBUTE,
   type SCIMConnection,
 } from "./SCIM.ts";
-import { SessionService } from "./session/SessionService.ts";
-import { UserStore } from "./session/UserStore.ts";
+import { SessionService } from "./SessionService.ts";
+import { UserStore } from "./UserStore.ts";
 import { UserService, UserServiceStore } from "./User.ts";
 import type * as Types from "./Types.ts";
 

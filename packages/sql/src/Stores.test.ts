@@ -335,7 +335,7 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     const bytes = new Uint8Array([0, 1, 2, 250, 255]);
     const result = await run(
       Effect.gen(function* () {
-        const store = yield* Auth.SecondFactor.ChallengeStore;
+        const store = yield* Auth.MultiFactor.ChallengeStore;
         yield* store.create({ challenge: bytes, expiresAt: Date.now() + 60_000, userId: "user-1" });
         // create replaces an existing row for the same challenge
         yield* store.create({ challenge: bytes, expiresAt: Date.now() + 90_000 });
@@ -351,7 +351,7 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
   });
 
   it("CredentialStore roundtrips credentials incl. transports and getByCredentialId", async () => {
-    const credential: Auth.SecondFactor.WebAuthnCredential = {
+    const credential: Auth.MultiFactor.WebAuthnCredential = {
       id: "cred-1",
       userId: "user-1",
       publicKey: new Uint8Array([9, 8, 7]),
@@ -363,7 +363,7 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     };
     const result = await run(
       Effect.gen(function* () {
-        const store = yield* Auth.SecondFactor.CredentialStore;
+        const store = yield* Auth.MultiFactor.CredentialStore;
         yield* store.create(credential);
         const loaded = yield* store.get("cred-1");
         const byCredentialId = yield* store.getByCredentialId("cred-1");
@@ -577,14 +577,14 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
   });
 
   it("MultiFactorStore and PendingMultiFactorStore roundtrip incl. lastUsedCounter", async () => {
-    const record: Auth.SecondFactor.MultiFactorRecord = {
+    const record: Auth.MultiFactor.MultiFactorRecord = {
       userId: "user-1",
       secret: "JBSWY3DPEHPK3PXP",
       backupCodes: ["h1", "h2", "h3"],
       verified: false,
       createdAt: Date.now(),
     };
-    const pending: Auth.SecondFactor.PendingMultiFactor = {
+    const pending: Auth.MultiFactor.PendingMultiFactor = {
       token: "p2f-1",
       userId: "user-1",
       expiresAt: Date.now() + 300_000,
@@ -592,8 +592,8 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     };
     const result = await run(
       Effect.gen(function* () {
-        const store = yield* Auth.SecondFactor.MultiFactorStore;
-        const pendingStore = yield* Auth.SecondFactor.PendingMultiFactorStore;
+        const store = yield* Auth.MultiFactor.MultiFactorStore;
+        const pendingStore = yield* Auth.MultiFactor.PendingMultiFactorStore;
         const before = yield* store.get("user-1");
         yield* store.upsert(record);
         const created = yield* store.get("user-1");
@@ -796,8 +796,8 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     ).pipe(Layer.provide(Reactivity.layer));
 
     const program = Effect.gen(function* () {
-      const challenges = yield* Auth.SecondFactor.ChallengeStore;
-      const credentials = yield* Auth.SecondFactor.CredentialStore;
+      const challenges = yield* Auth.MultiFactor.ChallengeStore;
+      const credentials = yield* Auth.MultiFactor.CredentialStore;
       const rateLimits = yield* Auth.RateLimitStore;
       const e1 = yield* Effect.flip(challenges.get(new Uint8Array([1, 2, 3])));
       const e2 = yield* Effect.flip(credentials.get("cred-id"));

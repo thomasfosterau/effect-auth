@@ -9,9 +9,9 @@ import {
   type DeviceAuthorizationRecord,
 } from "./DeviceAuthorization.ts";
 import { hashToken } from "./TokenHash.ts";
-import { SessionStore } from "./session/SessionStore.ts";
-import { UserStore } from "./session/UserStore.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionStore } from "./SessionStore.ts";
+import { UserStore } from "./UserStore.ts";
+import { SessionService } from "./SessionService.ts";
 import { Hooks } from "./Hooks.ts";
 import type * as Types from "./Types.ts";
 

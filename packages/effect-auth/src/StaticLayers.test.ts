@@ -20,9 +20,9 @@ describe("static service layers", () => {
       ["EmailVerificationService", Auth.Email.EmailVerificationService],
       ["PasswordResetService", Auth.Password.PasswordResetService],
       ["UsernameService", Auth.UsernameService],
-      ["MultiFactorService", Auth.SecondFactor.MultiFactorService],
-      ["WebAuthnService", Auth.SecondFactor.WebAuthnService],
-      ["APIKeyService", Auth.APIKeyService],
+      ["MultiFactorService", Auth.MultiFactor.MultiFactorService],
+      ["WebAuthnService", Auth.MultiFactor.WebAuthnService],
+      ["ApiKeyService", Auth.ApiKeyService],
       ["JWTService", Auth.JWTService],
       ["OAuthService", Auth.OAuth.OAuthService],
       ["SSOService", Auth.SSOService],
@@ -33,7 +33,7 @@ describe("static service layers", () => {
       ["AccountManagementService", Auth.AccountManagementService],
       ["DeviceAuthorizationService", Auth.DeviceAuthorizationService],
       ["AuthLifecycleService", Auth.AuthLifecycleService],
-      ["OIDCProviderService", Auth.OIDCProviderService],
+      ["OidcProviderService", Auth.OidcProviderService],
     ];
     for (const [name, service] of services) {
       expect(typeof service.layer, `${name}.layer`).toBe("function");

@@ -11,10 +11,10 @@
 import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
 import { claimIdentifier, IdentifierStore, makeIdentifier } from "../Identifier.ts";
-import { UserStore } from "../session/UserStore.ts";
+import { UserStore } from "../UserStore.ts";
 import type { HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { SessionService } from "../session/SessionService.ts";
+import { SessionService } from "../SessionService.ts";
 import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";

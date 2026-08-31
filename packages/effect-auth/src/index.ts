@@ -1,15 +1,17 @@
 /**
  * effect-auth — public API barrel.
  *
- * No `Session` namespace: `Types.ts` already exports the flat `Session`
- * record type/schema (`export * from "./Types.ts"` above), and a sibling
+ * No `Session` namespace, and no `session/` cluster: session management is the
+ * spine nearly every feature module depends on, so `SessionService`,
+ * `SessionStore`, `UserStore` and `TrustedDevice` live flat in `src/`
+ * alongside the rest of it. A namespace was never an option anyway —
+ * `Types.ts` already exports the flat `Session` record type/schema
+ * (`export * from "./Types.ts"` below), and a sibling
  * `export * as Session from "./session/index.ts"` would silently win that
  * name collision — an explicit `export * as X` always beats an ambiguous
  * `export *`-derived binding of the same name — making `Types.Session`
  * unreachable from the root for every consumer that types a session as
- * `Auth.Session`. The session cluster (`SessionService`, `SessionStore`,
- * `UserStore`, `TrustedDevice`) stays reachable via the flat spine below
- * and the `effect-auth/session` subpath.
+ * `Auth.Session`.
  *
  * @module effect-auth
  */
@@ -26,9 +28,23 @@ export * from "./Messages.ts";
 export * from "./utils.ts";
 
 // Session management (core — depended on by nearly every feature module)
-export { SessionService } from "./session/SessionService.ts";
-export * from "./session/SessionStore.ts";
-export * from "./session/UserStore.ts";
+export { SessionService } from "./SessionService.ts";
+export * from "./SessionStore.ts";
+export * from "./UserStore.ts";
+// Trusted devices: the `./session` subpath used to be the only route to these,
+// so the flat spine now carries them. `make`/`gate` are too generic for the
+// root — reach them through the namespace (`Auth.TrustedDevice.gate`).
+export * as TrustedDevice from "./TrustedDevice.ts";
+export {
+  type TrustedDeviceRecord,
+  TrustedDeviceStore,
+  TrustedDeviceCookieRef,
+  type TrustedDeviceConfig,
+  type TrustedDeviceIssueResult,
+  TrustedDeviceService,
+  trustedDeviceConfig,
+  TrustedDeviceWithMultiFactorGateLayer,
+} from "./TrustedDevice.ts";
 
 // Rate limiting facade
 export {
@@ -79,17 +95,17 @@ export {
   UsernameService,
 } from "./Username.ts";
 export {
-  APIKeyError,
-  type APIKey,
-  APIKeyStore,
-  type APIKeyConfig,
-  type APIKeyCreateOptions,
-  type APIKeyCreateResult,
-  type APIKeyVerifyResult,
-  type APIKeyUpdate,
-  APIKeyService,
-  hashAPIKey,
-} from "./APIKey.ts";
+  ApiKeyError,
+  type ApiKey,
+  ApiKeyStore,
+  type ApiKeyConfig,
+  type ApiKeyCreateOptions,
+  type ApiKeyCreateResult,
+  type ApiKeyVerifyResult,
+  type ApiKeyUpdate,
+  ApiKeyService,
+  hashApiKey,
+} from "./ApiKey.ts";
 export {
   JWTError,
   type JWTAlgorithm,
@@ -235,45 +251,45 @@ export {
   AuthLifecycleService,
 } from "./AuthLifecycle.ts";
 export {
-  OIDCProviderError,
-  OIDCTokenError,
-  OIDCRegistrationError,
-  type OIDCClient,
-  OIDCClientStore,
-  type OIDCAuthorizationCode,
-  OIDCCodeStore,
-  type OIDCToken,
-  OIDCTokenStore,
-  type OIDCConsent,
-  OIDCConsentStore,
-  type RegisterOIDCClientInput,
-  type RegisteredOIDCClient,
-  type UpdateOIDCClientInput,
-  type OIDCAuthorizeRequest,
-  type OIDCAuthorizeResult,
-  type OIDCTokenRequest,
-  type OIDCTokenResult,
-  type TrustedOIDCClient,
-  type OIDCProviderConfig,
-  OIDCProviderService,
-  hashOIDCSecret,
+  OidcProviderError,
+  OidcTokenError,
+  OidcRegistrationError,
+  type OidcClient,
+  OidcClientStore,
+  type OidcAuthorizationCode,
+  OidcCodeStore,
+  type OidcToken,
+  OidcTokenStore,
+  type OidcConsent,
+  OidcConsentStore,
+  type RegisterOidcClientInput,
+  type RegisteredOidcClient,
+  type UpdateOidcClientInput,
+  type OidcAuthorizeRequest,
+  type OidcAuthorizeResult,
+  type OidcTokenRequest,
+  type OidcTokenResult,
+  type TrustedOidcClient,
+  type OidcProviderConfig,
+  OidcProviderService,
+  hashOidcSecret,
   DEFAULT_OIDC_SCOPES,
   // RFC 7591 / 7592 dynamic client registration + the MCP preset.
-  type OIDCClientMetadata,
-  type NormalizedOIDCClientMetadata,
-  type OIDCTokenEndpointAuthMethod,
-  type OIDCRegistrationPolicy,
-  type OIDCRegistrationDisposition,
-  type OIDCInitialAccessTokenVerifier,
-  type OIDCDynamicRegistrationConfig,
-  type OIDCDynamicRegistrationInfo,
-  type DynamicallyRegisteredOIDCClient,
+  type OidcClientMetadata,
+  type NormalizedOidcClientMetadata,
+  type OidcTokenEndpointAuthMethod,
+  type OidcRegistrationPolicy,
+  type OidcRegistrationDisposition,
+  type OidcInitialAccessTokenVerifier,
+  type OidcDynamicRegistrationConfig,
+  type OidcDynamicRegistrationInfo,
+  type DynamicallyRegisteredOidcClient,
   OIDC_TOKEN_ENDPOINT_AUTH_METHODS,
   OIDC_DYNAMIC_GRANT_TYPES,
   OIDC_DYNAMIC_RESPONSE_TYPES,
   DEFAULT_OIDC_REGISTRATION_RATE_LIMIT,
   mcpProviderPreset,
-} from "./OIDCProvider.ts";
+} from "./OidcProvider.ts";
 export * from "./ClientIP.ts";
 export * from "./SessionCookieCache.ts";
 export {
@@ -366,4 +382,4 @@ export * as HTTP from "./http/index.ts";
 export * as OAuth from "./oauth/index.ts";
 export * as Password from "./password/index.ts";
 export * as Plugins from "./plugins/index.ts";
-export * as SecondFactor from "./secondfactor/index.ts";
+export * as MultiFactor from "./multifactor/index.ts";

@@ -1,10 +1,10 @@
 import { Context, Crypto, Effect, Layer } from "effect";
-import type * as Types from "../Types.ts";
-import * as Errors from "../Errors.ts";
-import { Hooks, type HookError } from "../Hooks.ts";
-import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { hashToken } from "../TokenHash.ts";
-import * as Obs from "../Observability.ts";
+import type * as Types from "./Types.ts";
+import * as Errors from "./Errors.ts";
+import { Hooks, type HookError } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { hashToken } from "./TokenHash.ts";
+import * as Obs from "./Observability.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 

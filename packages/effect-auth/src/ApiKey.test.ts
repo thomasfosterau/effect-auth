@@ -2,22 +2,22 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
-  type APIKeyService,
-  APIKeyStore,
-  hashAPIKey,
-  type APIKey as APIKeyRecord,
-  type APIKeyConfig,
-  type APIKeyVerifyResult,
-} from "./APIKey.ts";
-import * as APIKey from "./APIKey.ts";
+  type ApiKeyService,
+  ApiKeyStore,
+  hashApiKey,
+  type ApiKey as ApiKeyRecord,
+  type ApiKeyConfig,
+  type ApiKeyVerifyResult,
+} from "./ApiKey.ts";
+import * as ApiKey from "./ApiKey.ts";
 import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.ts";
 import * as RateLimit from "./RateLimit.ts";
 
-const apiKeys = new Map<string, APIKeyRecord>();
+const apiKeys = new Map<string, ApiKeyRecord>();
 const rateLimitEntries = new Map<string, RateLimitEntry>();
 
 const apiKeyStore = {
-  create: (apiKey: APIKeyRecord) =>
+  create: (apiKey: ApiKeyRecord) =>
     Effect.sync(() => {
       apiKeys.set(apiKey.id, apiKey);
       return apiKey;
@@ -35,7 +35,7 @@ const apiKeyStore = {
       return null;
     }),
 
-  update: (apiKey: APIKeyRecord) =>
+  update: (apiKey: ApiKeyRecord) =>
     Effect.sync(() => {
       apiKeys.set(apiKey.id, apiKey);
       return apiKey;
@@ -74,7 +74,7 @@ const rateLimitStore = {
     }),
 };
 
-const storeContext = Context.make(APIKeyStore, apiKeyStore);
+const storeContext = Context.make(ApiKeyStore, apiKeyStore);
 
 const makeRateLimitContext = async () => {
   const rateLimiter = await Effect.runPromise(
@@ -92,20 +92,20 @@ const makeRateLimitContext = async () => {
   );
 };
 
-// APIKeyService now resolves RateLimiter at construction time (not just
+// ApiKeyService now resolves RateLimiter at construction time (not just
 // per-call), so every test — even ones that don't exercise rate limiting —
 // needs a full context including RateLimiter | RateLimitStore.
 const runService = async <A, E>(
   program: (
-    service: typeof APIKeyService.Service,
-  ) => Effect.Effect<A, E, APIKeyStore | RateLimiter>,
-  config?: APIKeyConfig,
+    service: typeof ApiKeyService.Service,
+  ) => Effect.Effect<A, E, ApiKeyStore | RateLimiter>,
+  config?: ApiKeyConfig,
 ): Promise<A> => {
   const testContext = await makeRateLimitContext();
   return Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
-        const service = yield* APIKey.make(config);
+        const service = yield* ApiKey.make(config);
         return yield* program(service);
       }),
       testContext,
@@ -113,7 +113,7 @@ const runService = async <A, E>(
   );
 };
 
-describe("APIKeyService", () => {
+describe("ApiKeyService", () => {
   beforeEach(() => {
     apiKeys.clear();
     rateLimitEntries.clear();
@@ -139,7 +139,7 @@ describe("APIKeyService", () => {
     expect(result.created.apiKey.metadata).toEqual({ env: "test" });
 
     // Only the sha256 digest is stored, never the plaintext
-    expect(result.created.apiKey.keyHash).toBe(hashAPIKey(result.created.key));
+    expect(result.created.apiKey.keyHash).toBe(hashApiKey(result.created.key));
     expect(result.created.apiKey.keyHash).not.toContain(result.created.key);
 
     expect(result.verified.valid).toBe(true);
@@ -238,7 +238,7 @@ describe("APIKeyService", () => {
 
     expect(result.third._tag).toBe("Failure");
     if (result.third._tag === "Failure") {
-      expect(result.third.failure._tag).toBe("APIKeyError");
+      expect(result.third.failure._tag).toBe("ApiKeyError");
     }
     expect(result.otherUser._tag).toBe("Success");
   });
@@ -279,7 +279,7 @@ describe("APIKeyService", () => {
 
     expect(result.foreignUpdate._tag).toBe("Failure");
     if (result.foreignUpdate._tag === "Failure") {
-      expect(result.foreignUpdate.failure._tag).toBe("APIKeyError");
+      expect(result.foreignUpdate.failure._tag).toBe("ApiKeyError");
     }
     expect(result.foreignDelete._tag).toBe("Failure");
     expect(result.ownedUpdate.name).toBe("renamed");
@@ -330,7 +330,7 @@ describe("APIKeyService", () => {
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const service = yield* APIKey.make();
+          const service = yield* ApiKey.make();
           const { key } = yield* service.create("user-1", {
             rateLimit: { maxRequests: 2, windowMs: 60_000 },
           });
@@ -473,7 +473,7 @@ describe("APIKeyService", () => {
           refillInterval: 60_000,
           // no remaining → unlimited
         });
-        const outcomes: APIKeyVerifyResult[] = [];
+        const outcomes: ApiKeyVerifyResult[] = [];
         for (let i = 0; i < 5; i++) outcomes.push(yield* service.verify(key));
         return outcomes;
       }),
@@ -489,9 +489,9 @@ describe("APIKeyService", () => {
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const service = yield* APIKey.make();
+          const service = yield* ApiKey.make();
           const { key } = yield* service.create("user-1");
-          const outcomes: APIKeyVerifyResult[] = [];
+          const outcomes: ApiKeyVerifyResult[] = [];
           for (let i = 0; i < 5; i++) {
             outcomes.push(yield* service.verifyWithRateLimit(key));
           }

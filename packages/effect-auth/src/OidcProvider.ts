@@ -23,13 +23,13 @@ import { JWTService } from "./JWT.ts";
 import * as Obs from "./Observability.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type { RateLimitConfig } from "./RateLimit.ts";
-import { UserStore } from "./session/UserStore.ts";
+import { UserStore } from "./UserStore.ts";
 import { anyEmail, IdentifierStore } from "./Identifier.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 
 /** Failure to register a client or process an authorization request. */
-export class OIDCProviderError extends Data.TaggedError("OIDCProviderError")<{
+export class OidcProviderError extends Data.TaggedError("OidcProviderError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
@@ -39,7 +39,7 @@ export class OIDCProviderError extends Data.TaggedError("OIDCProviderError")<{
  * (`invalid_request`, `invalid_client`, `invalid_grant`,
  * `unsupported_grant_type`, `invalid_scope`, `server_error`).
  */
-export class OIDCTokenError extends Data.TaggedError("OIDCTokenError")<{
+export class OidcTokenError extends Data.TaggedError("OidcTokenError")<{
   readonly error: string;
   readonly description?: string;
 }> {}
@@ -50,7 +50,7 @@ export class OIDCTokenError extends Data.TaggedError("OIDCTokenError")<{
  * guarded endpoints need: `invalid_token` (bad initial-access or registration
  * access token → 401) and `access_denied` (refused outright → 403).
  */
-export class OIDCRegistrationError extends Data.TaggedError("OIDCRegistrationError")<{
+export class OidcRegistrationError extends Data.TaggedError("OidcRegistrationError")<{
   readonly error: string;
   readonly description?: string;
 }> {}
@@ -60,7 +60,7 @@ export class OIDCRegistrationError extends Data.TaggedError("OIDCRegistrationErr
 // -----------------------------------------------------------------------------
 
 /** A registered OAuth2/OIDC client application. */
-export interface OIDCClient {
+export interface OidcClient {
   readonly clientId: string;
   /** sha256 hex digest of the client secret — absent for public (native) clients. */
   readonly clientSecretHash?: string;
@@ -85,7 +85,7 @@ export interface OIDCClient {
    */
   readonly registrationAccessTokenHash?: string;
   /** RFC 7591 `token_endpoint_auth_method`. `none` marks a public client. */
-  readonly tokenEndpointAuthMethod?: OIDCTokenEndpointAuthMethod;
+  readonly tokenEndpointAuthMethod?: OidcTokenEndpointAuthMethod;
   /**
    * RFC 7591 `grant_types` the client registered for. When present the token
    * endpoint refuses any other grant with `unauthorized_client`; when absent
@@ -104,16 +104,16 @@ export interface OIDCClient {
 }
 
 /** Persistent registry of OIDC clients. */
-export class OIDCClientStore extends Context.Service<
-  OIDCClientStore,
+export class OidcClientStore extends Context.Service<
+  OidcClientStore,
   {
-    readonly create: (client: OIDCClient) => Effect.Effect<OIDCClient, AuthError>;
-    readonly getByClientId: (clientId: string) => Effect.Effect<OIDCClient | null, AuthError>;
-    readonly update: (client: OIDCClient) => Effect.Effect<OIDCClient, AuthError>;
+    readonly create: (client: OidcClient) => Effect.Effect<OidcClient, AuthError>;
+    readonly getByClientId: (clientId: string) => Effect.Effect<OidcClient | null, AuthError>;
+    readonly update: (client: OidcClient) => Effect.Effect<OidcClient, AuthError>;
     readonly delete: (clientId: string) => Effect.Effect<void, AuthError>;
-    readonly list: () => Effect.Effect<ReadonlyArray<OIDCClient>, AuthError>;
+    readonly list: () => Effect.Effect<ReadonlyArray<OidcClient>, AuthError>;
   }
->()("@effect-auth/OIDCClientStore") {}
+>()("@effect-auth/OidcClientStore") {}
 
 /**
  * A short-lived authorization artifact: either an issued authorization code
@@ -121,7 +121,7 @@ export class OIDCClientStore extends Context.Service<
  * (`kind: "pending_consent"`), keyed by the sha256 hex digest of the
  * user-visible value.
  */
-export interface OIDCAuthorizationCode {
+export interface OidcAuthorizationCode {
   /** sha256 hex digest of the code — never the plaintext. */
   readonly codeHash: string;
   readonly kind: "authorization_code" | "pending_consent";
@@ -139,19 +139,19 @@ export interface OIDCAuthorizationCode {
 }
 
 /** Ephemeral store for authorization codes and pending consent requests. */
-export class OIDCCodeStore extends Context.Service<
-  OIDCCodeStore,
+export class OidcCodeStore extends Context.Service<
+  OidcCodeStore,
   {
     readonly create: (
-      code: OIDCAuthorizationCode,
-    ) => Effect.Effect<OIDCAuthorizationCode, AuthError>;
-    readonly get: (codeHash: string) => Effect.Effect<OIDCAuthorizationCode | null, AuthError>;
+      code: OidcAuthorizationCode,
+    ) => Effect.Effect<OidcAuthorizationCode, AuthError>;
+    readonly get: (codeHash: string) => Effect.Effect<OidcAuthorizationCode | null, AuthError>;
     readonly delete: (codeHash: string) => Effect.Effect<void, AuthError>;
   }
->()("@effect-auth/OIDCCodeStore") {}
+>()("@effect-auth/OidcCodeStore") {}
 
 /** An issued opaque token, keyed by the sha256 hex digest of its value. */
-export interface OIDCToken {
+export interface OidcToken {
   /** sha256 hex digest of the token — never the plaintext. */
   readonly tokenHash: string;
   readonly kind: "access" | "refresh";
@@ -168,21 +168,21 @@ export interface OIDCToken {
 }
 
 /** Store for issued access and refresh tokens. */
-export class OIDCTokenStore extends Context.Service<
-  OIDCTokenStore,
+export class OidcTokenStore extends Context.Service<
+  OidcTokenStore,
   {
-    readonly create: (token: OIDCToken) => Effect.Effect<OIDCToken, AuthError>;
-    readonly get: (tokenHash: string) => Effect.Effect<OIDCToken | null, AuthError>;
+    readonly create: (token: OidcToken) => Effect.Effect<OidcToken, AuthError>;
+    readonly get: (tokenHash: string) => Effect.Effect<OidcToken | null, AuthError>;
     readonly delete: (tokenHash: string) => Effect.Effect<void, AuthError>;
     /** Optional: list all tokens belonging to a rotation family. Used for reuse-detection revocation. */
     readonly listByFamily?: (
       familyId: string,
-    ) => Effect.Effect<ReadonlyArray<OIDCToken>, AuthError>;
+    ) => Effect.Effect<ReadonlyArray<OidcToken>, AuthError>;
   }
->()("@effect-auth/OIDCTokenStore") {}
+>()("@effect-auth/OidcTokenStore") {}
 
 /** A user's recorded consent for a client (the union of granted scopes). */
-export interface OIDCConsent {
+export interface OidcConsent {
   readonly userId: string;
   readonly clientId: string;
   readonly scopes: readonly string[];
@@ -192,24 +192,24 @@ export interface OIDCConsent {
 }
 
 /** Store for recorded user consents. */
-export class OIDCConsentStore extends Context.Service<
-  OIDCConsentStore,
+export class OidcConsentStore extends Context.Service<
+  OidcConsentStore,
   {
     readonly get: (
       userId: string,
       clientId: string,
-    ) => Effect.Effect<OIDCConsent | null, AuthError>;
-    readonly upsert: (consent: OIDCConsent) => Effect.Effect<OIDCConsent, AuthError>;
+    ) => Effect.Effect<OidcConsent | null, AuthError>;
+    readonly upsert: (consent: OidcConsent) => Effect.Effect<OidcConsent, AuthError>;
     readonly delete: (userId: string, clientId: string) => Effect.Effect<void, AuthError>;
   }
->()("@effect-auth/OIDCConsentStore") {}
+>()("@effect-auth/OidcConsentStore") {}
 
 // -----------------------------------------------------------------------------
 // Service types
 // -----------------------------------------------------------------------------
 
-/** Input to {@link OIDCProviderService.registerClient}. */
-export interface RegisterOIDCClientInput {
+/** Input to {@link OidcProviderService.registerClient}. */
+export interface RegisterOidcClientInput {
   readonly name: string;
   readonly redirectUris: readonly string[];
   /** Default `"web"` (confidential — a secret is generated). */
@@ -220,14 +220,14 @@ export interface RegisterOIDCClientInput {
 }
 
 /** Result of registering a client: the plaintext secret is shown exactly once. */
-export interface RegisteredOIDCClient {
-  readonly client: OIDCClient;
+export interface RegisteredOidcClient {
+  readonly client: OidcClient;
   /** Only present for `web` (confidential) clients. */
   readonly clientSecret?: string;
 }
 
-/** Fields updatable via {@link OIDCProviderService.updateClient}. */
-export interface UpdateOIDCClientInput {
+/** Fields updatable via {@link OidcProviderService.updateClient}. */
+export interface UpdateOidcClientInput {
   readonly name?: string;
   readonly redirectUris?: readonly string[];
   readonly skipConsent?: boolean;
@@ -245,7 +245,7 @@ export const OIDC_TOKEN_ENDPOINT_AUTH_METHODS = [
   "client_secret_post",
   "none",
 ] as const;
-export type OIDCTokenEndpointAuthMethod = (typeof OIDC_TOKEN_ENDPOINT_AUTH_METHODS)[number];
+export type OidcTokenEndpointAuthMethod = (typeof OIDC_TOKEN_ENDPOINT_AUTH_METHODS)[number];
 
 /** Grant types a dynamically registered client may ask for. */
 export const OIDC_DYNAMIC_GRANT_TYPES = ["authorization_code", "refresh_token"] as const;
@@ -258,7 +258,7 @@ export const OIDC_DYNAMIC_RESPONSE_TYPES = ["code"] as const;
  * snake_case wire form). Members the provider does not implement
  * (`jwks`, `software_statement`, ...) are ignored rather than rejected.
  */
-export interface OIDCClientMetadata {
+export interface OidcClientMetadata {
   /** Required. Exact-match redirect URIs; https or loopback http by default. */
   readonly redirectUris: readonly string[];
   /** Default `client_secret_basic` per RFC 7591 §2; `none` = public client. */
@@ -272,10 +272,10 @@ export interface OIDCClientMetadata {
   readonly scope?: string;
 }
 
-/** {@link OIDCClientMetadata} after validation, with every RFC default applied. */
-export interface NormalizedOIDCClientMetadata {
+/** {@link OidcClientMetadata} after validation, with every RFC default applied. */
+export interface NormalizedOidcClientMetadata {
   readonly redirectUris: readonly string[];
-  readonly tokenEndpointAuthMethod: OIDCTokenEndpointAuthMethod;
+  readonly tokenEndpointAuthMethod: OidcTokenEndpointAuthMethod;
   readonly grantTypes: readonly string[];
   readonly responseTypes: readonly string[];
   readonly clientName: string;
@@ -288,7 +288,7 @@ export interface NormalizedOIDCClientMetadata {
  * different code — use `access_denied` for a 403-shaped refusal that is not
  * about the metadata itself.
  */
-export interface OIDCRegistrationDisposition {
+export interface OidcRegistrationDisposition {
   readonly allow: boolean;
   /** RFC 7591 §3.2.2 error code when denying. Default `invalid_client_metadata`. */
   readonly error?: string;
@@ -299,18 +299,18 @@ export interface OIDCRegistrationDisposition {
 
 /**
  * Gate for `POST {issuer}/register`, evaluated after the metadata is validated
- * and normalized. Return `true`/`false`, or an {@link OIDCRegistrationDisposition}
+ * and normalized. Return `true`/`false`, or an {@link OidcRegistrationDisposition}
  * to choose the error code or opt the client out of the consent screen.
  */
-export type OIDCRegistrationPolicy = (
-  metadata: NormalizedOIDCClientMetadata,
-) => Effect.Effect<boolean | OIDCRegistrationDisposition, AuthError>;
+export type OidcRegistrationPolicy = (
+  metadata: NormalizedOidcClientMetadata,
+) => Effect.Effect<boolean | OidcRegistrationDisposition, AuthError>;
 
 /**
  * Verifier for the optional initial access token (RFC 7591 §3.1) presented as
  * `Authorization: Bearer` on `POST {issuer}/register`.
  */
-export type OIDCInitialAccessTokenVerifier = (token: string) => Effect.Effect<boolean, AuthError>;
+export type OidcInitialAccessTokenVerifier = (token: string) => Effect.Effect<boolean, AuthError>;
 
 /** Rate limit applied to `POST {issuer}/register` per client IP. */
 export const DEFAULT_OIDC_REGISTRATION_RATE_LIMIT: RateLimitConfig = {
@@ -323,18 +323,18 @@ export const DEFAULT_OIDC_REGISTRATION_RATE_LIMIT: RateLimitConfig = {
  * Enables RFC 7591 dynamic client registration. Registration is **off** until
  * this is set: `POST {issuer}/register` answers 404 without it.
  */
-export interface OIDCDynamicRegistrationConfig {
+export interface OidcDynamicRegistrationConfig {
   /**
    * Deny/allow hook run against the normalized metadata. Without it every
    * well-formed registration is accepted (open registration) — pair it with
    * {@link initialAccessToken} for anything internet-facing.
    */
-  readonly policy?: OIDCRegistrationPolicy;
+  readonly policy?: OidcRegistrationPolicy;
   /**
    * Require `Authorization: Bearer <initial access token>` on `POST /register`.
    * Either a shared secret (compared in constant time) or a verifier hook.
    */
-  readonly initialAccessToken?: Redacted.Redacted<string> | OIDCInitialAccessTokenVerifier;
+  readonly initialAccessToken?: Redacted.Redacted<string> | OidcInitialAccessTokenVerifier;
   /**
    * Scope granted when the request omits `scope`. Defaults to the provider's
    * `allowedScopes`.
@@ -366,8 +366,8 @@ export interface OIDCDynamicRegistrationConfig {
  * clients only) and `registrationAccessToken` are returned exactly once — both
  * are stored as sha256 digests.
  */
-export interface DynamicallyRegisteredOIDCClient {
-  readonly client: OIDCClient;
+export interface DynamicallyRegisteredOidcClient {
+  readonly client: OidcClient;
   /** Absent for public clients (`token_endpoint_auth_method: "none"`). */
   readonly clientSecret?: string;
   /** RFC 7592 registration access token for the management endpoints. */
@@ -375,7 +375,7 @@ export interface DynamicallyRegisteredOIDCClient {
 }
 
 /** What the HTTP layer needs to know about the registration configuration. */
-export interface OIDCDynamicRegistrationInfo {
+export interface OidcDynamicRegistrationInfo {
   /** `POST /register` is served (404 otherwise). */
   readonly enabled: boolean;
   /** The RFC 7592 management endpoints are served. */
@@ -385,7 +385,7 @@ export interface OIDCDynamicRegistrationInfo {
 }
 
 /** A parsed `GET /oauth2/authorize` request (snake_case per RFC 6749). */
-export interface OIDCAuthorizeRequest {
+export interface OidcAuthorizeRequest {
   readonly responseType: string;
   readonly clientId: string;
   readonly redirectUri: string;
@@ -409,13 +409,13 @@ export interface OIDCAuthorizeRequest {
  * - `error`: a spec-level error redirected to the client per RFC 6749 —
  *   `redirect_uri?error=...&state=...`
  */
-export type OIDCAuthorizeResult =
+export type OidcAuthorizeResult =
   | { readonly type: "code"; readonly redirectTo: string }
   | { readonly type: "consent"; readonly redirectTo: string; readonly consentCode: string }
   | { readonly type: "error"; readonly redirectTo: string; readonly error: string };
 
 /** A parsed `POST /oauth2/token` request (snake_case per RFC 6749). */
-export interface OIDCTokenRequest {
+export interface OidcTokenRequest {
   readonly grantType: string;
   readonly code?: string;
   readonly redirectUri?: string;
@@ -429,7 +429,7 @@ export interface OIDCTokenRequest {
 }
 
 /** A successful token response (camelCase; the HTTP layer encodes snake_case). */
-export interface OIDCTokenResult {
+export interface OidcTokenResult {
   readonly accessToken: string;
   readonly tokenType: "Bearer";
   /** Seconds until the access token expires. */
@@ -440,7 +440,7 @@ export interface OIDCTokenResult {
 }
 
 /** A statically configured, implicitly trusted client (consent skipped). */
-export interface TrustedOIDCClient {
+export interface TrustedOidcClient {
   readonly clientId: string;
   /** Plaintext secret (hashed at service creation); omit for public clients. */
   readonly clientSecret?: Redacted.Redacted<string>;
@@ -451,7 +451,7 @@ export interface TrustedOIDCClient {
 }
 
 /** Configuration for {@link make}. */
-export interface OIDCProviderConfig {
+export interface OidcProviderConfig {
   /**
    * Issuer identifier: the external base URL where the auth handler is
    * mounted (e.g. `https://app.example.com/api/auth`). Used as the `iss`
@@ -478,16 +478,16 @@ export interface OIDCProviderConfig {
   /** Require PKCE from confidential clients too (default: `false`). */
   readonly requirePKCE?: boolean;
   /** Statically configured first-party clients (consent skipped by default). */
-  readonly trustedClients?: readonly TrustedOIDCClient[];
+  readonly trustedClients?: readonly TrustedOidcClient[];
   /**
    * Enable RFC 7591 dynamic client registration (and, unless disabled, the
    * RFC 7592 management endpoints). Omit to keep `POST /register` unmounted.
    */
-  readonly dynamicRegistration?: OIDCDynamicRegistrationConfig;
+  readonly dynamicRegistration?: OidcDynamicRegistrationConfig;
 }
 
-export class OIDCProviderService extends Context.Service<
-  OIDCProviderService,
+export class OidcProviderService extends Context.Service<
+  OidcProviderService,
   {
     /**
      * Register a client application. Generates the `client_id` and — for `web`
@@ -495,9 +495,9 @@ export class OIDCProviderService extends Context.Service<
      * Gate this behind an admin check at the HTTP layer.
      */
     readonly registerClient: (
-      input: RegisterOIDCClientInput,
+      input: RegisterOidcClientInput,
       registrarUserId?: string,
-    ) => Effect.Effect<RegisteredOIDCClient, OIDCProviderError | AuthError>;
+    ) => Effect.Effect<RegisteredOidcClient, OidcProviderError | AuthError>;
 
     /**
      * RFC 7591 dynamic client registration. Validates the metadata, runs the
@@ -510,15 +510,15 @@ export class OIDCProviderService extends Context.Service<
      * layer's per-IP rate limit.
      */
     readonly registerDynamicClient: (
-      metadata: OIDCClientMetadata,
+      metadata: OidcClientMetadata,
       options?: { readonly initialAccessToken?: string },
-    ) => Effect.Effect<DynamicallyRegisteredOIDCClient, OIDCRegistrationError | AuthError>;
+    ) => Effect.Effect<DynamicallyRegisteredOidcClient, OidcRegistrationError | AuthError>;
 
     /** RFC 7592 read: the client behind a registration access token. */
     readonly readDynamicClient: (
       clientId: string,
       registrationAccessToken: string,
-    ) => Effect.Effect<OIDCClient, OIDCRegistrationError | AuthError>;
+    ) => Effect.Effect<OidcClient, OidcRegistrationError | AuthError>;
 
     /**
      * RFC 7592 update: replace a dynamically registered client's metadata.
@@ -528,43 +528,43 @@ export class OIDCProviderService extends Context.Service<
     readonly updateDynamicClient: (
       clientId: string,
       registrationAccessToken: string,
-      metadata: OIDCClientMetadata,
-    ) => Effect.Effect<OIDCClient, OIDCRegistrationError | AuthError>;
+      metadata: OidcClientMetadata,
+    ) => Effect.Effect<OidcClient, OidcRegistrationError | AuthError>;
 
     /** RFC 7592 delete: deregister a dynamically registered client. */
     readonly deleteDynamicClient: (
       clientId: string,
       registrationAccessToken: string,
-    ) => Effect.Effect<void, OIDCRegistrationError | AuthError>;
+    ) => Effect.Effect<void, OidcRegistrationError | AuthError>;
 
     /** Whether (and how) dynamic registration is served. */
-    readonly dynamicRegistration: OIDCDynamicRegistrationInfo;
+    readonly dynamicRegistration: OidcDynamicRegistrationInfo;
 
     /** Look up a client (trusted config clients first, then the store). */
-    readonly getClient: (clientId: string) => Effect.Effect<OIDCClient | null, AuthError>;
+    readonly getClient: (clientId: string) => Effect.Effect<OidcClient | null, AuthError>;
 
     /** List registered clients (store-backed only). */
-    readonly listClients: () => Effect.Effect<ReadonlyArray<OIDCClient>, AuthError>;
+    readonly listClients: () => Effect.Effect<ReadonlyArray<OidcClient>, AuthError>;
 
     /** Update a registered client. Trusted config clients cannot be updated. */
     readonly updateClient: (
       clientId: string,
-      input: UpdateOIDCClientInput,
-    ) => Effect.Effect<OIDCClient, OIDCProviderError | AuthError>;
+      input: UpdateOidcClientInput,
+    ) => Effect.Effect<OidcClient, OidcProviderError | AuthError>;
 
     /** Delete a registered client. */
-    readonly deleteClient: (clientId: string) => Effect.Effect<void, OIDCProviderError | AuthError>;
+    readonly deleteClient: (clientId: string) => Effect.Effect<void, OidcProviderError | AuthError>;
 
     /**
      * Process an authorization request for an authenticated user. Fails with
-     * {@link OIDCProviderError} only for errors that must NOT redirect back to
+     * {@link OidcProviderError} only for errors that must NOT redirect back to
      * the client (unknown client, unregistered `redirect_uri`); every other
      * outcome is a redirect (code, consent page, or spec error).
      */
     readonly authorize: (
       user: Types.User,
-      request: OIDCAuthorizeRequest,
-    ) => Effect.Effect<OIDCAuthorizeResult, OIDCProviderError | AuthError>;
+      request: OidcAuthorizeRequest,
+    ) => Effect.Effect<OidcAuthorizeResult, OidcProviderError | AuthError>;
 
     /**
      * Resolve a pending consent request. Accepting records the consent and
@@ -575,7 +575,7 @@ export class OIDCProviderService extends Context.Service<
       userId: string,
       consentCode: string,
       accept: boolean,
-    ) => Effect.Effect<{ readonly redirectTo: string }, OIDCProviderError | AuthError>;
+    ) => Effect.Effect<{ readonly redirectTo: string }, OidcProviderError | AuthError>;
 
     /**
      * Token endpoint: `authorization_code` (with PKCE verification) and
@@ -584,8 +584,8 @@ export class OIDCProviderService extends Context.Service<
      * verifier instead.
      */
     readonly token: (
-      request: OIDCTokenRequest,
-    ) => Effect.Effect<OIDCTokenResult, OIDCTokenError | AuthError>;
+      request: OidcTokenRequest,
+    ) => Effect.Effect<OidcTokenResult, OidcTokenError | AuthError>;
 
     /**
      * Resolve the standard claims for a bearer access token
@@ -594,7 +594,7 @@ export class OIDCProviderService extends Context.Service<
      */
     readonly userinfo: (
       accessToken: string,
-    ) => Effect.Effect<Record<string, unknown>, OIDCProviderError | AuthError>;
+    ) => Effect.Effect<Record<string, unknown>, OidcProviderError | AuthError>;
 
     /** The OpenID Provider Metadata document (OIDC Discovery). */
     readonly getMetadata: () => Record<string, unknown>;
@@ -613,12 +613,12 @@ export class OIDCProviderService extends Context.Service<
      */
     readonly loginRedirect: (returnTo: string) => string;
   }
->()("@effect-auth/OIDCProviderService") {
+>()("@effect-auth/OidcProviderService") {
   /**
    * Construct a Layer providing this service.
    */
-  static readonly layer = (config: OIDCProviderConfig) =>
-    Layer.effect(OIDCProviderService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
+  static readonly layer = (config: OidcProviderConfig) =>
+    Layer.effect(OidcProviderService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 // -----------------------------------------------------------------------------
@@ -626,7 +626,7 @@ export class OIDCProviderService extends Context.Service<
 // -----------------------------------------------------------------------------
 
 /** SHA-256 hex digest used for every OIDC secret at rest (tokens, codes, secrets). */
-export const hashOIDCSecret = hashToken;
+export const hashOidcSecret = hashToken;
 
 /** Constant-time equality of two strings via their SHA-256 digests. */
 const secretEquals = (a: string, b: string): boolean =>
@@ -690,7 +690,7 @@ const isAllowedDynamicRedirectUri = (uri: string, extraSchemes: readonly string[
  * endpoints available so a client can maintain its own registration.
  *
  * ```ts
- * OIDCProviderService.layer(
+ * OidcProviderService.layer(
  *   mcpProviderPreset({
  *     issuer: "https://mcp.example.com/api/auth",
  *     loginPage: "https://mcp.example.com/login",
@@ -704,7 +704,7 @@ const isAllowedDynamicRedirectUri = (uri: string, extraSchemes: readonly string[
  * and `dynamicRegistration` is merged field-by-field so adding a `policy` or an
  * `initialAccessToken` does not drop the preset's defaults.
  */
-export const mcpProviderPreset = (config: OIDCProviderConfig): OIDCProviderConfig => ({
+export const mcpProviderPreset = (config: OidcProviderConfig): OidcProviderConfig => ({
   // MCP clients are public + PKCE; requiring it of confidential clients too
   // costs nothing and closes code-injection on any first-party client.
   requirePKCE: true,
@@ -721,14 +721,14 @@ export const mcpProviderPreset = (config: OIDCProviderConfig): OIDCProviderConfi
 // -----------------------------------------------------------------------------
 
 export const make = (
-  config: OIDCProviderConfig,
+  config: OidcProviderConfig,
 ): Effect.Effect<
-  typeof OIDCProviderService.Service,
+  typeof OidcProviderService.Service,
   never,
-  | OIDCClientStore
-  | OIDCCodeStore
-  | OIDCConsentStore
-  | OIDCTokenStore
+  | OidcClientStore
+  | OidcCodeStore
+  | OidcConsentStore
+  | OidcTokenStore
   | UserStore
   | IdentifierStore
   | JWTService
@@ -740,7 +740,7 @@ export const make = (
     const refreshTokenExpiresIn = config.refreshTokenExpiresIn ?? 30 * 24 * 60 * 60 * 1000;
     const allowedScopes = config.allowedScopes ?? DEFAULT_OIDC_SCOPES;
     const dcr = config.dynamicRegistration;
-    const dynamicRegistration: OIDCDynamicRegistrationInfo = {
+    const dynamicRegistration: OidcDynamicRegistrationInfo = {
       enabled: dcr !== undefined,
       management: dcr !== undefined && (dcr.management ?? true),
       rateLimit: dcr?.rateLimit ?? DEFAULT_OIDC_REGISTRATION_RATE_LIMIT,
@@ -764,13 +764,13 @@ export const make = (
     };
 
     /** Trusted config clients, normalized to the stored shape (secret hashed). */
-    const trustedClients = new Map<string, OIDCClient>(
+    const trustedClients = new Map<string, OidcClient>(
       (config.trustedClients ?? []).map((c) => [
         c.clientId,
         {
           clientId: c.clientId,
           ...(c.clientSecret !== undefined && {
-            clientSecretHash: hashOIDCSecret(Redacted.value(c.clientSecret)),
+            clientSecretHash: hashOidcSecret(Redacted.value(c.clientSecret)),
           }),
           name: c.name,
           redirectUris: c.redirectUris,
@@ -780,14 +780,14 @@ export const make = (
           metadata: {},
           createdAt: 0,
           updatedAt: 0,
-        } satisfies OIDCClient,
+        } satisfies OidcClient,
       ]),
     );
 
-    const clientStore = yield* OIDCClientStore;
-    const codeStore = yield* OIDCCodeStore;
-    const consentStore = yield* OIDCConsentStore;
-    const tokenStore = yield* OIDCTokenStore;
+    const clientStore = yield* OidcClientStore;
+    const codeStore = yield* OidcCodeStore;
+    const consentStore = yield* OidcConsentStore;
+    const tokenStore = yield* OidcTokenStore;
     const userStore = yield* UserStore;
     const identifierStore = yield* IdentifierStore;
     const jwt = yield* JWTService;
@@ -825,15 +825,15 @@ export const make = (
 
     /** Create + persist an authorization-code (or pending-consent) record. */
     const issueCode = (
-      kind: OIDCAuthorizationCode["kind"],
-      base: Omit<OIDCAuthorizationCode, "codeHash" | "kind" | "expiresAt" | "createdAt">,
+      kind: OidcAuthorizationCode["kind"],
+      base: Omit<OidcAuthorizationCode, "codeHash" | "kind" | "expiresAt" | "createdAt">,
     ) =>
       Effect.gen(function* () {
         const value = yield* randomToken();
         const now = Date.now();
         yield* codeStore.create({
           ...base,
-          codeHash: hashOIDCSecret(value),
+          codeHash: hashOidcSecret(value),
           kind,
           expiresAt: now + codeExpiresIn,
           createdAt: now,
@@ -889,11 +889,11 @@ export const make = (
             .get(grant.userId)
             .pipe(
               Effect.mapError(
-                (e) => new OIDCTokenError({ error: "invalid_grant", description: e.message }),
+                (e) => new OidcTokenError({ error: "invalid_grant", description: e.message }),
               ),
             );
           if (user === null) {
-            return yield* new OIDCTokenError({
+            return yield* new OidcTokenError({
               error: "invalid_grant",
               description: "Unknown user",
             });
@@ -907,7 +907,7 @@ export const make = (
             })
             .pipe(
               Effect.catchTag("JWTError", (e) =>
-                Effect.fail(new OIDCTokenError({ error: "server_error", description: e.message })),
+                Effect.fail(new OidcTokenError({ error: "server_error", description: e.message })),
               ),
             );
           idToken = signed.token;
@@ -915,7 +915,7 @@ export const make = (
 
         const accessToken = yield* randomToken();
         yield* tokenStore.create({
-          tokenHash: hashOIDCSecret(accessToken),
+          tokenHash: hashOidcSecret(accessToken),
           kind: "access",
           clientId: grant.clientId,
           userId: grant.userId,
@@ -930,7 +930,7 @@ export const make = (
           const familyId = grant.familyId ?? (yield* randomToken());
           const absoluteExpiresAt = grant.absoluteExpiresAt ?? now + refreshTokenExpiresIn;
           yield* tokenStore.create({
-            tokenHash: hashOIDCSecret(refreshToken),
+            tokenHash: hashOidcSecret(refreshToken),
             kind: "refresh",
             clientId: grant.clientId,
             userId: grant.userId,
@@ -950,7 +950,7 @@ export const make = (
           ...(refreshToken !== undefined && { refreshToken }),
           ...(idToken !== undefined && { idToken }),
           scope: grant.scopes.join(" "),
-        } satisfies OIDCTokenResult;
+        } satisfies OidcTokenResult;
       });
 
     /**
@@ -958,17 +958,17 @@ export const make = (
      * present their secret; public clients authenticate via PKCE (checked by
      * the grant handling).
      */
-    const authenticateClient = (request: OIDCTokenRequest) =>
+    const authenticateClient = (request: OidcTokenRequest) =>
       Effect.gen(function* () {
         if (request.clientId === undefined) {
-          return yield* new OIDCTokenError({
+          return yield* new OidcTokenError({
             error: "invalid_client",
             description: "Missing client_id",
           });
         }
         const client = yield* getClient(request.clientId);
         if (client === null || client.disabled) {
-          return yield* new OIDCTokenError({
+          return yield* new OidcTokenError({
             error: "invalid_client",
             description: "Unknown client",
           });
@@ -976,9 +976,9 @@ export const make = (
         if (client.clientSecretHash !== undefined) {
           if (
             request.clientSecret === undefined ||
-            !secretEquals(hashOIDCSecret(request.clientSecret), client.clientSecretHash)
+            !secretEquals(hashOidcSecret(request.clientSecret), client.clientSecretHash)
           ) {
-            return yield* new OIDCTokenError({
+            return yield* new OidcTokenError({
               error: "invalid_client",
               description: "Invalid client credentials",
             });
@@ -993,7 +993,7 @@ export const make = (
     const requireDynamicRegistration = Effect.suspend(() =>
       dcr === undefined
         ? Effect.fail(
-            new OIDCRegistrationError({
+            new OidcRegistrationError({
               error: "access_denied",
               description: "Dynamic client registration is not enabled",
             }),
@@ -1006,7 +1006,7 @@ export const make = (
       Effect.gen(function* () {
         const required = dcr?.initialAccessToken;
         if (required === undefined) return;
-        const invalid = new OIDCRegistrationError({
+        const invalid = new OidcRegistrationError({
           error: "invalid_token",
           description: "A valid initial access token is required to register a client",
         });
@@ -1024,14 +1024,14 @@ export const make = (
      * client never believes it registered for a grant it will not receive.
      */
     const normalizeMetadata = (
-      metadata: OIDCClientMetadata,
-    ): Effect.Effect<NormalizedOIDCClientMetadata, OIDCRegistrationError> =>
+      metadata: OidcClientMetadata,
+    ): Effect.Effect<NormalizedOidcClientMetadata, OidcRegistrationError> =>
       Effect.gen(function* () {
         const invalid = (description: string) =>
-          new OIDCRegistrationError({ error: "invalid_client_metadata", description });
+          new OidcRegistrationError({ error: "invalid_client_metadata", description });
 
         if (metadata.redirectUris.length === 0) {
-          return yield* new OIDCRegistrationError({
+          return yield* new OidcRegistrationError({
             error: "invalid_redirect_uri",
             description: "At least one redirect_uri is required",
           });
@@ -1039,7 +1039,7 @@ export const make = (
         const extraSchemes = dcr?.allowedRedirectUriSchemes ?? [];
         for (const uri of metadata.redirectUris) {
           if (!isAllowedDynamicRedirectUri(uri, extraSchemes)) {
-            return yield* new OIDCRegistrationError({
+            return yield* new OidcRegistrationError({
               error: "invalid_redirect_uri",
               description: `redirect_uri must be https, loopback http, or a registered private-use scheme, without a fragment: ${uri}`,
             });
@@ -1088,23 +1088,23 @@ export const make = (
 
         return {
           redirectUris: metadata.redirectUris,
-          tokenEndpointAuthMethod: authMethod as OIDCTokenEndpointAuthMethod,
+          tokenEndpointAuthMethod: authMethod as OidcTokenEndpointAuthMethod,
           grantTypes,
           responseTypes,
           clientName: metadata.clientName ?? "Dynamic Client",
           scope: scopes.join(" "),
-        } satisfies NormalizedOIDCClientMetadata;
+        } satisfies NormalizedOidcClientMetadata;
       });
 
     /** Run the registration policy and turn its verdict into a disposition. */
-    const applyRegistrationPolicy = (metadata: NormalizedOIDCClientMetadata) =>
+    const applyRegistrationPolicy = (metadata: NormalizedOidcClientMetadata) =>
       Effect.gen(function* () {
-        if (dcr?.policy === undefined) return { allow: true } as OIDCRegistrationDisposition;
+        if (dcr?.policy === undefined) return { allow: true } as OidcRegistrationDisposition;
         const verdict = yield* dcr.policy(metadata);
-        const disposition: OIDCRegistrationDisposition =
+        const disposition: OidcRegistrationDisposition =
           typeof verdict === "boolean" ? { allow: verdict } : verdict;
         if (!disposition.allow) {
-          return yield* new OIDCRegistrationError({
+          return yield* new OidcRegistrationError({
             // RFC 7591 §3.2.2 has no generic refusal code: a policy that
             // dislikes the metadata reports invalid_client_metadata, and one
             // refusing the caller outright can ask for access_denied (403).
@@ -1128,9 +1128,9 @@ export const make = (
         if (
           client === null ||
           client.registrationAccessTokenHash === undefined ||
-          !secretEquals(hashOIDCSecret(token), client.registrationAccessTokenHash)
+          !secretEquals(hashOidcSecret(token), client.registrationAccessTokenHash)
         ) {
-          return yield* new OIDCRegistrationError({
+          return yield* new OidcRegistrationError({
             error: "invalid_token",
             description: "Invalid registration access token",
           });
@@ -1165,8 +1165,8 @@ export const make = (
     return {
       dynamicRegistration,
 
-      registerDynamicClient: Effect.fn("OIDCProviderService.registerDynamicClient")(
-        (metadata: OIDCClientMetadata, options?: { readonly initialAccessToken?: string }) =>
+      registerDynamicClient: Effect.fn("OidcProviderService.registerDynamicClient")(
+        (metadata: OidcClientMetadata, options?: { readonly initialAccessToken?: string }) =>
           Effect.gen(function* () {
             yield* requireDynamicRegistration;
             yield* verifyInitialAccessToken(options?.initialAccessToken);
@@ -1181,7 +1181,7 @@ export const make = (
             const client = yield* clientStore.create({
               clientId,
               ...(clientSecret !== undefined && {
-                clientSecretHash: hashOIDCSecret(clientSecret),
+                clientSecretHash: hashOidcSecret(clientSecret),
               }),
               name: normalized.clientName,
               redirectUris: normalized.redirectUris,
@@ -1193,7 +1193,7 @@ export const make = (
               metadata: {},
               createdAt: now,
               updatedAt: now,
-              registrationAccessTokenHash: hashOIDCSecret(registrationAccessToken),
+              registrationAccessTokenHash: hashOidcSecret(registrationAccessToken),
               tokenEndpointAuthMethod: normalized.tokenEndpointAuthMethod,
               grantTypes: normalized.grantTypes,
               responseTypes: normalized.responseTypes,
@@ -1204,11 +1204,11 @@ export const make = (
               client,
               ...(clientSecret !== undefined && { clientSecret }),
               registrationAccessToken,
-            } satisfies DynamicallyRegisteredOIDCClient;
+            } satisfies DynamicallyRegisteredOidcClient;
           }).pipe(Effect.withSpan("effect-auth.oidc.registerDynamicClient")),
       ),
 
-      readDynamicClient: Effect.fn("OIDCProviderService.readDynamicClient")(function* (
+      readDynamicClient: Effect.fn("OidcProviderService.readDynamicClient")(function* (
         clientId: string,
         registrationAccessToken: string,
       ) {
@@ -1216,10 +1216,10 @@ export const make = (
         return yield* authenticateRegistrationAccess(clientId, registrationAccessToken);
       }),
 
-      updateDynamicClient: Effect.fn("OIDCProviderService.updateDynamicClient")(function* (
+      updateDynamicClient: Effect.fn("OidcProviderService.updateDynamicClient")(function* (
         clientId: string,
         registrationAccessToken: string,
-        metadata: OIDCClientMetadata,
+        metadata: OidcClientMetadata,
       ) {
         yield* requireDynamicRegistration;
         const existing = yield* authenticateRegistrationAccess(clientId, registrationAccessToken);
@@ -1232,7 +1232,7 @@ export const make = (
           existing.tokenEndpointAuthMethod !== undefined &&
           normalized.tokenEndpointAuthMethod !== existing.tokenEndpointAuthMethod
         ) {
-          return yield* new OIDCRegistrationError({
+          return yield* new OidcRegistrationError({
             error: "invalid_client_metadata",
             description: "token_endpoint_auth_method cannot be changed after registration",
           });
@@ -1249,7 +1249,7 @@ export const make = (
         });
       }),
 
-      deleteDynamicClient: Effect.fn("OIDCProviderService.deleteDynamicClient")(function* (
+      deleteDynamicClient: Effect.fn("OidcProviderService.deleteDynamicClient")(function* (
         clientId: string,
         registrationAccessToken: string,
       ) {
@@ -1258,18 +1258,18 @@ export const make = (
         yield* clientStore.delete(client.clientId);
       }),
 
-      registerClient: Effect.fn("OIDCProviderService.registerClient")(function* (
-        input: RegisterOIDCClientInput,
+      registerClient: Effect.fn("OidcProviderService.registerClient")(function* (
+        input: RegisterOidcClientInput,
         registrarUserId?: string,
       ) {
         if (input.redirectUris.length === 0) {
-          return yield* new OIDCProviderError({
+          return yield* new OidcProviderError({
             message: "At least one redirect URI is required",
           });
         }
         for (const uri of input.redirectUris) {
           if (!isAllowedRedirectUri(uri)) {
-            return yield* new OIDCProviderError({
+            return yield* new OidcProviderError({
               message: `Redirect URI must be https or loopback http: ${uri}`,
             });
           }
@@ -1280,7 +1280,7 @@ export const make = (
         const now = Date.now();
         const client = yield* clientStore.create({
           clientId,
-          ...(clientSecret !== undefined && { clientSecretHash: hashOIDCSecret(clientSecret) }),
+          ...(clientSecret !== undefined && { clientSecretHash: hashOidcSecret(clientSecret) }),
           name: input.name,
           redirectUris: input.redirectUris,
           type,
@@ -1294,27 +1294,27 @@ export const make = (
         return {
           client,
           ...(clientSecret !== undefined && { clientSecret }),
-        } satisfies RegisteredOIDCClient;
+        } satisfies RegisteredOidcClient;
       }),
 
-      getClient: Effect.fn("OIDCProviderService.getClient")(getClient),
+      getClient: Effect.fn("OidcProviderService.getClient")(getClient),
 
-      listClients: Effect.fn("OIDCProviderService.listClients")(function* () {
+      listClients: Effect.fn("OidcProviderService.listClients")(function* () {
         return yield* clientStore.list();
       }),
 
-      updateClient: Effect.fn("OIDCProviderService.updateClient")(function* (
+      updateClient: Effect.fn("OidcProviderService.updateClient")(function* (
         clientId: string,
-        input: UpdateOIDCClientInput,
+        input: UpdateOidcClientInput,
       ) {
         if (trustedClients.has(clientId)) {
-          return yield* new OIDCProviderError({
+          return yield* new OidcProviderError({
             message: "Trusted clients are configured statically and cannot be updated",
           });
         }
         const existing = yield* clientStore.getByClientId(clientId);
         if (existing === null) {
-          return yield* new OIDCProviderError({ message: "Client not found" });
+          return yield* new OidcProviderError({ message: "Client not found" });
         }
         return yield* clientStore.update({
           ...existing,
@@ -1327,27 +1327,27 @@ export const make = (
         });
       }),
 
-      deleteClient: Effect.fn("OIDCProviderService.deleteClient")(function* (clientId: string) {
+      deleteClient: Effect.fn("OidcProviderService.deleteClient")(function* (clientId: string) {
         const existing = yield* clientStore.getByClientId(clientId);
         if (existing === null) {
-          return yield* new OIDCProviderError({ message: "Client not found" });
+          return yield* new OidcProviderError({ message: "Client not found" });
         }
         yield* clientStore.delete(clientId);
       }),
 
-      authorize: Effect.fn("OIDCProviderService.authorize")(
-        (user: Types.User, request: OIDCAuthorizeRequest) =>
+      authorize: Effect.fn("OidcProviderService.authorize")(
+        (user: Types.User, request: OidcAuthorizeRequest) =>
           Effect.gen(function* () {
             // Unknown client / unregistered redirect_uri: NEVER redirect (RFC 6749 §4.1.2.1).
             const client = yield* getClient(request.clientId);
             if (client === null || client.disabled) {
-              return yield* new OIDCProviderError({ message: "Unknown client" });
+              return yield* new OidcProviderError({ message: "Unknown client" });
             }
             if (!client.redirectUris.includes(request.redirectUri)) {
-              return yield* new OIDCProviderError({ message: "Unregistered redirect_uri" });
+              return yield* new OidcProviderError({ message: "Unregistered redirect_uri" });
             }
 
-            const errorRedirect = (error: string): OIDCAuthorizeResult => ({
+            const errorRedirect = (error: string): OidcAuthorizeResult => ({
               type: "error",
               error,
               redirectTo: buildRedirect(request.redirectUri, {
@@ -1433,7 +1433,7 @@ export const make = (
                   scope: scopes.join(" "),
                   ...(request.state !== undefined && { state: request.state }),
                 }),
-              } satisfies OIDCAuthorizeResult;
+              } satisfies OidcAuthorizeResult;
             }
 
             const code = yield* issueCode("authorization_code", codeFields);
@@ -1443,21 +1443,21 @@ export const make = (
                 code,
                 ...(request.state !== undefined && { state: request.state }),
               }),
-            } satisfies OIDCAuthorizeResult;
+            } satisfies OidcAuthorizeResult;
           }).pipe(Effect.withSpan("effect-auth.oidc.authorize")),
       ),
 
-      consent: Effect.fn("OIDCProviderService.consent")(
+      consent: Effect.fn("OidcProviderService.consent")(
         (userId: string, consentCode: string, accept: boolean) =>
           Effect.gen(function* () {
-            const pending = yield* codeStore.get(hashOIDCSecret(consentCode));
+            const pending = yield* codeStore.get(hashOidcSecret(consentCode));
             if (
               pending === null ||
               pending.kind !== "pending_consent" ||
               pending.userId !== userId ||
               Date.now() > pending.expiresAt
             ) {
-              return yield* new OIDCProviderError({
+              return yield* new OidcProviderError({
                 message: "Consent request not found or expired",
               });
             }
@@ -1500,7 +1500,7 @@ export const make = (
           }).pipe(Effect.withSpan("effect-auth.oidc.consent")),
       ),
 
-      token: Effect.fn("OIDCProviderService.token")((request: OIDCTokenRequest) =>
+      token: Effect.fn("OidcProviderService.token")((request: OidcTokenRequest) =>
         Effect.gen(function* () {
           const client = yield* authenticateClient(request);
 
@@ -1508,7 +1508,7 @@ export const make = (
           // `grantTypes` is set by dynamic registration only — statically and
           // admin-registered clients keep access to every supported grant.
           if (client.grantTypes !== undefined && !client.grantTypes.includes(request.grantType)) {
-            return yield* new OIDCTokenError({
+            return yield* new OidcTokenError({
               error: "unauthorized_client",
               description: `The client is not registered for the ${request.grantType} grant`,
             });
@@ -1516,30 +1516,30 @@ export const make = (
 
           if (request.grantType === "authorization_code") {
             if (request.code === undefined) {
-              return yield* new OIDCTokenError({
+              return yield* new OidcTokenError({
                 error: "invalid_request",
                 description: "Missing code",
               });
             }
-            const record = yield* codeStore.get(hashOIDCSecret(request.code));
+            const record = yield* codeStore.get(hashOidcSecret(request.code));
             if (
               record === null ||
               record.kind !== "authorization_code" ||
               record.clientId !== client.clientId
             ) {
-              return yield* new OIDCTokenError({ error: "invalid_grant" });
+              return yield* new OidcTokenError({ error: "invalid_grant" });
             }
             // Single use: burn the code before any further checks so a replay
             // (even with corrected parameters) always fails.
             yield* codeStore.delete(record.codeHash);
             if (Date.now() > record.expiresAt) {
-              return yield* new OIDCTokenError({
+              return yield* new OidcTokenError({
                 error: "invalid_grant",
                 description: "Code expired",
               });
             }
             if (request.redirectUri !== record.redirectUri) {
-              return yield* new OIDCTokenError({
+              return yield* new OidcTokenError({
                 error: "invalid_grant",
                 description: "redirect_uri mismatch",
               });
@@ -1553,14 +1553,14 @@ export const make = (
                 computedChallenge === undefined ||
                 !secretEquals(computedChallenge, record.codeChallenge)
               ) {
-                return yield* new OIDCTokenError({
+                return yield* new OidcTokenError({
                   error: "invalid_grant",
                   description: "PKCE verification failed",
                 });
               }
             } else if (client.clientSecretHash === undefined) {
               // Public client without PKCE: never issue tokens.
-              return yield* new OIDCTokenError({
+              return yield* new OidcTokenError({
                 error: "invalid_grant",
                 description: "PKCE required",
               });
@@ -1575,14 +1575,14 @@ export const make = (
 
           if (request.grantType === "refresh_token") {
             if (request.refreshToken === undefined) {
-              return yield* new OIDCTokenError({
+              return yield* new OidcTokenError({
                 error: "invalid_request",
                 description: "Missing refresh_token",
               });
             }
 
             pruneConsumed();
-            const presentedHash = hashOIDCSecret(request.refreshToken);
+            const presentedHash = hashOidcSecret(request.refreshToken);
             const record = yield* tokenStore.get(presentedHash);
 
             if (
@@ -1603,7 +1603,7 @@ export const make = (
                   });
                 });
               }
-              return yield* new OIDCTokenError({ error: "invalid_grant" });
+              return yield* new OidcTokenError({ error: "invalid_grant" });
             }
 
             // Rotation: burn the presented token immediately.
@@ -1618,7 +1618,7 @@ export const make = (
 
             // Absolute (non-sliding) lifetime check.
             if (Date.now() > absoluteExpiresAt) {
-              return yield* new OIDCTokenError({
+              return yield* new OidcTokenError({
                 error: "invalid_grant",
                 description: "Refresh token expired",
               });
@@ -1629,7 +1629,7 @@ export const make = (
             if (request.scope !== undefined) {
               const requested = parseScopes(request.scope);
               if (requested.some((s) => !record.scopes.includes(s))) {
-                return yield* new OIDCTokenError({
+                return yield* new OidcTokenError({
                   error: "invalid_scope",
                   description: "Requested scopes exceed those of the original grant",
                 });
@@ -1646,29 +1646,29 @@ export const make = (
             });
           }
 
-          return yield* new OIDCTokenError({ error: "unsupported_grant_type" });
+          return yield* new OidcTokenError({ error: "unsupported_grant_type" });
         }).pipe(
           Effect.withSpan("effect-auth.oidc.token", { attributes: { grant: request.grantType } }),
-          Effect.tap(() => Obs.recordOIDCTokenRequest(request.grantType, "success")),
-          Effect.tapError(() => Obs.recordOIDCTokenRequest(request.grantType, "failure")),
+          Effect.tap(() => Obs.recordOidcTokenRequest(request.grantType, "success")),
+          Effect.tapError(() => Obs.recordOidcTokenRequest(request.grantType, "failure")),
         ),
       ),
 
-      userinfo: Effect.fn("OIDCProviderService.userinfo")((accessToken: string) =>
+      userinfo: Effect.fn("OidcProviderService.userinfo")((accessToken: string) =>
         Effect.gen(function* () {
-          const record = yield* tokenStore.get(hashOIDCSecret(accessToken));
+          const record = yield* tokenStore.get(hashOidcSecret(accessToken));
           if (record === null || record.kind !== "access" || Date.now() > record.expiresAt) {
-            return yield* new OIDCProviderError({ message: "Invalid or expired access token" });
+            return yield* new OidcProviderError({ message: "Invalid or expired access token" });
           }
           const user = yield* userStore
             .get(record.userId)
             .pipe(
               Effect.mapError(
-                () => new OIDCProviderError({ message: "Invalid or expired access token" }),
+                () => new OidcProviderError({ message: "Invalid or expired access token" }),
               ),
             );
           if (user === null) {
-            return yield* new OIDCProviderError({ message: "Invalid or expired access token" });
+            return yield* new OidcProviderError({ message: "Invalid or expired access token" });
           }
           return yield* claimsFor(user, record.scopes);
         }).pipe(Effect.withSpan("effect-auth.oidc.userinfo")),

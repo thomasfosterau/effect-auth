@@ -14,7 +14,7 @@ import { RateLimiter, type RateLimitConfig } from "../RateLimit.ts";
 import * as S from "./HttpApiSchema.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { Hooks } from "../Hooks.ts";
-import { SessionService } from "../session/SessionService.ts";
+import { SessionService } from "../SessionService.ts";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
 import * as EmailPassword from "../email/EmailPassword.ts";
 import { IdentifierStore, type Identifier } from "../Identifier.ts";
@@ -25,7 +25,7 @@ import { PhoneOTPService } from "../PhoneOTP.ts";
 import { UsernameService } from "../Username.ts";
 import { DeviceAuthorizationService, normalizeUserCode } from "../DeviceAuthorization.ts";
 import { EmailOTPService } from "../email/EmailOTP.ts";
-import { MultiFactorService } from "../secondfactor/MultiFactor.ts";
+import { MultiFactorService } from "../multifactor/MultiFactor.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { EmailVerificationService } from "../email/EmailVerification.ts";
 import { PasswordResetService } from "../password/PasswordReset.ts";
@@ -41,14 +41,14 @@ import {
   type FullOrganization,
 } from "../Organization.ts";
 import { AdminService, isAdmin } from "../Admin.ts";
-import { APIKeyService, type APIKey } from "../APIKey.ts";
+import { ApiKeyService, type ApiKey } from "../ApiKey.ts";
 import { JWTService } from "../JWT.ts";
 import {
-  OIDCProviderService,
-  type OIDCClient,
-  type OIDCClientMetadata,
-  type OIDCRegistrationError,
-} from "../OIDCProvider.ts";
+  OidcProviderService,
+  type OidcClient,
+  type OidcClientMetadata,
+  type OidcRegistrationError,
+} from "../OidcProvider.ts";
 import { SSOService, type SSOProvider } from "../SSO.ts";
 import {
   SCIMService,
@@ -406,7 +406,7 @@ const resolveOrganization = resolveOptional(OrganizationService, "Organizations 
 const resolveAdmin = resolveOptional(AdminService, "Admin is not enabled");
 
 /** Resolve the API-key service, or fail with 404. */
-const resolveAPIKey = resolveOptional(APIKeyService, "API keys are not enabled");
+const resolveApiKey = resolveOptional(ApiKeyService, "API keys are not enabled");
 
 /** Resolve the JWT service, or fail with 404. */
 const resolveJWT = resolveOptional(JWTService, "JWT is not enabled");
@@ -418,7 +418,7 @@ const resolveSSO = resolveOptional(SSOService, "SSO is not enabled");
 const resolveGoogleOneTap = resolveOptional(GoogleOneTapService, "Google One Tap is not enabled");
 
 /** Resolve the OIDC provider service, or fail with 404. */
-const resolveOIDCProvider = resolveOptional(OIDCProviderService, "OIDC provider is not enabled");
+const resolveOidcProvider = resolveOptional(OidcProviderService, "OIDC provider is not enabled");
 
 // --- Encoders for the organization / API-key domain types --------------------
 
@@ -520,7 +520,7 @@ const encodeSSOProvider = (p: SSOProvider): S.SSOProviderView =>
         createdAt: p.createdAt,
       };
 
-const encodeOIDCClient = (c: OIDCClient): S.OIDCClientView => ({
+const encodeOidcClient = (c: OidcClient): S.OidcClientView => ({
   clientId: c.clientId,
   name: c.name,
   redirectUris: c.redirectUris,
@@ -537,10 +537,10 @@ const encodeOIDCClient = (c: OIDCClient): S.OIDCClientView => ({
  * one-time `client_secret` / `registration_access_token` are added by the
  * registration handler; everything here is readable from the stored client.
  */
-const encodeOIDCRegistration = (
-  c: OIDCClient,
+const encodeOidcRegistration = (
+  c: OidcClient,
   registrationEndpoint: string,
-): S.OIDCRegistrationView => ({
+): S.OidcRegistrationView => ({
   client_id: c.clientId,
   client_id_issued_at: Math.floor(c.createdAt / 1000),
   client_name: c.name,
@@ -555,13 +555,13 @@ const encodeOIDCRegistration = (
 });
 
 /**
- * Map an `OIDCRegistrationError` onto the HTTP contract: RFC 7591 §3.2.2 keeps
+ * Map an `OidcRegistrationError` onto the HTTP contract: RFC 7591 §3.2.2 keeps
  * metadata failures at 400 with an `{ error, error_description }` body, while
  * `invalid_token` (RFC 7592 §2) is a 401 and `access_denied` a 403 — both in
  * this API's usual error shape, with the OAuth code carried in `code`.
  */
 const registrationError = (
-  e: OIDCRegistrationError,
+  e: OidcRegistrationError,
 ): Effect.Effect<never, S.OAuthError | S.Unauthorized | S.Forbidden> => {
   const message = e.description ?? e.error;
   if (e.error === "invalid_token") {
@@ -590,7 +590,7 @@ const bearerToken = (request: HttpServerRequest.HttpServerRequest): string | und
  * token itself is verified by the service, in constant time).
  */
 const requireRegistrationAccessToken = (
-  service: typeof OIDCProviderService.Service,
+  service: typeof OidcProviderService.Service,
   request: HttpServerRequest.HttpServerRequest,
 ): Effect.Effect<string, S.NotFound | S.Unauthorized> =>
   Effect.gen(function* () {
@@ -610,7 +610,7 @@ const requireRegistrationAccessToken = (
   });
 
 /** Decode an RFC 7591 registration body into the service's camelCase input. */
-const registrationMetadata = (payload: S.OIDCRegistrationPayload): OIDCClientMetadata => ({
+const registrationMetadata = (payload: S.OidcRegistrationPayload): OidcClientMetadata => ({
   redirectUris: payload.redirect_uris,
   ...(payload.token_endpoint_auth_method !== undefined && {
     tokenEndpointAuthMethod: payload.token_endpoint_auth_method,
@@ -621,7 +621,7 @@ const registrationMetadata = (payload: S.OIDCRegistrationPayload): OIDCClientMet
   ...(payload.scope !== undefined && { scope: payload.scope }),
 });
 
-const encodeAPIKey = (k: APIKey): S.APIKeyView => ({
+const encodeApiKey = (k: ApiKey): S.ApiKeyView => ({
   id: k.id,
   ...(k.name !== undefined && { name: k.name }),
   ...(k.prefix !== undefined && { prefix: k.prefix }),
@@ -2411,7 +2411,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("apiKeyCreate", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const apiKey = yield* resolveAPIKey;
+          const apiKey = yield* resolveApiKey;
           const result = yield* apiKey.service
             .create(resolved.user.id, {
               ...(payload.name !== undefined && { name: payload.name }),
@@ -2424,29 +2424,29 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             })
             .pipe(
               Effect.catchTags({
-                APIKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => internalServerError(e),
               }),
             );
-          return { key: result.key, apiKey: encodeAPIKey(result.apiKey) };
+          return { key: result.key, apiKey: encodeApiKey(result.apiKey) };
         }),
       )
       .handle("apiKeyList", ({ request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const apiKey = yield* resolveAPIKey;
+          const apiKey = yield* resolveApiKey;
           const keys = yield* apiKey.service.list(resolved.user.id).pipe(
             Effect.catchTags({
               AuthError: (e) => internalServerError(e),
             }),
           );
-          return keys.map(encodeAPIKey);
+          return keys.map(encodeApiKey);
         }),
       )
       .handle("apiKeyUpdate", ({ params, payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const apiKey = yield* resolveAPIKey;
+          const apiKey = yield* resolveApiKey;
           const updated = yield* apiKey.service
             .update(resolved.user.id, params.keyId, {
               ...(payload.name !== undefined && { name: payload.name }),
@@ -2459,20 +2459,20 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             })
             .pipe(
               Effect.catchTags({
-                APIKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => internalServerError(e),
               }),
             );
-          return encodeAPIKey(updated);
+          return encodeApiKey(updated);
         }),
       )
       .handle("apiKeyDelete", ({ params, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const apiKey = yield* resolveAPIKey;
+          const apiKey = yield* resolveApiKey;
           yield* apiKey.service.delete(resolved.user.id, params.keyId).pipe(
             Effect.catchTags({
-              APIKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              ApiKeyError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => internalServerError(e),
             }),
           );
@@ -2701,7 +2701,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           if (!isAdmin(resolved.user)) {
             return yield* new S.Forbidden({ message: "Admin privileges required" });
           }
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           const result = yield* oidc.service
             .registerClient(
               {
@@ -2715,12 +2715,12 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             )
             .pipe(
               Effect.catchTags({
-                OIDCProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => internalServerError(e),
               }),
             );
           return {
-            client: encodeOIDCClient(result.client),
+            client: encodeOidcClient(result.client),
             ...(result.clientSecret !== undefined && { clientSecret: result.clientSecret }),
           };
         }),
@@ -2731,13 +2731,13 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           if (!isAdmin(resolved.user)) {
             return yield* new S.Forbidden({ message: "Admin privileges required" });
           }
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           const clients = yield* oidc.service.listClients().pipe(
             Effect.catchTags({
               AuthError: (e) => internalServerError(e),
             }),
           );
-          return clients.map(encodeOIDCClient);
+          return clients.map(encodeOidcClient);
         }),
       )
       .handle("oidcUpdateClient", ({ params, payload, request }) =>
@@ -2746,7 +2746,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           if (!isAdmin(resolved.user)) {
             return yield* new S.Forbidden({ message: "Admin privileges required" });
           }
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           const updated = yield* oidc.service
             .updateClient(params.clientId, {
               ...(payload.name !== undefined && { name: payload.name }),
@@ -2759,11 +2759,11 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             })
             .pipe(
               Effect.catchTags({
-                OIDCProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => internalServerError(e),
               }),
             );
-          return encodeOIDCClient(updated);
+          return encodeOidcClient(updated);
         }),
       )
       .handle("oidcDeleteClient", ({ params, request }) =>
@@ -2772,10 +2772,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           if (!isAdmin(resolved.user)) {
             return yield* new S.Forbidden({ message: "Admin privileges required" });
           }
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           yield* oidc.service.deleteClient(params.clientId).pipe(
             Effect.catchTags({
-              OIDCProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => internalServerError(e),
             }),
           );
@@ -2783,7 +2783,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("oidcAuthorize", ({ query, request }) =>
         Effect.gen(function* () {
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           // Unauthenticated: redirect to the login page carrying the original
           // authorize URL so the app can resume the flow after sign-in.
           const session = yield* resolveSession(request, cfg).pipe(
@@ -2834,7 +2834,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             })
             .pipe(
               Effect.catchTags({
-                OIDCProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => internalServerError(e),
               }),
             );
@@ -2843,13 +2843,13 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("oidcConsent", ({ payload, request }) =>
         Effect.gen(function* () {
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           const resolved = yield* requireSession(request, cfg);
           const result = yield* oidc.service
             .consent(resolved.user.id, payload.consentCode, payload.accept)
             .pipe(
               Effect.catchTags({
-                OIDCProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                OidcProviderError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => internalServerError(e),
               }),
             );
@@ -2858,7 +2858,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("oidcToken", ({ payload, request }) =>
         Effect.gen(function* () {
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           // Client authentication: a Basic Authorization header takes
           // precedence over body credentials (RFC 6749 §2.3.1).
           let clientId = payload.client_id;
@@ -2892,7 +2892,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             .pipe(
               Effect.catchTags({
                 // RFC 6749 error codes: invalid_client -> 401, the rest -> 400.
-                OIDCTokenError: (e) =>
+                OidcTokenError: (e) =>
                   Effect.fail(
                     e.error === "invalid_client"
                       ? new S.Unauthorized({ message: e.error })
@@ -2913,7 +2913,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("oidcUserInfo", ({ request }) =>
         Effect.gen(function* () {
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           const auth = request.headers["authorization"];
           const token =
             auth !== undefined && auth.startsWith("Bearer ") ? auth.slice(7) : undefined;
@@ -2922,7 +2922,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           }
           return yield* oidc.service.userinfo(token).pipe(
             Effect.catchTags({
-              OIDCProviderError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
+              OidcProviderError: (e) => Effect.fail(new S.Unauthorized({ message: e.message })),
               AuthError: (e) => internalServerError(e),
             }),
           );
@@ -2931,7 +2931,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       // --- RFC 7591 dynamic client registration -------------------------------
       .handle("oidcDynamicRegister", ({ payload, request }) =>
         Effect.gen(function* () {
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           const dcr = oidc.service.dynamicRegistration;
           if (!dcr.enabled) {
             return yield* new S.NotFound({
@@ -2946,7 +2946,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             })
             .pipe(
               Effect.catchTags({
-                OIDCRegistrationError: registrationError,
+                OidcRegistrationError: registrationError,
                 AuthError: (e) => internalServerError(e),
               }),
             );
@@ -2954,7 +2954,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             oidc.service.getAuthorizationServerMetadata()["registration_endpoint"],
           );
           return {
-            ...encodeOIDCRegistration(result.client, registrationEndpoint),
+            ...encodeOidcRegistration(result.client, registrationEndpoint),
             ...(result.clientSecret !== undefined && {
               client_secret: result.clientSecret,
               // RFC 7591 §3.2.1: 0 means the secret never expires.
@@ -2966,15 +2966,15 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("oidcReadRegistration", ({ params, request }) =>
         Effect.gen(function* () {
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           const token = yield* requireRegistrationAccessToken(oidc.service, request);
           const client = yield* oidc.service.readDynamicClient(params.clientId, token).pipe(
             Effect.catchTags({
-              OIDCRegistrationError: registrationError,
+              OidcRegistrationError: registrationError,
               AuthError: (e) => internalServerError(e),
             }),
           );
-          return encodeOIDCRegistration(
+          return encodeOidcRegistration(
             client,
             String(oidc.service.getAuthorizationServerMetadata()["registration_endpoint"]),
           );
@@ -2982,17 +2982,17 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("oidcUpdateRegistration", ({ params, payload, request }) =>
         Effect.gen(function* () {
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           const token = yield* requireRegistrationAccessToken(oidc.service, request);
           const client = yield* oidc.service
             .updateDynamicClient(params.clientId, token, registrationMetadata(payload))
             .pipe(
               Effect.catchTags({
-                OIDCRegistrationError: registrationError,
+                OidcRegistrationError: registrationError,
                 AuthError: (e) => internalServerError(e),
               }),
             );
-          return encodeOIDCRegistration(
+          return encodeOidcRegistration(
             client,
             String(oidc.service.getAuthorizationServerMetadata()["registration_endpoint"]),
           );
@@ -3000,11 +3000,11 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("oidcDeleteRegistration", ({ params, request }) =>
         Effect.gen(function* () {
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           const token = yield* requireRegistrationAccessToken(oidc.service, request);
           yield* oidc.service.deleteDynamicClient(params.clientId, token).pipe(
             Effect.catchTags({
-              OIDCRegistrationError: registrationError,
+              OidcRegistrationError: registrationError,
               AuthError: (e) => internalServerError(e),
             }),
           );
@@ -3012,19 +3012,19 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("oidcDiscovery", () =>
         Effect.gen(function* () {
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           return oidc.service.getMetadata();
         }),
       )
       .handle("oauthAuthorizationServerMetadata", () =>
         Effect.gen(function* () {
-          const oidc = yield* resolveOIDCProvider;
+          const oidc = yield* resolveOidcProvider;
           return oidc.service.getAuthorizationServerMetadata();
         }),
       )
       .handle("oidcJwks", () =>
         Effect.gen(function* () {
-          yield* resolveOIDCProvider; // 404 when the OIDC provider is disabled
+          yield* resolveOidcProvider; // 404 when the OIDC provider is disabled
           const jwt = yield* resolveJWT;
           const jwks = yield* jwt.service.getJwks().pipe(
             Effect.catchTags({

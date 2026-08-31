@@ -2,9 +2,9 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { SessionStore } from "./session/SessionStore.ts";
-import { UserStore } from "./session/UserStore.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionStore } from "./SessionStore.ts";
+import { UserStore } from "./UserStore.ts";
+import { SessionService } from "./SessionService.ts";
 import { hashToken } from "./TokenHash.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
@@ -26,22 +26,22 @@ import * as HTTPServer from "./http/HttpServer.ts";
 import { JWTKeyStore, type JWTKeyPair, JWTService } from "./JWT.ts";
 import { generatePKCE, verifyIdToken } from "./oauth/OAuth.ts";
 import {
-  OIDCClientStore,
-  OIDCCodeStore,
-  OIDCTokenStore,
-  OIDCConsentStore,
-  OIDCProviderError,
-  OIDCRegistrationError,
-  hashOIDCSecret,
+  OidcClientStore,
+  OidcCodeStore,
+  OidcTokenStore,
+  OidcConsentStore,
+  OidcProviderError,
+  OidcRegistrationError,
+  hashOidcSecret,
   mcpProviderPreset,
-  type OIDCAuthorizationCode,
-  type OIDCClient,
-  type OIDCConsent,
-  type OIDCDynamicRegistrationConfig,
-  type OIDCToken,
-  OIDCProviderService,
-} from "./OIDCProvider.ts";
-import * as OIDCProvider from "./OIDCProvider.ts";
+  type OidcAuthorizationCode,
+  type OidcClient,
+  type OidcConsent,
+  type OidcDynamicRegistrationConfig,
+  type OidcToken,
+  OidcProviderService,
+} from "./OidcProvider.ts";
+import * as OidcProvider from "./OidcProvider.ts";
 import type * as Types from "./Types.ts";
 
 const ISSUER = "http://idp.test/api/auth";
@@ -50,33 +50,33 @@ const ISSUER = "http://idp.test/api/auth";
 // In-memory stores
 // -----------------------------------------------------------------------------
 
-const makeOIDCStores = () => {
-  const clients = new Map<string, OIDCClient>();
-  const codes = new Map<string, OIDCAuthorizationCode>();
-  const tokens = new Map<string, OIDCToken>();
-  const consents = new Map<string, OIDCConsent>();
+const makeOidcStores = () => {
+  const clients = new Map<string, OidcClient>();
+  const codes = new Map<string, OidcAuthorizationCode>();
+  const tokens = new Map<string, OidcToken>();
+  const consents = new Map<string, OidcConsent>();
   const jwtKeys: JWTKeyPair[] = [];
 
-  const clientStore: typeof OIDCClientStore.Service = {
+  const clientStore: typeof OidcClientStore.Service = {
     create: (c) => Effect.sync(() => (clients.set(c.clientId, c), c)),
     getByClientId: (id) => Effect.succeed(clients.get(id) ?? null),
     update: (c) => Effect.sync(() => (clients.set(c.clientId, c), c)),
     delete: (id) => Effect.sync(() => void clients.delete(id)),
     list: () => Effect.succeed([...clients.values()]),
   };
-  const codeStore: typeof OIDCCodeStore.Service = {
+  const codeStore: typeof OidcCodeStore.Service = {
     create: (c) => Effect.sync(() => (codes.set(c.codeHash, c), c)),
     get: (hash) => Effect.succeed(codes.get(hash) ?? null),
     delete: (hash) => Effect.sync(() => void codes.delete(hash)),
   };
-  const tokenStore: typeof OIDCTokenStore.Service = {
+  const tokenStore: typeof OidcTokenStore.Service = {
     create: (t) => Effect.sync(() => (tokens.set(t.tokenHash, t), t)),
     get: (hash) => Effect.succeed(tokens.get(hash) ?? null),
     delete: (hash) => Effect.sync(() => void tokens.delete(hash)),
     listByFamily: (familyId) =>
       Effect.succeed([...tokens.values()].filter((t) => t.familyId === familyId)),
   };
-  const consentStore: typeof OIDCConsentStore.Service = {
+  const consentStore: typeof OidcConsentStore.Service = {
     get: (userId, clientId) => Effect.succeed(consents.get(`${userId}:${clientId}`) ?? null),
     upsert: (c) => Effect.sync(() => (consents.set(`${c.userId}:${c.clientId}`, c), c)),
     delete: (userId, clientId) => Effect.sync(() => void consents.delete(`${userId}:${clientId}`)),
@@ -105,7 +105,7 @@ const makeUser = (id: string): Types.User => {
   };
 };
 
-describe("OIDCProviderService", () => {
+describe("OidcProviderService", () => {
   const config = {
     issuer: ISSUER,
     loginPage: "http://idp.test/login",
@@ -113,8 +113,8 @@ describe("OIDCProviderService", () => {
   };
 
   const setup = () => {
-    const stores = makeOIDCStores();
-    // `OIDCProvider.make` also resolves `UserStore` and `JWTService` at
+    const stores = makeOidcStores();
+    // `OidcProvider.make` also resolves `UserStore` and `JWTService` at
     // construction time (even though these service-level tests never exercise
     // the userinfo/token-signing paths), so both must be satisfiable here too.
     const userStore: typeof UserStore.Service = {
@@ -125,10 +125,10 @@ describe("OIDCProviderService", () => {
       Layer.provide(Layer.succeed(JWTKeyStore)(stores.jwtKeyStore)),
     );
     const layer = Layer.mergeAll(
-      Layer.succeed(OIDCClientStore)(stores.clientStore),
-      Layer.succeed(OIDCCodeStore)(stores.codeStore),
-      Layer.succeed(OIDCTokenStore)(stores.tokenStore),
-      Layer.succeed(OIDCConsentStore)(stores.consentStore),
+      Layer.succeed(OidcClientStore)(stores.clientStore),
+      Layer.succeed(OidcCodeStore)(stores.codeStore),
+      Layer.succeed(OidcTokenStore)(stores.tokenStore),
+      Layer.succeed(OidcConsentStore)(stores.consentStore),
       Layer.succeed(UserStore)(userStore),
       Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
       jwtServiceLayer,
@@ -139,7 +139,7 @@ describe("OIDCProviderService", () => {
 
   it("registers web clients with a secret and native clients without", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
+    const service = await Effect.runPromise(OidcProvider.make(config).pipe(Effect.provide(layer)));
 
     const { web, native } = await Effect.runPromise(
       Effect.gen(function* () {
@@ -158,25 +158,25 @@ describe("OIDCProviderService", () => {
 
     expect(web.clientSecret).toBeDefined();
     expect(web.client.type).toBe("web");
-    expect(web.client.clientSecretHash).toBe(hashOIDCSecret(web.clientSecret!));
+    expect(web.client.clientSecretHash).toBe(hashOidcSecret(web.clientSecret!));
     expect(native.clientSecret).toBeUndefined();
     expect(native.client.type).toBe("native");
   });
 
   it("rejects registration without redirect URIs", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
+    const service = await Effect.runPromise(OidcProvider.make(config).pipe(Effect.provide(layer)));
     const err = await Effect.runPromise(
       Effect.flip(service.registerClient({ name: "x", redirectUris: [] })).pipe(
         Effect.provide(layer),
       ),
     );
-    expect(err).toBeInstanceOf(OIDCProviderError);
+    expect(err).toBeInstanceOf(OidcProviderError);
   });
 
   it("refuses to redirect for unknown clients or unregistered redirect URIs", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
+    const service = await Effect.runPromise(OidcProvider.make(config).pipe(Effect.provide(layer)));
     const user = makeUser("u1");
 
     const { unknownClient, badRedirect } = await Effect.runPromise(
@@ -205,13 +205,13 @@ describe("OIDCProviderService", () => {
       }).pipe(Effect.provide(layer)),
     );
 
-    expect(unknownClient).toBeInstanceOf(OIDCProviderError);
-    expect(badRedirect).toBeInstanceOf(OIDCProviderError);
+    expect(unknownClient).toBeInstanceOf(OidcProviderError);
+    expect(badRedirect).toBeInstanceOf(OidcProviderError);
   });
 
   it("redirects spec-level errors back to the client", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
+    const service = await Effect.runPromise(OidcProvider.make(config).pipe(Effect.provide(layer)));
     const user = makeUser("u1");
 
     const results = await Effect.runPromise(
@@ -268,7 +268,7 @@ describe("OIDCProviderService", () => {
 
   it("requires PKCE from native (public) clients", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
+    const service = await Effect.runPromise(OidcProvider.make(config).pipe(Effect.provide(layer)));
     const user = makeUser("u1");
 
     const result = await Effect.runPromise(
@@ -294,7 +294,7 @@ describe("OIDCProviderService", () => {
 
   it("rejects redirect URIs that are not https or loopback http", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
+    const service = await Effect.runPromise(OidcProvider.make(config).pipe(Effect.provide(layer)));
 
     const bad = [
       "javascript:alert(1)",
@@ -309,8 +309,8 @@ describe("OIDCProviderService", () => {
           Effect.provide(layer),
         ),
       );
-      expect(err).toBeInstanceOf(OIDCProviderError);
-      expect((err as OIDCProviderError).message).toContain("https or loopback http");
+      expect(err).toBeInstanceOf(OidcProviderError);
+      expect((err as OidcProviderError).message).toContain("https or loopback http");
     }
 
     const good = [
@@ -329,7 +329,7 @@ describe("OIDCProviderService", () => {
 
   it("returns interaction_required for prompt=none when consent is needed", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
+    const service = await Effect.runPromise(OidcProvider.make(config).pipe(Effect.provide(layer)));
     const user = makeUser("u1");
 
     const result = await Effect.runPromise(
@@ -358,7 +358,7 @@ describe("OIDCProviderService", () => {
 
   it("prompt=none succeeds when consent has already been granted", async () => {
     const { layer } = setup();
-    const service = await Effect.runPromise(OIDCProvider.make(config).pipe(Effect.provide(layer)));
+    const service = await Effect.runPromise(OidcProvider.make(config).pipe(Effect.provide(layer)));
     const user = makeUser("u1");
 
     const result = await Effect.runPromise(
@@ -369,7 +369,7 @@ describe("OIDCProviderService", () => {
           skipConsent: false,
         });
         // Grant consent first.
-        const consentStore = yield* OIDCConsentStore;
+        const consentStore = yield* OidcConsentStore;
         yield* consentStore.upsert({
           userId: user.id,
           clientId: client.clientId,
@@ -393,7 +393,7 @@ describe("OIDCProviderService", () => {
   it("resolves trusted config clients without touching the store", async () => {
     const { layer } = setup();
     const service = await Effect.runPromise(
-      OIDCProvider.make({
+      OidcProvider.make({
         ...config,
         trustedClients: [
           {
@@ -428,15 +428,15 @@ describe("OIDCProviderService", () => {
 // RFC 7591 dynamic client registration / RFC 7592 management (service level)
 // -----------------------------------------------------------------------------
 
-describe("OIDCProviderService dynamic client registration", () => {
+describe("OidcProviderService dynamic client registration", () => {
   const baseConfig = {
     issuer: ISSUER,
     loginPage: "http://idp.test/login",
     consentPage: "http://idp.test/consent",
   };
 
-  const setup = (dynamicRegistration?: OIDCDynamicRegistrationConfig) => {
-    const stores = makeOIDCStores();
+  const setup = (dynamicRegistration?: OidcDynamicRegistrationConfig) => {
+    const stores = makeOidcStores();
     const userStore: typeof UserStore.Service = {
       get: () => Effect.succeed(null),
       getCredentials: () => Effect.succeed(null),
@@ -445,10 +445,10 @@ describe("OIDCProviderService dynamic client registration", () => {
       Layer.provide(Layer.succeed(JWTKeyStore)(stores.jwtKeyStore)),
     );
     const layer = Layer.mergeAll(
-      Layer.succeed(OIDCClientStore)(stores.clientStore),
-      Layer.succeed(OIDCCodeStore)(stores.codeStore),
-      Layer.succeed(OIDCTokenStore)(stores.tokenStore),
-      Layer.succeed(OIDCConsentStore)(stores.consentStore),
+      Layer.succeed(OidcClientStore)(stores.clientStore),
+      Layer.succeed(OidcCodeStore)(stores.codeStore),
+      Layer.succeed(OidcTokenStore)(stores.tokenStore),
+      Layer.succeed(OidcConsentStore)(stores.consentStore),
       Layer.succeed(UserStore)(userStore),
       Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
       jwtServiceLayer,
@@ -458,7 +458,7 @@ describe("OIDCProviderService dynamic client registration", () => {
       ...baseConfig,
       ...(dynamicRegistration !== undefined && { dynamicRegistration }),
     };
-    const service = Effect.runSync(OIDCProvider.make(config).pipe(Effect.provide(layer)));
+    const service = Effect.runSync(OidcProvider.make(config).pipe(Effect.provide(layer)));
     return { stores, layer, service };
   };
 
@@ -482,7 +482,7 @@ describe("OIDCProviderService dynamic client registration", () => {
     expect(publicClient.registrationAccessToken).toBeTruthy();
     // Both one-time secrets are stored only as digests.
     expect(publicClient.client.registrationAccessTokenHash).toBe(
-      hashOIDCSecret(publicClient.registrationAccessToken),
+      hashOidcSecret(publicClient.registrationAccessToken),
     );
 
     // RFC 7591 §2: an omitted token_endpoint_auth_method means client_secret_basic.
@@ -492,7 +492,7 @@ describe("OIDCProviderService dynamic client registration", () => {
     expect(confidential.clientSecret).toBeTruthy();
     expect(confidential.client.type).toBe("web");
     expect(confidential.client.tokenEndpointAuthMethod).toBe("client_secret_basic");
-    expect(confidential.client.clientSecretHash).toBe(hashOIDCSecret(confidential.clientSecret!));
+    expect(confidential.client.clientSecretHash).toBe(hashOidcSecret(confidential.clientSecret!));
     // The default scope is the provider's full allowed set.
     expect(confidential.client.scope).toBe("openid profile email offline_access");
   });
@@ -501,8 +501,8 @@ describe("OIDCProviderService dynamic client registration", () => {
     const { service } = setup();
     expect(service.dynamicRegistration.enabled).toBe(false);
     const err = await Effect.runPromise(Effect.flip(service.registerDynamicClient(publicMetadata)));
-    expect(err).toBeInstanceOf(OIDCRegistrationError);
-    expect((err as OIDCRegistrationError).error).toBe("access_denied");
+    expect(err).toBeInstanceOf(OidcRegistrationError);
+    expect((err as OidcRegistrationError).error).toBe("access_denied");
   });
 
   it("rejects redirect URIs that are not https, loopback, or a registered scheme", async () => {
@@ -519,7 +519,7 @@ describe("OIDCProviderService dynamic client registration", () => {
       const err = await Effect.runPromise(
         Effect.flip(service.registerDynamicClient({ ...publicMetadata, redirectUris })),
       );
-      expect((err as OIDCRegistrationError).error).toBe("invalid_redirect_uri");
+      expect((err as OidcRegistrationError).error).toBe("invalid_redirect_uri");
     }
 
     // Private-use URI schemes (RFC 8252 §7.1) are opt-in per deployment.
@@ -549,7 +549,7 @@ describe("OIDCProviderService dynamic client registration", () => {
       const err = await Effect.runPromise(
         Effect.flip(service.registerDynamicClient({ ...publicMetadata, ...overrides })),
       );
-      expect((err as OIDCRegistrationError).error).toBe("invalid_client_metadata");
+      expect((err as OidcRegistrationError).error).toBe("invalid_client_metadata");
     }
   });
 
@@ -558,7 +558,7 @@ describe("OIDCProviderService dynamic client registration", () => {
     const denied = await Effect.runPromise(
       Effect.flip(denyAll.service.registerDynamicClient(publicMetadata)),
     );
-    expect((denied as OIDCRegistrationError).error).toBe("invalid_client_metadata");
+    expect((denied as OidcRegistrationError).error).toBe("invalid_client_metadata");
 
     const forbid = setup({
       policy: () =>
@@ -567,8 +567,8 @@ describe("OIDCProviderService dynamic client registration", () => {
     const forbidden = await Effect.runPromise(
       Effect.flip(forbid.service.registerDynamicClient(publicMetadata)),
     );
-    expect((forbidden as OIDCRegistrationError).error).toBe("access_denied");
-    expect((forbidden as OIDCRegistrationError).description).toBe("Closed");
+    expect((forbidden as OidcRegistrationError).error).toBe("access_denied");
+    expect((forbidden as OidcRegistrationError).description).toBe("Closed");
 
     // The policy sees the NORMALIZED metadata and may opt the client into
     // skipping the consent screen.
@@ -590,14 +590,14 @@ describe("OIDCProviderService dynamic client registration", () => {
     const missing = await Effect.runPromise(
       Effect.flip(secret.service.registerDynamicClient(publicMetadata)),
     );
-    expect((missing as OIDCRegistrationError).error).toBe("invalid_token");
+    expect((missing as OidcRegistrationError).error).toBe("invalid_token");
 
     const wrong = await Effect.runPromise(
       Effect.flip(
         secret.service.registerDynamicClient(publicMetadata, { initialAccessToken: "nope" }),
       ),
     );
-    expect((wrong as OIDCRegistrationError).error).toBe("invalid_token");
+    expect((wrong as OidcRegistrationError).error).toBe("invalid_token");
 
     const ok = await Effect.runPromise(
       secret.service.registerDynamicClient(publicMetadata, {
@@ -624,7 +624,7 @@ describe("OIDCProviderService dynamic client registration", () => {
         hook.service.registerDynamicClient(publicMetadata, { initialAccessToken: "other" }),
       ),
     );
-    expect((rejected as OIDCRegistrationError).error).toBe("invalid_token");
+    expect((rejected as OidcRegistrationError).error).toBe("invalid_token");
   });
 
   it("gates RFC 7592 management on the registration access token", async () => {
@@ -641,7 +641,7 @@ describe("OIDCProviderService dynamic client registration", () => {
       ["unknown-client", rat],
     ] as const) {
       const err = await Effect.runPromise(Effect.flip(service.readDynamicClient(id, token)));
-      expect((err as OIDCRegistrationError).error).toBe("invalid_token");
+      expect((err as OidcRegistrationError).error).toBe("invalid_token");
     }
 
     const updated = await Effect.runPromise(
@@ -654,7 +654,7 @@ describe("OIDCProviderService dynamic client registration", () => {
     expect(updated.name).toBe("Renamed");
     expect(updated.redirectUris).toEqual(["http://127.0.0.1:9876/callback", "https://rp.test/cb"]);
     // The secret and registration access token survive an update untouched.
-    expect(updated.registrationAccessTokenHash).toBe(hashOIDCSecret(rat));
+    expect(updated.registrationAccessTokenHash).toBe(hashOidcSecret(rat));
 
     // A client cannot promote itself from public to confidential.
     const promote = await Effect.runPromise(
@@ -665,7 +665,7 @@ describe("OIDCProviderService dynamic client registration", () => {
         }),
       ),
     );
-    expect((promote as OIDCRegistrationError).error).toBe("invalid_client_metadata");
+    expect((promote as OidcRegistrationError).error).toBe("invalid_client_metadata");
 
     await Effect.runPromise(service.deleteDynamicClient(clientId, rat));
     expect(stores.clients.has(clientId)).toBe(false);
@@ -736,13 +736,13 @@ describe("OIDCProviderService dynamic client registration", () => {
  * Pass `dynamicRegistration` to mount the RFC 7591/7592 endpoints.
  */
 const makeHttpFixture = (
-  options: { readonly dynamicRegistration?: OIDCDynamicRegistrationConfig } = {},
+  options: { readonly dynamicRegistration?: OidcDynamicRegistrationConfig } = {},
 ) => {
   const usersById = new Map<string, Types.User>();
   const identifiers = new Map<string, Identifier>();
   const identifierStore = memoryIdentifierStore(identifiers);
   const sessions = new Map<string, Types.Session>();
-  const oidc = makeOIDCStores();
+  const oidc = makeOidcStores();
   let userSeq = 0;
 
   const seedUser = (email: string, attributes: Record<string, unknown> = {}): string => {
@@ -833,21 +833,21 @@ const makeHttpFixture = (
     Layer.provide(jwtKeyStoreLayer),
   );
 
-  // `OIDCProviderService` resolves the OIDC stores, the core `UserStore`, and
+  // `OidcProviderService` resolves the OIDC stores, the core `UserStore`, and
   // `JWTService` at construction time, so all of them must already be built.
   const oidcDeps = Layer.mergeAll(
-    Layer.succeed(OIDCClientStore)(oidc.clientStore),
-    Layer.succeed(OIDCCodeStore)(oidc.codeStore),
-    Layer.succeed(OIDCTokenStore)(oidc.tokenStore),
-    Layer.succeed(OIDCConsentStore)(oidc.consentStore),
+    Layer.succeed(OidcClientStore)(oidc.clientStore),
+    Layer.succeed(OidcCodeStore)(oidc.codeStore),
+    Layer.succeed(OidcTokenStore)(oidc.tokenStore),
+    Layer.succeed(OidcConsentStore)(oidc.consentStore),
     jwtKeyStoreLayer,
     jwtServiceLayer,
-    // resolveOIDCProvider needs the core user store in the ambient context.
+    // resolveOidcProvider needs the core user store in the ambient context.
     Layer.succeed(UserStore)(userStore),
     Layer.succeed(IdentifierStore)(identifierStore),
   );
 
-  const oidcServiceLayer = OIDCProviderService.layer({
+  const oidcServiceLayer = OidcProviderService.layer({
     issuer: ISSUER,
     loginPage: "http://idp.test/login",
     consentPage: "http://idp.test/consent",
@@ -858,15 +858,15 @@ const makeHttpFixture = (
 
   const oidcLayer = Layer.mergeAll(oidcDeps, oidcServiceLayer);
 
-  const withOIDC = Layer.mergeAll(base, oidcLayer) as Layer.Layer<AuthServices>;
-  const withoutOIDC = base as Layer.Layer<AuthServices>;
+  const withOidc = Layer.mergeAll(base, oidcLayer) as Layer.Layer<AuthServices>;
+  const withoutOidc = base as Layer.Layer<AuthServices>;
 
   return {
     seedUser,
     makeSession,
     oidcTokenStore: oidc.tokens,
-    handler: HTTPServer.make({ services: withOIDC, cookie: { secure: false } }).handler,
-    handlerWithoutOIDC: HTTPServer.make({ services: withoutOIDC, cookie: { secure: false } })
+    handler: HTTPServer.make({ services: withOidc, cookie: { secure: false } }).handler,
+    handlerWithoutOidc: HTTPServer.make({ services: withoutOidc, cookie: { secure: false } })
       .handler,
   };
 };
@@ -1320,9 +1320,9 @@ describe("HTTP OIDC provider endpoints", () => {
 
   it("returns 404 when the OIDC provider is not configured", async () => {
     const fx = makeHttpFixture();
-    const discovery = await fx.handlerWithoutOIDC(get("/.well-known/openid-configuration"));
+    const discovery = await fx.handlerWithoutOidc(get("/.well-known/openid-configuration"));
     expect(discovery.status).toBe(404);
-    const token = await fx.handlerWithoutOIDC(
+    const token = await fx.handlerWithoutOidc(
       post("/oauth2/token", { grant_type: "authorization_code" }),
     );
     expect(token.status).toBe(404);
@@ -1468,7 +1468,7 @@ describe("HTTP OIDC provider endpoints", () => {
     const { refresh_token: rt } = (await tokenRes.json()) as { refresh_token: string };
 
     // Expire the token by mutating absoluteExpiresAt to the past.
-    const hash = hashOIDCSecret(rt);
+    const hash = hashOidcSecret(rt);
     const stored = fx.oidcTokenStore.get(hash)!;
     fx.oidcTokenStore.set(hash, {
       ...stored,
@@ -1948,7 +1948,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
 
     // 404 while the provider itself is absent.
     expect(
-      (await withoutDCR.handlerWithoutOIDC(get("/.well-known/oauth-authorization-server"))).status,
+      (await withoutDCR.handlerWithoutOidc(get("/.well-known/oauth-authorization-server"))).status,
     ).toBe(404);
   });
 });

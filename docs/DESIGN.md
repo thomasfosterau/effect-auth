@@ -71,7 +71,7 @@ const app = Effect.gen(function* () {
 > compat alias. The rest of D1 — bare service names, `X.layer(config)` as the
 > sole constructor — still holds.
 
-**Status quo.** Every module ships four things (e.g. `session/SessionService.ts` (then flat `Session.ts`)):
+**Status quo.** Every module ships four things (e.g. `SessionService.ts` (then `Session.ts`)):
 
 1. `interface SessionManager` — the service shape;
 2. `class SessionManagerTag extends Context.Service<SessionManagerTag, SessionManager>()("@effect-auth/SessionManager")`;
@@ -144,7 +144,7 @@ the KV store layers (`KeyValueStores.ts`, provide store tags from many modules).
 no-config functions (`RateLimiterLayer()` `RateLimit.ts:212`,
 `AuthorizationPolicyLayer()` `Authorization.ts`, `UserServiceLayer()`
 `User.ts:153`); 4 bare Layer values (`RateLimiterPersistenceLayer`,
-`ScryptHasherLayer`, `PasswordHasherLayer`, `MultiFactorGateLayer` — `secondfactor/MultiFactor.ts`
+`ScryptHasherLayer`, `PasswordHasherLayer`, `MultiFactorGateLayer` — `multifactor/MultiFactor.ts`
 (then flat `TwoFactor.ts`)); one
 `make`-prefixed (`makeMultiAlgorithmVerifierLayer` `password/Password.ts` (then flat `Password.ts`)); one
 lowercase two-arg (`authGroupLayer(config?, multiSession?)` `http/HttpServer.ts` (then flat `HttpServer.ts`));
@@ -183,7 +183,7 @@ needs a short migration note in the changeset.
 
 **Status quo.** 38 store interfaces. 30+ return `X | null` for lookups with an
 `AuthError` channel; 4 fail typed not-found errors (`SessionStore.get` →
-`SessionNotFoundError` `session/SessionService.ts` (then flat `Session.ts`); `UserStore.get`/`UserServiceStore.get` →
+`SessionNotFoundError` `SessionService.ts` (then `Session.ts`); `UserStore.get`/`UserServiceStore.get` →
 `UserNotFoundError`; `ChallengeStore.get`/`CredentialStore.get` →
 `Challenge/CredentialNotFoundError` `WebAuthn.ts:191–216`); one —
 `OAuthStateStore.get` (`OAuth.ts:147`) — is neither: non-nullable success with
@@ -207,7 +207,7 @@ only broad `AuthError`. Method vocabulary drifts: `get` vs `getById` vs
    `SessionStore.get`, `UserStore.get`, `UserServiceStore.get`,
    `ChallengeStore.get`, `CredentialStore.get` become nullable (their services
    already own the typed errors); `OAuthStateStore.get` becomes nullable;
-   `CredentialStore.getByUserId` → `listByUserId`; `APIKeyStore.getById` → `get`.
+   `CredentialStore.getByUserId` → `listByUserId`; `ApiKeyStore.getById` → `get`.
    `@effect-auth/sql` and `@effect-auth/alchemy` update in lockstep.
 
 **Rationale.** The nullable convention is the de-facto majority (30+ of 38), is
@@ -227,7 +227,7 @@ Changeset with a migration table.
 `@effect-auth/sql` and `@effect-auth/alchemy` both implement the same 20
 stores (the alchemy gap — MagicLink, MagicLinkUser, EmailOTP, EmailOTPUser,
 MultiFactor, PendingMultiFactor — was closed 2026-07-04). Neither implements the
-advanced-feature stores (Organization, APIKey, SSO, OIDC\*,
+advanced-feature stores (Organization, ApiKey, SSO, Oidc\*,
 DeviceAuthorization, …); that remains a tracked feature gap, not an API
 question.
 
@@ -623,7 +623,7 @@ semantics adopted on merit and, at most, an interop serialization (door-open
   `AuthMiddleware` providing the principal per request.
 
 The M0-era `AuthorizationPolicy`/`RoleStore` API remains during the
-transition; M4 migrates Organization/Admin/APIKey onto `Policy` and decides
+transition; M4 migrates Organization/Admin/ApiKey onto `Policy` and decides
 its retirement.
 
 ---

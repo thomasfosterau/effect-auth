@@ -631,18 +631,18 @@ export const authGroup = HttpApiGroup.make("auth").add(
   }),
   // --- API keys (session-authenticated management).
   HttpApiEndpoint.post("apiKeyCreate", "/api-keys", {
-    payload: S.APIKeyCreatePayload,
-    success: S.APIKeyCreatedView,
+    payload: S.ApiKeyCreatePayload,
+    success: S.ApiKeyCreatedView,
     error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
   }),
   HttpApiEndpoint.get("apiKeyList", "/api-keys", {
-    success: S.APIKeyListView,
+    success: S.ApiKeyListView,
     error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
   }),
   HttpApiEndpoint.patch("apiKeyUpdate", "/api-keys/:keyId", {
     params: { keyId: Schema.String },
-    payload: S.APIKeyUpdatePayload,
-    success: S.APIKeyView,
+    payload: S.ApiKeyUpdatePayload,
+    success: S.ApiKeyView,
     error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
   }),
   HttpApiEndpoint.delete("apiKeyDelete", "/api-keys/:keyId", {
@@ -733,8 +733,8 @@ export const authGroup = HttpApiGroup.make("auth").add(
   // --- OIDC provider (this server as an OpenID Connect IdP). 404 when the
   // --- module is absent. Client management is admin-gated.
   HttpApiEndpoint.post("oidcRegisterClient", "/oauth2/register", {
-    payload: S.OIDCRegisterClientPayload,
-    success: S.OIDCClientCreatedView,
+    payload: S.OidcRegisterClientPayload,
+    success: S.OidcClientCreatedView,
     error: [
       S.NotFoundError,
       S.UnauthorizedError,
@@ -744,13 +744,13 @@ export const authGroup = HttpApiGroup.make("auth").add(
     ],
   }),
   HttpApiEndpoint.get("oidcListClients", "/oauth2/clients", {
-    success: S.OIDCClientListView,
+    success: S.OidcClientListView,
     error: [S.NotFoundError, S.UnauthorizedError, S.ForbiddenError, S.InternalError],
   }),
   HttpApiEndpoint.patch("oidcUpdateClient", "/oauth2/clients/:clientId", {
     params: { clientId: Schema.String },
-    payload: S.OIDCClientUpdatePayload,
-    success: S.OIDCClientView,
+    payload: S.OidcClientUpdatePayload,
+    success: S.OidcClientView,
     error: [
       S.NotFoundError,
       S.UnauthorizedError,
@@ -790,15 +790,15 @@ export const authGroup = HttpApiGroup.make("auth").add(
   }),
   // Consent decision (session-authenticated; posted by the consent page).
   HttpApiEndpoint.post("oidcConsent", "/oauth2/consent", {
-    payload: S.OIDCConsentPayload,
-    success: S.OIDCRedirectView,
+    payload: S.OidcConsentPayload,
+    success: S.OidcRedirectView,
     error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
   }),
   // Token endpoint: authorization_code + refresh_token grants. Accepts JSON
   // or form encoding; errors carry the RFC 6749 error code as the message.
   HttpApiEndpoint.post("oidcToken", "/oauth2/token", {
-    payload: [S.OIDCTokenPayload, S.OIDCTokenPayload.pipe(HttpApiSchema.asFormUrlEncoded())],
-    success: S.OIDCTokenView,
+    payload: [S.OidcTokenPayload, S.OidcTokenPayload.pipe(HttpApiSchema.asFormUrlEncoded())],
+    success: S.OidcTokenView,
     error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
   }),
   // UserInfo endpoint: bearer access token -> standard claims.
@@ -811,8 +811,8 @@ export const authGroup = HttpApiGroup.make("auth").add(
   // --- (optionally gated by an initial access token), so it is rate limited
   // --- and errors use the RFC's `{ error, error_description }` body.
   HttpApiEndpoint.post("oidcDynamicRegister", "/register", {
-    payload: S.OIDCRegistrationPayload,
-    success: S.OIDCRegistrationView.pipe(HttpApiSchema.status(201)),
+    payload: S.OidcRegistrationPayload,
+    success: S.OidcRegistrationView.pipe(HttpApiSchema.status(201)),
     error: [
       S.OAuthBadRequestError,
       S.NotFoundError,
@@ -826,7 +826,7 @@ export const authGroup = HttpApiGroup.make("auth").add(
   // --- token issued at registration (`Authorization: Bearer`).
   HttpApiEndpoint.get("oidcReadRegistration", "/register/:clientId", {
     params: { clientId: Schema.String },
-    success: S.OIDCRegistrationView,
+    success: S.OidcRegistrationView,
     error: [
       S.OAuthBadRequestError,
       S.NotFoundError,
@@ -837,8 +837,8 @@ export const authGroup = HttpApiGroup.make("auth").add(
   }),
   HttpApiEndpoint.put("oidcUpdateRegistration", "/register/:clientId", {
     params: { clientId: Schema.String },
-    payload: S.OIDCRegistrationPayload,
-    success: S.OIDCRegistrationView,
+    payload: S.OidcRegistrationPayload,
+    success: S.OidcRegistrationView,
     error: [
       S.OAuthBadRequestError,
       S.NotFoundError,

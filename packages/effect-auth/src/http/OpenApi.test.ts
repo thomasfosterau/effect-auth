@@ -3,7 +3,7 @@ import { Layer } from "effect";
 import { getOpenApiSpec } from "./HttpApi.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HTTPServer from "./HttpServer.ts";
-import { SessionService } from "../session/SessionService.ts";
+import { SessionService } from "../SessionService.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { IdentifierStore } from "../Identifier.ts";
 import { PasswordHasher } from "../password/Password.ts";

@@ -17,9 +17,9 @@ import {
   memoryIdentifierStore,
 } from "../Identifier.ts";
 import { hashToken } from "../TokenHash.ts";
-import { make, SessionService } from "../session/SessionService.ts";
-import { SessionStore } from "../session/SessionStore.ts";
-import { UserStore } from "../session/UserStore.ts";
+import { make, SessionService } from "../SessionService.ts";
+import { SessionStore } from "../SessionStore.ts";
+import { UserStore } from "../UserStore.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 import * as Errors from "../Errors.ts";
 

@@ -32,7 +32,7 @@ import {
 } from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 

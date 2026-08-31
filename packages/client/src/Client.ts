@@ -19,11 +19,11 @@ import type {
   AdminSetRolePayload,
   AdminUserActionPayload,
   AdminUserListView,
-  APIKeyCreatePayload,
-  APIKeyCreatedView,
-  APIKeyListView,
-  APIKeyUpdatePayload,
-  APIKeyView,
+  ApiKeyCreatePayload,
+  ApiKeyCreatedView,
+  ApiKeyListView,
+  ApiKeyUpdatePayload,
+  ApiKeyView,
   AuthSuccess,
   BackupCodesView,
   ChangeEmailConfirmPayload,
@@ -49,13 +49,13 @@ import type {
   MemberView,
   MultiSessionActionPayload,
   MultiSessionListView,
-  OIDCClientCreatedView,
-  OIDCClientListView,
-  OIDCClientUpdatePayload,
-  OIDCClientView,
-  OIDCConsentPayload,
-  OIDCRedirectView,
-  OIDCRegisterClientPayload,
+  OidcClientCreatedView,
+  OidcClientListView,
+  OidcClientUpdatePayload,
+  OidcClientView,
+  OidcConsentPayload,
+  OidcRedirectView,
+  OidcRegisterClientPayload,
   OrgRoleListView,
   OrgRoleView,
   OrganizationListView,
@@ -447,9 +447,9 @@ export interface AuthClient {
   /** API keys owned by the signed-in user. 404 when unconfigured. */
   readonly apiKeys: {
     /** The plaintext key is returned exactly once — show it, then discard. */
-    readonly create: (payload: APIKeyCreatePayload) => Promise<APIKeyCreatedView>;
-    readonly list: () => Promise<APIKeyListView>;
-    readonly update: (keyId: string, payload: APIKeyUpdatePayload) => Promise<APIKeyView>;
+    readonly create: (payload: ApiKeyCreatePayload) => Promise<ApiKeyCreatedView>;
+    readonly list: () => Promise<ApiKeyListView>;
+    readonly update: (keyId: string, payload: ApiKeyUpdatePayload) => Promise<ApiKeyView>;
     readonly delete: (keyId: string) => Promise<void>;
   };
 
@@ -483,15 +483,15 @@ export interface AuthClient {
    * discovery) are for OAuth clients, not this SDK.
    */
   readonly oidc: {
-    readonly registerClient: (payload: OIDCRegisterClientPayload) => Promise<OIDCClientCreatedView>;
-    readonly listClients: () => Promise<OIDCClientListView>;
+    readonly registerClient: (payload: OidcRegisterClientPayload) => Promise<OidcClientCreatedView>;
+    readonly listClients: () => Promise<OidcClientListView>;
     readonly updateClient: (
       clientId: string,
-      payload: OIDCClientUpdatePayload,
-    ) => Promise<OIDCClientView>;
+      payload: OidcClientUpdatePayload,
+    ) => Promise<OidcClientView>;
     readonly deleteClient: (clientId: string) => Promise<void>;
     /** Post the consent decision; the response carries the redirect URL. */
-    readonly consent: (payload: OIDCConsentPayload) => Promise<OIDCRedirectView>;
+    readonly consent: (payload: OidcConsentPayload) => Promise<OidcRedirectView>;
   };
 
   /** Extend this client with a plugin's typed methods. */
@@ -889,9 +889,9 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     apiKeys: {
-      create: (payload) => request<APIKeyCreatedView>("POST", "/api-keys", payload),
-      list: () => request<APIKeyListView>("GET", "/api-keys"),
-      update: (keyId, payload) => request<APIKeyView>("PATCH", `/api-keys/${seg(keyId)}`, payload),
+      create: (payload) => request<ApiKeyCreatedView>("POST", "/api-keys", payload),
+      list: () => request<ApiKeyListView>("GET", "/api-keys"),
+      update: (keyId, payload) => request<ApiKeyView>("PATCH", `/api-keys/${seg(keyId)}`, payload),
       delete: (keyId) => request<void>("DELETE", `/api-keys/${seg(keyId)}`),
     },
 
@@ -918,12 +918,12 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
 
     oidc: {
       registerClient: (payload) =>
-        request<OIDCClientCreatedView>("POST", "/oauth2/register", payload),
-      listClients: () => request<OIDCClientListView>("GET", "/oauth2/clients"),
+        request<OidcClientCreatedView>("POST", "/oauth2/register", payload),
+      listClients: () => request<OidcClientListView>("GET", "/oauth2/clients"),
       updateClient: (clientId, payload) =>
-        request<OIDCClientView>("PATCH", `/oauth2/clients/${seg(clientId)}`, payload),
+        request<OidcClientView>("PATCH", `/oauth2/clients/${seg(clientId)}`, payload),
       deleteClient: (clientId) => request<void>("DELETE", `/oauth2/clients/${seg(clientId)}`),
-      consent: (payload) => request<OIDCRedirectView>("POST", "/oauth2/consent", payload),
+      consent: (payload) => request<OidcRedirectView>("POST", "/oauth2/consent", payload),
     },
 
     extend: <TExtension extends object>(

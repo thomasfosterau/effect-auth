@@ -4,9 +4,9 @@ import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { OTPSecondFactorStore, type OTPSecondFactorRecord } from "./OTPSecondFactor.ts";
 import * as OTPSecondFactor from "./OTPSecondFactor.ts";
-import { make, SessionService } from "../session/SessionService.ts";
-import { SessionStore } from "../session/SessionStore.ts";
-import { UserStore } from "../session/UserStore.ts";
+import { make, SessionService } from "../SessionService.ts";
+import { SessionStore } from "../SessionStore.ts";
+import { UserStore } from "../UserStore.ts";
 import type { Session, SessionConfig, User } from "../Types.ts";
 
 // ---------------------------------------------------------------------------

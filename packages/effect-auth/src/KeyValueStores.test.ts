@@ -14,7 +14,7 @@ import {
   PendingMultiFactorStoreKV,
 } from "./KeyValueStores.ts";
 import { OAuthStateStore, type OAuthState } from "./oauth/OAuth.ts";
-import { ChallengeStore, type WebAuthnChallenge } from "./secondfactor/WebAuthn.ts";
+import { ChallengeStore, type WebAuthnChallenge } from "./multifactor/WebAuthn.ts";
 import { RateLimitStore, type RateLimitEntry } from "./RateLimit.ts";
 import {
   EmailVerificationStore,
@@ -24,7 +24,7 @@ import * as EmailVerification from "./email/EmailVerification.ts";
 import { PasswordResetStore, type PasswordResetToken } from "./password/PasswordReset.ts";
 import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
 import { EmailOTPStore, type EmailOTPRecord } from "./email/EmailOTP.ts";
-import { PendingMultiFactorStore, type PendingMultiFactor } from "./secondfactor/MultiFactor.ts";
+import { PendingMultiFactorStore, type PendingMultiFactor } from "./multifactor/MultiFactor.ts";
 import { Hooks } from "./Hooks.ts";
 
 /** Fresh in-memory KV per invocation so tests are isolated. */

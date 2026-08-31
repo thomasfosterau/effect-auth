@@ -16,7 +16,7 @@
  */
 import { Effect } from "effect";
 import type { AuthResult } from "../email/EmailPassword.ts";
-import { SessionService } from "../session/SessionService.ts";
+import { SessionService } from "../SessionService.ts";
 import { Hooks, makePlugin } from "../Hooks.ts";
 
 /**

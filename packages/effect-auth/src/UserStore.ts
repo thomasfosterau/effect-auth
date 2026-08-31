@@ -1,6 +1,6 @@
 import { Context, Effect } from "effect";
-import type * as Types from "../Types.ts";
-import * as Errors from "../Errors.ts";
+import type * as Types from "./Types.ts";
+import * as Errors from "./Errors.ts";
 
 /**
  * User store interface for managing user persistence

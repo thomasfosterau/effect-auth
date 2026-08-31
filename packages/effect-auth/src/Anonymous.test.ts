@@ -6,7 +6,7 @@ import {
   isAnonymousUser,
   type AnonymousConfig,
 } from "./Anonymous.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionService } from "./SessionService.ts";
 import { Hooks } from "./Hooks.ts";
 import type * as Types from "./Types.ts";
 import { InvalidInputError } from "./Errors.ts";

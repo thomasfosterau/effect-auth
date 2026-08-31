@@ -25,7 +25,7 @@ import { hashToken } from "./TokenHash.ts";
 /**
  * API key error
  */
-export class APIKeyError extends Data.TaggedError("APIKeyError")<{
+export class ApiKeyError extends Data.TaggedError("ApiKeyError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
@@ -38,7 +38,7 @@ export class APIKeyError extends Data.TaggedError("APIKeyError")<{
  * six characters of the key's random portion so dashboards can display a
  * recognizable fragment without revealing the secret.
  */
-export interface APIKey {
+export interface ApiKey {
   readonly id: string;
   /** Human-readable label (e.g. "CI deploy key") */
   readonly name?: string;
@@ -84,22 +84,22 @@ export interface APIKey {
 /**
  * Storage interface for API keys
  */
-export class APIKeyStore extends Context.Service<
-  APIKeyStore,
+export class ApiKeyStore extends Context.Service<
+  ApiKeyStore,
   {
-    readonly create: (apiKey: APIKey) => Effect.Effect<APIKey, Errors.AuthError>;
-    readonly get: (id: string) => Effect.Effect<APIKey | null, Errors.AuthError>;
-    readonly getByHash: (keyHash: string) => Effect.Effect<APIKey | null, Errors.AuthError>;
-    readonly update: (apiKey: APIKey) => Effect.Effect<APIKey, Errors.AuthError>;
+    readonly create: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
+    readonly get: (id: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
+    readonly getByHash: (keyHash: string) => Effect.Effect<ApiKey | null, Errors.AuthError>;
+    readonly update: (apiKey: ApiKey) => Effect.Effect<ApiKey, Errors.AuthError>;
     readonly delete: (id: string) => Effect.Effect<void, Errors.AuthError>;
-    readonly listByUserId: (userId: string) => Effect.Effect<readonly APIKey[], Errors.AuthError>;
+    readonly listByUserId: (userId: string) => Effect.Effect<readonly ApiKey[], Errors.AuthError>;
   }
->()("@effect-auth/APIKeyStore") {}
+>()("@effect-auth/ApiKeyStore") {}
 
 /**
  * API key service configuration
  */
-export interface APIKeyConfig {
+export interface ApiKeyConfig {
   /** Prefix prepended to generated keys when none is supplied (default: "ak_") */
   readonly defaultPrefix?: string;
   /** Number of random bytes in the secret portion, base64url-encoded (default: 32) */
@@ -113,7 +113,7 @@ export interface APIKeyConfig {
 /**
  * Options for creating an API key
  */
-export interface APIKeyCreateOptions {
+export interface ApiKeyCreateOptions {
   readonly name?: string;
   /** Overrides the configured default prefix for this key */
   readonly prefix?: string;
@@ -139,9 +139,9 @@ export interface APIKeyCreateOptions {
  * Result of creating an API key. `key` is the full plaintext key
  * (prefix + secret) and is shown exactly once — it is never stored.
  */
-export interface APIKeyCreateResult {
+export interface ApiKeyCreateResult {
   readonly key: string;
-  readonly apiKey: APIKey;
+  readonly apiKey: ApiKey;
 }
 
 /**
@@ -149,16 +149,16 @@ export interface APIKeyCreateResult {
  * `{ valid: false, error }` rather than typed failures so callers can treat
  * a bad key as a normal (unauthenticated) outcome.
  */
-export interface APIKeyVerifyResult {
+export interface ApiKeyVerifyResult {
   readonly valid: boolean;
-  readonly apiKey?: APIKey;
+  readonly apiKey?: ApiKey;
   readonly error?: string;
 }
 
 /**
  * Fields of an API key that may be changed after creation.
  */
-export interface APIKeyUpdate {
+export interface ApiKeyUpdate {
   readonly name?: string;
   readonly enabled?: boolean;
   readonly expiresAt?: number;
@@ -179,18 +179,18 @@ export interface APIKeyUpdate {
 /**
  * API key service
  */
-export class APIKeyService extends Context.Service<
-  APIKeyService,
+export class ApiKeyService extends Context.Service<
+  ApiKeyService,
   {
     /**
      * Create a new API key for a user. Returns the plaintext key (shown once)
-     * alongside the stored record. Fails with {@link APIKeyError} when the
+     * alongside the stored record. Fails with {@link ApiKeyError} when the
      * user already holds `maxKeysPerUser` keys.
      */
     readonly create: (
       userId: string,
-      options?: APIKeyCreateOptions,
-    ) => Effect.Effect<APIKeyCreateResult, APIKeyError | Errors.AuthError>;
+      options?: ApiKeyCreateOptions,
+    ) => Effect.Effect<ApiKeyCreateResult, ApiKeyError | Errors.AuthError>;
 
     /**
      * Verify a plaintext API key: sha256 hash lookup, then enabled / expiry /
@@ -201,7 +201,7 @@ export class APIKeyService extends Context.Service<
     readonly verify: (
       plaintextKey: string,
       requiredPermissions?: Record<string, readonly string[]>,
-    ) => Effect.Effect<APIKeyVerifyResult, Errors.AuthError>;
+    ) => Effect.Effect<ApiKeyVerifyResult, Errors.AuthError>;
 
     /**
      * Like `verify`, but when the key carries a `rateLimit` configuration a
@@ -212,36 +212,36 @@ export class APIKeyService extends Context.Service<
     readonly verifyWithRateLimit: (
       plaintextKey: string,
       requiredPermissions?: Record<string, readonly string[]>,
-    ) => Effect.Effect<APIKeyVerifyResult, Errors.AuthError, RateLimitStore>;
+    ) => Effect.Effect<ApiKeyVerifyResult, Errors.AuthError, RateLimitStore>;
 
     /**
-     * Fetch a key by id, failing with {@link APIKeyError} when it does not exist.
+     * Fetch a key by id, failing with {@link ApiKeyError} when it does not exist.
      */
-    readonly get: (keyId: string) => Effect.Effect<APIKey, APIKeyError | Errors.AuthError>;
+    readonly get: (keyId: string) => Effect.Effect<ApiKey, ApiKeyError | Errors.AuthError>;
 
     /**
      * List all keys belonging to a user.
      */
-    readonly list: (userId: string) => Effect.Effect<readonly APIKey[], Errors.AuthError>;
+    readonly list: (userId: string) => Effect.Effect<readonly ApiKey[], Errors.AuthError>;
 
     /**
-     * Update a key on behalf of a user. Fails with {@link APIKeyError} when the
+     * Update a key on behalf of a user. Fails with {@link ApiKeyError} when the
      * key does not exist or belongs to a different user.
      */
     readonly update: (
       userId: string,
       keyId: string,
-      updates: APIKeyUpdate,
-    ) => Effect.Effect<APIKey, APIKeyError | Errors.AuthError>;
+      updates: ApiKeyUpdate,
+    ) => Effect.Effect<ApiKey, ApiKeyError | Errors.AuthError>;
 
     /**
-     * Delete a key on behalf of a user. Fails with {@link APIKeyError} when the
+     * Delete a key on behalf of a user. Fails with {@link ApiKeyError} when the
      * key does not exist or belongs to a different user.
      */
     readonly delete: (
       userId: string,
       keyId: string,
-    ) => Effect.Effect<void, APIKeyError | Errors.AuthError>;
+    ) => Effect.Effect<void, ApiKeyError | Errors.AuthError>;
 
     /**
      * Delete every key of a user whose `expiresAt` is in the past. Returns the
@@ -250,19 +250,19 @@ export class APIKeyService extends Context.Service<
      */
     readonly deleteAllExpired: (userId: string) => Effect.Effect<number, Errors.AuthError>;
   }
->()("@effect-auth/APIKeyService") {
+>()("@effect-auth/ApiKeyService") {
   /**
    * Construct a Layer providing this service.
    */
-  static readonly layer = (config: APIKeyConfig = {}) =>
-    Layer.effect(APIKeyService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
+  static readonly layer = (config: ApiKeyConfig = {}) =>
+    Layer.effect(ApiKeyService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /**
  * SHA-256 hex digest of a plaintext API key. Exposed so stores/tests can
  * compute lookup hashes without duplicating the hashing scheme.
  */
-export const hashAPIKey = hashToken;
+export const hashApiKey = hashToken;
 
 /**
  * Check that every requested `resource → actions` entry is granted by the
@@ -294,15 +294,15 @@ const hasRequiredPermissions = (
  * Create an API key service
  */
 export const make = (
-  config: APIKeyConfig = {},
-): Effect.Effect<typeof APIKeyService.Service, never, APIKeyStore | RateLimiter | Crypto.Crypto> =>
+  config: ApiKeyConfig = {},
+): Effect.Effect<typeof ApiKeyService.Service, never, ApiKeyStore | RateLimiter | Crypto.Crypto> =>
   Effect.gen(function* () {
     const defaultPrefix = config?.defaultPrefix ?? "ak_";
     const keyLength = config?.keyLength ?? 32;
     const defaultExpiresIn = config?.defaultExpiresIn;
     const maxKeysPerUser = config?.maxKeysPerUser ?? 10;
 
-    const store = yield* APIKeyStore;
+    const store = yield* ApiKeyStore;
     const rateLimiter = yield* RateLimiter;
     const crypto = yield* Crypto.Crypto;
 
@@ -329,7 +329,7 @@ export const make = (
         const apiKey = yield* store.get(keyId);
         if (!apiKey || apiKey.userId !== userId) {
           return yield* Effect.fail(
-            new APIKeyError({
+            new ApiKeyError({
               message: "API key not found",
             }),
           );
@@ -343,18 +343,18 @@ export const make = (
      * Due quota refills are applied lazily before the remaining-uses check.
      */
     const verifyRecord = (
-      apiKey: APIKey,
+      apiKey: ApiKey,
       requiredPermissions: Record<string, readonly string[]> | undefined,
     ) =>
       Effect.gen(function* () {
         const now = Date.now();
 
         if (!apiKey.enabled) {
-          return { valid: false, error: "API key is disabled" } satisfies APIKeyVerifyResult;
+          return { valid: false, error: "API key is disabled" } satisfies ApiKeyVerifyResult;
         }
 
         if (apiKey.expiresAt !== undefined && now > apiKey.expiresAt) {
-          return { valid: false, error: "API key has expired" } satisfies APIKeyVerifyResult;
+          return { valid: false, error: "API key has expired" } satisfies ApiKeyVerifyResult;
         }
 
         // Lazily apply quota refills before checking remaining
@@ -383,14 +383,14 @@ export const make = (
           return {
             valid: false,
             error: "API key has no remaining uses",
-          } satisfies APIKeyVerifyResult;
+          } satisfies ApiKeyVerifyResult;
         }
 
         if (requiredPermissions && !hasRequiredPermissions(key.permissions, requiredPermissions)) {
           return {
             valid: false,
             error: "API key is missing required permissions",
-          } satisfies APIKeyVerifyResult;
+          } satisfies ApiKeyVerifyResult;
         }
 
         const updated = yield* store.update({
@@ -400,24 +400,24 @@ export const make = (
           updatedAt: now,
         });
 
-        return { valid: true, apiKey: updated } satisfies APIKeyVerifyResult;
+        return { valid: true, apiKey: updated } satisfies ApiKeyVerifyResult;
       });
 
     /**
      * Hash lookup for a plaintext key. Lookup is by exact sha256 digest, so
      * the comparison carries no secret-dependent timing.
      */
-    const lookup = (plaintextKey: string) => store.getByHash(hashAPIKey(plaintextKey));
+    const lookup = (plaintextKey: string) => store.getByHash(hashApiKey(plaintextKey));
 
     return {
-      create: Effect.fn("APIKeyService.create")(function* (
+      create: Effect.fn("ApiKeyService.create")(function* (
         userId: string,
-        options?: APIKeyCreateOptions,
+        options?: ApiKeyCreateOptions,
       ) {
         const existing = yield* store.listByUserId(userId);
         if (existing.length >= maxKeysPerUser) {
           return yield* Effect.fail(
-            new APIKeyError({
+            new ApiKeyError({
               message: `User already has the maximum of ${maxKeysPerUser} API keys`,
             }),
           );
@@ -433,12 +433,12 @@ export const make = (
         const hasRefill =
           options?.refillAmount !== undefined && options?.refillInterval !== undefined;
 
-        const apiKey: APIKey = {
+        const apiKey: ApiKey = {
           id: yield* randomId(),
           ...(options?.name !== undefined && { name: options.name }),
           prefix,
           start: secret.slice(0, 6),
-          keyHash: hashAPIKey(key),
+          keyHash: hashApiKey(key),
           userId,
           enabled: true,
           ...(expiresIn !== undefined && { expiresAt: now + expiresIn }),
@@ -460,27 +460,27 @@ export const make = (
 
         const created = yield* store.create(apiKey);
 
-        return { key, apiKey: created } satisfies APIKeyCreateResult;
+        return { key, apiKey: created } satisfies ApiKeyCreateResult;
       }),
 
-      verify: Effect.fn("APIKeyService.verify")(function* (
+      verify: Effect.fn("ApiKeyService.verify")(function* (
         plaintextKey: string,
         requiredPermissions?: Record<string, readonly string[]>,
       ) {
         const apiKey = yield* lookup(plaintextKey);
         if (!apiKey) {
-          return { valid: false, error: "Invalid API key" } satisfies APIKeyVerifyResult;
+          return { valid: false, error: "Invalid API key" } satisfies ApiKeyVerifyResult;
         }
         return yield* verifyRecord(apiKey, requiredPermissions);
       }),
 
-      verifyWithRateLimit: Effect.fn("APIKeyService.verifyWithRateLimit")(function* (
+      verifyWithRateLimit: Effect.fn("ApiKeyService.verifyWithRateLimit")(function* (
         plaintextKey: string,
         requiredPermissions?: Record<string, readonly string[]>,
       ) {
         const apiKey = yield* lookup(plaintextKey);
         if (!apiKey) {
-          return { valid: false, error: "Invalid API key" } satisfies APIKeyVerifyResult;
+          return { valid: false, error: "Invalid API key" } satisfies ApiKeyVerifyResult;
         }
 
         if (apiKey.rateLimit) {
@@ -491,18 +491,18 @@ export const make = (
               Effect.catchTag("RateLimitError", () => Effect.succeed(true)),
             );
           if (limited) {
-            return { valid: false, error: "Rate limit exceeded" } satisfies APIKeyVerifyResult;
+            return { valid: false, error: "Rate limit exceeded" } satisfies ApiKeyVerifyResult;
           }
         }
 
         return yield* verifyRecord(apiKey, requiredPermissions);
       }),
 
-      get: Effect.fn("APIKeyService.get")(function* (keyId: string) {
+      get: Effect.fn("ApiKeyService.get")(function* (keyId: string) {
         const apiKey = yield* store.get(keyId);
         if (!apiKey) {
           return yield* Effect.fail(
-            new APIKeyError({
+            new ApiKeyError({
               message: "API key not found",
             }),
           );
@@ -510,14 +510,14 @@ export const make = (
         return apiKey;
       }),
 
-      list: Effect.fn("APIKeyService.list")(function* (userId: string) {
+      list: Effect.fn("ApiKeyService.list")(function* (userId: string) {
         return yield* store.listByUserId(userId);
       }),
 
-      update: Effect.fn("APIKeyService.update")(function* (
+      update: Effect.fn("ApiKeyService.update")(function* (
         userId: string,
         keyId: string,
-        updates: APIKeyUpdate,
+        updates: ApiKeyUpdate,
       ) {
         const apiKey = yield* getOwned(userId, keyId);
 
@@ -538,12 +538,12 @@ export const make = (
         });
       }),
 
-      delete: Effect.fn("APIKeyService.delete")(function* (userId: string, keyId: string) {
+      delete: Effect.fn("ApiKeyService.delete")(function* (userId: string, keyId: string) {
         const apiKey = yield* getOwned(userId, keyId);
         yield* store.delete(apiKey.id);
       }),
 
-      deleteAllExpired: Effect.fn("APIKeyService.deleteAllExpired")(function* (userId: string) {
+      deleteAllExpired: Effect.fn("ApiKeyService.deleteAllExpired")(function* (userId: string) {
         const now = Date.now();
 
         const candidates = yield* store.listByUserId(userId);

@@ -89,13 +89,14 @@ effect-auth/                       # pnpm workspaces monorepo (Vite+ toolchain)
 │   │       ├── PlatformCrypto.ts  # Default Crypto.Crypto layer (Web Crypto API)
 │   │       ├── <Feature>.ts       # One module per flat, non-clustered feature
 │   │       │                       # (AuthLifecycle, JWT, Organization, Admin, ...)
+│   │       │                       # incl. session: SessionService, SessionStore,
+│   │       │                       # UserStore, TrustedDevice, ...
 │   │       │                       # incl. authorization: Policy, Entity, Condition,
 │   │       │                       # Authorizer, PolicyStore, Protected, RBAC, ...
-│   │       ├── session/           # SessionService, SessionStore, UserStore, TrustedDevice
 │   │       ├── email/             # EmailAddress, EmailOTP, EmailPassword, EmailVerification
 │   │       ├── password/          # Password, PasswordReset, HaveIBeenPwned
 │   │       ├── oauth/             # OAuth, Scope
-│   │       ├── secondfactor/      # MultiFactor, OTP, OTPSecondFactor, WebAuthn
+│   │       ├── multifactor/       # MultiFactor, OTP, OTPSecondFactor, WebAuthn
 │   │       ├── http/              # HttpApi, HttpApiSchema, HttpServer, HttpClient, HttpMiddleware
 │   │       ├── plugins/           # First-party Hooks plugins (AccountLockout, Audit, Captcha, ...)
 │   │       ├── index.ts           # Public API barrel (curated root + cluster namespace re-exports)
@@ -176,7 +177,7 @@ store interfaces with nullable lookups, tagged errors):
 
 1. **Define shared types** in `src/Types.ts` (module-specific types live in the module)
 2. **Define errors** in `src/Errors.ts` if shared, or module-local if only that module raises them
-3. **Implement the module** in `src/<Feature>.ts`, or `src/<cluster>/<Feature>.ts` if it belongs to an existing cluster (`email/`, `http/`, `oauth/`, `session/`, `password/`, `plugins/`, `secondfactor/`)
+3. **Implement the module** in `src/<Feature>.ts`, or `src/<cluster>/<Feature>.ts` if it belongs to an existing cluster (`email/`, `http/`, `oauth/`, `password/`, `plugins/`, `multifactor/`)
 4. **Add tests** in the sibling `<Feature>.test.ts` file
 5. **Export from** the module's `index.ts` — the cluster barrel if clustered, otherwise `src/index.ts` (with a one-line doc comment)
 6. **Document** in README.md and the site guides
@@ -357,7 +358,7 @@ All changes to security-sensitive code require:
 Security-sensitive areas:
 
 - Password hashing (`src/password/Password.ts`)
-- Session management (`src/session/SessionService.ts`, `src/SessionCookieCache.ts`)
+- Session management (`src/SessionService.ts`, `src/SessionCookieCache.ts`)
 - Cookie flags, CSRF/trusted-origin checks (`src/http/HttpServer.ts`)
 - Cryptographic operations (token generation, timing-safe comparison)
 - Input validation

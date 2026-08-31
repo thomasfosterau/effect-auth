@@ -11,8 +11,8 @@ import {
 import { MultiAlgorithmVerifier, PasswordHasher } from "../password/Password.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
-import { SessionService } from "../session/SessionService.ts";
-import { UserStore } from "../session/UserStore.ts";
+import { SessionService } from "../SessionService.ts";
+import { UserStore } from "../UserStore.ts";
 import * as Obs from "../Observability.ts";
 
 /**

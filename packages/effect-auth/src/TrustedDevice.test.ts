@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect, Redacted } from "effect";
-import { AuthError } from "../Errors.ts";
-import { Hooks } from "../Hooks.ts";
-import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { AuthError } from "./Errors.ts";
+import { Hooks } from "./Hooks.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   TrustedDeviceCookieRef,
   TrustedDeviceStore,
   type TrustedDeviceRecord,
 } from "./TrustedDevice.ts";
 import * as TrustedDevice from "./TrustedDevice.ts";
-import type { User } from "../Types.ts";
+import type { User } from "./Types.ts";
 
 // ---------------------------------------------------------------------------
 // In-memory store

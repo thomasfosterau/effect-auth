@@ -44,10 +44,6 @@
       "types": "./dist/oauth/index.d.ts",
       "import": "./dist/oauth/index.js"
     },
-    "./session": {
-      "types": "./dist/session/index.d.ts",
-      "import": "./dist/session/index.js"
-    },
     "./password": {
       "types": "./dist/password/index.d.ts",
       "import": "./dist/password/index.js"
@@ -56,9 +52,9 @@
       "types": "./dist/plugins/index.d.ts",
       "import": "./dist/plugins/index.js"
     },
-    "./secondfactor": {
-      "types": "./dist/secondfactor/index.d.ts",
-      "import": "./dist/secondfactor/index.js"
+    "./multifactor": {
+      "types": "./dist/multifactor/index.d.ts",
+      "import": "./dist/multifactor/index.js"
     }
   },
   "publishConfig": {

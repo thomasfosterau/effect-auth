@@ -26,11 +26,11 @@ import {
   UserNotFoundError,
 } from "../Errors.ts";
 import { type HookError } from "../Hooks.ts";
-import { SessionService } from "../session/SessionService.ts";
+import { SessionService } from "../SessionService.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 import { claimIdentifier, IdentifierStore, makeIdentifier } from "../Identifier.ts";
-import { UserStore } from "../session/UserStore.ts";
+import { UserStore } from "../UserStore.ts";
 
 /**
  * OAuth2 provider configuration

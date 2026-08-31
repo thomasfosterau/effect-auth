@@ -35,7 +35,7 @@ field shape is disjoint from Account, so it lives as its own entity rather than 
 into Account as another `providerId`.
 _Avoid_: WebAuthnAccount, FIDOCredential when referring to the stored record.
 
-**APIKey**:
+**ApiKey**:
 A bearer-style credential for programmatic clients. The hashed key value is the verifier; the
 plaintext is shown once at creation. Has its own scopes/permissions.
 _Avoid_: AccessToken (that's the OAuth-provider-issued token on an Account), Token.

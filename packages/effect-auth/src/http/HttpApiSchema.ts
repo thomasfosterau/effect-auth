@@ -684,13 +684,13 @@ export type AdminUserActionPayload = typeof AdminUserActionPayload.Type;
 // -----------------------------------------------------------------------------
 
 /** Per-key rate-limit configuration. */
-export const APIKeyRateLimit = Schema.Struct({
+export const ApiKeyRateLimit = Schema.Struct({
   maxRequests: Schema.Number,
   windowMs: Schema.Number,
 });
 
 /** Public view of an API key (never includes the plaintext or hash). */
-export const APIKeyView = Schema.Struct({
+export const ApiKeyView = Schema.Struct({
   id: Schema.String,
   name: Schema.optional(Schema.String),
   prefix: Schema.optional(Schema.String),
@@ -702,45 +702,45 @@ export const APIKeyView = Schema.Struct({
   permissions: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
   metadata: Attributes,
   remaining: Schema.optional(Schema.Number),
-  rateLimit: Schema.optional(APIKeyRateLimit),
+  rateLimit: Schema.optional(ApiKeyRateLimit),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
 });
-export type APIKeyView = typeof APIKeyView.Type;
+export type ApiKeyView = typeof ApiKeyView.Type;
 
 /** Result of creating an API key: the plaintext key (shown once) + its record. */
-export const APIKeyCreatedView = Schema.Struct({
+export const ApiKeyCreatedView = Schema.Struct({
   key: Schema.String,
-  apiKey: APIKeyView,
+  apiKey: ApiKeyView,
 });
-export type APIKeyCreatedView = typeof APIKeyCreatedView.Type;
+export type ApiKeyCreatedView = typeof ApiKeyCreatedView.Type;
 
-export const APIKeyListView = Schema.Array(APIKeyView);
-export type APIKeyListView = typeof APIKeyListView.Type;
+export const ApiKeyListView = Schema.Array(ApiKeyView);
+export type ApiKeyListView = typeof ApiKeyListView.Type;
 
 /** Request body for creating an API key. */
-export const APIKeyCreatePayload = Schema.Struct({
+export const ApiKeyCreatePayload = Schema.Struct({
   name: Schema.optional(Schema.String),
   prefix: Schema.optional(Schema.String),
   expiresIn: Schema.optional(Schema.Number),
   permissions: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
   metadata: Schema.optional(Attributes),
   remaining: Schema.optional(Schema.Number),
-  rateLimit: Schema.optional(APIKeyRateLimit),
+  rateLimit: Schema.optional(ApiKeyRateLimit),
 });
-export type APIKeyCreatePayload = typeof APIKeyCreatePayload.Type;
+export type ApiKeyCreatePayload = typeof ApiKeyCreatePayload.Type;
 
 /** Request body for updating an API key. */
-export const APIKeyUpdatePayload = Schema.Struct({
+export const ApiKeyUpdatePayload = Schema.Struct({
   name: Schema.optional(Schema.String),
   enabled: Schema.optional(Schema.Boolean),
   expiresAt: Schema.optional(Schema.Number),
   permissions: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
   metadata: Schema.optional(Attributes),
   remaining: Schema.optional(Schema.Number),
-  rateLimit: Schema.optional(APIKeyRateLimit),
+  rateLimit: Schema.optional(ApiKeyRateLimit),
 });
-export type APIKeyUpdatePayload = typeof APIKeyUpdatePayload.Type;
+export type ApiKeyUpdatePayload = typeof ApiKeyUpdatePayload.Type;
 
 // -----------------------------------------------------------------------------
 // Google One Tap
@@ -770,7 +770,7 @@ export type GoogleOneTapPayload = typeof GoogleOneTapPayload.Type;
 // -----------------------------------------------------------------------------
 
 /** Public view of a registered OIDC client (never exposes the secret hash). */
-export const OIDCClientView = Schema.Struct({
+export const OidcClientView = Schema.Struct({
   clientId: Schema.String,
   name: Schema.String,
   redirectUris: Schema.Array(Schema.String),
@@ -781,57 +781,57 @@ export const OIDCClientView = Schema.Struct({
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
 });
-export type OIDCClientView = typeof OIDCClientView.Type;
+export type OidcClientView = typeof OidcClientView.Type;
 
 /** Result of registering a client: the plaintext secret is shown exactly once. */
-export const OIDCClientCreatedView = Schema.Struct({
-  client: OIDCClientView,
+export const OidcClientCreatedView = Schema.Struct({
+  client: OidcClientView,
   clientSecret: Schema.optional(Schema.String),
 });
-export type OIDCClientCreatedView = typeof OIDCClientCreatedView.Type;
+export type OidcClientCreatedView = typeof OidcClientCreatedView.Type;
 
-export const OIDCClientListView = Schema.Array(OIDCClientView);
-export type OIDCClientListView = typeof OIDCClientListView.Type;
+export const OidcClientListView = Schema.Array(OidcClientView);
+export type OidcClientListView = typeof OidcClientListView.Type;
 
 /** Request body for registering an OIDC client (admin-gated). */
-export const OIDCRegisterClientPayload = Schema.Struct({
+export const OidcRegisterClientPayload = Schema.Struct({
   name: Schema.String,
   redirectUris: Schema.Array(Schema.String),
   type: Schema.optional(Schema.Literals(["web", "native"])),
   skipConsent: Schema.optional(Schema.Boolean),
   metadata: Schema.optional(Attributes),
 });
-export type OIDCRegisterClientPayload = typeof OIDCRegisterClientPayload.Type;
+export type OidcRegisterClientPayload = typeof OidcRegisterClientPayload.Type;
 
 /** Request body for updating an OIDC client (admin-gated). */
-export const OIDCClientUpdatePayload = Schema.Struct({
+export const OidcClientUpdatePayload = Schema.Struct({
   name: Schema.optional(Schema.String),
   redirectUris: Schema.optional(Schema.Array(Schema.String)),
   skipConsent: Schema.optional(Schema.Boolean),
   disabled: Schema.optional(Schema.Boolean),
   metadata: Schema.optional(Attributes),
 });
-export type OIDCClientUpdatePayload = typeof OIDCClientUpdatePayload.Type;
+export type OidcClientUpdatePayload = typeof OidcClientUpdatePayload.Type;
 
 /** Request body for resolving a pending consent request. */
-export const OIDCConsentPayload = Schema.Struct({
+export const OidcConsentPayload = Schema.Struct({
   consentCode: Schema.String,
   accept: Schema.Boolean,
 });
-export type OIDCConsentPayload = typeof OIDCConsentPayload.Type;
+export type OidcConsentPayload = typeof OidcConsentPayload.Type;
 
 /** Where to send the user after a consent decision. */
-export const OIDCRedirectView = Schema.Struct({
+export const OidcRedirectView = Schema.Struct({
   redirectTo: Schema.String,
 });
-export type OIDCRedirectView = typeof OIDCRedirectView.Type;
+export type OidcRedirectView = typeof OidcRedirectView.Type;
 
 /**
  * Token endpoint request (RFC 6749 snake_case). Accepted as JSON or
  * `application/x-www-form-urlencoded`; client credentials may instead come
  * from a Basic Authorization header.
  */
-export const OIDCTokenPayload = Schema.Struct({
+export const OidcTokenPayload = Schema.Struct({
   grant_type: Schema.String,
   code: Schema.optional(Schema.String),
   redirect_uri: Schema.optional(Schema.String),
@@ -841,10 +841,10 @@ export const OIDCTokenPayload = Schema.Struct({
   client_secret: Schema.optional(Schema.String),
   scope: Schema.optional(Schema.String),
 });
-export type OIDCTokenPayload = typeof OIDCTokenPayload.Type;
+export type OidcTokenPayload = typeof OidcTokenPayload.Type;
 
 /** Token endpoint success response (RFC 6749 snake_case). */
-export const OIDCTokenView = Schema.Struct({
+export const OidcTokenView = Schema.Struct({
   access_token: Schema.String,
   token_type: Schema.String,
   expires_in: Schema.Number,
@@ -852,7 +852,7 @@ export const OIDCTokenView = Schema.Struct({
   id_token: Schema.optional(Schema.String),
   scope: Schema.String,
 });
-export type OIDCTokenView = typeof OIDCTokenView.Type;
+export type OidcTokenView = typeof OidcTokenView.Type;
 
 // -----------------------------------------------------------------------------
 // RFC 7591 dynamic client registration / RFC 7592 management
@@ -864,7 +864,7 @@ export type OIDCTokenView = typeof OIDCTokenView.Type;
  * `contacts`, `software_statement`, ...) are accepted and ignored rather than
  * rejected, as RFC 7591 §2 requires.
  */
-export const OIDCRegistrationPayload = Schema.Struct({
+export const OidcRegistrationPayload = Schema.Struct({
   redirect_uris: Schema.Array(Schema.String),
   token_endpoint_auth_method: Schema.optional(Schema.String),
   grant_types: Schema.optional(Schema.Array(Schema.String)),
@@ -872,14 +872,14 @@ export const OIDCRegistrationPayload = Schema.Struct({
   client_name: Schema.optional(Schema.String),
   scope: Schema.optional(Schema.String),
 });
-export type OIDCRegistrationPayload = typeof OIDCRegistrationPayload.Type;
+export type OidcRegistrationPayload = typeof OidcRegistrationPayload.Type;
 
 /**
  * RFC 7591 §3.2.1 client information response. `client_secret` and
  * `registration_access_token` are returned only by the registration call that
  * mints them — both are stored hashed and cannot be read back afterwards.
  */
-export const OIDCRegistrationView = Schema.Struct({
+export const OidcRegistrationView = Schema.Struct({
   client_id: Schema.String,
   /** Seconds since the epoch. */
   client_id_issued_at: Schema.Number,
@@ -895,7 +895,7 @@ export const OIDCRegistrationView = Schema.Struct({
   registration_access_token: Schema.optional(Schema.String),
   registration_client_uri: Schema.optional(Schema.String),
 });
-export type OIDCRegistrationView = typeof OIDCRegistrationView.Type;
+export type OidcRegistrationView = typeof OidcRegistrationView.Type;
 
 /** UserInfo response / OpenID Provider Metadata: open-ended claim records. */
 export const ClaimsView = Schema.Record(Schema.String, Schema.Unknown);

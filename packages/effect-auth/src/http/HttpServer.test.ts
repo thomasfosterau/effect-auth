@@ -4,9 +4,9 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.ts";
 import * as HTTPServer from "./HttpServer.ts";
 import * as HTTPClient from "./HttpClient.ts";
-import { SessionStore } from "../session/SessionStore.ts";
-import { UserStore } from "../session/UserStore.ts";
-import { SessionService } from "../session/SessionService.ts";
+import { SessionStore } from "../SessionStore.ts";
+import { UserStore } from "../UserStore.ts";
+import { SessionService } from "../SessionService.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { EmailPasswordService, EmailPasswordStore } from "../email/EmailPassword.ts";
 import { PasswordHasher } from "../password/Password.ts";
@@ -51,7 +51,7 @@ import {
   type PendingMultiFactor,
   type MultiFactorRecord,
   MultiFactorService,
-} from "../secondfactor/MultiFactor.ts";
+} from "../multifactor/MultiFactor.ts";
 import {
   AccountManagementStore,
   type AccountToken,
@@ -71,7 +71,7 @@ import {
   type DeviceAuthorizationRecord,
   DeviceAuthorizationService,
 } from "../DeviceAuthorization.ts";
-import { generateHOTP, generateTOTP } from "../secondfactor/OTP.ts";
+import { generateHOTP, generateTOTP } from "../multifactor/OTP.ts";
 import type * as Types from "../Types.ts";
 
 const HOUR = 60 * 60 * 1000;

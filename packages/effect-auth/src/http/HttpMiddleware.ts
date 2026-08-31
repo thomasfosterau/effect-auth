@@ -65,7 +65,7 @@ import { Context, Effect, Layer, Option, Redacted } from "effect";
 import { HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi";
 import { HttpServerRequest } from "effect/unstable/http";
 import { Hooks } from "../Hooks.ts";
-import { SessionService } from "../session/SessionService.ts";
+import { SessionService } from "../SessionService.ts";
 import { CurrentPrincipal } from "../Authorizer.ts";
 import * as Entity from "../Entity.ts";
 import { resolveMessage } from "../Messages.ts";

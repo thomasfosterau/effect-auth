@@ -11,9 +11,9 @@ import {
   memoryIdentifierStore,
   type Identifier,
 } from "../Identifier.ts";
-import { make, SessionService } from "../session/SessionService.ts";
-import { SessionStore } from "../session/SessionStore.ts";
-import { UserStore } from "../session/UserStore.ts";
+import { make, SessionService } from "../SessionService.ts";
+import { SessionStore } from "../SessionStore.ts";
+import { UserStore } from "../UserStore.ts";
 import { hashToken } from "../TokenHash.ts";
 import { MultiAlgorithmVerifier, PasswordHasher } from "../password/Password.ts";
 import * as Password from "../password/Password.ts";

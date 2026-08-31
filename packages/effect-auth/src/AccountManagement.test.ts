@@ -14,7 +14,7 @@ import {
   type Identifier,
 } from "./Identifier.ts";
 import { UserServiceStore } from "./User.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 
 interface Harness {

@@ -11,7 +11,7 @@ import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type * as Types from "./Types.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionService } from "./SessionService.ts";
 import type { HookError } from "./Hooks.ts";
 import { hashToken } from "./TokenHash.ts";
 

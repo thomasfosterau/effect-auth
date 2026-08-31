@@ -19,7 +19,7 @@
 import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionService } from "./SessionService.ts";
 import { type HookError } from "./Hooks.ts";
 
 /**

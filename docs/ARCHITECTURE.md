@@ -106,10 +106,14 @@ directories, each with its own `index.ts` barrel and matching
   (hooks/plugin system), `TokenHash.ts`, `Cipher.ts`, `Identifier.ts`,
   `Messages.ts`, `PlatformCrypto.ts` (default `Crypto.Crypto` layer),
   `Observability.ts`.
-- **`session/` cluster**: `SessionService.ts`, `SessionStore.ts`,
-  `UserStore.ts`, `TrustedDevice.ts`. Also re-exported flat from the package
-  root (`Auth.SessionService`, `Auth.SessionStore`, `Auth.UserStore`) since
-  nearly every feature module depends on them.
+- **Session management** (root, flat — the spine nearly every feature module
+  depends on, so it is not a cluster): `SessionService.ts`, `SessionStore.ts`,
+  `UserStore.ts`, `TrustedDevice.ts`. Exported flat from the package root
+  (`Auth.SessionService`, `Auth.SessionStore`, `Auth.UserStore`,
+  `Auth.TrustedDeviceStore`, …); `TrustedDevice.ts` is additionally namespaced
+  as `Auth.TrustedDevice` so its generic `make`/`gate` stay qualified. There is
+  no `Auth.Session` namespace — `Types.ts` already owns that name for the flat
+  `Session` record.
 - **`email/` cluster**: `EmailAddress.ts`, `EmailOTP.ts` (merged from the old
   `EmailOtp.ts` + `EmailOTPService.ts`), `EmailPassword.ts`,
   `EmailVerification.ts`.
@@ -137,7 +141,7 @@ directories, each with its own `index.ts` barrel and matching
   `HttpMiddleware.ts` (`AuthMiddleware`/`OptionalAuthMiddleware` for
   consumer apps), plus `SessionCookieCache.ts` (signed session-data cookie,
   re-exported here from its root file).
-- **`secondfactor/` cluster** (also the `Auth.SecondFactor` namespace):
+- **`multifactor/` cluster** (also the `Auth.MultiFactor` namespace):
   `MultiFactor.ts` (TOTP + backup codes, integrating into password sign-in
   via the `SecondFactorGate` seam), `OTPSecondFactor.ts` (OTP-based
   alternative second-factor gate), `WebAuthn.ts` (passkeys, merged from
@@ -147,8 +151,8 @@ directories, each with its own `index.ts` barrel and matching
   party), `GoogleOneTap.ts`, `DeviceAuthorization.ts` (RFC 8628).
 - **Account lifecycle** (root): `AuthLifecycle.ts` (sign-up/sign-in
   orchestration), `AccountManagement.ts` (email change / account deletion).
-- **Platform features** (root): `Organization.ts`, `Admin.ts`, `APIKey.ts`,
-  `JWT.ts` (ES256/EdDSA + JWKS), `OIDCProvider.ts` (act as an OIDC identity
+- **Platform features** (root): `Organization.ts`, `Admin.ts`, `ApiKey.ts`,
+  `JWT.ts` (ES256/EdDSA + JWKS), `OidcProvider.ts` (act as an OIDC identity
   provider), `RateLimit.ts`/`RateLimitPersistence.ts`, `ClientIP.ts`,
   `OneTimeToken.ts`.
 - **Storage helpers** (root): `KeyValueStores.ts` — layers implementing the
@@ -158,9 +162,9 @@ directories, each with its own `index.ts` barrel and matching
 
 Every cluster namespace is also re-exported from the package root (`Auth.Email`,
 `Auth.HTTP`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`,
-`Auth.SecondFactor`), so `import * as Auth from "@thomasfosterau/effect-auth"` reaches the
+`Auth.MultiFactor`), so `import * as Auth from "@thomasfosterau/effect-auth"` reaches the
 whole surface; the per-cluster subpaths (`effect-auth/email`, `/http`,
-`/oauth`, `/password`, `/plugins`, `/secondfactor`) exist for
+`/oauth`, `/password`, `/plugins`, `/multifactor`) exist for
 consumers who want a narrower import.
 
 ## Stores

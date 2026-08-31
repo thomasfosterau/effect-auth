@@ -11,15 +11,15 @@ up and then walks a client through the three calls it makes.
 
 ## 1. Configure the provider
 
-`mcpProviderPreset` returns the `OIDCProviderConfig` slice MCP clients need:
+`mcpProviderPreset` returns the `OidcProviderConfig` slice MCP clients need:
 PKCE required of every client, dynamic registration on, and the RFC 7592
 management endpoints available so a client can maintain its own registration.
 
 ```ts
 import { Layer, Redacted } from "effect";
-import { OIDCProviderService, mcpProviderPreset } from "@thomasfosterau/effect-auth";
+import { OidcProviderService, mcpProviderPreset } from "@thomasfosterau/effect-auth";
 
-const oidc = OIDCProviderService.layer(
+const oidc = OidcProviderService.layer(
   mcpProviderPreset({
     // The external base URL the auth handler is mounted at. Every advertised
     // endpoint is derived from it, and it is the `iss` claim of every id_token.
@@ -37,7 +37,7 @@ const oidc = OIDCProviderService.layer(
 Everything the preset sets is overridable; `dynamicRegistration` is merged
 field by field, so adding a `policy` does not drop the preset's other defaults.
 To enable registration without the preset, set `dynamicRegistration` on your own
-`OIDCProviderConfig` — the field's presence is what mounts the endpoints.
+`OidcProviderConfig` — the field's presence is what mounts the endpoints.
 Leaving it out keeps `POST /register` answering `404`, which is the default.
 
 ## 2. What the server exposes
@@ -262,7 +262,7 @@ get a new one), and `PUT` does not rotate credentials.
 
 ## 6. Storage
 
-Dynamic registration writes through the existing `OIDCClientStore` — no new
+Dynamic registration writes through the existing `OidcClientStore` — no new
 store. Clients created this way carry a few extra optional fields
 (`registrationAccessTokenHash`, `tokenEndpointAuthMethod`, `grantTypes`,
 `responseTypes`, `scope`, `dynamicallyRegistered`), so a custom store

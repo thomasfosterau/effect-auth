@@ -30,13 +30,13 @@
  * @module trusted-device
  */
 import { Config, Context, Crypto, Effect, Layer, Redacted } from "effect";
-import * as Cipher from "../Cipher.ts";
-import * as Errors from "../Errors.ts";
-import { SecondFactorGate } from "../email/EmailPassword.ts";
-import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { hashToken, timingSafeEqualBytes } from "../TokenHash.ts";
-import type * as Types from "../Types.ts";
-import { MultiFactorService } from "../secondfactor/MultiFactor.ts";
+import * as Cipher from "./Cipher.ts";
+import * as Errors from "./Errors.ts";
+import { SecondFactorGate } from "./email/EmailPassword.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { hashToken, timingSafeEqualBytes } from "./TokenHash.ts";
+import type * as Types from "./Types.ts";
+import { MultiFactorService } from "./multifactor/MultiFactor.ts";
 
 // ---------------------------------------------------------------------------
 // Record + Store

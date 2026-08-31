@@ -9,8 +9,8 @@ import {
   type Identifier,
 } from "../Identifier.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { SessionService } from "../session/SessionService.ts";
-import { UserStore } from "../session/UserStore.ts";
+import { SessionService } from "../SessionService.ts";
+import { UserStore } from "../UserStore.ts";
 import type * as Types from "../Types.ts";
 import {
   verifyIdToken,

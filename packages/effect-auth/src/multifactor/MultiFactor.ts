@@ -24,9 +24,9 @@ import { PasswordHasher } from "../password/Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { hashToken, timingSafeEqualBytes } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
-import { UserStore } from "../session/UserStore.ts";
+import { UserStore } from "../UserStore.ts";
 import { anyEmailValue, IdentifierStore } from "../Identifier.ts";
-import { SessionService } from "../session/SessionService.ts";
+import { SessionService } from "../SessionService.ts";
 
 /**
  * Two-factor error

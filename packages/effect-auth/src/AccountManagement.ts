@@ -17,7 +17,7 @@ import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionService } from "./SessionService.ts";
 import { normalizeEmail } from "./utils.ts";
 import { anyEmailValue, claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
 

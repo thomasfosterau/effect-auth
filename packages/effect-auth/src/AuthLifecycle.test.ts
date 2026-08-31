@@ -17,9 +17,9 @@ import {
 } from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import * as Password from "./password/Password.ts";
-import { make, SessionService } from "./session/SessionService.ts";
-import { SessionStore } from "./session/SessionStore.ts";
-import { UserStore } from "./session/UserStore.ts";
+import { make, SessionService } from "./SessionService.ts";
+import { SessionStore } from "./SessionStore.ts";
+import { UserStore } from "./UserStore.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import * as UserModule from "./User.ts";
 import type { Session, SessionConfig, User } from "./Types.ts";

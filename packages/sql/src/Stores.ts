@@ -479,13 +479,13 @@ interface ChallengeRow {
   readonly user_id: string | null;
 }
 
-const rowToChallenge = (row: ChallengeRow): Auth.SecondFactor.WebAuthnChallenge =>
+const rowToChallenge = (row: ChallengeRow): Auth.MultiFactor.WebAuthnChallenge =>
   row.user_id == null
     ? { challenge: fromBase64(row.challenge), expiresAt: row.expires_at }
     : { challenge: fromBase64(row.challenge), expiresAt: row.expires_at, userId: row.user_id };
 
 export const makeChallengeStore: Effect.Effect<
-  typeof Auth.SecondFactor.ChallengeStore.Service,
+  typeof Auth.MultiFactor.ChallengeStore.Service,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -519,7 +519,7 @@ export const makeChallengeStore: Effect.Effect<
         "challenge.delete",
         sql`DELETE FROM auth_webauthn_challenges WHERE challenge = ${toBase64(challenge)}`,
       ),
-  } satisfies typeof Auth.SecondFactor.ChallengeStore.Service;
+  } satisfies typeof Auth.MultiFactor.ChallengeStore.Service;
 });
 
 interface CredentialRow {
@@ -535,7 +535,7 @@ interface CredentialRow {
 
 const rowToCredential = (
   row: CredentialRow,
-): Effect.Effect<Auth.SecondFactor.WebAuthnCredential, Auth.AuthError> =>
+): Effect.Effect<Auth.MultiFactor.WebAuthnCredential, Auth.AuthError> =>
   Effect.try({
     try: () => ({
       id: row.id,
@@ -553,7 +553,7 @@ const rowToCredential = (
   });
 
 export const makeCredentialStore: Effect.Effect<
-  typeof Auth.SecondFactor.CredentialStore.Service,
+  typeof Auth.MultiFactor.CredentialStore.Service,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -593,7 +593,7 @@ export const makeCredentialStore: Effect.Effect<
         "credential.listByUserId",
         sql<CredentialRow>`SELECT * FROM auth_webauthn_credentials WHERE user_id = ${userId}`,
       ).pipe(Effect.flatMap((rows) => Effect.all(rows.map((row) => rowToCredential(row))))),
-  } satisfies typeof Auth.SecondFactor.CredentialStore.Service;
+  } satisfies typeof Auth.MultiFactor.CredentialStore.Service;
 });
 
 // ---------------------------------------------------------------------------
@@ -996,7 +996,7 @@ interface MultiFactorRow {
 
 const rowToMultiFactor = (
   row: MultiFactorRow,
-): Effect.Effect<Auth.SecondFactor.MultiFactorRecord, Auth.AuthError> =>
+): Effect.Effect<Auth.MultiFactor.MultiFactorRecord, Auth.AuthError> =>
   Effect.try({
     try: () => ({
       userId: row.user_id,
@@ -1010,7 +1010,7 @@ const rowToMultiFactor = (
   });
 
 export const makeMultiFactorStore: Effect.Effect<
-  typeof Auth.SecondFactor.MultiFactorStore.Service,
+  typeof Auth.MultiFactor.MultiFactorStore.Service,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -1039,7 +1039,7 @@ export const makeMultiFactorStore: Effect.Effect<
       ).pipe(Effect.as(record)),
     delete: (userId) =>
       asVoid("multiFactor.delete", sql`DELETE FROM auth_multi_factor WHERE user_id = ${userId}`),
-  } satisfies typeof Auth.SecondFactor.MultiFactorStore.Service;
+  } satisfies typeof Auth.MultiFactor.MultiFactorStore.Service;
 });
 
 interface PendingMultiFactorRow {
@@ -1051,7 +1051,7 @@ interface PendingMultiFactorRow {
 
 const rowToPendingMultiFactor = (
   row: PendingMultiFactorRow,
-): Auth.SecondFactor.PendingMultiFactor => ({
+): Auth.MultiFactor.PendingMultiFactor => ({
   token: row.token,
   userId: row.user_id,
   expiresAt: row.expires_at,
@@ -1059,7 +1059,7 @@ const rowToPendingMultiFactor = (
 });
 
 export const makePendingMultiFactorStore: Effect.Effect<
-  typeof Auth.SecondFactor.PendingMultiFactorStore.Service,
+  typeof Auth.MultiFactor.PendingMultiFactorStore.Service,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -1081,7 +1081,7 @@ export const makePendingMultiFactorStore: Effect.Effect<
         "pendingMultiFactor.delete",
         sql`DELETE FROM auth_pending_multi_factor WHERE token = ${token}`,
       ),
-  } satisfies typeof Auth.SecondFactor.PendingMultiFactorStore.Service;
+  } satisfies typeof Auth.MultiFactor.PendingMultiFactorStore.Service;
 });
 
 // ---------------------------------------------------------------------------
@@ -1255,15 +1255,15 @@ export const EmailVerificationStoreLayer: Layer.Layer<
   SqlClient.SqlClient
 > = Layer.effect(Auth.Email.EmailVerificationStore, makeEmailVerificationStore);
 export const ChallengeStoreLayer: Layer.Layer<
-  Auth.SecondFactor.ChallengeStore,
+  Auth.MultiFactor.ChallengeStore,
   never,
   SqlClient.SqlClient
-> = Layer.effect(Auth.SecondFactor.ChallengeStore, makeChallengeStore);
+> = Layer.effect(Auth.MultiFactor.ChallengeStore, makeChallengeStore);
 export const CredentialStoreLayer: Layer.Layer<
-  Auth.SecondFactor.CredentialStore,
+  Auth.MultiFactor.CredentialStore,
   never,
   SqlClient.SqlClient
-> = Layer.effect(Auth.SecondFactor.CredentialStore, makeCredentialStore);
+> = Layer.effect(Auth.MultiFactor.CredentialStore, makeCredentialStore);
 export const OAuthStateStoreLayer: Layer.Layer<
   Auth.OAuth.OAuthStateStore,
   never,
@@ -1299,15 +1299,15 @@ export const EmailOTPUserStoreLayer: Layer.Layer<
   SqlClient.SqlClient
 > = Layer.effect(Auth.Email.EmailOTPUserStore, makeEmailOTPUserStore);
 export const MultiFactorStoreLayer: Layer.Layer<
-  Auth.SecondFactor.MultiFactorStore,
+  Auth.MultiFactor.MultiFactorStore,
   never,
   SqlClient.SqlClient
-> = Layer.effect(Auth.SecondFactor.MultiFactorStore, makeMultiFactorStore);
+> = Layer.effect(Auth.MultiFactor.MultiFactorStore, makeMultiFactorStore);
 export const PendingMultiFactorStoreLayer: Layer.Layer<
-  Auth.SecondFactor.PendingMultiFactorStore,
+  Auth.MultiFactor.PendingMultiFactorStore,
   never,
   SqlClient.SqlClient
-> = Layer.effect(Auth.SecondFactor.PendingMultiFactorStore, makePendingMultiFactorStore);
+> = Layer.effect(Auth.MultiFactor.PendingMultiFactorStore, makePendingMultiFactorStore);
 export const IdentifierStoreLayer: Layer.Layer<Auth.IdentifierStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.IdentifierStore, makeIdentifierStore);
 export const AccountLockoutStoreLayer: Layer.Layer<
@@ -1323,7 +1323,7 @@ export const AccountLockoutStoreLayer: Layer.Layer<
  * OAuth, WebAuthn, MagicLink, EmailOTP, MultiFactor, ...) has persistence.
  *
  * Stores added to core after this package's restoration (OneTimeToken,
- * TrustedDevice, PhoneOTP, Organization, Admin, APIKey, OIDC provider, SSO,
+ * TrustedDevice, PhoneOTP, Organization, Admin, ApiKey, OIDC provider, SSO,
  * DeviceAuthorization, ...) are not yet covered here — use the
  * `KeyValueStore`-backed layers from core or bring your own until they land.
  */
@@ -1336,8 +1336,8 @@ export const layer: Layer.Layer<
   | Auth.RoleStore
   | Auth.RateLimitStore
   | Auth.Email.EmailVerificationStore
-  | Auth.SecondFactor.ChallengeStore
-  | Auth.SecondFactor.CredentialStore
+  | Auth.MultiFactor.ChallengeStore
+  | Auth.MultiFactor.CredentialStore
   | Auth.OAuth.OAuthStateStore
   | Auth.OAuth.OAuthAccountStore
   | Auth.OAuth.OAuthUserStore
@@ -1346,8 +1346,8 @@ export const layer: Layer.Layer<
   | Auth.MagicLinkUserStore
   | Auth.Email.EmailOTPStore
   | Auth.Email.EmailOTPUserStore
-  | Auth.SecondFactor.MultiFactorStore
-  | Auth.SecondFactor.PendingMultiFactorStore
+  | Auth.MultiFactor.MultiFactorStore
+  | Auth.MultiFactor.PendingMultiFactorStore
   | Auth.IdentifierStore
   | Auth.Plugins.AccountLockoutStore,
   never,

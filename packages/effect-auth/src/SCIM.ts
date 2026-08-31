@@ -70,7 +70,7 @@ import {
 } from "./Identifier.ts";
 import { OrganizationStore, type Member, type Team } from "./Organization.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionService } from "./SessionService.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 

@@ -186,15 +186,15 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       }),
   };
 
-  const multiFactorRecords = new Map<string, Auth.SecondFactor.MultiFactorRecord>();
-  const multiFactorStore: typeof Auth.SecondFactor.MultiFactorStore.Service = {
+  const multiFactorRecords = new Map<string, Auth.MultiFactor.MultiFactorRecord>();
+  const multiFactorStore: typeof Auth.MultiFactor.MultiFactorStore.Service = {
     get: (userId) => Effect.sync(() => multiFactorRecords.get(userId) ?? null),
     upsert: (record) => Effect.sync(() => (multiFactorRecords.set(record.userId, record), record)),
     delete: (userId) => Effect.sync(() => void multiFactorRecords.delete(userId)),
   };
 
-  const pendingMultiFactors = new Map<string, Auth.SecondFactor.PendingMultiFactor>();
-  const pendingMultiFactorStore: typeof Auth.SecondFactor.PendingMultiFactorStore.Service = {
+  const pendingMultiFactors = new Map<string, Auth.MultiFactor.PendingMultiFactor>();
+  const pendingMultiFactorStore: typeof Auth.MultiFactor.PendingMultiFactorStore.Service = {
     create: (pending) =>
       Effect.sync(() => (pendingMultiFactors.set(pending.token, pending), pending)),
     get: (token) => Effect.sync(() => pendingMultiFactors.get(token) ?? null),
@@ -246,14 +246,14 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     core,
     Layer.succeed(Auth.AnonymousUserStore)(anonymousUserStore),
     Layer.succeed(Auth.AccountManagementStore)(accountStore),
-    Layer.succeed(Auth.SecondFactor.MultiFactorStore)(multiFactorStore),
-    Layer.succeed(Auth.SecondFactor.PendingMultiFactorStore)(pendingMultiFactorStore),
+    Layer.succeed(Auth.MultiFactor.MultiFactorStore)(multiFactorStore),
+    Layer.succeed(Auth.MultiFactor.PendingMultiFactorStore)(pendingMultiFactorStore),
     Layer.succeed(Auth.PhoneOTPStore)(phoneOTPStore),
     Layer.succeed(Auth.PhoneOTPUserStore)(phoneOTPUserStore),
     Layer.succeed(Auth.DeviceAuthorizationStore)(deviceStore),
   );
 
-  const multiFactorServiceLayer = Auth.SecondFactor.MultiFactorService.layer({
+  const multiFactorServiceLayer = Auth.MultiFactor.MultiFactorService.layer({
     issuer: "effect-auth-client-test",
   }).pipe(Layer.provide(featureBase));
 
@@ -278,7 +278,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     }).pipe(Layer.provide(featureBase)),
     multiFactorServiceLayer,
     // The gate is what makes password sign-in answer with `secondFactor`.
-    Auth.SecondFactor.MultiFactorGateLayer.pipe(Layer.provide(multiFactorServiceLayer)),
+    Auth.MultiFactor.MultiFactorGateLayer.pipe(Layer.provide(multiFactorServiceLayer)),
   );
 
   // --- Organization module ---------------------------------------------------

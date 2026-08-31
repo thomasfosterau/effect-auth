@@ -25,9 +25,9 @@ import {
   makeIdentifier,
   primaryEmail,
 } from "./Identifier.ts";
-import { UserStore } from "./session/UserStore.ts";
+import { UserStore } from "./UserStore.ts";
 import { MultiAlgorithmVerifier, PasswordHasher } from "./password/Password.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionService } from "./SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 
 /** Raised for invalid or already-taken usernames. */

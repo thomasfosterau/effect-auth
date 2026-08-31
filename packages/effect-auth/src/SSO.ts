@@ -28,10 +28,10 @@
 import { Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
 import { AuthError } from "./Errors.ts";
 import { claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
-import { UserStore } from "./session/UserStore.ts";
+import { UserStore } from "./UserStore.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionService } from "./SessionService.ts";
 import { OrganizationStore, type Member } from "./Organization.ts";
 import {
   defaultClockSkewMs,

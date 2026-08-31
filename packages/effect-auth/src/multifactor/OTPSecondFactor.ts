@@ -22,10 +22,10 @@ import { generateOTP } from "../email/EmailOTP.ts";
 import { SecondFactorGate, type SecondFactorChallenge } from "../email/EmailPassword.ts";
 import { type HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { SessionService } from "../session/SessionService.ts";
+import { SessionService } from "../SessionService.ts";
 import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
-import { TrustedDeviceService } from "../session/TrustedDevice.ts";
-import * as TrustedDevice from "../session/TrustedDevice.ts";
+import { TrustedDeviceService } from "../TrustedDevice.ts";
+import * as TrustedDevice from "../TrustedDevice.ts";
 import type * as Types from "../Types.ts";
 
 // ---------------------------------------------------------------------------

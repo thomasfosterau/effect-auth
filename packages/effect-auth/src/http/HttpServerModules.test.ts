@@ -3,9 +3,9 @@ import { Effect, Layer } from "effect";
 import * as Cipher from "../Cipher.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HTTPServer from "./HttpServer.ts";
-import { SessionStore } from "../session/SessionStore.ts";
-import { UserStore } from "../session/UserStore.ts";
-import { SessionService } from "../session/SessionService.ts";
+import { SessionStore } from "../SessionStore.ts";
+import { UserStore } from "../UserStore.ts";
+import { SessionService } from "../SessionService.ts";
 import { hashToken } from "../TokenHash.ts";
 import { UserServiceStore, UserService } from "../User.ts";
 import { Hooks } from "../Hooks.ts";
@@ -29,7 +29,7 @@ import {
   OrganizationService,
 } from "../Organization.ts";
 import { AdminUserStore, AdminService } from "../Admin.ts";
-import { APIKeyStore, type APIKey, APIKeyService } from "../APIKey.ts";
+import { ApiKeyStore, type ApiKey, ApiKeyService } from "../ApiKey.ts";
 import { JWTKeyStore, type JWTKeyPair, JWTService } from "../JWT.ts";
 import {
   IdentifierStore,
@@ -53,7 +53,7 @@ const makeFixture = () => {
   const teams = new Map<string, Team>();
   const teamMembers: TeamMember[] = [];
   const orgRoles = new Map<string, OrgRole>();
-  const apiKeys = new Map<string, APIKey>();
+  const apiKeys = new Map<string, ApiKey>();
   const jwtKeys: JWTKeyPair[] = [];
 
   const seedUser = (id: string, email: string, attributes: Record<string, unknown> = {}) => {
@@ -266,11 +266,11 @@ const makeFixture = () => {
   };
 
   const apiKeyStore = {
-    create: (k: APIKey) => Effect.sync(() => (apiKeys.set(k.id, k), k)),
+    create: (k: ApiKey) => Effect.sync(() => (apiKeys.set(k.id, k), k)),
     get: (id: string) => Effect.succeed(apiKeys.get(id) ?? null),
     getByHash: (keyHash: string) =>
       Effect.succeed([...apiKeys.values()].find((k) => k.keyHash === keyHash) ?? null),
-    update: (k: APIKey) => Effect.sync(() => (apiKeys.set(k.id, k), k)),
+    update: (k: ApiKey) => Effect.sync(() => (apiKeys.set(k.id, k), k)),
     delete: (id: string) => Effect.sync(() => void apiKeys.delete(id)),
     listByUserId: (userId: string) =>
       Effect.succeed([...apiKeys.values()].filter((k) => k.userId === userId)),
@@ -282,7 +282,7 @@ const makeFixture = () => {
     list: () => Effect.succeed(jwtKeys),
   };
 
-  // In-memory RateLimitStore: APIKeyService resolves RateLimiter at construction
+  // In-memory RateLimitStore: ApiKeyService resolves RateLimiter at construction
   // time even though these tests never exercise rate-limited paths.
   const rateLimitEntries = new Map<string, RateLimitEntry>();
   const rateLimitStore = {
@@ -307,7 +307,7 @@ const makeFixture = () => {
     Layer.succeed(UserServiceStore)(userServiceStore),
     Layer.succeed(OrganizationStore)(orgStore),
     Layer.succeed(AdminUserStore)(adminUserStore),
-    Layer.succeed(APIKeyStore)(apiKeyStore),
+    Layer.succeed(ApiKeyStore)(apiKeyStore),
     Layer.succeed(JWTKeyStore)(jwtKeyStore),
     Layer.succeed(RateLimitStore)(rateLimitStore),
     Layer.succeed(IdentifierStore)(memoryIdentifierStore(identifierRecords)),
@@ -341,7 +341,7 @@ const makeFixture = () => {
   const adminServiceLayer = AdminService.layer({ adminRoles: ["admin"] }).pipe(
     Layer.provide(stage1),
   );
-  const apiKeyServiceLayer = APIKeyService.layer().pipe(Layer.provide(stage1));
+  const apiKeyServiceLayer = ApiKeyService.layer().pipe(Layer.provide(stage1));
   const jwtServiceLayer = JWTService.layer({ issuer: "https://auth.test" }).pipe(
     Layer.provide(stage1),
   );

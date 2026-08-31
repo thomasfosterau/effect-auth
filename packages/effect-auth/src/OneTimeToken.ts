@@ -17,7 +17,7 @@ import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { hashToken } from "./TokenHash.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 
 // ---------------------------------------------------------------------------

@@ -25,7 +25,7 @@ implemented one the rest are the same exercise:
   `Layer.succeed(Auth.XStore)(impl)`. (`SessionStore` and `UserStore` live at
   the package root; a handful of contracts are namespaced — `Auth.Email.*`,
   `Auth.OAuth.*`, `Auth.Password.*`, `Auth.Plugins.*`,
-  `Auth.SecondFactor.*` — see the exact path in §5.)
+  `Auth.MultiFactor.*` — see the exact path in §5.)
 - **Lookups return `null` on a miss, never throw or fail.** A service
   converts `null` into a typed domain error (`SessionNotFoundError`,
   `UserNotFoundError`, …) at its own layer — the store just reports what it
@@ -105,7 +105,7 @@ A second tier is **strongly recommended** atomic (packages/sql and
 packages/alchemy both treat these as single `INSERT ... ON CONFLICT ... DO
 UPDATE` / `UPDATE ... RETURNING` statements, never a separate SELECT then
 write): `RateLimitStore.set`/`increment`, `Auth.OAuth.OAuthAccountStore`'s
-link-or-update path, `Auth.SecondFactor.MultiFactorStore.upsert`, and the
+link-or-update path, `Auth.MultiFactor.MultiFactorStore.upsert`, and the
 `Email`/`PhoneOTPStore` `upsert`/`incrementAttempts` pair. A race here just
 double-counts an OTP attempt or drops a rate-limit tick — annoying, not a
 security bypass — so a read-modify-write implementation is a legitimate
@@ -375,10 +375,10 @@ whichever sign-in feature's own store (`Auth.Email.EmailPasswordStore`,
 A store contract's methods correspond 1:1 to what the feature that owns it
 needs — there's no unused surface to stub out. If your app never enables
 WebAuthn, you never implement `ChallengeStore`/`CredentialStore`; if you don't
-mount the OIDC provider, `OIDCClientStore`/`OIDCCodeStore`/`OIDCTokenStore`/
-`OIDCConsentStore` don't exist for you. A handful of methods are themselves
+mount the OIDC provider, `OidcClientStore`/`OidcCodeStore`/`OidcTokenStore`/
+`OidcConsentStore` don't exist for you. A handful of methods are themselves
 optional on the interface (`OAuthAccountStore.hasPassword`,
-`OAuthUserStore.updateUser`, `OIDCTokenStore.listByFamily`) — each is
+`OAuthUserStore.updateUser`, `OidcTokenStore.listByFamily`) — each is
 documented at the call site with what's skipped when it's absent.
 
 ## 5. Every store contract in core
@@ -390,13 +390,13 @@ that consumes it.
 
 **Session & identity (core spine)**
 
-| Contract             | Namespace                                                                                             | What it holds                                                    | Powers                                                                                                        |
-| -------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `SessionStore`       | `Auth.SessionStore`                                                                                   | Sessions keyed by the SHA-256 hash of the bearer token           | `SessionService` — every sign-in flow                                                                         |
-| `UserStore`          | `Auth.UserStore`                                                                                      | Read a user by id; generic password-hash lookup                  | Read path used across the library                                                                             |
-| `UserServiceStore`   | `Auth.UserServiceStore`                                                                               | Get/update/delete the user record (name, image, attributes)      | `UserService` — profile updates, account deletion                                                             |
-| `IdentifierStore`    | `Auth.IdentifierStore`                                                                                | Email/username/phone claims, globally unique per `(type, value)` | Identifier epic — EmailPassword, Username, PhoneOTP, MagicLink, EmailOTP, OAuth linking, SSO, Admin, and more |
-| `TrustedDeviceStore` | `TrustedDeviceStore` from `@thomasfosterau/effect-auth/session` (not re-exported at the package root) | Trusted-device cookie tokens, keyed by their hash                | `TrustedDeviceService` — "remember this device" 2FA skip                                                      |
+| Contract             | Namespace                 | What it holds                                                    | Powers                                                                                                        |
+| -------------------- | ------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `SessionStore`       | `Auth.SessionStore`       | Sessions keyed by the SHA-256 hash of the bearer token           | `SessionService` — every sign-in flow                                                                         |
+| `UserStore`          | `Auth.UserStore`          | Read a user by id; generic password-hash lookup                  | Read path used across the library                                                                             |
+| `UserServiceStore`   | `Auth.UserServiceStore`   | Get/update/delete the user record (name, image, attributes)      | `UserService` — profile updates, account deletion                                                             |
+| `IdentifierStore`    | `Auth.IdentifierStore`    | Email/username/phone claims, globally unique per `(type, value)` | Identifier epic — EmailPassword, Username, PhoneOTP, MagicLink, EmailOTP, OAuth linking, SSO, Admin, and more |
+| `TrustedDeviceStore` | `Auth.TrustedDeviceStore` | Trusted-device cookie tokens, keyed by their hash                | `TrustedDeviceService` — "remember this device" 2FA skip                                                      |
 
 **Password & recovery**
 
@@ -421,13 +421,13 @@ that consumes it.
 
 **Second factor**
 
-| Contract                  | Namespace                                   | What it holds                                            | Powers                                             |
-| ------------------------- | ------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------- |
-| `MultiFactorStore`        | `Auth.SecondFactor.MultiFactorStore`        | TOTP secret + backup codes per user                      | `MultiFactorService` — 2FA enrollment/verification |
-| `PendingMultiFactorStore` | `Auth.SecondFactor.PendingMultiFactorStore` | Short-lived "password OK, awaiting 2FA" challenge tokens | `MultiFactorService` sign-in step                  |
-| `OTPSecondFactorStore`    | `Auth.SecondFactor.OTPSecondFactorStore`    | Pending email/SMS-OTP-as-second-factor records           | `OTPSecondFactorService`                           |
-| `ChallengeStore`          | `Auth.SecondFactor.ChallengeStore`          | WebAuthn ceremony challenges                             | `WebAuthnService`                                  |
-| `CredentialStore`         | `Auth.SecondFactor.CredentialStore`         | WebAuthn public-key credentials                          | `WebAuthnService`                                  |
+| Contract                  | Namespace                                  | What it holds                                            | Powers                                             |
+| ------------------------- | ------------------------------------------ | -------------------------------------------------------- | -------------------------------------------------- |
+| `MultiFactorStore`        | `Auth.MultiFactor.MultiFactorStore`        | TOTP secret + backup codes per user                      | `MultiFactorService` — 2FA enrollment/verification |
+| `PendingMultiFactorStore` | `Auth.MultiFactor.PendingMultiFactorStore` | Short-lived "password OK, awaiting 2FA" challenge tokens | `MultiFactorService` sign-in step                  |
+| `OTPSecondFactorStore`    | `Auth.MultiFactor.OTPSecondFactorStore`    | Pending email/SMS-OTP-as-second-factor records           | `OTPSecondFactorService`                           |
+| `ChallengeStore`          | `Auth.MultiFactor.ChallengeStore`          | WebAuthn ceremony challenges                             | `WebAuthnService`                                  |
+| `CredentialStore`         | `Auth.MultiFactor.CredentialStore`         | WebAuthn public-key credentials                          | `WebAuthnService`                                  |
 
 **OAuth & SSO**
 
@@ -444,16 +444,16 @@ that consumes it.
 
 | Contract           | Namespace               | What it holds                                                          | Powers                |
 | ------------------ | ----------------------- | ---------------------------------------------------------------------- | --------------------- |
-| `OIDCClientStore`  | `Auth.OIDCClientStore`  | Registered OIDC clients — static and dynamically registered (RFC 7591) | `OIDCProviderService` |
-| `OIDCCodeStore`    | `Auth.OIDCCodeStore`    | Authorization codes and pending-consent artifacts                      | `OIDCProviderService` |
-| `OIDCTokenStore`   | `Auth.OIDCTokenStore`   | Issued access/refresh tokens, refresh-family metadata                  | `OIDCProviderService` |
-| `OIDCConsentStore` | `Auth.OIDCConsentStore` | Recorded user consent per client                                       | `OIDCProviderService` |
+| `OidcClientStore`  | `Auth.OidcClientStore`  | Registered OIDC clients — static and dynamically registered (RFC 7591) | `OidcProviderService` |
+| `OidcCodeStore`    | `Auth.OidcCodeStore`    | Authorization codes and pending-consent artifacts                      | `OidcProviderService` |
+| `OidcTokenStore`   | `Auth.OidcTokenStore`   | Issued access/refresh tokens, refresh-family metadata                  | `OidcProviderService` |
+| `OidcConsentStore` | `Auth.OidcConsentStore` | Recorded user consent per client                                       | `OidcProviderService` |
 
 **API keys, devices, admin, orgs**
 
 | Contract                   | Namespace                       | What it holds                                            | Powers                       |
 | -------------------------- | ------------------------------- | -------------------------------------------------------- | ---------------------------- |
-| `APIKeyStore`              | `Auth.APIKeyStore`              | Hashed API keys                                          | `APIKeyService`              |
+| `ApiKeyStore`              | `Auth.ApiKeyStore`              | Hashed API keys                                          | `ApiKeyService`              |
 | `JWTKeyStore`              | `Auth.JWTKeyStore`              | JWT signing key pairs                                    | `JWTService` / JWKS          |
 | `DeviceAuthorizationStore` | `Auth.DeviceAuthorizationStore` | RFC 8628 `device_code`/`user_code` records               | `DeviceAuthorizationService` |
 | `AnonymousUserStore`       | `Auth.AnonymousUserStore`       | Create/delete guest users                                | `AnonymousService`           |
@@ -482,7 +482,7 @@ Prefer one of these over writing your own when it fits your stack:
   mysql, sqlite, D1, …). Implements 22 of the 42 contracts — the whole
   credential/session/OAuth/WebAuthn/MFA/passwordless/lockout core. Not yet
   covered: `OneTimeTokenStore`, `TrustedDeviceStore`, `PhoneOTP*Store`,
-  `OrganizationStore`, `AdminUserStore`, `APIKeyStore`, the OIDC provider
+  `OrganizationStore`, `AdminUserStore`, `ApiKeyStore`, the OIDC provider
   stores, `SSOProviderStore`, `SAMLReplayStore`, `DeviceAuthorizationStore`,
   `GoogleOneTapNonceStore`, `JWTKeyStore`, `OTPSecondFactorStore`,
   `AnonymousUserStore`, `AccountManagementStore`, and `PolicyStore` — bring

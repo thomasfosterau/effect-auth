@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect, Redacted } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { SessionService, make as makeSessionService } from "../session/SessionService.ts";
-import { SessionStore } from "../session/SessionStore.ts";
-import { UserStore } from "../session/UserStore.ts";
+import { SessionService, make as makeSessionService } from "../SessionService.ts";
+import { SessionStore } from "../SessionStore.ts";
+import { UserStore } from "../UserStore.ts";
 import {
   type PendingMultiFactor,
   type MultiFactorRecord,

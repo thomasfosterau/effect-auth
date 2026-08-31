@@ -9,12 +9,12 @@ import {
   type SignUpInput,
 } from "./email/EmailPassword.ts";
 import { IdentifierStore } from "./Identifier.ts";
-import { UserStore } from "./session/UserStore.ts";
+import { UserStore } from "./UserStore.ts";
 import {
   type EmailVerificationResult,
   EmailVerificationService,
 } from "./email/EmailVerification.ts";
-import { SessionService } from "./session/SessionService.ts";
+import { SessionService } from "./SessionService.ts";
 import { UserService } from "./User.ts";
 import type * as Types from "./Types.ts";
 

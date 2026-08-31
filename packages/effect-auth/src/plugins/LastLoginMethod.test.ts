@@ -7,9 +7,9 @@ import { EmailPasswordStore } from "../email/EmailPassword.ts";
 import { IdentifierStore, memoryIdentifierStore, type Identifier } from "../Identifier.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as Password from "../password/Password.ts";
-import { SessionService } from "../session/SessionService.ts";
-import { SessionStore } from "../session/SessionStore.ts";
-import { UserStore } from "../session/UserStore.ts";
+import { SessionService } from "../SessionService.ts";
+import { SessionStore } from "../SessionStore.ts";
+import { UserStore } from "../UserStore.ts";
 import { hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 

@@ -184,14 +184,14 @@ describe("multi-session", () => {
 // Multi-factor: the challenge-continuation helper
 // -----------------------------------------------------------------------------
 
-const totpFor = (secret: string) => Effect.runPromise(Auth.SecondFactor.generateTOTP(secret));
+const totpFor = (secret: string) => Effect.runPromise(Auth.MultiFactor.generateTOTP(secret));
 /**
  * The previous time step's code (still inside the ±1 window). Confirming
  * enrollment with it leaves the current step's code unused, so the replay
  * guard does not reject the later challenge redemption.
  */
 const previousTotpFor = (secret: string) =>
-  Effect.runPromise(Auth.SecondFactor.generateHOTP(secret, Math.floor(Date.now() / 1000 / 30) - 1));
+  Effect.runPromise(Auth.MultiFactor.generateHOTP(secret, Math.floor(Date.now() / 1000 / 30) - 1));
 
 /** Enrol `email` in multi-factor and return the enrollment view. */
 const enrol = async (client: ReturnType<typeof createAuthClient>, email: string) => {

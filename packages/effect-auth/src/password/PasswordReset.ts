@@ -1,12 +1,12 @@
 import { Context, Crypto, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore, resolveUserByIdentifier } from "../Identifier.ts";
-import { UserStore } from "../session/UserStore.ts";
+import { UserStore } from "../UserStore.ts";
 import { hashToken } from "../TokenHash.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import { PasswordHasher } from "./Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { SessionService } from "../session/SessionService.ts";
+import { SessionService } from "../SessionService.ts";
 import { normalizeEmail } from "../utils.ts";
 
 export interface PasswordResetToken {

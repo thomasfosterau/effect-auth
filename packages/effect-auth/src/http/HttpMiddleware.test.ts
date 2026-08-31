@@ -2,7 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Exit, Layer, Option, Redacted } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type * as Types from "../Types.ts";
-import { SessionService } from "../session/SessionService.ts";
+import { SessionService } from "../SessionService.ts";
 import { Hooks } from "../Hooks.ts";
 import * as Errors from "../Errors.ts";
 import {

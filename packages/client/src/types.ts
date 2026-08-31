@@ -86,11 +86,11 @@ export type UpsertOrgRolePayload = Auth.HTTP.UpsertOrgRolePayload;
 
 // --- API keys -----------------------------------------------------------------
 
-export type APIKeyView = Auth.HTTP.APIKeyView;
-export type APIKeyListView = Auth.HTTP.APIKeyListView;
-export type APIKeyCreatedView = Auth.HTTP.APIKeyCreatedView;
-export type APIKeyCreatePayload = Auth.HTTP.APIKeyCreatePayload;
-export type APIKeyUpdatePayload = Auth.HTTP.APIKeyUpdatePayload;
+export type ApiKeyView = Auth.HTTP.ApiKeyView;
+export type ApiKeyListView = Auth.HTTP.ApiKeyListView;
+export type ApiKeyCreatedView = Auth.HTTP.ApiKeyCreatedView;
+export type ApiKeyCreatePayload = Auth.HTTP.ApiKeyCreatePayload;
+export type ApiKeyUpdatePayload = Auth.HTTP.ApiKeyUpdatePayload;
 
 // --- JWT ----------------------------------------------------------------------
 
@@ -115,10 +115,10 @@ export type SSOCallbackPayload = Auth.HTTP.SSOCallbackPayload;
 
 // --- OIDC provider (client management + consent) ------------------------------
 
-export type OIDCClientView = Auth.HTTP.OIDCClientView;
-export type OIDCClientListView = Auth.HTTP.OIDCClientListView;
-export type OIDCClientCreatedView = Auth.HTTP.OIDCClientCreatedView;
-export type OIDCRegisterClientPayload = Auth.HTTP.OIDCRegisterClientPayload;
-export type OIDCClientUpdatePayload = Auth.HTTP.OIDCClientUpdatePayload;
-export type OIDCConsentPayload = Auth.HTTP.OIDCConsentPayload;
-export type OIDCRedirectView = Auth.HTTP.OIDCRedirectView;
+export type OidcClientView = Auth.HTTP.OidcClientView;
+export type OidcClientListView = Auth.HTTP.OidcClientListView;
+export type OidcClientCreatedView = Auth.HTTP.OidcClientCreatedView;
+export type OidcRegisterClientPayload = Auth.HTTP.OidcRegisterClientPayload;
+export type OidcClientUpdatePayload = Auth.HTTP.OidcClientUpdatePayload;
+export type OidcConsentPayload = Auth.HTTP.OidcConsentPayload;
+export type OidcRedirectView = Auth.HTTP.OidcRedirectView;
