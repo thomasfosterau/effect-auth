@@ -2,10 +2,11 @@
  * Drizzle-backed implementation of effect-auth's `UserStore`, plus the
  * `Request`/`RequestResolver` pair that batches user reads.
  *
- * {@link makeUserStore} is an `Effect` that reads {@link DrizzleDatabase} out of
- * context and returns a plain store object; {@link userStoreLayer} lifts it
- * into a `Layer` keyed by `Auth.UserStore`. Both take an optional
- * {@link Tables} set, so custom table names are a one-argument change.
+ * {@link make} is an `Effect` that reads {@link DrizzleDatabase} out of context
+ * and returns a plain store object; {@link layer} lifts it into a `Layer` keyed
+ * by `Auth.UserStore`. Both take an optional {@link Tables} set — any dialect's,
+ * under any names — so switching database or table names is a one-argument
+ * change.
  *
  * ### Contract notes
  *
@@ -22,42 +23,42 @@ import { Effect, Exit, Layer, Request, RequestResolver } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { DrizzleDatabase } from "./Database.ts";
 import { run } from "./internal.ts";
+import { tables as defaultTables } from "./PgSchema.ts";
 import type { Tables, UserRow } from "./Schema.ts";
-import { tables as defaultTables } from "./Schema.ts";
-
-// ---------------------------------------------------------------------------
-// Row -> domain mapping
-// ---------------------------------------------------------------------------
-
-const rowToUser = (row: UserRow): Auth.User => ({
-  id: row.id,
-  createdAt: row.createdAt,
-  updatedAt: row.updatedAt,
-  attributes: row.attributes ?? {},
-  ...(row.name !== null ? { name: row.name } : {}),
-  ...(row.image !== null ? { image: row.image } : {}),
-});
 
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
 /** Build a `UserStore` over the ambient {@link DrizzleDatabase}. */
-export const makeUserStore = (
+export const make = (
   tables: Tables = defaultTables,
 ): Effect.Effect<typeof Auth.UserStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     const db = yield* DrizzleDatabase;
     const users = tables.users;
 
-    const byId = (userId: string, label: string) =>
+    const byId = (userId: string, label: string): Effect.Effect<UserRow | null, Auth.AuthError> =>
       run(label, () => db.select().from(users).where(eq(users.id, userId)).limit(1).execute()).pipe(
         Effect.map((rows) => rows[0] ?? null),
       );
 
     return {
       get: (userId) =>
-        byId(userId, "user.get").pipe(Effect.map((row) => (row === null ? null : rowToUser(row)))),
+        byId(userId, "user.get").pipe(
+          Effect.map((row) =>
+            row === null
+              ? null
+              : {
+                  id: row.id,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
+                  attributes: row.attributes ?? {},
+                  ...(row.name !== null ? { name: row.name } : {}),
+                  ...(row.image !== null ? { image: row.image } : {}),
+                },
+          ),
+        ),
 
       getCredentials: (userId) =>
         byId(userId, "user.getCredentials").pipe(Effect.map((row) => row?.passwordHash ?? null)),
@@ -65,10 +66,10 @@ export const makeUserStore = (
   });
 
 /** `UserStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
-export const userStoreLayer = (
+export const layer = (
   tables: Tables = defaultTables,
 ): Layer.Layer<Auth.UserStore, never, DrizzleDatabase> =>
-  Layer.effect(Auth.UserStore, makeUserStore(tables));
+  Layer.effect(Auth.UserStore, make(tables));
 
 // ---------------------------------------------------------------------------
 // Requests / Resolver
@@ -76,7 +77,7 @@ export const userStoreLayer = (
 
 /**
  * Read one user by id. Resolves to `null` on a miss, exactly like
- * `UserStore.get`. Issue it with `Drizzle.getUser(id)`.
+ * `UserStore.get`. Issue it with `Requests.getUser(id)`.
  */
 export class GetUser extends Request.TaggedClass("GetUser")<
   { readonly id: string },
@@ -87,7 +88,7 @@ export class GetUser extends Request.TaggedClass("GetUser")<
 /**
  * Read one user's password hash. Resolves to `null` when the user does not
  * exist *or* has no password set — the same conflation `UserStore.getCredentials`
- * makes. Issue it with `Drizzle.getUserCredentials(id)`.
+ * makes. Issue it with `Requests.getUserCredentials(id)`.
  */
 export class GetUserCredentials extends Request.TaggedClass("GetUserCredentials")<
   { readonly id: string },
@@ -95,7 +96,7 @@ export class GetUserCredentials extends Request.TaggedClass("GetUserCredentials"
   Auth.AuthError
 > {}
 
-/** Every request served by {@link makeUserResolver}. */
+/** Every request served by {@link makeResolver}. */
 export type UserRequest = GetUser | GetUserCredentials;
 
 /**
@@ -109,9 +110,9 @@ export type UserRequest = GetUser | GetUserCredentials;
  *
  * The returned resolver must be **shared** for batching to happen — requests
  * are grouped per resolver instance. Build it once behind
- * `AuthRequests`/`requestsLayer` rather than per call site.
+ * `Requests.AuthRequests`/`Requests.layer` rather than per call site.
  */
-export const makeUserResolver = (
+export const makeResolver = (
   tables: Tables = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<UserRequest>, never, DrizzleDatabase> =>
   Effect.map(DrizzleDatabase, (db) => {
@@ -131,7 +132,14 @@ export const makeUserResolver = (
               entry.request._tag === "GetUser"
                 ? row === undefined
                   ? null
-                  : rowToUser(row)
+                  : {
+                      id: row.id,
+                      createdAt: row.createdAt,
+                      updatedAt: row.updatedAt,
+                      attributes: row.attributes ?? {},
+                      ...(row.name !== null ? { name: row.name } : {}),
+                      ...(row.image !== null ? { image: row.image } : {}),
+                    }
                 : (row?.passwordHash ?? null),
             ),
           );

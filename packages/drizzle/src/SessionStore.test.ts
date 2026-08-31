@@ -13,8 +13,8 @@ import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
-import { migrationStatements, tables } from "./Schema.ts";
-import { sessionStoreLayer } from "./SessionStore.ts";
+import { migrationStatements, tables } from "./PgSchema.ts";
+import { layer as sessionStoreLayer } from "./SessionStore.ts";
 
 /**
  * Spin up a fresh in-memory Postgres, apply the exported DDL, run `build`'s

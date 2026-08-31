@@ -2,10 +2,11 @@
  * Drizzle-backed implementation of effect-auth's `SessionStore`, plus the
  * `Request`/`RequestResolver` pair that batches session reads.
  *
- * {@link makeSessionStore} is an `Effect` that reads {@link DrizzleDatabase} out
- * of context and returns a plain store object; {@link sessionStoreLayer} lifts
- * it into a `Layer` keyed by `Auth.SessionStore`. Both take an optional
- * {@link Tables} set, so custom table names are a one-argument change.
+ * {@link make} is an `Effect` that reads {@link DrizzleDatabase} out of context
+ * and returns a plain store object; {@link layer} lifts it into a `Layer` keyed
+ * by `Auth.SessionStore`. Both take an optional {@link Tables} set — any
+ * dialect's, under any names — so switching database or table names is a
+ * one-argument change.
  *
  * ### Contract notes
  *
@@ -22,28 +23,15 @@ import { Effect, Exit, Layer, Request, RequestResolver } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { DrizzleDatabase } from "./Database.ts";
 import { run } from "./internal.ts";
-import type { SessionRow, Tables } from "./Schema.ts";
-import { tables as defaultTables } from "./Schema.ts";
-
-// ---------------------------------------------------------------------------
-// Row -> domain mapping
-// ---------------------------------------------------------------------------
-
-const rowToSession = (row: SessionRow): Auth.Session => ({
-  id: row.id,
-  userId: row.userId,
-  expiresAt: row.expiresAt,
-  createdAt: row.createdAt,
-  lastActivityAt: row.lastActivityAt,
-  attributes: row.attributes ?? {},
-});
+import { tables as defaultTables } from "./PgSchema.ts";
+import type { Tables } from "./Schema.ts";
 
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
 /** Build a `SessionStore` over the ambient {@link DrizzleDatabase}. */
-export const makeSessionStore = (
+export const make = (
   tables: Tables = defaultTables,
 ): Effect.Effect<typeof Auth.SessionStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
@@ -69,7 +57,21 @@ export const makeSessionStore = (
       get: (sessionId) =>
         run("session.get", () =>
           db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1).execute(),
-        ).pipe(Effect.map((rows) => (rows[0] === undefined ? null : rowToSession(rows[0])))),
+        ).pipe(
+          Effect.map((rows) => {
+            const row = rows[0];
+            return row === undefined
+              ? null
+              : {
+                  id: row.id,
+                  userId: row.userId,
+                  expiresAt: row.expiresAt,
+                  createdAt: row.createdAt,
+                  lastActivityAt: row.lastActivityAt,
+                  attributes: row.attributes ?? {},
+                };
+          }),
+        ),
 
       update: (session) =>
         run("session.update", () =>
@@ -102,15 +104,26 @@ export const makeSessionStore = (
             .where(eq(sessions.userId, userId))
             .orderBy(asc(sessions.createdAt))
             .execute(),
-        ).pipe(Effect.map((rows) => rows.map(rowToSession))),
+        ).pipe(
+          Effect.map((rows) =>
+            rows.map((row) => ({
+              id: row.id,
+              userId: row.userId,
+              expiresAt: row.expiresAt,
+              createdAt: row.createdAt,
+              lastActivityAt: row.lastActivityAt,
+              attributes: row.attributes ?? {},
+            })),
+          ),
+        ),
     } satisfies typeof Auth.SessionStore.Service;
   });
 
 /** `SessionStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
-export const sessionStoreLayer = (
+export const layer = (
   tables: Tables = defaultTables,
 ): Layer.Layer<Auth.SessionStore, never, DrizzleDatabase> =>
-  Layer.effect(Auth.SessionStore, makeSessionStore(tables));
+  Layer.effect(Auth.SessionStore, make(tables));
 
 // ---------------------------------------------------------------------------
 // Request / Resolver
@@ -120,7 +133,7 @@ export const sessionStoreLayer = (
  * Read one session by its id (the SHA-256 hash of the bearer token).
  *
  * Resolves to `null` on a miss, exactly like `SessionStore.get`. Issue it with
- * `Drizzle.getSession(id)` rather than constructing it by hand.
+ * `Requests.getSession(id)` rather than constructing it by hand.
  */
 export class GetSession extends Request.TaggedClass("GetSession")<
   { readonly id: string },
@@ -137,9 +150,9 @@ export class GetSession extends Request.TaggedClass("GetSession")<
  *
  * The returned resolver must be **shared** for batching to happen — requests
  * are grouped per resolver instance. Build it once behind
- * `AuthRequests`/`requestsLayer` rather than per call site.
+ * `Requests.AuthRequests`/`Requests.layer` rather than per call site.
  */
-export const makeSessionResolver = (
+export const makeResolver = (
   tables: Tables = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<GetSession>, never, DrizzleDatabase> =>
   Effect.map(DrizzleDatabase, (db) => {
@@ -151,7 +164,19 @@ export const makeSessionResolver = (
           db.select().from(sessions).where(inArray(sessions.id, ids)).execute(),
         );
 
-        const byId = new Map(rows.map((row) => [row.id, rowToSession(row)]));
+        const byId = new Map(
+          rows.map((row) => [
+            row.id,
+            {
+              id: row.id,
+              userId: row.userId,
+              expiresAt: row.expiresAt,
+              createdAt: row.createdAt,
+              lastActivityAt: row.lastActivityAt,
+              attributes: row.attributes ?? {},
+            } satisfies Auth.Session,
+          ]),
+        );
         for (const entry of entries) {
           entry.completeUnsafe(Exit.succeed(byId.get(entry.request.id) ?? null));
         }

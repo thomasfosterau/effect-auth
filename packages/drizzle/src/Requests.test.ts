@@ -10,21 +10,21 @@
 
 import { PGlite } from "@electric-sql/pglite";
 import type { Logger } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/pglite";
+import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import type * as Auth from "@thomasfosterau/effect-auth";
-import { databaseLayer, type DrizzlePgDatabase } from "./Database.ts";
+import { databaseLayer } from "./Database.ts";
+import { migrationStatements, tables } from "./PgSchema.ts";
 import {
   AuthRequests,
   getIdentifierByValue,
   getSession,
   getUser,
   getUserCredentials,
+  layer as requestsLayer,
   listIdentifiersByUser,
-  requestsLayer,
 } from "./Requests.ts";
-import { migrationStatements, tables } from "./Schema.ts";
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -58,7 +58,7 @@ const makeQueryLog = (): QueryLog => {
  * torn down afterwards.
  */
 const withDatabase = async <A>(
-  use: (db: DrizzlePgDatabase, log: QueryLog) => Promise<A>,
+  use: (db: PgliteDatabase, log: QueryLog) => Promise<A>,
 ): Promise<A> => {
   const client = await PGlite.create();
   try {
@@ -76,7 +76,7 @@ const withDatabase = async <A>(
  * Run a program against a single {@link requestsLayer} build — one build, so
  * one set of resolvers, which is what makes batching possible at all.
  */
-const runRequests = <A, E>(db: DrizzlePgDatabase, program: Effect.Effect<A, E, AuthRequests>) =>
+const runRequests = <A, E>(db: PgliteDatabase, program: Effect.Effect<A, E, AuthRequests>) =>
   Effect.runPromise(
     program.pipe(
       Effect.provide(requestsLayer(tables).pipe(Layer.provide(databaseLayer(db)))),
@@ -85,7 +85,7 @@ const runRequests = <A, E>(db: DrizzlePgDatabase, program: Effect.Effect<A, E, A
 
 const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
 
-const seedUsers = (db: DrizzlePgDatabase, rows: ReadonlyArray<{ id: string; hash?: string }>) =>
+const seedUsers = (db: PgliteDatabase, rows: ReadonlyArray<{ id: string; hash?: string }>) =>
   db
     .insert(tables.users)
     .values(
@@ -102,7 +102,7 @@ const seedUsers = (db: DrizzlePgDatabase, rows: ReadonlyArray<{ id: string; hash
     .execute();
 
 const seedIdentifiers = (
-  db: DrizzlePgDatabase,
+  db: PgliteDatabase,
   rows: ReadonlyArray<{
     id: string;
     userId: string;

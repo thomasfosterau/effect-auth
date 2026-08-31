@@ -6,11 +6,11 @@
 
 import { PGlite } from "@electric-sql/pglite";
 import { getTableName } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/pglite";
+import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
-import { databaseLayer, type DrizzlePgDatabase } from "./Database.ts";
+import { databaseLayer } from "./Database.ts";
 import { layer } from "./Layers.ts";
 import {
   defineTables,
@@ -18,11 +18,11 @@ import {
   migrationSql,
   migrationStatements,
   sessionsTable,
-  type TableNames,
   type Tables,
   tables as defaultTables,
   usersTable,
-} from "./Schema.ts";
+} from "./PgSchema.ts";
+import type { TableNames } from "./Schema.ts";
 
 type StoreServices = Auth.SessionStore | Auth.UserStore | Auth.IdentifierStore;
 
@@ -31,7 +31,7 @@ type StoreServices = Auth.SessionStore | Auth.UserStore | Auth.IdentifierStore;
  * program against all three stores, then tear the database down.
  */
 const runFresh = async <A, E>(
-  build: (db: DrizzlePgDatabase, tables: Tables) => Effect.Effect<A, E, StoreServices>,
+  build: (db: PgliteDatabase, tables: Tables) => Effect.Effect<A, E, StoreServices>,
   names?: Partial<TableNames>,
 ): Promise<A> => {
   const client = await PGlite.create();
@@ -75,7 +75,7 @@ const identifier = (overrides: Partial<Auth.Identifier> = {}): Auth.Identifier =
 
 /** Insert a user row directly — `UserStore` is read-only by contract. */
 const seedUser = (
-  db: DrizzlePgDatabase,
+  db: PgliteDatabase,
   tables: Tables,
   row: Partial<Tables["users"]["$inferInsert"]> = {},
 ): Effect.Effect<string> =>

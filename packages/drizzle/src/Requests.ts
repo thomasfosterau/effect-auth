@@ -18,22 +18,24 @@
  * import { Effect, Layer } from "effect";
  * import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
  *
- * const program = Effect.forEach(userIds, Drizzle.getUser, {
+ * const program = Effect.forEach(userIds, Drizzle.Requests.getUser, {
  *   concurrency: "unbounded",
  * }); // one SELECT ... WHERE id IN (...), however many ids
  *
  * program.pipe(
- *   Effect.provide(Drizzle.requestsLayer().pipe(Layer.provide(Drizzle.databaseLayer(db)))),
+ *   Effect.provide(
+ *     Drizzle.Requests.layer().pipe(Layer.provide(Drizzle.databaseLayer(db))),
+ *   ),
  * );
  * ```
  *
  * ### Why a layer
  *
  * Effect batches per **resolver instance**, so the resolvers have to be shared
- * for anything to be batched at all. {@link requestsLayer} builds them once
- * against the ambient {@link DrizzleDatabase} and hands them out as a service;
- * the constructors below read that service back out of context, which is why
- * each returns an `Effect` requiring {@link AuthRequests}.
+ * for anything to be batched at all. {@link layer} builds them once against the
+ * ambient {@link DrizzleDatabase} and hands them out as a service; the
+ * constructors below read that service back out of context, which is why each
+ * returns an `Effect` requiring {@link AuthRequests}.
  *
  * ### What this is not
  *
@@ -46,16 +48,11 @@
 import { Context, Effect, Layer, RequestResolver } from "effect";
 import type * as Auth from "@thomasfosterau/effect-auth";
 import type { DrizzleDatabase } from "./Database.ts";
-import {
-  GetIdentifierByValue,
-  ListIdentifiersByUser,
-  makeIdentifierByValueResolver,
-  makeIdentifiersByUserResolver,
-} from "./IdentifierStore.ts";
+import * as IdentifierStore from "./IdentifierStore.ts";
+import { tables as defaultTables } from "./PgSchema.ts";
 import type { Tables } from "./Schema.ts";
-import { tables as defaultTables } from "./Schema.ts";
-import { GetSession, makeSessionResolver } from "./SessionStore.ts";
-import { GetUser, GetUserCredentials, makeUserResolver, type UserRequest } from "./UserStore.ts";
+import * as SessionStore from "./SessionStore.ts";
+import * as UserStore from "./UserStore.ts";
 
 // ---------------------------------------------------------------------------
 // Service
@@ -64,29 +61,30 @@ import { GetUser, GetUserCredentials, makeUserResolver, type UserRequest } from 
 /**
  * The shared resolvers behind the request constructors in this module.
  *
- * `user` serves both {@link GetUser} and {@link GetUserCredentials}: they read
- * the same row, so one resolver means one batch and one query for the pair.
+ * `user` serves both `UserStore.GetUser` and `UserStore.GetUserCredentials`:
+ * they read the same row, so one resolver means one batch and one query for the
+ * pair.
  */
 export class AuthRequests extends Context.Service<
   AuthRequests,
   {
-    readonly session: RequestResolver.RequestResolver<GetSession>;
-    readonly user: RequestResolver.RequestResolver<UserRequest>;
-    readonly identifierByValue: RequestResolver.RequestResolver<GetIdentifierByValue>;
-    readonly identifiersByUser: RequestResolver.RequestResolver<ListIdentifiersByUser>;
+    readonly session: RequestResolver.RequestResolver<SessionStore.GetSession>;
+    readonly user: RequestResolver.RequestResolver<UserStore.UserRequest>;
+    readonly identifierByValue: RequestResolver.RequestResolver<IdentifierStore.GetIdentifierByValue>;
+    readonly identifiersByUser: RequestResolver.RequestResolver<IdentifierStore.ListIdentifiersByUser>;
   }
 >()("@effect-auth/DrizzleRequests") {}
 
 /** Build the resolver set over the ambient {@link DrizzleDatabase}. */
-export const makeRequests = (
+export const make = (
   tables: Tables = defaultTables,
 ): Effect.Effect<typeof AuthRequests.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     return {
-      session: yield* makeSessionResolver(tables),
-      user: yield* makeUserResolver(tables),
-      identifierByValue: yield* makeIdentifierByValueResolver(tables),
-      identifiersByUser: yield* makeIdentifiersByUserResolver(tables),
+      session: yield* SessionStore.makeResolver(tables),
+      user: yield* UserStore.makeResolver(tables),
+      identifierByValue: yield* IdentifierStore.makeByValueResolver(tables),
+      identifiersByUser: yield* IdentifierStore.makeByUserResolver(tables),
     } satisfies typeof AuthRequests.Service;
   });
 
@@ -96,10 +94,9 @@ export const makeRequests = (
  * Independent of the store layers: provide either, or both. Batching is scoped
  * to this layer's lifetime, since that is what owns the resolver instances.
  */
-export const requestsLayer = (
+export const layer = (
   tables: Tables = defaultTables,
-): Layer.Layer<AuthRequests, never, DrizzleDatabase> =>
-  Layer.effect(AuthRequests, makeRequests(tables));
+): Layer.Layer<AuthRequests, never, DrizzleDatabase> => Layer.effect(AuthRequests, make(tables));
 
 // ---------------------------------------------------------------------------
 // Constructors
@@ -112,8 +109,8 @@ export const requestsLayer = (
 export const getSession = (
   id: string,
 ): Effect.Effect<Auth.Session | null, Auth.AuthError, AuthRequests> =>
-  Effect.request<GetSession, never, AuthRequests>(
-    new GetSession({ id }),
+  Effect.request<SessionStore.GetSession, never, AuthRequests>(
+    new SessionStore.GetSession({ id }),
     Effect.map(AuthRequests, (requests) => requests.session),
   );
 
@@ -124,8 +121,8 @@ export const getSession = (
 export const getUser = (
   id: string,
 ): Effect.Effect<Auth.User | null, Auth.AuthError, AuthRequests> =>
-  Effect.request<GetUser, never, AuthRequests>(
-    new GetUser({ id }),
+  Effect.request<UserStore.GetUser, never, AuthRequests>(
+    new UserStore.GetUser({ id }),
     Effect.map(AuthRequests, (requests) => requests.user),
   );
 
@@ -136,8 +133,8 @@ export const getUser = (
 export const getUserCredentials = (
   id: string,
 ): Effect.Effect<string | null, Auth.AuthError, AuthRequests> =>
-  Effect.request<GetUserCredentials, never, AuthRequests>(
-    new GetUserCredentials({ id }),
+  Effect.request<UserStore.GetUserCredentials, never, AuthRequests>(
+    new UserStore.GetUserCredentials({ id }),
     Effect.map(AuthRequests, (requests) => requests.user),
   );
 
@@ -149,8 +146,8 @@ export const getIdentifierByValue = (
   type: Auth.IdentifierType,
   value: string,
 ): Effect.Effect<Auth.Identifier | null, Auth.AuthError, AuthRequests> =>
-  Effect.request<GetIdentifierByValue, never, AuthRequests>(
-    new GetIdentifierByValue({ type, value }),
+  Effect.request<IdentifierStore.GetIdentifierByValue, never, AuthRequests>(
+    new IdentifierStore.GetIdentifierByValue({ type, value }),
     Effect.map(AuthRequests, (requests) => requests.identifierByValue),
   );
 
@@ -161,7 +158,7 @@ export const getIdentifierByValue = (
 export const listIdentifiersByUser = (
   userId: string,
 ): Effect.Effect<ReadonlyArray<Auth.Identifier>, Auth.AuthError, AuthRequests> =>
-  Effect.request<ListIdentifiersByUser, never, AuthRequests>(
-    new ListIdentifiersByUser({ userId }),
+  Effect.request<IdentifierStore.ListIdentifiersByUser, never, AuthRequests>(
+    new IdentifierStore.ListIdentifiersByUser({ userId }),
     Effect.map(AuthRequests, (requests) => requests.identifiersByUser),
   );

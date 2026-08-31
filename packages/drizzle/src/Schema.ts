@@ -1,21 +1,26 @@
 /**
- * Drizzle `pg-core` table definitions backing the effect-auth stores.
+ * What the three auth tables are called, and the dialect-independent shape the
+ * stores address them through.
  *
- * Three tables cover the surface this package implements — sessions, users and
- * identifiers — and they are namespaced with an `effect_auth_` prefix so they
- * can live beside an application's own tables. The exported table objects are
- * ordinary drizzle schema objects: feed them to `drizzle-kit` (or any
- * migration tool) exactly as you would your own.
+ * The tables themselves are defined once per dialect — `Pg`, `Sqlite` and
+ * `MySql` — because a drizzle table object is branded by its dialect. This
+ * module holds what those three definitions agree on: the table names, the
+ * {@link Tables} set a store factory takes, and the row types it reads back.
  *
- * ### Column conventions
+ * ### Column conventions, in the abstract
  *
- * - Timestamps are `timestamp({ mode: "date", withTimezone: true })`, so the
- *   domain sees real `Date` values and PostgreSQL stores `timestamptz`.
- * - Attribute bags are `jsonb().$type<Record<string, unknown>>()`, `NOT NULL`
- *   with a `'{}'` default — the driver round-trips them as plain objects, no
- *   `JSON.parse` in the store layer.
- * - Identifiers are unique on `(type, value)`; that index is the real claim
- *   mechanism behind `Auth.claimIdentifier`.
+ * Every dialect maps the same six semantics; only the physical types differ.
+ *
+ * | Semantic          | PostgreSQL              | SQLite                     | MySQL             |
+ * | ----------------- | ----------------------- | -------------------------- | ----------------- |
+ * | id / handle text  | `text`                  | `text`                     | `varchar(255)`    |
+ * | instant           | `timestamptz` (`Date`)  | `integer` epoch ms (`Date`)| `datetime(3)`     |
+ * | attribute bag     | `jsonb`                 | `text` (JSON mode)         | `json`            |
+ * | boolean           | `boolean`               | `integer` 0/1              | `tinyint` 0/1     |
+ *
+ * All four round-trip to the *same* TypeScript values — `string`, `Date`,
+ * `Record<string, unknown>`, `boolean` — which is why one store implementation
+ * serves all three. Column names are identical across dialects.
  *
  * ### What is *not* here
  *
@@ -23,16 +28,11 @@
  * surrogate-key migration, login handles live exclusively in
  * `effect_auth_identifiers` — a user may hold several emails, a username and a
  * phone number, or none at all.
- *
- * ### Custom table names
- *
- * {@link defineTables} builds the same three tables under names you choose;
- * pass the result to any store factory. {@link migrationStatements} emits DDL
- * for whichever names you used.
  */
 
-import { boolean, index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
-import type * as Auth from "@thomasfosterau/effect-auth";
+import type * as MySql from "./MySqlSchema.ts";
+import type * as Pg from "./PgSchema.ts";
+import type * as Sqlite from "./SqliteSchema.ts";
 
 // ---------------------------------------------------------------------------
 // Table names
@@ -45,150 +45,29 @@ export interface TableNames {
   readonly identifiers: string;
 }
 
-/** The default `effect_auth_*` table names. */
+/** The default `effect_auth_*` table names, shared by every dialect. */
 export const defaultTableNames: TableNames = {
   sessions: "effect_auth_sessions",
   users: "effect_auth_users",
   identifiers: "effect_auth_identifiers",
 };
 
-const resolveNames = (names?: Partial<TableNames>): TableNames => ({
-  sessions: names?.sessions ?? defaultTableNames.sessions,
-  users: names?.users ?? defaultTableNames.users,
-  identifiers: names?.identifiers ?? defaultTableNames.identifiers,
-});
-
-// ---------------------------------------------------------------------------
-// Columns
-//
-// Each column set is built by a function rather than shared as a value:
-// drizzle column builders are consumed (and named) by `pgTable`, so a fresh
-// set per table keeps `defineTables` re-entrant.
-// ---------------------------------------------------------------------------
-
-const sessionColumns = () => ({
-  /** SHA-256 hex digest of the bearer token — never the raw token itself. */
-  id: text("id").primaryKey(),
-  userId: text("user_id").notNull(),
-  expiresAt: timestamp("expires_at", { mode: "date", withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
-  lastActivityAt: timestamp("last_activity_at", { mode: "date", withTimezone: true }).notNull(),
-  attributes: jsonb("attributes").$type<Record<string, unknown>>().notNull().default({}),
-});
-
-const userColumns = () => ({
-  id: text("id").primaryKey(),
-  name: text("name"),
-  image: text("image"),
-  passwordHash: text("password_hash"),
-  attributes: jsonb("attributes").$type<Record<string, unknown>>().notNull().default({}),
-  createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
-  updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).notNull(),
-});
-
-const identifierColumns = () => ({
-  id: text("id").primaryKey(),
-  userId: text("user_id").notNull(),
-  type: text("type").$type<Auth.IdentifierType>().notNull(),
-  value: text("value").notNull(),
-  verified: boolean("verified").notNull().default(false),
-  verifiedAt: timestamp("verified_at", { mode: "date", withTimezone: true }),
-  createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
-});
-
 // ---------------------------------------------------------------------------
 // Tables
 // ---------------------------------------------------------------------------
 
 /**
- * Build the three auth tables under the given names. Omitted names fall back
- * to {@link defaultTableNames}.
+ * The set of tables a store factory reads and writes: one dialect's three
+ * tables, never a mixture.
  *
- * @example
- * ```ts
- * const tables = defineTables({ sessions: "app_sessions" });
- * const stores = layer(tables);
- * ```
+ * The union is what makes the stores dialect-generic without giving up type
+ * safety — `Pg.defineTables()`, `Sqlite.defineTables()` and
+ * `MySql.defineTables()` each produce one member, and every member yields the
+ * same row and insert shapes, so the store code is written once.
  */
-export const defineTables = (names?: Partial<TableNames>) => {
-  const resolved = resolveNames(names);
-  return {
-    sessions: pgTable(resolved.sessions, sessionColumns(), (table) => [
-      index(`${resolved.sessions}_user_id_idx`).on(table.userId),
-    ]),
-    users: pgTable(resolved.users, userColumns()),
-    identifiers: pgTable(resolved.identifiers, identifierColumns(), (table) => [
-      uniqueIndex(`${resolved.identifiers}_type_value_key`).on(table.type, table.value),
-      index(`${resolved.identifiers}_user_id_idx`).on(table.userId),
-    ]),
-  };
-};
+export type Tables = Pg.Tables | Sqlite.Tables | MySql.Tables;
 
-/** The set of tables a store factory reads and writes. */
-export type Tables = ReturnType<typeof defineTables>;
-
-/** The three tables under their default `effect_auth_*` names. */
-export const tables: Tables = defineTables();
-
-/** `effect_auth_sessions` — session records keyed by token hash. */
-export const sessionsTable = tables.sessions;
-/** `effect_auth_users` — user records; login handles live in identifiers. */
-export const usersTable = tables.users;
-/** `effect_auth_identifiers` — email/username/phone claims, unique per `(type, value)`. */
-export const identifiersTable = tables.identifiers;
-
-/** Row shapes selected from each table. */
+/** Row shapes selected from each table, whichever dialect produced them. */
 export type SessionRow = Tables["sessions"]["$inferSelect"];
 export type UserRow = Tables["users"]["$inferSelect"];
 export type IdentifierRow = Tables["identifiers"]["$inferSelect"];
-
-// ---------------------------------------------------------------------------
-// SQL migration
-// ---------------------------------------------------------------------------
-
-/**
- * The DDL equivalent of {@link defineTables}, one statement per entry, in
- * dependency order. Every statement is idempotent (`IF NOT EXISTS`) so it is
- * safe to replay on each deploy.
- *
- * Use this when you do not run `drizzle-kit` — hand the statements to your own
- * migration runner, or paste {@link migrationSql} into a `.sql` file.
- */
-export const migrationStatements = (names?: Partial<TableNames>): ReadonlyArray<string> => {
-  const t = resolveNames(names);
-  return [
-    `CREATE TABLE IF NOT EXISTS ${t.users} (
-  id TEXT PRIMARY KEY,
-  name TEXT,
-  image TEXT,
-  password_hash TEXT,
-  attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL
-)`,
-    `CREATE TABLE IF NOT EXISTS ${t.sessions} (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  expires_at TIMESTAMPTZ NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL,
-  last_activity_at TIMESTAMPTZ NOT NULL,
-  attributes JSONB NOT NULL DEFAULT '{}'::jsonb
-)`,
-    `CREATE INDEX IF NOT EXISTS ${t.sessions}_user_id_idx ON ${t.sessions} (user_id)`,
-    `CREATE TABLE IF NOT EXISTS ${t.identifiers} (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  type TEXT NOT NULL,
-  value TEXT NOT NULL,
-  verified BOOLEAN NOT NULL DEFAULT FALSE,
-  verified_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL
-)`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS ${t.identifiers}_type_value_key ON ${t.identifiers} (type, value)`,
-    `CREATE INDEX IF NOT EXISTS ${t.identifiers}_user_id_idx ON ${t.identifiers} (user_id)`,
-  ];
-};
-
-/** {@link migrationStatements} joined into a single runnable SQL script. */
-export const migrationSql = (names?: Partial<TableNames>): string =>
-  `${migrationStatements(names).join(";\n\n")};\n`;

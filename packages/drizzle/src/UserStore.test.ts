@@ -5,20 +5,20 @@
  */
 
 import { PGlite } from "@electric-sql/pglite";
-import { drizzle } from "drizzle-orm/pglite";
+import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
-import { databaseLayer, type DrizzlePgDatabase } from "./Database.ts";
-import { migrationStatements, type Tables, tables } from "./Schema.ts";
-import { userStoreLayer } from "./UserStore.ts";
+import { databaseLayer } from "./Database.ts";
+import { migrationStatements, type Tables, tables } from "./PgSchema.ts";
+import { layer as userStoreLayer } from "./UserStore.ts";
 
 /**
  * Spin up a fresh in-memory Postgres, apply the exported DDL, run `build`'s
  * program against the user store, then tear the database down.
  */
 const runFresh = async <A, E>(
-  build: (db: DrizzlePgDatabase) => Effect.Effect<A, E, Auth.UserStore>,
+  build: (db: PgliteDatabase) => Effect.Effect<A, E, Auth.UserStore>,
 ): Promise<A> => {
   const client = await PGlite.create();
   try {
@@ -40,7 +40,7 @@ const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs)
 
 /** Insert a user row directly — `UserStore` is read-only by contract. */
 const seedUser = (
-  db: DrizzlePgDatabase,
+  db: PgliteDatabase,
   row: Partial<Tables["users"]["$inferInsert"]> = {},
 ): Effect.Effect<string> =>
   Effect.promise(async () => {
