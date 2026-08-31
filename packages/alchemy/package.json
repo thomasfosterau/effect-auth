@@ -1,7 +1,7 @@
 {
   "name": "@thomasfosterau/effect-auth-alchemy",
   "version": "0.1.0",
-  "description": "Alchemy v2 infrastructure resources and Cloudflare D1-backed storage layers for effect-auth.",
+  "description": "Alchemy v2 AuthSchema resource and Cloudflare D1 storage wiring for effect-auth.",
   "keywords": [
     "alchemy",
     "auth",
@@ -12,8 +12,9 @@
     "effect-auth",
     "iac",
     "infrastructure",
-    "migration",
-    "session"
+    "schema",
+    "sql",
+    "sqlite"
   ],
   "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
   "bugs": {
@@ -48,7 +49,8 @@
     "typecheck": "tsc --noEmit && vp test --typecheck --run"
   },
   "dependencies": {
-    "@thomasfosterau/effect-auth": "workspace:*"
+    "@thomasfosterau/effect-auth": "workspace:*",
+    "@thomasfosterau/effect-auth-sql": "workspace:*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",

@@ -1,212 +1,209 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect } from "effect";
-import type { D1Database, D1PreparedStatement, D1Result } from "./D1.ts";
-import {
-  AUTH_SCHEMA_TYPE,
-  AuthSchema,
-  AuthSchemaProvider,
-  type AuthSchemaProps,
-} from "./AuthSchema.ts";
-import { authTableNames, listAuthTables } from "./Tables.ts";
-import { deprovision, provision, silentSession, type ResourceIdentity } from "./Alchemy.ts";
-
-type SqlValue = null | number | bigint | string | Uint8Array;
-
-interface SqliteStatement {
-  all(...params: SqlValue[]): unknown[];
-  get(...params: SqlValue[]): unknown;
-  run(...params: SqlValue[]): unknown;
-}
-interface SqliteDatabase {
-  prepare(sql: string): SqliteStatement;
-}
+import { Effect, FileSystem, Layer, Path, PlatformError } from "effect";
+import { SqlClient } from "effect/unstable/sql";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import { AdoptPolicy } from "alchemy/AdoptPolicy";
+import { AlchemyContextLive } from "alchemy/AlchemyContext";
+import { apply } from "alchemy/Apply";
+import { provideFreshArtifactStore } from "alchemy/Artifacts";
+import { AuthProviders } from "alchemy/Auth/AuthProvider";
+import { CredentialsStoreLive } from "alchemy/Auth/Credentials";
+import { ProfileLive } from "alchemy/Auth/Profile";
+import { LoggingCli } from "alchemy/Cli/LoggingCli";
+import * as Plan from "alchemy/Plan";
+import { Stack } from "alchemy/Stack";
+import { make as makeStack } from "alchemy/Stack";
+import { Stage } from "alchemy/Stage";
+import * as State from "alchemy/State";
+import { AuthSchema, AuthSchemaProvider, authTableNames } from "./AuthSchema.ts";
+import * as D1Client from "./D1Client.ts";
+import { makeTestD1 } from "./testShim.ts";
 
 /**
- * Load whichever embedded SQLite engine is available — Node's built-in
- * `node:sqlite` (Node >= 22.13) or `better-sqlite3`. Both are real SQLite
- * engines, like D1. The suite skips if neither can be loaded.
+ * The lifecycle below is driven by the **real** Alchemy engine — `Stack` +
+ * `Plan.make` + `apply`, the same path `alchemy deploy` takes — against an
+ * in-memory state store. This mirrors `alchemy/Test`'s own `scratchStack`.
+ *
+ * `alchemy/Test` itself can't be used here: its runtime always builds
+ * `PlatformServices`, which imports `@effect/platform-node`, an unmet peer
+ * dependency of `alchemy` in this repo (the import dies with
+ * `ERR_MODULE_NOT_FOUND`). The only substitution below is that platform layer:
+ * `Path` is real, and the filesystem is Effect's own testing stub reporting an
+ * empty disk, which is all the engine needs to conclude there is no Alchemy
+ * profile or credentials file to read.
  */
-const loadSqlite = async (): Promise<(() => SqliteDatabase) | null> => {
-  try {
-    const { DatabaseSync } = await import("node:sqlite");
-    return () => new DatabaseSync(":memory:") as unknown as SqliteDatabase;
-  } catch {
-    // node:sqlite unavailable or requires --experimental-sqlite
-  }
-  try {
-    const { default: Database } = await import("better-sqlite3");
-    return () => new Database(":memory:") as unknown as SqliteDatabase;
-  } catch {
-    // better-sqlite3 not installed
-  }
-  return null;
-};
+const notFound = (path: string) =>
+  PlatformError.systemError({
+    reason: "NotFound",
+    module: "FileSystem",
+    method: "readFileString",
+    description: "no such file",
+    pathOrDescriptor: path,
+  });
 
-const newSqlite = await loadSqlite();
+const platform = Layer.mergeAll(
+  FileSystem.layerNoop({
+    readFileString: (path: string) => Effect.fail(notFound(path)),
+    readFile: (path: string) => Effect.fail(notFound(path)),
+    exists: () => Effect.succeed(false),
+    makeDirectory: () => Effect.void,
+    writeFileString: () => Effect.void,
+  } as never),
+  Path.layer,
+  FetchHttpClient.layer,
+);
 
-/** Wrap an embedded SQLite engine in the minimal async D1 client shape. */
-const makeTestDb = (): D1Database => {
-  const sqlite = newSqlite!();
+const STACK = "effect-auth-alchemy-test";
+const STAGE = "test";
+
+/** A stack with its own in-memory state, deployable more than once. */
+const makeEngine = () => {
+  const store: Record<string, never> = {};
+  const state = Layer.succeed(State.State, State.InMemoryService(store));
+  const providers = AuthSchemaProvider();
+
+  const withRuntime = <A>(effect: Effect.Effect<A, unknown, never>): Promise<A> =>
+    Effect.runPromise(
+      effect.pipe(
+        Effect.provide(Layer.succeed(Stage, STAGE)),
+        provideFreshArtifactStore,
+        Effect.provideService(AdoptPolicy, false),
+        Effect.provideService(AuthProviders, {}),
+        Effect.provide(Layer.mergeAll(LoggingCli, AlchemyContextLive)),
+        Effect.provide(Layer.provide(ProfileLive, platform)),
+        Effect.provide(Layer.provide(CredentialsStoreLive, platform)),
+        Effect.provide(platform),
+        Effect.scoped,
+      ) as Effect.Effect<A>,
+    );
+
   return {
-    prepare(sql: string): D1PreparedStatement {
-      let bound: SqlValue[] = [];
-      const statement: D1PreparedStatement = {
-        bind(...values: readonly unknown[]): D1PreparedStatement {
-          bound = values as SqlValue[];
-          return statement;
-        },
-        first<T>(): Promise<T | null> {
-          const row = sqlite.prepare(sql).get(...bound) as T | undefined;
-          return Promise.resolve(row ?? null);
-        },
-        all<T>(): Promise<D1Result<T>> {
-          const results = sqlite.prepare(sql).all(...bound) as T[];
-          return Promise.resolve({ results, success: true, meta: {} });
-        },
-        run<T>(): Promise<D1Result<T>> {
-          sqlite.prepare(sql).run(...bound);
-          return Promise.resolve({ results: [] as T[], success: true, meta: {} });
-        },
-      };
-      return statement;
-    },
+    /** `alchemy deploy` for one program. */
+    deploy: <A>(program: Effect.Effect<A, never, never>): Promise<unknown> =>
+      withRuntime(
+        program.pipe(
+          makeStack({ name: STACK, providers, state } as never) as never,
+          Effect.flatMap((compiled: { services: Layer.Layer<never> }) =>
+            Plan.make(compiled as never).pipe(
+              Effect.flatMap(apply),
+              Effect.provide(compiled.services),
+            ),
+          ),
+        ) as Effect.Effect<unknown, unknown, never>,
+      ),
+    /** `alchemy destroy`: apply an empty plan, so every resource is deleted. */
+    destroy: (): Promise<unknown> =>
+      withRuntime(
+        Plan.make({
+          name: STACK,
+          stage: STAGE,
+          resources: {},
+          bindings: {},
+          actions: {},
+          output: {},
+        } as never).pipe(
+          Effect.flatMap(apply),
+          Effect.asVoid,
+          Effect.provide(state),
+          Effect.provide(providers as Layer.Layer<never>),
+          Effect.provide(
+            Layer.succeed(Stack, {
+              name: STACK,
+              stage: STAGE,
+              resources: {},
+              bindings: {},
+              actions: {},
+            } as never),
+          ),
+        ) as Effect.Effect<unknown, unknown, never>,
+      ),
   };
 };
 
-const ref: ResourceIdentity = { id: "auth-schema" };
-/** What the engine passes every lifecycle operation for {@link ref}. */
-const self = { id: ref.id, fqn: ref.id, instanceId: ref.id };
+const tablesIn = (database: D1Client.D1Database): Promise<readonly string[]> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{
+        readonly name: string;
+      }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'auth_%' ORDER BY name`;
+      return rows.map((row) => row.name);
+    }).pipe(Effect.provide(D1Client.layer({ db: database }))) as Effect.Effect<readonly string[]>,
+  );
 
-/**
- * Build the resource's provider exactly the way an Alchemy stack does: the
- * `Provider.succeed(...)` Layer is mounted and the service is read back off
- * Alchemy's own `Provider` tag.
- */
-const provider = await Effect.runPromise(
-  AuthSchema.Provider.pipe(Effect.provide(AuthSchemaProvider())),
-);
+const countUsers = (database: D1Client.D1Database): Promise<number> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{ readonly n: number }>`SELECT count(*) AS n FROM auth_users`;
+      return rows[0]?.n ?? 0;
+    }).pipe(Effect.provide(D1Client.layer({ db: database }))) as Effect.Effect<number>,
+  );
 
-describe("@thomasfosterau/effect-auth-alchemy resources", () => {
-  it("derives the auth table list from the shared schema statements", () => {
+const insertUser = (database: D1Client.D1Database): Promise<void> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO auth_users (id, created_at, updated_at) VALUES ('u1', 1, 1)`;
+    }).pipe(Effect.provide(D1Client.layer({ db: database }))) as Effect.Effect<void>,
+  );
+
+describe("AuthSchema resource", () => {
+  it("is a real Alchemy resource whose provider mounts on Alchemy's own tag", async () => {
+    const provider = await Effect.runPromise(
+      AuthSchema.Provider.pipe(Effect.provide(AuthSchemaProvider())),
+    );
+    expect(typeof provider.reconcile).toBe("function");
+    expect(typeof provider.delete).toBe("function");
+    expect(await Effect.runPromise(provider.list())).toEqual([]);
+  });
+
+  it("derives its table list from the shared SQL schema", () => {
     expect(authTableNames).toContain("auth_users");
     expect(authTableNames).toContain("auth_sessions");
-    expect(authTableNames).toContain("auth_oauth_accounts");
-    expect(authTableNames).toContain("auth_multi_factor");
-    expect(authTableNames).toContain("auth_pending_multi_factor");
     expect(authTableNames).toContain("auth_identifiers");
-    // Every entry is prefixed and the list is non-trivial.
-    expect(authTableNames.length).toBeGreaterThanOrEqual(10);
     expect(authTableNames.every((name) => name.startsWith("auth_"))).toBe(true);
   });
 
-  it("declares a real Alchemy resource and registers a provider for it", async () => {
-    expect(AuthSchema.Type).toBe(AUTH_SCHEMA_TYPE);
-    // The provider resolved off Alchemy's `Provider` tag implements the
-    // lifecycle the engine drives.
-    expect(typeof provider.reconcile).toBe("function");
-    expect(typeof provider.delete).toBe("function");
-    expect(typeof provider.list).toBe("function");
+  it("deploys the schema, converges on a redeploy, and keeps data by default", async () => {
+    const database = makeTestD1();
+    const engine = makeEngine();
+    const program = Effect.gen(function* () {
+      return yield* AuthSchema("auth-schema", { database });
+    });
 
-    // diff always asks for an in-place update — the schema is never replaced.
-    const diff = await Effect.runPromise(
-      provider.diff!({
-        ...self,
-        olds: {} as AuthSchemaProps,
-        news: {} as AuthSchemaProps,
-        oldBindings: [],
-        newBindings: [],
-        output: undefined,
-      }),
-    );
-    expect(diff).toEqual({ action: "update" });
+    const created = (await engine.deploy(program as never)) as {
+      tables: readonly string[];
+      statements: number;
+      appliedAt: number;
+    };
+    expect(created.tables).toEqual([...authTableNames].sort());
+    expect(created.statements).toBeGreaterThan(0);
+    expect(created.appliedAt).toBeGreaterThan(0);
 
-    // Nothing to enumerate account-wide.
-    expect(await Effect.runPromise(provider.list())).toEqual([]);
-  });
-});
+    // Data written between deploys must survive the next reconcile.
+    await insertUser(database);
+    await engine.deploy(program as never);
+    expect(await countUsers(database)).toBe(1);
+    expect(await tablesIn(database)).toEqual([...authTableNames].sort());
 
-const suite = newSqlite ? describe : describe.skip;
-
-suite("AuthSchema provider", () => {
-  it("read reports undefined before the schema exists", async () => {
-    const database = makeTestDb();
-    const live = await Effect.runPromise(
-      provider.read!({ ...self, olds: { database }, output: undefined }),
-    );
-    expect(live).toBeUndefined();
+    // Teardown leaves the tables alone unless `dropOnDelete` is set.
+    await engine.destroy();
+    expect(await tablesIn(database)).toEqual([...authTableNames].sort());
+    expect(await countUsers(database)).toBe(1);
   });
 
-  it("reconcile creates every auth table and is idempotent", async () => {
-    const database = makeTestDb();
+  it("drops every auth table on destroy when dropOnDelete is set", async () => {
+    const database = makeTestD1();
+    const engine = makeEngine();
+    const program = Effect.gen(function* () {
+      return yield* AuthSchema("auth-schema", { database, dropOnDelete: true });
+    });
 
-    const first = await Effect.runPromise(
-      provider.reconcile({
-        ...self,
-        news: { database },
-        olds: undefined,
-        output: undefined,
-        session: silentSession,
-        bindings: [],
-      }),
-    );
-    expect(first.tables).toEqual([...authTableNames].sort());
-    expect(first.statements).toBeGreaterThan(0);
-    expect(first.appliedAt).toBeGreaterThan(0);
+    await engine.deploy(program as never);
+    expect(await tablesIn(database)).toEqual([...authTableNames].sort());
 
-    // Running again must converge to the same state without error.
-    const second = await Effect.runPromise(
-      provider.reconcile({
-        ...self,
-        news: { database },
-        olds: { database },
-        output: first,
-        session: silentSession,
-        bindings: [],
-      }),
-    );
-    expect(second.tables).toEqual(first.tables);
-  });
-
-  it("read reflects the live tables after reconciling", async () => {
-    const database = makeTestDb();
-    await Effect.runPromise(provision(provider, ref, { database }));
-
-    const live = await Effect.runPromise(
-      provider.read!({ ...self, olds: { database }, output: undefined }),
-    );
-    expect(live?.tables).toEqual([...authTableNames].sort());
-  });
-
-  it("delete preserves data by default and drops tables when opted in", async () => {
-    const database = makeTestDb();
-    const output = await Effect.runPromise(provision(provider, ref, { database }));
-
-    // Default: leave the tables in place.
-    await Effect.runPromise(deprovision(provider, ref, { props: { database }, output }));
-    const stillThere = await Effect.runPromise(listAuthTables(database));
-    expect(stillThere).toEqual([...authTableNames].sort());
-
-    // Opt in: drop everything.
-    await Effect.runPromise(
-      deprovision(provider, ref, { props: { database, dropOnDelete: true }, output }),
-    );
-    const gone = await Effect.runPromise(listAuthTables(database));
-    expect(gone).toEqual([]);
-  });
-
-  it("provision/deprovision drive the full lifecycle outside the engine", async () => {
-    const database = makeTestDb();
-    const props: AuthSchemaProps = { database, dropOnDelete: true };
-
-    const output = await Effect.runPromise(provision(provider, ref, props));
-    expect(output.tables).toEqual([...authTableNames].sort());
-
-    // A second apply carries the prior state, so read + diff run too.
-    const again = await Effect.runPromise(provision(provider, ref, props, { props, output }));
-    expect(again.tables).toEqual(output.tables);
-
-    await Effect.runPromise(deprovision(provider, ref, { props, output }));
-    const gone = await Effect.runPromise(listAuthTables(database));
-    expect(gone).toEqual([]);
+    await engine.destroy();
+    expect(await tablesIn(database)).toEqual([]);
   });
 });
