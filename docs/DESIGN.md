@@ -7,15 +7,14 @@ Changesets. Date: 2026-07-03/04. Supersedes the architectural framing in `ARCHIT
 (rewritten alongside this document) and the status header of `HOOKS_DESIGN.md`.
 
 > **Superseded (partially) by the directory/export restructure.** The API
-> restructure milestone (`docs/refactor-plan.md`, `docs/migration.md`) landed
-> after this document and revisited two calls made below: the service formerly
-> named `SessionManager` is now `SessionService` (renamed as part of the
-> restructure's naming pass), and the `XShape` interface convention decided in
-> D1's "implementation finding" was reversed — `*Shape` interfaces are deleted
-> outright; implementors reference `typeof X.Service` instead. The rest of this
-> document's rationale and decisions still hold; read D1 and D9 below with
-> those two corrections in mind, and see `docs/migration.md` for the full
-> rename table.
+> restructure milestone landed after this document and revisited two calls made
+> below: the service formerly named `SessionManager` is now `SessionService`
+> (renamed as part of the restructure's naming pass), and the `XShape` interface
+> convention decided in D1's "implementation finding" was reversed — `*Shape`
+> interfaces are deleted outright; implementors reference `typeof X.Service`
+> instead. The rest of this document's rationale and decisions still hold; read
+> D1 and D9 below with those two corrections in mind, and treat
+> [ARCHITECTURE.md](./ARCHITECTURE.md) as the description of the tree today.
 
 This document records, per design dimension: **status quo → problem → decision →
 rationale → migration & blast radius → risk**. Evidence lines reference the tree at
@@ -54,15 +53,14 @@ const app = Effect.gen(function* () {
 - **Errors:** tagged errors, `AuthError` for infrastructure failure, specific tags
   for flow outcomes; lookups that can legitimately miss return `X | null` from
   stores and surface typed errors from services.
-- **HTTP:** the `AuthApi` contract under `Auth.HTTP`, one flat `auth` group,
+- **HTTP:** the `AuthApi` contract under `Auth.Http`, one flat `auth` group,
   404-until-configured for optional features, trusted-origin CSRF gate.
 
 ---
 
 ## D1. The Tag–Service–Layer quartet (highest leverage)
 
-> **Superseded (partially) by the API restructure** (`docs/refactor-plan.md`
-> §3, `docs/migration.md` §4): the `Shape`-suffix decision below did not
+> **Superseded (partially) by the API restructure**: the `Shape`-suffix decision below did not
 > survive contact with real usage and was reversed — `*Shape` interfaces
 > (`SessionStoreShape`, `EmailOtpServiceShape`, and ~65 others) are deleted
 > outright; implementors use `typeof X.Service` in type position instead.
@@ -71,7 +69,7 @@ const app = Effect.gen(function* () {
 > compat alias. The rest of D1 — bare service names, `X.layer(config)` as the
 > sole constructor — still holds.
 
-**Status quo.** Every module ships four things (e.g. `session/SessionService.ts` (then flat `Session.ts`)):
+**Status quo.** Every module ships four things (e.g. `SessionService.ts` (then `Session.ts`)):
 
 1. `interface SessionManager` — the service shape;
 2. `class SessionManagerTag extends Context.Service<SessionManagerTag, SessionManager>()("@effect-auth/SessionManager")`;
@@ -142,12 +140,12 @@ the KV store layers (`KeyValueStores.ts`, provide store tags from many modules).
 
 **Status quo.** 31 `*Layer` exports: 24 `XServiceLayer(config)` functions; 3
 no-config functions (`RateLimiterLayer()` `RateLimit.ts:212`,
-`AuthorizationPolicyLayer()` `authz/Authorization.ts` (then flat `Authorization.ts`), `UserServiceLayer()`
+`AuthorizationPolicyLayer()` `Authorization.ts`, `UserServiceLayer()`
 `User.ts:153`); 4 bare Layer values (`RateLimiterPersistenceLayer`,
-`ScryptHasherLayer`, `PasswordHasherLayer`, `MultiFactorGateLayer` — `secondfactor/MultiFactor.ts`
+`ScryptHasherLayer`, `PasswordHasherLayer`, `MultiFactorGateLayer` — `multifactor/MultiFactor.ts`
 (then flat `TwoFactor.ts`)); one
 `make`-prefixed (`makeMultiAlgorithmVerifierLayer` `password/Password.ts` (then flat `Password.ts`)); one
-lowercase two-arg (`authGroupLayer(config?, multiSession?)` `http/HTTPServer.ts` (then flat `HttpServer.ts`));
+lowercase two-arg (`authGroupLayer(config?, multiSession?)` `http/HttpServer.ts` (then flat `HttpServer.ts`));
 plus `PasswordHasherLive`/`PBKDF2HasherLive` (`password/Password.ts` (then flat `Password.ts`)) which are
 **`Context.make` values, not Layers**, wearing a `Live` suffix used nowhere else.
 
@@ -183,7 +181,7 @@ needs a short migration note in the changeset.
 
 **Status quo.** 38 store interfaces. 30+ return `X | null` for lookups with an
 `AuthError` channel; 4 fail typed not-found errors (`SessionStore.get` →
-`SessionNotFoundError` `session/SessionService.ts` (then flat `Session.ts`); `UserStore.get`/`UserServiceStore.get` →
+`SessionNotFoundError` `SessionService.ts` (then `Session.ts`); `UserStore.get`/`UserServiceStore.get` →
 `UserNotFoundError`; `ChallengeStore.get`/`CredentialStore.get` →
 `Challenge/CredentialNotFoundError` `WebAuthn.ts:191–216`); one —
 `OAuthStateStore.get` (`OAuth.ts:147`) — is neither: non-nullable success with
@@ -207,7 +205,7 @@ only broad `AuthError`. Method vocabulary drifts: `get` vs `getById` vs
    `SessionStore.get`, `UserStore.get`, `UserServiceStore.get`,
    `ChallengeStore.get`, `CredentialStore.get` become nullable (their services
    already own the typed errors); `OAuthStateStore.get` becomes nullable;
-   `CredentialStore.getByUserId` → `listByUserId`; `APIKeyStore.getById` → `get`.
+   `CredentialStore.getByUserId` → `listByUserId`; `ApiKeyStore.getById` → `get`.
    `@effect-auth/sql` and `@effect-auth/alchemy` update in lockstep.
 
 **Rationale.** The nullable convention is the de-facto majority (30+ of 38), is
@@ -225,9 +223,9 @@ Changeset with a migration table.
 ### First-party implementation coverage
 
 `@effect-auth/sql` and `@effect-auth/alchemy` both implement the same 20
-stores (the alchemy gap — MagicLink, MagicLinkUser, EmailOTP, EmailOTPUser,
+stores (the alchemy gap — MagicLink, MagicLinkUser, EmailOtp, EmailOtpUser,
 MultiFactor, PendingMultiFactor — was closed 2026-07-04). Neither implements the
-advanced-feature stores (Organization, APIKey, SSO, OIDC\*,
+advanced-feature stores (Organization, ApiKey, SSO, Oidc\*,
 DeviceAuthorization, …); that remains a tracked feature gap, not an API
 question.
 
@@ -237,8 +235,8 @@ question.
 (`Errors.ts`) + 17 module-local. `AuthError` is a nominal base **nothing
 subclasses**; it composes via unions. 6 HTTP boundary errors use
 `Schema.TaggedErrorClass` + `HttpApiSchema.status`
-(`http/HTTPApiSchemas.ts`, then flat `HttpApiSchemas.ts:703–739`). Domain→HTTP mapping happens per-endpoint in ~40
-`Effect.catchTags` blocks in `http/HTTPServer.ts` (then flat `HttpServer.ts`), with real
+(`http/HttpApiSchema.ts`, then flat `HttpApiSchemas.ts:703–739`). Domain→HTTP mapping happens per-endpoint in ~40
+`Effect.catchTags` blocks in `http/HttpServer.ts` (then flat `HttpServer.ts`), with real
 inconsistencies: `AuthError` → 409 in `signUp` but → 500 in `signIn`
 (`:634`); `RateLimitError` → 400 in signUp (`:611`) but → 403 in signIn
 (`:638`); there is **no 429** anywhere.
@@ -378,7 +376,7 @@ batching/caching data access — a need this library's own code never exhibited.
 
 ## D7. HTTP contract conventions
 
-**Status quo.** One flat `auth` group with ~84 endpoints (`http/HTTPApi.ts` (then flat `HttpApi.ts:21,576`)).
+**Status quo.** One flat `auth` group with ~84 endpoints (`http/HttpApi.ts` (then flat `HttpApi.ts:21,576`)).
 Paths are consistently kebab-case. operationIds drift across four schemes:
 `signIn<Method>` family (6 endpoints) vs `ssoSignIn` (`:449`, sits at
 `/sign-in/sso`); `siweNonce` (`:462`) vs sibling `signInSiwe` (`:467`);
@@ -411,9 +409,9 @@ correct).
 - **Kept as settled conventions:** the single flat `auth` group (splitting into
   per-feature groups would break every `client.auth.*` call for cosmetic gain —
   revisit only if a 2.0 happens); `404-until-configured` via
-  `Effect.serviceOption` (`http/HTTPServer.ts`, then flat `HttpServer.ts:251–500`) — documented as the official
+  `Effect.serviceOption` (`http/HttpServer.ts`, then flat `HttpServer.ts:251–500`) — documented as the official
   behavior for optional features; the trusted-origin CSRF gate
-  (`http/HTTPServer.ts`, then flat `HttpServer.ts:2387–2437`) — no-Origin requests pass (server-to-server),
+  (`http/HttpServer.ts`, then flat `HttpServer.ts:2387–2437`) — no-Origin requests pass (server-to-server),
   browser requests must match request origin or `trustedOrigins`, enforced
   before any handler.
 
@@ -423,9 +421,9 @@ they're batched for one 0.x minor with a rename table.
 ## D8. Client API & framework parity
 
 **Status quo.** Two clients: the generated Effect client
-(`http/HTTPClient.ts`, then flat `HttpClient.ts:26`, full parity by construction) and the hand-written
+(`http/HttpClient.ts`, then flat `HttpClient.ts:26`, full parity by construction) and the hand-written
 zero-dependency browser client (`packages/client/src/Client.ts:136`) covering
-23/84 endpoints (core flows + magicLink/emailOTP/multiFactor namespaces). No
+23/84 endpoints (core flows + magicLink/emailOtp/multiFactor namespaces). No
 dead methods; the missing 61 are the optional/advanced surface. Framework
 bindings: React has `useSession` + `useListSessions` (`react.ts:24,37`); Svelte
 has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`
@@ -450,10 +448,10 @@ has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`
 
 ## D9. Barrel & module boundaries
 
-> **Superseded** by `docs/refactor-plan.md` §6: `effect-auth` now also
+> **Superseded** by the API restructure: `effect-auth` now also
 > publishes per-cluster subpath exports (`effect-auth/email`, `/http`,
-> `/oauth`, `/session`, `/password`, `/plugins`, `/authz`) alongside the root
-> barrel, with matching `Auth.Email` / `Auth.HTTP` / `Auth.OAuth` / ...
+> `/oauth`, `/session`, `/password`, `/plugins`) alongside the root
+> barrel, with matching `Auth.Email` / `Auth.Http` / `Auth.OAuth` / ...
 > namespace re-exports from the root. The status quo/decision below reflects
 > the pre-refactor state.
 
@@ -462,7 +460,7 @@ has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`
 `Types`, `Errors`, all feature modules, all plugins, `Requests`/`Resolvers`,
 and re-exports `Effect`, `Context`, `Layer`, `RequestResolver` from `effect`
 (`index.ts:137–146`). SIWE — contrary to earlier planning notes — is still fully
-present (core `Siwe.ts`, `@effect-auth/siwe`, HTTP endpoints in `http/HTTPApi.ts`, then flat `HttpApi.ts:462–472`).
+present (core `Siwe.ts`, `@effect-auth/siwe`, HTTP endpoints in `http/HttpApi.ts`, then flat `HttpApi.ts:462–472`).
 
 **Decision.**
 
@@ -537,6 +535,94 @@ pre-commit `vp check --fix` hook, so every regeneration appeared to churn all
 ~45 pages. Fix applied: `docs:api` now runs
 `vp check --fix site/src/content/docs/reference/api` after syncing, making
 regeneration idempotent (verified: a full regen produces zero spurious diffs).
+
+## D12. Surrogate-keyed identity (identifiers, not `user.email`)
+
+**Status quo (pre-2026-08).** `User` carried `email`/`emailVerified` as a
+natural key: `auth_users.email` was globally unique, every flow resolved
+accounts via `getUserByEmail`, usernames lived in a parallel `UsernameStore`,
+and phone numbers hid in `attributes`. One email per user, renames were
+UPDATEs on the primary record, and each new handle type grew its own store.
+
+**Decision (applied, breaking).** `User` is purely surrogate-keyed:
+`{ id, name?, image?, createdAt, updatedAt, attributes }`. Login handles are
+`Identifier` records — `(type: "email" | "username" | "phone", value)` with
+global uniqueness on the pair, a `verified`/`verifiedAt` promotion state, and
+`createdAt` ordering — behind the single `IdentifierStore` contract
+(`Identifier.ts`; KV, sql and alchemy implementations). Consequences:
+
+- **Resolution**: every "who owns this handle" goes through
+  `IdentifierStore.getByValue` (helper: `resolveUserByIdentifier`). The
+  removed members: `User.email`/`emailVerified`, `UserServiceStore.getByEmail`,
+  `UserService.getUserByEmail`/`markEmailVerified`, every feature store's
+  `getUserByEmail`, and `UsernameStore` outright.
+- **Claiming**: creation-time uniqueness rides the store's unique index;
+  `claimIdentifier` adds the check-first + race re-check pattern and a typed
+  `IdentifierTakenError`. Flows map it to their own conflict error
+  (`EmailInUseError`, `UsernameError`, ...).
+- **Verification is proof-of-ownership**: completing an email verification,
+  magic link, email OTP, phone OTP, or a trusted OAuth/SSO assertion promotes
+  the identifier via `setVerified`. `requireEmailVerification`-style gates
+  read `identifier.verified`, never a user field.
+- **Email-of-record** for delivery/display is derived: `primaryEmail`
+  (earliest verified) falling back to `anyEmail` (earliest of any state).
+  The HTTP `UserView` exposes derived optional `email`/`emailVerified`
+  (omitted on cookie-cache-served responses) plus `GET /identifiers` /
+  `DELETE /identifiers/:identifierId`; the wire shape stays compatible for
+  clients that read `user.email` from store-served responses.
+- **Storage**: `auth_users` drops `email`/`email_verified` and
+  `auth_users_email_idx`; `auth_identifiers` (unique `(type, value)`) is the
+  handle table.
+
+**Rationale.** Multiple emails per account, username renames, phone-as-handle
+and future handle types (door open: passkey handles, wallet addresses) all
+become row operations on one table instead of schema surgery; verification
+state finally attaches to the handle it belongs to.
+
+## D13. Effect-native authorization (the policy kernel)
+
+**Status quo (pre-M3).** The authorization modules (then an `authz/` cluster)
+held an RBAC seed: `PermissionRef` wildcard matching, `RoleStore`, and an
+`AuthorizationPolicy` service whose checks were method calls — no reusable policy value, no resource/attribute model, no
+policies-as-data.
+
+**Decision (applied; owner decisions 2026-08-30, recorded in
+`better-auth-parity.md` §2.5).** Authorization is a first-class pillar built
+around the `Policy` **value** — Effect-native-first; Cedar contributes
+semantics adopted on merit and, at most, an interop serialization (door-open
+`packages/cedar`). The load-bearing choices:
+
+- **Two policy kinds, difference visible in types.** `DeclarativePolicy` is
+  pure data (permit/forbid + PARC scopes `any/eq/in/is` + a serializable
+  condition AST) and earns data powers: Schema-validated, storable,
+  tenant-editable, model-checkable. `Policy.custom` (arbitrary Effect
+  predicate) is first-class everywhere policies are accepted, but opaque —
+  its `E`/`R` surface in `Policy<E, R>` and it cannot be stored.
+- **Pure core, Effect shell.** Decisions are a pure, total function over a
+  pre-fetched `EntitySlice` (`decidePure`); services (`EntityResolver`,
+  `PolicyStore`, `CurrentPrincipal`) live in the `Authorizer` shell. Every
+  decision is deterministic and replayable from the logged `(request, slice)`.
+- **Semantics:** default deny; forbid overrides permit; order-independent;
+  the `Decision` carries determining policies + per-policy outcomes.
+  **Fail-closed both ways** (deliberate Cedar deviation): an erroring permit
+  cannot grant, an erroring forbid denies; errors land in the trace.
+- **Entities everywhere:** principals, resources, actions and roles are typed
+  entities in one hierarchy, so RBAC (`principal in Role::"admin"`), ReBAC
+  and action groups are the same data check. The declared `Model` doubles as
+  Cedar-style policy validation at `Authorizer` layer construction.
+- **Templates in v1:** `?principal`/`?resource` slots + link records;
+  instantiation is fail-closed (missing _or superfluous_ slot values error —
+  a link may never broaden its template); a broken link fails
+  `effectivePolicies` loudly rather than letting a forbid vanish.
+- **Schema-embedded enforcement:** `protectedField` runs the same policies at
+  the data boundary via v4 Schema effectful getters — decode denial fails
+  (write guard), encode denial redacts (viewer projection) — with
+  `CurrentPrincipal` flowing through the struct's Requirements channel, and
+  `AuthMiddleware` providing the principal per request.
+
+The M0-era `AuthorizationPolicy`/`RoleStore` API remains during the
+transition; M4 migrates Organization/Admin/ApiKey onto `Policy` and decides
+its retirement.
 
 ---
 

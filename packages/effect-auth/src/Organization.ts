@@ -1,0 +1,1364 @@
+/**
+ * Organizations (multi-tenant teams) for effect-auth.
+ *
+ * Mirrors better-auth's organization plugin: users create organizations,
+ * invite members by email, and manage member roles. Every mutating operation
+ * is permission-checked against a configurable role → permission map using
+ * `"resource:action"` permission strings.
+ *
+ * **Teams:** organizations can be subdivided into teams (see {@link Team}).
+ * Team management is governed by the *organization*-scoped `team:*`
+ * permissions; team membership itself carries no roles - it is a plain
+ * `(teamId, userId)` association, and any organization member may read the
+ * team structure. A user must already be a member of the team's organization
+ * before they can be added to one of its teams.
+ *
+ * **Dynamic access control:** on top of the static `roles` config map, each
+ * organization may define its own roles at runtime ({@link OrgRole}, managed
+ * with {@link OrganizationService.upsertOrgRole} and friends). A custom role
+ * *replaces* the static entry of the same name for that organization - the
+ * two are never merged, so what a tenant sees is exactly what it defined.
+ *
+ * **Active organization:** this module deliberately does not manage a
+ * per-session "active organization" (better-auth's `setActiveOrganization`).
+ * The conventional integration is to store the selected organization id on
+ * the session's attribute bag - e.g.
+ * `sessionManager.createSession(userId, { activeOrganizationId: org.id })`
+ * or by updating `session.attributes.activeOrganizationId` through your
+ * session store - and read it back from `session.attributes` when handling
+ * requests.
+ *
+ * @module organization
+ */
+
+import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { IdentifierStore } from "./Identifier.ts";
+import * as Errors from "./Errors.ts";
+import { parsePermission, permissionMatches } from "./Permission.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { normalizeEmail } from "./utils.ts";
+
+/**
+ * Organization error
+ */
+export class OrganizationError extends Data.TaggedError("OrganizationError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
+
+/**
+ * An organization (team / tenant).
+ */
+export interface Organization {
+  readonly id: string;
+  readonly name: string;
+  /** URL-friendly unique identifier */
+  readonly slug: string;
+  readonly logo?: string;
+  /** Arbitrary app-specific metadata */
+  readonly metadata: Record<string, unknown>;
+  /** Epoch milliseconds */
+  readonly createdAt: number;
+}
+
+/**
+ * A user's membership in an organization.
+ */
+export interface Member {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly userId: string;
+  /** Role name, resolved against the configured role → permission map */
+  readonly role: string;
+  /** Epoch milliseconds */
+  readonly createdAt: number;
+}
+
+/**
+ * Lifecycle states of an invitation.
+ */
+export type InvitationStatus = "pending" | "accepted" | "rejected" | "canceled";
+
+/**
+ * An email invitation to join an organization.
+ */
+export interface Invitation {
+  readonly id: string;
+  readonly organizationId: string;
+  /** Normalized (trimmed, lowercased) invitee email */
+  readonly email: string;
+  /** Role the invitee receives upon acceptance */
+  readonly role: string;
+  readonly status: InvitationStatus;
+  /** User id of the member who created the invitation */
+  readonly inviterId: string;
+  /** Epoch milliseconds */
+  readonly expiresAt: number;
+  /** Epoch milliseconds */
+  readonly createdAt: number;
+}
+
+/**
+ * A team: a named sub-group of an organization.
+ *
+ * Teams are managed with the organization-scoped `team:*` permissions; the
+ * membership rows ({@link TeamMember}) deliberately carry no role of their own.
+ */
+export interface Team {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly name: string;
+  /** Epoch milliseconds */
+  readonly createdAt: number;
+  /** Epoch milliseconds */
+  readonly updatedAt: number;
+}
+
+/**
+ * A user's membership in a team.
+ *
+ * Team membership is orthogonal to the organization role: it grants no
+ * permissions by itself. The user is always also a {@link Member} of the
+ * team's organization.
+ */
+export interface TeamMember {
+  readonly teamId: string;
+  readonly userId: string;
+  /** Epoch milliseconds */
+  readonly createdAt: number;
+}
+
+/**
+ * A role defined at runtime by one organization (dynamic access control).
+ *
+ * An `OrgRole` **replaces** the static {@link OrganizationConfig.roles} entry
+ * of the same name, for that organization only: permission resolution never
+ * merges the two, so a tenant's role grants exactly the permissions it lists.
+ * Permissions are `"resource:action"` strings and may use the `"*"` wildcard
+ * (`"team:*"`, `"*:*"`), matched with `permissionMatches`.
+ *
+ * The protected owner role (`config.creatorRole`, default `owner`) can never
+ * be redefined this way - see {@link OrganizationService.upsertOrgRole}.
+ */
+export interface OrgRole {
+  readonly organizationId: string;
+  /** Role name, as it appears on a {@link Member} */
+  readonly role: string;
+  /** `"resource:action"` permission strings, `"*"` wildcards allowed */
+  readonly permissions: ReadonlyArray<string>;
+  /** Epoch milliseconds */
+  readonly createdAt: number;
+  /** Epoch milliseconds */
+  readonly updatedAt: number;
+}
+
+/**
+ * Default role → permission map, mirroring better-auth's built-in
+ * organization roles. Permissions are `"resource:action"` strings.
+ *
+ * - `owner` - full control (organization update/delete, member, invitation
+ *   and team management, plus `role:manage` for custom organization roles)
+ * - `admin` - member, invitation and team management plus organization
+ *   updates, but cannot delete the organization or manage custom roles
+ * - `member` - read-only participant (no management permissions; may still
+ *   read the organization's teams)
+ *
+ * Override via {@link OrganizationConfig.roles}.
+ */
+export const defaultOrganizationRoles: Record<string, ReadonlyArray<string>> = {
+  owner: [
+    "organization:update",
+    "organization:delete",
+    "member:create",
+    "member:update",
+    "member:delete",
+    "invitation:create",
+    "invitation:cancel",
+    "team:create",
+    "team:update",
+    "team:delete",
+    "team:manage-members",
+    "role:manage",
+  ],
+  admin: [
+    "organization:update",
+    "member:create",
+    "member:update",
+    "member:delete",
+    "invitation:create",
+    "invitation:cancel",
+    "team:create",
+    "team:update",
+    "team:delete",
+    "team:manage-members",
+  ],
+  member: [],
+};
+
+/**
+ * Storage interface for organizations, members, invitations, teams, and
+ * custom organization roles. Implement with your preferred backend (SQL,
+ * Redis, ...).
+ *
+ * Note: `deleteOrganization` should cascade - implementations are expected to
+ * remove the organization's members, invitations, teams, team memberships,
+ * and custom roles ({@link OrgRole}) as well. `deleteTeam` cascades too: it
+ * must remove the team's team-member rows along with the team.
+ *
+ * Conventions: lookups answer `null` when the record does not exist, deletes
+ * of unknown ids are no-ops, and failures are reported as `AuthError`.
+ */
+export class OrganizationStore extends Context.Service<
+  OrganizationStore,
+  {
+    readonly createOrganization: (
+      organization: Organization,
+    ) => Effect.Effect<Organization, Errors.AuthError>;
+    readonly getOrganizationById: (
+      organizationId: string,
+    ) => Effect.Effect<Organization | null, Errors.AuthError>;
+    readonly getOrganizationBySlug: (
+      slug: string,
+    ) => Effect.Effect<Organization | null, Errors.AuthError>;
+    readonly updateOrganization: (
+      organization: Organization,
+    ) => Effect.Effect<Organization, Errors.AuthError>;
+    readonly deleteOrganization: (organizationId: string) => Effect.Effect<void, Errors.AuthError>;
+
+    readonly createMember: (member: Member) => Effect.Effect<Member, Errors.AuthError>;
+    readonly getMember: (
+      organizationId: string,
+      userId: string,
+    ) => Effect.Effect<Member | null, Errors.AuthError>;
+    readonly updateMember: (member: Member) => Effect.Effect<Member, Errors.AuthError>;
+    readonly deleteMember: (memberId: string) => Effect.Effect<void, Errors.AuthError>;
+    readonly listMembersByOrganization: (
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<Member>, Errors.AuthError>;
+    readonly listMembersByUser: (
+      userId: string,
+    ) => Effect.Effect<ReadonlyArray<Member>, Errors.AuthError>;
+    readonly countMembersByOrganization: (
+      organizationId: string,
+    ) => Effect.Effect<number, Errors.AuthError>;
+
+    readonly createInvitation: (
+      invitation: Invitation,
+    ) => Effect.Effect<Invitation, Errors.AuthError>;
+    readonly getInvitation: (
+      invitationId: string,
+    ) => Effect.Effect<Invitation | null, Errors.AuthError>;
+    readonly updateInvitation: (
+      invitation: Invitation,
+    ) => Effect.Effect<Invitation, Errors.AuthError>;
+    readonly listInvitationsByOrganization: (
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
+    readonly listInvitationsByEmail: (
+      email: string,
+    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
+
+    readonly createTeam: (team: Team) => Effect.Effect<Team, Errors.AuthError>;
+    readonly getTeam: (teamId: string) => Effect.Effect<Team | null, Errors.AuthError>;
+    /** Persist an updated team; answers `null` when the team no longer exists. */
+    readonly updateTeam: (team: Team) => Effect.Effect<Team | null, Errors.AuthError>;
+    /** Delete a team *and* its team-member rows. A no-op for unknown ids. */
+    readonly deleteTeam: (teamId: string) => Effect.Effect<void, Errors.AuthError>;
+    readonly listTeams: (
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<Team>, Errors.AuthError>;
+
+    readonly addTeamMember: (
+      teamId: string,
+      userId: string,
+    ) => Effect.Effect<TeamMember, Errors.AuthError>;
+    /** Remove a team membership. A no-op when the user is not in the team. */
+    readonly removeTeamMember: (
+      teamId: string,
+      userId: string,
+    ) => Effect.Effect<void, Errors.AuthError>;
+    readonly listTeamMembers: (
+      teamId: string,
+    ) => Effect.Effect<ReadonlyArray<TeamMember>, Errors.AuthError>;
+    /** The teams of `organizationId` that `userId` belongs to. */
+    readonly listTeamsForMember: (
+      organizationId: string,
+      userId: string,
+    ) => Effect.Effect<ReadonlyArray<Team>, Errors.AuthError>;
+
+    /**
+     * Create or replace a custom role definition, keyed by
+     * `(organizationId, role)`.
+     */
+    readonly upsertOrgRole: (orgRole: OrgRole) => Effect.Effect<OrgRole, Errors.AuthError>;
+    readonly getOrgRole: (
+      organizationId: string,
+      role: string,
+    ) => Effect.Effect<OrgRole | null, Errors.AuthError>;
+    readonly listOrgRoles: (
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<OrgRole>, Errors.AuthError>;
+    /** Delete a custom role definition. A no-op when it does not exist. */
+    readonly deleteOrgRole: (
+      organizationId: string,
+      role: string,
+    ) => Effect.Effect<void, Errors.AuthError>;
+  }
+>()("@effect-auth/OrganizationStore") {}
+
+/**
+ * Organization service configuration
+ */
+export interface OrganizationConfig {
+  /** Whether users may create organizations at all (default: true) */
+  readonly allowUserToCreateOrganization?: boolean;
+  /** Maximum number of organizations a user may belong to (default: 5) */
+  readonly organizationLimit?: number;
+  /** Maximum number of members per organization (default: 100) */
+  readonly membershipLimit?: number;
+  /** Invitation lifetime in milliseconds (default: 48 hours) */
+  readonly invitationExpiresIn?: number;
+  /** Role assigned to the creator of an organization (default: "owner").
+   * This role is also treated as the protected "owner" role for the
+   * last-owner safeguards in `removeMember`/`updateMemberRole`. */
+  readonly creatorRole?: string;
+  /**
+   * Static role → permission map (default: {@link defaultOrganizationRoles}).
+   * A per-organization {@link OrgRole} of the same name replaces the entry
+   * here for that organization.
+   */
+  readonly roles?: Record<string, ReadonlyArray<string>>;
+  /** Optional invitation email delivery */
+  readonly sendInvitationEmail?: (
+    invitation: Invitation,
+    organization: Organization,
+  ) => Effect.Effect<void, OrganizationError>;
+}
+
+/**
+ * Input for creating an organization
+ */
+export interface CreateOrganizationInput {
+  readonly name: string;
+  readonly slug: string;
+  readonly logo?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
+/**
+ * Partial update of an organization's fields
+ */
+export interface UpdateOrganizationInput {
+  readonly name?: string;
+  readonly slug?: string;
+  readonly logo?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
+/**
+ * Input for inviting a member by email
+ */
+export interface InviteMemberInput {
+  readonly email: string;
+  readonly role: string;
+}
+
+/**
+ * Input for creating a team
+ */
+export interface CreateTeamInput {
+  readonly name: string;
+}
+
+/**
+ * Partial update of a team's fields
+ */
+export interface UpdateTeamInput {
+  readonly name?: string;
+}
+
+/**
+ * Input for defining (or redefining) a custom organization role
+ */
+export interface UpsertOrgRoleInput {
+  /** Role name; the protected owner role is rejected */
+  readonly role: string;
+  /** `"resource:action"` permission strings, `"*"` wildcards allowed */
+  readonly permissions: ReadonlyArray<string>;
+}
+
+/**
+ * An organization together with its member list
+ */
+export interface FullOrganization {
+  readonly organization: Organization;
+  readonly members: ReadonlyArray<Member>;
+}
+
+/**
+ * Organization service
+ */
+export class OrganizationService extends Context.Service<
+  OrganizationService,
+  {
+    /**
+     * Create an organization. Enforces `allowUserToCreateOrganization`,
+     * `organizationLimit` (organizations the user already belongs to) and slug
+     * uniqueness. The creator becomes a member with `creatorRole`.
+     */
+    readonly createOrganization: (
+      userId: string,
+      input: CreateOrganizationInput,
+    ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Update an organization's fields. Requires the `organization:update`
+     * permission. Slug changes are checked for uniqueness.
+     */
+    readonly updateOrganization: (
+      userId: string,
+      organizationId: string,
+      updates: UpdateOrganizationInput,
+    ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Delete an organization. Requires the `organization:delete` permission.
+     */
+    readonly deleteOrganization: (
+      userId: string,
+      organizationId: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Fetch an organization together with all of its members.
+     */
+    readonly getFullOrganization: (
+      organizationId: string,
+    ) => Effect.Effect<FullOrganization, OrganizationError | Errors.AuthError>;
+
+    /**
+     * List the organizations a user belongs to.
+     */
+    readonly listOrganizations: (
+      userId: string,
+    ) => Effect.Effect<ReadonlyArray<Organization>, Errors.AuthError>;
+
+    /**
+     * Invite a user (by email) to the organization. Requires the
+     * `invitation:create` permission. Rejects duplicate pending invitations for
+     * the same email + organization and enforces `membershipLimit`. When
+     * `sendInvitationEmail` is configured it is invoked with the created
+     * invitation.
+     */
+    readonly inviteMember: (
+      inviterId: string,
+      organizationId: string,
+      input: InviteMemberInput,
+    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Accept a pending invitation. Validates that the invitation is pending,
+     * unexpired, and addressed to one of the user's email identifiers.
+     * Creates the membership and marks
+     * the invitation accepted.
+     */
+    readonly acceptInvitation: (
+      userId: string,
+      invitationId: string,
+    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Reject a pending invitation addressed to one of the user's email
+     * identifiers.
+     */
+    readonly rejectInvitation: (
+      userId: string,
+      invitationId: string,
+    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Cancel a pending invitation. The canceler needs the `invitation:cancel`
+     * permission in the invitation's organization.
+     */
+    readonly cancelInvitation: (
+      cancelerId: string,
+      invitationId: string,
+    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
+
+    /**
+     * List all invitations for an organization (any status).
+     */
+    readonly listInvitations: (
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
+
+    /**
+     * List pending, unexpired invitations addressed to an email.
+     */
+    readonly listUserInvitations: (
+      email: string,
+    ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
+
+    /**
+     * Add a user to the organization directly (no invitation). Requires the
+     * `member:create` permission and enforces `membershipLimit`.
+     */
+    readonly addMember: (
+      actorId: string,
+      organizationId: string,
+      userId: string,
+      role: string,
+    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Remove a member. Requires the `member:delete` permission. An owner can
+     * only be removed by another owner, and the last owner can never be
+     * removed. Cascades: the member's memberships in the organization's teams
+     * are removed as well.
+     */
+    readonly removeMember: (
+      actorId: string,
+      organizationId: string,
+      memberUserId: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Change a member's role. Requires the `member:update` permission. The last
+     * owner cannot be demoted.
+     */
+    readonly updateMemberRole: (
+      actorId: string,
+      organizationId: string,
+      memberUserId: string,
+      role: string,
+    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Create a team inside an organization. Requires the `team:create`
+     * permission.
+     */
+    readonly createTeam: (
+      actorUserId: string,
+      organizationId: string,
+      input: CreateTeamInput,
+    ) => Effect.Effect<Team, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Rename a team. Requires the `team:update` permission in the team's
+     * organization.
+     */
+    readonly updateTeam: (
+      actorUserId: string,
+      teamId: string,
+      input: UpdateTeamInput,
+    ) => Effect.Effect<Team, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Delete a team, along with its memberships. Requires the `team:delete`
+     * permission in the team's organization.
+     */
+    readonly deleteTeam: (
+      actorUserId: string,
+      teamId: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Add a user to a team. Requires the `team:manage-members` permission in
+     * the team's organization. The target user must already be a member of
+     * that organization, and must not already be in the team.
+     */
+    readonly addTeamMember: (
+      actorUserId: string,
+      teamId: string,
+      memberUserId: string,
+    ) => Effect.Effect<TeamMember, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Remove a user from a team. Requires the `team:manage-members` permission
+     * in the team's organization.
+     */
+    readonly removeTeamMember: (
+      actorUserId: string,
+      teamId: string,
+      memberUserId: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
+
+    /**
+     * List an organization's teams. Any member of the organization may do so.
+     */
+    readonly listTeams: (
+      actorUserId: string,
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<Team>, OrganizationError | Errors.AuthError>;
+
+    /**
+     * List a team's members. Any member of the team's organization may do so.
+     */
+    readonly listTeamMembers: (
+      actorUserId: string,
+      teamId: string,
+    ) => Effect.Effect<ReadonlyArray<TeamMember>, OrganizationError | Errors.AuthError>;
+
+    /**
+     * List the organization's teams a given user belongs to. Any member of the
+     * organization may do so.
+     */
+    readonly listTeamsForMember: (
+      actorUserId: string,
+      organizationId: string,
+      userId: string,
+    ) => Effect.Effect<ReadonlyArray<Team>, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Define or redefine a custom role for the organization. Requires the
+     * `role:manage` permission (owner-only by default).
+     *
+     * The definition *replaces* the static `config.roles` entry of the same
+     * name for this organization, and takes effect immediately for every
+     * member holding the role. Redefining the protected owner role
+     * (`config.creatorRole`, default `owner`) is refused with an
+     * `OrganizationError`: owner semantics stay static, so a tenant can never
+     * lock itself out of role management.
+     */
+    readonly upsertOrgRole: (
+      actorUserId: string,
+      organizationId: string,
+      input: UpsertOrgRoleInput,
+    ) => Effect.Effect<OrgRole, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Remove a custom role definition, falling back to the static
+     * `config.roles` entry (if any) for members still holding the role.
+     * Requires the `role:manage` permission; deleting the protected owner
+     * role is refused, and deleting a role that was never defined is a no-op.
+     */
+    readonly deleteOrgRole: (
+      actorUserId: string,
+      organizationId: string,
+      role: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
+
+    /**
+     * List the organization's custom role definitions. Any member of the
+     * organization may do so.
+     */
+    readonly listOrgRoles: (
+      actorUserId: string,
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<OrgRole>, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Whether the user's role in the organization grants the given
+     * `"resource:action"` permission - resolved against the organization's
+     * custom {@link OrgRole} first, then the static `config.roles` map, and
+     * denied when neither defines the role. Non-members simply get `false`.
+     */
+    readonly checkPermission: (
+      userId: string,
+      organizationId: string,
+      permission: string,
+    ) => Effect.Effect<boolean, Errors.AuthError>;
+
+    /**
+     * Like {@link checkPermission} but fails with `OrganizationError` when the
+     * permission is not granted.
+     */
+    readonly requirePermission: (
+      userId: string,
+      organizationId: string,
+      permission: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
+  }
+>()("@effect-auth/OrganizationService") {
+  /**
+   * Construct a Layer providing this service.
+   */
+  static readonly layer = (config: OrganizationConfig = {}) =>
+    Layer.effect(OrganizationService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
+}
+
+/**
+ * Create an organization service
+ */
+export const make = (
+  config: OrganizationConfig = {},
+): Effect.Effect<
+  typeof OrganizationService.Service,
+  never,
+  OrganizationStore | IdentifierStore | Crypto.Crypto
+> =>
+  Effect.gen(function* () {
+    const allowUserToCreateOrganization = config.allowUserToCreateOrganization ?? true;
+    const organizationLimit = config.organizationLimit ?? 5;
+    const membershipLimit = config.membershipLimit ?? 100;
+    const invitationExpiresIn = config.invitationExpiresIn ?? 48 * 60 * 60 * 1000; // 48 hours
+    const creatorRole = config.creatorRole ?? "owner";
+    const roles = config.roles ?? defaultOrganizationRoles;
+
+    const store = yield* OrganizationStore;
+    const identifiers = yield* IdentifierStore;
+    const crypto = yield* Crypto.Crypto;
+
+    /** Generate a random identifier for organizations, members, and invitations. */
+    const generateId = (): Effect.Effect<string, Errors.AuthError> =>
+      crypto.randomBytes(16).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate id", cause }),
+        ),
+      );
+
+    /**
+     * Whether one granted permission string satisfies a requested one.
+     *
+     * Exact equality first - that is the historical behavior of the static
+     * role map, and the only thing a string without a `:` separator can
+     * support - then `"*"` wildcard matching via `permissionMatches`, so
+     * `"team:*"` covers `"team:create"` exactly as an admin grant does.
+     * Unparseable grants never match anything but themselves.
+     */
+    const grantSatisfies = (granted: string, requested: string): boolean => {
+      if (granted === requested) return true;
+      try {
+        return permissionMatches(parsePermission(granted), parsePermission(requested));
+      } catch {
+        return false;
+      }
+    };
+
+    /**
+     * The permissions a role name resolves to in an organization: the custom
+     * {@link OrgRole} when one exists (it *replaces* the static entry - no
+     * merging), else the static `config.roles` entry, else `null` for an
+     * unknown role (fail closed: no permissions at all).
+     */
+    const resolveRolePermissions = (
+      organizationId: string,
+      role: string,
+    ): Effect.Effect<ReadonlyArray<string> | null, Errors.AuthError> =>
+      Effect.gen(function* () {
+        const custom = yield* store.getOrgRole(organizationId, role);
+        if (custom) return custom.permissions;
+        return roles[role] ?? null;
+      });
+
+    /** Whether a member's role grants a `"resource:action"` permission. */
+    const roleHasPermission = (
+      organizationId: string,
+      role: string,
+      permission: string,
+    ): Effect.Effect<boolean, Errors.AuthError> =>
+      Effect.map(
+        resolveRolePermissions(organizationId, role),
+        (permissions) =>
+          permissions !== null &&
+          permissions.some((granted) => grantSatisfies(granted, permission)),
+      );
+
+    /** Load an organization, failing when it does not exist. */
+    const getOrganizationOrFail = (organizationId: string) =>
+      Effect.gen(function* () {
+        const organization = yield* store.getOrganizationById(organizationId);
+        if (!organization) {
+          return yield* Effect.fail(new OrganizationError({ message: "Organization not found" }));
+        }
+        return organization;
+      });
+
+    /**
+     * Resolve the actor's membership and enforce a permission, returning the
+     * membership so callers can inspect the actor's role.
+     */
+    const requireMemberPermission = (userId: string, organizationId: string, permission: string) =>
+      Effect.gen(function* () {
+        const member = yield* store.getMember(organizationId, userId);
+        const granted =
+          member !== null && (yield* roleHasPermission(organizationId, member.role, permission));
+        if (!member || !granted) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: `Missing permission '${permission}' in this organization`,
+            }),
+          );
+        }
+        return member;
+      });
+
+    /**
+     * Resolve the actor's membership without requiring any permission - used
+     * by the read-only team listings, which any organization member may call.
+     */
+    const requireMembership = (userId: string, organizationId: string) =>
+      Effect.gen(function* () {
+        const member = yield* store.getMember(organizationId, userId);
+        if (!member) {
+          return yield* Effect.fail(
+            new OrganizationError({ message: "You are not a member of this organization" }),
+          );
+        }
+        return member;
+      });
+
+    /** Load a team, failing when it does not exist. */
+    const getTeamOrFail = (teamId: string) =>
+      Effect.gen(function* () {
+        const team = yield* store.getTeam(teamId);
+        if (!team) {
+          return yield* Effect.fail(new OrganizationError({ message: "Team not found" }));
+        }
+        return team;
+      });
+
+    /**
+     * Load a team and enforce a permission in *its* organization, returning the
+     * team so callers can use its `organizationId`.
+     */
+    const requireTeamPermission = (userId: string, teamId: string, permission: string) =>
+      Effect.gen(function* () {
+        const team = yield* getTeamOrFail(teamId);
+        yield* requireMemberPermission(userId, team.organizationId, permission);
+        return team;
+      });
+
+    /** Enforce the per-organization membership limit before adding a member. */
+    const ensureMembershipCapacity = (organizationId: string) =>
+      Effect.gen(function* () {
+        const count = yield* store.countMembersByOrganization(organizationId);
+        if (count >= membershipLimit) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "Organization has reached its membership limit",
+            }),
+          );
+        }
+      });
+
+    /** Number of members holding the protected owner (creator) role. */
+    const countOwners = (organizationId: string) =>
+      Effect.gen(function* () {
+        const members = yield* store.listMembersByOrganization(organizationId);
+        return members.filter((member) => member.role === creatorRole).length;
+      });
+
+    /**
+     * Refuse custom-role writes against the protected owner role: owner
+     * semantics stay static, so no tenant can define its way out of
+     * `role:manage` (or out of the last-owner safeguards).
+     */
+    const ensureNotOwnerRole = (role: string) =>
+      role === creatorRole
+        ? Effect.fail(
+            new OrganizationError({
+              message: `The '${creatorRole}' role is protected and cannot be redefined`,
+            }),
+          )
+        : Effect.void;
+
+    /** Create a membership record (after all checks have passed). */
+    const createMembership = (organizationId: string, userId: string, role: string) =>
+      Effect.gen(function* () {
+        const member: Member = {
+          id: yield* generateId(),
+          organizationId,
+          userId,
+          role,
+          createdAt: Date.now(),
+        };
+        return yield* store.createMember(member);
+      });
+
+    /**
+     * Load a pending invitation addressed to one of `userId`'s email
+     * identifiers, enforcing expiry. (Matching mirrors the pre-identifier
+     * behavior: the identifier does not need to be verified.)
+     */
+    const getPendingInvitationFor = (invitationId: string, userId: string) =>
+      Effect.gen(function* () {
+        const invitation = yield* store.getInvitation(invitationId);
+        if (!invitation) {
+          return yield* Effect.fail(new OrganizationError({ message: "Invitation not found" }));
+        }
+        if (invitation.status !== "pending") {
+          return yield* Effect.fail(
+            new OrganizationError({ message: "Invitation is no longer pending" }),
+          );
+        }
+        const userIdentifiers = yield* identifiers.listByUser(userId);
+        const ownsEmail = userIdentifiers.some(
+          (id) => id.type === "email" && id.value === normalizeEmail(invitation.email),
+        );
+        if (!ownsEmail) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "This invitation is addressed to a different email",
+            }),
+          );
+        }
+        if (Date.now() > invitation.expiresAt) {
+          return yield* Effect.fail(new OrganizationError({ message: "Invitation has expired" }));
+        }
+        return invitation;
+      });
+
+    return {
+      createOrganization: Effect.fn("OrganizationService.createOrganization")(function* (
+        userId: string,
+        input: CreateOrganizationInput,
+      ) {
+        if (!allowUserToCreateOrganization) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "Users are not allowed to create organizations",
+            }),
+          );
+        }
+
+        const memberships = yield* store.listMembersByUser(userId);
+        if (memberships.length >= organizationLimit) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: `You have reached the maximum of ${organizationLimit} organizations`,
+            }),
+          );
+        }
+
+        const existing = yield* store.getOrganizationBySlug(input.slug);
+        if (existing) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: `An organization with slug '${input.slug}' already exists`,
+            }),
+          );
+        }
+
+        const organization: Organization = {
+          id: yield* generateId(),
+          name: input.name,
+          slug: input.slug,
+          ...(input.logo !== undefined && { logo: input.logo }),
+          metadata: input.metadata ?? {},
+          createdAt: Date.now(),
+        };
+
+        const created = yield* store.createOrganization(organization);
+        yield* createMembership(created.id, userId, creatorRole);
+        return created;
+      }),
+
+      updateOrganization: Effect.fn("OrganizationService.updateOrganization")(function* (
+        userId: string,
+        organizationId: string,
+        updates: UpdateOrganizationInput,
+      ) {
+        yield* requireMemberPermission(userId, organizationId, "organization:update");
+
+        const organization = yield* getOrganizationOrFail(organizationId);
+
+        if (updates.slug !== undefined && updates.slug !== organization.slug) {
+          const existing = yield* store.getOrganizationBySlug(updates.slug);
+          if (existing) {
+            return yield* Effect.fail(
+              new OrganizationError({
+                message: `An organization with slug '${updates.slug}' already exists`,
+              }),
+            );
+          }
+        }
+
+        const updated: Organization = {
+          ...organization,
+          ...(updates.name !== undefined && { name: updates.name }),
+          ...(updates.slug !== undefined && { slug: updates.slug }),
+          ...(updates.logo !== undefined && { logo: updates.logo }),
+          ...(updates.metadata !== undefined && { metadata: updates.metadata }),
+        };
+
+        return yield* store.updateOrganization(updated);
+      }),
+
+      deleteOrganization: Effect.fn("OrganizationService.deleteOrganization")(function* (
+        userId: string,
+        organizationId: string,
+      ) {
+        yield* requireMemberPermission(userId, organizationId, "organization:delete");
+        yield* getOrganizationOrFail(organizationId);
+
+        yield* store.deleteOrganization(organizationId);
+      }),
+
+      getFullOrganization: Effect.fn("OrganizationService.getFullOrganization")(function* (
+        organizationId: string,
+      ) {
+        const organization = yield* getOrganizationOrFail(organizationId);
+        const members = yield* store.listMembersByOrganization(organizationId);
+        return { organization, members } satisfies FullOrganization;
+      }),
+
+      listOrganizations: Effect.fn("OrganizationService.listOrganizations")(function* (
+        userId: string,
+      ) {
+        const memberships = yield* store.listMembersByUser(userId);
+        const organizations = yield* Effect.forEach(memberships, (membership) =>
+          store.getOrganizationById(membership.organizationId),
+        );
+        return organizations.filter(
+          (organization): organization is Organization => organization !== null,
+        );
+      }),
+
+      inviteMember: Effect.fn("OrganizationService.inviteMember")(function* (
+        inviterId: string,
+        organizationId: string,
+        input: InviteMemberInput,
+      ) {
+        yield* requireMemberPermission(inviterId, organizationId, "invitation:create");
+        const organization = yield* getOrganizationOrFail(organizationId);
+        yield* ensureMembershipCapacity(organizationId);
+
+        const email = normalizeEmail(input.email);
+
+        const existingInvitations = yield* store.listInvitationsByEmail(email);
+        const now = Date.now();
+        const duplicate = existingInvitations.find(
+          (invitation) =>
+            invitation.organizationId === organizationId &&
+            invitation.status === "pending" &&
+            invitation.expiresAt > now,
+        );
+        if (duplicate) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "A pending invitation already exists for this email",
+            }),
+          );
+        }
+
+        const invitation: Invitation = {
+          id: yield* generateId(),
+          organizationId,
+          email,
+          role: input.role,
+          status: "pending",
+          inviterId,
+          expiresAt: now + invitationExpiresIn,
+          createdAt: now,
+        };
+
+        const created = yield* store.createInvitation(invitation);
+
+        if (config.sendInvitationEmail) {
+          yield* config.sendInvitationEmail(created, organization);
+        }
+
+        return created;
+      }),
+
+      acceptInvitation: Effect.fn("OrganizationService.acceptInvitation")(function* (
+        userId: string,
+        invitationId: string,
+      ) {
+        const invitation = yield* getPendingInvitationFor(invitationId, userId);
+
+        const existingMember = yield* store.getMember(invitation.organizationId, userId);
+        if (existingMember) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "You are already a member of this organization",
+            }),
+          );
+        }
+
+        yield* ensureMembershipCapacity(invitation.organizationId);
+
+        const member = yield* createMembership(invitation.organizationId, userId, invitation.role);
+        yield* store.updateInvitation({ ...invitation, status: "accepted" });
+        return member;
+      }),
+
+      rejectInvitation: Effect.fn("OrganizationService.rejectInvitation")(function* (
+        userId: string,
+        invitationId: string,
+      ) {
+        const invitation = yield* getPendingInvitationFor(invitationId, userId);
+        return yield* store.updateInvitation({ ...invitation, status: "rejected" });
+      }),
+
+      cancelInvitation: Effect.fn("OrganizationService.cancelInvitation")(function* (
+        cancelerId: string,
+        invitationId: string,
+      ) {
+        const invitation = yield* store.getInvitation(invitationId);
+        if (!invitation) {
+          return yield* Effect.fail(new OrganizationError({ message: "Invitation not found" }));
+        }
+        if (invitation.status !== "pending") {
+          return yield* Effect.fail(
+            new OrganizationError({ message: "Invitation is no longer pending" }),
+          );
+        }
+
+        yield* requireMemberPermission(cancelerId, invitation.organizationId, "invitation:cancel");
+
+        return yield* store.updateInvitation({ ...invitation, status: "canceled" });
+      }),
+
+      listInvitations: Effect.fn("OrganizationService.listInvitations")(function* (
+        organizationId: string,
+      ) {
+        return yield* store.listInvitationsByOrganization(organizationId);
+      }),
+
+      listUserInvitations: Effect.fn("OrganizationService.listUserInvitations")(function* (
+        email: string,
+      ) {
+        const invitations = yield* store.listInvitationsByEmail(email);
+        const now = Date.now();
+        return invitations.filter(
+          (invitation) => invitation.status === "pending" && invitation.expiresAt > now,
+        );
+      }),
+
+      addMember: Effect.fn("OrganizationService.addMember")(function* (
+        actorId: string,
+        organizationId: string,
+        userId: string,
+        role: string,
+      ) {
+        yield* requireMemberPermission(actorId, organizationId, "member:create");
+        yield* getOrganizationOrFail(organizationId);
+
+        const existing = yield* store.getMember(organizationId, userId);
+        if (existing) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "User is already a member of this organization",
+            }),
+          );
+        }
+
+        yield* ensureMembershipCapacity(organizationId);
+        return yield* createMembership(organizationId, userId, role);
+      }),
+
+      removeMember: Effect.fn("OrganizationService.removeMember")(function* (
+        actorId: string,
+        organizationId: string,
+        memberUserId: string,
+      ) {
+        const actor = yield* requireMemberPermission(actorId, organizationId, "member:delete");
+
+        const target = yield* store.getMember(organizationId, memberUserId);
+        if (!target) {
+          return yield* Effect.fail(new OrganizationError({ message: "Member not found" }));
+        }
+
+        if (target.role === creatorRole) {
+          if (actor.role !== creatorRole) {
+            return yield* Effect.fail(
+              new OrganizationError({ message: "Only an owner can remove another owner" }),
+            );
+          }
+          const owners = yield* countOwners(organizationId);
+          if (owners <= 1) {
+            return yield* Effect.fail(
+              new OrganizationError({
+                message: "The last owner of an organization cannot be removed",
+              }),
+            );
+          }
+        }
+
+        yield* store.deleteMember(target.id);
+        // Cascade: leaving the organization also leaves all of its teams.
+        const teams = yield* store.listTeamsForMember(organizationId, memberUserId);
+        yield* Effect.forEach(teams, (team) => store.removeTeamMember(team.id, memberUserId));
+      }),
+
+      updateMemberRole: Effect.fn("OrganizationService.updateMemberRole")(function* (
+        actorId: string,
+        organizationId: string,
+        memberUserId: string,
+        role: string,
+      ) {
+        yield* requireMemberPermission(actorId, organizationId, "member:update");
+
+        const target = yield* store.getMember(organizationId, memberUserId);
+        if (!target) {
+          return yield* Effect.fail(new OrganizationError({ message: "Member not found" }));
+        }
+
+        if (target.role === creatorRole && role !== creatorRole) {
+          const owners = yield* countOwners(organizationId);
+          if (owners <= 1) {
+            return yield* Effect.fail(
+              new OrganizationError({
+                message: "The last owner of an organization cannot be demoted",
+              }),
+            );
+          }
+        }
+
+        return yield* store.updateMember({ ...target, role });
+      }),
+
+      createTeam: Effect.fn("OrganizationService.createTeam")(function* (
+        actorUserId: string,
+        organizationId: string,
+        input: CreateTeamInput,
+      ) {
+        yield* requireMemberPermission(actorUserId, organizationId, "team:create");
+        yield* getOrganizationOrFail(organizationId);
+
+        const now = Date.now();
+        const team: Team = {
+          id: yield* generateId(),
+          organizationId,
+          name: input.name,
+          createdAt: now,
+          updatedAt: now,
+        };
+        return yield* store.createTeam(team);
+      }),
+
+      updateTeam: Effect.fn("OrganizationService.updateTeam")(function* (
+        actorUserId: string,
+        teamId: string,
+        input: UpdateTeamInput,
+      ) {
+        const team = yield* requireTeamPermission(actorUserId, teamId, "team:update");
+
+        const updated = yield* store.updateTeam({
+          ...team,
+          ...(input.name !== undefined && { name: input.name }),
+          updatedAt: Date.now(),
+        });
+        if (!updated) {
+          return yield* Effect.fail(new OrganizationError({ message: "Team not found" }));
+        }
+        return updated;
+      }),
+
+      deleteTeam: Effect.fn("OrganizationService.deleteTeam")(function* (
+        actorUserId: string,
+        teamId: string,
+      ) {
+        yield* requireTeamPermission(actorUserId, teamId, "team:delete");
+        // The store cascades the team's memberships.
+        yield* store.deleteTeam(teamId);
+      }),
+
+      addTeamMember: Effect.fn("OrganizationService.addTeamMember")(function* (
+        actorUserId: string,
+        teamId: string,
+        memberUserId: string,
+      ) {
+        const team = yield* requireTeamPermission(actorUserId, teamId, "team:manage-members");
+
+        const member = yield* store.getMember(team.organizationId, memberUserId);
+        if (!member) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "User is not a member of this organization",
+            }),
+          );
+        }
+
+        const existing = yield* store.listTeamMembers(teamId);
+        if (existing.some((teamMember) => teamMember.userId === memberUserId)) {
+          return yield* Effect.fail(
+            new OrganizationError({ message: "User is already a member of this team" }),
+          );
+        }
+
+        return yield* store.addTeamMember(teamId, memberUserId);
+      }),
+
+      removeTeamMember: Effect.fn("OrganizationService.removeTeamMember")(function* (
+        actorUserId: string,
+        teamId: string,
+        memberUserId: string,
+      ) {
+        yield* requireTeamPermission(actorUserId, teamId, "team:manage-members");
+        yield* store.removeTeamMember(teamId, memberUserId);
+      }),
+
+      listTeams: Effect.fn("OrganizationService.listTeams")(function* (
+        actorUserId: string,
+        organizationId: string,
+      ) {
+        yield* requireMembership(actorUserId, organizationId);
+        return yield* store.listTeams(organizationId);
+      }),
+
+      listTeamMembers: Effect.fn("OrganizationService.listTeamMembers")(function* (
+        actorUserId: string,
+        teamId: string,
+      ) {
+        const team = yield* getTeamOrFail(teamId);
+        yield* requireMembership(actorUserId, team.organizationId);
+        return yield* store.listTeamMembers(teamId);
+      }),
+
+      listTeamsForMember: Effect.fn("OrganizationService.listTeamsForMember")(function* (
+        actorUserId: string,
+        organizationId: string,
+        userId: string,
+      ) {
+        yield* requireMembership(actorUserId, organizationId);
+        return yield* store.listTeamsForMember(organizationId, userId);
+      }),
+
+      upsertOrgRole: Effect.fn("OrganizationService.upsertOrgRole")(function* (
+        actorUserId: string,
+        organizationId: string,
+        input: UpsertOrgRoleInput,
+      ) {
+        yield* requireMemberPermission(actorUserId, organizationId, "role:manage");
+        yield* getOrganizationOrFail(organizationId);
+        yield* ensureNotOwnerRole(input.role);
+
+        const now = Date.now();
+        const existing = yield* store.getOrgRole(organizationId, input.role);
+        return yield* store.upsertOrgRole({
+          organizationId,
+          role: input.role,
+          permissions: input.permissions,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        });
+      }),
+
+      deleteOrgRole: Effect.fn("OrganizationService.deleteOrgRole")(function* (
+        actorUserId: string,
+        organizationId: string,
+        role: string,
+      ) {
+        yield* requireMemberPermission(actorUserId, organizationId, "role:manage");
+        yield* ensureNotOwnerRole(role);
+        yield* store.deleteOrgRole(organizationId, role);
+      }),
+
+      listOrgRoles: Effect.fn("OrganizationService.listOrgRoles")(function* (
+        actorUserId: string,
+        organizationId: string,
+      ) {
+        yield* requireMembership(actorUserId, organizationId);
+        return yield* store.listOrgRoles(organizationId);
+      }),
+
+      checkPermission: Effect.fn("OrganizationService.checkPermission")(function* (
+        userId: string,
+        organizationId: string,
+        permission: string,
+      ) {
+        const member = yield* store.getMember(organizationId, userId);
+        if (!member) return false;
+        return yield* roleHasPermission(organizationId, member.role, permission);
+      }),
+
+      requirePermission: Effect.fn("OrganizationService.requirePermission")(
+        (userId: string, organizationId: string, permission: string) =>
+          requireMemberPermission(userId, organizationId, permission).pipe(Effect.asVoid),
+      ),
+    };
+  });

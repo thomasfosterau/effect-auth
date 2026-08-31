@@ -1,0 +1,74 @@
+{
+  "name": "@thomasfosterau/effect-auth-drizzle",
+  "version": "0.1.0",
+  "description": "PostgreSQL, SQLite and MySQL storage layers for effect-auth built on Drizzle ORM.",
+  "keywords": [
+    "auth",
+    "drizzle",
+    "drizzle-orm",
+    "effect",
+    "effect-auth",
+    "mysql",
+    "postgres",
+    "postgresql",
+    "sqlite",
+    "storage"
+  ],
+  "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
+  "bugs": {
+    "url": "https://github.com/thomasfosterau/effect-auth/issues"
+  },
+  "license": "MIT",
+  "author": "Thomas Foster <me@thomasfoster.au>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thomasfosterau/effect-auth.git",
+    "directory": "packages/drizzle"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vp test run",
+    "typecheck": "tsc --noEmit && vp test --typecheck --run"
+  },
+  "dependencies": {
+    "@thomasfosterau/effect-auth": "workspace:*"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^26.1.0",
+    "@types/pg": "^8.15.0",
+    "better-sqlite3": "^11.7.0",
+    "drizzle-orm": "^0.45.0",
+    "effect": ">=4.0.0-beta.93"
+  },
+  "peerDependencies": {
+    "@types/pg": "^8.15.0",
+    "drizzle-orm": ">=0.44.0",
+    "effect": ">=4.0.0-beta.93"
+  },
+  "peerDependenciesMeta": {
+    "@types/pg": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.18.0 || >=24.11.0"
+  }
+}

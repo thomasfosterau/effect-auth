@@ -1,7 +1,30 @@
 {
   "name": "@thomasfosterau/effect-auth",
   "version": "0.1.0",
+  "description": "An experimental Auth library for Effect.",
+  "keywords": [
+    "auth",
+    "authentication",
+    "authorization",
+    "effect",
+    "session"
+  ],
+  "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
+  "bugs": {
+    "url": "https://github.com/thomasfosterau/effect-auth/issues"
+  },
+  "license": "MIT",
+  "author": "Thomas Foster <me@thomasfoster.au>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thomasfosterau/effect-auth.git",
+    "directory": "packages/effect-auth"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -21,10 +44,6 @@
       "types": "./dist/oauth/index.d.ts",
       "import": "./dist/oauth/index.js"
     },
-    "./session": {
-      "types": "./dist/session/index.d.ts",
-      "import": "./dist/session/index.js"
-    },
     "./password": {
       "types": "./dist/password/index.d.ts",
       "import": "./dist/password/index.js"
@@ -33,12 +52,28 @@
       "types": "./dist/plugins/index.d.ts",
       "import": "./dist/plugins/index.js"
     },
-    "./authz": {
-      "types": "./dist/authz/index.d.ts",
-      "import": "./dist/authz/index.js"
+    "./multifactor": {
+      "types": "./dist/multifactor/index.d.ts",
+      "import": "./dist/multifactor/index.js"
     }
   },
   "publishConfig": {
     "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vp test run",
+    "typecheck": "tsc --noEmit && vp test --typecheck --run",
+    "docs": "docgen"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "effect": ">=4.0.0-beta.93"
+  },
+  "peerDependencies": {
+    "effect": ">=4.0.0-beta.93"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.18.0 || >=24.11.0"
   }
 }

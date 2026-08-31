@@ -25,21 +25,28 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🏢 **Organizations & Admin**: Multi-tenant organizations (members, invitations, roles) and admin tooling (ban, impersonate)
 - 🗝️ **API Keys & JWT**: Hashed API keys with permissions/quotas; ES256/EdDSA JWTs with JWKS
 - 🌍 **HTTP Protocol**: A typed `effect/unstable/httpapi` contract serving the whole surface as a mountable Web handler with a derived typed client, session cookies, and trusted-origin CSRF protection
-- 📖 **OpenAPI Document + Reference UI**: Derive an OpenAPI 3.1 spec from the HTTP contract (`HTTP.getOpenApiSpec()`) and optionally serve it plus a Scalar reference page via `HTTP.make({ docs: true })`
+- 📖 **OpenAPI Document + Reference UI**: Derive an OpenAPI 3.1 spec from the HTTP contract (`Http.getOpenApiSpec()`) and optionally serve it plus a Scalar reference page via `Http.make({ docs: true })`
 - 🍪 **Session Cookie Cache**: Optional HMAC-signed session-data cookie (`cookie.cache`) that serves authenticated requests without a session-store read for a short window
 - 🏛️ **Enterprise SSO**: OIDC relying party with per-organization connections, email-domain routing, and first-login provisioning
 - 🪞 **OIDC Provider**: Act as an OpenID Connect identity provider — client registry, authorization-code flow with PKCE, consent, opaque access/refresh tokens, id_tokens on a shared JWKS, and discovery metadata
+- 🔌 **MCP / dynamic client registration**: RFC 7591 self-registration (with RFC 7592 management) and RFC 8414 authorization-server metadata, so MCP clients can register and sign in unattended — see the [MCP provider guide](./docs/guides/mcp-provider.md)
 - 🅶 **Google One Tap**: Verify the One Tap credential against Google's JWKS and sign in by verified email
 - 🧠 **Last Login Method**: A hooks plugin + non-httpOnly cookie hint so login pages can highlight the user's previous sign-in method
 - 👥 **Multi-Session**: Several signed-in accounts per browser with list/switch/revoke endpoints
 
 ## Packages
 
-| Package                | Purpose                                                    |
-| ---------------------- | ---------------------------------------------------------- |
-| `effect-auth`          | The core library: every module above, `node:crypto` only   |
-| `@effect-auth/sql`     | Driver-agnostic SQL storage layers (`effect/unstable/sql`) |
-| `@effect-auth/alchemy` | Alchemy v2 infra resources + Cloudflare D1 storage layers  |
+| Package                               | Purpose                                                        |
+| ------------------------------------- | -------------------------------------------------------------- |
+| `@thomasfosterau/effect-auth`         | The core library: every module above, `effect` as the only dep |
+| `@thomasfosterau/effect-auth-client`  | Typed browser client + observable session store                |
+| `@thomasfosterau/effect-auth-react`   | React hooks and form components over the browser client        |
+| `@thomasfosterau/effect-auth-svelte`  | Svelte stores and form components over the browser client      |
+| `@thomasfosterau/effect-auth-vue`     | Vue composables and form components over the browser client    |
+| `@thomasfosterau/effect-auth-solid`   | Solid primitives and form components over the browser client   |
+| `@thomasfosterau/effect-auth-sql`     | Driver-agnostic SQL storage layers (`effect/unstable/sql`)     |
+| `@thomasfosterau/effect-auth-alchemy` | Alchemy v2 `AuthSchema` resource + D1-backed storage layers    |
+| `@thomasfosterau/effect-auth-argon2`  | Argon2id `PasswordHasher` on WASM (`hash-wasm`)                |
 
 ## Installation
 
@@ -186,7 +193,7 @@ import { Effect, Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // Implement your role store
-const roleStore: typeof Auth.Authz.RoleStore.Service = {
+const roleStore: typeof Auth.RoleStore.Service = {
   getUserRoles: (userId) => Effect.succeed(["admin", "user"]),
   getRolePermissions: (role) =>
     Effect.succeed([
@@ -195,20 +202,20 @@ const roleStore: typeof Auth.Authz.RoleStore.Service = {
     ]),
 };
 
-// `Authz.AuthorizationPolicy` only exposes `.layer()` (its raw `make` isn't
-// re-exported from the `authz` barrel), so provide it as a Layer.
-const layer = Auth.Authz.AuthorizationPolicy.layer().pipe(
-  Layer.provide(Layer.succeed(Auth.Authz.RoleStore)(roleStore)),
+// `AuthorizationPolicy` only exposes `.layer()` (its raw `make` isn't
+// re-exported from the root barrel), so provide it as a Layer.
+const layer = Auth.AuthorizationPolicy.layer().pipe(
+  Layer.provide(Layer.succeed(Auth.RoleStore)(roleStore)),
 );
 
 const program = Effect.gen(function* () {
-  const policy = yield* Auth.Authz.AuthorizationPolicy;
+  const policy = yield* Auth.AuthorizationPolicy;
 
   // Check permission
   const canCreate = yield* policy.checkPermission("user-123", "posts", "create");
 
   // Or require permission (throws if denied)
-  yield* Auth.Authz.requirePermission("user-123", "posts", "create");
+  yield* Auth.requirePermission("user-123", "posts", "create");
 });
 
 const result = await Effect.runPromise(Effect.provide(program, layer));
@@ -242,10 +249,10 @@ const program = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   // Generate a secret for the user
-  const secret = yield* Auth.SecondFactor.generateBase32Secret(crypto, 20);
+  const secret = yield* Auth.MultiFactor.generateBase32Secret(crypto, 20);
 
   // Generate a QR code URI for the user to scan
-  const uri = Auth.SecondFactor.generateOTPURI({
+  const uri = Auth.MultiFactor.generateOtpUri({
     type: "totp",
     label: "user@example.com",
     issuer: "MyApp",
@@ -257,7 +264,7 @@ const program = Effect.gen(function* () {
 
   // When the user submits a token, verify it
   const userToken = "123456"; // From user input
-  const isValid = yield* Auth.SecondFactor.verifyTOTP(userToken, secret);
+  const isValid = yield* Auth.MultiFactor.verifyTotp(userToken, secret);
 
   if (isValid) {
     // Token is valid, proceed with authentication
@@ -281,13 +288,13 @@ const program = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   // Generate a secret for the user
-  const secret = yield* Auth.SecondFactor.generateBase32Secret(crypto, 20);
+  const secret = yield* Auth.MultiFactor.generateBase32Secret(crypto, 20);
 
   // Store initial counter (typically 0) for the user
   let counter = 0;
 
   // Generate a QR code URI
-  const uri = Auth.SecondFactor.generateOTPURI({
+  const uri = Auth.MultiFactor.generateOtpUri({
     type: "hotp",
     label: "user@example.com",
     issuer: "MyApp",
@@ -300,7 +307,7 @@ const program = Effect.gen(function* () {
 
   // When the user submits a token, verify it
   const userToken = "123456"; // From user input
-  const isValid = yield* Auth.SecondFactor.verifyHOTP(userToken, secret, counter);
+  const isValid = yield* Auth.MultiFactor.verifyHotp(userToken, secret, counter);
 
   if (isValid) {
     // Token is valid, increment counter for next use
@@ -324,23 +331,23 @@ Both TOTP and HOTP support custom configurations:
 
 ```typescript
 // TOTP with custom settings
-const totpConfig: Auth.SecondFactor.TOTPConfig = {
+const totpConfig: Auth.MultiFactor.TotpConfig = {
   period: 60, // 60-second time window (default: 30)
   digits: 8, // 8-digit codes (default: 6)
   algorithm: "sha256", // Use SHA-256 (default: "sha1")
   window: 2, // Accept tokens from ±2 time steps (default: 1)
 };
 
-const token = yield * Auth.SecondFactor.generateTOTP(secret, totpConfig);
-const isValid = yield * Auth.SecondFactor.verifyTOTP(token, secret, totpConfig);
+const token = yield * Auth.MultiFactor.generateTotp(secret, totpConfig);
+const isValid = yield * Auth.MultiFactor.verifyTotp(token, secret, totpConfig);
 
 // HOTP with custom settings
-const hotpConfig: Auth.SecondFactor.HOTPConfig = {
+const hotpConfig: Auth.MultiFactor.HotpConfig = {
   digits: 8, // 8-digit codes (default: 6)
   algorithm: "sha512", // Use SHA-512 (default: "sha1")
 };
 
-const hotpToken = yield * Auth.SecondFactor.generateHOTP(secret, counter, hotpConfig);
+const hotpToken = yield * Auth.MultiFactor.generateHotp(secret, counter, hotpConfig);
 ```
 
 ## WebAuthn / Passkeys
@@ -354,14 +361,14 @@ import * as Auth from "@thomasfosterau/effect-auth";
 // Implement challenge store (temporary storage for challenges). Stores are
 // "dumb persistence" — lookups return `null` on a miss; the service converts
 // that into a typed `ChallengeNotFoundError`/`CredentialNotFoundError`.
-const challengeStore: typeof Auth.SecondFactor.ChallengeStore.Service = {
+const challengeStore: typeof Auth.MultiFactor.ChallengeStore.Service = {
   create: (challenge) => Effect.succeed(challenge), // Store in Redis/memory
   get: (challenge) => Effect.succeed(null), // null if not found
   delete: (challenge) => Effect.void,
 };
 
 // Implement credential store (persistent storage for passkeys)
-const credentialStore: typeof Auth.SecondFactor.CredentialStore.Service = {
+const credentialStore: typeof Auth.MultiFactor.CredentialStore.Service = {
   create: (credential) => Effect.succeed(credential), // Store in database
   get: (credentialId) => Effect.succeed(null), // null if not found
   // Resolve by the raw credential id; used on the discoverable/usernameless login path.
@@ -371,7 +378,7 @@ const credentialStore: typeof Auth.SecondFactor.CredentialStore.Service = {
   listByUserId: (userId) => Effect.succeed([]), // Return all user's credentials
 };
 
-const webAuthnConfig: Auth.SecondFactor.WebAuthnConfig = {
+const webAuthnConfig: Auth.MultiFactor.WebAuthnConfig = {
   relyingPartyId: "example.com",
   relyingPartyName: "Example Corp",
   expectedOrigin: "https://example.com",
@@ -380,18 +387,18 @@ const webAuthnConfig: Auth.SecondFactor.WebAuthnConfig = {
 
 // `WebAuthnService` only exposes `.layer()` (its raw `make` isn't re-exported
 // from the package root), so provide it as a Layer.
-const WebAuthnLive = Auth.SecondFactor.WebAuthnService.layer(webAuthnConfig).pipe(
+const WebAuthnLive = Auth.MultiFactor.WebAuthnService.layer(webAuthnConfig).pipe(
   Layer.provide(
     Layer.mergeAll(
-      Layer.succeed(Auth.SecondFactor.ChallengeStore)(challengeStore),
-      Layer.succeed(Auth.SecondFactor.CredentialStore)(credentialStore),
+      Layer.succeed(Auth.MultiFactor.ChallengeStore)(challengeStore),
+      Layer.succeed(Auth.MultiFactor.CredentialStore)(credentialStore),
     ),
   ),
 );
 
 // Registration flow
 const registerPasskey = Effect.gen(function* () {
-  const service = yield* Auth.SecondFactor.WebAuthnService;
+  const service = yield* Auth.MultiFactor.WebAuthnService;
 
   // Step 1: Generate challenge
   const { challenge } = yield* service.generateRegistrationChallenge({
@@ -416,7 +423,7 @@ const registerPasskey = Effect.gen(function* () {
 
 // Authentication flow
 const authenticateWithPasskey = Effect.gen(function* () {
-  const service = yield* Auth.SecondFactor.WebAuthnService;
+  const service = yield* Auth.MultiFactor.WebAuthnService;
 
   // Step 1: Generate challenge
   const { challenge } = yield* service.generateAuthenticationChallenge("user-123");
@@ -770,9 +777,9 @@ Flat root exports (`Auth.X`) unless noted:
 - `SessionConfig`: Configuration for session expiration
 - `HashedPassword`: Hashed password with algorithm info
 - `Permission`: Permission check result
-- `TOTPConfig`: Configuration for TOTP generation and verification
-- `HOTPConfig`: Configuration for HOTP generation and verification
-- `OTPURIParams`: Parameters for generating OTP URIs (for QR codes)
+- `TotpConfig`: Configuration for TOTP generation and verification
+- `HotpConfig`: Configuration for HOTP generation and verification
+- `OtpUriParams`: Parameters for generating OTP URIs (for QR codes)
 - `WebAuthnChallenge`: Temporary challenge for WebAuthn operations
 - `WebAuthnCredential`: Stored passkey credential
 - `WebAuthnConfig`: Configuration for WebAuthn service
@@ -795,8 +802,8 @@ Flat root exports (`Auth.X`) unless noted:
 - `UserStore`: Interface for user data retrieval
 - `SessionService`: Service for managing sessions
 - `Auth.Password.PasswordHasher`: Service for password hashing and verification
-- `Auth.Authz.AuthorizationPolicy`: Interface for permission checking
-- `Auth.Authz.RoleStore`: Interface for role-based authorization
+- `Auth.AuthorizationPolicy`: Interface for permission checking
+- `Auth.RoleStore`: Interface for role-based authorization
 - `ChallengeStore`: Interface for WebAuthn challenge storage
 - `CredentialStore`: Interface for WebAuthn credential storage
 - `WebAuthnService`: Service for passkey registration and authentication
@@ -843,11 +850,11 @@ All OTP functions return Effect types for composability:
 - `generateBase32Secret(crypto, length?)`: Generate a base32-encoded secret
 - `encodeBase32(buffer)`: Encode bytes to base32 string
 - `decodeBase32(base32)`: Decode base32 string to bytes
-- `generateHOTP(secret, counter, config?)`: Generate HOTP token
-- `verifyHOTP(token, secret, counter, config?)`: Verify HOTP token
-- `generateTOTP(secret, config?)`: Generate TOTP token
-- `verifyTOTP(token, secret, config?)`: Verify TOTP token
-- `generateOTPURI(params)`: Generate OTP URI for QR codes
+- `generateHotp(secret, counter, config?)`: Generate HOTP token
+- `verifyHotp(token, secret, counter, config?)`: Verify HOTP token
+- `generateTotp(secret, config?)`: Generate TOTP token
+- `verifyTotp(token, secret, config?)`: Verify TOTP token
+- `generateOtpUri(params)`: Generate OTP URI for QR codes
 
 ### Errors
 
@@ -902,7 +909,7 @@ Following Oslo guidelines:
 
 ## Security
 
-Security is our top priority. See our [Security Policy](./SECURITY.md) for:
+Security is our top priority. See our [Security Policy](./docs/SECURITY.md) for:
 
 - How to report security vulnerabilities
 - Security guarantees and considerations
@@ -981,37 +988,24 @@ Following BetterAuth and OWASP guidelines:
 6. Use distributed rate limiting for multi-server deployments
 7. Configure appropriate limits per operation type
 
-## Examples
-
-See the `examples/` directory for complete examples:
-
-- Basic session management
-- User authentication flow
-- Role-based access control
-- Custom storage adapters
-- WebAuthn passkey authentication
-- OAuth2 social login integration
-- Email verification flows
-- Rate limiting implementation
-
 ## Documentation
 
-- [Contributing Guide](./CONTRIBUTING.md) - How to contribute to this project
-- [Agent Guidelines](./AGENT_GUIDELINES.md) - Guidelines for agents and contributors
-- [Architecture](./ARCHITECTURE.md) - Architectural overview and design patterns
-- [Security Policy](./SECURITY.md) - Security best practices and vulnerability reporting
-- [BetterAuth Integration](./docs/BETTERAUTH_INTEGRATION.md) - Detailed BetterAuth feature integration guide
-- [Multi-Algorithm Support](./docs/MULTI_ALGORITHM.md) - Guide for multiple password hashing algorithms
+- [Contributing Guide](./docs/CONTRIBUTING.md) - How to contribute to this project
+- [Architecture](./docs/ARCHITECTURE.md) - Architectural overview and design patterns
+- [Bring Your Own Store](./docs/guides/byo-stores.md) - Store-contract conventions, atomicity rules, and a worked example for any database
+- [MCP Provider Guide](./docs/guides/mcp-provider.md) - Dynamic client registration and PKCE auth-code for MCP clients
+- [Migrating from Better Auth](./docs/guides/better-auth-migration.md) - Concept map, flow equivalents, client swap, and schema migration
+- [Security Policy](./docs/SECURITY.md) - Security best practices and vulnerability reporting
+- [Better Auth Parity Plan](./docs/better-auth-parity.md) - Target architecture, roadmap, and feature parity tracking
 
 ## Contributing
 
-Contributions are welcome! Please see our [Contributing Guide](./CONTRIBUTING.md) for details.
+Contributions are welcome! Please see our [Contributing Guide](./docs/CONTRIBUTING.md) for details.
 
 Before contributing, please review:
 
-- [Contributing Guide](./CONTRIBUTING.md) for the development workflow
-- [Agent Guidelines](./AGENT_GUIDELINES.md) for coding standards and security requirements
-- [Security Policy](./SECURITY.md) for security considerations
+- [Contributing Guide](./docs/CONTRIBUTING.md) for the development workflow
+- [Security Policy](./docs/SECURITY.md) for security considerations
 
 ## License
 

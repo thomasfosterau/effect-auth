@@ -1,0 +1,309 @@
+/**
+ * Identifier domain: a surrogate-keyed model for user identity credentials.
+ *
+ * An `Identifier` is a verified or unverified claim that a user owns a
+ * particular value for a given type — an email address, a username, or a phone
+ * number. This separates identity claims from the `User` record itself, enabling
+ * a user to have multiple emails, rename their username, or add phone as a
+ * second factor without changing the user's primary key.
+ *
+ * Since the surrogate-key migration, identifiers are the **only** place
+ * login handles live: `User` carries no `email`/`emailVerified` fields, and
+ * every flow that resolves "who owns this email/username/phone" goes through
+ * the {@link IdentifierStore}.
+ */
+import { Context, Data, Effect, Schema } from "effect";
+import * as Errors from "./Errors.ts";
+import * as Types from "./Types.ts";
+
+// ---------------------------------------------------------------------------
+// Domain type
+// ---------------------------------------------------------------------------
+
+/** The three first-class identifier types. */
+export type IdentifierType = "email" | "username" | "phone";
+
+/**
+ * An `Identifier` is a normalized, globally-unique claim that a user owns a
+ * value for a given type.
+ *
+ * Uniqueness is enforced on `(type, value)` — the same email address cannot
+ * belong to two users, and neither can the same username or phone number.
+ *
+ * `value` is stored in normalized form: email addresses are trimmed and
+ * lowercased; usernames are trimmed and lowercased; phone numbers are stored
+ * in E.164 form (app policy; the store does not normalize).
+ */
+export const Identifier = Schema.Struct({
+  id: Schema.String,
+  userId: Schema.String,
+  type: Schema.Literals(["email", "username", "phone"]),
+  value: Schema.String,
+  verified: Schema.Boolean,
+  verifiedAt: Schema.optional(Schema.Date),
+  createdAt: Schema.Date,
+});
+export type Identifier = typeof Identifier.Type;
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/** Raised by services that need a specific identifier and find none. */
+export class IdentifierNotFoundError extends Data.TaggedError("IdentifierNotFoundError")<{
+  readonly message: string;
+  readonly id?: string;
+}> {}
+
+/**
+ * Raised by {@link claimIdentifier} when the `(type, value)` pair already
+ * belongs to another user. The value is deliberately omitted so the error can
+ * be logged without leaking the handle.
+ */
+export class IdentifierTakenError extends Data.TaggedError("IdentifierTakenError")<{
+  readonly message: string;
+  readonly identifierType: IdentifierType;
+}> {}
+
+// ---------------------------------------------------------------------------
+// Store contract (D3 conventions: null on miss, AuthError for infra failures)
+// ---------------------------------------------------------------------------
+
+/** Tag for the `IdentifierStore` service. */
+export class IdentifierStore extends Context.Service<
+  IdentifierStore,
+  {
+    /**
+     * Look up an identifier by its `(type, value)` pair (the natural unique key).
+     * Returns `null` when no matching record exists.
+     */
+    readonly getByValue: (
+      type: IdentifierType,
+      value: string,
+    ) => Effect.Effect<Identifier | null, Errors.AuthError>;
+
+    /**
+     * List all identifiers for a user, ordered by `createdAt` ascending.
+     * Returns an empty array when the user has no identifiers.
+     */
+    readonly listByUser: (
+      userId: string,
+    ) => Effect.Effect<ReadonlyArray<Identifier>, Errors.AuthError>;
+
+    /** Persist a new identifier record. */
+    readonly create: (identifier: Identifier) => Effect.Effect<Identifier, Errors.AuthError>;
+
+    /**
+     * Mark an identifier as verified, recording the timestamp.
+     * Returns `null` when no identifier with the given `id` exists.
+     */
+    readonly setVerified: (
+      id: string,
+      verifiedAt: Date,
+    ) => Effect.Effect<Identifier | null, Errors.AuthError>;
+
+    /**
+     * Delete a single identifier by `id`.
+     * No-ops silently when the identifier does not exist.
+     */
+    readonly delete: (id: string) => Effect.Effect<void, Errors.AuthError>;
+
+    /**
+     * Delete all identifiers for a user (e.g. on account deletion).
+     * No-ops silently when the user has no identifiers.
+     */
+    readonly deleteByUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+  }
+>()("@effect-auth/IdentifierStore") {}
+
+// ---------------------------------------------------------------------------
+// Read views & helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * A `User` enriched with all of their identifiers. This is a read-only view:
+ * it is never written to any store directly.
+ */
+export const UserWithIdentifiers = Schema.Struct({
+  user: Types.User,
+  identifiers: Schema.Array(Identifier),
+});
+export type UserWithIdentifiers = typeof UserWithIdentifiers.Type;
+
+/**
+ * Return the first verified email identifier for a user, or `null` if none
+ * exists. When the user has multiple verified email identifiers the one with
+ * the earliest `createdAt` is considered primary.
+ */
+export const primaryEmail = (identifiers: ReadonlyArray<Identifier>): Identifier | null => {
+  const verified = identifiers
+    .filter((id) => id.type === "email" && id.verified)
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  return verified[0] ?? null;
+};
+
+/**
+ * Return the primary email _value_ string, or `null`.
+ * Convenience wrapper over {@link primaryEmail}.
+ */
+export const primaryEmailValue = (identifiers: ReadonlyArray<Identifier>): string | null =>
+  primaryEmail(identifiers)?.value ?? null;
+
+/**
+ * Return the user's email of record for delivery/display: the primary
+ * (earliest verified) email identifier when one exists, otherwise the
+ * earliest email identifier of any verification state, otherwise `null`.
+ */
+export const anyEmail = (identifiers: ReadonlyArray<Identifier>): Identifier | null => {
+  const primary = primaryEmail(identifiers);
+  if (primary !== null) return primary;
+  const emails = identifiers
+    .filter((id) => id.type === "email")
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  return emails[0] ?? null;
+};
+
+/** Convenience wrapper over {@link anyEmail} returning the value string. */
+export const anyEmailValue = (identifiers: ReadonlyArray<Identifier>): string | null =>
+  anyEmail(identifiers)?.value ?? null;
+
+/** Construct a new (unpersisted) identifier record with a random id. */
+export const makeIdentifier = (input: {
+  readonly userId: string;
+  readonly type: IdentifierType;
+  readonly value: string;
+  readonly verified?: boolean;
+  readonly verifiedAt?: Date;
+  readonly now?: Date;
+}): Identifier => {
+  const now = input.now ?? new Date();
+  return {
+    id: globalThis.crypto.randomUUID(),
+    userId: input.userId,
+    type: input.type,
+    value: input.value,
+    verified: input.verified ?? false,
+    ...(input.verifiedAt !== undefined ? { verifiedAt: input.verifiedAt } : {}),
+    createdAt: now,
+  };
+};
+
+/**
+ * Claim a `(type, value)` identifier for a user.
+ *
+ * The store's unique index on `(type, value)` is the real claim mechanism;
+ * this helper adds a readable failure mode: when `create` fails and the pair
+ * turns out to exist (a concurrent claim, or a pre-existing owner), the
+ * failure is an {@link IdentifierTakenError}; infrastructure errors pass
+ * through as `AuthError`. On an `IdentifierTakenError` the caller's freshly
+ * created user (if any) may be orphaned — compensate or surface per flow.
+ */
+export const claimIdentifier = (
+  store: typeof IdentifierStore.Service,
+  identifier: Identifier,
+): Effect.Effect<Identifier, Errors.AuthError | IdentifierTakenError> =>
+  Effect.gen(function* () {
+    const existing = yield* store.getByValue(identifier.type, identifier.value);
+    if (existing !== null) {
+      return yield* Effect.fail(
+        new IdentifierTakenError({
+          message: `This ${identifier.type} is already in use`,
+          identifierType: identifier.type,
+        }),
+      );
+    }
+    return yield* store.create(identifier).pipe(
+      Effect.catchTag(
+        "AuthError",
+        (error): Effect.Effect<Identifier, Errors.AuthError | IdentifierTakenError> =>
+          Effect.gen(function* () {
+            // The unique index may have rejected a concurrent claim — re-check
+            // so the caller sees a conflict, not an infrastructure error.
+            const raced = yield* store.getByValue(identifier.type, identifier.value);
+            if (raced !== null) {
+              return yield* Effect.fail(
+                new IdentifierTakenError({
+                  message: `This ${identifier.type} is already in use`,
+                  identifierType: identifier.type,
+                }),
+              );
+            }
+            return yield* Effect.fail(error);
+          }),
+      ),
+    );
+  });
+
+/**
+ * In-memory {@link IdentifierStore} for tests and single-instance
+ * deployments. Uniqueness on `(type, value)` is enforced by construction
+ * (synchronous, single-threaded): `create` fails with `AuthError` when the
+ * pair is already claimed, mirroring a SQL unique-index violation.
+ *
+ * Pass your own `Map` (keyed by identifier `id`) to inspect or pre-seed
+ * state in tests.
+ */
+export const memoryIdentifierStore = (
+  records: Map<string, Identifier> = new Map(),
+): typeof IdentifierStore.Service => {
+  const byValue = (type: IdentifierType, value: string): Identifier | null => {
+    for (const identifier of records.values()) {
+      if (identifier.type === type && identifier.value === value) return identifier;
+    }
+    return null;
+  };
+  return {
+    getByValue: (type, value) => Effect.sync(() => byValue(type, value)),
+    listByUser: (userId) =>
+      Effect.sync(() =>
+        Array.from(records.values())
+          .filter((identifier) => identifier.userId === userId)
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
+      ),
+    create: (identifier) =>
+      Effect.suspend(() => {
+        if (byValue(identifier.type, identifier.value) !== null) {
+          return Effect.fail(
+            new Errors.AuthError({
+              message: `Identifier (${identifier.type}) already exists`,
+            }),
+          );
+        }
+        records.set(identifier.id, identifier);
+        return Effect.succeed(identifier);
+      }),
+    setVerified: (id, verifiedAt) =>
+      Effect.sync(() => {
+        const existing = records.get(id);
+        if (existing === undefined) return null;
+        const updated: Identifier = { ...existing, verified: true, verifiedAt };
+        records.set(id, updated);
+        return updated;
+      }),
+    delete: (id) => Effect.sync(() => void records.delete(id)),
+    deleteByUser: (userId) =>
+      Effect.sync(() => {
+        for (const [id, identifier] of records.entries()) {
+          if (identifier.userId === userId) records.delete(id);
+        }
+      }),
+  };
+};
+
+/**
+ * Resolve the user that owns a `(type, value)` identifier, or `null` when the
+ * identifier is unclaimed (or its owner no longer exists). `getUser` is any
+ * user-by-id lookup (e.g. `UserStore.get`).
+ */
+export const resolveUserByIdentifier = <E>(
+  store: typeof IdentifierStore.Service,
+  getUser: (userId: string) => Effect.Effect<Types.User | null, E>,
+  type: IdentifierType,
+  value: string,
+): Effect.Effect<{ user: Types.User; identifier: Identifier } | null, Errors.AuthError | E> =>
+  Effect.gen(function* () {
+    const identifier = yield* store.getByValue(type, value);
+    if (identifier === null) return null;
+    const user = yield* getUser(identifier.userId);
+    return user === null ? null : { user, identifier };
+  });

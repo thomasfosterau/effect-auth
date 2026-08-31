@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "lib": ["ES2022", "DOM"],
+    // Solid compiles JSX itself (vite-plugin-solid / babel-preset-solid), so
+    // tsc must hand the JSX through untouched and only type-check it against
+    // Solid's own JSX namespace.
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    // `--emitDeclarationOnly` (the declaration half of `pnpm run build`)
+    // refuses to run alongside `sourceMap`; the bundle's sourcemap comes from
+    // Vite instead.
+    "sourceMap": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.tsx"]
+}

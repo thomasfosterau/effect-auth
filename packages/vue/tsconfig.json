@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "lib": ["ES2022", "DOM"],
+    // `vue-tsc` owns this package: it emits declarations only (the JavaScript
+    // comes from the Vite library build) and it resolves the `.vue` single-file
+    // components the barrel re-exports. A `.vue` specifier has no `.js`
+    // counterpart to rewrite, so the repo-wide `rewriteRelativeImportExtensions`
+    // is swapped for `allowImportingTsExtensions`, which leaves every relative
+    // specifier — `.ts` and `.vue` alike — untouched in the emitted types.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": false,
+    // `vp build` empties `dist` before `vue-tsc` runs, so a build-info file from
+    // the previous run would report the declarations as up to date and emit
+    // nothing into the freshly emptied directory.
+    "incremental": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

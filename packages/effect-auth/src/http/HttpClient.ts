@@ -1,0 +1,26 @@
+import { HttpApiClient } from "effect/unstable/httpapi";
+import { AuthApi } from "./HttpApi.ts";
+
+/**
+ * Derive a typed, Effect-native client for the auth API.
+ *
+ * Returns an `Effect` that yields the client; it requires an
+ * `HttpClient.HttpClient` in context (e.g. provide `FetchHttpClient.layer`).
+ * Client methods return `Effect`s over the same `Schema` types and tagged-error
+ * channel as the server contract.
+ *
+ * @example
+ * ```ts
+ * import { Effect } from "effect"
+ * import { HTTP } from "@thomasfosterau/effect-auth"
+ *
+ * const program = Effect.gen(function* () {
+ *   const client = yield* HTTP.client("http://localhost:5173")
+ *   const result = yield* client.auth.signIn({
+ *     payload: { email: "user@example.com", password: "password-123" },
+ *   })
+ *   return result.user
+ * })
+ * ```
+ */
+export const client = (baseUrl: string | URL) => HttpApiClient.make(AuthApi, { baseUrl });

@@ -4,7 +4,7 @@
 
 Effect Auth is a generic, type-safe authentication and authorization library for [Effect](https://effect.website/) v4, following best practices from Lucia, the Copenhagen Book, Oslo, and BetterAuth.
 
-The settled API conventions — naming, export shapes, store contracts, error taxonomy — are recorded with rationale in [DESIGN.md](./DESIGN.md); the directory/export restructure that followed is recorded in [refactor-plan.md](./refactor-plan.md) and [migration.md](./migration.md). This document describes how the pieces fit together today.
+The settled API conventions — naming, export shapes, store contracts, error taxonomy — are recorded with rationale in [DESIGN.md](./DESIGN.md). This document describes how the pieces fit together today.
 
 ## Core Principles
 
@@ -13,7 +13,7 @@ The settled API conventions — naming, export shapes, store contracts, error ta
 2. **Type-Safe**: schema'd domain models and precise tagged-error unions.
 3. **Composable**: features are independent layers; provide only what you use.
 4. **Storage-Agnostic**: bring your own store implementations (or use
-   `@effect-auth/sql`, `@effect-auth/alchemy`, or the built-in KeyValueStore
+   `@thomasfosterau/effect-auth-sql`, `@thomasfosterau/effect-auth-alchemy`, or the built-in KeyValueStore
    layers).
 5. **Secure by Default**: timing-safe comparisons, high-entropy tokens,
    HttpOnly/Secure cookies, trusted-origin CSRF checks, anti-enumeration
@@ -106,42 +106,52 @@ directories, each with its own `index.ts` barrel and matching
   (hooks/plugin system), `TokenHash.ts`, `Cipher.ts`, `Identifier.ts`,
   `Messages.ts`, `PlatformCrypto.ts` (default `Crypto.Crypto` layer),
   `Observability.ts`.
-- **`session/` cluster**: `SessionService.ts`, `SessionStore.ts`,
-  `UserStore.ts`, `TrustedDevice.ts`. Also re-exported flat from the package
-  root (`Auth.SessionService`, `Auth.SessionStore`, `Auth.UserStore`) since
-  nearly every feature module depends on them.
-- **`email/` cluster**: `EmailAddress.ts`, `EmailOTP.ts` (merged from the old
-  `EmailOtp.ts` + `EmailOTPService.ts`), `EmailPassword.ts`,
+- **Session management** (root, flat — the spine nearly every feature module
+  depends on, so it is not a cluster): `SessionService.ts`, `SessionStore.ts`,
+  `UserStore.ts`, `TrustedDevice.ts`. Exported flat from the package root
+  (`Auth.SessionService`, `Auth.SessionStore`, `Auth.UserStore`,
+  `Auth.TrustedDeviceStore`, …); `TrustedDevice.ts` is additionally namespaced
+  as `Auth.TrustedDevice` so its generic `make`/`gate` stay qualified. There is
+  no `Auth.Session` namespace — `Types.ts` already owns that name for the flat
+  `Session` record.
+- **`email/` cluster**: `EmailAddress.ts`, `EmailOtp.ts`, `EmailPassword.ts`,
   `EmailVerification.ts`.
 - **`password/` cluster**: `Password.ts` (PBKDF2/scrypt hashers,
   multi-algorithm verifier), `Argon2.ts`, `PasswordReset.ts`,
   `HaveIBeenPwned.ts`.
-- **`authz/` cluster**: `Authorization.ts` (`AuthorizationPolicy`,
-  `RoleStore`), `RBAC.ts`, `Permission.ts`.
+- **Authorization** (root, flat — a first-class feature, not a cluster): the
+  policy kernel `Entity.ts` / `Condition.ts` / `Policy.ts` /
+  `AuthorizationModel.ts` / `PolicyStore.ts` (namespaced at the root as
+  `Auth.Entity`, `Auth.Policy`, … because their member names are generic),
+  the `Authorizer.ts` shell, `Protected.ts` (schema-embedded field guards),
+  `OrganizationEntities.ts` (the organization → entity-graph bridge), and the
+  permission-string RBAC facade `Authorization.ts` (`AuthorizationPolicy`,
+  `RoleStore`), `Rbac.ts`, `Permission.ts`. Route-level gating lives in
+  `http/AuthorizationMiddleware.ts`.
 - **`oauth/` cluster**: `OAuth.ts` (providers + PKCE), `Scope.ts`.
 - **`plugins/` cluster**: `AccountLockout.ts`, `Audit.ts`, `Captcha.ts`,
   `IPRateLimit.ts`, `LastLoginMethod.ts`, `NormalizeEmail.ts`, `RateLimit.ts`
   — first-party Hooks plugins (exported values keep the `*Plugin` suffix,
   e.g. `AuditPlugin`, even though the file names dropped it).
-- **`http/` cluster** (also the `Auth.HTTP` namespace): `HTTPApiSchemas.ts`
-  (wire schemas + HTTP error types), `HTTPApi.ts` (the typed `AuthApi`
-  contract), `HTTPServer.ts` (handlers + mountable web handler),
-  `HTTPClient.ts` (typed Effect client derived from the contract),
-  `HTTPMiddleware.ts` (`AuthMiddleware`/`OptionalAuthMiddleware` for
+- **`http/` cluster** (also the `Auth.Http` namespace): `HttpApiSchema.ts`
+  (wire schemas + HTTP error types), `HttpApi.ts` (the typed `AuthApi`
+  contract), `HttpServer.ts` (handlers + mountable web handler),
+  `HttpClient.ts` (typed Effect client derived from the contract),
+  `HttpMiddleware.ts` (`AuthMiddleware`/`OptionalAuthMiddleware` for
   consumer apps), plus `SessionCookieCache.ts` (signed session-data cookie,
   re-exported here from its root file).
-- **`secondfactor/` cluster** (also the `Auth.SecondFactor` namespace):
+- **`multifactor/` cluster** (also the `Auth.MultiFactor` namespace):
   `MultiFactor.ts` (TOTP + backup codes, integrating into password sign-in
-  via the `SecondFactorGate` seam), `OTPSecondFactor.ts` (OTP-based
+  via the `SecondFactorGate` seam), `OtpSecondFactor.ts` (OTP-based
   alternative second-factor gate), `WebAuthn.ts` (passkeys, merged from
-  `WebAuthnService.ts`), `OTP.ts` (RFC 6238/4226 TOTP/HOTP primitives).
+  `WebAuthnService.ts`), `Otp.ts` (RFC 6238/4226 TOTP/HOTP primitives).
 - **Sign-in methods** (root, not yet clustered): `Username.ts`,
-  `MagicLink.ts`, `PhoneOTP.ts`, `Anonymous.ts`, `SSO.ts` (OIDC relying
+  `MagicLink.ts`, `PhoneOtp.ts`, `Anonymous.ts`, `Sso.ts` (OIDC relying
   party), `GoogleOneTap.ts`, `DeviceAuthorization.ts` (RFC 8628).
 - **Account lifecycle** (root): `AuthLifecycle.ts` (sign-up/sign-in
   orchestration), `AccountManagement.ts` (email change / account deletion).
-- **Platform features** (root): `Organization.ts`, `Admin.ts`, `APIKey.ts`,
-  `JWT.ts` (ES256/EdDSA + JWKS), `OIDCProvider.ts` (act as an OIDC identity
+- **Platform features** (root): `Organization.ts`, `Admin.ts`, `ApiKey.ts`,
+  `Jwt.ts` (ES256/EdDSA + JWKS), `OidcProvider.ts` (act as an OIDC identity
   provider), `RateLimit.ts`/`RateLimitPersistence.ts`, `ClientIP.ts`,
   `OneTimeToken.ts`.
 - **Storage helpers** (root): `KeyValueStores.ts` — layers implementing the
@@ -150,10 +160,10 @@ directories, each with its own `index.ts` barrel and matching
   `KeyValueStore` (in-memory, file system, Redis, …).
 
 Every cluster namespace is also re-exported from the package root (`Auth.Email`,
-`Auth.HTTP`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`, `Auth.Authz`,
-`Auth.SecondFactor`), so `import * as Auth from "@thomasfosterau/effect-auth"` reaches the
+`Auth.Http`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`,
+`Auth.MultiFactor`), so `import * as Auth from "@thomasfosterau/effect-auth"` reaches the
 whole surface; the per-cluster subpaths (`effect-auth/email`, `/http`,
-`/oauth`, `/password`, `/plugins`, `/authz`, `/secondfactor`) exist for
+`/oauth`, `/password`, `/plugins`, `/multifactor`) exist for
 consumers who want a narrower import.
 
 ## Stores
@@ -169,21 +179,21 @@ Users persist state by implementing plain store interfaces (DESIGN.md D3):
 Two mechanisms, by boundary (DESIGN.md D4):
 
 - **Domain errors** are `Data.TaggedError` classes — shared ones in `Errors.ts` (`AuthError`, `InvalidCredentialsError`, `SessionExpiredError`, …), module-local ones (`MultiFactorError`, `OrganizationError`, …) where only one module raises them. `AuthError` means _infrastructure/unexpected_ failure; flow outcomes get specific tags. Nothing subclasses `AuthError` — errors compose in unions, keeping method signatures honest.
-- **HTTP boundary errors** are `Schema.TaggedErrorClass` classes in `HTTPApiSchemas.ts` with fixed status codes (400/401/403/404/409/429/500). Handlers in `HTTPServer.ts` map domain errors to these per endpoint; `RateLimitError` is always 429, `AuthError` is always 500, and typed flow errors carry the specific statuses (e.g. `EmailInUseError` → 409).
+- **HTTP boundary errors** are `Schema.TaggedErrorClass` classes in `HttpApiSchema.ts` with fixed status codes (400/401/403/404/409/429/500). Handlers in `HttpServer.ts` map domain errors to these per endpoint; `RateLimitError` is always 429, `AuthError` is always 500, and typed flow errors carry the specific statuses (e.g. `EmailInUseError` → 409).
 
 ## HTTP protocol
 
-- `HTTPApi.ts` defines the full contract with `effect/unstable/httpapi` — one `auth` group, kebab-case paths (`/sign-in/email-otp`, `/multi-factor/enable`), camelCase operationIds. OpenAPI 3.1 (`HTTP.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`HTTP.make({ docs: true })`).
+- `HttpApi.ts` defines the full contract with `effect/unstable/httpapi` — one `auth` group, kebab-case paths (`/sign-in/email-otp`, `/multi-factor/enable`), camelCase operationIds. OpenAPI 3.1 (`Http.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`Http.make({ docs: true })`).
 - **404-until-configured**: optional features resolve their service with `Effect.serviceOption`; when the layer isn't provided the endpoint fails `NotFound` — a server only exposes what it configures.
 - **Cookies**: HttpOnly, SameSite, `Secure` by default; optional HMAC-signed session-data cache cookie to skip store reads; multi-session and last-login-method helper cookies.
 - **CSRF**: a trusted-origin gate runs before any handler — requests with an `Origin` header must match the request origin or the configured `trustedOrigins`; requests without one (curl, server-to-server) pass.
-- **Clients**: `HTTPClient.ts` derives a full-parity Effect client from the contract (`client.auth.<operationId>`).
+- **Clients**: `HttpClient.ts` derives a full-parity Effect client from the contract (`client.auth.<operationId>`).
 
 ## Security Considerations
 
 ### Password Security
 
-- PBKDF2-SHA256 with 210,000 iterations (OWASP) by default; scrypt and Argon2id (`password/Argon2.ts`, native via `@node-rs/argon2`) also in core; a multi-algorithm verifier supports migration between algorithms.
+- PBKDF2-SHA256 with 210,000 iterations (OWASP) by default; scrypt also in core; Argon2id via `@thomasfosterau/effect-auth-argon2` (WASM by default, optional native fast-path); a multi-algorithm verifier supports migration between algorithms.
 - Random salt per password; timing-safe comparison; plaintext never stored.
 
 ### Session Security
@@ -210,13 +220,13 @@ Any design change that would weaken timing-safety, entropy, cookie flags, CSRF/t
 
 ## Dependencies
 
-- **Core**: `effect`, `@node-rs/argon2` (native Argon2id hashing), `@oslojs/webauthn` (WebAuthn primitives). Most randomness/digest needs go through the `Crypto.Crypto` service (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC).
-- **Packages** isolate framework/storage-driver peer deps (e.g. `@effect-auth/client`) so core stays lean.
+- **Core**: `effect`, and nothing else — the effect-only dependency rule now holds with zero exceptions. The WebAuthn wire formats (CBOR, `clientDataJSON`, authenticator data, attestation objects, COSE public keys) are parsed in-repo by `multifactor/WebAuthnCodec.ts`. Most randomness/digest needs go through the `Crypto.Crypto` service (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC, SHA-256). Native dependencies never enter core: Argon2id hashing lives in `@thomasfosterau/effect-auth-argon2`.
+- **Packages** isolate framework/storage-driver/native peer deps (e.g. `@thomasfosterau/effect-auth-client`, `-sql`, `-alchemy`, `-argon2`) so core stays lean.
 
 ## References
 
 - [DESIGN.md](./DESIGN.md) — the settled API decision record
-- [refactor-plan.md](./refactor-plan.md) / [migration.md](./migration.md) — the directory/export restructure and its migration table
+- [guides/better-auth-migration.md](./guides/better-auth-migration.md) — moving an application from Better Auth to effect-auth
 - [Lucia](https://lucia-auth.com/) / [Copenhagen Book](https://lucia-auth.com/copenhagen)
 - [Oslo](https://github.com/pilcrowonpaper/oslo)
 - [BetterAuth](https://www.better-auth.com/) — feature-surface inspiration

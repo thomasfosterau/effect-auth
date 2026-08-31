@@ -1,11 +1,17 @@
 /**
- * @effect-auth/client
+ * @thomasfosterau/effect-auth-client
  *
- * Framework client libraries for effect-auth: a small, dependency-free
- * vanilla client (`createAuthClient`) with typed methods over the auth HTTP
- * contract and an observable session store, consumed by the framework
- * adapters exported from `@effect-auth/client/react`, `/svelte`, and `/vue`.
- * Wire types are re-exported (type-only) from `@effect-auth/client/types`.
+ * The front-end half of effect-auth: a small, dependency-free vanilla client
+ * (`createAuthClient`) with typed methods over the auth HTTP contract and an
+ * observable session store.
+ *
+ * Framework bindings live in their own packages —
+ * `@thomasfosterau/effect-auth-react`, `@thomasfosterau/effect-auth-svelte`,
+ * `@thomasfosterau/effect-auth-vue` and `@thomasfosterau/effect-auth-solid` —
+ * each of which builds on this one.
+ *
+ * Wire types (`SessionWithUserView`, `SignUpPayload`, ...) come straight from
+ * `@thomasfosterau/effect-auth`'s `Http` namespace; they erase at compile time,
+ * so importing them costs the browser bundle nothing.
  */
 export * from "./Client.ts";
-export * from "./types.ts";
