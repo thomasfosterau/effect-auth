@@ -15,7 +15,7 @@ import {
   ClientDataType,
   type ClientData,
   type AuthenticatorData,
-} from "@oslojs/webauthn";
+} from "./WebAuthnCodec.ts";
 import * as Cipher from "../Cipher.ts";
 import * as Errors from "../Errors.ts";
 import * as Obs from "../Observability.ts";

@@ -6,10 +6,11 @@ issue links back here.
 
 ## Principles
 
-- **Big, maintainable core** with dependencies limited to the Effect
-  ecosystem plus native essentials (`@node-rs/*`, `@oslojs/*` acceptable).
-  ORMs and storage drivers (e.g. `drizzle-orm`) live in adapter packages,
-  never in core.
+- **Big, maintainable core** with `effect` as its only runtime dependency
+  (superseding the original allowance for native/pure-JS auth primitives:
+  Argon2id moved to `packages/argon2` and the WebAuthn parsers were
+  reimplemented in-repo). ORMs and storage drivers (e.g. `drizzle-orm`) live in
+  adapter packages, never in core.
 - **Idiomatic Effect v4** as defined by the effect-solutions guides
   (`bunx effect-solutions show services-and-layers`), falling back to
   Effect-core conventions where the guides are silent.

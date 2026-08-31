@@ -531,8 +531,15 @@ const keyGenParams = (alg: Alg) =>
         }
       : { name: "Ed25519" };
 
-/** Generate a keypair and its COSE-key CBOR bytes for the given algorithm. */
-const buildKey = async (alg: Alg): Promise<{ privateKey: CryptoKey; cose: number[] }> => {
+/**
+ * Generate a keypair and its COSE-key CBOR bytes for the given algorithm.
+ * `algorithmLabel` overrides the advertised COSE `alg` value, for tests that
+ * need a key labelled with an algorithm effect-auth does not support.
+ */
+const buildKey = async (
+  alg: Alg,
+  algorithmLabel: number = alg,
+): Promise<{ privateKey: CryptoKey; cose: number[] }> => {
   const { publicKey, privateKey } = (await globalThis.crypto.subtle.generateKey(
     keyGenParams(alg),
     true,
@@ -550,7 +557,7 @@ const buildKey = async (alg: Alg): Promise<{ privateKey: CryptoKey; cose: number
       privateKey,
       cose: cborMap([
         [cborUint(1), cborUint(2)],
-        [cborUint(3), cborNegInt(-7)],
+        [cborUint(3), cborNegInt(algorithmLabel)],
         [cborNegInt(-1), cborUint(1)],
         [cborNegInt(-2), cborBytes(x)],
         [cborNegInt(-3), cborBytes(y)],
@@ -568,7 +575,7 @@ const buildKey = async (alg: Alg): Promise<{ privateKey: CryptoKey; cose: number
       privateKey,
       cose: cborMap([
         [cborUint(1), cborUint(3)],
-        [cborUint(3), cborNegInt(-257)],
+        [cborUint(3), cborNegInt(algorithmLabel)],
         [cborNegInt(-1), cborBytes(n)],
         [cborNegInt(-2), cborBytes(e)],
       ]),
@@ -580,7 +587,7 @@ const buildKey = async (alg: Alg): Promise<{ privateKey: CryptoKey; cose: number
     privateKey,
     cose: cborMap([
       [cborUint(1), cborUint(1)],
-      [cborUint(3), cborNegInt(-8)],
+      [cborUint(3), cborNegInt(algorithmLabel)],
       [cborNegInt(-1), cborUint(6)],
       [cborNegInt(-2), cborBytes(x)],
     ]),
@@ -859,5 +866,89 @@ describe.each<{ name: string; alg: Alg }>([
 
     const err = await Effect.runPromise(Effect.provide(program, dependencies));
     expect(err).toBeInstanceOf(WebAuthnVerificationError);
+  });
+});
+
+describe("WebAuthn algorithm support", () => {
+  beforeEach(() => {
+    mockChallengeStore.challenges.clear();
+    mockCredentialStore.credentials.clear();
+  });
+
+  it("rejects registration of a credential using an unsupported COSE algorithm", async () => {
+    // A P-256 key advertised as ES384 (-35), which effect-auth does not support.
+    const { cose } = await buildKey(-7, -35);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+
+    const program = Effect.gen(function* () {
+      const service = yield* WebAuthn.make(config);
+      const reg = yield* service.generateRegistrationChallenge(testUser);
+      return yield* Effect.flip(
+        service.verifyRegistration(reg.challenge, {
+          credentialId,
+          attestationObject: attestationObj,
+          clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+        }),
+      );
+    });
+
+    const err = await Effect.runPromise(Effect.provide(program, dependencies));
+    expect(err).toBeInstanceOf(WebAuthnVerificationError);
+    expect((err as WebAuthnVerificationError).message).toContain("Unsupported algorithm: -35");
+    expect(mockCredentialStore.credentials.size).toBe(0);
+  });
+
+  it("rejects a registration whose attestation object is not valid CBOR", async () => {
+    const program = Effect.gen(function* () {
+      const service = yield* WebAuthn.make(config);
+      const reg = yield* service.generateRegistrationChallenge(testUser);
+      return yield* Effect.flip(
+        service.verifyRegistration(reg.challenge, {
+          credentialId: globalThis.crypto.getRandomValues(new Uint8Array(20)),
+          attestationObject: new Uint8Array([0xff, 0xff, 0xff]),
+          clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+        }),
+      );
+    });
+
+    const err = await Effect.runPromise(Effect.provide(program, dependencies));
+    expect(err).toBeInstanceOf(WebAuthnVerificationError);
+    expect((err as WebAuthnVerificationError).message).toBe("Failed to parse attestation object");
+  });
+
+  it("rejects an assertion whose authenticator data is truncated", async () => {
+    const { privateKey, cose } = await buildKey(-7);
+    const credentialId = globalThis.crypto.getRandomValues(new Uint8Array(20));
+    const attestationObj = await attestationObject(cose, credentialId);
+
+    const program = Effect.gen(function* () {
+      const service = yield* WebAuthn.make(config);
+      const reg = yield* service.generateRegistrationChallenge(testUser);
+      yield* service.verifyRegistration(reg.challenge, {
+        credentialId,
+        attestationObject: attestationObj,
+        clientDataJSON: clientDataJSON("webauthn.create", reg.challenge),
+      });
+
+      const auth = yield* service.generateAuthenticationChallenge(testUser.id);
+      const authenticatorData = new Uint8Array(36); // one byte short of the minimum
+      const clientData = clientDataJSON("webauthn.get", auth.challenge);
+      const signature = yield* Effect.promise(() =>
+        signAssertion(-7, privateKey, authenticatorData, clientData),
+      );
+      return yield* Effect.flip(
+        service.verifyAuthentication(auth.challenge, {
+          credentialId,
+          authenticatorData,
+          clientDataJSON: clientData,
+          signature,
+        }),
+      );
+    });
+
+    const err = await Effect.runPromise(Effect.provide(program, dependencies));
+    expect(err).toBeInstanceOf(WebAuthnVerificationError);
+    expect((err as WebAuthnVerificationError).message).toBe("Failed to parse authenticator data");
   });
 });

@@ -67,13 +67,17 @@ Consequences for the current tree:
     already the service seam, so this is a layer move; core's default remains
     PBKDF2-SHA256 via `node:crypto`/WebCrypto (`PlatformCrypto`), which runs on edge
     runtimes where native modules don't.
-  - `@oslojs/webauthn` (pure JS, MIT): **kept as the single documented
-    exception** (M0 outcome). Vendoring was assessed and rejected: the package is
-    not standalone — its closure spans five `@oslojs/*` packages (asn1, binary,
-    cbor, crypto, encoding, several thousand lines including crypto primitives),
-    and vendoring security-critical parsing/crypto code would cut us off from
-    upstream patches. WebAuthn stays in the maximal core with this one pure-JS
-    dependency, re-reviewed if the rule ever needs to be absolute.
+  - The third-party Oslo WebAuthn package (pure JS, MIT): **removed**. Wholesale
+    vendoring was assessed and rejected — the package is not standalone, its
+    closure spans five sibling packages (asn1, binary, cbor, crypto, encoding;
+    several thousand lines including crypto primitives). Instead effect-auth
+    reimplements only the parsing subset it actually used, in
+    `multifactor/WebAuthnCodec.ts`: a definite-length CBOR decoder, COSE
+    public-key handling (ES256/RS256/EdDSA), `clientDataJSON`, authenticator
+    data, and attestation objects — roughly 600 lines with no crypto
+    primitives of its own (SHA-256 comes from `Cipher.ts`, signature
+    verification from `node:crypto`). Core's runtime dependency list is now
+    `effect` only, with no exceptions.
 
 ### 2.2 Delivery seams: unified `EmailSender` / `SMSSender` services
 
@@ -292,7 +296,8 @@ the engine for org dynamic access control (M4), which with teams unblocks SCIM g
   - Reinstate `packages/alchemy` (same port treatment; `alchemy` as optional peer).
   - Restore `packages/client/src/react.ts` from `f219705^` onto the current
     `Client.ts` store API.
-  - Extract `packages/argon2`; vendor `@oslojs/webauthn`; core's dependency list
+  - Extract `packages/argon2`; replace the third-party Oslo WebAuthn package
+    with the in-repo `multifactor/WebAuthnCodec.ts`; core's dependency list
     becomes `effect` only.
   - Make README/docs match the tree; close the ~12 verified-done issues.
 - **M1 — Security close-out + delivery seams (done 2026-08-30).** #111 lockout

@@ -85,6 +85,21 @@ export const aes256GcmCipher = (secret: string): TokenCipher => {
 };
 
 // ---------------------------------------------------------------------------
+// Digest
+// ---------------------------------------------------------------------------
+
+/**
+ * Synchronous SHA-256 digest.
+ *
+ * Prefer the `Crypto.Crypto` service (`crypto.digest`) wherever an `Effect` is
+ * available; this exists for the synchronous parsing paths that cannot suspend
+ * — notably WebAuthn relying-party ID hash verification — and keeps
+ * `node:crypto` corralled to this module.
+ */
+export const sha256 = (data: Uint8Array | string): Uint8Array =>
+  new Uint8Array(crypto.createHash("sha256").update(data).digest());
+
+// ---------------------------------------------------------------------------
 // Keyed HMAC
 // ---------------------------------------------------------------------------
 
