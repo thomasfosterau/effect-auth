@@ -4,7 +4,8 @@
  *
  * Implements `SessionStore`, `UserStore` and `IdentifierStore` — the three
  * stores every sign-in flow touches — against drizzle table objects you can
- * hand straight to `drizzle-kit`.
+ * hand straight to `drizzle-kit`. One module per store, plus a batched
+ * `Request`/`RequestResolver` read interface for application code.
  *
  * @example
  * ```ts
@@ -21,9 +22,17 @@
  * // Custom table names use the same schema shape.
  * const custom = Drizzle.defineTables({ sessions: "app_sessions" });
  * const customStores = Drizzle.layer(custom).pipe(Layer.provide(Drizzle.databaseLayer(db)));
+ *
+ * // Batched reads for application code (one query per batch of lookups).
+ * const requests = Drizzle.requestsLayer().pipe(Layer.provide(Drizzle.databaseLayer(db)));
+ * const users = Effect.forEach(ids, Drizzle.getUser, { concurrency: "unbounded" });
  * ```
  */
 
 export * from "./Database.ts";
+export * from "./IdentifierStore.ts";
+export * from "./Layers.ts";
+export * from "./Requests.ts";
 export * from "./Schema.ts";
-export * from "./Stores.ts";
+export * from "./SessionStore.ts";
+export * from "./UserStore.ts";

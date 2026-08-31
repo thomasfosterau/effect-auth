@@ -51,7 +51,8 @@ const stores = Drizzle.layer().pipe(Layer.provide(Drizzle.databaseLayer(db)));
 `Layer.succeed(Drizzle.DrizzleDatabase, db)` — any drizzle PostgreSQL handle
 (including a transaction handle) is accepted.
 
-Individual stores are available too, all with the same shape:
+Individual stores are available too, all with the same shape — one module per
+store, so you can reach for exactly the one you need:
 
 ```ts
 Drizzle.sessionStoreLayer(); // Layer<SessionStore, never, DrizzleDatabase>
@@ -62,6 +63,77 @@ Drizzle.identifierStoreLayer(); // Layer<IdentifierStore, never, DrizzleDatabase
 …as are the underlying `Effect`s, if you would rather assemble the store
 objects yourself: `makeSessionStore()`, `makeUserStore()`,
 `makeIdentifierStore()`.
+
+## Batched reads: the `Request` interface
+
+The stores above implement effect-auth's service contracts: one call, one
+query. That is the right shape for the auth flows themselves, which read one
+session or one user at a time.
+
+Application code often has the opposite shape — a page that resolves twenty
+users, or a list that asks "does this identifier exist?" once per row. For
+that, the same five read paths are also exposed as Effect `Request`s backed by
+`RequestResolver`s, so concurrent lookups collapse into a single
+`WHERE ... IN (...)` query:
+
+```ts
+import { Effect, Layer } from "effect";
+import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
+
+const requests = Drizzle.requestsLayer().pipe(Layer.provide(Drizzle.databaseLayer(db)));
+
+const program = Effect.forEach(userIds, Drizzle.getUser, { concurrency: "unbounded" });
+//    ^ one SELECT ... WHERE id IN (...), however many ids
+
+program.pipe(Effect.provide(requests));
+```
+
+| Constructor                         | Request                 | Resolves to                      |
+| ----------------------------------- | ----------------------- | -------------------------------- |
+| `getSession(id)`                    | `GetSession`            | `Session \| null`                |
+| `getUser(id)`                       | `GetUser`               | `User \| null`                   |
+| `getUserCredentials(id)`            | `GetUserCredentials`    | `string \| null` (password hash) |
+| `getIdentifierByValue(type, value)` | `GetIdentifierByValue`  | `Identifier \| null`             |
+| `listIdentifiersByUser(userId)`     | `ListIdentifiersByUser` | `ReadonlyArray<Identifier>`      |
+
+Each returns an `Effect<…, AuthError, AuthRequests>`; provide
+`Drizzle.requestsLayer()` (on top of a `DrizzleDatabase` layer) to satisfy it.
+
+What the resolvers do inside a batch:
+
+- **De-duplicate.** Twenty concurrent `getUser("u1")` are one row read, not
+  twenty.
+- **Coalesce.** Different ids in the same batch become one
+  `WHERE id IN (...)`.
+- **Share a row.** `getUser` and `getUserCredentials` read the same row, so
+  they share a resolver and therefore a single query.
+- **Group composite keys.** `(type, value)` pairs are grouped by type and
+  `OR`-ed together — still one round trip when a batch mixes emails, usernames
+  and phone numbers.
+- **Keep the store semantics.** A miss is `null`, a user with no identifiers is
+  `[]`, `listIdentifiersByUser` stays ordered by `createdAt` ascending, and
+  driver failures are the same `AuthError`.
+
+### Which one do I use?
+
+- **The stores** (`layer()`, `sessionStoreLayer()`, …) whenever effect-auth
+  itself is doing the reading. They are the `SessionStore` / `UserStore` /
+  `IdentifierStore` contracts, and **the contracts still use the direct
+  implementations** — providing `requestsLayer()` does not change how
+  effect-auth reads. Auth decisions want the freshest possible row and a
+  predictable single query, not a batch window.
+- **The `Request` interface** (`requestsLayer()`, `getUser`, …) for
+  application-side reads, where the same lookup fans out across a request
+  handler, a resolver graph, or a page render.
+
+The two are independent layers: provide either, or both.
+
+Two caveats. Effect batches per **resolver instance**, so the resolvers must be
+shared — that is what `requestsLayer()` is for; building resolvers per call
+site (via `makeSessionResolver()` and friends) batches nothing. And there is no
+cache by default: results live only for the batch window. Wrap a resolver with
+`RequestResolver.withCache` if you want request-level memoization, remembering
+that a cached auth read is a stale auth read.
 
 ## Schema
 
@@ -170,7 +242,9 @@ and the rest — are not covered here yet.
 The test suite runs against
 [PGlite](https://github.com/electric-sql/pglite) (PostgreSQL compiled to
 WebAssembly, in-process, no server), so `jsonb`, `timestamptz`, `RETURNING` and
-unique-index violations behave exactly as they do in production.
+unique-index violations behave exactly as they do in production. One file per
+store, plus `Requests.test.ts`, which counts the SQL a program emits through
+drizzle's own `logger` hook to prove the batching claims above.
 
 ```sh
 pnpm run test
