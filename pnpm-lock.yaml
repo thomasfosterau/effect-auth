@@ -93,12 +93,18 @@ importers:
       '@electric-sql/pglite':
         specifier: ^0.5.8
         version: 0.5.8
+      '@types/better-sqlite3':
+        specifier: ^7.6.12
+        version: 7.6.13
       '@types/node':
         specifier: ^26.1.0
         version: 26.1.1
       '@types/pg':
         specifier: ^8.15.0
         version: 8.23.1
+      better-sqlite3:
+        specifier: ^11.7.0
+        version: 11.10.0
       drizzle-orm:
         specifier: ^0.45.0
         version: 0.45.2(@cloudflare/workers-types@5.20260829.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(mysql2@3.24.2(@types/node@26.1.1))(pg@8.23.0)
