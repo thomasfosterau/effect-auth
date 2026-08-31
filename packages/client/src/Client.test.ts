@@ -297,6 +297,63 @@ describe("background refresh", () => {
   });
 });
 
+describe("JSON response detection", () => {
+  /** A client whose every request answers with `response`. */
+  const clientReturning = (response: () => Response) =>
+    createAuthClient({ baseUrl: "http://client.test", fetch: () => Promise.resolve(response()) });
+
+  const respond = (body: string | null, contentType: string, init?: ResponseInit) =>
+    new Response(body, { ...init, headers: { "content-type": contentType } });
+
+  it("parses a body whose content-type carries parameters", async () => {
+    const client = clientReturning(() =>
+      respond(JSON.stringify([{ id: "s1" }]), "application/json; charset=utf-8"),
+    );
+    expect(await client.listSessions()).toEqual([{ id: "s1" }]);
+  });
+
+  it("reads the server's message from a `+json` suffix media type", async () => {
+    const client = clientReturning(() =>
+      respond(JSON.stringify({ message: "Session expired" }), "application/problem+json", {
+        status: 400,
+        statusText: "Bad Request",
+      }),
+    );
+
+    const error = await client.listSessions().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AuthClientError);
+    expect((error as AuthClientError).message).toBe("Session expired");
+  });
+
+  it("does not parse a non-JSON body", async () => {
+    const client = clientReturning(() => respond("<html>ok</html>", "text/html"));
+    expect(await client.listSessions()).toBeUndefined();
+  });
+
+  it("matches the media type, not a substring of the header", async () => {
+    // A `text/plain` body must not be read as JSON just because a header
+    // parameter happens to spell out `application/json`.
+    const client = clientReturning(() =>
+      respond(JSON.stringify({ message: "leaked" }), "text/plain; note=application/json", {
+        status: 400,
+        statusText: "Bad Request",
+      }),
+    );
+
+    const error = await client.listSessions().catch((e: unknown) => e);
+    expect((error as AuthClientError).message).toBe("Bad Request");
+  });
+
+  it("treats a missing content-type as non-JSON", async () => {
+    const client = clientReturning(() => {
+      const response = new Response(JSON.stringify([{ id: "s1" }]), { status: 200 });
+      response.headers.delete("content-type");
+      return response;
+    });
+    expect(await client.listSessions()).toBeUndefined();
+  });
+});
+
 describe("plugin extension", () => {
   it("extend() adds typed methods from a plugin", async () => {
     const { client } = makeClient();

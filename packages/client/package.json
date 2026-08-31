@@ -1,16 +1,13 @@
 {
   "name": "@thomasfosterau/effect-auth-client",
   "version": "0.1.0",
-  "description": "Framework client libraries for effect-auth: a typed vanilla client with an observable session store, plus React, Svelte, and Vue bindings.",
+  "description": "Browser client for effect-auth: a typed, dependency-free client over the auth HTTP contract with an observable session store.",
   "keywords": [
     "auth",
     "authentication",
     "client",
     "effect",
-    "effect-auth",
-    "react",
-    "svelte",
-    "vue"
+    "effect-auth"
   ],
   "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
   "bugs": {
@@ -25,7 +22,7 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE.md"
   ],
   "type": "module",
   "main": "./dist/index.js",
@@ -34,22 +31,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./react": {
-      "types": "./dist/react.d.ts",
-      "import": "./dist/react.js"
-    },
-    "./svelte": {
-      "types": "./dist/svelte.d.ts",
-      "import": "./dist/svelte.js"
-    },
-    "./vue": {
-      "types": "./dist/vue.d.ts",
-      "import": "./dist/vue.js"
-    },
-    "./types": {
-      "types": "./dist/types.d.ts",
-      "import": "./dist/types.js"
     }
   },
   "publishConfig": {
@@ -64,29 +45,6 @@
     "@thomasfosterau/effect-auth": "workspace:*"
   },
   "devDependencies": {
-    "@testing-library/react": "^16.1.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "effect": ">=4.0.0-beta.93",
-    "jsdom": "^25.0.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "vue": "^3.5.13"
-  },
-  "peerDependencies": {
-    "react": ">=18",
-    "svelte": ">=4",
-    "vue": ">=3"
-  },
-  "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    },
-    "svelte": {
-      "optional": true
-    },
-    "vue": {
-      "optional": true
-    }
+    "effect": ">=4.0.0-beta.93"
   }
 }

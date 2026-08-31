@@ -1,6 +1,6 @@
 /**
  * Test-only fixture: a fully functional in-memory effect-auth server (the
- * real `Auth.HTTP.make` handler over in-memory stores) plus a cookie-jar `fetch`
+ * real `Auth.Http.make` handler over in-memory stores) plus a cookie-jar `fetch`
  * so the browser-oriented client can be exercised end to end in-process.
  *
  * Excluded from the published build (see `tsconfig.json`).
@@ -168,7 +168,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
 
   const sentChangeEmail: Array<{ readonly newEmail: string; readonly token: string }> = [];
   const sentDeleteTokens: string[] = [];
-  const sentPhoneOTPs: Array<{ readonly phoneNumber: string; readonly otp: string }> = [];
+  const sentPhoneOtps: Array<{ readonly phoneNumber: string; readonly otp: string }> = [];
 
   const anonymousUserStore: typeof Auth.AnonymousUserStore.Service = {
     createAnonymousUser: () => Effect.sync(() => createUser({ attributes: { isAnonymous: true } })),
@@ -201,9 +201,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     delete: (token) => Effect.sync(() => void pendingMultiFactors.delete(token)),
   };
 
-  const phoneRecords = new Map<string, Auth.PhoneOTPRecord>();
-  const phoneKey = (phone: string, purpose: Auth.PhoneOTPPurpose) => `${phone}:${purpose}`;
-  const phoneOTPStore: typeof Auth.PhoneOTPStore.Service = {
+  const phoneRecords = new Map<string, Auth.PhoneOtpRecord>();
+  const phoneKey = (phone: string, purpose: Auth.PhoneOtpPurpose) => `${phone}:${purpose}`;
+  const phoneOtpStore: typeof Auth.PhoneOtpStore.Service = {
     upsert: (record) =>
       Effect.sync(() => {
         phoneRecords.set(phoneKey(record.phoneNumber, record.purpose), record);
@@ -221,7 +221,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
         return updated.attempts;
       }),
   };
-  const phoneOTPUserStore: typeof Auth.PhoneOTPUserStore.Service = {
+  const phoneOtpUserStore: typeof Auth.PhoneOtpUserStore.Service = {
     createUser: (input) => Effect.sync(() => createUser(input)),
   };
 
@@ -248,8 +248,8 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     Layer.succeed(Auth.AccountManagementStore)(accountStore),
     Layer.succeed(Auth.MultiFactor.MultiFactorStore)(multiFactorStore),
     Layer.succeed(Auth.MultiFactor.PendingMultiFactorStore)(pendingMultiFactorStore),
-    Layer.succeed(Auth.PhoneOTPStore)(phoneOTPStore),
-    Layer.succeed(Auth.PhoneOTPUserStore)(phoneOTPUserStore),
+    Layer.succeed(Auth.PhoneOtpStore)(phoneOtpStore),
+    Layer.succeed(Auth.PhoneOtpUserStore)(phoneOtpUserStore),
     Layer.succeed(Auth.DeviceAuthorizationStore)(deviceStore),
   );
 
@@ -267,9 +267,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       sendDeleteAccountVerification: ({ token }) =>
         Effect.sync(() => void sentDeleteTokens.push(token)),
     }).pipe(Layer.provide(featureBase)),
-    Auth.PhoneOTPService.layer({
-      sendOTP: (phoneNumber, otp) =>
-        Effect.sync(() => void sentPhoneOTPs.push({ phoneNumber, otp })),
+    Auth.PhoneOtpService.layer({
+      sendOtp: (phoneNumber, otp) =>
+        Effect.sync(() => void sentPhoneOtps.push({ phoneNumber, otp })),
     }).pipe(Layer.provide(featureBase)),
     Auth.DeviceAuthorizationService.layer({
       verificationUri: "https://client.test/device",
@@ -395,13 +395,13 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     Auth.OrganizationService.layer().pipe(Layer.provide(organizationBase)),
   );
 
-  const services: Layer.Layer<Auth.HTTP.AuthServices> = Layer.mergeAll(
+  const services: Layer.Layer<Auth.Http.AuthServices> = Layer.mergeAll(
     core,
     options.features === true ? featureLayer : Layer.empty,
     options.organization === true ? organizationLayer : Layer.empty,
-  ) as Layer.Layer<Auth.HTTP.AuthServices>;
+  ) as Layer.Layer<Auth.Http.AuthServices>;
 
-  const { handler } = Auth.HTTP.make({
+  const { handler } = Auth.Http.make({
     services,
     cookie: { secure: false },
     ...(options.multiSession !== undefined && { multiSession: options.multiSession }),
@@ -428,7 +428,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     /** Delete-account tokens the server "sent". */
     sentDeleteTokens,
     /** Phone OTPs the server "texted". */
-    sentPhoneOTPs,
+    sentPhoneOtps,
   };
 };
 

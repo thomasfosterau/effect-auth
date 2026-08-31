@@ -1,18 +1,58 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vite-plus/test";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { createAuthClient } from "./Client.ts";
-import { useListSessions, useSession } from "./react.ts";
-import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
+import { createAuthClient } from "@thomasfosterau/effect-auth-client";
+import { useListSessions, useSession } from "./index.ts";
 
 const EMAIL = "alice@react.test";
 const PW = "password-123";
 
+const json = (body: unknown): Response =>
+  new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+
+/**
+ * A client backed by a stand-in server covering only the endpoints these
+ * hooks touch (`/sign-up`, `/sign-out`, `/session`, `/sessions`). The bindings
+ * care about nothing but the session store moving, so the in-process auth
+ * server the client package tests against would only add a dependency here.
+ */
 const makeClient = () => {
-  const server = makeServerFixture();
+  const now = Date.now();
+  const user = { id: "user-1", email: EMAIL, createdAt: now, updatedAt: now, attributes: {} };
+  const session = {
+    id: "session-1",
+    userId: user.id,
+    expiresAt: now + 60_000,
+    createdAt: now,
+    lastActivityAt: now,
+    attributes: {},
+  };
+  let signedIn = false;
+
   return createAuthClient({
     baseUrl: "http://react.test",
-    fetch: makeCookieJarFetch(server.handler),
+    fetch: (input, init) => {
+      const { pathname } = new URL(String(input));
+      switch (`${init?.method ?? "GET"} ${pathname}`) {
+        case "POST /sign-up":
+          signedIn = true;
+          return Promise.resolve(json({ user, needsEmailVerification: false }));
+        case "POST /sign-out":
+          signedIn = false;
+          return Promise.resolve(new Response(null, { status: 204 }));
+        case "GET /session":
+          return Promise.resolve(
+            signedIn ? json({ session, user }) : new Response(null, { status: 401 }),
+          );
+        case "GET /sessions":
+          return Promise.resolve(json(signedIn ? [session] : []));
+        default:
+          return Promise.resolve(new Response(null, { status: 404 }));
+      }
+    },
   });
 };
 

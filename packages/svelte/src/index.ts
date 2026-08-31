@@ -11,10 +11,49 @@
  * {#if $session.data}Signed in as {$session.data.user.email}{/if}
  * ```
  *
- * @module svelte
+ * The bundled form components are the other half of the package: real,
+ * unstyled `.svelte` components for sign-in, sign-up, password reset, magic
+ * links and email one-time codes, each owning its own submit, pending and error
+ * state and reaching the client through {@link setAuthClient}'s context.
+ *
+ * @module effect-auth-svelte
  */
-import type { AuthClient, AuthClientError, SessionState } from "./Client.ts";
-import type { SessionView } from "./types.ts";
+import type { AuthClient, AuthClientError, SessionState } from "@thomasfosterau/effect-auth-client";
+
+export { authClientKey, getAuthClient, setAuthClient } from "./context.ts";
+
+export { default as SignInForm } from "./forms/SignInForm.svelte";
+export { default as SignUpForm } from "./forms/SignUpForm.svelte";
+export { default as PasswordResetRequestForm } from "./forms/PasswordResetRequestForm.svelte";
+export { default as PasswordResetConfirmForm } from "./forms/PasswordResetConfirmForm.svelte";
+export { default as MagicLinkForm } from "./forms/MagicLinkForm.svelte";
+export { default as EmailOtpForm } from "./forms/EmailOtpForm.svelte";
+
+export type {
+  AuthFormBaseProps,
+  AuthFormClasses,
+  AuthSuccess,
+  EmailOtpPurpose,
+  FormFailure,
+  StatusResponse,
+} from "./forms/internal.ts";
+export type {
+  EmailOtpFormProps,
+  EmailOtpLabels,
+  MagicLinkFormProps,
+  MagicLinkLabels,
+  PasswordResetConfirmFormProps,
+  PasswordResetConfirmLabels,
+  PasswordResetRequestFormProps,
+  PasswordResetRequestLabels,
+  SignInFormProps,
+  SignInLabels,
+  SignUpFormProps,
+  SignUpLabels,
+} from "./forms/props.ts";
+
+/** The sessions `client.listSessions()` resolves to. */
+type SessionList = Awaited<ReturnType<AuthClient["listSessions"]>>;
 
 /** Svelte's readable-store contract. */
 export interface Readable<T> {
@@ -34,7 +73,7 @@ export const sessionStore = (client: AuthClient): Readable<SessionState> => ({
 
 /** The state emitted by {@link listSessionsStore}. */
 export interface ListSessionsState {
-  readonly data: readonly SessionView[] | null;
+  readonly data: SessionList | null;
   readonly isPending: boolean;
   readonly error: AuthClientError | null;
 }

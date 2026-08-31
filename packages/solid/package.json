@@ -1,0 +1,62 @@
+{
+  "name": "@thomasfosterau/effect-auth-solid",
+  "version": "0.1.0",
+  "description": "Solid bindings and form components for the effect-auth client.",
+  "keywords": [
+    "auth",
+    "authentication",
+    "client",
+    "effect",
+    "effect-auth",
+    "solid",
+    "solidjs"
+  ],
+  "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
+  "bugs": {
+    "url": "https://github.com/thomasfosterau/effect-auth/issues"
+  },
+  "license": "MIT",
+  "author": "Thomas Foster <me@thomasfoster.au>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thomasfosterau/effect-auth.git"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE.md"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "solid": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/source/index.js"
+      },
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp build && tsc --emitDeclarationOnly --incremental false && tsc --outDir dist/source --declaration false --declarationMap false --incremental false",
+    "test": "vp test run",
+    "typecheck": "tsc --noEmit && vp test --typecheck --run"
+  },
+  "dependencies": {
+    "@thomasfosterau/effect-auth-client": "workspace:*"
+  },
+  "devDependencies": {
+    "@solidjs/testing-library": "^0.8.10",
+    "jsdom": "^25.0.1",
+    "solid-js": "^1.9.15",
+    "vite-plugin-solid": "^2.11.14"
+  },
+  "peerDependencies": {
+    "solid-js": ">=1.8"
+  }
+}

@@ -25,7 +25,7 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🏢 **Organizations & Admin**: Multi-tenant organizations (members, invitations, roles) and admin tooling (ban, impersonate)
 - 🗝️ **API Keys & JWT**: Hashed API keys with permissions/quotas; ES256/EdDSA JWTs with JWKS
 - 🌍 **HTTP Protocol**: A typed `effect/unstable/httpapi` contract serving the whole surface as a mountable Web handler with a derived typed client, session cookies, and trusted-origin CSRF protection
-- 📖 **OpenAPI Document + Reference UI**: Derive an OpenAPI 3.1 spec from the HTTP contract (`HTTP.getOpenApiSpec()`) and optionally serve it plus a Scalar reference page via `HTTP.make({ docs: true })`
+- 📖 **OpenAPI Document + Reference UI**: Derive an OpenAPI 3.1 spec from the HTTP contract (`Http.getOpenApiSpec()`) and optionally serve it plus a Scalar reference page via `Http.make({ docs: true })`
 - 🍪 **Session Cookie Cache**: Optional HMAC-signed session-data cookie (`cookie.cache`) that serves authenticated requests without a session-store read for a short window
 - 🏛️ **Enterprise SSO**: OIDC relying party with per-organization connections, email-domain routing, and first-login provisioning
 - 🪞 **OIDC Provider**: Act as an OpenID Connect identity provider — client registry, authorization-code flow with PKCE, consent, opaque access/refresh tokens, id_tokens on a shared JWKS, and discovery metadata
@@ -39,9 +39,13 @@ A generic authentication and authorization library for [Effect](https://effect.w
 | Package                               | Purpose                                                        |
 | ------------------------------------- | -------------------------------------------------------------- |
 | `@thomasfosterau/effect-auth`         | The core library: every module above, `effect` as the only dep |
-| `@thomasfosterau/effect-auth-client`  | Typed browser client with React/Svelte/Vue bindings            |
+| `@thomasfosterau/effect-auth-client`  | Typed browser client + observable session store                |
+| `@thomasfosterau/effect-auth-react`   | React hooks and form components over the browser client        |
+| `@thomasfosterau/effect-auth-svelte`  | Svelte stores and form components over the browser client      |
+| `@thomasfosterau/effect-auth-vue`     | Vue composables and form components over the browser client    |
+| `@thomasfosterau/effect-auth-solid`   | Solid primitives and form components over the browser client   |
 | `@thomasfosterau/effect-auth-sql`     | Driver-agnostic SQL storage layers (`effect/unstable/sql`)     |
-| `@thomasfosterau/effect-auth-alchemy` | Alchemy v2 infra resources + Cloudflare D1 storage layers      |
+| `@thomasfosterau/effect-auth-alchemy` | Alchemy v2 `AuthSchema` resource + D1-backed storage layers    |
 | `@thomasfosterau/effect-auth-argon2`  | Argon2id `PasswordHasher` on WASM (`hash-wasm`)                |
 
 ## Installation
@@ -248,7 +252,7 @@ const program = Effect.gen(function* () {
   const secret = yield* Auth.MultiFactor.generateBase32Secret(crypto, 20);
 
   // Generate a QR code URI for the user to scan
-  const uri = Auth.MultiFactor.generateOTPURI({
+  const uri = Auth.MultiFactor.generateOtpUri({
     type: "totp",
     label: "user@example.com",
     issuer: "MyApp",
@@ -260,7 +264,7 @@ const program = Effect.gen(function* () {
 
   // When the user submits a token, verify it
   const userToken = "123456"; // From user input
-  const isValid = yield* Auth.MultiFactor.verifyTOTP(userToken, secret);
+  const isValid = yield* Auth.MultiFactor.verifyTotp(userToken, secret);
 
   if (isValid) {
     // Token is valid, proceed with authentication
@@ -290,7 +294,7 @@ const program = Effect.gen(function* () {
   let counter = 0;
 
   // Generate a QR code URI
-  const uri = Auth.MultiFactor.generateOTPURI({
+  const uri = Auth.MultiFactor.generateOtpUri({
     type: "hotp",
     label: "user@example.com",
     issuer: "MyApp",
@@ -303,7 +307,7 @@ const program = Effect.gen(function* () {
 
   // When the user submits a token, verify it
   const userToken = "123456"; // From user input
-  const isValid = yield* Auth.MultiFactor.verifyHOTP(userToken, secret, counter);
+  const isValid = yield* Auth.MultiFactor.verifyHotp(userToken, secret, counter);
 
   if (isValid) {
     // Token is valid, increment counter for next use
@@ -327,23 +331,23 @@ Both TOTP and HOTP support custom configurations:
 
 ```typescript
 // TOTP with custom settings
-const totpConfig: Auth.MultiFactor.TOTPConfig = {
+const totpConfig: Auth.MultiFactor.TotpConfig = {
   period: 60, // 60-second time window (default: 30)
   digits: 8, // 8-digit codes (default: 6)
   algorithm: "sha256", // Use SHA-256 (default: "sha1")
   window: 2, // Accept tokens from ±2 time steps (default: 1)
 };
 
-const token = yield * Auth.MultiFactor.generateTOTP(secret, totpConfig);
-const isValid = yield * Auth.MultiFactor.verifyTOTP(token, secret, totpConfig);
+const token = yield * Auth.MultiFactor.generateTotp(secret, totpConfig);
+const isValid = yield * Auth.MultiFactor.verifyTotp(token, secret, totpConfig);
 
 // HOTP with custom settings
-const hotpConfig: Auth.MultiFactor.HOTPConfig = {
+const hotpConfig: Auth.MultiFactor.HotpConfig = {
   digits: 8, // 8-digit codes (default: 6)
   algorithm: "sha512", // Use SHA-512 (default: "sha1")
 };
 
-const hotpToken = yield * Auth.MultiFactor.generateHOTP(secret, counter, hotpConfig);
+const hotpToken = yield * Auth.MultiFactor.generateHotp(secret, counter, hotpConfig);
 ```
 
 ## WebAuthn / Passkeys
@@ -773,9 +777,9 @@ Flat root exports (`Auth.X`) unless noted:
 - `SessionConfig`: Configuration for session expiration
 - `HashedPassword`: Hashed password with algorithm info
 - `Permission`: Permission check result
-- `TOTPConfig`: Configuration for TOTP generation and verification
-- `HOTPConfig`: Configuration for HOTP generation and verification
-- `OTPURIParams`: Parameters for generating OTP URIs (for QR codes)
+- `TotpConfig`: Configuration for TOTP generation and verification
+- `HotpConfig`: Configuration for HOTP generation and verification
+- `OtpUriParams`: Parameters for generating OTP URIs (for QR codes)
 - `WebAuthnChallenge`: Temporary challenge for WebAuthn operations
 - `WebAuthnCredential`: Stored passkey credential
 - `WebAuthnConfig`: Configuration for WebAuthn service
@@ -846,11 +850,11 @@ All OTP functions return Effect types for composability:
 - `generateBase32Secret(crypto, length?)`: Generate a base32-encoded secret
 - `encodeBase32(buffer)`: Encode bytes to base32 string
 - `decodeBase32(base32)`: Decode base32 string to bytes
-- `generateHOTP(secret, counter, config?)`: Generate HOTP token
-- `verifyHOTP(token, secret, counter, config?)`: Verify HOTP token
-- `generateTOTP(secret, config?)`: Generate TOTP token
-- `verifyTOTP(token, secret, config?)`: Verify TOTP token
-- `generateOTPURI(params)`: Generate OTP URI for QR codes
+- `generateHotp(secret, counter, config?)`: Generate HOTP token
+- `verifyHotp(token, secret, counter, config?)`: Verify HOTP token
+- `generateTotp(secret, config?)`: Generate TOTP token
+- `verifyTotp(token, secret, config?)`: Verify TOTP token
+- `generateOtpUri(params)`: Generate OTP URI for QR codes
 
 ### Errors
 
@@ -990,6 +994,7 @@ Following BetterAuth and OWASP guidelines:
 - [Architecture](./docs/ARCHITECTURE.md) - Architectural overview and design patterns
 - [Bring Your Own Store](./docs/guides/byo-stores.md) - Store-contract conventions, atomicity rules, and a worked example for any database
 - [MCP Provider Guide](./docs/guides/mcp-provider.md) - Dynamic client registration and PKCE auth-code for MCP clients
+- [Migrating from Better Auth](./docs/guides/better-auth-migration.md) - Concept map, flow equivalents, client swap, and schema migration
 - [Security Policy](./docs/SECURITY.md) - Security best practices and vulnerability reporting
 - [Better Auth Parity Plan](./docs/better-auth-parity.md) - Target architecture, roadmap, and feature parity tracking
 

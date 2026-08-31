@@ -1,0 +1,62 @@
+{
+  "name": "@thomasfosterau/effect-auth-svelte",
+  "version": "0.1.0",
+  "description": "Svelte bindings and form components for the effect-auth client.",
+  "keywords": [
+    "auth",
+    "authentication",
+    "client",
+    "components",
+    "effect",
+    "effect-auth",
+    "forms",
+    "svelte"
+  ],
+  "homepage": "https://github.com/thomasfosterau/effect-auth#readme",
+  "bugs": {
+    "url": "https://github.com/thomasfosterau/effect-auth/issues"
+  },
+  "license": "MIT",
+  "author": "Thomas Foster <me@thomasfoster.au>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thomasfosterau/effect-auth.git"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "types": "./dist/index.d.ts",
+  "svelte": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "svelte": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "svelte-package -i src -o dist && node ./scripts/postbuild.mjs",
+    "test": "vp test run",
+    "typecheck": "tsc --noEmit && vp test --typecheck --run"
+  },
+  "dependencies": {
+    "@thomasfosterau/effect-auth-client": "workspace:*"
+  },
+  "devDependencies": {
+    "@sveltejs/package": "^2.5.8",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@testing-library/svelte": "^5.4.2",
+    "jsdom": "^25.0.1",
+    "svelte": "^5.16.0"
+  },
+  "peerDependencies": {
+    "svelte": "^5.20.0"
+  }
+}

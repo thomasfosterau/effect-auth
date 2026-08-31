@@ -10,11 +10,21 @@
  * </template>
  * ```
  *
- * @module vue
+ * Alongside the composables the package ships headless form components
+ * (`SignInForm`, `SignUpForm`, ...) and the provide/inject plumbing they
+ * resolve their client through.
+ *
+ * @module effect-auth-vue
  */
 import { getCurrentScope, onScopeDispose, shallowRef, type ShallowRef } from "vue";
-import type { AuthClient, AuthClientError, SessionState } from "./Client.ts";
-import type { SessionView } from "./types.ts";
+import type { AuthClient, AuthClientError, SessionState } from "@thomasfosterau/effect-auth-client";
+
+export * from "./components.ts";
+export * from "./context.ts";
+export * from "./forms.ts";
+
+/** The sessions `client.listSessions()` resolves to. */
+type SessionList = Awaited<ReturnType<AuthClient["listSessions"]>>;
 
 /**
  * A `ref` over the client's session store that also carries a `dispose()`
@@ -52,7 +62,7 @@ export const useSession = (client: AuthClient): UseSessionResult => {
 
 /** The refs returned by {@link useListSessions}. */
 export interface ListSessionsRefs {
-  readonly data: Readonly<ShallowRef<readonly SessionView[] | null>>;
+  readonly data: Readonly<ShallowRef<SessionList | null>>;
   readonly isPending: Readonly<ShallowRef<boolean>>;
   readonly error: Readonly<ShallowRef<AuthClientError | null>>;
   /** Re-run the query (e.g. after revoking a session). */
@@ -68,7 +78,7 @@ export interface ListSessionsRefs {
  * the React `useListSessions` hook.
  */
 export const useListSessions = (client: AuthClient): ListSessionsRefs => {
-  const data = shallowRef<readonly SessionView[] | null>(null);
+  const data = shallowRef<SessionList | null>(null);
   const isPending = shallowRef(true);
   const error = shallowRef<AuthClientError | null>(null);
   let disposed = false;

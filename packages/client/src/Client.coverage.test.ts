@@ -112,14 +112,14 @@ describe("phone OTP", () => {
   it("sends an SMS code and signs in with it", async () => {
     const { server, client } = withServer({ features: true });
 
-    expect(await client.phoneOTP.send({ phoneNumber: "+15550001", purpose: "sign-in" })).toEqual({
+    expect(await client.phoneOtp.send({ phoneNumber: "+15550001", purpose: "sign-in" })).toEqual({
       status: true,
     });
-    expect(server.sentPhoneOTPs).toHaveLength(1);
+    expect(server.sentPhoneOtps).toHaveLength(1);
 
-    const signedIn = await client.phoneOTP.signIn({
+    const signedIn = await client.phoneOtp.signIn({
       phoneNumber: "+15550001",
-      otp: server.sentPhoneOTPs[0]!.otp,
+      otp: server.sentPhoneOtps[0]!.otp,
     });
     expect(signedIn.user.id).toBeTypeOf("string");
     expect(await client.getSession()).not.toBeNull();
@@ -184,14 +184,14 @@ describe("multi-session", () => {
 // Multi-factor: the challenge-continuation helper
 // -----------------------------------------------------------------------------
 
-const totpFor = (secret: string) => Effect.runPromise(Auth.MultiFactor.generateTOTP(secret));
+const totpFor = (secret: string) => Effect.runPromise(Auth.MultiFactor.generateTotp(secret));
 /**
  * The previous time step's code (still inside the ±1 window). Confirming
  * enrollment with it leaves the current step's code unused, so the replay
  * guard does not reject the later challenge redemption.
  */
 const previousTotpFor = (secret: string) =>
-  Effect.runPromise(Auth.MultiFactor.generateHOTP(secret, Math.floor(Date.now() / 1000 / 30) - 1));
+  Effect.runPromise(Auth.MultiFactor.generateHotp(secret, Math.floor(Date.now() / 1000 / 30) - 1));
 
 /** Enrol `email` in multi-factor and return the enrollment view. */
 const enrol = async (client: ReturnType<typeof createAuthClient>, email: string) => {

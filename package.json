@@ -18,7 +18,7 @@
     "prepare": "vp config && pnpm exec effect-language-service patch",
     "build": "pnpm -r run build",
     "check": "vp check",
-    "test": "vp test run",
+    "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
     "docs": "pnpm --filter @thomasfosterau/effect-auth run docs",
     "changeset": "changeset",

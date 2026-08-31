@@ -3,9 +3,8 @@
   "compilerOptions": {
     "rootDir": "./src",
     "outDir": "./dist",
-    "lib": ["ES2022", "DOM"],
-    "jsx": "react-jsx"
+    "lib": ["ES2022", "DOM"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.tsx", "src/testing/**"]
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "src/testing/**"]
 }
