@@ -1,12 +1,10 @@
 /**
  * Shared Argon2id vocabulary: the PHC algorithm identifier, the cost-parameter
- * interface, the recommended cost profiles, and the input guards both hashers
- * apply before running a KDF.
+ * interface, the recommended cost profiles, and the input guards the hasher
+ * applies before running a KDF.
  *
  * This module intentionally depends on nothing but `effect` and
- * `@thomasfosterau/effect-auth`. It is the only code the WASM hasher
- * (`Argon2.ts`) and the native hasher (`Native.ts`) share, so importing one
- * never drags the other's backend into the module graph.
+ * `@thomasfosterau/effect-auth`.
  *
  * @module argon2/common
  */
@@ -17,9 +15,9 @@ import { HashingError } from "@thomasfosterau/effect-auth";
 export const ARGON2ID = "argon2id";
 
 /**
- * Argon2id cost parameters. Option names match `@node-rs/argon2` (and the
- * previous releases of this package), so a configuration object works
- * unchanged against either backend.
+ * Argon2id cost parameters. Option names match `@node-rs/argon2` and previous
+ * releases of this package, so a configuration object written for either
+ * still works unchanged.
  *
  * Unset fields fall back to {@link defaultProfile}.
  */

@@ -64,9 +64,6 @@ importers:
         specifier: ^4.12.0
         version: 4.12.0
     devDependencies:
-      '@node-rs/argon2':
-        specifier: ^2.0.2
-        version: 2.0.2
       '@types/node':
         specifier: ^26.1.0
         version: 26.1.1
@@ -131,10 +128,6 @@ importers:
         version: 4.0.0-beta.94
 
   packages/effect-auth:
-    dependencies:
-      '@oslojs/webauthn':
-        specifier: ^1.0.0
-        version: 1.0.0
     devDependencies:
       '@types/node':
         specifier: ^26.1.0
@@ -554,17 +547,11 @@ packages:
   '@emnapi/core@1.11.1':
     resolution: {integrity: sha512-RSvbQmHzdKzNsLYa/wHrbc3KN4sYLKAdPZxqiM2HATqv/SBk2/ENSHpvXGaLOMcsAyz0poEGqkmmKYG3OWiJEQ==}
 
-  '@emnapi/core@1.11.2':
-    resolution: {integrity: sha512-TC8MkTuZUtcTSiFeuC0ksCh9QIJ5+F21MvZ4Wn4ORfYaFJ/0dsiudv5tVkejgwZlwQ39jL9WWDe2lz8x0WglOA==}
-
   '@emnapi/runtime@1.10.0':
     resolution: {integrity: sha512-ewvYlk86xUoGI0zQRNq/mC+16R1QeDlKQy21Ki3oSYXNgLb45GV1P6A0M+/s6nyCuNDqe5VpaY84BzXGwVbwFA==}
 
   '@emnapi/runtime@1.11.1':
     resolution: {integrity: sha512-vgj7R3y3Wgx24IQaGPA/R6YFXLHVMOZ0uVEyIQPaWs+rd1AzfEMXlAC22FYwO1XkKR6NPsq7mUandH8oIRdZFw==}
-
-  '@emnapi/runtime@1.11.2':
-    resolution: {integrity: sha512-kyOl3X0DuTiT1h2ft8r2fYO8JYtU9a9Xis/zBSiGArNaagCOWx90N1k2wxp18czFDH+OgcWGb5ZP/XMt3dcyPA==}
 
   '@emnapi/wasi-threads@1.2.1':
     resolution: {integrity: sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w==}
@@ -850,9 +837,6 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@napi-rs/wasm-runtime@0.2.12':
-    resolution: {integrity: sha512-ZVWUcfwY4E/yPitQJl481FjFo3K22D6qF0DuFH6Y/nbnE11GY5uguDxZMGXPQ8WQ0128MXQD7TnfHyK4oWoIJQ==}
-
   '@napi-rs/wasm-runtime@1.1.6':
     resolution: {integrity: sha512-ZLv/JdUfkvOy9eCnnBaGfiO+XimbjebAeO+MRQqD/B+FR1tnRN0tpKSJHRbE8sFfS6aqsXZ67TQjfwfsxULVbg==}
     peerDependencies:
@@ -864,97 +848,6 @@ packages:
 
   '@nodable/entities@3.0.0':
     resolution: {integrity: sha512-8L9xFeTYKhm49xfIypoe2W5wV1m/3Z58kT+7kR9A8OyFxcPduI4VmxaUMQyKYrRjUoLLSXv6EKKID5Tvj9cUVw==}
-
-  '@node-rs/argon2-android-arm-eabi@2.0.2':
-    resolution: {integrity: sha512-DV/H8p/jt40lrao5z5g6nM9dPNPGEHL+aK6Iy/og+dbL503Uj0AHLqj1Hk9aVUSCNnsDdUEKp4TVMi0YakDYKw==}
-    engines: {node: '>= 10'}
-    cpu: [arm]
-    os: [android]
-
-  '@node-rs/argon2-android-arm64@2.0.2':
-    resolution: {integrity: sha512-1LKwskau+8O1ktKx7TbK7jx1oMOMt4YEXZOdSNIar1TQKxm6isZ0cRXgHLibPHEcNHgYRsJWDE9zvDGBB17QDg==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [android]
-
-  '@node-rs/argon2-darwin-arm64@2.0.2':
-    resolution: {integrity: sha512-3TTNL/7wbcpNju5YcqUrCgXnXUSbD7ogeAKatzBVHsbpjZQbNb1NDxDjqqrWoTt6XL3z9mJUMGwbAk7zQltHtA==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@node-rs/argon2-darwin-x64@2.0.2':
-    resolution: {integrity: sha512-vNPfkLj5Ij5111UTiYuwgxMqE7DRbOS2y58O2DIySzSHbcnu+nipmRKg+P0doRq6eKIJStyBK8dQi5Ic8pFyDw==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [darwin]
-
-  '@node-rs/argon2-freebsd-x64@2.0.2':
-    resolution: {integrity: sha512-M8vQZk01qojQfCqQU0/O1j1a4zPPrz93zc9fSINY7Q/6RhQRBCYwDw7ltDCZXg5JRGlSaeS8cUXWyhPGar3cGg==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [freebsd]
-
-  '@node-rs/argon2-linux-arm-gnueabihf@2.0.2':
-    resolution: {integrity: sha512-7EmmEPHLzcu0G2GDh30L6G48CH38roFC2dqlQJmtRCxs6no3tTE/pvgBGatTp/o2n2oyOJcfmgndVFcUpwMnww==}
-    engines: {node: '>= 10'}
-    cpu: [arm]
-    os: [linux]
-
-  '@node-rs/argon2-linux-arm64-gnu@2.0.2':
-    resolution: {integrity: sha512-6lsYh3Ftbk+HAIZ7wNuRF4SZDtxtFTfK+HYFAQQyW7Ig3LHqasqwfUKRXVSV5tJ+xTnxjqgKzvZSUJCAyIfHew==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [linux]
-    libc: [glibc]
-
-  '@node-rs/argon2-linux-arm64-musl@2.0.2':
-    resolution: {integrity: sha512-p3YqVMNT/4DNR67tIHTYGbedYmXxW9QlFmF39SkXyEbGQwpgSf6pH457/fyXBIYznTU/smnG9EH+C1uzT5j4hA==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [linux]
-    libc: [musl]
-
-  '@node-rs/argon2-linux-x64-gnu@2.0.2':
-    resolution: {integrity: sha512-ZM3jrHuJ0dKOhvA80gKJqBpBRmTJTFSo2+xVZR+phQcbAKRlDMSZMFDiKbSTnctkfwNFtjgDdh5g1vaEV04AvA==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [linux]
-    libc: [glibc]
-
-  '@node-rs/argon2-linux-x64-musl@2.0.2':
-    resolution: {integrity: sha512-of5uPqk7oCRF/44a89YlWTEfjsftPywyTULwuFDKyD8QtVZoonrJR6ZWvfFE/6jBT68S0okAkAzzMEdBVWdxWw==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [linux]
-    libc: [musl]
-
-  '@node-rs/argon2-wasm32-wasi@2.0.2':
-    resolution: {integrity: sha512-U3PzLYKSQYzTERstgtHLd4ZTkOF9co57zTXT77r0cVUsleGZOrd6ut7rHzeWwoJSiHOVxxa0OhG1JVQeB7lLoQ==}
-    engines: {node: '>=14.0.0'}
-    cpu: [wasm32]
-
-  '@node-rs/argon2-win32-arm64-msvc@2.0.2':
-    resolution: {integrity: sha512-Eisd7/NM0m23ijrGr6xI2iMocdOuyl6gO27gfMfya4C5BODbUSP7ljKJ7LrA0teqZMdYHesRDzx36Js++/vhiQ==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [win32]
-
-  '@node-rs/argon2-win32-ia32-msvc@2.0.2':
-    resolution: {integrity: sha512-GsE2ezwAYwh72f9gIjbGTZOf4HxEksb5M2eCaj+Y5rGYVwAdt7C12Q2e9H5LRYxWcFvLH4m4jiSZpQQ4upnPAQ==}
-    engines: {node: '>= 10'}
-    cpu: [ia32]
-    os: [win32]
-
-  '@node-rs/argon2-win32-x64-msvc@2.0.2':
-    resolution: {integrity: sha512-cJxWXanH4Ew9CfuZ4IAEiafpOBCe97bzoKowHCGk5lG/7kR4WF/eknnBlHW9m8q7t10mKq75kruPLtbSDqgRTw==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [win32]
-
-  '@node-rs/argon2@2.0.2':
-    resolution: {integrity: sha512-t64wIsPEtNd4aUPuTAyeL2ubxATCBGmeluaKXEMAFk/8w6AJIVVkeLKMBpgLW6LU2t5cQxT+env/c6jxbtTQBg==}
-    engines: {node: '>= 10'}
 
   '@node-saml/node-saml@5.1.0':
     resolution: {integrity: sha512-t3cJnZ4aC7HhPZ6MGylGZULvUtBOZ6FzuUndaHGXjmIZHXnLfC/7L8a57O9Q9V7AxJGKAiRM5zu2wNm9EsvQpw==}
@@ -1040,29 +933,6 @@ packages:
   '@octokit/webhooks@14.2.0':
     resolution: {integrity: sha512-da6KbdNCV5sr1/txD896V+6W0iamFWrvVl8cHkBSPT+YlvmT3DwXa4jxZnQc+gnuTEqSWbBeoSZYTayXH9wXcw==}
     engines: {node: '>= 20'}
-
-  '@oslojs/asn1@1.0.0':
-    resolution: {integrity: sha512-zw/wn0sj0j0QKbIXfIlnEcTviaCzYOY3V5rAyjR6YtOByFtJiT574+8p9Wlach0lZH9fddD4yb9laEAIl4vXQA==}
-    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
-
-  '@oslojs/binary@1.0.0':
-    resolution: {integrity: sha512-9RCU6OwXU6p67H4NODbuxv2S3eenuQ4/WFLrsq+K/k682xrznH5EVWA7N4VFk9VYVcbFtKqur5YQQZc0ySGhsQ==}
-    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
-
-  '@oslojs/cbor@1.0.0':
-    resolution: {integrity: sha512-AY6Lknexs7n2xp8Cgey95c+975VG7XOk4UEdRdNFxHmDDbuf47OC/LAVRsl14DeTLwo8W6xr3HLFwUFmKcndTQ==}
-    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
-
-  '@oslojs/crypto@1.0.0':
-    resolution: {integrity: sha512-dVz8TkkgYdr3tlwxHd7SCYGxoN7ynwHLA0nei/Aq9C+ERU0BK+U8+/3soEzBUxUNKYBf42351DyJUZ2REla50w==}
-    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
-
-  '@oslojs/encoding@1.0.0':
-    resolution: {integrity: sha512-dyIB0SdZgMm5BhGwdSp8rMxEFIopLKxDG1vxIBaiogyom6ZqH2aXPb6DEC2WzOOWKdPSq1cxdNeRx2wAn1Z+ZQ==}
-
-  '@oslojs/webauthn@1.0.0':
-    resolution: {integrity: sha512-2ZRpbt3msNURwvjmavzq9vrNlxUnWFBGMYqbC1kO3fYBLskL7r4DiLJT1wbtLoI+hclFwjhl48YhRFBl6RWg1A==}
-    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
   '@oxc-project/runtime@0.138.0':
     resolution: {integrity: sha512-yHhoXsN8tYxgdJCdD91PbySNjEEaBX/tH2OQRDXJpsQv5b184oC4/qVbU7qlblvfil/JP15Lh2HW7+HN5DS90Q==}
@@ -4276,23 +4146,12 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@emnapi/core@1.11.2':
-    dependencies:
-      '@emnapi/wasi-threads': 1.2.2
-      tslib: 2.8.1
-    optional: true
-
   '@emnapi/runtime@1.10.0':
     dependencies:
       tslib: 2.8.1
     optional: true
 
   '@emnapi/runtime@1.11.1':
-    dependencies:
-      tslib: 2.8.1
-    optional: true
-
-  '@emnapi/runtime@1.11.2':
     dependencies:
       tslib: 2.8.1
     optional: true
@@ -4512,13 +4371,6 @@ snapshots:
   '@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4':
     optional: true
 
-  '@napi-rs/wasm-runtime@0.2.12':
-    dependencies:
-      '@emnapi/core': 1.11.2
-      '@emnapi/runtime': 1.11.2
-      '@tybys/wasm-util': 0.10.3
-    optional: true
-
   '@napi-rs/wasm-runtime@1.1.6(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
     dependencies:
       '@emnapi/core': 1.10.0
@@ -4536,67 +4388,6 @@ snapshots:
   '@neon-rs/load@0.0.4': {}
 
   '@nodable/entities@3.0.0': {}
-
-  '@node-rs/argon2-android-arm-eabi@2.0.2':
-    optional: true
-
-  '@node-rs/argon2-android-arm64@2.0.2':
-    optional: true
-
-  '@node-rs/argon2-darwin-arm64@2.0.2':
-    optional: true
-
-  '@node-rs/argon2-darwin-x64@2.0.2':
-    optional: true
-
-  '@node-rs/argon2-freebsd-x64@2.0.2':
-    optional: true
-
-  '@node-rs/argon2-linux-arm-gnueabihf@2.0.2':
-    optional: true
-
-  '@node-rs/argon2-linux-arm64-gnu@2.0.2':
-    optional: true
-
-  '@node-rs/argon2-linux-arm64-musl@2.0.2':
-    optional: true
-
-  '@node-rs/argon2-linux-x64-gnu@2.0.2':
-    optional: true
-
-  '@node-rs/argon2-linux-x64-musl@2.0.2':
-    optional: true
-
-  '@node-rs/argon2-wasm32-wasi@2.0.2':
-    dependencies:
-      '@napi-rs/wasm-runtime': 0.2.12
-    optional: true
-
-  '@node-rs/argon2-win32-arm64-msvc@2.0.2':
-    optional: true
-
-  '@node-rs/argon2-win32-ia32-msvc@2.0.2':
-    optional: true
-
-  '@node-rs/argon2-win32-x64-msvc@2.0.2':
-    optional: true
-
-  '@node-rs/argon2@2.0.2':
-    optionalDependencies:
-      '@node-rs/argon2-android-arm-eabi': 2.0.2
-      '@node-rs/argon2-android-arm64': 2.0.2
-      '@node-rs/argon2-darwin-arm64': 2.0.2
-      '@node-rs/argon2-darwin-x64': 2.0.2
-      '@node-rs/argon2-freebsd-x64': 2.0.2
-      '@node-rs/argon2-linux-arm-gnueabihf': 2.0.2
-      '@node-rs/argon2-linux-arm64-gnu': 2.0.2
-      '@node-rs/argon2-linux-arm64-musl': 2.0.2
-      '@node-rs/argon2-linux-x64-gnu': 2.0.2
-      '@node-rs/argon2-linux-x64-musl': 2.0.2
-      '@node-rs/argon2-wasm32-wasi': 2.0.2
-      '@node-rs/argon2-win32-arm64-msvc': 2.0.2
-      '@node-rs/argon2-win32-ia32-msvc': 2.0.2
-      '@node-rs/argon2-win32-x64-msvc': 2.0.2
 
   '@node-saml/node-saml@5.1.0':
     dependencies:
@@ -4705,31 +4496,6 @@ snapshots:
       '@octokit/openapi-webhooks-types': 12.1.0
       '@octokit/request-error': 7.1.1
       '@octokit/webhooks-methods': 6.0.0
-
-  '@oslojs/asn1@1.0.0':
-    dependencies:
-      '@oslojs/binary': 1.0.0
-
-  '@oslojs/binary@1.0.0': {}
-
-  '@oslojs/cbor@1.0.0':
-    dependencies:
-      '@oslojs/binary': 1.0.0
-
-  '@oslojs/crypto@1.0.0':
-    dependencies:
-      '@oslojs/asn1': 1.0.0
-      '@oslojs/binary': 1.0.0
-
-  '@oslojs/encoding@1.0.0': {}
-
-  '@oslojs/webauthn@1.0.0':
-    dependencies:
-      '@oslojs/asn1': 1.0.0
-      '@oslojs/binary': 1.0.0
-      '@oslojs/cbor': 1.0.0
-      '@oslojs/crypto': 1.0.0
-      '@oslojs/encoding': 1.0.0
 
   '@oxc-project/runtime@0.138.0': {}
 

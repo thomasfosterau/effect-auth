@@ -5,7 +5,7 @@
  * Argon2id — OWASP's first-choice password hashing algorithm — needs a KDF the
  * platform does not provide, so it lives in its own package.
  *
- * The default backend is **pure WebAssembly**
+ * This package is **pure WebAssembly**
  * ([`hash-wasm`](https://github.com/Daninet/hash-wasm)): no native module, no
  * `node:` imports, so the same code runs on Node, Bun, Deno and edge runtimes
  * such as Cloudflare Workers. Default cost parameters follow OWASP's
@@ -13,20 +13,10 @@
  * Workers isolate; {@link serverProfile} (m = 64 MiB, t = 3, p = 1) is
  * available for plain-Node deployments.
  *
- * A native fast path over
- * [`@node-rs/argon2`](https://github.com/napi-rs/node-rs) is available as an
- * opt-in from a separate entry point, so bundlers never pull the native module
- * into an edge build:
- *
- * ```ts
- * import { nativeArgon2Hasher } from "@thomasfosterau/effect-auth-argon2/native";
- * ```
- *
- * Both backends emit and accept standard PHC strings
+ * Hashes are standard PHC strings
  * (`$argon2id$v=19$m=...,t=...,p=...$salt$hash`), and `verify` reads the cost
- * parameters out of the stored hash, so hashes interoperate with each other,
- * with older configurations of this package, and with any other Argon2
- * implementation.
+ * parameters out of the stored hash, so hashes interoperate with older
+ * configurations of this package and with any other Argon2 implementation.
  *
  * @module argon2
  */
