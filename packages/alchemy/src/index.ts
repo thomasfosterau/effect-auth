@@ -19,7 +19,7 @@ export * from "./Schema.ts";
 /** Store implementations and their layers. */
 export * from "./Stores.ts";
 
-/** The structural model of Alchemy v2's resource lifecycle plus runner helpers. */
+/** Helpers for driving a real Alchemy v2 provider outside the engine. */
 export * from "./Alchemy.ts";
 
 /** The `AuthSchema` infrastructure resource and its provider. */

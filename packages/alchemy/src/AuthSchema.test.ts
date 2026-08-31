@@ -1,9 +1,14 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect } from "effect";
 import type { D1Database, D1PreparedStatement, D1Result } from "./D1.ts";
-import { AuthSchema, AuthSchemaProvider, type AuthSchemaProps } from "./AuthSchema.ts";
+import {
+  AUTH_SCHEMA_TYPE,
+  AuthSchema,
+  AuthSchemaProvider,
+  type AuthSchemaProps,
+} from "./AuthSchema.ts";
 import { authTableNames, listAuthTables } from "./Tables.ts";
-import { deprovision, provision, type ResourceId } from "./Alchemy.ts";
+import { deprovision, provision, silentSession, type ResourceIdentity } from "./Alchemy.ts";
 
 type SqlValue = null | number | bigint | string | Uint8Array;
 
@@ -68,7 +73,18 @@ const makeTestDb = (): D1Database => {
   };
 };
 
-const id: ResourceId = { logicalId: "auth-schema" };
+const ref: ResourceIdentity = { id: "auth-schema" };
+/** What the engine passes every lifecycle operation for {@link ref}. */
+const self = { id: ref.id, fqn: ref.id, instanceId: ref.id };
+
+/**
+ * Build the resource's provider exactly the way an Alchemy stack does: the
+ * `Provider.succeed(...)` Layer is mounted and the service is read back off
+ * Alchemy's own `Provider` tag.
+ */
+const provider = await Effect.runPromise(
+  AuthSchema.Provider.pipe(Effect.provide(AuthSchemaProvider())),
+);
 
 describe("@thomasfosterau/effect-auth-alchemy resources", () => {
   it("derives the auth table list from the shared schema statements", () => {
@@ -83,12 +99,29 @@ describe("@thomasfosterau/effect-auth-alchemy resources", () => {
     expect(authTableNames.every((name) => name.startsWith("auth_"))).toBe(true);
   });
 
-  it("declares an AuthSchema resource type", () => {
-    expect(AuthSchema.type).toBe("effect-auth::AuthSchema");
+  it("declares a real Alchemy resource and registers a provider for it", async () => {
+    expect(AuthSchema.Type).toBe(AUTH_SCHEMA_TYPE);
+    // The provider resolved off Alchemy's `Provider` tag implements the
+    // lifecycle the engine drives.
+    expect(typeof provider.reconcile).toBe("function");
+    expect(typeof provider.delete).toBe("function");
+    expect(typeof provider.list).toBe("function");
+
     // diff always asks for an in-place update — the schema is never replaced.
-    expect(
-      AuthSchemaProvider.diff({ id, news: {} as AuthSchemaProps, olds: {} as AuthSchemaProps }),
-    ).toBe("update");
+    const diff = await Effect.runPromise(
+      provider.diff!({
+        ...self,
+        olds: {} as AuthSchemaProps,
+        news: {} as AuthSchemaProps,
+        oldBindings: [],
+        newBindings: [],
+        output: undefined,
+      }),
+    );
+    expect(diff).toEqual({ action: "update" });
+
+    // Nothing to enumerate account-wide.
+    expect(await Effect.runPromise(provider.list())).toEqual([]);
   });
 });
 
@@ -98,7 +131,7 @@ suite("AuthSchema provider", () => {
   it("read reports undefined before the schema exists", async () => {
     const database = makeTestDb();
     const live = await Effect.runPromise(
-      AuthSchemaProvider.read({ id, props: { database }, output: undefined }),
+      provider.read!({ ...self, olds: { database }, output: undefined }),
     );
     expect(live).toBeUndefined();
   });
@@ -107,7 +140,14 @@ suite("AuthSchema provider", () => {
     const database = makeTestDb();
 
     const first = await Effect.runPromise(
-      AuthSchemaProvider.reconcile({ id, news: { database }, olds: undefined, output: undefined }),
+      provider.reconcile({
+        ...self,
+        news: { database },
+        olds: undefined,
+        output: undefined,
+        session: silentSession,
+        bindings: [],
+      }),
     );
     expect(first.tables).toEqual([...authTableNames].sort());
     expect(first.statements).toBeGreaterThan(0);
@@ -115,37 +155,40 @@ suite("AuthSchema provider", () => {
 
     // Running again must converge to the same state without error.
     const second = await Effect.runPromise(
-      AuthSchemaProvider.reconcile({ id, news: { database }, olds: { database }, output: first }),
+      provider.reconcile({
+        ...self,
+        news: { database },
+        olds: { database },
+        output: first,
+        session: silentSession,
+        bindings: [],
+      }),
     );
     expect(second.tables).toEqual(first.tables);
   });
 
   it("read reflects the live tables after reconciling", async () => {
     const database = makeTestDb();
-    await Effect.runPromise(
-      AuthSchemaProvider.reconcile({ id, news: { database }, olds: undefined, output: undefined }),
-    );
+    await Effect.runPromise(provision(provider, ref, { database }));
 
     const live = await Effect.runPromise(
-      AuthSchemaProvider.read({ id, props: { database }, output: undefined }),
+      provider.read!({ ...self, olds: { database }, output: undefined }),
     );
     expect(live?.tables).toEqual([...authTableNames].sort());
   });
 
   it("delete preserves data by default and drops tables when opted in", async () => {
     const database = makeTestDb();
-    const output = await Effect.runPromise(
-      AuthSchemaProvider.reconcile({ id, news: { database }, olds: undefined, output: undefined }),
-    );
+    const output = await Effect.runPromise(provision(provider, ref, { database }));
 
     // Default: leave the tables in place.
-    await Effect.runPromise(AuthSchemaProvider.delete({ id, props: { database }, output }));
+    await Effect.runPromise(deprovision(provider, ref, { props: { database }, output }));
     const stillThere = await Effect.runPromise(listAuthTables(database));
     expect(stillThere).toEqual([...authTableNames].sort());
 
     // Opt in: drop everything.
     await Effect.runPromise(
-      AuthSchemaProvider.delete({ id, props: { database, dropOnDelete: true }, output }),
+      deprovision(provider, ref, { props: { database, dropOnDelete: true }, output }),
     );
     const gone = await Effect.runPromise(listAuthTables(database));
     expect(gone).toEqual([]);
@@ -155,10 +198,14 @@ suite("AuthSchema provider", () => {
     const database = makeTestDb();
     const props: AuthSchemaProps = { database, dropOnDelete: true };
 
-    const output = await Effect.runPromise(provision(AuthSchemaProvider, id, props));
+    const output = await Effect.runPromise(provision(provider, ref, props));
     expect(output.tables).toEqual([...authTableNames].sort());
 
-    await Effect.runPromise(deprovision(AuthSchemaProvider, id, { props, output }));
+    // A second apply carries the prior state, so read + diff run too.
+    const again = await Effect.runPromise(provision(provider, ref, props, { props, output }));
+    expect(again.tables).toEqual(output.tables);
+
+    await Effect.runPromise(deprovision(provider, ref, { props, output }));
     const gone = await Effect.runPromise(listAuthTables(database));
     expect(gone).toEqual([]);
   });

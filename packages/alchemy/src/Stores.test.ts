@@ -302,7 +302,7 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
     await Effect.runPromise(challenges.delete(challengeBytes));
     expect(await Effect.runPromise(challenges.get(challengeBytes))).toBe(null);
 
-    const credential: Auth.SecondFactor.WebAuthnCredential = {
+    const credential: Auth.MultiFactor.WebAuthnCredential = {
       id: "c1",
       userId: "u1",
       publicKey: new Uint8Array([9, 8, 7]),
@@ -512,7 +512,7 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
     const { db } = await setup();
     const store = makeMultiFactorStore(db);
     const pendingStore = makePendingMultiFactorStore(db);
-    const record: Auth.SecondFactor.MultiFactorRecord = {
+    const record: Auth.MultiFactor.MultiFactorRecord = {
       userId: "user-1",
       secret: "JBSWY3DPEHPK3PXP",
       backupCodes: ["h1", "h2", "h3"],
@@ -539,7 +539,7 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
     await Effect.runPromise(store.delete("user-1"));
     expect(await Effect.runPromise(store.get("user-1"))).toBe(null);
 
-    const pending: Auth.SecondFactor.PendingMultiFactor = {
+    const pending: Auth.MultiFactor.PendingMultiFactor = {
       token: "p2f-1",
       userId: "user-1",
       expiresAt: Date.now() + 300_000,
@@ -639,8 +639,8 @@ suite("@thomasfosterau/effect-auth-alchemy stores", () => {
       });
       const magicLink = yield* magicLinks.get("ml-layer");
       const emailOtps = yield* Auth.Email.EmailOTPStore;
-      const multiFactor = yield* Auth.SecondFactor.MultiFactorStore;
-      const pendingMultiFactor = yield* Auth.SecondFactor.PendingMultiFactorStore;
+      const multiFactor = yield* Auth.MultiFactor.MultiFactorStore;
+      const pendingMultiFactor = yield* Auth.MultiFactor.PendingMultiFactorStore;
       const magicLinkUsers = yield* Auth.MagicLinkUserStore;
       const emailOtpUsers = yield* Auth.Email.EmailOTPUserStore;
       const identifiers = yield* Auth.IdentifierStore;

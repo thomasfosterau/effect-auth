@@ -3,7 +3,7 @@
  *
  * The {@link D1Database} interface is the minimal structural subset of the
  * Cloudflare D1 client that these stores use. The handle returned by Alchemy
- * v2's `Cloudflare.D1Database.bind(...)`, the `D1Database` type from
+ * v2's Cloudflare D1 binding, the `D1Database` type from
  * `@cloudflare/workers-types`, and Miniflare's local implementation all
  * satisfy it, so no Cloudflare type dependency is required here.
  */
@@ -37,9 +37,6 @@ export interface D1Result<T = unknown> {
   readonly meta: unknown;
 }
 
-const prepared = (db: D1Database, sql: string, params: readonly unknown[]): D1PreparedStatement =>
-  db.prepare(sql).bind(...params);
-
 const toAuthError =
   (label: string) =>
   (cause: unknown): Auth.AuthError =>
@@ -55,7 +52,11 @@ export const d1Run = (
   label = "run",
 ): Effect.Effect<D1Result, Auth.AuthError> =>
   Effect.tryPromise({
-    try: () => prepared(db, sql, params).run(),
+    try: () =>
+      db
+        .prepare(sql)
+        .bind(...params)
+        .run(),
     catch: toAuthError(label),
   });
 
@@ -69,7 +70,11 @@ export const d1First = <T>(
   label = "query",
 ): Effect.Effect<T | null, Auth.AuthError> =>
   Effect.tryPromise({
-    try: () => prepared(db, sql, params).first<T>(),
+    try: () =>
+      db
+        .prepare(sql)
+        .bind(...params)
+        .first<T>(),
     catch: toAuthError(label),
   });
 
@@ -83,6 +88,10 @@ export const d1All = <T>(
   label = "query",
 ): Effect.Effect<readonly T[], Auth.AuthError> =>
   Effect.tryPromise({
-    try: () => prepared(db, sql, params).all<T>(),
+    try: () =>
+      db
+        .prepare(sql)
+        .bind(...params)
+        .all<T>(),
     catch: toAuthError(label),
   }).pipe(Effect.map((result) => result.results));

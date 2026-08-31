@@ -27,52 +27,61 @@ Cloudflare D1 database on every deploy.
   binding, so tearing down the stack never destroys auth data unless you opt in
   with `dropOnDelete: true`.
 
+`AuthSchema` is built with Alchemy's own `Resource` constructor and
+`AuthSchemaProvider()` is a `Layer` built with Alchemy's own `Provider.succeed`
+— the same primitives `Alchemy.Random` and `Cloudflare.D1.Database` are built
+from. Declare the resource in your program and merge its provider into the
+stack's provider layer:
+
 ```ts
-import { Cloudflare } from "alchemy";
+import * as Alchemy from "alchemy";
+import * as Cloudflare from "alchemy/Cloudflare";
 import { Effect, Layer } from "effect";
-import { Provider } from "alchemy/resource"; // the engine's Provider tag
 import { AuthSchema, AuthSchemaProvider } from "@thomasfosterau/effect-auth-alchemy";
 
-const AuthD1 = Cloudflare.D1Database("auth");
-
-export default Cloudflare.Worker(
+export default Alchemy.Stack(
   "api",
+  {
+    // Mount the provider so the engine can drive the resource's lifecycle.
+    providers: Layer.mergeAll(Cloudflare.providers(), AuthSchemaProvider()),
+    state: Cloudflare.state(),
+  },
   Effect.gen(function* () {
-    const db = yield* Cloudflare.D1Database.bind(AuthD1);
+    // A bound D1 handle — however your program obtains one. See Alchemy's
+    // Cloudflare docs for `Cloudflare.D1.Database` and worker bindings.
+    const db = yield* getBoundD1Database();
 
-    // Declare the managed schema against the bound database.
+    // Declare the managed schema against the bound database. On every deploy
+    // the engine reconciles it: the auth tables are created if missing and
+    // left alone otherwise.
     yield* AuthSchema("auth-schema", { database: db });
-
-    return {
-      fetch: Effect.gen(function* () {
-        /* ... your auth routes ... */
-      }),
-    };
   }),
-).pipe(
-  // Mount the provider so the engine can drive its lifecycle.
-  Effect.provide(Layer.effect(Provider, Effect.succeed(AuthSchemaProvider))),
 );
 ```
 
-`AuthSchemaProvider` implements the four lifecycle hooks the Alchemy engine
-expects — `read`, `diff`, `reconcile`, `delete`. They are plain Effects, so you
-can also drive them directly for a one-off migration script:
+The provider implements the lifecycle hooks the Alchemy engine expects —
+`read`, `diff`, `reconcile`, `delete`, `list`. For a one-off migration outside
+the engine, reach for `migrate` instead of standing a stack up:
 
 ```ts
 import { Effect } from "effect";
-import { provision, AuthSchemaProvider } from "@thomasfosterau/effect-auth-alchemy";
+import { migrate } from "@thomasfosterau/effect-auth-alchemy";
 
-await Effect.runPromise(
-  provision(AuthSchemaProvider, { logicalId: "auth-schema" }, { database: db }),
-);
+await Effect.runPromise(migrate(db));
 ```
 
-> `alchemy` is an **optional peer dependency**: bring it in your IaC program,
-> but it is not required to build, test, or run a migration with this package.
-> Like the structural `D1Database` type, the slice of Alchemy v2's resource
-> lifecycle this package targets is modelled in `Alchemy.ts` rather than taken
-> as a hard dependency on the `alchemy` runtime.
+`provision` / `deprovision` are also exported for driving a single provider's
+lifecycle (read → diff → reconcile, and delete) against a real
+`ProviderService` without the engine. Alchemy has no lightweight equivalent —
+its own answer is a full `Stack` plus `deploy` / `destroy`, which brings a
+state store, a plan, a CLI session and credential resolution with it — so these
+stay as thin package-local helpers, typed entirely from Alchemy's own
+`ProviderService` signatures.
+
+> `alchemy` is a **required peer dependency**. This package's resource,
+> provider and lifecycle types all come from `alchemy` itself; there is no
+> vendored or structural copy of them here, and the package is not useful
+> without it.
 
 ## Storage layers
 
@@ -100,28 +109,30 @@ schema in the same D1 database.
 ## Installation
 
 ```sh
-bun add @thomasfosterau/effect-auth-alchemy @thomasfosterau/effect-auth effect
+bun add @thomasfosterau/effect-auth-alchemy @thomasfosterau/effect-auth effect alchemy
 ```
+
+`alchemy` and `effect` are required peer dependencies.
 
 ## Usage
 
 ### 1. Provision and bind D1 in your Alchemy v2 program
 
 ```ts
-import { Cloudflare } from "alchemy";
+import * as Cloudflare from "alchemy/Cloudflare";
 import { Effect } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "@effect/platform";
 import * as AuthDb from "@thomasfosterau/effect-auth-alchemy";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // Declare the database resource.
-const AuthD1 = Cloudflare.D1Database("auth");
+const AuthD1 = Cloudflare.D1.Database("auth");
 
 export default Cloudflare.Worker(
   "api",
   Effect.gen(function* () {
     // Bind the provisioned D1 database inside the worker.
-    const db = yield* Cloudflare.D1Database.bind(AuthD1);
+    const db = yield* Cloudflare.D1.Database.bind(AuthD1);
 
     // Create the auth schema (idempotent — safe on every cold start).
     yield* AuthDb.migrate(db);
@@ -140,10 +151,11 @@ export default Cloudflare.Worker(
 );
 ```
 
-> The only thing this package needs from Alchemy is the bound D1 handle. The
-> handle returned by `Cloudflare.D1Database.bind(...)` satisfies the small
-> structural `D1Database` type exported here, as do the `D1Database` type from
-> `@cloudflare/workers-types` and Miniflare's local implementation.
+> The storage layers themselves need nothing from Alchemy but the bound D1
+> handle. That handle satisfies the small structural `D1Database` type exported
+> here, as do the `D1Database` type from `@cloudflare/workers-types` and
+> Miniflare's local implementation — so the same layers work under
+> `wrangler dev` and in tests.
 
 ### 2. Wire effect-auth services on top
 

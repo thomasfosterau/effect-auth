@@ -446,14 +446,14 @@ interface ChallengeRow {
   readonly user_id: string | null;
 }
 
-const rowToChallenge = (row: ChallengeRow): Auth.SecondFactor.WebAuthnChallenge =>
+const rowToChallenge = (row: ChallengeRow): Auth.MultiFactor.WebAuthnChallenge =>
   row.user_id == null
     ? { challenge: fromBase64(row.challenge), expiresAt: row.expires_at }
     : { challenge: fromBase64(row.challenge), expiresAt: row.expires_at, userId: row.user_id };
 
 export const makeChallengeStore = (
   db: D1Database,
-): typeof Auth.SecondFactor.ChallengeStore.Service => ({
+): typeof Auth.MultiFactor.ChallengeStore.Service => ({
   create: (challenge) =>
     d1Run(
       db,
@@ -490,7 +490,7 @@ interface CredentialRow {
 
 const rowToCredential = (
   row: CredentialRow,
-): Effect.Effect<Auth.SecondFactor.WebAuthnCredential, Auth.AuthError> =>
+): Effect.Effect<Auth.MultiFactor.WebAuthnCredential, Auth.AuthError> =>
   Effect.try({
     try: () => ({
       id: row.id,
@@ -507,7 +507,7 @@ const rowToCredential = (
     catch: (cause) => new Auth.AuthError({ message: "credential decode failed", cause }),
   });
 
-const credentialParams = (credential: Auth.SecondFactor.WebAuthnCredential): readonly unknown[] => [
+const credentialParams = (credential: Auth.MultiFactor.WebAuthnCredential): readonly unknown[] => [
   credential.id,
   credential.userId,
   toBase64(credential.publicKey),
@@ -520,7 +520,7 @@ const credentialParams = (credential: Auth.SecondFactor.WebAuthnCredential): rea
 
 export const makeCredentialStore = (
   db: D1Database,
-): typeof Auth.SecondFactor.CredentialStore.Service => {
+): typeof Auth.MultiFactor.CredentialStore.Service => {
   const getById = (credentialId: string, label: string) =>
     d1First<CredentialRow>(
       db,
@@ -1035,7 +1035,7 @@ interface MultiFactorRow {
 
 const rowToMultiFactor = (
   row: MultiFactorRow,
-): Effect.Effect<Auth.SecondFactor.MultiFactorRecord, Auth.AuthError> =>
+): Effect.Effect<Auth.MultiFactor.MultiFactorRecord, Auth.AuthError> =>
   Effect.try({
     try: () => ({
       userId: row.user_id,
@@ -1060,7 +1060,7 @@ const upsertMultiFactor = `INSERT INTO auth_multi_factor (user_id, secret, backu
 
 export const makeMultiFactorStore = (
   db: D1Database,
-): typeof Auth.SecondFactor.MultiFactorStore.Service => ({
+): typeof Auth.MultiFactor.MultiFactorStore.Service => ({
   get: (userId) =>
     d1First<MultiFactorRow>(
       db,
@@ -1100,7 +1100,7 @@ interface PendingMultiFactorRow {
 
 const rowToPendingMultiFactor = (
   row: PendingMultiFactorRow,
-): Auth.SecondFactor.PendingMultiFactor => ({
+): Auth.MultiFactor.PendingMultiFactor => ({
   token: row.token,
   userId: row.user_id,
   expiresAt: row.expires_at,
@@ -1109,7 +1109,7 @@ const rowToPendingMultiFactor = (
 
 export const makePendingMultiFactorStore = (
   db: D1Database,
-): typeof Auth.SecondFactor.PendingMultiFactorStore.Service => ({
+): typeof Auth.MultiFactor.PendingMultiFactorStore.Service => ({
   create: (pending) =>
     d1Run(
       db,
@@ -1303,9 +1303,9 @@ export const RateLimitStoreLayer = (db: D1Database) =>
 export const EmailVerificationStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.Email.EmailVerificationStore, makeEmailVerificationStore(db));
 export const ChallengeStoreLayer = (db: D1Database) =>
-  Layer.succeed(Auth.SecondFactor.ChallengeStore, makeChallengeStore(db));
+  Layer.succeed(Auth.MultiFactor.ChallengeStore, makeChallengeStore(db));
 export const CredentialStoreLayer = (db: D1Database) =>
-  Layer.succeed(Auth.SecondFactor.CredentialStore, makeCredentialStore(db));
+  Layer.succeed(Auth.MultiFactor.CredentialStore, makeCredentialStore(db));
 export const OAuthStateStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.OAuth.OAuthStateStore, makeOAuthStateStore(db));
 export const OAuthAccountStoreLayer = (db: D1Database) =>
@@ -1323,9 +1323,9 @@ export const EmailOTPStoreLayer = (db: D1Database) =>
 export const EmailOTPUserStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.Email.EmailOTPUserStore, makeEmailOTPUserStore(db));
 export const MultiFactorStoreLayer = (db: D1Database) =>
-  Layer.succeed(Auth.SecondFactor.MultiFactorStore, makeMultiFactorStore(db));
+  Layer.succeed(Auth.MultiFactor.MultiFactorStore, makeMultiFactorStore(db));
 export const PendingMultiFactorStoreLayer = (db: D1Database) =>
-  Layer.succeed(Auth.SecondFactor.PendingMultiFactorStore, makePendingMultiFactorStore(db));
+  Layer.succeed(Auth.MultiFactor.PendingMultiFactorStore, makePendingMultiFactorStore(db));
 export const IdentifierStoreLayer = (db: D1Database) =>
   Layer.succeed(Auth.IdentifierStore, makeIdentifierStore(db));
 export const AccountLockoutStoreLayer = (db: D1Database) =>
