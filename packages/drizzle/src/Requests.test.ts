@@ -21,7 +21,6 @@ import {
   getIdentifierByValue,
   getSession,
   getUser,
-  getUserCredentials,
   layer as requestsLayer,
   listIdentifiersByUser,
 } from "./Requests.ts";
@@ -166,36 +165,6 @@ describe("Requests / users", () => {
       expect(found.map((user) => user?.id ?? null)).toEqual(["user-1", "user-2", "user-3", null]);
       // Results are matched back by id, not by row order.
       expect(found[0]?.name).toBe("name-user-1");
-    });
-  });
-
-  it("serves a user and that user's credentials from the same query", async () => {
-    await withDatabase(async (db, log) => {
-      await seedUsers(db, [{ id: "user-1", hash: "argon2id$hash" }, { id: "user-2" }]);
-      log.reset();
-
-      const [user, credentials, noPassword, missing] = await runRequests(
-        db,
-        Effect.all(
-          [
-            getUser("user-1"),
-            getUserCredentials("user-1"),
-            getUserCredentials("user-2"),
-            getUserCredentials("ghost"),
-          ],
-          { concurrency: "unbounded" },
-        ),
-      );
-
-      // `GetUser` and `GetUserCredentials` read the same row, so they share a
-      // resolver — and therefore a batch.
-      expect(log.selectsOn("effect_auth_users")).toHaveLength(1);
-      expect(user?.id).toBe("user-1");
-      expect(credentials).toBe("argon2id$hash");
-      // A user with no password and a user that does not exist are both null,
-      // exactly as `UserStore.getCredentials` conflates them.
-      expect(noPassword).toBeNull();
-      expect(missing).toBeNull();
     });
   });
 });

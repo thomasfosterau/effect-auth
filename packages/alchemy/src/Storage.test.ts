@@ -14,7 +14,7 @@ import { makeTestD1 } from "./testShim.ts";
  * ones, and the binding is SQLite — which is what D1 is.
  */
 const run = <A, E>(
-  effect: Effect.Effect<A, E, Layer.Success<typeof layer> | SqlClient.SqlClient>,
+  effect: Effect.Effect<A, E, Layer.Success<ReturnType<typeof layer>> | SqlClient.SqlClient>,
 ): Promise<A> => {
   const database = makeTestD1();
   const stores = layer(database).pipe(Layer.provideMerge(D1Client.layer({ db: database })));

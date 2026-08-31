@@ -29,11 +29,11 @@ const storeContext = Context.merge(
 
 const user: User = {
   id: "user-1",
-  email: "jwt@example.com",
-  emailVerified: true,
   createdAt: new Date(),
   updatedAt: new Date(),
-  attributes: {},
+  // `email` is not a first-class `User` field (login handles are `Identifier`
+  // records), so the claim source for `definePayload` lives in `attributes`.
+  attributes: { email: "jwt@example.com" },
 };
 
 const baseConfig: JwtConfig = {
@@ -197,7 +197,7 @@ describe("JwtService", () => {
       Effect.gen(function* () {
         const service = yield* Jwt.make({
           ...baseConfig,
-          definePayload: (u) => ({ email: u.email, plan: "pro" }),
+          definePayload: (u) => ({ email: u.attributes["email"], plan: "pro" }),
         });
         const { token } = yield* service.sign(user, { role: "admin" });
         return yield* service.verify(token);

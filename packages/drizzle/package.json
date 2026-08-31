@@ -44,7 +44,7 @@
   "scripts": {
     "build": "tsc",
     "test": "vp test run",
-    "typecheck": "tsc --noEmit && vp test --typecheck --run"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run"
   },
   "dependencies": {
     "@thomasfosterau/effect-auth": "workspace:*"

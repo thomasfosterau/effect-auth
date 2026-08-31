@@ -269,24 +269,18 @@ describe("MySQL / statements", () => {
       }),
     ]);
 
-    const [user, credentials, missing] = await Effect.runPromise(
-      Effect.all(
-        [
-          Requests.getUser("user-1"),
-          Requests.getUserCredentials("user-1"),
-          Requests.getUser("ghost"),
-        ],
-        { concurrency: "unbounded" },
-      ).pipe(
+    const [user, missing] = await Effect.runPromise(
+      Effect.all([Requests.getUser("user-1"), Requests.getUser("ghost")], {
+        concurrency: "unbounded",
+      }).pipe(
         Effect.provide(Requests.layer(tables).pipe(Layer.provide(databaseLayer(proxy.db)))),
-      ) as Effect.Effect<[Auth.User | null, string | null, Auth.User | null]>,
+      ) as Effect.Effect<[Auth.User | null, Auth.User | null]>,
     );
 
-    // Three reads, two ids, one query.
+    // Two reads, two ids, one query.
     expect(proxy.statements).toHaveLength(1);
     expect(proxy.statements[0]?.sql).toContain("`id` in (?, ?)");
     expect(user?.id).toBe("user-1");
-    expect(credentials).toBe("argon2id$hash");
     expect(missing).toBeNull();
   });
 });

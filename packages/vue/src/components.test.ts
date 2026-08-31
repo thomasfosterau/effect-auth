@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vite-plus/test";
-import { defineComponent, h } from "vue";
+import { defineComponent, h, type Component } from "vue";
 import { mount, type VueWrapper } from "@vue/test-utils";
 import type { AuthClient } from "@thomasfosterau/effect-auth-client";
 import { authClientKey, provideAuthClient } from "./context.ts";
@@ -26,8 +26,12 @@ const AUTH_SUCCESS = {
 const STATUS = { status: "ok" } as unknown as StatusResponse;
 
 /** Mount with the client handed down through `provide`, as an app would. */
-const withClient = (component: unknown, client: AuthClient, props: Record<string, unknown> = {}) =>
-  mount(component as never, {
+const withClient = (
+  component: Component,
+  client: AuthClient,
+  props: Record<string, unknown> = {},
+) =>
+  mount(component, {
     props,
     global: { provide: { [authClientKey as symbol]: client } },
   });
@@ -125,7 +129,7 @@ describe("SignInForm", () => {
     ]);
     expect(labels.every((label) => (label.attributes("for") ?? "") !== "")).toBe(true);
 
-    expect(wrapper.get(".ea-field").exists()).toBe(true);
+    expect(wrapper.find(".ea-field").exists()).toBe(true);
     expect(button(wrapper).text()).toBe("Sign in");
     expect(wrapper.find("[role='alert']").exists()).toBe(false);
   });
@@ -223,7 +227,7 @@ describe("SignInForm", () => {
     expect(wrapper.findAll("label")[0]?.text()).toBe("Courriel");
     expect(button(wrapper).text()).toBe("Se connecter");
     expect(wrapper.get("input[name='email']").classes()).toEqual(["field-input"]);
-    expect(wrapper.get(".ea-field").exists()).toBe(true);
+    expect(wrapper.find(".ea-field").exists()).toBe(true);
   });
 });
 

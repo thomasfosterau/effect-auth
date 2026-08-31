@@ -45,7 +45,7 @@
   "scripts": {
     "build": "vp build && tsc --emitDeclarationOnly --incremental false && tsc --outDir dist/source --declaration false --declarationMap false --incremental false",
     "test": "vp test run",
-    "typecheck": "tsc --noEmit && vp test --typecheck --run"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run"
   },
   "dependencies": {
     "@thomasfosterau/effect-auth-client": "workspace:*"

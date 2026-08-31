@@ -49,7 +49,6 @@ const makeFixture = () => {
   };
   const userStore: typeof UserStore.Service = {
     get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
-    getCredentials: (_userId) => Effect.succeed(null),
   };
 
   const stores = Layer.mergeAll(

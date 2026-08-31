@@ -25,7 +25,6 @@ import {
   getIdentifierByValue,
   getSession,
   getUser,
-  getUserCredentials,
   layer as requestsLayer,
   listIdentifiersByUser,
   type AuthRequests,
@@ -274,14 +273,13 @@ describe("SQLite / SessionStore", () => {
 // ---------------------------------------------------------------------------
 
 describe("SQLite / UserStore", () => {
-  it("maps rows to users, omitting absent optional fields, and reads password_hash", async () => {
+  it("maps rows to users, omitting absent optional fields", async () => {
     const result = await runStores((db, activeTables) =>
       Effect.gen(function* () {
         yield* seedUser(db, activeTables, {
           id: "full",
           name: "Ada",
           image: "https://example.com/a.png",
-          passwordHash: "argon2id$hash",
           attributes: { plan: "pro", flags: { beta: true } },
           createdAt: at(0),
           updatedAt: at(5000),
@@ -293,9 +291,6 @@ describe("SQLite / UserStore", () => {
           full: yield* store.get("full"),
           bare: yield* store.get("bare"),
           missing: yield* store.get("ghost"),
-          withPassword: yield* store.getCredentials("full"),
-          withoutPassword: yield* store.getCredentials("bare"),
-          missingUser: yield* store.getCredentials("ghost"),
         };
       }),
     );
@@ -317,9 +312,6 @@ describe("SQLite / UserStore", () => {
     expect(result.bare && "name" in result.bare).toBe(false);
     expect(result.bare && "image" in result.bare).toBe(false);
     expect(result.missing).toBeNull();
-    expect(result.withPassword).toBe("argon2id$hash");
-    expect(result.withoutPassword).toBeNull();
-    expect(result.missingUser).toBeNull();
   });
 });
 
@@ -464,7 +456,7 @@ describe("SQLite / Schema", () => {
     const result = await runStores(
       (db, activeTables, client) =>
         Effect.gen(function* () {
-          yield* seedUser(db, activeTables, { id: "user-1", passwordHash: "hash" });
+          yield* seedUser(db, activeTables, { id: "user-1" });
 
           const sessions = yield* Auth.SessionStore;
           const users = yield* Auth.UserStore;
@@ -486,7 +478,7 @@ describe("SQLite / Schema", () => {
           return {
             present,
             session: yield* sessions.get("session-1"),
-            credentials: yield* users.getCredentials("user-1"),
+            user: yield* users.get("user-1"),
             identifier: yield* identifiers.getByValue("email", "ada@example.com"),
           };
         }),
@@ -495,7 +487,7 @@ describe("SQLite / Schema", () => {
 
     expect(result.present).toEqual(["app_identifiers", "app_sessions", "app_users"]);
     expect(result.session?.attributes).toEqual({ via: "custom" });
-    expect(result.credentials).toBe("hash");
+    expect(result.user?.id).toBe("user-1");
     expect(result.identifier?.id).toBe("identifier-1");
   });
 
@@ -586,7 +578,6 @@ describe("SQLite / Requests", () => {
           Effect.all([getUser("user-1"), getUser("user-1"), getUser("user-2"), getUser("ghost")], {
             concurrency: "unbounded",
           }),
-          getUserCredentials("user-1"),
           getSession("session-1"),
           getSession("nope"),
           Effect.all(
@@ -603,21 +594,20 @@ describe("SQLite / Requests", () => {
         { concurrency: "unbounded" },
       );
 
-      const [users, credentials, session, missingSession, byValue, mine, none] = await runRequests(
+      const [users, session, missingSession, byValue, mine, none] = await runRequests(
         db,
         activeTables,
         program,
       );
 
-      // One query per resolver: users (four reads plus the credentials read),
-      // sessions, identifiers-by-pair and identifiers-by-user.
+      // One query per resolver: users (four reads), sessions, identifiers-by-pair
+      // and identifiers-by-user.
       expect(log.selectsOn("effect_auth_users")).toHaveLength(1);
       expect(log.selectsOn("effect_auth_sessions")).toHaveLength(1);
       expect(log.selectsOn("effect_auth_identifiers")).toHaveLength(2);
 
       expect(users.map((user) => user?.id ?? null)).toEqual(["user-1", "user-1", "user-2", null]);
       expect(users[0]?.name).toBe("name-user-1");
-      expect(credentials).toBe("argon2id$hash");
       expect(session?.attributes).toEqual({ device: "laptop" });
       expect(missingSession).toBeNull();
       expect(byValue.map((row) => row?.id ?? null)).toEqual(["email-1", "name-1", null]);

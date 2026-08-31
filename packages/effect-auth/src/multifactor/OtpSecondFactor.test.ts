@@ -66,7 +66,6 @@ const sessionStore = {
 
 const userStore = {
   get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
-  getCredentials: (_userId: string) => Effect.succeed<string | null>(null),
 };
 
 const sessionConfig: SessionConfig = {
@@ -102,8 +101,6 @@ const makeTestContext = async () => {
 
 const testUser: User = {
   id: "user-otp-1",
-  email: "bob@example.com",
-  emailVerified: true,
   createdAt: new Date(),
   updatedAt: new Date(),
   attributes: {},

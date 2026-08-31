@@ -50,8 +50,6 @@ const testConfig = { secret: Redacted.make("test-hmac-secret-32bytes-exactly!!")
 
 const testUser: User = {
   id: "user-td-1",
-  email: "alice@example.com",
-  emailVerified: true,
   createdAt: new Date(),
   updatedAt: new Date(),
   attributes: {},

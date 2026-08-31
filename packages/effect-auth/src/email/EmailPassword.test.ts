@@ -68,8 +68,6 @@ const sessionStore = {
 
 const userStore = {
   get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
-
-  getCredentials: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
 };
 
 const emailPasswordStore = {
@@ -720,7 +718,6 @@ describe("EmailPasswordService - dangling session protection", () => {
 
   const localUserStore = {
     get: (userId: string) => Effect.sync(() => localUsers.get(userId) ?? null),
-    getCredentials: (userId: string) => Effect.sync(() => localPasswordHashes.get(userId) ?? null),
   };
 
   const localEmailPasswordStore = {

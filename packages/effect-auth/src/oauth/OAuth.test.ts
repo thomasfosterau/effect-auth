@@ -910,7 +910,7 @@ describe("OAuthService encryptTokens", () => {
       OAuth.make(
         { github: githubProvider },
         { encryptTokens: { secret: Redacted.make(TEST_SECRET) } },
-      ).pipe(Effect.provide(accountStoreLive), Effect.provide(unusedDepsLayer)),
+      ).pipe(Effect.provide(Layer.mergeAll(accountStoreLive, unusedDepsLayer))),
     );
 
     let capturedRefreshToken: string | null = null;
@@ -960,8 +960,7 @@ describe("OAuthService encryptTokens", () => {
 
     const service = await Effect.runPromise(
       OAuth.make({ github: githubProvider }).pipe(
-        Effect.provide(accountStoreLive),
-        Effect.provide(unusedDepsLayer),
+        Effect.provide(Layer.mergeAll(accountStoreLive, unusedDepsLayer)),
       ),
     );
     const tokenResp: OAuthTokenResponse = { access_token: NEW_ACCESS, token_type: "bearer" };
@@ -1000,8 +999,7 @@ describe("OAuthService encryptTokens", () => {
 
     const service = await Effect.runPromise(
       OAuth.make({ github: githubProvider }, { encryptTokens: { cipher: customCipher } }).pipe(
-        Effect.provide(accountStoreLive),
-        Effect.provide(unusedDepsLayer),
+        Effect.provide(Layer.mergeAll(accountStoreLive, unusedDepsLayer)),
       ),
     );
 
@@ -1102,8 +1100,7 @@ describe("OAuthService unlinkAccount guard", () => {
   const buildService = (accountLayer: Layer.Layer<OAuthAccountStore>) =>
     Effect.runPromise(
       OAuth.make({ github: githubProvider }).pipe(
-        Effect.provide(accountLayer),
-        Effect.provide(unusedDeps),
+        Effect.provide(Layer.mergeAll(accountLayer, unusedDeps)),
       ),
     );
 
@@ -1269,7 +1266,6 @@ describe("OAuthService linking controls", () => {
   const makeCoreUserLayer = (...users: ReadonlyArray<Types.User>) =>
     Layer.succeed(UserStore, {
       get: (id) => Effect.succeed(users.find((u) => u.id === id) ?? null),
-      getCredentials: () => Effect.succeed(null),
     });
 
   const makeSessionLayer = (userId: string) => {

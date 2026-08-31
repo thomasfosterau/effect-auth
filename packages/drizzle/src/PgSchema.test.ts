@@ -108,7 +108,7 @@ describe("Schema", () => {
     const result = await runFresh(
       (db, tables) =>
         Effect.gen(function* () {
-          yield* seedUser(db, tables, { id: "user-1", passwordHash: "hash" });
+          yield* seedUser(db, tables, { id: "user-1" });
 
           const sessions = yield* Auth.SessionStore;
           const users = yield* Auth.UserStore;
@@ -129,7 +129,7 @@ describe("Schema", () => {
           return {
             present,
             session: yield* sessions.get("session-1"),
-            credentials: yield* users.getCredentials("user-1"),
+            user: yield* users.get("user-1"),
             identifier: yield* identifiers.getByValue("email", "ada@example.com"),
           };
         }),
@@ -138,7 +138,7 @@ describe("Schema", () => {
 
     expect(result.present).toEqual(["app_identifiers", "app_sessions", "app_users"]);
     expect(result.session?.attributes).toEqual({ via: "custom" });
-    expect(result.credentials).toBe("hash");
+    expect(result.user?.id).toBe("user-1");
     expect(result.identifier?.id).toBe("identifier-1");
   });
 

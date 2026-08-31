@@ -119,7 +119,6 @@ describe("OidcProviderService", () => {
     // the userinfo/token-signing paths), so both must be satisfiable here too.
     const userStore: typeof UserStore.Service = {
       get: () => Effect.succeed(null),
-      getCredentials: () => Effect.succeed(null),
     };
     const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
       Layer.provide(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore)),
@@ -439,7 +438,6 @@ describe("OidcProviderService dynamic client registration", () => {
     const stores = makeOidcStores();
     const userStore: typeof UserStore.Service = {
       get: () => Effect.succeed(null),
-      getCredentials: () => Effect.succeed(null),
     };
     const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
       Layer.provide(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore)),
@@ -782,9 +780,8 @@ const makeHttpFixture = (
     return rawToken;
   };
 
-  const userStore: UserStore = {
+  const userStore: typeof UserStore.Service = {
     get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
-    getCredentials: (_userId) => Effect.succeed(null),
   };
   const userServiceStore = {
     get: userStore.get,

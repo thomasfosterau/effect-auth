@@ -34,7 +34,7 @@ import { makeTestD1 } from "./testShim.ts";
  */
 const notFound = (path: string) =>
   PlatformError.systemError({
-    reason: "NotFound",
+    _tag: "NotFound",
     module: "FileSystem",
     method: "readFileString",
     description: "no such file",
@@ -69,6 +69,11 @@ const makeEngine = () => {
         provideFreshArtifactStore,
         Effect.provideService(AdoptPolicy, false),
         Effect.provideService(AuthProviders, {}),
+        // The order of the provides below is load-bearing — each one supplies
+        // requirements of the layers provided before it, mirroring alchemy's
+        // own runtime layering — so they cannot collapse into a single merged
+        // provide.
+        // @effect-diagnostics-next-line effect/multipleEffectProvide:off
         Effect.provide(Layer.mergeAll(LoggingCli, AlchemyContextLive)),
         Effect.provide(Layer.provide(ProfileLive, platform)),
         Effect.provide(Layer.provide(CredentialsStoreLive, platform)),
@@ -89,7 +94,7 @@ const makeEngine = () => {
               Effect.provide(compiled.services),
             ),
           ),
-        ) as Effect.Effect<unknown, unknown, never>,
+        ) as unknown as Effect.Effect<unknown, unknown, never>,
       ),
     /** `alchemy destroy`: apply an empty plan, so every resource is deleted. */
     destroy: (): Promise<unknown> =>
@@ -104,6 +109,9 @@ const makeEngine = () => {
         } as never).pipe(
           Effect.flatMap(apply),
           Effect.asVoid,
+          // Ordered provides again: `providers` and the `Stack` layer are
+          // resolved against the state layer provided first.
+          // @effect-diagnostics-next-line effect/multipleEffectProvide:off
           Effect.provide(state),
           Effect.provide(providers as Layer.Layer<never>),
           Effect.provide(
@@ -128,7 +136,7 @@ const tablesIn = (database: D1Client.D1Database): Promise<readonly string[]> =>
         readonly name: string;
       }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'auth_%' ORDER BY name`;
       return rows.map((row) => row.name);
-    }).pipe(Effect.provide(D1Client.layer({ db: database }))) as Effect.Effect<readonly string[]>,
+    }).pipe(Effect.provide(D1Client.layer({ db: database }))),
   );
 
 const countUsers = (database: D1Client.D1Database): Promise<number> =>

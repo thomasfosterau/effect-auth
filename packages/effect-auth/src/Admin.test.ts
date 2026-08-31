@@ -69,7 +69,6 @@ const getUser = (userId: string) => Effect.sync(() => users.get(userId) ?? null)
 // Session's UserStore (used by SessionService.validateSession)
 const sessionUserStore = {
   get: getUser,
-  getCredentials: (_userId: string) => Effect.succeed(null),
 };
 
 const userServiceStore = {

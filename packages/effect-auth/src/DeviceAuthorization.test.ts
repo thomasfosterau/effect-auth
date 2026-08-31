@@ -68,7 +68,6 @@ const sessionStore: typeof SessionStore.Service = {
 
 const userStore: typeof UserStore.Service = {
   get: (userId) => Effect.sync(() => users.get(userId) ?? null),
-  getCredentials: (_userId) => Effect.succeed(null),
 };
 
 const sessionConfig: Types.SessionConfig = {
@@ -111,8 +110,6 @@ describe("DeviceAuthorizationService", () => {
     const now = new Date();
     users.set("user-1", {
       id: "user-1",
-      email: "u@example.com",
-      emailVerified: true,
       createdAt: now,
       updatedAt: now,
       attributes: {},

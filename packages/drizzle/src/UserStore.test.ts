@@ -102,24 +102,4 @@ describe("UserStore", () => {
     expect(result.bare && "image" in result.bare).toBe(false);
     expect(result.missing).toBeNull();
   });
-
-  it("reads getCredentials from password_hash", async () => {
-    const result = await runFresh((db) =>
-      Effect.gen(function* () {
-        yield* seedUser(db, { id: "with-password", passwordHash: "argon2id$hash" });
-        yield* seedUser(db, { id: "no-password" });
-
-        const store = yield* Auth.UserStore;
-        return {
-          withPassword: yield* store.getCredentials("with-password"),
-          withoutPassword: yield* store.getCredentials("no-password"),
-          missingUser: yield* store.getCredentials("ghost"),
-        };
-      }),
-    );
-
-    expect(result.withPassword).toBe("argon2id$hash");
-    expect(result.withoutPassword).toBeNull();
-    expect(result.missingUser).toBeNull();
-  });
 });

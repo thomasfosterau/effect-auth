@@ -7,6 +7,7 @@ import { SessionService } from "../SessionService.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { IdentifierStore } from "../Identifier.ts";
 import { PasswordHasher } from "../password/Password.ts";
+import { EmailPasswordService } from "../email/EmailPassword.ts";
 import { EmailVerificationService, EmailVerificationStore } from "../email/EmailVerification.ts";
 import {
   PasswordResetService,
@@ -24,6 +25,7 @@ const stubServices = (): Layer.Layer<AuthServices> =>
   Layer.mergeAll(
     Layer.succeed(AuthLifecycleService)(undefined as never),
     Layer.succeed(SessionService)(undefined as never),
+    Layer.succeed(EmailPasswordService)(undefined as never),
     Layer.succeed(IdentifierStore)(undefined as never),
     Layer.succeed(PasswordHasher)(undefined as never),
     Layer.succeed(EmailVerificationService)(undefined as never),
@@ -86,8 +88,15 @@ const EXPECTED_PATHS = [
   "/invitations/{invitationId}/accept",
   "/invitations/{invitationId}/reject",
   "/invitations/{invitationId}/cancel",
+  "/invitations/{invitationId}/resend",
   "/organization/{organizationId}/members",
   "/organization/{organizationId}/members/{userId}",
+  "/organization/{organizationId}/members/{userId}/deactivate",
+  "/organization/{organizationId}/members/{userId}/reactivate",
+  "/organization/{organizationId}/default-role",
+  "/organization/{organizationId}/domains",
+  "/organization/{organizationId}/domains/{domainId}",
+  "/organization/{organizationId}/domains/{domainId}/verify",
   "/organization/{organizationId}/roles",
   "/organization/{organizationId}/roles/{role}",
   "/organization/{organizationId}/teams",

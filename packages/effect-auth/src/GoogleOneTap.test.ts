@@ -122,7 +122,6 @@ const makeStores = () => {
   };
   const coreUserStore: typeof UserStore.Service = {
     get: (userId) => Effect.sync(() => users.get(userId) ?? null),
-    getCredentials: () => Effect.succeed(null),
   };
   const sessionManager: typeof SessionService.Service = {
     createSession: (userId) =>
@@ -365,7 +364,6 @@ const makeHttpFixture = () => {
   };
   const userStore = {
     get: (userId: string) => Effect.sync(() => usersById.get(userId) ?? null),
-    getCredentials: (_userId: string) => Effect.succeed(null),
   };
   const userServiceStore = {
     get: userStore.get,

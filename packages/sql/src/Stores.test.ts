@@ -41,6 +41,24 @@ const makeConnection = (db: Database.Database): SqlConnection.Connection => {
       catch: sqliteError,
     });
 
+  const runValues = (
+    sqlText: string,
+    params: ReadonlyArray<unknown>,
+  ): Effect.Effect<ReadonlyArray<ReadonlyArray<unknown>>, SqlError.SqlError> =>
+    Effect.try({
+      try: () => {
+        const statement = db.prepare(sqlText);
+        if (statement.reader) {
+          return statement.raw(true).all(...(params as ReadonlyArray<never>)) as ReadonlyArray<
+            ReadonlyArray<unknown>
+          >;
+        }
+        statement.run(...(params as ReadonlyArray<never>));
+        return [] as ReadonlyArray<ReadonlyArray<unknown>>;
+      },
+      catch: sqliteError,
+    });
+
   return {
     execute: (sqlText, params, transformRows) =>
       runStatement(sqlText, params).pipe(
@@ -53,20 +71,11 @@ const makeConnection = (db: Database.Database): SqlConnection.Connection => {
           Effect.map((rows) => (transformRows ? transformRows(rows) : rows)),
         ),
       ),
-    executeValues: (sqlText, params) =>
-      Effect.try({
-        try: () => {
-          const statement = db.prepare(sqlText);
-          if (statement.reader) {
-            return statement.raw(true).all(...(params as ReadonlyArray<never>)) as ReadonlyArray<
-              ReadonlyArray<unknown>
-            >;
-          }
-          statement.run(...(params as ReadonlyArray<never>));
-          return [] as ReadonlyArray<ReadonlyArray<unknown>>;
-        },
-        catch: sqliteError,
-      }),
+    executeValues: runValues,
+    // better-sqlite3 has no separate unprepared path — every statement goes
+    // through `db.prepare` — so the unprepared variants reuse the same
+    // execution as their prepared counterparts.
+    executeValuesUnprepared: runValues,
     executeUnprepared: (sqlText, params, transformRows) =>
       runStatement(sqlText, params).pipe(
         Effect.map((rows) => (transformRows ? transformRows(rows) : rows)),
@@ -196,10 +205,9 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
         const missingEmail = yield* identifiers.getByValue("email", "nobody@example.com");
         yield* emailPassword.setPasswordHash(created.id, "hash-1");
         const hash = yield* emailPassword.getPasswordHash(created.id);
-        const credentials = yield* users.getCredentials(created.id);
         const loaded = yield* users.get(created.id);
         const missing = yield* users.get("nope");
-        return { created, byEmail, missingEmail, hash, credentials, loaded, missing };
+        return { created, byEmail, missingEmail, hash, loaded, missing };
       }),
     );
     expect(result.byEmail?.userId).toBe(result.created.id);
@@ -208,7 +216,6 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     expect(result.loaded?.name).toBe("Test User");
     expect(result.missingEmail).toBeNull();
     expect(result.hash).toBe("hash-1");
-    expect(result.credentials).toBe("hash-1");
     expect(result.loaded?.createdAt).toBeInstanceOf(Date);
     expect(result.missing).toBeNull();
   });
@@ -782,6 +789,7 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
       executeRaw: () => Effect.fail(sqliteError(new Error("simulated failure"))),
       executeStream: () => Stream.fail(sqliteError(new Error("simulated failure"))),
       executeValues: () => Effect.fail(sqliteError(new Error("simulated failure"))),
+      executeValuesUnprepared: () => Effect.fail(sqliteError(new Error("simulated failure"))),
       executeUnprepared: () => Effect.fail(sqliteError(new Error("simulated failure"))),
     };
     const brokenClientLayer = Layer.effect(
