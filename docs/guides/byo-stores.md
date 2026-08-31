@@ -6,7 +6,7 @@ If your database is Postgres/MySQL/SQLite via `effect/unstable/sql`, Cloudflare 
 
 ## 1. Conventions every store follows
 
-All 42 store contracts in core (§5) share the same shape, so once you've implemented one the rest are the same exercise:
+All 43 store contracts in core (§5) share the same shape, so once you've implemented one the rest are the same exercise:
 
 - **A contract is a plain object typed `typeof Auth.XStore.Service`.** There's nothing to extend or subclass — write an object whose methods match the interface and provide it with `Layer.succeed(Auth.XStore)(impl)`. (`SessionStore` and `UserStore` live at the package root; a handful of contracts are namespaced — `Auth.Email.*`, `Auth.OAuth.*`, `Auth.Password.*`, `Auth.Plugins.*`, `Auth.MultiFactor.*` — see the exact path in §5.)
 - **Lookups return `null` on a miss, never throw or fail.** A service converts `null` into a typed domain error (`SessionNotFoundError`, `UserNotFoundError`, …) at its own layer — the store just reports what it found.
@@ -127,11 +127,9 @@ const sessionStore: typeof Auth.SessionStore.Service = {
 };
 
 // ---------------------------------------------------------------------------
-// UserStore — read-only: `get` resolves a user by id, `getCredentials`
-// answers a generic password-hash lookup (declared for BYO stores; the
-// shipped EmailPassword flow reads its hash through
-// `Auth.Email.EmailPasswordStore.getPasswordHash` instead — implement both
-// against the same column so they never disagree).
+// UserStore — read-only: `get` resolves a user by id. Password hashes are
+// not part of this contract; the shipped EmailPassword flow reads and
+// writes its hash through `Auth.Email.EmailPasswordStore` instead.
 // ---------------------------------------------------------------------------
 
 interface UserRow {
@@ -141,7 +139,6 @@ interface UserRow {
   created_at: number;
   updated_at: number;
   attributes: string;
-  password_hash: string | null;
 }
 
 const rowToUser = (row: UserRow): Auth.User => ({
@@ -159,15 +156,6 @@ const userStore: typeof Auth.UserStore.Service = {
       try: () => db.query<UserRow>("SELECT * FROM users WHERE id = ?", [userId]),
       catch: infra("user.get"),
     }).pipe(Effect.map((rows) => (rows[0] ? rowToUser(rows[0]) : null))),
-
-  getCredentials: (userId) =>
-    Effect.tryPromise({
-      try: () =>
-        db.query<{ password_hash: string | null }>("SELECT password_hash FROM users WHERE id = ?", [
-          userId,
-        ]),
-      catch: infra("user.getCredentials"),
-    }).pipe(Effect.map((rows) => rows[0]?.password_hash ?? null)),
 };
 
 // ---------------------------------------------------------------------------
@@ -290,7 +278,7 @@ Grouped by cluster, in the same order the source is organized. "Namespace" is ho
 | Contract             | Namespace                 | What it holds                                                    | Powers                                                                                                        |
 | -------------------- | ------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `SessionStore`       | `Auth.SessionStore`       | Sessions keyed by the SHA-256 hash of the bearer token           | `SessionService` — every sign-in flow                                                                         |
-| `UserStore`          | `Auth.UserStore`          | Read a user by id; generic password-hash lookup                  | Read path used across the library                                                                             |
+| `UserStore`          | `Auth.UserStore`          | Read a user by id                                                | Read path used across the library                                                                             |
 | `UserServiceStore`   | `Auth.UserServiceStore`   | Get/update/delete the user record (name, image, attributes)      | `UserService` — profile updates, account deletion                                                             |
 | `IdentifierStore`    | `Auth.IdentifierStore`    | Email/username/phone claims, globally unique per `(type, value)` | Identifier epic — EmailPassword, Username, PhoneOtp, MagicLink, EmailOtp, OAuth linking, SSO, Admin, and more |
 | `TrustedDeviceStore` | `Auth.TrustedDeviceStore` | Trusted-device cookie tokens, keyed by their hash                | `TrustedDeviceService` — "remember this device" 2FA skip                                                      |
@@ -348,15 +336,16 @@ Grouped by cluster, in the same order the source is organized. "Namespace" is ho
 
 **API keys, devices, admin, orgs**
 
-| Contract                   | Namespace                       | What it holds                                            | Powers                       |
-| -------------------------- | ------------------------------- | -------------------------------------------------------- | ---------------------------- |
-| `ApiKeyStore`              | `Auth.ApiKeyStore`              | Hashed API keys                                          | `ApiKeyService`              |
-| `JwtKeyStore`              | `Auth.JwtKeyStore`              | JWT signing key pairs                                    | `JwtService` / JWKS          |
-| `DeviceAuthorizationStore` | `Auth.DeviceAuthorizationStore` | RFC 8628 `device_code`/`user_code` records               | `DeviceAuthorizationService` |
-| `AnonymousUserStore`       | `Auth.AnonymousUserStore`       | Create/delete guest users                                | `AnonymousService`           |
-| `AdminUserStore`           | `Auth.AdminUserStore`           | List/create users, admin password reset                  | `AdminService`               |
-| `OrganizationStore`        | `Auth.OrganizationStore`        | Organizations, members, invitations, teams, custom roles | `OrganizationService`        |
-| `AccountManagementStore`   | `Auth.AccountManagementStore`   | Pending email-change/delete-account tokens               | `AccountManagementService`   |
+| Contract                   | Namespace                       | What it holds                                                         | Powers                                             |
+| -------------------------- | ------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------- |
+| `ApiKeyStore`              | `Auth.ApiKeyStore`              | Hashed API keys                                                       | `ApiKeyService`                                    |
+| `JwtKeyStore`              | `Auth.JwtKeyStore`              | JWT signing key pairs                                                 | `JwtService` / JWKS                                |
+| `DeviceAuthorizationStore` | `Auth.DeviceAuthorizationStore` | RFC 8628 `device_code`/`user_code` records                            | `DeviceAuthorizationService`                       |
+| `AnonymousUserStore`       | `Auth.AnonymousUserStore`       | Create/delete guest users                                             | `AnonymousService`                                 |
+| `AdminUserStore`           | `Auth.AdminUserStore`           | List/create users, admin password reset                               | `AdminService`                                     |
+| `OrganizationStore`        | `Auth.OrganizationStore`        | Organizations, members, invitations, teams, custom roles              | `OrganizationService`                              |
+| `OrganizationDomainStore`  | `Auth.OrganizationDomainStore`  | Email-domain claims and their verification state (unique on `domain`) | `OrganizationService` — domains + JIT provisioning |
+| `AccountManagementStore`   | `Auth.AccountManagementStore`   | Pending email-change/delete-account tokens                            | `AccountManagementService`                         |
 
 **Rate limiting, lockout, authorization**
 
@@ -367,13 +356,13 @@ Grouped by cluster, in the same order the source is organized. "Namespace" is ho
 | `RoleStore`           | `Auth.RoleStore`                   | User → roles, role → permissions                                    | The legacy permission-string RBAC facade (`AuthorizationPolicy`)                       |
 | `PolicyStore`         | `Auth.PolicyStore.PolicyStore`     | Versioned policy documents, templates, and template-linked policies | Policies-as-data — the M3 authorization framework, organization dynamic access control |
 
-That's 42 store contracts. None are required — only implement the ones behind the features you actually enable.
+That's 43 store contracts. None are required — only implement the ones behind the features you actually enable.
 
 ## 6. Reference implementations
 
 Prefer one of these over writing your own when it fits your stack:
 
-- **[`packages/sql`](../../packages/sql)** — driver-agnostic over `effect/unstable/sql` (works with any dialect the driver supports: pg, mysql, sqlite, D1, …). Implements 22 of the 42 contracts — the whole credential/session/OAuth/WebAuthn/MFA/passwordless/lockout core. Not yet covered: `OneTimeTokenStore`, `TrustedDeviceStore`, `PhoneOtp*Store`, `OrganizationStore`, `AdminUserStore`, `ApiKeyStore`, the OIDC provider stores, `SsoProviderStore`, `SamlReplayStore`, `DeviceAuthorizationStore`, `GoogleOneTapNonceStore`, `JwtKeyStore`, `OtpSecondFactorStore`, `AnonymousUserStore`, `AccountManagementStore`, and `PolicyStore` — bring your own or use the `KeyValueStore` defaults for those until they land. `Stores.ts`'s module doc comment is the authoritative source for the atomicity guarantees (`ON CONFLICT ... DO UPDATE` / `UPDATE ... RETURNING` for single-row upserts and counters; `sql.withTransaction` for multi-step writes) — read it before copying the patterns into your own store.
+- **[`packages/sql`](../../packages/sql)** — driver-agnostic over `effect/unstable/sql` (works with any dialect the driver supports: pg, mysql, sqlite, D1, …). Implements 22 of the 43 contracts — the whole credential/session/OAuth/WebAuthn/MFA/passwordless/lockout core. Not yet covered: `OneTimeTokenStore`, `TrustedDeviceStore`, `PhoneOtp*Store`, `OrganizationStore`, `OrganizationDomainStore`, `AdminUserStore`, `ApiKeyStore`, the OIDC provider stores, `SsoProviderStore`, `SamlReplayStore`, `DeviceAuthorizationStore`, `GoogleOneTapNonceStore`, `JwtKeyStore`, `OtpSecondFactorStore`, `AnonymousUserStore`, `AccountManagementStore`, and `PolicyStore` — bring your own or use the `KeyValueStore` defaults for those until they land. `Stores.ts`'s module doc comment is the authoritative source for the atomicity guarantees (`ON CONFLICT ... DO UPDATE` / `UPDATE ... RETURNING` for single-row upserts and counters; `sql.withTransaction` for multi-step writes) — read it before copying the patterns into your own store.
 - **[`packages/alchemy`](../../packages/alchemy)** — the same store coverage as `packages/sql`, over Cloudflare D1 via Alchemy v2, plus the `AuthSchema` infrastructure resource that reconciles the D1 schema on every deploy. Good default if you're already on D1/Alchemy; same "not yet covered" list as above.
-- **[`packages/drizzle`](../../packages/drizzle)** — `SessionStore` + `UserStore` + `IdentifierStore` only, over `drizzle-orm` with PostgreSQL, SQLite, and MySQL table sets (native `jsonb`/`timestamptz` on Postgres, per-dialect mappings elsewhere) instead of `packages/sql`'s TEXT/epoch-ms codecs. Stands alone (doesn't wrap `packages/sql`) — reach for it when your app already models its schema in Drizzle and you want the auth tables in the same migration pipeline; reach for `packages/sql` instead when you need the other 39 contracts too.
+- **[`packages/drizzle`](../../packages/drizzle)** — `SessionStore` + `UserStore` + `IdentifierStore` only, over `drizzle-orm` with PostgreSQL, SQLite, and MySQL table sets (native `jsonb`/`timestamptz` on Postgres, per-dialect mappings elsewhere) instead of `packages/sql`'s TEXT/epoch-ms codecs. Stands alone (doesn't wrap `packages/sql`) — reach for it when your app already models its schema in Drizzle and you want the auth tables in the same migration pipeline; reach for `packages/sql` instead when you need the other 40 contracts too.
 - **[`KeyValueStores.ts`](../../packages/effect-auth/src/KeyValueStores.ts)** — `KeyValueStore`-backed (from `effect/unstable/persistence`) defaults for the ephemeral/token-shaped stores: OAuth state, WebAuthn challenges, rate limits, verification/reset/magic-link tokens, email OTPs, pending multi-factor challenges, and Google One Tap nonces. A natural fit for Redis, Cloudflare KV, or an in-memory map — provide any `KeyValueStore` backend (`KeyValueStore.layerMemory`, `KeyValueStore.layerFileSystem`, `KeyValueStore.layerSql`, …) underneath. Its module doc documents a deliberate read-modify-write shortcut on `RateLimitStore.increment`/`EmailOtpStore.incrementAttempts` — fine for best-effort limiting, not for the §2 MUST-be-atomic tier.

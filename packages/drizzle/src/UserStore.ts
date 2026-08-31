@@ -10,10 +10,7 @@
  *
  * ### Contract notes
  *
- * - `get` and `getCredentials` return `null` on a miss; they never fail with a
- *   "not found" error.
- * - `getCredentials` reads `password_hash`; writing it belongs to a store this
- *   package does not implement yet.
+ * - `get` returns `null` on a miss; it never fails with a "not found" error.
  * - Every driver failure surfaces as `Auth.AuthError` with the original error
  *   preserved as `cause`.
  */
@@ -59,9 +56,6 @@ export const make = (
                 },
           ),
         ),
-
-      getCredentials: (userId) =>
-        byId(userId, "user.getCredentials").pipe(Effect.map((row) => row?.passwordHash ?? null)),
     } satisfies typeof Auth.UserStore.Service;
   });
 
@@ -85,28 +79,14 @@ export class GetUser extends Request.TaggedClass("GetUser")<
   Auth.AuthError
 > {}
 
-/**
- * Read one user's password hash. Resolves to `null` when the user does not
- * exist *or* has no password set — the same conflation `UserStore.getCredentials`
- * makes. Issue it with `Requests.getUserCredentials(id)`.
- */
-export class GetUserCredentials extends Request.TaggedClass("GetUserCredentials")<
-  { readonly id: string },
-  string | null,
-  Auth.AuthError
-> {}
-
 /** Every request served by {@link makeResolver}. */
-export type UserRequest = GetUser | GetUserCredentials;
+export type UserRequest = GetUser;
 
 /**
- * A resolver that collapses every {@link GetUser} and {@link GetUserCredentials}
- * in a batch into a single `WHERE id IN (...)` query.
+ * A resolver that collapses every {@link GetUser} in a batch into a single
+ * `WHERE id IN (...)` query.
  *
- * Both requests read the same row, so they share one resolver — and therefore
- * one batch and one query. A page that renders a user and checks whether that
- * user has a password costs one round trip, not two, and duplicate ids inside
- * the batch are de-duplicated before the query is built.
+ * Duplicate ids inside the batch are de-duplicated before the query is built.
  *
  * The returned resolver must be **shared** for batching to happen — requests
  * are grouped per resolver instance. Build it once behind
@@ -129,18 +109,16 @@ export const makeResolver = (
           const row = byId.get(entry.request.id);
           entry.completeUnsafe(
             Exit.succeed(
-              entry.request._tag === "GetUser"
-                ? row === undefined
-                  ? null
-                  : {
-                      id: row.id,
-                      createdAt: row.createdAt,
-                      updatedAt: row.updatedAt,
-                      attributes: row.attributes ?? {},
-                      ...(row.name !== null ? { name: row.name } : {}),
-                      ...(row.image !== null ? { image: row.image } : {}),
-                    }
-                : (row?.passwordHash ?? null),
+              row === undefined
+                ? null
+                : {
+                    id: row.id,
+                    createdAt: row.createdAt,
+                    updatedAt: row.updatedAt,
+                    attributes: row.attributes ?? {},
+                    ...(row.name !== null ? { name: row.name } : {}),
+                    ...(row.image !== null ? { image: row.image } : {}),
+                  },
             ),
           );
         }

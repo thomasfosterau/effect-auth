@@ -254,10 +254,6 @@ export const makeUserStore: Effect.Effect<
   const users = userQueries(sql);
   return {
     get: (userId) => users.findById(userId, "user.get"),
-    getCredentials: (userId) =>
-      users
-        .getById(userId, "user.getCredentials")
-        .pipe(Effect.map((row) => row?.password_hash ?? null)),
   } satisfies typeof Auth.UserStore.Service;
 });
 

@@ -60,10 +60,6 @@ import * as UserStore from "./UserStore.ts";
 
 /**
  * The shared resolvers behind the request constructors in this module.
- *
- * `user` serves both `UserStore.GetUser` and `UserStore.GetUserCredentials`:
- * they read the same row, so one resolver means one batch and one query for the
- * pair.
  */
 export class AuthRequests extends Context.Service<
   AuthRequests,
@@ -123,18 +119,6 @@ export const getUser = (
 ): Effect.Effect<Auth.User | null, Auth.AuthError, AuthRequests> =>
   Effect.request<UserStore.GetUser, never, AuthRequests>(
     new UserStore.GetUser({ id }),
-    Effect.map(AuthRequests, (requests) => requests.user),
-  );
-
-/**
- * Read a user's password hash, batched into the same query as any concurrent
- * {@link getUser}. `null` when the user does not exist or has no password.
- */
-export const getUserCredentials = (
-  id: string,
-): Effect.Effect<string | null, Auth.AuthError, AuthRequests> =>
-  Effect.request<UserStore.GetUserCredentials, never, AuthRequests>(
-    new UserStore.GetUserCredentials({ id }),
     Effect.map(AuthRequests, (requests) => requests.user),
   );
 
