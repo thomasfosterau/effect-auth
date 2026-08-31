@@ -2,11 +2,11 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect } from "effect";
 import {
   EmailSender,
-  SMSSender,
+  SmsSender,
   emailCallbacks,
   smsCallbacks,
   type EmailMessage,
-  type SMSMessage,
+  type SmsMessage,
 } from "./Delivery.ts";
 import { AuthError, EmailVerificationError, MagicLinkError, PasswordResetError } from "./Errors.ts";
 import {
@@ -63,7 +63,7 @@ describe("emailCallbacks", () => {
 
     await Effect.runPromise(cb.sendVerificationEmail("a@example.com", "tok-1"));
     await Effect.runPromise(cb.sendMagicLink("b@example.com", "tok-2"));
-    await Effect.runPromise(cb.sendVerificationOTP("c@example.com", "123456", "sign-in"));
+    await Effect.runPromise(cb.sendVerificationOtp("c@example.com", "123456", "sign-in"));
     await Effect.runPromise(cb.sendResetPassword("d@example.com", "tok-3"));
     await Effect.runPromise(
       cb.sendChangeEmailVerification({ user: user(), newEmail: "new@example.com", token: "tok-4" }),
@@ -75,7 +75,7 @@ describe("emailCallbacks", () => {
         token: "tok-5",
       }),
     );
-    await Effect.runPromise(cb.sendSecondFactorOTP(user(), "654321"));
+    await Effect.runPromise(cb.sendSecondFactorOtp(user(), "654321"));
 
     expect(sent).toEqual([
       { to: "a@example.com", purpose: "email-verification", params: { token: "tok-1" } },
@@ -92,7 +92,7 @@ describe("emailCallbacks", () => {
     const { sent, sender } = captureEmailSender();
     const cb = emailCallbacks(sender, identifierStoreWith());
 
-    const otpError = await Effect.runPromise(Effect.flip(cb.sendSecondFactorOTP(user(), "1")));
+    const otpError = await Effect.runPromise(Effect.flip(cb.sendSecondFactorOtp(user(), "1")));
     expect(otpError).toBeInstanceOf(AuthError);
     expect(otpError.message).toMatch(/no email/);
 
@@ -121,7 +121,7 @@ describe("emailCallbacks", () => {
     expect(reset).toBeInstanceOf(PasswordResetError);
 
     const otp = await Effect.runPromise(
-      Effect.flip(cb.sendVerificationOTP("a@example.com", "1", "sign-in")),
+      Effect.flip(cb.sendVerificationOtp("a@example.com", "1", "sign-in")),
     );
     expect(otp).toBeInstanceOf(AuthError);
   });
@@ -129,14 +129,14 @@ describe("emailCallbacks", () => {
 
 describe("smsCallbacks", () => {
   it("routes phone OTP and second-factor OTP through the sender", async () => {
-    const sent: SMSMessage[] = [];
-    const sender: typeof SMSSender.Service = {
+    const sent: SmsMessage[] = [];
+    const sender: typeof SmsSender.Service = {
       send: (message) => Effect.sync(() => void sent.push(message)),
     };
     const cb = smsCallbacks(sender, identifierStoreWith({ type: "phone", value: "+15559876543" }));
 
-    await Effect.runPromise(cb.sendPhoneOTP("+15551234567", "111222", "sign-in"));
-    await Effect.runPromise(cb.sendSecondFactorOTP(user(), "333444"));
+    await Effect.runPromise(cb.sendPhoneOtp("+15551234567", "111222", "sign-in"));
+    await Effect.runPromise(cb.sendSecondFactorOtp(user(), "333444"));
 
     expect(sent).toEqual([
       { to: "+15551234567", purpose: "phone-otp:sign-in", params: { otp: "111222" } },
@@ -145,10 +145,10 @@ describe("smsCallbacks", () => {
   });
 
   it("fails when the user has no phone number for second-factor OTP", async () => {
-    const sender: typeof SMSSender.Service = { send: () => Effect.void };
+    const sender: typeof SmsSender.Service = { send: () => Effect.void };
     const cb = smsCallbacks(sender, identifierStoreWith());
 
-    const error = await Effect.runPromise(Effect.flip(cb.sendSecondFactorOTP(user(), "1")));
+    const error = await Effect.runPromise(Effect.flip(cb.sendSecondFactorOtp(user(), "1")));
     expect(error).toBeInstanceOf(AuthError);
     expect(error.message).toMatch(/no phone number/);
   });

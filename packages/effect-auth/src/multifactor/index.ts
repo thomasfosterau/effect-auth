@@ -1,15 +1,15 @@
-export * from "./OTP.ts";
+export * from "./Otp.ts";
 export {
-  OTPSecondFactorError,
-  type OTPSecondFactorRecord,
-  OTPSecondFactorStore,
-  type OTPSecondFactorConfig,
-  type OTPSecondFactorVerifyOptions,
-  type OTPSecondFactorVerifyResult,
-  OTPSecondFactorService,
-  OTPSecondFactorGateLayer,
-  TrustedDeviceWithOTPSecondFactorGateLayer,
-} from "./OTPSecondFactor.ts";
+  OtpSecondFactorError,
+  type OtpSecondFactorRecord,
+  OtpSecondFactorStore,
+  type OtpSecondFactorConfig,
+  type OtpSecondFactorVerifyOptions,
+  type OtpSecondFactorVerifyResult,
+  OtpSecondFactorService,
+  OtpSecondFactorGateLayer,
+  TrustedDeviceWithOtpSecondFactorGateLayer,
+} from "./OtpSecondFactor.ts";
 export {
   MultiFactorError,
   type MultiFactorRecord,

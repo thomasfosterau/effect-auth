@@ -2,18 +2,18 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vite-plus
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { Context, Crypto, Effect, Redacted } from "effect";
-import { generateKeyPair, JWTKeyStore, type JWTConfig, type JWTKeyPair } from "./JWT.ts";
-import * as JWT from "./JWT.ts";
+import { generateKeyPair, JwtKeyStore, type JwtConfig, type JwtKeyPair } from "./Jwt.ts";
+import * as Jwt from "./Jwt.ts";
 import * as Cipher from "./Cipher.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type { User } from "./Types.ts";
 
-const keyPairs: JWTKeyPair[] = [];
+const keyPairs: JwtKeyPair[] = [];
 
 const jwtKeyStore = {
   getActive: () => Effect.sync(() => keyPairs[keyPairs.length - 1] ?? null),
 
-  create: (pair: JWTKeyPair) =>
+  create: (pair: JwtKeyPair) =>
     Effect.sync(() => {
       keyPairs.push(pair);
       return pair;
@@ -23,7 +23,7 @@ const jwtKeyStore = {
 };
 
 const storeContext = Context.merge(
-  Context.make(JWTKeyStore, jwtKeyStore),
+  Context.make(JwtKeyStore, jwtKeyStore),
   Context.make(Crypto.Crypto, PlatformCrypto.instance),
 );
 
@@ -36,15 +36,15 @@ const user: User = {
   attributes: {},
 };
 
-const baseConfig: JWTConfig = {
+const baseConfig: JwtConfig = {
   issuer: "https://auth.example.com",
   audience: "https://api.example.com",
 };
 
-const run = <A, E>(program: Effect.Effect<A, E, JWTKeyStore | Crypto.Crypto>) =>
+const run = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | Crypto.Crypto>) =>
   Effect.runPromise(Effect.provide(program, storeContext));
 
-describe("JWTService", () => {
+describe("JwtService", () => {
   beforeEach(() => {
     keyPairs.splice(0, keyPairs.length);
   });
@@ -52,7 +52,7 @@ describe("JWTService", () => {
   it("should sign and verify a token with ES256", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make({ ...baseConfig, algorithm: "ES256" });
+        const service = yield* Jwt.make({ ...baseConfig, algorithm: "ES256" });
         const signed = yield* service.sign(user);
         const payload = yield* service.verify(signed.token);
         return { signed, payload };
@@ -71,7 +71,7 @@ describe("JWTService", () => {
   it("should sign and verify a token with EdDSA", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make({ ...baseConfig, algorithm: "EdDSA" });
+        const service = yield* Jwt.make({ ...baseConfig, algorithm: "EdDSA" });
         const signed = yield* service.sign(user);
         const payload = yield* service.verify(signed.token);
         return { signed, payload };
@@ -87,7 +87,7 @@ describe("JWTService", () => {
 
     await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make(baseConfig);
+        const service = yield* Jwt.make(baseConfig);
         yield* service.sign(user);
         yield* service.sign(user);
       }),
@@ -101,7 +101,7 @@ describe("JWTService", () => {
   it("should reject tampered tokens", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make(baseConfig);
+        const service = yield* Jwt.make(baseConfig);
         const { token } = yield* service.sign(user);
 
         const [header, payload, signature] = token.split(".") as [string, string, string];
@@ -122,7 +122,7 @@ describe("JWTService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JWTError");
+      expect(result.failure._tag).toBe("JwtError");
       expect(result.failure.message).toContain("signature");
     }
   });
@@ -130,7 +130,7 @@ describe("JWTService", () => {
   it("should reject malformed tokens", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make(baseConfig);
+        const service = yield* Jwt.make(baseConfig);
         return yield* Effect.result(service.verify("not-a-jwt"));
       }),
     );
@@ -140,7 +140,7 @@ describe("JWTService", () => {
   it("should reject expired tokens", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make({ ...baseConfig, expiresIn: -1000 });
+        const service = yield* Jwt.make({ ...baseConfig, expiresIn: -1000 });
         const { token } = yield* service.sign(user);
         return yield* Effect.result(service.verify(token));
       }),
@@ -148,7 +148,7 @@ describe("JWTService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JWTError");
+      expect(result.failure._tag).toBe("JwtError");
       expect(result.failure.message).toContain("expired");
     }
   });
@@ -158,8 +158,8 @@ describe("JWTService", () => {
       Effect.gen(function* () {
         // Both services share the same key store, so the signature checks
         // out — only the issuer claim differs.
-        const signer = yield* JWT.make({ issuer: "https://other.example.com" });
-        const verifier = yield* JWT.make(baseConfig);
+        const signer = yield* Jwt.make({ issuer: "https://other.example.com" });
+        const verifier = yield* Jwt.make(baseConfig);
         const { token } = yield* signer.sign(user);
         return yield* Effect.result(verifier.verify(token));
       }),
@@ -167,7 +167,7 @@ describe("JWTService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JWTError");
+      expect(result.failure._tag).toBe("JwtError");
       expect(result.failure.message).toContain("issuer");
     }
   });
@@ -175,11 +175,11 @@ describe("JWTService", () => {
   it("should reject tokens with the wrong audience", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const signer = yield* JWT.make({
+        const signer = yield* Jwt.make({
           issuer: baseConfig.issuer,
           audience: "https://elsewhere.example.com",
         });
-        const verifier = yield* JWT.make(baseConfig);
+        const verifier = yield* Jwt.make(baseConfig);
         const { token } = yield* signer.sign(user);
         return yield* Effect.result(verifier.verify(token));
       }),
@@ -187,7 +187,7 @@ describe("JWTService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JWTError");
+      expect(result.failure._tag).toBe("JwtError");
       expect(result.failure.message).toContain("audience");
     }
   });
@@ -195,7 +195,7 @@ describe("JWTService", () => {
   it("should include definePayload and extra claims", async () => {
     const payload = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make({
+        const service = yield* Jwt.make({
           ...baseConfig,
           definePayload: (u) => ({ email: u.email, plan: "pro" }),
         });
@@ -212,7 +212,7 @@ describe("JWTService", () => {
   it("should use a custom subject when configured", async () => {
     const payload = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make({
+        const service = yield* Jwt.make({
           ...baseConfig,
           getSubject: (u) => `urn:users:${u.id}`,
         });
@@ -227,13 +227,13 @@ describe("JWTService", () => {
   it("should expose public keys via JWKS without private material", async () => {
     const jwks = await run(
       Effect.gen(function* () {
-        const es256 = yield* JWT.make({ ...baseConfig, algorithm: "ES256" });
+        const es256 = yield* Jwt.make({ ...baseConfig, algorithm: "ES256" });
         yield* es256.sign(user);
         const ed25519 = yield* generateKeyPair("EdDSA", PlatformCrypto.instance);
-        const store = yield* JWTKeyStore;
+        const store = yield* JwtKeyStore;
         yield* store.create(ed25519);
 
-        const service = yield* JWT.make(baseConfig);
+        const service = yield* Jwt.make(baseConfig);
         return yield* service.getJwks();
       }),
     );
@@ -261,12 +261,12 @@ describe("JWTService", () => {
   it("should verify tokens signed by an older key via kid lookup", async () => {
     const payload = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make(baseConfig);
+        const service = yield* Jwt.make(baseConfig);
         const { token } = yield* service.sign(user);
 
         // Rotate: a new key becomes active, the old one stays in the store
         const rotated = yield* generateKeyPair("ES256", PlatformCrypto.instance);
-        const store = yield* JWTKeyStore;
+        const store = yield* JwtKeyStore;
         yield* store.create(rotated);
 
         return yield* service.verify(token);
@@ -277,7 +277,7 @@ describe("JWTService", () => {
   });
 });
 
-describe("JWTService — nbf validation", () => {
+describe("JwtService — nbf validation", () => {
   beforeEach(() => {
     keyPairs.splice(0, keyPairs.length);
   });
@@ -285,7 +285,7 @@ describe("JWTService — nbf validation", () => {
   it("should accept a token with a past nbf", async () => {
     const payload = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make(baseConfig);
+        const service = yield* Jwt.make(baseConfig);
         const pastNbf = Math.floor(Date.now() / 1000) - 60; // 1 minute ago
         const { token } = yield* service.sign(user, { nbf: pastNbf });
         return yield* service.verify(token);
@@ -298,7 +298,7 @@ describe("JWTService — nbf validation", () => {
   it("should reject a token whose nbf is in the future", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make(baseConfig);
+        const service = yield* Jwt.make(baseConfig);
         const futureNbf = Math.floor(Date.now() / 1000) + 3600; // 1 hour ahead
         const { token } = yield* service.sign(user, { nbf: futureNbf });
         return yield* Effect.result(service.verify(token));
@@ -307,7 +307,7 @@ describe("JWTService — nbf validation", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JWTError");
+      expect(result.failure._tag).toBe("JwtError");
       expect(result.failure.message).toContain("not yet valid");
     }
   });
@@ -315,7 +315,7 @@ describe("JWTService — nbf validation", () => {
   it("should accept a token with no nbf claim", async () => {
     const payload = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make(baseConfig);
+        const service = yield* Jwt.make(baseConfig);
         const { token } = yield* service.sign(user); // no nbf
         return yield* service.verify(token);
       }),
@@ -326,7 +326,7 @@ describe("JWTService — nbf validation", () => {
   });
 });
 
-describe("JWTService — clock-skew leeway", () => {
+describe("JwtService — clock-skew leeway", () => {
   beforeEach(() => {
     keyPairs.splice(0, keyPairs.length);
   });
@@ -336,8 +336,8 @@ describe("JWTService — clock-skew leeway", () => {
     const payload = await run(
       Effect.gen(function* () {
         // Sign with a negative expiresIn so exp is 2 s in the past
-        const signer = yield* JWT.make({ ...baseConfig, expiresIn: -2000 });
-        const verifier = yield* JWT.make({ ...baseConfig, clockSkewLeeway: 5000 });
+        const signer = yield* Jwt.make({ ...baseConfig, expiresIn: -2000 });
+        const verifier = yield* Jwt.make({ ...baseConfig, clockSkewLeeway: 5000 });
         const { token } = yield* signer.sign(user);
         return yield* verifier.verify(token);
       }),
@@ -350,8 +350,8 @@ describe("JWTService — clock-skew leeway", () => {
     // Token expired 10 s ago; leeway of 5 s is not enough.
     const result = await run(
       Effect.gen(function* () {
-        const signer = yield* JWT.make({ ...baseConfig, expiresIn: -10000 });
-        const verifier = yield* JWT.make({ ...baseConfig, clockSkewLeeway: 5000 });
+        const signer = yield* Jwt.make({ ...baseConfig, expiresIn: -10000 });
+        const verifier = yield* Jwt.make({ ...baseConfig, clockSkewLeeway: 5000 });
         const { token } = yield* signer.sign(user);
         return yield* Effect.result(verifier.verify(token));
       }),
@@ -359,7 +359,7 @@ describe("JWTService — clock-skew leeway", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JWTError");
+      expect(result.failure._tag).toBe("JwtError");
       expect(result.failure.message).toContain("expired");
     }
   });
@@ -368,7 +368,7 @@ describe("JWTService — clock-skew leeway", () => {
     // nbf is 2 s in the future; leeway of 5 s should accept it.
     const payload = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make({ ...baseConfig, clockSkewLeeway: 5000 });
+        const service = yield* Jwt.make({ ...baseConfig, clockSkewLeeway: 5000 });
         const nearFutureNbf = Math.floor(Date.now() / 1000) + 2;
         const { token } = yield* service.sign(user, { nbf: nearFutureNbf });
         return yield* service.verify(token);
@@ -382,7 +382,7 @@ describe("JWTService — clock-skew leeway", () => {
     // nbf is 10 s in the future; leeway of 5 s is not enough.
     const result = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make({ ...baseConfig, clockSkewLeeway: 5000 });
+        const service = yield* Jwt.make({ ...baseConfig, clockSkewLeeway: 5000 });
         const farFutureNbf = Math.floor(Date.now() / 1000) + 10;
         const { token } = yield* service.sign(user, { nbf: farFutureNbf });
         return yield* Effect.result(service.verify(token));
@@ -391,13 +391,13 @@ describe("JWTService — clock-skew leeway", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JWTError");
+      expect(result.failure._tag).toBe("JwtError");
       expect(result.failure.message).toContain("not yet valid");
     }
   });
 });
 
-describe("JWTService with private key encryption", () => {
+describe("JwtService with private key encryption", () => {
   beforeEach(() => {
     keyPairs.splice(0, keyPairs.length);
   });
@@ -405,7 +405,7 @@ describe("JWTService with private key encryption", () => {
   it("should sign and verify with encrypted private key (ES256, { secret })", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make({
+        const service = yield* Jwt.make({
           ...baseConfig,
           encryptPrivateKey: { secret: Redacted.make("test-encryption-secret-32-bytes!!") },
         });
@@ -428,7 +428,7 @@ describe("JWTService with private key encryption", () => {
   it("should sign and verify with encrypted private key (EdDSA, { secret })", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make({
+        const service = yield* Jwt.make({
           ...baseConfig,
           algorithm: "EdDSA",
           encryptPrivateKey: { secret: Redacted.make("test-encryption-secret-32-bytes!!") },
@@ -449,7 +449,7 @@ describe("JWTService with private key encryption", () => {
 
     const result = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make({
+        const service = yield* Jwt.make({
           ...baseConfig,
           encryptPrivateKey: { cipher },
         });
@@ -466,7 +466,7 @@ describe("JWTService with private key encryption", () => {
   it("should reuse the encrypted key across multiple sign calls", async () => {
     await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make({
+        const service = yield* Jwt.make({
           ...baseConfig,
           encryptPrivateKey: { secret: Redacted.make("test-encryption-secret-32-bytes!!") },
         });
@@ -485,7 +485,7 @@ describe("JWTService with private key encryption", () => {
     // encrypted private key in the store does not need to be decrypted here.
     const result = await run(
       Effect.gen(function* () {
-        const service = yield* JWT.make({
+        const service = yield* Jwt.make({
           ...baseConfig,
           encryptPrivateKey: { secret: Redacted.make("test-encryption-secret-32-bytes!!") },
         });
@@ -494,7 +494,7 @@ describe("JWTService with private key encryption", () => {
 
         // Rotate: new unencrypted key becomes active in the store
         const rotated = yield* generateKeyPair("ES256", PlatformCrypto.instance);
-        const store = yield* JWTKeyStore;
+        const store = yield* JwtKeyStore;
         yield* store.create(rotated);
 
         // Verify still resolves the correct kid and uses its public key
@@ -512,10 +512,10 @@ describe("JWTService with private key encryption", () => {
 
 describe("RemoteJwksVerifier", () => {
   // Isolated key store so beforeEach on the shared store doesn't interfere.
-  const remotePairs: JWTKeyPair[] = [];
+  const remotePairs: JwtKeyPair[] = [];
   const remoteStore = {
     getActive: () => Effect.sync(() => remotePairs[remotePairs.length - 1] ?? null),
-    create: (pair: JWTKeyPair) =>
+    create: (pair: JwtKeyPair) =>
       Effect.sync(() => {
         remotePairs.push(pair);
         return pair;
@@ -523,10 +523,10 @@ describe("RemoteJwksVerifier", () => {
     list: () => Effect.sync(() => [...remotePairs]),
   };
   const remoteContext = Context.merge(
-    Context.make(JWTKeyStore, remoteStore),
+    Context.make(JwtKeyStore, remoteStore),
     Context.make(Crypto.Crypto, PlatformCrypto.instance),
   );
-  const runRemote = <A, E>(program: Effect.Effect<A, E, JWTKeyStore | Crypto.Crypto>) =>
+  const runRemote = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | Crypto.Crypto>) =>
     Effect.runPromise(Effect.provide(program, remoteContext));
 
   let server: Server;
@@ -537,7 +537,7 @@ describe("RemoteJwksVerifier", () => {
     // Sign a token to trigger lazy key-pair creation in the remote store.
     signedToken = await runRemote(
       Effect.gen(function* () {
-        const service = yield* JWT.make(baseConfig);
+        const service = yield* Jwt.make(baseConfig);
         const { token } = yield* service.sign(user);
         return token;
       }),
@@ -546,7 +546,7 @@ describe("RemoteJwksVerifier", () => {
     // Get the JWKS to serve from the test HTTP server.
     const jwks = await runRemote(
       Effect.gen(function* () {
-        const service = yield* JWT.make(baseConfig);
+        const service = yield* Jwt.make(baseConfig);
         return yield* service.getJwks();
       }),
     );
@@ -568,7 +568,7 @@ describe("RemoteJwksVerifier", () => {
   it("should verify a valid JWT against the remote JWKS", async () => {
     const payload = await Effect.runPromise(
       Effect.gen(function* () {
-        const verifier = yield* JWT.remoteJwksVerifier({
+        const verifier = yield* Jwt.remoteJwksVerifier({
           jwksUri: jwksUrl,
           issuer: baseConfig.issuer,
           ...(baseConfig.audience !== undefined && { audience: baseConfig.audience }),
@@ -594,7 +594,7 @@ describe("RemoteJwksVerifier", () => {
     const result = await Effect.runPromise(
       Effect.result(
         Effect.gen(function* () {
-          const verifier = yield* JWT.remoteJwksVerifier({
+          const verifier = yield* Jwt.remoteJwksVerifier({
             jwksUri: jwksUrl,
             issuer: baseConfig.issuer,
           });
@@ -605,7 +605,7 @@ describe("RemoteJwksVerifier", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JWTError");
+      expect(result.failure._tag).toBe("JwtError");
       expect(result.failure.message).toContain("signature");
     }
   });
@@ -624,7 +624,7 @@ describe("RemoteJwksVerifier", () => {
     const result = await Effect.runPromise(
       Effect.result(
         Effect.gen(function* () {
-          const verifier = yield* JWT.remoteJwksVerifier({
+          const verifier = yield* Jwt.remoteJwksVerifier({
             jwksUri: jwksUrl,
             issuer: baseConfig.issuer,
           });
@@ -635,7 +635,7 @@ describe("RemoteJwksVerifier", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JWTError");
+      expect(result.failure._tag).toBe("JwtError");
       expect(result.failure.message).toContain("kid");
     }
   });
@@ -643,7 +643,7 @@ describe("RemoteJwksVerifier", () => {
   it("should reject a token with a future nbf via the remote verifier", async () => {
     const futureNbfToken = await runRemote(
       Effect.gen(function* () {
-        const service = yield* JWT.make(baseConfig);
+        const service = yield* Jwt.make(baseConfig);
         const { token } = yield* service.sign(user, {
           nbf: Math.floor(Date.now() / 1000) + 3600,
         });
@@ -654,7 +654,7 @@ describe("RemoteJwksVerifier", () => {
     const result = await Effect.runPromise(
       Effect.result(
         Effect.gen(function* () {
-          const verifier = yield* JWT.remoteJwksVerifier({
+          const verifier = yield* Jwt.remoteJwksVerifier({
             jwksUri: jwksUrl,
             issuer: baseConfig.issuer,
           });
@@ -665,7 +665,7 @@ describe("RemoteJwksVerifier", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JWTError");
+      expect(result.failure._tag).toBe("JwtError");
       expect(result.failure.message).toContain("not yet valid");
     }
   });
@@ -675,7 +675,7 @@ describe("RemoteJwksVerifier", () => {
     // internal caching means only one network request was made.
     const results = await Effect.runPromise(
       Effect.gen(function* () {
-        const verifier = yield* JWT.remoteJwksVerifier({
+        const verifier = yield* Jwt.remoteJwksVerifier({
           jwksUri: jwksUrl,
           issuer: baseConfig.issuer,
           ...(baseConfig.audience !== undefined && { audience: baseConfig.audience }),
@@ -695,7 +695,7 @@ describe("RemoteJwksVerifier", () => {
     const result = await Effect.runPromise(
       Effect.result(
         Effect.gen(function* () {
-          const verifier = yield* JWT.remoteJwksVerifier({
+          const verifier = yield* Jwt.remoteJwksVerifier({
             jwksUri: jwksUrl,
             issuer: "https://wrong-issuer.example.com",
           });
@@ -706,7 +706,7 @@ describe("RemoteJwksVerifier", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JWTError");
+      expect(result.failure._tag).toBe("JwtError");
       expect(result.failure.message).toContain("issuer");
     }
   });

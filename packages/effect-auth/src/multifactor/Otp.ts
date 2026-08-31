@@ -12,7 +12,7 @@ import { timingSafeEqualBytes } from "../TokenHash.ts";
 /**
  * Configuration for TOTP generation
  */
-export interface TOTPConfig {
+export interface TotpConfig {
   /** Time step in seconds (default: 30) */
   readonly period?: number;
   /** Number of digits in the OTP (default: 6) */
@@ -26,7 +26,7 @@ export interface TOTPConfig {
 /**
  * Configuration for HOTP generation
  */
-export interface HOTPConfig {
+export interface HotpConfig {
   /** Number of digits in the OTP (default: 6) */
   readonly digits?: number;
   /** HMAC algorithm to use (default: "sha1") */
@@ -36,7 +36,7 @@ export interface HOTPConfig {
 /**
  * OTP URI parameters for generating QR codes
  */
-export interface OTPURIParams {
+export interface OtpUriParams {
   /** Type of OTP: totp or hotp */
   readonly type: "totp" | "hotp";
   /** Label (typically username or email) */
@@ -156,10 +156,10 @@ export const decodeBase32 = (base32: string): Effect.Effect<Buffer, Errors.Hashi
  * @param config - HOTP configuration
  * @returns Effect that produces the OTP string
  */
-export const generateHOTP = (
+export const generateHotp = (
   secret: string | Buffer,
   counter: number,
-  config: HOTPConfig = {},
+  config: HotpConfig = {},
 ): Effect.Effect<string, Errors.HashingError> =>
   Effect.gen(function* () {
     // Validate counter
@@ -236,11 +236,11 @@ export const generateHOTP = (
  * @param config - HOTP configuration
  * @returns Effect that produces true if valid, false otherwise
  */
-export const verifyHOTP = (
+export const verifyHotp = (
   token: string,
   secret: string | Buffer,
   counter: number,
-  config: HOTPConfig = {},
+  config: HotpConfig = {},
 ): Effect.Effect<boolean, Errors.HashingError> =>
   Effect.gen(function* () {
     // Validate token: must be a non-empty string of digits
@@ -248,7 +248,7 @@ export const verifyHOTP = (
       return false;
     }
 
-    const expectedToken = yield* generateHOTP(secret, counter, config);
+    const expectedToken = yield* generateHotp(secret, counter, config);
 
     // Timing-safe comparison
     if (token.length !== expectedToken.length) {
@@ -266,19 +266,19 @@ export const verifyHOTP = (
  * @param config - TOTP configuration
  * @returns Effect that produces the OTP string
  */
-export const generateTOTP = (
+export const generateTotp = (
   secret: string | Buffer,
-  config: TOTPConfig = {},
+  config: TotpConfig = {},
 ): Effect.Effect<string, Errors.HashingError> => {
   const period = config?.period ?? 30;
   const currentTime = Math.floor(Date.now() / 1000);
   const counter = Math.floor(currentTime / period);
-  const hotpConfig: HOTPConfig = {
+  const hotpConfig: HotpConfig = {
     ...(config?.digits !== undefined && { digits: config.digits }),
     ...(config?.algorithm !== undefined && { algorithm: config.algorithm }),
   };
 
-  return generateHOTP(secret, counter, hotpConfig);
+  return generateHotp(secret, counter, hotpConfig);
 };
 
 /**
@@ -292,10 +292,10 @@ export const generateTOTP = (
  *   the token is invalid. Callers should persist the counter and reject
  *   subsequent submissions with the same or lower counter to prevent replay.
  */
-export const verifyTOTP = (
+export const verifyTotp = (
   token: string,
   secret: string | Buffer,
-  config: TOTPConfig = {},
+  config: TotpConfig = {},
 ): Effect.Effect<number | null, Errors.HashingError> =>
   Effect.gen(function* () {
     // Validate and normalize period
@@ -320,11 +320,11 @@ export const verifyTOTP = (
     // Check current time step and adjacent steps within window
     for (let i = -window; i <= window; i++) {
       const counter = currentCounter + i;
-      const hotpConfig: HOTPConfig = {
+      const hotpConfig: HotpConfig = {
         ...(config?.digits !== undefined && { digits: config.digits }),
         ...(config?.algorithm !== undefined && { algorithm: config.algorithm }),
       };
-      const expectedToken = yield* generateHOTP(secret, counter, hotpConfig);
+      const expectedToken = yield* generateHotp(secret, counter, hotpConfig);
 
       // Timing-safe comparison
       if (token.length === expectedToken.length) {
@@ -345,7 +345,7 @@ export const verifyTOTP = (
  * @param params - OTP URI parameters
  * @returns The otpauth:// URI string
  */
-export const generateOTPURI = (params: OTPURIParams): string => {
+export const generateOtpUri = (params: OtpUriParams): string => {
   const { type, label, issuer, secret, counter, period, digits, algorithm } = params;
 
   // Validate secret is a valid base32 string
@@ -358,7 +358,7 @@ export const generateOTPURI = (params: OTPURIParams): string => {
   }
   // Allow only Base32 characters A-Z and 2-7 (case-insensitive), with optional padding
   if (!/^[A-Z2-7]+=*$/i.test(trimmed)) {
-    throw new Error("Invalid Base32 secret provided to generateOTPURI");
+    throw new Error("Invalid Base32 secret provided to generateOtpUri");
   }
 
   // Normalize secret for URI (trim, uppercase, and remove padding)

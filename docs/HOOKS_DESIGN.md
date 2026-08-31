@@ -5,13 +5,12 @@ The hooks system described here exists in `src/Hooks.ts` (with first-party
 plugins under `src/plugins/`) on Effect v4; details below may diverge from the
 shipped code (e.g. the shipped plugin is `NormalizeEmailPlugin`, not
 `EmailNormalizePlugin`, and the service uses `Context.Service`, not the v3
-`Effect.Service` API). The API restructure milestone (`docs/refactor-plan.md`,
-`docs/migration.md`) also postdates this document: `SessionManager` below is
-now `SessionService` (`src/session/SessionService.ts`), and module paths
-referenced here as flat `<Feature>.ts` files may now live under a lowercase
-cluster directory (e.g. `EmailPassword.ts` → `src/email/EmailPassword.ts`) —
-see `docs/migration.md` for the full rename/move table. The current API
-conventions live in [DESIGN.md](./DESIGN.md).
+`Effect.Service` API). The API restructure milestone also postdates this
+document: `SessionManager` below is now `SessionService` (`src/SessionService.ts`),
+and module paths referenced here as flat `<Feature>.ts` files may now live under
+a lowercase cluster directory (e.g. `EmailPassword.ts` →
+`src/email/EmailPassword.ts`) — [ARCHITECTURE.md](./ARCHITECTURE.md) maps the
+tree as it stands. The current API conventions live in [DESIGN.md](./DESIGN.md).
 **Target package:** `effect-auth` (this repository's root package)
 **Effect version at time of writing:** v3.21.2 (resolved from `effect@^3.19.15`)
 

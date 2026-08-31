@@ -20,7 +20,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect } from "effect";
 import { generateKeyPairSync } from "node:crypto";
 import { SignedXml } from "xml-crypto";
-import { SAMLError, type SAMLVerifyInput } from "@thomasfosterau/effect-auth";
+import { SamlError, type SamlVerifyInput } from "@thomasfosterau/effect-auth";
 import { verifier } from "./index.ts";
 
 const IDP = "https://idp.acme.test/metadata";
@@ -125,7 +125,7 @@ const validResponse = (o: ResponseOptions = {}): string =>
 
 const encode = (xml: string): string => Buffer.from(xml, "utf8").toString("base64");
 
-const input = (xml: string, overrides: Partial<SAMLVerifyInput> = {}): SAMLVerifyInput => ({
+const input = (xml: string, overrides: Partial<SamlVerifyInput> = {}): SamlVerifyInput => ({
   samlResponse: encode(xml),
   idpCertificates: [trusted.publicPem],
   idpEntityId: IDP,
@@ -134,11 +134,11 @@ const input = (xml: string, overrides: Partial<SAMLVerifyInput> = {}): SAMLVerif
   ...overrides,
 });
 
-const run = <A>(effect: Effect.Effect<A, SAMLError>): Promise<A> => Effect.runPromise(effect);
-const flip = (xml: string, overrides: Partial<SAMLVerifyInput> = {}): Promise<SAMLError> =>
+const run = <A>(effect: Effect.Effect<A, SamlError>): Promise<A> => Effect.runPromise(effect);
+const flip = (xml: string, overrides: Partial<SamlVerifyInput> = {}): Promise<SamlError> =>
   Effect.runPromise(Effect.flip(verifier.verify(input(xml, overrides))));
 
-describe("SAMLVerifier.verify — happy path", () => {
+describe("SamlVerifier.verify — happy path", () => {
   it("accepts a correctly signed assertion and returns only signed data", async () => {
     const assertion = await run(verifier.verify(input(validResponse())));
 
@@ -161,11 +161,11 @@ describe("SAMLVerifier.verify — happy path", () => {
   });
 });
 
-describe("SAMLVerifier.verify — signature scope", () => {
+describe("SamlVerifier.verify — signature scope", () => {
   // (a) The most basic forgery: no signature at all.
   it("rejects an unsigned response", async () => {
     const err = await flip(responseXml(assertionXml()));
-    expect(err).toBeInstanceOf(SAMLError);
+    expect(err).toBeInstanceOf(SamlError);
     expect(err.message).toMatch(/signature/i);
   });
 
@@ -229,7 +229,7 @@ describe("SAMLVerifier.verify — signature scope", () => {
   });
 });
 
-describe("SAMLVerifier.verify — addressing and validity", () => {
+describe("SamlVerifier.verify — addressing and validity", () => {
   // (d)
   it("rejects an assertion audienced at a different SP", async () => {
     const err = await flip(validResponse({ audience: "https://someone-else.test/metadata" }));
@@ -283,7 +283,7 @@ describe("SAMLVerifier.verify — addressing and validity", () => {
   });
 });
 
-describe("SAMLVerifier.verify — algorithms and encryption", () => {
+describe("SamlVerifier.verify — algorithms and encryption", () => {
   it("rejects SHA-1 signatures by default", async () => {
     const err = await flip(sign(responseXml(assertionXml()), ASSERTION_XPATH, { alg: "sha1" }));
     expect(err.message).toMatch(/weaker than the configured minimum/);
@@ -328,7 +328,7 @@ describe("SAMLVerifier.verify — algorithms and encryption", () => {
   });
 });
 
-describe("SAMLVerifier.buildAuthnRequest", () => {
+describe("SamlVerifier.buildAuthnRequest", () => {
   it("builds a redirect-binding URL carrying the caller's request id", async () => {
     const request = await run(
       verifier.buildAuthnRequest({
@@ -377,7 +377,7 @@ describe("SAMLVerifier.buildAuthnRequest", () => {
   });
 });
 
-describe("SAMLVerifier.spMetadataXml", () => {
+describe("SamlVerifier.spMetadataXml", () => {
   it("renders an EntityDescriptor the IdP can consume", async () => {
     const xml = await run(verifier.spMetadataXml({ spEntityId: SP, acsUrl: ACS }));
     expect(xml).toContain("<EntityDescriptor");

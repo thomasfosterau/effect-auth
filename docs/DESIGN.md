@@ -7,15 +7,14 @@ Changesets. Date: 2026-07-03/04. Supersedes the architectural framing in `ARCHIT
 (rewritten alongside this document) and the status header of `HOOKS_DESIGN.md`.
 
 > **Superseded (partially) by the directory/export restructure.** The API
-> restructure milestone (`docs/refactor-plan.md`, `docs/migration.md`) landed
-> after this document and revisited two calls made below: the service formerly
-> named `SessionManager` is now `SessionService` (renamed as part of the
-> restructure's naming pass), and the `XShape` interface convention decided in
-> D1's "implementation finding" was reversed — `*Shape` interfaces are deleted
-> outright; implementors reference `typeof X.Service` instead. The rest of this
-> document's rationale and decisions still hold; read D1 and D9 below with
-> those two corrections in mind, and see `docs/migration.md` for the full
-> rename table.
+> restructure milestone landed after this document and revisited two calls made
+> below: the service formerly named `SessionManager` is now `SessionService`
+> (renamed as part of the restructure's naming pass), and the `XShape` interface
+> convention decided in D1's "implementation finding" was reversed — `*Shape`
+> interfaces are deleted outright; implementors reference `typeof X.Service`
+> instead. The rest of this document's rationale and decisions still hold; read
+> D1 and D9 below with those two corrections in mind, and treat
+> [ARCHITECTURE.md](./ARCHITECTURE.md) as the description of the tree today.
 
 This document records, per design dimension: **status quo → problem → decision →
 rationale → migration & blast radius → risk**. Evidence lines reference the tree at
@@ -54,15 +53,14 @@ const app = Effect.gen(function* () {
 - **Errors:** tagged errors, `AuthError` for infrastructure failure, specific tags
   for flow outcomes; lookups that can legitimately miss return `X | null` from
   stores and surface typed errors from services.
-- **HTTP:** the `AuthApi` contract under `Auth.HTTP`, one flat `auth` group,
+- **HTTP:** the `AuthApi` contract under `Auth.Http`, one flat `auth` group,
   404-until-configured for optional features, trusted-origin CSRF gate.
 
 ---
 
 ## D1. The Tag–Service–Layer quartet (highest leverage)
 
-> **Superseded (partially) by the API restructure** (`docs/refactor-plan.md`
-> §3, `docs/migration.md` §4): the `Shape`-suffix decision below did not
+> **Superseded (partially) by the API restructure**: the `Shape`-suffix decision below did not
 > survive contact with real usage and was reversed — `*Shape` interfaces
 > (`SessionStoreShape`, `EmailOtpServiceShape`, and ~65 others) are deleted
 > outright; implementors use `typeof X.Service` in type position instead.
@@ -225,7 +223,7 @@ Changeset with a migration table.
 ### First-party implementation coverage
 
 `@effect-auth/sql` and `@effect-auth/alchemy` both implement the same 20
-stores (the alchemy gap — MagicLink, MagicLinkUser, EmailOTP, EmailOTPUser,
+stores (the alchemy gap — MagicLink, MagicLinkUser, EmailOtp, EmailOtpUser,
 MultiFactor, PendingMultiFactor — was closed 2026-07-04). Neither implements the
 advanced-feature stores (Organization, ApiKey, SSO, Oidc\*,
 DeviceAuthorization, …); that remains a tracked feature gap, not an API
@@ -425,7 +423,7 @@ they're batched for one 0.x minor with a rename table.
 **Status quo.** Two clients: the generated Effect client
 (`http/HttpClient.ts`, then flat `HttpClient.ts:26`, full parity by construction) and the hand-written
 zero-dependency browser client (`packages/client/src/Client.ts:136`) covering
-23/84 endpoints (core flows + magicLink/emailOTP/multiFactor namespaces). No
+23/84 endpoints (core flows + magicLink/emailOtp/multiFactor namespaces). No
 dead methods; the missing 61 are the optional/advanced surface. Framework
 bindings: React has `useSession` + `useListSessions` (`react.ts:24,37`); Svelte
 has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`
@@ -450,10 +448,10 @@ has only `sessionStore` (`svelte.ts:27`); Vue has only `useSession`
 
 ## D9. Barrel & module boundaries
 
-> **Superseded** by `docs/refactor-plan.md` §6: `effect-auth` now also
+> **Superseded** by the API restructure: `effect-auth` now also
 > publishes per-cluster subpath exports (`effect-auth/email`, `/http`,
 > `/oauth`, `/session`, `/password`, `/plugins`) alongside the root
-> barrel, with matching `Auth.Email` / `Auth.HTTP` / `Auth.OAuth` / ...
+> barrel, with matching `Auth.Email` / `Auth.Http` / `Auth.OAuth` / ...
 > namespace re-exports from the root. The status quo/decision below reflects
 > the pre-refactor state.
 
@@ -574,7 +572,7 @@ global uniqueness on the pair, a `verified`/`verifiedAt` promotion state, and
   clients that read `user.email` from store-served responses.
 - **Storage**: `auth_users` drops `email`/`email_verified` and
   `auth_users_email_idx`; `auth_identifiers` (unique `(type, value)`) is the
-  handle table. Upgrade path: `docs/migration.md` § "Surrogate-keyed identity".
+  handle table.
 
 **Rationale.** Multiple emails per account, username renames, phone-as-handle
 and future handle types (door open: passkey handles, wallet addresses) all

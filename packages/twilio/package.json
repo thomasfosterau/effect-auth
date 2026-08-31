@@ -1,7 +1,7 @@
 {
   "name": "@thomasfosterau/effect-auth-twilio",
   "version": "0.1.0",
-  "description": "Twilio SMSSender adapter for effect-auth — plain fetch against Twilio's Messages API, no SDK.",
+  "description": "Twilio SmsSender adapter for effect-auth — plain fetch against Twilio's Messages API, no SDK.",
   "keywords": [
     "auth",
     "effect",

@@ -55,7 +55,7 @@ package that implements a core service contract.
 | `packages/argon2` _(new, extract)_ | `PasswordHasher` layer over `@node-rs/argon2` (native dep moves out of core)        | core; `@node-rs/argon2`                                             |
 | `packages/drizzle` _(M6, #171)_    | `SessionStore`/`UserStore` (+ rest) via Drizzle                                     | core; `drizzle-orm` as peer                                         |
 | `packages/<email>` _(M6)_          | `EmailSender` adapters — first candidates: Resend, SES, Nodemailer                  | core; provider SDK                                                  |
-| `packages/<sms>` _(M6)_            | `SMSSender` adapters — first candidate: Twilio                                      | core; provider SDK                                                  |
+| `packages/<sms>` _(M6)_            | `SmsSender` adapters — first candidate: Twilio                                      | core; provider SDK                                                  |
 
 Consequences for the current tree:
 
@@ -79,12 +79,12 @@ Consequences for the current tree:
     verification from `node:crypto`). Core's runtime dependency list is now
     `effect` only, with no exceptions.
 
-### 2.2 Delivery seams: unified `EmailSender` / `SMSSender` services
+### 2.2 Delivery seams: unified `EmailSender` / `SmsSender` services
 
 Today every feature takes its own delivery callback (`EmailVerification.sendEmail`,
-`MagicLink.sendMagicLink`, `EmailOTP.sendVerificationOTP`, `PhoneOTP.sendOTP`). That's
+`MagicLink.sendMagicLink`, `EmailOtp.sendVerificationOtp`, `PhoneOtp.sendOtp`). That's
 fine for BYO, but gives adapter packages no single contract to implement. Add core
-`EmailSender` and `SMSSender` `Context.Service` contracts (message = recipient +
+`EmailSender` and `SmsSender` `Context.Service` contracts (message = recipient +
 purpose + template params), with default layers that route the existing per-feature
 callbacks through them. Per-feature callbacks stay for full control; adapters
 implement the unified seam once and every feature lights up.
@@ -225,8 +225,8 @@ checklist, add any missing test, then close.
 | #66   | Session `updateAge`, `rememberMe`, config semantics | `updateAge` throttle in `SessionService.ts:133-136`; `rememberMe` threaded through Types → HTTP schemas → server                                                                                                                  | Close after verification                                                                    |
 | #68   | Account-linking guard + controls                    | Landed in `78e377f`; `trustedProviders`/`allowDifferentEmails`/`updateUserInfoOnLink`/`LastCredential` in `oauth/OAuth.ts`                                                                                                        | Close after verification                                                                    |
 | #73   | **Identifier epic**                                 | Phase 1 only: `Identifier.ts` + KV store exist, but `EmailPassword` still keys on `getUserByEmail`, `User` still requires `email`/`emailVerified`. `docs/PLAN.md` holds the phase plan — which references the deleted SQL package | **Open — the core-model milestone (M2)**                                                    |
-| #74   | Trusted devices + email/SMS OTP factor              | `TrustedDevice.ts` (config-gated, signed, `Config` integration) + `multifactor/OTPSecondFactor.ts` with gate layers                                                                                                               | Close after verification                                                                    |
-| #75   | **SAML SSO + SCIM**                                 | Not started; `SSO.ts` is OIDC-only                                                                                                                                                                                                | **Open — enterprise milestone (M5)**                                                        |
+| #74   | Trusted devices + email/SMS OTP factor              | `TrustedDevice.ts` (config-gated, signed, `Config` integration) + `multifactor/OtpSecondFactor.ts` with gate layers                                                                                                               | Close after verification                                                                    |
+| #75   | **SAML SSO + SCIM**                                 | Not started; `Sso.ts` is OIDC-only                                                                                                                                                                                                | **Open — enterprise milestone (M5)**                                                        |
 | #76   | Bearer-token issuance                               | `set-auth-token` handling in `http/HttpServer.ts` (+ tests)                                                                                                                                                                       | Close after verification                                                                    |
 | #77   | OIDC DCR + MCP                                      | DCR done (`registerClient`, `registration_endpoint` advertised). No `.well-known/oauth-authorization-server`, no MCP preset                                                                                                       | **Part 2 open (M5)**                                                                        |
 | #78   | **Org teams + dynamic access control**              | Not started; no `Team` in `Organization.ts`, roles still config-static                                                                                                                                                            | **Open — dynamic AC lands on the policy framework (M3), teams in M4**                       |
@@ -265,7 +265,7 @@ composability (an Effect-native advantage Better Auth has no equivalent of).
 | --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
 | Authorization framework           | Thin: per-plugin permission maps (admin/org) only                  | RBAC seed (permissions, roles, combinators); no policy values/ABAC/schema embedding        | M3 (§2.5) — **leapfrog, not parity**: policy kernel, ABAC, Cedar-style policies-as-data, schema-embedded authorization |
 | Database adapters                 | Drizzle/Prisma/Kysely/Mongo adapters + CLI schema generate/migrate | Nothing in-tree (post-regression); KV layers + BYO stores                                  | M0 restore `packages/sql`; M6 Drizzle (#171); CLI/migration story a stretch goal                                       |
-| Email/SMS delivery adapters       | Docs-level integrations; callbacks                                 | Per-feature callbacks only; no unified sender seam                                         | M1 `EmailSender`/`SMSSender` seams (§2.2); M6 first adapter packages                                                   |
+| Email/SMS delivery adapters       | Docs-level integrations; callbacks                                 | Per-feature callbacks only; no unified sender seam                                         | M1 `EmailSender`/`SmsSender` seams (§2.2); M6 first adapter packages                                                   |
 | Surrogate-key identity            | Flexible via `additionalFields`; but BA also hardwires email       | Email hardwired in `User`; phase 1 of #73 done                                             | M2 — also a differentiator, not just parity                                                                            |
 | Org teams + dynamic AC            | `teams`, `createAccessControl` runtime roles                       | Static config roles, no teams                                                              | M3 (dynamic AC via policy framework) + M4 (teams) (#78)                                                                |
 | SAML SSO                          | SSO plugin supports SAML                                           | OIDC only                                                                                  | M5 (#75)                                                                                                               |
@@ -305,19 +305,18 @@ the engine for org dynamic access control (M4), which with teams unblocks SCIM g
   SQL/D1 implementations, isolated reset tap, documented DoS tradeoff with
   IPRateLimitPlugin as the second dimension, configurable fail-open/fail-closed
   on store outage); the #88/#116/#117 residuals verified as already implemented;
-  `EmailSender`/`SMSSender` seams + `emailCallbacks`/`smsCallbacks` added (§2.2).
+  `EmailSender`/`SmsSender` seams + `emailCallbacks`/`smsCallbacks` added (§2.2).
   The 14 verified-done issues are closed with evidence comments.
 - **M2 — Identifier epic (done 2026-08-30; breaking, ships with M3).**
   `docs/PLAN.md` phases 2–8 executed: `User` is surrogate-keyed
   (`{id, name?, image?, createdAt, updatedAt, attributes}`), email/username/
   phone are `Identifier`s behind `IdentifierStore` (`claimIdentifier` race
   pattern, verification-as-promotion), every flow migrated
-  (EmailPassword/Username/PhoneOTP/MagicLink/EmailOTP/OAuth-linking/SSO/
+  (EmailPassword/Username/PhoneOtp/MagicLink/EmailOtp/OAuth-linking/SSO/
   GoogleOneTap/Anonymous/Admin/Org/AccountManagement/OIDC/MultiFactor), the
   HTTP contract carries derived optional `email`/`emailVerified` plus
   `GET`/`DELETE /identifiers` endpoints, sql/alchemy schemas dropped the user
-  email columns, and the upgrade path is `docs/migration.md` § 9 with design
-  record `DESIGN.md` § D12. Release note: held on the shared M2+M3 breaking
+  email columns, with design record `DESIGN.md` § D12. Release note: held on the shared M2+M3 breaking
   release (decision 7) — do not cut until M3 lands.
 - **M3 — Authorization framework (done 2026-08-30; ships with M2, decision 7).**
   All four stages landed as flat modules in `src/` (~150 tests):
@@ -355,36 +354,36 @@ the engine for org dynamic access control (M4), which with teams unblocks SCIM g
   MCP-ready auth server (PKCE required + DCR on) and
   `docs/guides/mcp-provider.md` walks a client through register → PKCE S256
   authorize → token → userinfo → refresh. #75's SAML half landed as an SP:
-  core gained protocol-agnostic `SAMLVerifier`/`SAMLReplayStore` contracts
-  and an `SSO.ts` SAML provider variant (pinned `idpCertificates`,
-  `AnySSOProvider` union), while the XML stack lives in the new
+  core gained protocol-agnostic `SamlVerifier`/`SamlReplayStore` contracts
+  and an `Sso.ts` SAML provider variant (pinned `idpCertificates`,
+  `SsoProvider` union), while the XML stack lives in the new
   `packages/saml` over `@node-saml/node-saml@5.1.0` (the release fixing
   CVE-2025-54419/54369). Security posture: pinned-cert-only verification
   (KeyInfo never trusted), signed-references-only reads, single-assertion
   and duplicate-id rejection, audience/recipient/destination/conditions
   checks with clock skew, a SHA-256+ signature floor (SHA-1 opt-in, HMAC
   refused), encrypted assertions refused in v1, one-time AuthnRequest +
-  assertion-id replay protection via the atomic `SAMLReplayStore.consume`,
+  assertion-id replay protection via the atomic `SamlReplayStore.consume`,
   and IdP-initiated flows off by default — 26 crypto tests reproduce known
   attack shapes (signature wrapping, decoy IDs, smuggled assertions) plus 14
   service-level tests, with the ACS/metadata endpoints wired
   (form-POST ACS, SP metadata XML, SAML registration arm; the OIDC-only
-  provider type renamed `OIDCSSOProvider`, `SSOProvider` now the union).
-  #75's SCIM half landed as `SCIM.ts` + a `/scim/v2` group: Users and
+  provider type renamed `OidcSsoProvider`, `SsoProvider` now the union).
+  #75's SCIM half landed as `Scim.ts` + a `/scim/v2` group: Users and
   Groups mapped onto users/identifiers and org teams (userName pinned
   against rename regressions, soft deactivation with session revocation +
-  `SCIMDeactivatedPlugin`, Okta and Entra patch dialects, eq filters,
+  `ScimDeactivatedPlugin`, Okta and Entra patch dialects, eq filters,
   pagination), per-organization bearer provisioning connections with
   hashed tokens and 404-shaped cross-tenant isolation, RFC 7644 error
   bodies, and the three discovery documents — 38 tests including a full
   Okta lifecycle; guide at `docs/guides/scim.md`.
 - **M6 — Adapter ecosystem (done 2026-08-30).** `packages/drizzle` (#171)
   ships standalone `SessionStore`/`UserStore`/`IdentifierStore` layers over
-  `drizzle-orm/pg-core` (native `jsonb`/`timestamptz`, 15 tests against real
-  Postgres semantics via PGlite) — `IdentifierStore` beyond the captured
+  `drizzle-orm` with PostgreSQL, SQLite, and MySQL table sets (native
+  `jsonb`/`timestamptz` on Postgres; tested via PGlite and better-sqlite3) — `IdentifierStore` beyond the captured
   spec, since the identifier model makes it load-bearing; it stands alone
   rather than wrapping the SQL stores. `packages/resend` and
-  `packages/twilio` are the first `EmailSender`/`SMSSender` adapters (§2.2),
+  `packages/twilio` are the first `EmailSender`/`SmsSender` adapters (§2.2),
   both over plain `fetch` (no SDKs), with `Redacted` secrets that never leak
   into errors, purpose-keyed default renderers, and 24 tests between them.
   `docs/guides/byo-stores.md` documents the store-contract conventions, the

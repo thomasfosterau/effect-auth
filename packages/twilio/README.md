@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-auth-twilio
 
-`SMSSender` adapter for
+`SmsSender` adapter for
 [`@thomasfosterau/effect-auth`](../effect-auth) backed by
 [Twilio](https://www.twilio.com)'s Messages API. Talks to
 `POST /2010-04-01/Accounts/:sid/Messages.json` with plain `fetch` — **no
@@ -16,15 +16,15 @@ npm install @thomasfosterau/effect-auth-twilio
 ## Usage
 
 Wire it through core's [`Delivery`](../effect-auth/src/Delivery.ts) module so
-every feature's `sendOTP` callback is derived in one line:
+every feature's `sendOtp` callback is derived in one line:
 
 ```ts
 import { Config, Effect, Layer, Redacted } from "effect";
-import { SMSSender, smsCallbacks, IdentifierStore } from "@thomasfosterau/effect-auth";
+import { SmsSender, smsCallbacks, IdentifierStore } from "@thomasfosterau/effect-auth";
 import { layer as twilioLayer } from "@thomasfosterau/effect-auth-twilio";
 
 // Resolve secrets through Config, then build the layer from the resolved config.
-const SMSLayer = Layer.unwrapEffect(
+const SmsLayer = Layer.unwrapEffect(
   Effect.gen(function* () {
     const accountSid = yield* Config.string("TWILIO_ACCOUNT_SID");
     const authToken = yield* Config.redacted("TWILIO_AUTH_TOKEN");
@@ -33,13 +33,13 @@ const SMSLayer = Layer.unwrapEffect(
 );
 
 const program = Effect.gen(function* () {
-  const sender = yield* SMSSender; // provided by SMSLayer
+  const sender = yield* SmsSender; // provided by SmsLayer
   const identifiers = yield* IdentifierStore;
   const send = smsCallbacks(sender, identifiers);
 
   return {
-    PhoneOTP: { sendOTP: send.sendPhoneOTP },
-    OTPSecondFactor: { sendOTP: send.sendSecondFactorOTP },
+    PhoneOtp: { sendOtp: send.sendPhoneOtp },
+    OtpSecondFactor: { sendOtp: send.sendSecondFactorOtp },
   };
 });
 ```
@@ -51,9 +51,9 @@ Or use the sender directly:
 
 ```ts
 import { Effect, Redacted } from "effect";
-import { twilioSMSSender } from "@thomasfosterau/effect-auth-twilio";
+import { twilioSmsSender } from "@thomasfosterau/effect-auth-twilio";
 
-const sender = twilioSMSSender({
+const sender = twilioSmsSender({
   accountSid: process.env.TWILIO_ACCOUNT_SID!,
   authToken: Redacted.make(process.env.TWILIO_AUTH_TOKEN!),
   from: "+15551234567",
@@ -88,7 +88,7 @@ twilioLayer({
 Pass `fetch` to inject a stub, and `baseUrl` to point at a local server:
 
 ```ts
-twilioSMSSender({
+twilioSmsSender({
   accountSid: "AC...",
   authToken: Redacted.make("test"),
   from: "+15551234567",
@@ -107,10 +107,10 @@ auth token is never included in any error.
 
 ## API
 
-- `twilioSMSSender(config)` — build the `SMSSender` service directly.
-- `layer(config)` — the same, as a `Layer<SMSSender>`.
+- `twilioSmsSender(config)` — build the `SmsSender` service directly.
+- `layer(config)` — the same, as a `Layer<SmsSender>`.
 - `defaultRender(message)` — the built-in renderer, exported for reuse/testing.
-- `TwilioSMSSenderConfig` — the config type.
+- `TwilioSmsSenderConfig` — the config type.
 
 ## License
 

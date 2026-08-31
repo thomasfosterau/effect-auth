@@ -9,7 +9,7 @@
  * The companion browser hint — a non-httpOnly `${cookie}_last_method` cookie
  * login pages read to highlight the user's previous method — is set by the
  * HTTP layer: enable it with `cookie.lastLoginMethod` on
- * `HTTPServer.make` (it covers every sign-in endpoint, including the
+ * `HttpServer.make` (it covers every sign-in endpoint, including the
  * flows that don't fire these hooks).
  *
  * @module plugins/last-login-method

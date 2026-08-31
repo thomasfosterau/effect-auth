@@ -15,7 +15,7 @@ npm install @thomasfosterau/effect-auth-resend
 ## Usage
 
 Wire it through core's [`Delivery`](../effect-auth/src/Delivery.ts) module so
-every feature's `sendEmail`/`sendMagicLink`/`sendVerificationOTP`/... callback
+every feature's `sendEmail`/`sendMagicLink`/`sendVerificationOtp`/... callback
 is derived in one line:
 
 ```ts
@@ -40,7 +40,7 @@ const program = Effect.gen(function* () {
   return {
     EmailVerification: { sendEmail: send.sendVerificationEmail },
     MagicLink: { sendMagicLink: send.sendMagicLink },
-    EmailOTP: { sendVerificationOTP: send.sendVerificationOTP },
+    EmailOtp: { sendVerificationOtp: send.sendVerificationOtp },
     PasswordReset: { sendResetPassword: send.sendResetPassword },
   };
 });

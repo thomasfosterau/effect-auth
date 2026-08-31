@@ -10,7 +10,7 @@ import {
   EmailVerificationStoreKV,
   PasswordResetStoreKV,
   MagicLinkStoreKV,
-  EmailOTPStoreKV,
+  EmailOtpStoreKV,
   PendingMultiFactorStoreKV,
 } from "./KeyValueStores.ts";
 import { OAuthStateStore, type OAuthState } from "./oauth/OAuth.ts";
@@ -23,7 +23,7 @@ import {
 import * as EmailVerification from "./email/EmailVerification.ts";
 import { PasswordResetStore, type PasswordResetToken } from "./password/PasswordReset.ts";
 import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
-import { EmailOTPStore, type EmailOTPRecord } from "./email/EmailOTP.ts";
+import { EmailOtpStore, type EmailOtpRecord } from "./email/EmailOtp.ts";
 import { PendingMultiFactorStore, type PendingMultiFactor } from "./multifactor/MultiFactor.ts";
 import { Hooks } from "./Hooks.ts";
 
@@ -40,7 +40,7 @@ const run = <A, E>(
     | EmailVerificationStore
     | PasswordResetStore
     | MagicLinkStore
-    | EmailOTPStore
+    | EmailOtpStore
     | PendingMultiFactorStore
   >,
 ): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(testLayer())) as Effect.Effect<A, E>);
@@ -53,7 +53,7 @@ describe("KeyValueStores", () => {
     expect(EmailVerificationStoreKV).toBeDefined();
     expect(PasswordResetStoreKV).toBeDefined();
     expect(MagicLinkStoreKV).toBeDefined();
-    expect(EmailOTPStoreKV).toBeDefined();
+    expect(EmailOtpStoreKV).toBeDefined();
     expect(PendingMultiFactorStoreKV).toBeDefined();
   });
 
@@ -279,8 +279,8 @@ describe("KeyValueStores", () => {
     });
   });
 
-  describe("EmailOTPStoreKV", () => {
-    const record: EmailOTPRecord = {
+  describe("EmailOtpStoreKV", () => {
+    const record: EmailOtpRecord = {
       email: "otp@example.com",
       otpHash: "hash",
       purpose: "sign-in",
@@ -292,7 +292,7 @@ describe("KeyValueStores", () => {
     it("upserts per email+purpose and increments attempts", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* EmailOTPStore;
+          const store = yield* EmailOtpStore;
           yield* store.upsert(record);
           // Same email, different purpose is a separate record.
           yield* store.upsert({ ...record, purpose: "forget-password", otpHash: "other" });

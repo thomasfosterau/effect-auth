@@ -93,7 +93,7 @@ const makeTx =
 // ---------------------------------------------------------------------------
 // Shared user row (auth_users backs UserStore, UserServiceStore,
 // EmailPasswordStore, PasswordResetUserStore, OAuthUserStore,
-// MagicLinkUserStore and EmailOTPUserStore)
+// MagicLinkUserStore and EmailOtpUserStore)
 // ---------------------------------------------------------------------------
 
 interface UserRow {
@@ -888,10 +888,10 @@ export const makeMagicLinkUserStore: Effect.Effect<
 });
 
 // ---------------------------------------------------------------------------
-// EmailOTPStore + EmailOTPUserStore
+// EmailOtpStore + EmailOtpUserStore
 // ---------------------------------------------------------------------------
 
-interface EmailOTPRow {
+interface EmailOtpRow {
   readonly email: string;
   readonly purpose: string;
   readonly otp_hash: string;
@@ -900,27 +900,27 @@ interface EmailOTPRow {
   readonly expires_at: number;
 }
 
-const rowToEmailOTP = (row: EmailOTPRow): Auth.Email.EmailOTPRecord => ({
+const rowToEmailOtp = (row: EmailOtpRow): Auth.Email.EmailOtpRecord => ({
   email: row.email,
-  purpose: row.purpose as Auth.Email.EmailOTPPurpose,
+  purpose: row.purpose as Auth.Email.EmailOtpPurpose,
   otpHash: row.otp_hash,
   attempts: row.attempts,
   createdAt: row.created_at,
   expiresAt: row.expires_at,
 });
 
-export const makeEmailOTPStore: Effect.Effect<
-  typeof Auth.Email.EmailOTPStore.Service,
+export const makeEmailOtpStore: Effect.Effect<
+  typeof Auth.Email.EmailOtpStore.Service,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const withTx = makeTx(sql);
 
-  const read = (email: string, purpose: Auth.Email.EmailOTPPurpose, label: string) =>
+  const read = (email: string, purpose: Auth.Email.EmailOtpPurpose, label: string) =>
     firstRow(
       label,
-      sql<EmailOTPRow>`SELECT * FROM auth_email_otps WHERE email = ${email} AND purpose = ${purpose}`,
+      sql<EmailOtpRow>`SELECT * FROM auth_email_otps WHERE email = ${email} AND purpose = ${purpose}`,
     );
 
   return {
@@ -942,7 +942,7 @@ export const makeEmailOTPStore: Effect.Effect<
       ),
     get: (email, purpose) =>
       read(email, purpose, "emailOtp.get").pipe(
-        Effect.map((row) => (row ? rowToEmailOTP(row) : null)),
+        Effect.map((row) => (row ? rowToEmailOtp(row) : null)),
       ),
     delete: (email, purpose) =>
       asVoid(
@@ -966,11 +966,11 @@ export const makeEmailOTPStore: Effect.Effect<
         }
         return attempts;
       }),
-  } satisfies typeof Auth.Email.EmailOTPStore.Service;
+  } satisfies typeof Auth.Email.EmailOtpStore.Service;
 });
 
-export const makeEmailOTPUserStore: Effect.Effect<
-  typeof Auth.Email.EmailOTPUserStore.Service,
+export const makeEmailOtpUserStore: Effect.Effect<
+  typeof Auth.Email.EmailOtpUserStore.Service,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
@@ -978,7 +978,7 @@ export const makeEmailOTPUserStore: Effect.Effect<
   const users = userQueries(sql);
   return {
     createUser: (input) => users.create(input, "emailOtpUser.createUser"),
-  } satisfies typeof Auth.Email.EmailOTPUserStore.Service;
+  } satisfies typeof Auth.Email.EmailOtpUserStore.Service;
 });
 
 // ---------------------------------------------------------------------------
@@ -1291,13 +1291,13 @@ export const MagicLinkUserStoreLayer: Layer.Layer<
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.MagicLinkUserStore, makeMagicLinkUserStore);
-export const EmailOTPStoreLayer: Layer.Layer<Auth.Email.EmailOTPStore, never, SqlClient.SqlClient> =
-  Layer.effect(Auth.Email.EmailOTPStore, makeEmailOTPStore);
-export const EmailOTPUserStoreLayer: Layer.Layer<
-  Auth.Email.EmailOTPUserStore,
+export const EmailOtpStoreLayer: Layer.Layer<Auth.Email.EmailOtpStore, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.Email.EmailOtpStore, makeEmailOtpStore);
+export const EmailOtpUserStoreLayer: Layer.Layer<
+  Auth.Email.EmailOtpUserStore,
   never,
   SqlClient.SqlClient
-> = Layer.effect(Auth.Email.EmailOTPUserStore, makeEmailOTPUserStore);
+> = Layer.effect(Auth.Email.EmailOtpUserStore, makeEmailOtpUserStore);
 export const MultiFactorStoreLayer: Layer.Layer<
   Auth.MultiFactor.MultiFactorStore,
   never,
@@ -1320,10 +1320,10 @@ export const AccountLockoutStoreLayer: Layer.Layer<
  * A single layer that provides every SQL-backed effect-auth store on top of
  * the ambient `SqlClient`. Provide it once (together with any `SqlClient`
  * layer) and the core auth stack (SessionService, EmailPasswordService,
- * OAuth, WebAuthn, MagicLink, EmailOTP, MultiFactor, ...) has persistence.
+ * OAuth, WebAuthn, MagicLink, EmailOtp, MultiFactor, ...) has persistence.
  *
  * Stores added to core after this package's restoration (OneTimeToken,
- * TrustedDevice, PhoneOTP, Organization, Admin, ApiKey, OIDC provider, SSO,
+ * TrustedDevice, PhoneOtp, Organization, Admin, ApiKey, OIDC provider, SSO,
  * DeviceAuthorization, ...) are not yet covered here — use the
  * `KeyValueStore`-backed layers from core or bring your own until they land.
  */
@@ -1344,8 +1344,8 @@ export const layer: Layer.Layer<
   | Auth.Password.PasswordResetStore
   | Auth.MagicLinkStore
   | Auth.MagicLinkUserStore
-  | Auth.Email.EmailOTPStore
-  | Auth.Email.EmailOTPUserStore
+  | Auth.Email.EmailOtpStore
+  | Auth.Email.EmailOtpUserStore
   | Auth.MultiFactor.MultiFactorStore
   | Auth.MultiFactor.PendingMultiFactorStore
   | Auth.IdentifierStore
@@ -1369,8 +1369,8 @@ export const layer: Layer.Layer<
   PasswordResetStoreLayer,
   MagicLinkStoreLayer,
   MagicLinkUserStoreLayer,
-  EmailOTPStoreLayer,
-  EmailOTPUserStoreLayer,
+  EmailOtpStoreLayer,
+  EmailOtpUserStoreLayer,
   MultiFactorStoreLayer,
   PendingMultiFactorStoreLayer,
   IdentifierStoreLayer,

@@ -4,7 +4,7 @@
 
 Effect Auth is a generic, type-safe authentication and authorization library for [Effect](https://effect.website/) v4, following best practices from Lucia, the Copenhagen Book, Oslo, and BetterAuth.
 
-The settled API conventions — naming, export shapes, store contracts, error taxonomy — are recorded with rationale in [DESIGN.md](./DESIGN.md); the directory/export restructure that followed is recorded in [refactor-plan.md](./refactor-plan.md) and [migration.md](./migration.md). This document describes how the pieces fit together today.
+The settled API conventions — naming, export shapes, store contracts, error taxonomy — are recorded with rationale in [DESIGN.md](./DESIGN.md). This document describes how the pieces fit together today.
 
 ## Core Principles
 
@@ -114,8 +114,7 @@ directories, each with its own `index.ts` barrel and matching
   as `Auth.TrustedDevice` so its generic `make`/`gate` stay qualified. There is
   no `Auth.Session` namespace — `Types.ts` already owns that name for the flat
   `Session` record.
-- **`email/` cluster**: `EmailAddress.ts`, `EmailOTP.ts` (merged from the old
-  `EmailOtp.ts` + `EmailOTPService.ts`), `EmailPassword.ts`,
+- **`email/` cluster**: `EmailAddress.ts`, `EmailOtp.ts`, `EmailPassword.ts`,
   `EmailVerification.ts`.
 - **`password/` cluster**: `Password.ts` (PBKDF2/scrypt hashers,
   multi-algorithm verifier), `Argon2.ts`, `PasswordReset.ts`,
@@ -127,14 +126,14 @@ directories, each with its own `index.ts` barrel and matching
   the `Authorizer.ts` shell, `Protected.ts` (schema-embedded field guards),
   `OrganizationEntities.ts` (the organization → entity-graph bridge), and the
   permission-string RBAC facade `Authorization.ts` (`AuthorizationPolicy`,
-  `RoleStore`), `RBAC.ts`, `Permission.ts`. Route-level gating lives in
+  `RoleStore`), `Rbac.ts`, `Permission.ts`. Route-level gating lives in
   `http/AuthorizationMiddleware.ts`.
 - **`oauth/` cluster**: `OAuth.ts` (providers + PKCE), `Scope.ts`.
 - **`plugins/` cluster**: `AccountLockout.ts`, `Audit.ts`, `Captcha.ts`,
   `IPRateLimit.ts`, `LastLoginMethod.ts`, `NormalizeEmail.ts`, `RateLimit.ts`
   — first-party Hooks plugins (exported values keep the `*Plugin` suffix,
   e.g. `AuditPlugin`, even though the file names dropped it).
-- **`http/` cluster** (also the `Auth.HTTP` namespace): `HttpApiSchema.ts`
+- **`http/` cluster** (also the `Auth.Http` namespace): `HttpApiSchema.ts`
   (wire schemas + HTTP error types), `HttpApi.ts` (the typed `AuthApi`
   contract), `HttpServer.ts` (handlers + mountable web handler),
   `HttpClient.ts` (typed Effect client derived from the contract),
@@ -143,16 +142,16 @@ directories, each with its own `index.ts` barrel and matching
   re-exported here from its root file).
 - **`multifactor/` cluster** (also the `Auth.MultiFactor` namespace):
   `MultiFactor.ts` (TOTP + backup codes, integrating into password sign-in
-  via the `SecondFactorGate` seam), `OTPSecondFactor.ts` (OTP-based
+  via the `SecondFactorGate` seam), `OtpSecondFactor.ts` (OTP-based
   alternative second-factor gate), `WebAuthn.ts` (passkeys, merged from
-  `WebAuthnService.ts`), `OTP.ts` (RFC 6238/4226 TOTP/HOTP primitives).
+  `WebAuthnService.ts`), `Otp.ts` (RFC 6238/4226 TOTP/HOTP primitives).
 - **Sign-in methods** (root, not yet clustered): `Username.ts`,
-  `MagicLink.ts`, `PhoneOTP.ts`, `Anonymous.ts`, `SSO.ts` (OIDC relying
+  `MagicLink.ts`, `PhoneOtp.ts`, `Anonymous.ts`, `Sso.ts` (OIDC relying
   party), `GoogleOneTap.ts`, `DeviceAuthorization.ts` (RFC 8628).
 - **Account lifecycle** (root): `AuthLifecycle.ts` (sign-up/sign-in
   orchestration), `AccountManagement.ts` (email change / account deletion).
 - **Platform features** (root): `Organization.ts`, `Admin.ts`, `ApiKey.ts`,
-  `JWT.ts` (ES256/EdDSA + JWKS), `OidcProvider.ts` (act as an OIDC identity
+  `Jwt.ts` (ES256/EdDSA + JWKS), `OidcProvider.ts` (act as an OIDC identity
   provider), `RateLimit.ts`/`RateLimitPersistence.ts`, `ClientIP.ts`,
   `OneTimeToken.ts`.
 - **Storage helpers** (root): `KeyValueStores.ts` — layers implementing the
@@ -161,7 +160,7 @@ directories, each with its own `index.ts` barrel and matching
   `KeyValueStore` (in-memory, file system, Redis, …).
 
 Every cluster namespace is also re-exported from the package root (`Auth.Email`,
-`Auth.HTTP`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`,
+`Auth.Http`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`,
 `Auth.MultiFactor`), so `import * as Auth from "@thomasfosterau/effect-auth"` reaches the
 whole surface; the per-cluster subpaths (`effect-auth/email`, `/http`,
 `/oauth`, `/password`, `/plugins`, `/multifactor`) exist for
@@ -184,7 +183,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 ## HTTP protocol
 
-- `HttpApi.ts` defines the full contract with `effect/unstable/httpapi` — one `auth` group, kebab-case paths (`/sign-in/email-otp`, `/multi-factor/enable`), camelCase operationIds. OpenAPI 3.1 (`HTTP.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`HTTP.make({ docs: true })`).
+- `HttpApi.ts` defines the full contract with `effect/unstable/httpapi` — one `auth` group, kebab-case paths (`/sign-in/email-otp`, `/multi-factor/enable`), camelCase operationIds. OpenAPI 3.1 (`Http.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`Http.make({ docs: true })`).
 - **404-until-configured**: optional features resolve their service with `Effect.serviceOption`; when the layer isn't provided the endpoint fails `NotFound` — a server only exposes what it configures.
 - **Cookies**: HttpOnly, SameSite, `Secure` by default; optional HMAC-signed session-data cache cookie to skip store reads; multi-session and last-login-method helper cookies.
 - **CSRF**: a trusted-origin gate runs before any handler — requests with an `Origin` header must match the request origin or the configured `trustedOrigins`; requests without one (curl, server-to-server) pass.
@@ -227,7 +226,7 @@ Any design change that would weaken timing-safety, entropy, cookie flags, CSRF/t
 ## References
 
 - [DESIGN.md](./DESIGN.md) — the settled API decision record
-- [refactor-plan.md](./refactor-plan.md) / [migration.md](./migration.md) — the directory/export restructure and its migration table
+- [guides/better-auth-migration.md](./guides/better-auth-migration.md) — moving an application from Better Auth to effect-auth
 - [Lucia](https://lucia-auth.com/) / [Copenhagen Book](https://lucia-auth.com/copenhagen)
 - [Oslo](https://github.com/pilcrowonpaper/oslo)
 - [BetterAuth](https://www.better-auth.com/) — feature-surface inspiration

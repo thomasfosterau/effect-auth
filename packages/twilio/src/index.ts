@@ -1,5 +1,5 @@
 /**
- * Twilio `SMSSender` adapter for effect-auth.
+ * Twilio `SmsSender` adapter for effect-auth.
  *
  * @module twilio
  */

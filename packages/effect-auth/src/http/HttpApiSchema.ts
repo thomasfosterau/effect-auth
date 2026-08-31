@@ -200,37 +200,37 @@ export const DeleteUserConfirmPayload = Schema.Struct({
 export type DeleteUserConfirmPayload = typeof DeleteUserConfirmPayload.Type;
 
 /** The purposes an email OTP can be issued for. */
-export const EmailOTPPurpose = Schema.Literals([
+export const EmailOtpPurpose = Schema.Literals([
   "sign-in",
   "email-verification",
   "forget-password",
 ]);
-export type EmailOTPPurpose = typeof EmailOTPPurpose.Type;
+export type EmailOtpPurpose = typeof EmailOtpPurpose.Type;
 
 /** Request body for sending an email OTP. */
-export const EmailOTPSendPayload = Schema.Struct({
+export const EmailOtpSendPayload = Schema.Struct({
   email: Schema.String,
-  purpose: EmailOTPPurpose,
+  purpose: EmailOtpPurpose,
 });
-export type EmailOTPSendPayload = typeof EmailOTPSendPayload.Type;
+export type EmailOtpSendPayload = typeof EmailOtpSendPayload.Type;
 
 /** The purposes a phone OTP can be issued for. */
-export const PhoneOTPPurpose = Schema.Literals(["sign-in", "phone-verification"]);
-export type PhoneOTPPurpose = typeof PhoneOTPPurpose.Type;
+export const PhoneOtpPurpose = Schema.Literals(["sign-in", "phone-verification"]);
+export type PhoneOtpPurpose = typeof PhoneOtpPurpose.Type;
 
 /** Request body for sending a phone (SMS) OTP. */
-export const PhoneOTPSendPayload = Schema.Struct({
+export const PhoneOtpSendPayload = Schema.Struct({
   phoneNumber: Schema.String,
-  purpose: PhoneOTPPurpose,
+  purpose: PhoneOtpPurpose,
 });
-export type PhoneOTPSendPayload = typeof PhoneOTPSendPayload.Type;
+export type PhoneOtpSendPayload = typeof PhoneOtpSendPayload.Type;
 
 /** Request body for signing in with a phone OTP. */
-export const PhoneOTPSignInPayload = Schema.Struct({
+export const PhoneOtpSignInPayload = Schema.Struct({
   phoneNumber: Schema.String,
   otp: Schema.String,
 });
-export type PhoneOTPSignInPayload = typeof PhoneOTPSignInPayload.Type;
+export type PhoneOtpSignInPayload = typeof PhoneOtpSignInPayload.Type;
 
 /** List of a device's valid sessions (multi-session). */
 export const MultiSessionListView = Schema.Array(SessionWithUserView);
@@ -284,11 +284,11 @@ export const UsernameSignInPayload = Schema.Struct({
 export type UsernameSignInPayload = typeof UsernameSignInPayload.Type;
 
 /** Request body for signing in with an email OTP. */
-export const EmailOTPSignInPayload = Schema.Struct({
+export const EmailOtpSignInPayload = Schema.Struct({
   email: Schema.String,
   otp: Schema.String,
 });
-export type EmailOTPSignInPayload = typeof EmailOTPSignInPayload.Type;
+export type EmailOtpSignInPayload = typeof EmailOtpSignInPayload.Type;
 
 /**
  * Request body for multi-factor operations that re-verify the user's password
@@ -343,7 +343,7 @@ export type BackupCodesView = typeof BackupCodesView.Type;
  * id — both are stored on the connection but neither is part of its public
  * description.
  */
-export const OIDCSSOProviderView = Schema.Struct({
+export const OidcSsoProviderView = Schema.Struct({
   id: Schema.String,
   issuer: Schema.String,
   domain: Schema.String,
@@ -358,7 +358,7 @@ export const OIDCSSOProviderView = Schema.Struct({
   organizationId: Schema.optional(Schema.String),
   createdAt: Schema.Number,
 });
-export type OIDCSSOProviderView = typeof OIDCSSOProviderView.Type;
+export type OidcSsoProviderView = typeof OidcSsoProviderView.Type;
 
 /**
  * Public view of a **SAML 2.0** SSO connection.
@@ -367,7 +367,7 @@ export type OIDCSSOProviderView = typeof OIDCSSOProviderView.Type;
  * an administrator rotating them needs to see what this connection currently
  * pins. As with the OIDC arm the registrar's user id is omitted.
  */
-export const SAMLSSOProviderView = Schema.Struct({
+export const SamlSsoProviderView = Schema.Struct({
   id: Schema.String,
   domain: Schema.String,
   protocol: Schema.Literal("saml"),
@@ -383,17 +383,17 @@ export const SAMLSSOProviderView = Schema.Struct({
   organizationId: Schema.optional(Schema.String),
   createdAt: Schema.Number,
 });
-export type SAMLSSOProviderView = typeof SAMLSSOProviderView.Type;
+export type SamlSsoProviderView = typeof SamlSsoProviderView.Type;
 
 /**
  * Public view of an SSO connection of either protocol, discriminated on
- * `protocol` exactly as the core `SSOProvider` union is.
+ * `protocol` exactly as the core `SsoProvider` union is.
  */
-export const SSOProviderView = Schema.Union([OIDCSSOProviderView, SAMLSSOProviderView]);
-export type SSOProviderView = typeof SSOProviderView.Type;
+export const SsoProviderView = Schema.Union([OidcSsoProviderView, SamlSsoProviderView]);
+export type SsoProviderView = typeof SsoProviderView.Type;
 
 /** Request body for registering an **OIDC** SSO connection (admin-gated). */
-export const SSORegisterOIDCPayload = Schema.Struct({
+export const SsoRegisterOidcPayload = Schema.Struct({
   /** Optional for backwards compatibility: OIDC is the default protocol. */
   protocol: Schema.optional(Schema.Literal("oidc")),
   issuer: Schema.String,
@@ -410,10 +410,10 @@ export const SSORegisterOIDCPayload = Schema.Struct({
   usePKCE: Schema.optional(Schema.Boolean),
   organizationId: Schema.optional(Schema.String),
 });
-export type SSORegisterOIDCPayload = typeof SSORegisterOIDCPayload.Type;
+export type SsoRegisterOidcPayload = typeof SsoRegisterOidcPayload.Type;
 
 /** Request body for registering a **SAML 2.0** SSO connection (admin-gated). */
-export const SSORegisterSAMLPayload = Schema.Struct({
+export const SsoRegisterSamlPayload = Schema.Struct({
   protocol: Schema.Literal("saml"),
   domain: Schema.String,
   entityId: Schema.String,
@@ -427,37 +427,37 @@ export const SSORegisterSAMLPayload = Schema.Struct({
   forceAuthn: Schema.optional(Schema.Boolean),
   organizationId: Schema.optional(Schema.String),
 });
-export type SSORegisterSAMLPayload = typeof SSORegisterSAMLPayload.Type;
+export type SsoRegisterSamlPayload = typeof SsoRegisterSamlPayload.Type;
 
 /**
  * Request body for registering an SSO connection, discriminated on `protocol`.
  * A body without `protocol` is an OIDC registration, which is what every
  * pre-SAML client sends.
  */
-export const SSORegisterPayload = Schema.Union([SSORegisterOIDCPayload, SSORegisterSAMLPayload]);
-export type SSORegisterPayload = typeof SSORegisterPayload.Type;
+export const SsoRegisterPayload = Schema.Union([SsoRegisterOidcPayload, SsoRegisterSamlPayload]);
+export type SsoRegisterPayload = typeof SsoRegisterPayload.Type;
 
 /** Request body for starting an SSO sign-in (any one of the fields). */
-export const SSOSignInPayload = Schema.Struct({
+export const SsoSignInPayload = Schema.Struct({
   email: Schema.optional(Schema.String),
   domain: Schema.optional(Schema.String),
   providerId: Schema.optional(Schema.String),
 });
-export type SSOSignInPayload = typeof SSOSignInPayload.Type;
+export type SsoSignInPayload = typeof SsoSignInPayload.Type;
 
 /** The IdP authorization URL to redirect the user to, with its CSRF state. */
-export const SSOURLView = Schema.Struct({
+export const SsoUrlView = Schema.Struct({
   url: Schema.String,
   state: Schema.String,
 });
-export type SSOURLView = typeof SSOURLView.Type;
+export type SsoUrlView = typeof SsoUrlView.Type;
 
 /** Request body for completing an SSO callback. */
-export const SSOCallbackPayload = Schema.Struct({
+export const SsoCallbackPayload = Schema.Struct({
   state: Schema.String,
   code: Schema.String,
 });
-export type SSOCallbackPayload = typeof SSOCallbackPayload.Type;
+export type SsoCallbackPayload = typeof SsoCallbackPayload.Type;
 
 /**
  * The SAML assertion consumer service (ACS) POST, exactly as the IdP sends it:
@@ -466,21 +466,21 @@ export type SSOCallbackPayload = typeof SSOCallbackPayload.Type;
  *
  * Field names are the wire names from the SAML binding, capitals and all.
  */
-export const SAMLACSPayload = Schema.Struct({
+export const SamlAcsPayload = Schema.Struct({
   SAMLResponse: Schema.String,
   RelayState: Schema.optional(Schema.String),
 }).pipe(HttpApiSchema.asFormUrlEncoded());
-export type SAMLACSPayload = typeof SAMLACSPayload.Type;
+export type SamlAcsPayload = typeof SamlAcsPayload.Type;
 
 /**
  * SP metadata is XML, not JSON: an `EntityDescriptor` document served as
  * `application/samlmetadata+xml` so an IdP's "import metadata by URL" flow
  * accepts it.
  */
-export const SAMLMetadataView = Schema.String.pipe(
+export const SamlMetadataView = Schema.String.pipe(
   HttpApiSchema.asText({ contentType: "application/samlmetadata+xml" }),
 );
-export type SAMLMetadataView = typeof SAMLMetadataView.Type;
+export type SamlMetadataView = typeof SamlMetadataView.Type;
 
 // -----------------------------------------------------------------------------
 // Organization
@@ -906,11 +906,11 @@ export type ClaimsView = typeof ClaimsView.Type;
 // -----------------------------------------------------------------------------
 
 /** A minted JWT plus its expiry (epoch millis). */
-export const JWTTokenView = Schema.Struct({
+export const JwtTokenView = Schema.Struct({
   token: Schema.String,
   expiresAt: Schema.Number,
 });
-export type JWTTokenView = typeof JWTTokenView.Type;
+export type JwtTokenView = typeof JwtTokenView.Type;
 
 /** A JWKS document (opaque key objects). */
 export const JwksView = Schema.Struct({
@@ -948,67 +948,67 @@ export const SCIM_SCHEMA_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:Schema"
 export const SCIM_CONTENT_TYPE = "application/scim+json";
 
 /** Mark a schema as a SCIM (`application/scim+json`) request or response body. */
-export const asSCIMJson = HttpApiSchema.asJson({ contentType: SCIM_CONTENT_TYPE });
+export const asScimJson = HttpApiSchema.asJson({ contentType: SCIM_CONTENT_TYPE });
 
 /** A resource's `meta` block (RFC 7643 §3.1). Timestamps are ISO-8601. */
-export const SCIMMetaView = Schema.Struct({
+export const ScimMetaView = Schema.Struct({
   resourceType: Schema.String,
   created: Schema.String,
   lastModified: Schema.String,
   location: Schema.String,
 });
-export type SCIMMetaView = typeof SCIMMetaView.Type;
+export type ScimMetaView = typeof ScimMetaView.Type;
 
 /** One entry of the multi-valued `emails` attribute. */
-export const SCIMEmailView = Schema.Struct({
+export const ScimEmailView = Schema.Struct({
   value: Schema.String,
   primary: Schema.optional(Schema.Boolean),
   type: Schema.optional(Schema.String),
 });
-export type SCIMEmailView = typeof SCIMEmailView.Type;
+export type ScimEmailView = typeof ScimEmailView.Type;
 
 /** A SCIM `User` resource on the wire. */
-export const SCIMUserView = Schema.Struct({
+export const ScimUserView = Schema.Struct({
   schemas: Schema.Array(Schema.String),
   id: Schema.String,
   externalId: Schema.optional(Schema.String),
   userName: Schema.String,
   displayName: Schema.optional(Schema.String),
-  emails: Schema.Array(SCIMEmailView),
+  emails: Schema.Array(ScimEmailView),
   active: Schema.Boolean,
-  meta: SCIMMetaView,
+  meta: ScimMetaView,
 });
-export type SCIMUserView = typeof SCIMUserView.Type;
+export type ScimUserView = typeof ScimUserView.Type;
 
 /** A SCIM `Group` resource on the wire. */
-export const SCIMGroupView = Schema.Struct({
+export const ScimGroupView = Schema.Struct({
   schemas: Schema.Array(Schema.String),
   id: Schema.String,
   displayName: Schema.String,
   members: Schema.Array(Schema.Struct({ value: Schema.String })),
-  meta: SCIMMetaView,
+  meta: ScimMetaView,
 });
-export type SCIMGroupView = typeof SCIMGroupView.Type;
+export type ScimGroupView = typeof ScimGroupView.Type;
 
 /** The `ListResponse` envelope around a page of `User` resources. */
-export const SCIMUserListView = Schema.Struct({
+export const ScimUserListView = Schema.Struct({
   schemas: Schema.Array(Schema.String),
   totalResults: Schema.Number,
   startIndex: Schema.Number,
   itemsPerPage: Schema.Number,
-  Resources: Schema.Array(SCIMUserView),
+  Resources: Schema.Array(ScimUserView),
 });
-export type SCIMUserListView = typeof SCIMUserListView.Type;
+export type ScimUserListView = typeof ScimUserListView.Type;
 
 /** The `ListResponse` envelope around a page of `Group` resources. */
-export const SCIMGroupListView = Schema.Struct({
+export const ScimGroupListView = Schema.Struct({
   schemas: Schema.Array(Schema.String),
   totalResults: Schema.Number,
   startIndex: Schema.Number,
   itemsPerPage: Schema.Number,
-  Resources: Schema.Array(SCIMGroupView),
+  Resources: Schema.Array(ScimGroupView),
 });
-export type SCIMGroupListView = typeof SCIMGroupListView.Type;
+export type ScimGroupListView = typeof ScimGroupListView.Type;
 
 /**
  * The discovery documents (`ServiceProviderConfig`, `ResourceTypes`,
@@ -1016,8 +1016,8 @@ export type SCIMGroupListView = typeof SCIMGroupListView.Type;
  * field by field, so they travel as open records rather than being modelled
  * attribute by attribute.
  */
-export const SCIMDocumentView = Schema.Record(Schema.String, Schema.Unknown);
-export type SCIMDocumentView = typeof SCIMDocumentView.Type;
+export const ScimDocumentView = Schema.Record(Schema.String, Schema.Unknown);
+export type ScimDocumentView = typeof ScimDocumentView.Type;
 
 /**
  * A `User` write body (`POST`/`PUT`).
@@ -1026,7 +1026,7 @@ export type SCIMDocumentView = typeof SCIMDocumentView.Type;
  * `displayName`; the handler folds it into a display name rather than storing
  * the sub-attributes separately.
  */
-export const SCIMUserPayload = Schema.Struct({
+export const ScimUserPayload = Schema.Struct({
   schemas: Schema.optional(Schema.Array(Schema.String)),
   externalId: Schema.optional(Schema.String),
   userName: Schema.String,
@@ -1038,13 +1038,13 @@ export const SCIMUserPayload = Schema.Struct({
       familyName: Schema.optional(Schema.String),
     }),
   ),
-  emails: Schema.optional(Schema.Array(SCIMEmailView)),
+  emails: Schema.optional(Schema.Array(ScimEmailView)),
   active: Schema.optional(Schema.Boolean),
 });
-export type SCIMUserPayload = typeof SCIMUserPayload.Type;
+export type ScimUserPayload = typeof ScimUserPayload.Type;
 
 /** A `Group` write body (`POST`/`PUT`). */
-export const SCIMGroupPayload = Schema.Struct({
+export const ScimGroupPayload = Schema.Struct({
   schemas: Schema.optional(Schema.Array(Schema.String)),
   externalId: Schema.optional(Schema.String),
   displayName: Schema.String,
@@ -1052,14 +1052,14 @@ export const SCIMGroupPayload = Schema.Struct({
     Schema.Array(Schema.Struct({ value: Schema.String, display: Schema.optional(Schema.String) })),
   ),
 });
-export type SCIMGroupPayload = typeof SCIMGroupPayload.Type;
+export type ScimGroupPayload = typeof ScimGroupPayload.Type;
 
 /**
  * An RFC 7644 §3.5.2 `PatchOp` body. `value` is `Unknown` because SCIM's patch
  * values are genuinely polymorphic — a boolean, a string, an attribute map, or
  * an array of multi-valued entries, depending on the path.
  */
-export const SCIMPatchPayload = Schema.Struct({
+export const ScimPatchPayload = Schema.Struct({
   schemas: Schema.optional(Schema.Array(Schema.String)),
   Operations: Schema.Array(
     Schema.Struct({
@@ -1069,7 +1069,7 @@ export const SCIMPatchPayload = Schema.Struct({
     }),
   ),
 });
-export type SCIMPatchPayload = typeof SCIMPatchPayload.Type;
+export type ScimPatchPayload = typeof ScimPatchPayload.Type;
 
 // -----------------------------------------------------------------------------
 // Error schemas (mapped to HTTP status codes via HttpApiSchema.status)
@@ -1143,7 +1143,7 @@ export class OAuthError extends Schema.TaggedErrorClass<OAuthError>()("OAuthErro
  * arm's `status` literal can match a given value, the right status code is
  * always chosen.
  */
-export class SCIMBadRequest extends Schema.ErrorClass<SCIMBadRequest>("SCIMBadRequest")({
+export class ScimBadRequest extends Schema.ErrorClass<ScimBadRequest>("ScimBadRequest")({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("400"),
   /** RFC 7644 §3.12 code: `invalidFilter`, `invalidPath`, `invalidValue`, … */
@@ -1152,7 +1152,7 @@ export class SCIMBadRequest extends Schema.ErrorClass<SCIMBadRequest>("SCIMBadRe
 }) {}
 
 /** 401 — missing or unknown provisioning token. */
-export class SCIMUnauthorized extends Schema.ErrorClass<SCIMUnauthorized>("SCIMUnauthorized")({
+export class ScimUnauthorized extends Schema.ErrorClass<ScimUnauthorized>("ScimUnauthorized")({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("401"),
   scimType: Schema.optional(Schema.String),
@@ -1160,7 +1160,7 @@ export class SCIMUnauthorized extends Schema.ErrorClass<SCIMUnauthorized>("SCIMU
 }) {}
 
 /** 404 — no such resource, or one outside the connection's organization. */
-export class SCIMNotFound extends Schema.ErrorClass<SCIMNotFound>("SCIMNotFound")({
+export class ScimNotFound extends Schema.ErrorClass<ScimNotFound>("ScimNotFound")({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("404"),
   scimType: Schema.optional(Schema.String),
@@ -1168,7 +1168,7 @@ export class SCIMNotFound extends Schema.ErrorClass<SCIMNotFound>("SCIMNotFound"
 }) {}
 
 /** 409 — the `uniqueness` conflict an IdP reconciles against. */
-export class SCIMConflict extends Schema.ErrorClass<SCIMConflict>("SCIMConflict")({
+export class ScimConflict extends Schema.ErrorClass<ScimConflict>("ScimConflict")({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("409"),
   scimType: Schema.optional(Schema.String),
@@ -1176,7 +1176,7 @@ export class SCIMConflict extends Schema.ErrorClass<SCIMConflict>("SCIMConflict"
 }) {}
 
 /** 500 — unexpected server error, in SCIM's shape. */
-export class SCIMInternalError extends Schema.ErrorClass<SCIMInternalError>("SCIMInternalError")({
+export class ScimInternalError extends Schema.ErrorClass<ScimInternalError>("ScimInternalError")({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("500"),
   scimType: Schema.optional(Schema.String),
@@ -1195,13 +1195,13 @@ export const InternalError = InternalServerError.pipe(HttpApiSchema.status(500))
 export const OAuthBadRequestError = OAuthError.pipe(HttpApiSchema.status(400));
 
 /** The SCIM error bodies, each carrying its status and the SCIM media type. */
-export const SCIMBadRequestError = SCIMBadRequest.pipe(HttpApiSchema.status(400), asSCIMJson);
-export const SCIMUnauthorizedError = SCIMUnauthorized.pipe(HttpApiSchema.status(401), asSCIMJson);
-export const SCIMNotFoundError = SCIMNotFound.pipe(HttpApiSchema.status(404), asSCIMJson);
-export const SCIMConflictError = SCIMConflict.pipe(HttpApiSchema.status(409), asSCIMJson);
-export const SCIMInternalServerError = SCIMInternalError.pipe(
+export const ScimBadRequestError = ScimBadRequest.pipe(HttpApiSchema.status(400), asScimJson);
+export const ScimUnauthorizedError = ScimUnauthorized.pipe(HttpApiSchema.status(401), asScimJson);
+export const ScimNotFoundError = ScimNotFound.pipe(HttpApiSchema.status(404), asScimJson);
+export const ScimConflictError = ScimConflict.pipe(HttpApiSchema.status(409), asScimJson);
+export const ScimInternalServerError = ScimInternalError.pipe(
   HttpApiSchema.status(500),
-  asSCIMJson,
+  asScimJson,
 );
 
 /**
@@ -1210,12 +1210,12 @@ export const SCIMInternalServerError = SCIMInternalError.pipe(
  * connection's organization (or absent entirely), 409 for a uniqueness clash,
  * and 500 for anything unexpected.
  */
-export const SCIMErrors = [
-  SCIMBadRequestError,
-  SCIMUnauthorizedError,
-  SCIMNotFoundError,
-  SCIMConflictError,
-  SCIMInternalServerError,
+export const ScimErrors = [
+  ScimBadRequestError,
+  ScimUnauthorizedError,
+  ScimNotFoundError,
+  ScimConflictError,
+  ScimInternalServerError,
 ] as const;
 
 // -----------------------------------------------------------------------------

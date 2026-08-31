@@ -1,6 +1,6 @@
 # The browser client
 
-`@thomasfosterau/effect-auth-client` is the front-end half of effect-auth: a dependency-free client over the auth HTTP contract (plain `fetch`, no Effect runtime in the bundle), an observable session store, and thin React / Svelte / Vue bindings on top of it. Only the _types_ come from `@thomasfosterau/effect-auth`, and those erase at compile time — nothing server-side reaches the browser bundle.
+`@thomasfosterau/effect-auth-client` is the front-end half of effect-auth: a dependency-free client over the auth HTTP contract (plain `fetch`, no Effect runtime in the bundle) with an observable session store. Thin React / Svelte / Vue / Solid bindings — with out-of-the-box form components (§4) — ship as their own packages on top of it (§3). Only the _types_ come from `@thomasfosterau/effect-auth`, and those erase at compile time — nothing server-side reaches the browser bundle.
 
 ## 1. Setup
 
@@ -65,11 +65,18 @@ The interval starts with the first subscriber and is cleared when the last one l
 
 ## 3. Framework bindings
 
-Each binding is a separate entrypoint and subscribes to the same store.
+Each binding is its own package, depends on `@thomasfosterau/effect-auth-client`, and subscribes to the same store — so an app installs only the framework it uses:
+
+| Framework | Package                              | Exports                                                |
+| --------- | ------------------------------------ | ------------------------------------------------------ |
+| React     | `@thomasfosterau/effect-auth-react`  | `useSession`, `useListSessions`, form components       |
+| Svelte    | `@thomasfosterau/effect-auth-svelte` | `sessionStore`, `listSessionsStore`, form components   |
+| Vue       | `@thomasfosterau/effect-auth-vue`    | `useSession`, `useListSessions`, form components       |
+| Solid     | `@thomasfosterau/effect-auth-solid`  | `createSession`, `createListSessions`, form components |
 
 ```tsx
-// React — @thomasfosterau/effect-auth-client/react
-import { useSession, useListSessions } from "@thomasfosterau/effect-auth-client/react";
+// React — @thomasfosterau/effect-auth-react
+import { useSession, useListSessions } from "@thomasfosterau/effect-auth-react";
 
 function Navbar() {
   const { data, isPending } = useSession(client);
@@ -79,18 +86,18 @@ function Navbar() {
 ```
 
 ```svelte
-<!-- Svelte — @thomasfosterau/effect-auth-client/svelte -->
+<!-- Svelte — @thomasfosterau/effect-auth-svelte -->
 <script>
-  import { sessionStore } from "@thomasfosterau/effect-auth-client/svelte";
+  import { sessionStore } from "@thomasfosterau/effect-auth-svelte";
   const session = sessionStore(client);
 </script>
 {#if $session.data}Signed in as {$session.data.user.email}{/if}
 ```
 
 ```vue
-<!-- Vue — @thomasfosterau/effect-auth-client/vue -->
+<!-- Vue — @thomasfosterau/effect-auth-vue -->
 <script setup>
-import { useSession } from "@thomasfosterau/effect-auth-client/vue";
+import { useSession } from "@thomasfosterau/effect-auth-vue";
 const session = useSession(client);
 </script>
 <template>
@@ -98,11 +105,27 @@ const session = useSession(client);
 </template>
 ```
 
+The Svelte session stores implement Svelte's readable-store contract by hand; the components and context helpers use Svelte 5 runes, so the package requires `svelte >= 5.20` as a peer.
+
 The Vue composables unsubscribe with the current effect scope. Called outside one (plain scripts, tests) they warn and hand back a `dispose()` to call yourself.
 
-## 4. Endpoint coverage
+```tsx
+// Solid — @thomasfosterau/effect-auth-solid
+import { createSession } from "@thomasfosterau/effect-auth-solid";
 
-Methods mirror the contract's endpoint names and are grouped by feature. Wire types are re-exported from `@thomasfosterau/effect-auth-client/types`.
+function Navbar() {
+  const session = createSession(client);
+  return <span>{session().data?.user.email}</span>;
+}
+```
+
+## 4. Form components
+
+Every framework package ships the same six headless form components out of the box: `SignInForm` (email or `variant="username"`), `SignUpForm`, `PasswordResetRequestForm`, `PasswordResetConfirmForm`, `MagicLinkForm`, and `EmailOtpForm` (request + verify in one). Each owns its submit/pending/error state, calls the typed client from context (a provider per framework, overridable with a `client` prop), reports through `onSuccess`/`onError` (Vue: `success`/`error` events), never navigates, and renders semantic, unstyled markup addressable through stable `ea-*` classes (`ea-form`, `ea-field`, `ea-label`, `ea-input`, `ea-submit`, `ea-error`, ...) with every visible string overridable via a `labels` prop. Each package's README documents provider setup and a styling example.
+
+## 5. Endpoint coverage
+
+Methods mirror the contract's endpoint names and are grouped by feature. Their payload and view types are the contract's own — import them from `@thomasfosterau/effect-auth`'s `Http` namespace (`import type { Http } from "@thomasfosterau/effect-auth"`, then `Http.SignUpPayload`); being type-only, they cost the browser bundle nothing.
 
 **Core** — `signUp`, `signIn`, `signOut`, `getSession`, `sendVerificationEmail`, `verifyEmail`, `passwordResetRequest`, `passwordResetConfirm`, `changePassword`, `updateUser`, `listSessions`, `revokeSession`, `revokeOtherSessions`.
 
@@ -113,7 +136,7 @@ const handles = await client.identifiers.list();
 await client.identifiers.delete(handles[0].id);
 ```
 
-**Alternative sign-in** — `signInUsername`, `signInAnonymous` (guest accounts), `magicLink.{send,verify}`, `emailOTP.{send,signIn}`, `phoneOTP.{send,signIn}`, `googleOneTap.{nonce,signIn}`, `sso.{register,signIn,callback}`.
+**Alternative sign-in** — `signInUsername`, `signInAnonymous` (guest accounts), `magicLink.{send,verify}`, `emailOtp.{send,signIn}`, `phoneOtp.{send,signIn}`, `googleOneTap.{nonce,signIn}`, `sso.{register,signIn,callback}`.
 
 SAML's two endpoints are deliberately absent: the assertion consumer service (`POST /sso/saml/acs/:providerId`) is a form POST the IdP makes through the browser, and SP metadata (`GET /sso/saml/metadata/:providerId`) is an XML document an IdP admin imports by URL. Neither is a call JavaScript makes.
 
@@ -157,7 +180,7 @@ Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `addMemb
 
 **OIDC provider** — the surfaces a first-party app drives: `oidc.{registerClient,listClients,updateClient,deleteClient}` (admin-gated) and `oidc.consent()` for the consent page's decision. The protocol endpoints (`/oauth2/authorize`, `/oauth2/token`, `/oauth2/userinfo`, discovery, RFC 7591 registration) are for OAuth clients rather than this SDK — see the [MCP provider guide](./mcp-provider.md).
 
-## 5. Continuing a second-factor challenge
+## 6. Continuing a second-factor challenge
 
 When multi-factor is enrolled, a password sign-in issues **no session**. It returns an `AuthSuccess` whose `secondFactor` carries `{ token, expiresAt }`, and the challenge must be redeemed for a session. `continueChallenge` takes that result and hands back the verify calls already bound to the token:
 
@@ -181,7 +204,7 @@ Failure modes are typed as `SecondFactorChallengeError`:
 
 A wrong code is a server-side rejection (`AuthClientError`, status `401`) and leaves the challenge redeemable until it expires. Already holding a `SecondFactorChallengeView` (e.g. restored from component state)? `client.multiFactor.challenge(view)` returns the same object.
 
-## 6. Plugins
+## 7. Plugins
 
 `extend` bolts typed methods onto a client — for endpoints a deployment adds itself, or for composing several calls into one app-level operation.
 
@@ -201,12 +224,12 @@ await client.listInvoices(); // typed, alongside every built-in method
 
 The install context gives a plugin `request` (raw call), `mutating` (call + conditional session refresh) and `session` (the store). `extend` returns a new client — the original is untouched — and plugins compose by chaining `.extend()`.
 
-## 7. Testing against a real server
+## 8. Testing against a real server
 
 The client's `fetch` option is the whole seam: point it at your auth handler in-process and the suite needs no network, no ports and no mock of the protocol.
 
 ```ts
-const { handler } = Auth.HTTP.make({ services, cookie: { secure: false } });
+const { handler } = Auth.Http.make({ services, cookie: { secure: false } });
 
 const client = createAuthClient({
   baseUrl: "http://app.test",

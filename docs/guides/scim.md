@@ -11,21 +11,21 @@ SCIM needs a connection store, a slice of user persistence, and the identifier, 
 ```ts
 import { Layer } from "effect";
 import {
-  SCIMService,
-  SCIMConnectionStore,
-  SCIMUserStore,
-  memorySCIMConnectionStore,
+  ScimService,
+  ScimConnectionStore,
+  ScimUserStore,
+  memoryScimConnectionStore,
 } from "@thomasfosterau/effect-auth";
 
 const scimStores = Layer.mergeAll(
-  Layer.succeed(SCIMConnectionStore)(memorySCIMConnectionStore()), // swap for SQL
-  Layer.succeed(SCIMUserStore)(yourUserStore),
+  Layer.succeed(ScimConnectionStore)(memoryScimConnectionStore()), // swap for SQL
+  Layer.succeed(ScimUserStore)(yourUserStore),
   identifierStoreLayer,
   organizationStoreLayer,
   sessionServiceLayer,
 );
 
-const scim = SCIMService.layer({
+const scim = ScimService.layer({
   // The externally-visible URL the endpoints are mounted at, used to build each
   // resource's `meta.location` so the IdP can follow what it is handed.
   baseUrl: "https://app.example.com/api/auth/scim/v2",
@@ -36,9 +36,9 @@ const scim = SCIMService.layer({
 }).pipe(Layer.provide(scimStores));
 ```
 
-Merge `scim` into the layer you hand `HTTPServer.make`. Until you do, every SCIM route answers `404` — the same 404-until-configured rule the rest of the optional modules follow.
+Merge `scim` into the layer you hand `Auth.Http.make`. Until you do, every SCIM route answers `404` — the same 404-until-configured rule the rest of the optional modules follow.
 
-`SCIMUserStore` is a three-method contract (`create` / `get` / `update`) over the same `User` table everything else uses; declaring its own tag follows the convention `OAuthUserStore`, `MagicLinkUserStore` and `AdminUserStore` already set.
+`ScimUserStore` is a three-method contract (`create` / `get` / `update`) over the same `User` table everything else uses; declaring its own tag follows the convention `OAuthUserStore`, `MagicLinkUserStore` and `AdminUserStore` already set.
 
 ## 2. Mint a connection
 
@@ -104,9 +104,9 @@ Reactivation (`PATCH {"active": true}`) is then a single write — which is what
 Revoking sessions closes the door on anyone already signed in. To keep it closed for _new_ sign-ins, add the plugin:
 
 ```ts
-import { SCIMDeactivatedPlugin, Hooks, composePlugins } from "@thomasfosterau/effect-auth";
+import { ScimDeactivatedPlugin, Hooks, composePlugins } from "@thomasfosterau/effect-auth";
 
-const hooks = composePlugins([SCIMDeactivatedPlugin]).pipe(Layer.provide(Hooks.Default));
+const hooks = composePlugins([ScimDeactivatedPlugin]).pipe(Layer.provide(Hooks.Default));
 ```
 
 It mirrors `BannedUserPlugin`: a deactivated user fails session validation instead of being quietly let back in. Build it into the `Hooks` instance your `SessionService` is constructed with — `SessionService` resolves hooks once, at construction time.

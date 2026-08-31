@@ -3,13 +3,13 @@ import { Context, Crypto, Effect } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
-  type EmailOTPCreateUserInput,
-  type EmailOTPPurpose,
-  type EmailOTPRecord,
-  EmailOTPStore,
-  EmailOTPUserStore,
-} from "./EmailOTP.ts";
-import * as EmailOTP from "./EmailOTP.ts";
+  type EmailOtpCreateUserInput,
+  type EmailOtpPurpose,
+  type EmailOtpRecord,
+  EmailOtpStore,
+  EmailOtpUserStore,
+} from "./EmailOtp.ts";
+import * as EmailOtp from "./EmailOtp.ts";
 import {
   type Identifier,
   IdentifierStore,
@@ -25,13 +25,13 @@ import * as Errors from "../Errors.ts";
 
 const users = new Map<string, User>();
 const identifierRecords = new Map<string, Identifier>();
-const otpRecords = new Map<string, EmailOTPRecord>();
+const otpRecords = new Map<string, EmailOtpRecord>();
 const sessions = new Map<string, Session>();
-const sentOTPs: Array<{ email: string; otp: string; purpose: EmailOTPPurpose }> = [];
+const sentOtps: Array<{ email: string; otp: string; purpose: EmailOtpPurpose }> = [];
 
 const identifierStore = memoryIdentifierStore(identifierRecords);
 
-const recordKey = (email: string, purpose: EmailOTPPurpose) => `${email}:${purpose}`;
+const recordKey = (email: string, purpose: EmailOtpPurpose) => `${email}:${purpose}`;
 
 const sessionStore = {
   create: (session: Session) =>
@@ -93,8 +93,8 @@ const findEmailIdentifier = (email: string): Identifier | null =>
     (identifier) => identifier.type === "email" && identifier.value === email,
   ) ?? null;
 
-const emailOTPUserStore = {
-  createUser: (input: EmailOTPCreateUserInput) =>
+const emailOtpUserStore = {
+  createUser: (input: EmailOtpCreateUserInput) =>
     Effect.sync(() => {
       const user: User = {
         id: `user-${users.size + 1}`,
@@ -108,22 +108,22 @@ const emailOTPUserStore = {
     }),
 };
 
-const emailOTPStore = {
-  upsert: (record: EmailOTPRecord) =>
+const emailOtpStore = {
+  upsert: (record: EmailOtpRecord) =>
     Effect.sync(() => {
       otpRecords.set(recordKey(record.email, record.purpose), record);
       return record;
     }),
 
-  get: (email: string, purpose: EmailOTPPurpose) =>
+  get: (email: string, purpose: EmailOtpPurpose) =>
     Effect.sync(() => otpRecords.get(recordKey(email, purpose)) ?? null),
 
-  delete: (email: string, purpose: EmailOTPPurpose) =>
+  delete: (email: string, purpose: EmailOtpPurpose) =>
     Effect.sync(() => {
       otpRecords.delete(recordKey(email, purpose));
     }),
 
-  incrementAttempts: (email: string, purpose: EmailOTPPurpose) =>
+  incrementAttempts: (email: string, purpose: EmailOtpPurpose) =>
     Effect.gen(function* () {
       const record = otpRecords.get(recordKey(email, purpose));
       if (!record) {
@@ -163,8 +163,8 @@ const makeTestContext = async () => {
     Context.make(SessionService, sessionManager),
     Context.merge(
       Context.merge(
-        Context.make(EmailOTPStore, emailOTPStore),
-        Context.make(EmailOTPUserStore, emailOTPUserStore),
+        Context.make(EmailOtpStore, emailOtpStore),
+        Context.make(EmailOtpUserStore, emailOtpUserStore),
       ),
       Context.merge(
         Context.merge(
@@ -177,25 +177,25 @@ const makeTestContext = async () => {
   );
 };
 
-const recordingSend = (email: string, otp: string, purpose: EmailOTPPurpose) =>
+const recordingSend = (email: string, otp: string, purpose: EmailOtpPurpose) =>
   Effect.sync(() => {
-    sentOTPs.push({ email, otp, purpose });
+    sentOtps.push({ email, otp, purpose });
   });
 
-describe("EmailOTPService", () => {
+describe("EmailOtpService", () => {
   beforeEach(() => {
     users.clear();
     identifierRecords.clear();
     otpRecords.clear();
     sessions.clear();
-    sentOTPs.splice(0, sentOTPs.length);
+    sentOtps.splice(0, sentOtps.length);
   });
 
   it("should send a numeric OTP and store only its hash", async () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("new@example.com", "sign-in");
     });
 
@@ -203,8 +203,8 @@ describe("EmailOTPService", () => {
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
-    expect(sentOTPs.length).toBe(1);
-    const sent = sentOTPs[0]!;
+    expect(sentOtps.length).toBe(1);
+    const sent = sentOtps[0]!;
     expect(sent.email).toBe("new@example.com");
     expect(sent.purpose).toBe("sign-in");
     expect(sent.otp).toMatch(/^\d{6}$/);
@@ -220,9 +220,9 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({
+      const service = yield* EmailOtp.make({
         otpLength: 8,
-        sendVerificationOTP: recordingSend,
+        sendVerificationOtp: recordingSend,
       });
       yield* service.send("repeat@example.com", "sign-in");
       yield* service.send("repeat@example.com", "sign-in");
@@ -232,20 +232,20 @@ describe("EmailOTPService", () => {
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
-    expect(sentOTPs.length).toBe(2);
-    expect(sentOTPs[0]?.otp).toMatch(/^\d{8}$/);
+    expect(sentOtps.length).toBe(2);
+    expect(sentOtps[0]?.otp).toMatch(/^\d{8}$/);
     // One active OTP per email + purpose: only the latest hash remains.
     expect(otpRecords.size).toBe(1);
-    expect(otpRecords.get("repeat@example.com:sign-in")?.otpHash).toBe(hashToken(sentOTPs[1]!.otp));
+    expect(otpRecords.get("repeat@example.com:sign-in")?.otpHash).toBe(hashToken(sentOtps[1]!.otp));
   });
 
   it("should sign in a new user with a valid OTP, creating a verified email identifier and session", async () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("  Fresh@Example.COM ", "sign-in");
-      return yield* service.signIn("fresh@example.com", sentOTPs[0]!.otp, {
+      return yield* service.signIn("fresh@example.com", sentOtps[0]!.otp, {
         sessionAttributes: { device: "test" },
       });
     });
@@ -278,9 +278,9 @@ describe("EmailOTPService", () => {
     addEmailIdentifier("user-known", "known@example.com", true);
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("known@example.com", "sign-in");
-      return yield* service.signIn("known@example.com", sentOTPs[0]!.otp);
+      return yield* service.signIn("known@example.com", sentOtps[0]!.otp);
     });
 
     const result = await Effect.runPromise(
@@ -296,9 +296,9 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("once@example.com", "sign-in");
-      const otp = sentOTPs[0]!.otp;
+      const otp = sentOtps[0]!.otp;
       yield* service.signIn("once@example.com", otp);
       return yield* Effect.result(service.signIn("once@example.com", otp));
     });
@@ -309,7 +309,7 @@ describe("EmailOTPService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("EmailOTPError");
+      expect(result.failure._tag).toBe("EmailOtpError");
     }
     expect(sessions.size).toBe(1);
   });
@@ -327,7 +327,7 @@ describe("EmailOTPService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       return yield* Effect.result(service.signIn("late@example.com", "123456"));
     });
 
@@ -337,7 +337,7 @@ describe("EmailOTPService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("EmailOTPError");
+      expect(result.failure._tag).toBe("EmailOtpError");
     }
     expect(otpRecords.size).toBe(0);
     expect(sessions.size).toBe(0);
@@ -347,9 +347,9 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({
+      const service = yield* EmailOtp.make({
         maxAttempts: 3,
-        sendVerificationOTP: recordingSend,
+        sendVerificationOtp: recordingSend,
       });
       yield* service.send("guess@example.com", "sign-in");
 
@@ -357,7 +357,7 @@ describe("EmailOTPService", () => {
       const second = yield* Effect.result(service.signIn("guess@example.com", "000001"));
       const third = yield* Effect.result(service.signIn("guess@example.com", "000002"));
       // Record has been deleted; even the real OTP no longer works.
-      const real = yield* Effect.result(service.signIn("guess@example.com", sentOTPs[0]!.otp));
+      const real = yield* Effect.result(service.signIn("guess@example.com", sentOtps[0]!.otp));
 
       return { first, second, third, real };
     });
@@ -371,7 +371,7 @@ describe("EmailOTPService", () => {
     expect(third._tag).toBe("Failure");
     expect(real._tag).toBe("Failure");
     if (real._tag === "Failure") {
-      expect(real.failure._tag).toBe("EmailOTPError");
+      expect(real.failure._tag).toBe("EmailOtpError");
     }
     expect(otpRecords.size).toBe(0);
     expect(sessions.size).toBe(0);
@@ -382,10 +382,10 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("fumble@example.com", "sign-in");
       yield* Effect.result(service.signIn("fumble@example.com", "000000"));
-      return yield* service.signIn("fumble@example.com", sentOTPs[0]!.otp);
+      return yield* service.signIn("fumble@example.com", sentOtps[0]!.otp);
     });
 
     const result = await Effect.runPromise(
@@ -400,9 +400,9 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({
+      const service = yield* EmailOtp.make({
         disableSignUp: true,
-        sendVerificationOTP: recordingSend,
+        sendVerificationOtp: recordingSend,
       });
       yield* service.send("stranger@example.com", "sign-in");
     });
@@ -412,7 +412,7 @@ describe("EmailOTPService", () => {
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
-    expect(sentOTPs.length).toBe(0);
+    expect(sentOtps.length).toBe(0);
     expect(otpRecords.size).toBe(0);
   });
 
@@ -429,9 +429,9 @@ describe("EmailOTPService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({
+      const service = yield* EmailOtp.make({
         disableSignUp: true,
-        sendVerificationOTP: recordingSend,
+        sendVerificationOtp: recordingSend,
       });
       return yield* Effect.result(service.signIn("orphan@example.com", "123456"));
     });
@@ -442,7 +442,7 @@ describe("EmailOTPService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("EmailOTPError");
+      expect(result.failure._tag).toBe("EmailOtpError");
     }
     expect(users.size).toBe(0);
     expect(identifierRecords.size).toBe(0);
@@ -461,7 +461,7 @@ describe("EmailOTPService", () => {
     addEmailIdentifier("user-member", "member@example.com", true);
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("missing@example.com", "forget-password");
       yield* service.send("member@example.com", "forget-password");
     });
@@ -471,9 +471,9 @@ describe("EmailOTPService", () => {
     );
 
     // Anti-enumeration: both calls succeed, only the existing user gets a code.
-    expect(sentOTPs.length).toBe(1);
-    expect(sentOTPs[0]?.email).toBe("member@example.com");
-    expect(sentOTPs[0]?.purpose).toBe("forget-password");
+    expect(sentOtps.length).toBe(1);
+    expect(sentOtps[0]?.email).toBe("member@example.com");
+    expect(sentOtps[0]?.purpose).toBe("forget-password");
     expect(otpRecords.size).toBe(1);
   });
 
@@ -481,9 +481,9 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("verify@example.com", "email-verification");
-      return yield* service.check("verify@example.com", sentOTPs[0]!.otp, "email-verification");
+      return yield* service.check("verify@example.com", sentOtps[0]!.otp, "email-verification");
     });
 
     const result = await Effect.runPromise(
@@ -500,10 +500,10 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("scoped@example.com", "email-verification");
       // A code issued for email-verification must not sign the user in.
-      return yield* Effect.result(service.signIn("scoped@example.com", sentOTPs[0]!.otp));
+      return yield* Effect.result(service.signIn("scoped@example.com", sentOtps[0]!.otp));
     });
 
     const result = await Effect.runPromise(
@@ -512,7 +512,7 @@ describe("EmailOTPService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("EmailOTPError");
+      expect(result.failure._tag).toBe("EmailOtpError");
     }
     expect(sessions.size).toBe(0);
   });
@@ -521,8 +521,8 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({
-        sendVerificationOTP: recordingSend,
+      const service = yield* EmailOtp.make({
+        sendVerificationOtp: recordingSend,
         resendCooldown: 60_000,
       });
       yield* service.send("user@example.com", "sign-in");
@@ -540,7 +540,7 @@ describe("EmailOTPService", () => {
       expect((result.failure as { retryAfter: number }).retryAfter).toBeLessThanOrEqual(60_000);
     }
     // The original OTP is preserved — no replacement was issued.
-    expect(sentOTPs.length).toBe(1);
+    expect(sentOtps.length).toBe(1);
     expect(otpRecords.size).toBe(1);
   });
 
@@ -558,8 +558,8 @@ describe("EmailOTPService", () => {
     });
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({
-        sendVerificationOTP: recordingSend,
+      const service = yield* EmailOtp.make({
+        sendVerificationOtp: recordingSend,
         resendCooldown: 60_000,
       });
       yield* service.send("user@example.com", "sign-in");
@@ -570,18 +570,18 @@ describe("EmailOTPService", () => {
     );
 
     // A fresh OTP was issued after the cooldown elapsed.
-    expect(sentOTPs.length).toBe(1);
+    expect(sentOtps.length).toBe(1);
     expect(otpRecords.size).toBe(1);
     // The new record has a fresh hash, not the seeded one.
-    expect(otpRecords.get("user@example.com:sign-in")?.otpHash).toBe(hashToken(sentOTPs[0]!.otp));
+    expect(otpRecords.get("user@example.com:sign-in")?.otpHash).toBe(hashToken(sentOtps[0]!.otp));
   });
 
   it("should scope the cooldown to each purpose independently", async () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({
-        sendVerificationOTP: recordingSend,
+      const service = yield* EmailOtp.make({
+        sendVerificationOtp: recordingSend,
         resendCooldown: 60_000,
       });
       // First send for sign-in; immediate re-send for a different purpose is allowed.
@@ -593,7 +593,7 @@ describe("EmailOTPService", () => {
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
-    expect(sentOTPs.length).toBe(2);
+    expect(sentOtps.length).toBe(2);
     expect(otpRecords.size).toBe(2);
   });
 
@@ -601,7 +601,7 @@ describe("EmailOTPService", () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* EmailOTP.make({ sendVerificationOTP: recordingSend });
+      const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("repeat@example.com", "sign-in");
       yield* service.send("repeat@example.com", "sign-in");
     });
@@ -610,7 +610,7 @@ describe("EmailOTPService", () => {
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
-    expect(sentOTPs.length).toBe(2);
+    expect(sentOtps.length).toBe(2);
     expect(otpRecords.size).toBe(1);
   });
 });

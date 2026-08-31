@@ -2,8 +2,8 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.ts";
-import * as HTTPServer from "./HttpServer.ts";
-import * as HTTPClient from "./HttpClient.ts";
+import * as HttpServer from "./HttpServer.ts";
+import * as HttpClient from "./HttpClient.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import { SessionService } from "../SessionService.ts";
@@ -38,12 +38,12 @@ import {
   MagicLinkService,
 } from "../MagicLink.ts";
 import {
-  EmailOTPStore,
-  EmailOTPUserStore,
-  type EmailOTPPurpose,
-  type EmailOTPRecord,
-  EmailOTPService,
-} from "../email/EmailOTP.ts";
+  EmailOtpStore,
+  EmailOtpUserStore,
+  type EmailOtpPurpose,
+  type EmailOtpRecord,
+  EmailOtpService,
+} from "../email/EmailOtp.ts";
 import {
   PendingMultiFactorStore,
   MultiFactorGateLayer,
@@ -59,19 +59,19 @@ import {
 } from "../AccountManagement.ts";
 import { AnonymousUserStore, AnonymousService } from "../Anonymous.ts";
 import {
-  PhoneOTPStore,
-  PhoneOTPUserStore,
-  type PhoneOTPPurpose,
-  type PhoneOTPRecord,
-  PhoneOTPService,
-} from "../PhoneOTP.ts";
+  PhoneOtpStore,
+  PhoneOtpUserStore,
+  type PhoneOtpPurpose,
+  type PhoneOtpRecord,
+  PhoneOtpService,
+} from "../PhoneOtp.ts";
 import { UsernameService } from "../Username.ts";
 import {
   DeviceAuthorizationStore,
   type DeviceAuthorizationRecord,
   DeviceAuthorizationService,
 } from "../DeviceAuthorization.ts";
-import { generateHOTP, generateTOTP } from "../multifactor/OTP.ts";
+import { generateHotp, generateTotp } from "../multifactor/Otp.ts";
 import type * as Types from "../Types.ts";
 
 const HOUR = 60 * 60 * 1000;
@@ -93,11 +93,11 @@ interface Fixture {
   readonly sentVerificationTokens: string[];
   readonly sentResetTokens: string[];
   readonly sentMagicLinkTokens: string[];
-  readonly sentOTPs: Array<{ email: string; otp: string; purpose: EmailOTPPurpose }>;
+  readonly sentOtps: Array<{ email: string; otp: string; purpose: EmailOtpPurpose }>;
   readonly sentChangeEmail: Array<{ newEmail: string; token: string }>;
   readonly sentDeleteTokens: string[];
   readonly beforeDeleteCalls: string[];
-  readonly sentPhoneOTPs: Array<{ phoneNumber: string; otp: string; purpose: PhoneOTPPurpose }>;
+  readonly sentPhoneOtps: Array<{ phoneNumber: string; otp: string; purpose: PhoneOtpPurpose }>;
   /** Register a verified `username` identifier for the username sign-in tests. */
   readonly registerUsername: (userId: string, username: string) => void;
   /** Number of session-store `get` reads so far (for the cookie-cache tests). */
@@ -123,11 +123,11 @@ const makeFixture = (): Fixture => {
   const sentVerificationTokens: string[] = [];
   const sentResetTokens: string[] = [];
   const sentMagicLinkTokens: string[] = [];
-  const sentOTPs: Array<{ email: string; otp: string; purpose: EmailOTPPurpose }> = [];
+  const sentOtps: Array<{ email: string; otp: string; purpose: EmailOtpPurpose }> = [];
   const sentChangeEmail: Array<{ newEmail: string; token: string }> = [];
   const sentDeleteTokens: string[] = [];
   const beforeDeleteCalls: string[] = [];
-  const sentPhoneOTPs: Array<{ phoneNumber: string; otp: string; purpose: PhoneOTPPurpose }> = [];
+  const sentPhoneOtps: Array<{ phoneNumber: string; otp: string; purpose: PhoneOtpPurpose }> = [];
 
   // Users are surrogate-keyed: login handles (email/username/phone) live in
   // `identifierRecords` and are claimed by the services themselves.
@@ -292,26 +292,26 @@ const makeFixture = (): Fixture => {
     createUser: (input) => Effect.sync(() => createUser(input)),
   };
 
-  const emailOTPs = new Map<string, EmailOTPRecord>();
-  const otpKey = (email: string, purpose: EmailOTPPurpose) => `${purpose}:${email}`;
-  const emailOTPStore: typeof EmailOTPStore.Service = {
+  const emailOtps = new Map<string, EmailOtpRecord>();
+  const otpKey = (email: string, purpose: EmailOtpPurpose) => `${purpose}:${email}`;
+  const emailOtpStore: typeof EmailOtpStore.Service = {
     upsert: (record) =>
       Effect.sync(() => {
-        emailOTPs.set(otpKey(record.email, record.purpose), record);
+        emailOtps.set(otpKey(record.email, record.purpose), record);
         return record;
       }),
-    get: (email, purpose) => Effect.sync(() => emailOTPs.get(otpKey(email, purpose)) ?? null),
-    delete: (email, purpose) => Effect.sync(() => void emailOTPs.delete(otpKey(email, purpose))),
+    get: (email, purpose) => Effect.sync(() => emailOtps.get(otpKey(email, purpose)) ?? null),
+    delete: (email, purpose) => Effect.sync(() => void emailOtps.delete(otpKey(email, purpose))),
     incrementAttempts: (email, purpose) =>
       Effect.sync(() => {
-        const record = emailOTPs.get(otpKey(email, purpose));
+        const record = emailOtps.get(otpKey(email, purpose));
         if (record === undefined) return 0;
         const updated = { ...record, attempts: record.attempts + 1 };
-        emailOTPs.set(otpKey(email, purpose), updated);
+        emailOtps.set(otpKey(email, purpose), updated);
         return updated.attempts;
       }),
   };
-  const emailOTPUserStore: typeof EmailOTPUserStore.Service = {
+  const emailOtpUserStore: typeof EmailOtpUserStore.Service = {
     createUser: (input) => Effect.sync(() => createUser(input)),
   };
 
@@ -351,9 +351,9 @@ const makeFixture = (): Fixture => {
       }),
   };
 
-  const phoneRecords = new Map<string, PhoneOTPRecord>();
-  const phoneKey = (phone: string, purpose: PhoneOTPPurpose) => `${phone}:${purpose}`;
-  const phoneOTPStore: typeof PhoneOTPStore.Service = {
+  const phoneRecords = new Map<string, PhoneOtpRecord>();
+  const phoneKey = (phone: string, purpose: PhoneOtpPurpose) => `${phone}:${purpose}`;
+  const phoneOtpStore: typeof PhoneOtpStore.Service = {
     upsert: (record) =>
       Effect.sync(() => {
         phoneRecords.set(phoneKey(record.phoneNumber, record.purpose), record);
@@ -373,7 +373,7 @@ const makeFixture = (): Fixture => {
   };
   // The phone number itself is claimed as a verified `phone` identifier by the
   // service; the user store only creates the bare profile row.
-  const phoneOTPUserStore: typeof PhoneOTPUserStore.Service = {
+  const phoneOtpUserStore: typeof PhoneOtpUserStore.Service = {
     createUser: (input) => Effect.sync(() => createUser(input)),
   };
 
@@ -427,13 +427,13 @@ const makeFixture = (): Fixture => {
     services,
     Layer.succeed(AnonymousUserStore)(anonymousUserStore),
     Layer.succeed(DeviceAuthorizationStore)(deviceStore),
-    Layer.succeed(PhoneOTPStore)(phoneOTPStore),
-    Layer.succeed(PhoneOTPUserStore)(phoneOTPUserStore),
+    Layer.succeed(PhoneOtpStore)(phoneOtpStore),
+    Layer.succeed(PhoneOtpUserStore)(phoneOtpUserStore),
     Layer.succeed(AccountManagementStore)(accountStore),
     Layer.succeed(MagicLinkStore)(magicLinkStore),
     Layer.succeed(MagicLinkUserStore)(magicLinkUserStore),
-    Layer.succeed(EmailOTPStore)(emailOTPStore),
-    Layer.succeed(EmailOTPUserStore)(emailOTPUserStore),
+    Layer.succeed(EmailOtpStore)(emailOtpStore),
+    Layer.succeed(EmailOtpUserStore)(emailOtpUserStore),
     Layer.succeed(MultiFactorStore)(multiFactorStore),
     Layer.succeed(PendingMultiFactorStore)(pendingMultiFactorStore),
   );
@@ -451,9 +451,9 @@ const makeFixture = (): Fixture => {
       // interval 0 so back-to-back polls in a single test don't hit slow_down.
       interval: 0,
     }).pipe(Layer.provide(featureBase)),
-    PhoneOTPService.layer({
-      sendOTP: (phoneNumber, otp, purpose) =>
-        Effect.sync(() => void sentPhoneOTPs.push({ phoneNumber, otp, purpose })),
+    PhoneOtpService.layer({
+      sendOtp: (phoneNumber, otp, purpose) =>
+        Effect.sync(() => void sentPhoneOtps.push({ phoneNumber, otp, purpose })),
     }).pipe(Layer.provide(featureBase)),
     AccountManagementService.layer({
       sendChangeEmailVerification: ({ newEmail, token }) =>
@@ -465,9 +465,9 @@ const makeFixture = (): Fixture => {
     MagicLinkService.layer({
       sendMagicLink: (_email, token) => Effect.sync(() => void sentMagicLinkTokens.push(token)),
     }).pipe(Layer.provide(featureBase)),
-    EmailOTPService.layer({
-      sendVerificationOTP: (email, otp, purpose) =>
-        Effect.sync(() => void sentOTPs.push({ email, otp, purpose })),
+    EmailOtpService.layer({
+      sendVerificationOtp: (email, otp, purpose) =>
+        Effect.sync(() => void sentOtps.push({ email, otp, purpose })),
     }).pipe(Layer.provide(featureBase)),
     multiFactorServiceLayer,
     // The gate makes password sign-in return `secondFactor` for enrolled users.
@@ -480,11 +480,11 @@ const makeFixture = (): Fixture => {
     sentVerificationTokens,
     sentResetTokens,
     sentMagicLinkTokens,
-    sentOTPs,
+    sentOtps,
     sentChangeEmail,
     sentDeleteTokens,
     beforeDeleteCalls,
-    sentPhoneOTPs,
+    sentPhoneOtps,
     registerUsername,
     sessionStoreReads: () => sessionStoreReads,
   };
@@ -507,7 +507,7 @@ const handlerFor = (
     readonly bearerMode?: boolean | "opt-in";
   },
 ): Handler =>
-  HTTPServer.make({
+  HttpServer.make({
     services: options?.features ? fixture.featureServices : fixture.services,
     ...(options?.multiSession !== undefined && { multiSession: options.multiSession }),
     cookie: {
@@ -678,7 +678,7 @@ describe("HTTP auth protocol", () => {
     );
 
     const program = Effect.gen(function* () {
-      const client = yield* HTTPClient.client("http://test");
+      const client = yield* HttpClient.client("http://test");
       return yield* client.auth.signUp({ payload: { email: "c@d.com", password: PW } });
     }).pipe(Effect.provide(ClientLayer));
 
@@ -1130,17 +1130,17 @@ describe("mount prefix: 404 for out-of-prefix paths", () => {
 
 describe("optional features return 404 when not configured", () => {
   it("answers 404 on feature endpoints with the base fixture", async () => {
-    const handler = handlerFor(); // base services: no MagicLink/EmailOTP/MultiFactor layers
+    const handler = handlerFor(); // base services: no MagicLink/EmailOtp/MultiFactor layers
     const sid = await signUp(handler, "a@b.com");
 
     const magicLink = await handler(jsonRequest("/magic-link/send", { email: "a@b.com" }));
     expect(magicLink.status).toBe(404);
     expect(((await magicLink.json()) as { _tag: string })._tag).toBe("NotFound");
 
-    const emailOTP = await handler(
+    const emailOtp = await handler(
       jsonRequest("/email-otp/send", { email: "a@b.com", purpose: "sign-in" }),
     );
-    expect(emailOTP.status).toBe(404);
+    expect(emailOtp.status).toBe(404);
 
     const verifyTotp = await handler(
       jsonRequest("/multi-factor/verify-totp", { token: "x", code: "000000" }),
@@ -1201,10 +1201,10 @@ describe("email OTP", () => {
     );
     expect(send.status).toBe(200);
     expect(await send.json()).toEqual({ status: true });
-    expect(fixture.sentOTPs).toHaveLength(1);
-    expect(fixture.sentOTPs[0].purpose).toBe("sign-in");
+    expect(fixture.sentOtps).toHaveLength(1);
+    expect(fixture.sentOtps[0].purpose).toBe("sign-in");
 
-    const otp = fixture.sentOTPs[0].otp;
+    const otp = fixture.sentOtps[0].otp;
     const res = await handler(jsonRequest("/sign-in/email-otp", { email: "otp@example.com", otp }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { user: { email: string; emailVerified: boolean } };
@@ -1220,7 +1220,7 @@ describe("email OTP", () => {
     const handler = handlerFor(fixture, { features: true });
 
     await handler(jsonRequest("/email-otp/send", { email: "otp@example.com", purpose: "sign-in" }));
-    const otp = fixture.sentOTPs[0].otp;
+    const otp = fixture.sentOtps[0].otp;
     const wrong = otp === "000000" ? "111111" : "000000";
 
     const res = await handler(
@@ -1235,12 +1235,12 @@ describe("email OTP", () => {
 });
 
 describe("multi-factor", () => {
-  const totpFor = (secret: string) => Effect.runPromise(generateTOTP(secret));
+  const totpFor = (secret: string) => Effect.runPromise(generateTotp(secret));
   // The previous time step's code (within the default ±1 window). Confirming
   // enrollment with it leaves the current step's code unused, so the replay
   // guard doesn't reject the later challenge redemption.
   const previousTotpFor = (secret: string) =>
-    Effect.runPromise(generateHOTP(secret, Math.floor(Date.now() / 1000 / 30) - 1));
+    Effect.runPromise(generateHotp(secret, Math.floor(Date.now() / 1000 / 30) - 1));
 
   it("enables, confirms, gates sign-in, and redeems a TOTP challenge", async () => {
     const fixture = makeFixture();
@@ -1516,8 +1516,8 @@ describe("HTTP phone OTP", () => {
     );
     expect(send.status).toBe(200);
     expect(await send.json()).toEqual({ status: true });
-    expect(fixture.sentPhoneOTPs).toHaveLength(1);
-    const otp = fixture.sentPhoneOTPs[0]!.otp;
+    expect(fixture.sentPhoneOtps).toHaveLength(1);
+    const otp = fixture.sentPhoneOtps[0]!.otp;
 
     const signIn = await handler(
       jsonRequest("/sign-in/phone-otp", { phoneNumber: "+15551234567", otp }),

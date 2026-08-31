@@ -12,7 +12,7 @@ import {
   MaybeCurrentSession,
   OptionalAuthMiddleware,
 } from "./HttpMiddleware.ts";
-import * as HTTPMiddleware from "./HttpMiddleware.ts";
+import * as HttpMiddleware from "./HttpMiddleware.ts";
 import * as Entity from "../Entity.ts";
 import * as Policy from "../Policy.ts";
 import { Authorizer, CurrentPrincipal } from "../Authorizer.ts";
@@ -76,8 +76,8 @@ const cell = <T>(): Cell<T> => ({ value: undefined });
 // AuthMiddleware – conduit_session handler
 // ---------------------------------------------------------------------------
 
-describe("HTTPMiddleware.layer – conduit_session handler", () => {
-  const authLayer = HTTPMiddleware.layer({ secure: false });
+describe("HttpMiddleware.layer – conduit_session handler", () => {
+  const authLayer = HttpMiddleware.layer({ secure: false });
 
   const runCookiePath = (
     request: HttpServerRequest.HttpServerRequest,
@@ -194,8 +194,8 @@ describe("HTTPMiddleware.layer – conduit_session handler", () => {
 // AuthMiddleware – bearer handler
 // ---------------------------------------------------------------------------
 
-describe("HTTPMiddleware.layer – bearer handler", () => {
-  const authLayer = HTTPMiddleware.layer({ secure: false });
+describe("HttpMiddleware.layer – bearer handler", () => {
+  const authLayer = HttpMiddleware.layer({ secure: false });
 
   const runBearerPath = (
     token: string,
@@ -256,8 +256,8 @@ describe("HTTPMiddleware.layer – bearer handler", () => {
 // OptionalAuthMiddleware
 // ---------------------------------------------------------------------------
 
-describe("HTTPMiddleware.optionalLayer", () => {
-  const optionalLayer = HTTPMiddleware.optionalLayer({ secure: false });
+describe("HttpMiddleware.optionalLayer", () => {
+  const optionalLayer = HttpMiddleware.optionalLayer({ secure: false });
 
   const runOptional = (request: HttpServerRequest.HttpServerRequest) => {
     const maybeCell = cell<Option.Option<Types.SessionWithUser>>();

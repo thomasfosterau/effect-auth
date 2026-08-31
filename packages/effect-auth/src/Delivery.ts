@@ -1,14 +1,14 @@
 /**
- * Unified delivery seams: {@link EmailSender} and {@link SMSSender}.
+ * Unified delivery seams: {@link EmailSender} and {@link SmsSender}.
  *
  * Every message-sending feature in effect-auth takes its own delivery
  * callback (`EmailVerification.sendEmail`, `MagicLink.sendMagicLink`,
- * `EmailOTP.sendVerificationOTP`, `PhoneOTP.sendOTP`, ...). Those callbacks
+ * `EmailOtp.sendVerificationOtp`, `PhoneOtp.sendOtp`, ...). Those callbacks
  * remain the full-control escape hatch — but they give delivery adapters
  * (Resend, SES, Nodemailer, Twilio, ...) no single contract to implement.
  *
  * This module adds that contract: an adapter implements `EmailSender` and/or
- * `SMSSender` once, and {@link emailCallbacks} / {@link smsCallbacks} derive
+ * `SmsSender` once, and {@link emailCallbacks} / {@link smsCallbacks} derive
  * every per-feature callback from it. The sender receives the recipient, a
  * stable {@link EmailMessage.purpose | purpose} tag, and the flow's
  * parameters (token, OTP code, ...), and renders/sends however it likes —
@@ -27,10 +27,10 @@
 import { Context, Effect } from "effect";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
-import type { EmailOTPPurpose } from "./email/EmailOTP.ts";
-import type { PhoneOTPPurpose } from "./PhoneOTP.ts";
+import type { EmailOtpPurpose } from "./email/EmailOtp.ts";
+import type { PhoneOtpPurpose } from "./PhoneOtp.ts";
 import { anyEmailValue, type IdentifierStore } from "./Identifier.ts";
-import { getPhoneNumber } from "./PhoneOTP.ts";
+import { getPhoneNumber } from "./PhoneOtp.ts";
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -44,11 +44,11 @@ import { getPhoneNumber } from "./PhoneOTP.ts";
 export type DeliveryPurpose =
   | "email-verification"
   | "magic-link"
-  | `email-otp:${EmailOTPPurpose}`
+  | `email-otp:${EmailOtpPurpose}`
   | "password-reset"
   | "change-email"
   | "delete-account"
-  | `phone-otp:${PhoneOTPPurpose}`
+  | `phone-otp:${PhoneOtpPurpose}`
   | "second-factor-otp"
   | (string & {});
 
@@ -60,7 +60,7 @@ export interface EmailMessage {
 }
 
 /** An SMS to deliver. `to` is the phone number as stored (normalize upstream). */
-export interface SMSMessage {
+export interface SmsMessage {
   readonly to: string;
   readonly purpose: DeliveryPurpose;
   readonly params: Readonly<Record<string, string>>;
@@ -82,12 +82,12 @@ export class EmailSender extends Context.Service<
 >()("@effect-auth/EmailSender") {}
 
 /** The single contract an SMS-delivery adapter implements. */
-export class SMSSender extends Context.Service<
-  SMSSender,
+export class SmsSender extends Context.Service<
+  SmsSender,
   {
-    readonly send: (message: SMSMessage) => Effect.Effect<void, Errors.AuthError>;
+    readonly send: (message: SmsMessage) => Effect.Effect<void, Errors.AuthError>;
   }
->()("@effect-auth/SMSSender") {}
+>()("@effect-auth/SmsSender") {}
 
 // ---------------------------------------------------------------------------
 // Per-feature callback derivation
@@ -125,8 +125,8 @@ export const emailCallbacks = (
         ),
       ),
 
-  /** `EmailOTPConfig.sendVerificationOTP` */
-  sendVerificationOTP: (email: string, otp: string, purpose: EmailOTPPurpose) =>
+  /** `EmailOtpConfig.sendVerificationOtp` */
+  sendVerificationOtp: (email: string, otp: string, purpose: EmailOtpPurpose) =>
     sender.send({ to: email, purpose: `email-otp:${purpose}`, params: { otp } }),
 
   /** `PasswordResetConfig.sendResetPassword` */
@@ -168,8 +168,8 @@ export const emailCallbacks = (
           params: { token: params.token },
         }),
 
-  /** `OTPSecondFactorConfig.sendOTP`, delivering the code to the user's email identifier. */
-  sendSecondFactorOTP: (user: Types.User, otp: string) =>
+  /** `OtpSecondFactorConfig.sendOtp`, delivering the code to the user's email identifier. */
+  sendSecondFactorOtp: (user: Types.User, otp: string) =>
     Effect.gen(function* () {
       const email = anyEmailValue(yield* identifiers.listByUser(user.id));
       if (email === null) {
@@ -183,22 +183,22 @@ export const emailCallbacks = (
 
 /**
  * Derive the SMS-based per-feature delivery callbacks from an
- * {@link SMSSender}.
+ * {@link SmsSender}.
  */
 export const smsCallbacks = (
-  sender: typeof SMSSender.Service,
+  sender: typeof SmsSender.Service,
   identifiers: typeof IdentifierStore.Service,
 ) => ({
-  /** `PhoneOTPConfig.sendOTP` */
-  sendPhoneOTP: (phoneNumber: string, otp: string, purpose: PhoneOTPPurpose) =>
+  /** `PhoneOtpConfig.sendOtp` */
+  sendPhoneOtp: (phoneNumber: string, otp: string, purpose: PhoneOtpPurpose) =>
     sender.send({ to: phoneNumber, purpose: `phone-otp:${purpose}`, params: { otp } }),
 
   /**
-   * `OTPSecondFactorConfig.sendOTP`, delivering the code to the user's
+   * `OtpSecondFactorConfig.sendOtp`, delivering the code to the user's
    * `phone` identifier. Fails with `AuthError` when the user has no phone
    * number on file.
    */
-  sendSecondFactorOTP: (user: Types.User, otp: string) =>
+  sendSecondFactorOtp: (user: Types.User, otp: string) =>
     Effect.gen(function* () {
       const phoneNumber = yield* getPhoneNumber(identifiers, user.id);
       if (phoneNumber === null) {

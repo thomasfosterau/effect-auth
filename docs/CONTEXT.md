@@ -64,8 +64,8 @@ never persisted.
 **PasswordResetToken**: single-use token authorising a password reset for a known User.
 **MagicLink**: single-use token whose consumption creates a Session — same channel-verification
 mechanism as `EmailVerificationToken`, different terminal action.
-**EmailOTP**: short numeric code delivered by email for sign-in or step-up.
-**PhoneOTP**: short numeric code delivered by SMS for phone verification or step-up.
+**EmailOtp**: short numeric code delivered by email for sign-in or step-up.
+**PhoneOtp**: short numeric code delivered by SMS for phone verification or step-up.
 **OneTimeToken**: generic single-use token for ad-hoc flows.
 
 #### Pre-issued, user-facing

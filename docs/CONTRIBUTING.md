@@ -75,8 +75,9 @@ The core library (`@thomasfosterau/effect-auth`) lives at
 Related feature modules are grouped into lowercase cluster directories (each
 with its own `index.ts` barrel and matching `<pkg>/<cluster>` subpath
 export); everything not listed in a cluster stays flat in `src/`. See
-`docs/refactor-plan.md` for the full rationale and `docs/migration.md` for the
-old-path → new-path table.
+[ARCHITECTURE.md](./ARCHITECTURE.md) for the module map and
+[DESIGN.md](./DESIGN.md) §D9 for the rationale behind the barrel and subpath
+boundaries.
 
 ```
 effect-auth/                       # pnpm workspaces monorepo (Vite+ toolchain)
@@ -88,20 +89,24 @@ effect-auth/                       # pnpm workspaces monorepo (Vite+ toolchain)
 │   │       ├── Hooks.ts           # Hooks/plugin system
 │   │       ├── PlatformCrypto.ts  # Default Crypto.Crypto layer (Web Crypto API)
 │   │       ├── <Feature>.ts       # One module per flat, non-clustered feature
-│   │       │                       # (AuthLifecycle, JWT, Organization, Admin, ...)
+│   │       │                       # (AuthLifecycle, Jwt, Organization, Admin, ...)
 │   │       │                       # incl. session: SessionService, SessionStore,
 │   │       │                       # UserStore, TrustedDevice, ...
 │   │       │                       # incl. authorization: Policy, Entity, Condition,
-│   │       │                       # Authorizer, PolicyStore, Protected, RBAC, ...
-│   │       ├── email/             # EmailAddress, EmailOTP, EmailPassword, EmailVerification
+│   │       │                       # Authorizer, PolicyStore, Protected, Rbac, ...
+│   │       ├── email/             # EmailAddress, EmailOtp, EmailPassword, EmailVerification
 │   │       ├── password/          # Password, PasswordReset, HaveIBeenPwned
 │   │       ├── oauth/             # OAuth, Scope
-│   │       ├── multifactor/       # MultiFactor, OTP, OTPSecondFactor, WebAuthn
+│   │       ├── multifactor/       # MultiFactor, Otp, OtpSecondFactor, WebAuthn
 │   │       ├── http/              # HttpApi, HttpApiSchema, HttpServer, HttpClient, HttpMiddleware
 │   │       ├── plugins/           # First-party Hooks plugins (AccountLockout, Audit, Captcha, ...)
 │   │       ├── index.ts           # Public API barrel (curated root + cluster namespace re-exports)
 │   │       └── *.test.ts          # Tests alongside source
-│   ├── client/                    # @thomasfosterau/effect-auth-client (browser client + React/Svelte/Vue)
+│   ├── client/                    # @thomasfosterau/effect-auth-client (browser client + session store)
+│   ├── react/                     # @thomasfosterau/effect-auth-react (React hooks)
+│   ├── svelte/                    # @thomasfosterau/effect-auth-svelte (Svelte stores)
+│   ├── vue/                       # @thomasfosterau/effect-auth-vue (Vue composables)
+│   ├── solid/                     # @thomasfosterau/effect-auth-solid (Solid primitives)
 │   ├── sql/                       # @thomasfosterau/effect-auth-sql (SqlClient store layers)
 │   ├── alchemy/                   # @thomasfosterau/effect-auth-alchemy (Alchemy v2 + Cloudflare D1)
 │   └── argon2/                    # @thomasfosterau/effect-auth-argon2 (Argon2id PasswordHasher)

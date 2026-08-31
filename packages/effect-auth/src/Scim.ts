@@ -10,7 +10,7 @@
  *
  * ## Scoping
  *
- * A {@link SCIMConnection} is **per organization**: it is the credential a
+ * A {@link ScimConnection} is **per organization**: it is the credential a
  * single tenant's IdP presents, and everything it can see or change is scoped
  * to `connection.organizationId`. A connection for org A cannot read, patch, or
  * even discover org B's members — cross-tenant reads answer `404`, exactly as
@@ -19,7 +19,7 @@
  * argument so the scope can never be forgotten.
  *
  * The provisioning token is a bearer secret: it is returned **once**, from
- * {@link SCIMService.createConnection}, and only its SHA-256 digest is stored
+ * {@link ScimService.createConnection}, and only its SHA-256 digest is stored
  * (the {@link module:token-hash} convention shared with API keys, magic links
  * and device codes).
  *
@@ -52,7 +52,7 @@
  * is what an IdP expects when someone returns from leave.
  *
  * Revoking sessions closes the door on anyone already signed in; to keep it
- * closed for *new* sign-ins, wire {@link SCIMDeactivatedPlugin} into your hooks
+ * closed for *new* sign-ins, wire {@link ScimDeactivatedPlugin} into your hooks
  * stack. It mirrors `BannedUserPlugin` — a deactivated user fails session
  * validation instead of being silently let back in.
  *
@@ -87,7 +87,7 @@ import type * as Types from "./Types.ts";
  * `scimType: "uniqueness"` is how an IdP learns to reconcile rather than retry,
  * and `400` with `invalidPath` is how it learns to stop sending an operation.
  */
-export class SCIMError extends Data.TaggedError("SCIMError")<{
+export class ScimError extends Data.TaggedError("ScimError")<{
   readonly message: string;
   /** HTTP status for this failure (400, 401, 404, 409, …). */
   readonly status: number;
@@ -96,11 +96,11 @@ export class SCIMError extends Data.TaggedError("SCIMError")<{
   readonly cause?: unknown;
 }> {}
 
-const badRequest = (message: string, scimType?: string): SCIMError =>
-  new SCIMError({ message, status: 400, ...(scimType !== undefined && { scimType }) });
-const notFound = (message: string): SCIMError => new SCIMError({ message, status: 404 });
-const conflict = (message: string): SCIMError =>
-  new SCIMError({ message, status: 409, scimType: "uniqueness" });
+const badRequest = (message: string, scimType?: string): ScimError =>
+  new ScimError({ message, status: 400, ...(scimType !== undefined && { scimType }) });
+const notFound = (message: string): ScimError => new ScimError({ message, status: 404 });
+const conflict = (message: string): ScimError =>
+  new ScimError({ message, status: 409, scimType: "uniqueness" });
 
 // ---------------------------------------------------------------------------
 // Attribute keys
@@ -132,24 +132,24 @@ export const SCIM_EXTERNAL_ID_ATTRIBUTE = "scimExternalId";
  * readable by any store, survives a round trip through JSON, and lets apps
  * gate on it without importing this module.
  */
-export const isSCIMDeactivated = (user: Types.User): boolean =>
+export const isScimDeactivated = (user: Types.User): boolean =>
   user.attributes[SCIM_DEACTIVATED_ATTRIBUTE] === true;
 
 /**
  * Hooks plugin that blocks SCIM-deactivated users at session validation.
  *
- * {@link SCIMService} already revokes a user's sessions the moment the IdP
+ * {@link ScimService} already revokes a user's sessions the moment the IdP
  * deactivates them, which handles everyone already signed in. This plugin
  * closes the other half — it stops a deactivated user from establishing a new
  * session at all, in exactly the way `BannedUserPlugin` stops a banned one.
  *
  * Zero-dependency, so compose it like any other plugin:
- * `SCIMDeactivatedPlugin.pipe(Layer.provide(Hooks.Default))`, or as one entry
+ * `ScimDeactivatedPlugin.pipe(Layer.provide(Hooks.Default))`, or as one entry
  * in a `composePlugins([...])` stack.
  */
-export const SCIMDeactivatedPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({
+export const ScimDeactivatedPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({
   afterValidateSession: (sessionWithUser: Types.SessionWithUser) =>
-    isSCIMDeactivated(sessionWithUser.user)
+    isScimDeactivated(sessionWithUser.user)
       ? Effect.fail(new Errors.UserBannedError({ message: "Your account has been deactivated" }))
       : Effect.succeed(sessionWithUser),
 });
@@ -162,7 +162,7 @@ export const SCIMDeactivatedPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugi
  * A tenant's SCIM connection: the provisioning credential one organization's
  * IdP presents, and the scope of everything it may do.
  */
-export interface SCIMConnection {
+export interface ScimConnection {
   readonly id: string;
   /** The only organization this connection can read or write. */
   readonly organizationId: string;
@@ -182,37 +182,37 @@ export interface SCIMConnection {
  * the library — `null` on a miss, no-op deletes, `AuthError` for infrastructure
  * failures.
  */
-export class SCIMConnectionStore extends Context.Service<
-  SCIMConnectionStore,
+export class ScimConnectionStore extends Context.Service<
+  ScimConnectionStore,
   {
     readonly create: (
-      connection: SCIMConnection,
-    ) => Effect.Effect<SCIMConnection, Errors.AuthError>;
-    readonly getById: (id: string) => Effect.Effect<SCIMConnection | null, Errors.AuthError>;
+      connection: ScimConnection,
+    ) => Effect.Effect<ScimConnection, Errors.AuthError>;
+    readonly getById: (id: string) => Effect.Effect<ScimConnection | null, Errors.AuthError>;
     /** Resolve a connection by the digest of its provisioning token. */
     readonly getByTokenHash: (
       tokenHash: string,
-    ) => Effect.Effect<SCIMConnection | null, Errors.AuthError>;
+    ) => Effect.Effect<ScimConnection | null, Errors.AuthError>;
     readonly listByOrganization: (
       organizationId: string,
-    ) => Effect.Effect<ReadonlyArray<SCIMConnection>, Errors.AuthError>;
+    ) => Effect.Effect<ReadonlyArray<ScimConnection>, Errors.AuthError>;
     readonly update: (
-      connection: SCIMConnection,
-    ) => Effect.Effect<SCIMConnection, Errors.AuthError>;
+      connection: ScimConnection,
+    ) => Effect.Effect<ScimConnection, Errors.AuthError>;
     /** Revoke a connection. A no-op for unknown ids. */
     readonly delete: (id: string) => Effect.Effect<void, Errors.AuthError>;
   }
->()("@effect-auth/SCIMConnectionStore") {}
+>()("@effect-auth/ScimConnectionStore") {}
 
 /**
- * In-memory {@link SCIMConnectionStore}, keyed by connection id. Single-process
+ * In-memory {@link ScimConnectionStore}, keyed by connection id. Single-process
  * only — good for tests and single-instance deployments.
  *
  * Pass your own `Map` to inspect or pre-seed state in tests.
  */
-export const memorySCIMConnectionStore = (
-  records: Map<string, SCIMConnection> = new Map(),
-): typeof SCIMConnectionStore.Service => ({
+export const memoryScimConnectionStore = (
+  records: Map<string, ScimConnection> = new Map(),
+): typeof ScimConnectionStore.Service => ({
   create: (connection) => Effect.sync(() => (records.set(connection.id, connection), connection)),
   getById: (id) => Effect.sync(() => records.get(id) ?? null),
   getByTokenHash: (tokenHash) =>
@@ -238,8 +238,8 @@ export const memorySCIMConnectionStore = (
  * `MagicLinkUserStore` and `AdminUserStore`. Back it with the same table as the
  * rest — it is the same `User` record.
  */
-export class SCIMUserStore extends Context.Service<
-  SCIMUserStore,
+export class ScimUserStore extends Context.Service<
+  ScimUserStore,
   {
     /** Create a user. The store assigns `id`, `createdAt` and `updatedAt`. */
     readonly create: (input: {
@@ -250,14 +250,14 @@ export class SCIMUserStore extends Context.Service<
     readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
     readonly update: (user: Types.User) => Effect.Effect<Types.User, Errors.AuthError>;
   }
->()("@effect-auth/SCIMUserStore") {}
+>()("@effect-auth/ScimUserStore") {}
 
 // ---------------------------------------------------------------------------
 // Resource shapes
 // ---------------------------------------------------------------------------
 
 /** One entry of a SCIM `User.emails[]` multi-valued attribute. */
-export interface SCIMEmail {
+export interface ScimEmail {
   readonly value: string;
   /** `true` for the address that is also the `userName`. */
   readonly primary?: boolean;
@@ -268,14 +268,14 @@ export interface SCIMEmail {
  * A SCIM `User` resource, in domain terms — the JSON envelope (`schemas`,
  * `meta`) is added at the HTTP layer.
  */
-export interface SCIMUserResource {
+export interface ScimUserResource {
   /** The core user id; SCIM's `id` is this library's surrogate key verbatim. */
   readonly id: string;
   readonly userName: string;
   readonly displayName?: string;
   /** The IdP's own identifier, when it sent one. */
   readonly externalId?: string;
-  readonly emails: ReadonlyArray<SCIMEmail>;
+  readonly emails: ReadonlyArray<ScimEmail>;
   readonly active: boolean;
   /** Epoch milliseconds. */
   readonly createdAt: number;
@@ -291,7 +291,7 @@ export interface SCIMUserResource {
  * resolve itself, and populating them would cost a user read per member on
  * every list.
  */
-export interface SCIMGroupResource {
+export interface ScimGroupResource {
   readonly id: string;
   readonly displayName: string;
   readonly members: ReadonlyArray<{ readonly value: string }>;
@@ -302,7 +302,7 @@ export interface SCIMGroupResource {
 }
 
 /** A page of resources, shaped for the SCIM `ListResponse` envelope. */
-export interface SCIMListResult<A> {
+export interface ScimListResult<A> {
   /** Matches *before* pagination. */
   readonly totalResults: number;
   /** 1-based index of the first returned resource. */
@@ -312,7 +312,7 @@ export interface SCIMListResult<A> {
 }
 
 /** Query parameters of a SCIM list request. */
-export interface SCIMListQuery {
+export interface ScimListQuery {
   /** A `eq` filter, e.g. `userName eq "ada@acme.test"`. Nothing else is supported. */
   readonly filter?: string;
   /** 1-based; defaults to 1. */
@@ -328,7 +328,7 @@ export interface SCIMListQuery {
  * body hands over for an absent optional member, and the path-less form is a
  * dialect this service supports rather than an error.
  */
-export interface SCIMPatchOperation {
+export interface ScimPatchOperation {
   /** `add`, `remove` or `replace` (case-insensitive). */
   readonly op: string;
   readonly path?: string | undefined;
@@ -336,16 +336,16 @@ export interface SCIMPatchOperation {
 }
 
 /** The writable attributes of a SCIM `User`, as sent on `POST` or `PUT`. */
-export interface SCIMUserInput {
+export interface ScimUserInput {
   readonly userName: string;
   readonly displayName?: string;
   readonly externalId?: string;
-  readonly emails?: ReadonlyArray<SCIMEmail>;
+  readonly emails?: ReadonlyArray<ScimEmail>;
   readonly active?: boolean;
 }
 
 /** The writable attributes of a SCIM `Group`. */
-export interface SCIMGroupInput {
+export interface ScimGroupInput {
   readonly displayName: string;
   readonly members?: ReadonlyArray<{ readonly value: string }>;
 }
@@ -354,7 +354,7 @@ export interface SCIMGroupInput {
 // Config
 // ---------------------------------------------------------------------------
 
-export interface SCIMConfig {
+export interface ScimConfig {
   /**
    * Organization role granted to users provisioned through SCIM.
    * Default `"member"`.
@@ -378,14 +378,14 @@ export interface SCIMConfig {
 // Service
 // ---------------------------------------------------------------------------
 
-export class SCIMService extends Context.Service<
-  SCIMService,
+export class ScimService extends Context.Service<
+  ScimService,
   {
-    /** Configured {@link SCIMConfig.baseUrl}, for building `meta.location`. */
+    /** Configured {@link ScimConfig.baseUrl}, for building `meta.location`. */
     readonly baseUrl: string;
 
     /**
-     * Configured {@link SCIMConfig.maxPageSize}. Advertised as `filter.maxResults`
+     * Configured {@link ScimConfig.maxPageSize}. Advertised as `filter.maxResults`
      * in the `ServiceProviderConfig` document so an IdP can size its own pages.
      */
     readonly maxPageSize: number;
@@ -401,7 +401,7 @@ export class SCIMService extends Context.Service<
     readonly createConnection: (
       organizationId: string,
     ) => Effect.Effect<
-      { readonly connection: SCIMConnection; readonly token: string },
+      { readonly connection: ScimConnection; readonly token: string },
       Errors.AuthError
     >;
 
@@ -411,17 +411,17 @@ export class SCIMService extends Context.Service<
     /** The organization's connections (digests only — never the raw tokens). */
     readonly listConnections: (
       organizationId: string,
-    ) => Effect.Effect<ReadonlyArray<SCIMConnection>, Errors.AuthError>;
+    ) => Effect.Effect<ReadonlyArray<ScimConnection>, Errors.AuthError>;
 
     /**
      * Resolve a raw bearer token to its connection, refreshing `lastUsedAt`.
      *
-     * Fails with a `401` {@link SCIMError} for an unknown or malformed token —
+     * Fails with a `401` {@link ScimError} for an unknown or malformed token —
      * one uniform answer, so a caller cannot probe which tokens exist.
      */
     readonly authenticate: (
       token: string,
-    ) => Effect.Effect<SCIMConnection, SCIMError | Errors.AuthError>;
+    ) => Effect.Effect<ScimConnection, ScimError | Errors.AuthError>;
 
     /**
      * Provision a user: create the account, claim its email identifiers as
@@ -432,15 +432,15 @@ export class SCIMService extends Context.Service<
      * against the existing user instead of retrying.
      */
     readonly createUser: (
-      connection: SCIMConnection,
-      input: SCIMUserInput,
-    ) => Effect.Effect<SCIMUserResource, SCIMError | Errors.AuthError>;
+      connection: ScimConnection,
+      input: ScimUserInput,
+    ) => Effect.Effect<ScimUserResource, ScimError | Errors.AuthError>;
 
     /** Read one user. `404` when the id is unknown *or* outside the connection's org. */
     readonly getUser: (
-      connection: SCIMConnection,
+      connection: ScimConnection,
       userId: string,
-    ) => Effect.Effect<SCIMUserResource, SCIMError | Errors.AuthError>;
+    ) => Effect.Effect<ScimUserResource, ScimError | Errors.AuthError>;
 
     /**
      * List the organization's users, newest last.
@@ -450,9 +450,9 @@ export class SCIMService extends Context.Service<
      * `400 invalidFilter` rather than silently returning the whole directory.
      */
     readonly listUsers: (
-      connection: SCIMConnection,
-      query?: SCIMListQuery,
-    ) => Effect.Effect<SCIMListResult<SCIMUserResource>, SCIMError | Errors.AuthError>;
+      connection: ScimConnection,
+      query?: ScimListQuery,
+    ) => Effect.Effect<ScimListResult<ScimUserResource>, ScimError | Errors.AuthError>;
 
     /**
      * Replace a user (`PUT`). `emails` is authoritative when present: addresses
@@ -460,10 +460,10 @@ export class SCIMService extends Context.Service<
      * reconciled, so a partial `PUT` cannot quietly delete addresses.
      */
     readonly replaceUser: (
-      connection: SCIMConnection,
+      connection: ScimConnection,
       userId: string,
-      input: SCIMUserInput,
-    ) => Effect.Effect<SCIMUserResource, SCIMError | Errors.AuthError>;
+      input: ScimUserInput,
+    ) => Effect.Effect<ScimUserResource, ScimError | Errors.AuthError>;
 
     /**
      * Apply an RFC 7644 §3.5.2 `PATCH`.
@@ -475,43 +475,43 @@ export class SCIMService extends Context.Service<
      * operations. Anything else fails with `400 invalidPath`.
      */
     readonly patchUser: (
-      connection: SCIMConnection,
+      connection: ScimConnection,
       userId: string,
-      operations: ReadonlyArray<SCIMPatchOperation>,
-    ) => Effect.Effect<SCIMUserResource, SCIMError | Errors.AuthError>;
+      operations: ReadonlyArray<ScimPatchOperation>,
+    ) => Effect.Effect<ScimUserResource, ScimError | Errors.AuthError>;
 
     /**
      * `DELETE /Users/:id` — a soft disable, never a hard delete: the user is
      * marked deactivated and every live session is revoked.
      */
     readonly deactivateUser: (
-      connection: SCIMConnection,
+      connection: ScimConnection,
       userId: string,
-    ) => Effect.Effect<void, SCIMError | Errors.AuthError>;
+    ) => Effect.Effect<void, ScimError | Errors.AuthError>;
 
     /** Create a team from a SCIM `Group`. Members must already belong to the org. */
     readonly createGroup: (
-      connection: SCIMConnection,
-      input: SCIMGroupInput,
-    ) => Effect.Effect<SCIMGroupResource, SCIMError | Errors.AuthError>;
+      connection: ScimConnection,
+      input: ScimGroupInput,
+    ) => Effect.Effect<ScimGroupResource, ScimError | Errors.AuthError>;
 
     readonly getGroup: (
-      connection: SCIMConnection,
+      connection: ScimConnection,
       groupId: string,
-    ) => Effect.Effect<SCIMGroupResource, SCIMError | Errors.AuthError>;
+    ) => Effect.Effect<ScimGroupResource, ScimError | Errors.AuthError>;
 
     /** List the organization's teams; supports `displayName eq "…"`. */
     readonly listGroups: (
-      connection: SCIMConnection,
-      query?: SCIMListQuery,
-    ) => Effect.Effect<SCIMListResult<SCIMGroupResource>, SCIMError | Errors.AuthError>;
+      connection: ScimConnection,
+      query?: ScimListQuery,
+    ) => Effect.Effect<ScimListResult<ScimGroupResource>, ScimError | Errors.AuthError>;
 
     /** Replace a group: rename it and set its membership to exactly `members`. */
     readonly replaceGroup: (
-      connection: SCIMConnection,
+      connection: ScimConnection,
       groupId: string,
-      input: SCIMGroupInput,
-    ) => Effect.Effect<SCIMGroupResource, SCIMError | Errors.AuthError>;
+      input: ScimGroupInput,
+    ) => Effect.Effect<ScimGroupResource, ScimError | Errors.AuthError>;
 
     /**
      * Apply a `PATCH` to a group: `replace` on `displayName`, and `add`/`remove`
@@ -519,23 +519,23 @@ export class SCIMService extends Context.Service<
      * major IdPs use to remove one member).
      */
     readonly patchGroup: (
-      connection: SCIMConnection,
+      connection: ScimConnection,
       groupId: string,
-      operations: ReadonlyArray<SCIMPatchOperation>,
-    ) => Effect.Effect<SCIMGroupResource, SCIMError | Errors.AuthError>;
+      operations: ReadonlyArray<ScimPatchOperation>,
+    ) => Effect.Effect<ScimGroupResource, ScimError | Errors.AuthError>;
 
     /** Delete the team. Its members keep their organization membership. */
     readonly deleteGroup: (
-      connection: SCIMConnection,
+      connection: ScimConnection,
       groupId: string,
-    ) => Effect.Effect<void, SCIMError | Errors.AuthError>;
+    ) => Effect.Effect<void, ScimError | Errors.AuthError>;
   }
->()("@effect-auth/SCIMService") {
+>()("@effect-auth/ScimService") {
   /**
    * Construct a Layer providing this service.
    */
-  static readonly layer = (config: SCIMConfig = {}) =>
-    Layer.effect(SCIMService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
+  static readonly layer = (config: ScimConfig = {}) =>
+    Layer.effect(ScimService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 // ---------------------------------------------------------------------------
@@ -557,7 +557,7 @@ interface ParsedFilter {
 const parseFilter = (
   filter: string,
   supported: ReadonlyArray<string>,
-): Effect.Effect<ParsedFilter, SCIMError> => {
+): Effect.Effect<ParsedFilter, ScimError> => {
   const match = FILTER_PATTERN.exec(filter);
   if (match === null) {
     return Effect.fail(
@@ -646,12 +646,12 @@ const memberValues = (value: unknown): ReadonlyArray<string> => {
 };
 
 export const make = (
-  config: SCIMConfig = {},
+  config: ScimConfig = {},
 ): Effect.Effect<
-  typeof SCIMService.Service,
+  typeof ScimService.Service,
   never,
-  | SCIMConnectionStore
-  | SCIMUserStore
+  | ScimConnectionStore
+  | ScimUserStore
   | IdentifierStore
   | OrganizationStore
   | SessionService
@@ -662,8 +662,8 @@ export const make = (
     const baseUrl = (config.baseUrl ?? "/scim/v2").replace(/\/+$/, "");
     const maxPageSize = config.maxPageSize ?? 100;
 
-    const connections = yield* SCIMConnectionStore;
-    const users = yield* SCIMUserStore;
+    const connections = yield* ScimConnectionStore;
+    const users = yield* ScimUserStore;
     const identifiers = yield* IdentifierStore;
     const orgs = yield* OrganizationStore;
     const sessions = yield* SessionService;
@@ -697,7 +697,7 @@ export const make = (
      * email for users this module did not create, and finally to the user id so
      * the resource is always well-formed.
      */
-    const toUserResource = (user: Types.User, all: ReadonlyArray<Identifier>): SCIMUserResource => {
+    const toUserResource = (user: Types.User, all: ReadonlyArray<Identifier>): ScimUserResource => {
       const emails = emailIdentifiers(all);
       const pinned = user.attributes[SCIM_USERNAME_ATTRIBUTE];
       const userName =
@@ -715,7 +715,7 @@ export const make = (
           ...(identifier.value === userName && { primary: true }),
           type: "work",
         })),
-        active: !isSCIMDeactivated(user),
+        active: !isScimDeactivated(user),
         createdAt: user.createdAt.getTime(),
         updatedAt: user.updatedAt.getTime(),
       };
@@ -731,7 +731,7 @@ export const make = (
      * belongs to another organization is reported as absent, so a connection
      * cannot use 404-vs-403 to enumerate the rest of the directory.
      */
-    const requireUser = (connection: SCIMConnection, userId: string) =>
+    const requireUser = (connection: ScimConnection, userId: string) =>
       Effect.gen(function* () {
         const member = yield* orgs.getMember(connection.organizationId, userId);
         if (member === null) return yield* notFound(`User "${userId}" not found`);
@@ -740,7 +740,7 @@ export const make = (
         return user;
       });
 
-    const requireTeam = (connection: SCIMConnection, groupId: string) =>
+    const requireTeam = (connection: ScimConnection, groupId: string) =>
       Effect.gen(function* () {
         const team = yield* orgs.getTeam(groupId);
         if (team === null || team.organizationId !== connection.organizationId) {
@@ -759,7 +759,7 @@ export const make = (
       }));
 
     /** Slice a filtered, ordered array into a SCIM `ListResponse` page. */
-    const paginate = <A>(all: ReadonlyArray<A>, query?: SCIMListQuery): SCIMListResult<A> => {
+    const paginate = <A>(all: ReadonlyArray<A>, query?: ScimListQuery): ScimListResult<A> => {
       const startIndex = Math.max(1, Math.trunc(query?.startIndex ?? 1));
       const count = Math.max(0, Math.min(Math.trunc(query?.count ?? maxPageSize), maxPageSize));
       const resources = all.slice(startIndex - 1, startIndex - 1 + count);
@@ -827,7 +827,7 @@ export const make = (
         });
       });
 
-    const addTeamMemberScoped = (connection: SCIMConnection, teamId: string, userId: string) =>
+    const addTeamMemberScoped = (connection: ScimConnection, teamId: string, userId: string) =>
       Effect.gen(function* () {
         const member = yield* orgs.getMember(connection.organizationId, userId);
         if (member === null) {
@@ -845,11 +845,11 @@ export const make = (
       baseUrl,
       maxPageSize,
 
-      createConnection: Effect.fn("SCIMService.createConnection")(function* (
+      createConnection: Effect.fn("ScimService.createConnection")(function* (
         organizationId: string,
       ) {
         const token = yield* randomToken();
-        const connection: SCIMConnection = {
+        const connection: ScimConnection = {
           id: yield* randomId(),
           organizationId,
           tokenHash: hashToken(token),
@@ -858,18 +858,18 @@ export const make = (
         return { connection: yield* connections.create(connection), token };
       }),
 
-      revokeConnection: Effect.fn("SCIMService.revokeConnection")((connectionId: string) =>
+      revokeConnection: Effect.fn("ScimService.revokeConnection")((connectionId: string) =>
         connections.delete(connectionId),
       ),
 
-      listConnections: Effect.fn("SCIMService.listConnections")((organizationId: string) =>
+      listConnections: Effect.fn("ScimService.listConnections")((organizationId: string) =>
         connections.listByOrganization(organizationId),
       ),
 
-      authenticate: Effect.fn("SCIMService.authenticate")(function* (token: string) {
+      authenticate: Effect.fn("ScimService.authenticate")(function* (token: string) {
         // One answer for "no token", "malformed token" and "unknown token": a
         // caller must not be able to tell them apart.
-        const unauthorized = new SCIMError({
+        const unauthorized = new ScimError({
           message: "Invalid SCIM provisioning token",
           status: 401,
         });
@@ -882,9 +882,9 @@ export const make = (
         return connection;
       }),
 
-      createUser: Effect.fn("SCIMService.createUser")(function* (
-        connection: SCIMConnection,
-        input: SCIMUserInput,
+      createUser: Effect.fn("ScimService.createUser")(function* (
+        connection: ScimConnection,
+        input: ScimUserInput,
       ) {
         const userName = normalizeEmail(input.userName);
         if (userName === "") {
@@ -939,16 +939,16 @@ export const make = (
         return yield* readUserResource(user);
       }),
 
-      getUser: Effect.fn("SCIMService.getUser")(function* (
-        connection: SCIMConnection,
+      getUser: Effect.fn("ScimService.getUser")(function* (
+        connection: ScimConnection,
         userId: string,
       ) {
         return yield* readUserResource(yield* requireUser(connection, userId));
       }),
 
-      listUsers: Effect.fn("SCIMService.listUsers")(function* (
-        connection: SCIMConnection,
-        query?: SCIMListQuery,
+      listUsers: Effect.fn("ScimService.listUsers")(function* (
+        connection: ScimConnection,
+        query?: ScimListQuery,
       ) {
         const parsed =
           query?.filter === undefined
@@ -958,7 +958,7 @@ export const make = (
         const members = yield* orgs.listMembersByOrganization(connection.organizationId);
         const ordered = [...members].sort((a, b) => a.createdAt - b.createdAt);
 
-        const resources: SCIMUserResource[] = [];
+        const resources: ScimUserResource[] = [];
         for (const member of ordered) {
           const user = yield* users.get(member.userId);
           // A membership row whose user is gone is stale, not an error.
@@ -979,10 +979,10 @@ export const make = (
         return paginate(resources, query);
       }),
 
-      replaceUser: Effect.fn("SCIMService.replaceUser")(function* (
-        connection: SCIMConnection,
+      replaceUser: Effect.fn("ScimService.replaceUser")(function* (
+        connection: ScimConnection,
         userId: string,
-        input: SCIMUserInput,
+        input: ScimUserInput,
       ) {
         const user = yield* requireUser(connection, userId);
         const userName = normalizeEmail(input.userName);
@@ -1022,17 +1022,17 @@ export const make = (
           updatedAt: new Date(),
         });
 
-        if (input.active !== undefined && input.active === isSCIMDeactivated(current)) {
+        if (input.active !== undefined && input.active === isScimDeactivated(current)) {
           current = yield* setActive(current, input.active);
         }
 
         return yield* readUserResource(current);
       }),
 
-      patchUser: Effect.fn("SCIMService.patchUser")(function* (
-        connection: SCIMConnection,
+      patchUser: Effect.fn("ScimService.patchUser")(function* (
+        connection: ScimConnection,
         userId: string,
-        operations: ReadonlyArray<SCIMPatchOperation>,
+        operations: ReadonlyArray<ScimPatchOperation>,
       ) {
         let user = yield* requireUser(connection, userId);
 
@@ -1067,7 +1067,7 @@ export const make = (
               if (active === null) {
                 return yield* badRequest("active must be a boolean", "invalidValue");
               }
-              if (active === isSCIMDeactivated(user)) user = yield* setActive(user, active);
+              if (active === isScimDeactivated(user)) user = yield* setActive(user, active);
               continue;
             }
 
@@ -1136,17 +1136,17 @@ export const make = (
         return yield* readUserResource(user);
       }),
 
-      deactivateUser: Effect.fn("SCIMService.deactivateUser")(function* (
-        connection: SCIMConnection,
+      deactivateUser: Effect.fn("ScimService.deactivateUser")(function* (
+        connection: ScimConnection,
         userId: string,
       ) {
         const user = yield* requireUser(connection, userId);
         yield* setActive(user, false);
       }),
 
-      createGroup: Effect.fn("SCIMService.createGroup")(function* (
-        connection: SCIMConnection,
-        input: SCIMGroupInput,
+      createGroup: Effect.fn("ScimService.createGroup")(function* (
+        connection: ScimConnection,
+        input: ScimGroupInput,
       ) {
         const displayName = input.displayName.trim();
         if (displayName === "") {
@@ -1166,16 +1166,16 @@ export const make = (
         return yield* toGroupResource(team);
       }),
 
-      getGroup: Effect.fn("SCIMService.getGroup")(function* (
-        connection: SCIMConnection,
+      getGroup: Effect.fn("ScimService.getGroup")(function* (
+        connection: ScimConnection,
         groupId: string,
       ) {
         return yield* toGroupResource(yield* requireTeam(connection, groupId));
       }),
 
-      listGroups: Effect.fn("SCIMService.listGroups")(function* (
-        connection: SCIMConnection,
-        query?: SCIMListQuery,
+      listGroups: Effect.fn("ScimService.listGroups")(function* (
+        connection: ScimConnection,
+        query?: ScimListQuery,
       ) {
         const parsed =
           query?.filter === undefined ? null : yield* parseFilter(query.filter, ["displayName"]);
@@ -1183,7 +1183,7 @@ export const make = (
         const teams = yield* orgs.listTeams(connection.organizationId);
         const ordered = [...teams].sort((a, b) => a.createdAt - b.createdAt);
 
-        const resources: SCIMGroupResource[] = [];
+        const resources: ScimGroupResource[] = [];
         for (const team of ordered) {
           if (parsed !== null && team.name !== parsed.value) continue;
           resources.push(yield* toGroupResource(team));
@@ -1191,10 +1191,10 @@ export const make = (
         return paginate(resources, query);
       }),
 
-      replaceGroup: Effect.fn("SCIMService.replaceGroup")(function* (
-        connection: SCIMConnection,
+      replaceGroup: Effect.fn("ScimService.replaceGroup")(function* (
+        connection: ScimConnection,
         groupId: string,
-        input: SCIMGroupInput,
+        input: ScimGroupInput,
       ) {
         const team = yield* requireTeam(connection, groupId);
         const displayName = input.displayName.trim();
@@ -1223,10 +1223,10 @@ export const make = (
         return yield* toGroupResource(renamed);
       }),
 
-      patchGroup: Effect.fn("SCIMService.patchGroup")(function* (
-        connection: SCIMConnection,
+      patchGroup: Effect.fn("ScimService.patchGroup")(function* (
+        connection: ScimConnection,
         groupId: string,
-        operations: ReadonlyArray<SCIMPatchOperation>,
+        operations: ReadonlyArray<ScimPatchOperation>,
       ) {
         let team = yield* requireTeam(connection, groupId);
 
@@ -1327,12 +1327,12 @@ export const make = (
         return yield* toGroupResource(team);
       }),
 
-      deleteGroup: Effect.fn("SCIMService.deleteGroup")(function* (
-        connection: SCIMConnection,
+      deleteGroup: Effect.fn("ScimService.deleteGroup")(function* (
+        connection: ScimConnection,
         groupId: string,
       ) {
         const team = yield* requireTeam(connection, groupId);
         yield* orgs.deleteTeam(team.id);
       }),
-    } satisfies typeof SCIMService.Service;
+    } satisfies typeof ScimService.Service;
   });

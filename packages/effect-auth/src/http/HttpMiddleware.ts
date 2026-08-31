@@ -339,7 +339,7 @@ const validateToken = (
  * invalid.
  *
  * @param config - Optional cookie configuration (name, secure, cache, …).
- *   Defaults match `HTTPServer.make` defaults (`name: "conduit_session"`,
+ *   Defaults match `HttpServer.make` defaults (`name: "conduit_session"`,
  *   `secure: true`).
  *
  * @example
@@ -407,7 +407,7 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  * session is present or it is invalid.
  *
  * @param config - Optional cookie configuration (name, secure, cache, …).
- *   Defaults match `HTTPServer.make` defaults.
+ *   Defaults match `HttpServer.make` defaults.
  *
  * @example
  * ```ts

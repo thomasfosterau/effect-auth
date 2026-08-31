@@ -15,7 +15,7 @@ import { PasswordHasher } from "./password/Password.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";
 import { PasswordResetService } from "./password/PasswordReset.ts";
 import { type AuthServices } from "./http/HttpServer.ts";
-import * as HTTPServer from "./http/HttpServer.ts";
+import * as HttpServer from "./http/HttpServer.ts";
 import { IdentifierStore, memoryIdentifierStore, type Identifier } from "./Identifier.ts";
 import { OAuthUserStore } from "./oauth/OAuth.ts";
 import { GoogleOneTapError, GoogleOneTapService, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
@@ -425,11 +425,11 @@ const makeHttpFixture = () => {
   );
 
   return {
-    handler: HTTPServer.make({
+    handler: HttpServer.make({
       services: Layer.mergeAll(base, oneTapLayer) as Layer.Layer<AuthServices>,
       cookie: { secure: false, lastLoginMethod: true },
     }).handler,
-    handlerWithoutOneTap: HTTPServer.make({
+    handlerWithoutOneTap: HttpServer.make({
       services: base as Layer.Layer<AuthServices>,
       cookie: { secure: false },
     }).handler,

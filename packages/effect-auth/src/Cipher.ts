@@ -4,7 +4,7 @@
  * storage, plus every other primitive Effect's `Crypto` service does not
  * cover (keyed HMAC, and asymmetric key generation/signing/verification for
  * JWS and WebAuthn). This is one of the three modules allowed to import
- * `node:crypto` directly — see `docs/refactor-plan.md` §5.
+ * `node:crypto` directly — see `docs/ARCHITECTURE.md` § Dependencies.
  *
  * @module cipher
  */
@@ -41,13 +41,13 @@ export interface TokenCipher {
  * ```ts
  * const cipher = aes256GcmCipher(process.env.ENCRYPTION_SECRET!)
  * // JWT private key at rest
- * const jwtLayer = JWTService.layer({ issuer: "...", encryptPrivateKey: { cipher } })
+ * const jwtLayer = JwtService.layer({ issuer: "...", encryptPrivateKey: { cipher } })
  * // TOTP secret at rest
  * const totpLayer = MultiFactorService.layer({ issuer: "...", encryptSecret: { cipher } })
  * // OAuth tokens at rest
  * const oauthLayer = OAuthService.layer(providers, { encryptTokens: { cipher } })
  * // or use the shorthand (each option accepts { secret } instead of { cipher }):
- * const jwtLayer = JWTService.layer({
+ * const jwtLayer = JwtService.layer({
  *   issuer: "...",
  *   encryptPrivateKey: { secret: process.env.ENCRYPTION_SECRET! },
  * })
@@ -115,12 +115,12 @@ export const hmac = (
 ): Uint8Array => new Uint8Array(crypto.createHmac(algorithm, secret).update(data).digest());
 
 // ---------------------------------------------------------------------------
-// JWS (JSON Web Signature) asymmetric primitives — used by JWT.ts and
+// JWS (JSON Web Signature) asymmetric primitives — used by Jwt.ts and
 // oauth/OAuth.ts (signing/verifying compact JWS tokens).
 // ---------------------------------------------------------------------------
 
 /** Signing/verification algorithms supported for compact JWS tokens. */
-export type JWSAlgorithm = "ES256" | "EdDSA" | "RS256";
+export type JwsAlgorithm = "ES256" | "EdDSA" | "RS256";
 
 /**
  * Generate a fresh ES256 (P-256) or EdDSA (Ed25519) signing key pair. The
@@ -162,7 +162,7 @@ export const signJws = (
  * null digest; RS256 is plain RSASSA-PKCS1-v1_5 over SHA-256.
  */
 export const verifyJws = (
-  algorithm: JWSAlgorithm,
+  algorithm: JwsAlgorithm,
   data: Uint8Array,
   signature: Uint8Array,
   jwk: Record<string, unknown>,

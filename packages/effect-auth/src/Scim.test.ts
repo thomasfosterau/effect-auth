@@ -5,7 +5,7 @@ import { EmailPasswordService } from "./email/EmailPassword.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";
 import { Hooks } from "./Hooks.ts";
 import { type AuthServices } from "./http/HttpServer.ts";
-import * as HTTPServer from "./http/HttpServer.ts";
+import * as HttpServer from "./http/HttpServer.ts";
 import {
   IdentifierStore,
   memoryIdentifierStore,
@@ -16,18 +16,18 @@ import { OrganizationStore, type Member, type Team, type TeamMember } from "./Or
 import { PasswordHasher } from "./password/Password.ts";
 import { PasswordResetService } from "./password/PasswordReset.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import * as SCIM from "./SCIM.ts";
+import * as Scim from "./Scim.ts";
 import {
-  memorySCIMConnectionStore,
-  SCIMConnectionStore,
-  SCIMDeactivatedPlugin,
-  SCIMError,
-  SCIMService,
-  SCIMUserStore,
+  memoryScimConnectionStore,
+  ScimConnectionStore,
+  ScimDeactivatedPlugin,
+  ScimError,
+  ScimService,
+  ScimUserStore,
   SCIM_DEACTIVATED_ATTRIBUTE,
   SCIM_EXTERNAL_ID_ATTRIBUTE,
-  type SCIMConnection,
-} from "./SCIM.ts";
+  type ScimConnection,
+} from "./Scim.ts";
 import { SessionService } from "./SessionService.ts";
 import { UserStore } from "./UserStore.ts";
 import { UserService, UserServiceStore } from "./User.ts";
@@ -37,7 +37,7 @@ const ORG_A = "org-a";
 const ORG_B = "org-b";
 
 /**
- * In-memory stand-ins for everything `SCIMService` touches.
+ * In-memory stand-ins for everything `ScimService` touches.
  *
  * The organization store implements only the methods SCIM reaches for —
  * members and teams — and dies loudly on the rest, so a test that accidentally
@@ -47,7 +47,7 @@ const makeStores = () => {
   const usersById = new Map<string, Types.User>();
   const identifierRecords = new Map<string, Identifier>();
   const identifiers = memoryIdentifierStore(identifierRecords);
-  const connectionRecords = new Map<string, SCIMConnection>();
+  const connectionRecords = new Map<string, ScimConnection>();
   const members: Member[] = [];
   const teams = new Map<string, Team>();
   const teamMembers: TeamMember[] = [];
@@ -55,7 +55,7 @@ const makeStores = () => {
   let userSeq = 0;
   let teamSeq = 0;
 
-  const userStore: typeof SCIMUserStore.Service = {
+  const userStore: typeof ScimUserStore.Service = {
     create: (input) =>
       Effect.sync(() => {
         const now = new Date();
@@ -220,8 +220,8 @@ const makeStores = () => {
   };
 
   const layer = Layer.mergeAll(
-    Layer.succeed(SCIMConnectionStore)(memorySCIMConnectionStore(connectionRecords)),
-    Layer.succeed(SCIMUserStore)(userStore),
+    Layer.succeed(ScimConnectionStore)(memoryScimConnectionStore(connectionRecords)),
+    Layer.succeed(ScimUserStore)(userStore),
     Layer.succeed(IdentifierStore)(identifiers),
     Layer.succeed(UserStore)(coreUserStore),
     Layer.succeed(UserServiceStore)(userServiceStore),
@@ -248,9 +248,9 @@ const makeStores = () => {
 };
 
 /** Build the service plus a connection for each of two organizations. */
-const makeFixture = async (config: SCIM.SCIMConfig = {}) => {
+const makeFixture = async (config: Scim.ScimConfig = {}) => {
   const stores = makeStores();
-  const service = await Effect.runPromise(SCIM.make(config).pipe(Effect.provide(stores.layer)));
+  const service = await Effect.runPromise(Scim.make(config).pipe(Effect.provide(stores.layer)));
   const run = <A, E>(effect: Effect.Effect<A, E, never>): Promise<A> => Effect.runPromise(effect);
   const a = await run(service.createConnection(ORG_A));
   const b = await run(service.createConnection(ORG_B));
@@ -259,7 +259,7 @@ const makeFixture = async (config: SCIM.SCIMConfig = {}) => {
 
 const ADA = { userName: "ada@acme.test", displayName: "Ada Lovelace", externalId: "okta-1" };
 
-describe("SCIMService — connections", () => {
+describe("ScimService — connections", () => {
   it("mints a token once, resolves it, and stops resolving it after a revoke", async () => {
     const fx = await makeFixture();
 
@@ -277,16 +277,16 @@ describe("SCIMService — connections", () => {
 
     await fx.run(fx.service.revokeConnection(fx.a.connection.id));
     const err = await fx.run(Effect.flip(fx.service.authenticate(fx.a.token)));
-    expect((err as SCIMError).status).toBe(401);
+    expect((err as ScimError).status).toBe(401);
   });
 
   it("answers 401 the same way for an empty and an unknown token", async () => {
     const fx = await makeFixture();
     const empty = await fx.run(Effect.flip(fx.service.authenticate("")));
     const unknown = await fx.run(Effect.flip(fx.service.authenticate("not-a-token")));
-    expect((empty as SCIMError).status).toBe(401);
-    expect((unknown as SCIMError).status).toBe(401);
-    expect((empty as SCIMError).message).toBe((unknown as SCIMError).message);
+    expect((empty as ScimError).status).toBe(401);
+    expect((unknown as ScimError).status).toBe(401);
+    expect((empty as ScimError).message).toBe((unknown as ScimError).message);
   });
 
   it("lists an organization's connections without leaking other tenants'", async () => {
@@ -296,7 +296,7 @@ describe("SCIMService — connections", () => {
   });
 });
 
-describe("SCIMService — users", () => {
+describe("ScimService — users", () => {
   it("provisions a user with a verified email and an org membership", async () => {
     const fx = await makeFixture();
     const resource = await fx.run(fx.service.createUser(fx.a.connection, ADA));
@@ -345,8 +345,8 @@ describe("SCIMService — users", () => {
     await fx.run(fx.service.createUser(fx.a.connection, ADA));
 
     const err = await fx.run(Effect.flip(fx.service.createUser(fx.a.connection, ADA)));
-    expect((err as SCIMError).status).toBe(409);
-    expect((err as SCIMError).scimType).toBe("uniqueness");
+    expect((err as ScimError).status).toBe(409);
+    expect((err as ScimError).scimType).toBe("uniqueness");
     // The pre-flight check runs before the user row, so no orphan is left.
     expect(fx.usersById.size).toBe(1);
   });
@@ -356,8 +356,8 @@ describe("SCIMService — users", () => {
     const err = await fx.run(
       Effect.flip(fx.service.createUser(fx.a.connection, { userName: " " })),
     );
-    expect((err as SCIMError).status).toBe(400);
-    expect((err as SCIMError).scimType).toBe("invalidValue");
+    expect((err as ScimError).status).toBe(400);
+    expect((err as ScimError).scimType).toBe("invalidValue");
   });
 
   it("keeps organizations apart: a connection cannot read another org's user", async () => {
@@ -367,7 +367,7 @@ describe("SCIMService — users", () => {
     // Org B's connection sees the id as absent — not forbidden, absent — so it
     // cannot use the status code to enumerate the rest of the directory.
     const err = await fx.run(Effect.flip(fx.service.getUser(fx.b.connection, ada.id)));
-    expect((err as SCIMError).status).toBe(404);
+    expect((err as ScimError).status).toBe(404);
 
     const listed = await fx.run(fx.service.listUsers(fx.b.connection));
     expect(listed.totalResults).toBe(0);
@@ -380,10 +380,10 @@ describe("SCIMService — users", () => {
         ]),
       ),
     );
-    expect((patchErr as SCIMError).status).toBe(404);
+    expect((patchErr as ScimError).status).toBe(404);
     const deleteErr = await fx.run(Effect.flip(fx.service.deactivateUser(fx.b.connection, ada.id)));
-    expect((deleteErr as SCIMError).status).toBe(404);
-    expect(SCIM.isSCIMDeactivated(fx.usersById.get(ada.id)!)).toBe(false);
+    expect((deleteErr as ScimError).status).toBe(404);
+    expect(Scim.isScimDeactivated(fx.usersById.get(ada.id)!)).toBe(false);
   });
 
   it("finds a user by the one filter Okta and Entra actually send", async () => {
@@ -423,8 +423,8 @@ describe("SCIMService — users", () => {
 
     for (const filter of ['displayName eq "Ada"', 'userName co "ada"', "userName pr"]) {
       const err = await fx.run(Effect.flip(fx.service.listUsers(fx.a.connection, { filter })));
-      expect((err as SCIMError).status).toBe(400);
-      expect((err as SCIMError).scimType).toBe("invalidFilter");
+      expect((err as ScimError).status).toBe(400);
+      expect((err as ScimError).scimType).toBe("invalidFilter");
     }
   });
 
@@ -572,7 +572,7 @@ describe("SCIMService — users", () => {
         ]),
       ),
     );
-    expect((err as SCIMError).status).toBe(409);
+    expect((err as ScimError).status).toBe(409);
   });
 
   it("rejects an unsupported patch path with 400 invalidPath", async () => {
@@ -586,8 +586,8 @@ describe("SCIMService — users", () => {
         ]),
       ),
     );
-    expect((err as SCIMError).status).toBe(400);
-    expect((err as SCIMError).scimType).toBe("invalidPath");
+    expect((err as ScimError).status).toBe(400);
+    expect((err as ScimError).scimType).toBe("invalidPath");
   });
 
   it("replaces a user with PUT, treating emails as authoritative only when sent", async () => {
@@ -664,7 +664,7 @@ describe("SCIMService — users", () => {
   });
 });
 
-describe("SCIMService — groups", () => {
+describe("ScimService — groups", () => {
   it("maps a group onto a team and its members onto team members", async () => {
     const fx = await makeFixture();
     const ada = await fx.run(fx.service.createUser(fx.a.connection, ADA));
@@ -697,8 +697,8 @@ describe("SCIMService — groups", () => {
         }),
       ),
     );
-    expect((err as SCIMError).status).toBe(400);
-    expect((err as SCIMError).scimType).toBe("invalidValue");
+    expect((err as ScimError).status).toBe(400);
+    expect((err as ScimError).scimType).toBe("invalidValue");
   });
 
   it("cannot see or delete another organization's group", async () => {
@@ -708,9 +708,9 @@ describe("SCIMService — groups", () => {
     );
 
     const err = await fx.run(Effect.flip(fx.service.getGroup(fx.b.connection, group.id)));
-    expect((err as SCIMError).status).toBe(404);
+    expect((err as ScimError).status).toBe(404);
     const deleteErr = await fx.run(Effect.flip(fx.service.deleteGroup(fx.b.connection, group.id)));
-    expect((deleteErr as SCIMError).status).toBe(404);
+    expect((deleteErr as ScimError).status).toBe(404);
     expect(fx.teams.has(group.id)).toBe(true);
 
     expect((await fx.run(fx.service.listGroups(fx.b.connection))).totalResults).toBe(0);
@@ -802,7 +802,7 @@ describe("SCIMService — groups", () => {
     const badFilter = await fx.run(
       Effect.flip(fx.service.listGroups(fx.a.connection, { filter: 'members eq "x"' })),
     );
-    expect((badFilter as SCIMError).scimType).toBe("invalidFilter");
+    expect((badFilter as ScimError).scimType).toBe("invalidFilter");
 
     await fx.run(fx.service.deleteGroup(fx.a.connection, engineering.id));
     expect(fx.teams.has(engineering.id)).toBe(false);
@@ -820,7 +820,7 @@ describe("SCIMService — groups", () => {
   });
 });
 
-describe("SCIMDeactivatedPlugin", () => {
+describe("ScimDeactivatedPlugin", () => {
   it("fails session validation for a deactivated user and passes everyone else", async () => {
     const active: Types.SessionWithUser = {
       session: {
@@ -843,7 +843,7 @@ describe("SCIMDeactivatedPlugin", () => {
       user: { ...active.user, attributes: { [SCIM_DEACTIVATED_ATTRIBUTE]: true } },
     };
 
-    const layer = SCIMDeactivatedPlugin.pipe(Layer.provide(Hooks.Default));
+    const layer = ScimDeactivatedPlugin.pipe(Layer.provide(Hooks.Default));
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const hooks = yield* Hooks;
@@ -862,7 +862,7 @@ describe("SCIMDeactivatedPlugin", () => {
 // --- HTTP layer --------------------------------------------------------------
 
 /** A web handler wired with the SCIM endpoints over the in-memory stores. */
-const makeHttpFixture = async (config: SCIM.SCIMConfig = {}) => {
+const makeHttpFixture = async (config: Scim.ScimConfig = {}) => {
   const stores = makeStores();
 
   // Members the SCIM handlers never touch, but `AuthServices` requires.
@@ -877,15 +877,15 @@ const makeHttpFixture = async (config: SCIM.SCIMConfig = {}) => {
     Hooks.Default,
   );
 
-  const scimServiceLayer = SCIMService.layer(config).pipe(Layer.provide(stores.layer));
-  const withSCIM = Layer.mergeAll(
+  const scimServiceLayer = ScimService.layer(config).pipe(Layer.provide(stores.layer));
+  const withScim = Layer.mergeAll(
     stores.layer,
     base,
     scimServiceLayer,
   ) as Layer.Layer<AuthServices>;
-  const withoutSCIM = Layer.mergeAll(stores.layer, base) as Layer.Layer<AuthServices>;
+  const withoutScim = Layer.mergeAll(stores.layer, base) as Layer.Layer<AuthServices>;
 
-  const service = await Effect.runPromise(SCIM.make(config).pipe(Effect.provide(stores.layer)));
+  const service = await Effect.runPromise(Scim.make(config).pipe(Effect.provide(stores.layer)));
   const connection = await Effect.runPromise(service.createConnection(ORG_A));
   const other = await Effect.runPromise(service.createConnection(ORG_B));
 
@@ -893,8 +893,8 @@ const makeHttpFixture = async (config: SCIM.SCIMConfig = {}) => {
     ...stores,
     token: connection.token,
     otherToken: other.token,
-    handler: HTTPServer.make({ services: withSCIM, cookie: { secure: false } }).handler,
-    handlerWithoutSCIM: HTTPServer.make({ services: withoutSCIM, cookie: { secure: false } })
+    handler: HttpServer.make({ services: withScim, cookie: { secure: false } }).handler,
+    handlerWithoutScim: HttpServer.make({ services: withoutScim, cookie: { secure: false } })
       .handler,
   };
 };
@@ -959,7 +959,7 @@ describe("HTTP SCIM endpoints", () => {
 
   it("returns 404 in SCIM's error shape when provisioning is not configured", async () => {
     const fx = await makeHttpFixture();
-    const res = await fx.handlerWithoutSCIM(scimReq("GET", "/Users", { token: fx.token }));
+    const res = await fx.handlerWithoutScim(scimReq("GET", "/Users", { token: fx.token }));
     expect(res.status).toBe(404);
     const body = (await res.json()) as ScimErrorBody;
     expect(body.status).toBe("404");

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { Layer } from "effect";
 import { getOpenApiSpec } from "./HttpApi.ts";
 import { type AuthServices } from "./HttpServer.ts";
-import * as HTTPServer from "./HttpServer.ts";
+import * as HttpServer from "./HttpServer.ts";
 import { SessionService } from "../SessionService.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { IdentifierStore } from "../Identifier.ts";
@@ -168,9 +168,9 @@ describe("getOpenApiSpec", () => {
   });
 });
 
-describe("HTTPServer.make docs routes", () => {
+describe("HttpServer.make docs routes", () => {
   it("serves openapi.json and the reference UI when docs are enabled", async () => {
-    const { handler, dispose } = HTTPServer.make({
+    const { handler, dispose } = HttpServer.make({
       services: stubServices(),
       prefix: "/api/auth",
       docs: true,
@@ -195,7 +195,7 @@ describe("HTTPServer.make docs routes", () => {
   });
 
   it("serves docs at the root when no prefix is configured", async () => {
-    const { handler, dispose } = HTTPServer.make({ services: stubServices(), docs: true });
+    const { handler, dispose } = HttpServer.make({ services: stubServices(), docs: true });
     try {
       const res = await handler(new Request("http://test/openapi.json"));
       expect(res.status).toBe(200);
@@ -205,7 +205,7 @@ describe("HTTPServer.make docs routes", () => {
   });
 
   it("does not expose docs routes when docs are disabled", async () => {
-    const { handler, dispose } = HTTPServer.make({
+    const { handler, dispose } = HttpServer.make({
       services: stubServices(),
       prefix: "/api/auth",
     });

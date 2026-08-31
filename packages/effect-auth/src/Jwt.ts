@@ -37,7 +37,7 @@ import * as Obs from "./Observability.ts";
 /**
  * JWT error
  */
-export class JWTError extends Data.TaggedError("JWTError")<{
+export class JwtError extends Data.TaggedError("JwtError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
@@ -45,7 +45,7 @@ export class JWTError extends Data.TaggedError("JWTError")<{
 /**
  * Supported signing algorithms
  */
-export type JWTAlgorithm = "ES256" | "EdDSA";
+export type JwtAlgorithm = "ES256" | "EdDSA";
 
 /**
  * A signing key pair.
@@ -55,10 +55,10 @@ export type JWTAlgorithm = "ES256" | "EdDSA";
  * private key — encrypt it at rest in production; the library stores/reads
  * it as-is.
  */
-export interface JWTKeyPair {
+export interface JwtKeyPair {
   /** Key id (`kid`), embedded in token headers and the JWKS */
   readonly id: string;
-  readonly algorithm: JWTAlgorithm;
+  readonly algorithm: JwtAlgorithm;
   /** Public key in JWK form (no private material) */
   readonly publicKeyJwk: Record<string, unknown>;
   /** PKCS#8 PEM private key — encrypt at rest in production */
@@ -69,21 +69,21 @@ export interface JWTKeyPair {
 /**
  * Storage interface for JWT signing keys
  */
-export class JWTKeyStore extends Context.Service<
-  JWTKeyStore,
+export class JwtKeyStore extends Context.Service<
+  JwtKeyStore,
   {
     /** The key pair new tokens should be signed with, or null when none exists */
-    readonly getActive: () => Effect.Effect<JWTKeyPair | null, Errors.AuthError>;
-    readonly create: (pair: JWTKeyPair) => Effect.Effect<JWTKeyPair, Errors.AuthError>;
+    readonly getActive: () => Effect.Effect<JwtKeyPair | null, Errors.AuthError>;
+    readonly create: (pair: JwtKeyPair) => Effect.Effect<JwtKeyPair, Errors.AuthError>;
     /** Every known key pair (verification matches tokens by `kid`) */
-    readonly list: () => Effect.Effect<readonly JWTKeyPair[], Errors.AuthError>;
+    readonly list: () => Effect.Effect<readonly JwtKeyPair[], Errors.AuthError>;
   }
->()("@effect-auth/JWTKeyStore") {}
+>()("@effect-auth/JwtKeyStore") {}
 
 /**
  * JWT service configuration
  */
-export interface JWTConfig {
+export interface JwtConfig {
   /** Value of the `iss` claim; verification requires an exact match */
   readonly issuer: string;
   /** Value of the `aud` claim; when set, verification requires it */
@@ -91,7 +91,7 @@ export interface JWTConfig {
   /** Token lifetime in milliseconds (default: 15 minutes) */
   readonly expiresIn?: number;
   /** Signing algorithm for newly generated keys (default: "ES256") */
-  readonly algorithm?: JWTAlgorithm;
+  readonly algorithm?: JwtAlgorithm;
   /** Derive the `sub` claim from the user (default: `user.id`) */
   readonly getSubject?: (user: Types.User) => string;
   /** Extra claims merged into every token's payload */
@@ -105,7 +105,7 @@ export interface JWTConfig {
   readonly clockSkewLeeway?: number;
   /**
    * Opt-in encryption-at-rest for the PKCS#8 PEM private key stored in
-   * {@link JWTKeyStore}. The store sees only ciphertext; plaintext is only
+   * {@link JwtKeyStore}. The store sees only ciphertext; plaintext is only
    * ever held in memory during signing.
    *
    * Pass `{ secret }` to use the built-in AES-256-GCM cipher (key derived
@@ -124,7 +124,7 @@ export interface JWTConfig {
 /**
  * A signed token plus its expiry (Unix ms).
  */
-export interface JWTSignResult {
+export interface JwtSignResult {
   readonly token: string;
   readonly expiresAt: number;
 }
@@ -139,8 +139,8 @@ export interface Jwks {
 /**
  * JWT service
  */
-export class JWTService extends Context.Service<
-  JWTService,
+export class JwtService extends Context.Service<
+  JwtService,
   {
     /**
      * Sign a JWT for a user. The header is `{ alg, kid, typ: "JWT" }`; the
@@ -151,17 +151,17 @@ export class JWTService extends Context.Service<
     readonly sign: (
       user: Types.User,
       extraClaims?: Record<string, unknown>,
-    ) => Effect.Effect<JWTSignResult, JWTError | Errors.AuthError>;
+    ) => Effect.Effect<JwtSignResult, JwtError | Errors.AuthError>;
 
     /**
      * Verify a compact JWS and return its decoded payload. Validates the
      * signature against the stored key whose `kid` matches the header, then
      * checks `exp`, `nbf`, `iss`, and (when configured) `aud`. Fails with
-     * {@link JWTError} on any mismatch.
+     * {@link JwtError} on any mismatch.
      */
     readonly verify: (
       token: string,
-    ) => Effect.Effect<Record<string, unknown>, JWTError | Errors.AuthError>;
+    ) => Effect.Effect<Record<string, unknown>, JwtError | Errors.AuthError>;
 
     /**
      * The JWKS document containing every stored public key (with `kid`,
@@ -170,12 +170,12 @@ export class JWTService extends Context.Service<
      */
     readonly getJwks: () => Effect.Effect<Jwks, Errors.AuthError>;
   }
->()("@effect-auth/JWTService") {
+>()("@effect-auth/JwtService") {
   /**
    * Construct a Layer providing this service.
    */
-  static readonly layer = (config: JWTConfig) =>
-    Layer.effect(JWTService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
+  static readonly layer = (config: JwtConfig) =>
+    Layer.effect(JwtService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 
   /**
    * Construct a Layer from environment variables via {@link jwtServiceConfig}.
@@ -185,7 +185,7 @@ export class JWTService extends Context.Service<
    * `JWT_CLOCK_SKEW_LEEWAY_MS`, `JWT_ENCRYPT_PRIVATE_KEY_SECRET`.
    */
   static readonly layerFromEnv = Layer.effect(
-    JWTService,
+    JwtService,
     Effect.gen(function* () {
       const cfg = yield* jwtServiceConfig;
       return yield* make({
@@ -201,7 +201,7 @@ export class JWTService extends Context.Service<
 }
 
 /**
- * Effect `Config` for {@link JWTConfig}.
+ * Effect `Config` for {@link JwtConfig}.
  *
  * Required env vars: `JWT_ISSUER`.
  * Optional: `JWT_AUDIENCE`, `JWT_EXPIRES_IN_MS`, `JWT_ALGORITHM`,
@@ -212,7 +212,7 @@ export const jwtServiceConfig = Config.all({
   audience: Config.string("JWT_AUDIENCE").pipe(Config.orElse(() => Config.succeed(undefined))),
   expiresIn: Config.int("JWT_EXPIRES_IN_MS").pipe(Config.orElse(() => Config.succeed(undefined))),
   algorithm: Config.string("JWT_ALGORITHM").pipe(
-    Config.map((s) => s as JWTAlgorithm),
+    Config.map((s) => s as JwtAlgorithm),
     Config.orElse(() => Config.succeed(undefined)),
   ),
   clockSkewLeeway: Config.int("JWT_CLOCK_SKEW_LEEWAY_MS").pipe(
@@ -240,17 +240,17 @@ const base64UrlDecode = (segment: string): Buffer => Buffer.from(segment, "base6
  * is exported as a JWK, the private key as PKCS#8 PEM.
  */
 export const generateKeyPair = (
-  algorithm: JWTAlgorithm,
+  algorithm: JwtAlgorithm,
   crypto: Crypto.Crypto,
-): Effect.Effect<JWTKeyPair, JWTError> =>
+): Effect.Effect<JwtKeyPair, JwtError> =>
   Effect.gen(function* () {
     const id = yield* crypto.randomUUIDv4.pipe(
       Effect.mapError(
-        (cause) => new JWTError({ message: `Failed to generate ${algorithm} key id`, cause }),
+        (cause) => new JwtError({ message: `Failed to generate ${algorithm} key id`, cause }),
       ),
     );
     return yield* Effect.try({
-      try: (): JWTKeyPair => {
+      try: (): JwtKeyPair => {
         const { publicKeyJwk, privateKeyPem } = Cipher.generateJwsKeyPair(algorithm);
         return {
           id,
@@ -261,7 +261,7 @@ export const generateKeyPair = (
         };
       },
       catch: (error) =>
-        new JWTError({
+        new JwtError({
           message: `Failed to generate ${algorithm} key pair`,
           cause: error,
         }),
@@ -273,11 +273,11 @@ export const generateKeyPair = (
  * raw JOSE `r || s` form (Node defaults to DER, which JWS does not accept);
  * Ed25519 signs with a null digest.
  */
-const signBytes = (pair: JWTKeyPair, data: Buffer): Effect.Effect<Buffer, JWTError> =>
+const signBytes = (pair: JwtKeyPair, data: Buffer): Effect.Effect<Buffer, JwtError> =>
   Effect.try({
     try: () => Buffer.from(Cipher.signJws(pair.algorithm, data, pair.privateKeyPem)),
     catch: (error) =>
-      new JWTError({
+      new JwtError({
         message: "Failed to sign token",
         cause: error,
       }),
@@ -288,14 +288,14 @@ const signBytes = (pair: JWTKeyPair, data: Buffer): Effect.Effect<Buffer, JWTErr
  */
 const verifyBytesFromJwk = (
   jwk: Record<string, unknown>,
-  algorithm: JWTAlgorithm,
+  algorithm: JwtAlgorithm,
   data: Buffer,
   signature: Buffer,
-): Effect.Effect<boolean, JWTError> =>
+): Effect.Effect<boolean, JwtError> =>
   Effect.try({
     try: () => Cipher.verifyJws(algorithm, data, signature, jwk),
     catch: (error) =>
-      new JWTError({
+      new JwtError({
         message: "Failed to verify token signature",
         cause: error,
       }),
@@ -304,7 +304,7 @@ const verifyBytesFromJwk = (
 const decodeJsonSegment = (
   segment: string,
   what: string,
-): Effect.Effect<Record<string, unknown>, JWTError> =>
+): Effect.Effect<Record<string, unknown>, JwtError> =>
   Effect.try({
     try: () => {
       const parsed: unknown = JSON.parse(base64UrlDecode(segment).toString("utf8"));
@@ -314,7 +314,7 @@ const decodeJsonSegment = (
       return parsed as Record<string, unknown>;
     },
     catch: (error) =>
-      new JWTError({
+      new JwtError({
         message: `Malformed JWT ${what}`,
         cause: error,
       }),
@@ -324,8 +324,8 @@ const decodeJsonSegment = (
  * Create a JWT service
  */
 export const make = (
-  config: JWTConfig,
-): Effect.Effect<typeof JWTService.Service, never, JWTKeyStore | Crypto.Crypto> =>
+  config: JwtConfig,
+): Effect.Effect<typeof JwtService.Service, never, JwtKeyStore | Crypto.Crypto> =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 15 * 60 * 1000; // 15 minutes default
     const algorithm = config.algorithm ?? "ES256";
@@ -338,13 +338,13 @@ export const make = (
         : Cipher.aes256GcmCipher(Redacted.value(config.encryptPrivateKey.secret))
       : null;
 
-    const store = yield* JWTKeyStore;
+    const store = yield* JwtKeyStore;
     const crypto = yield* Crypto.Crypto;
 
     // Ref holding an in-progress key-creation Deferred; null when idle.
     // Prevents duplicate active keys when concurrent fibers both call sign()
     // before any key exists (both see getActive() → null).
-    type PendingDeferred = Deferred.Deferred<JWTKeyPair, JWTError | Errors.AuthError>;
+    type PendingDeferred = Deferred.Deferred<JwtKeyPair, JwtError | Errors.AuthError>;
     const pendingCreate = yield* Ref.make<PendingDeferred | null>(null);
 
     /**
@@ -354,7 +354,7 @@ export const make = (
      * Concurrent first-call fibers are serialized through a Deferred so only
      * one key is generated regardless of concurrency.
      */
-    const getOrCreateActiveKey: Effect.Effect<JWTKeyPair, JWTError | Errors.AuthError> = Effect.gen(
+    const getOrCreateActiveKey: Effect.Effect<JwtKeyPair, JwtError | Errors.AuthError> = Effect.gen(
       function* () {
         const active = yield* store.getActive();
         if (active) {
@@ -362,7 +362,7 @@ export const make = (
           return { ...active, privateKeyPem: yield* cipher.decrypt(active.privateKeyPem) };
         }
 
-        const deferred = yield* Deferred.make<JWTKeyPair, JWTError | Errors.AuthError>();
+        const deferred = yield* Deferred.make<JwtKeyPair, JwtError | Errors.AuthError>();
 
         // Atomically claim leadership or attach to an in-progress creation.
         const existing: PendingDeferred | null = yield* Ref.modify(
@@ -400,7 +400,7 @@ export const make = (
     );
 
     return {
-      sign: Effect.fn("JWTService.sign")(
+      sign: Effect.fn("JwtService.sign")(
         (user: Types.User, extraClaims?: Record<string, unknown>) =>
           Effect.gen(function* () {
             const pair = yield* getOrCreateActiveKey;
@@ -433,16 +433,16 @@ export const make = (
             return {
               token: `${signingInput}.${base64UrlEncode(signature)}`,
               expiresAt: exp * 1000,
-            } satisfies JWTSignResult;
+            } satisfies JwtSignResult;
           }).pipe(Effect.withSpan("effect-auth.token.sign")),
       ),
 
-      verify: Effect.fn("JWTService.verify")((token: string) =>
+      verify: Effect.fn("JwtService.verify")((token: string) =>
         Effect.gen(function* () {
           const segments = token.split(".");
           if (segments.length !== 3) {
             return yield* Effect.fail(
-              new JWTError({
+              new JwtError({
                 message: "Malformed JWT: expected three dot-separated segments",
               }),
             );
@@ -459,7 +459,7 @@ export const make = (
           const pair = keys.find((candidate) => candidate.id === header["kid"]);
           if (!pair) {
             return yield* Effect.fail(
-              new JWTError({
+              new JwtError({
                 message: "Unknown signing key (kid not found)",
               }),
             );
@@ -467,7 +467,7 @@ export const make = (
 
           if (header["alg"] !== pair.algorithm) {
             return yield* Effect.fail(
-              new JWTError({
+              new JwtError({
                 message: "Token algorithm does not match the signing key",
               }),
             );
@@ -481,7 +481,7 @@ export const make = (
           );
           if (!validSignature) {
             return yield* Effect.fail(
-              new JWTError({
+              new JwtError({
                 message: "Invalid token signature",
               }),
             );
@@ -492,7 +492,7 @@ export const make = (
           const exp = payload["exp"];
           if (typeof exp !== "number" || Date.now() >= exp * 1000 + leewayMs) {
             return yield* Effect.fail(
-              new JWTError({
+              new JwtError({
                 message: "Token has expired",
               }),
             );
@@ -501,7 +501,7 @@ export const make = (
           const nbf = payload["nbf"];
           if (typeof nbf === "number" && Date.now() < nbf * 1000 - leewayMs) {
             return yield* Effect.fail(
-              new JWTError({
+              new JwtError({
                 message: "Token not yet valid",
               }),
             );
@@ -509,7 +509,7 @@ export const make = (
 
           if (payload["iss"] !== config.issuer) {
             return yield* Effect.fail(
-              new JWTError({
+              new JwtError({
                 message: "Token issuer mismatch",
               }),
             );
@@ -522,7 +522,7 @@ export const make = (
               : aud === config.audience;
             if (!matches) {
               return yield* Effect.fail(
-                new JWTError({
+                new JwtError({
                   message: "Token audience mismatch",
                 }),
               );
@@ -537,7 +537,7 @@ export const make = (
         ),
       ),
 
-      getJwks: Effect.fn("JWTService.getJwks")(function* () {
+      getJwks: Effect.fn("JwtService.getJwks")(function* () {
         const keys = yield* store.list();
 
         return {
@@ -589,7 +589,7 @@ export class RemoteJwksVerifier extends Context.Service<
      * token header is absent in the cached JWKS, the cache is refreshed once to
      * handle key rotation before failing.
      */
-    readonly verify: (token: string) => Effect.Effect<Record<string, unknown>, JWTError>;
+    readonly verify: (token: string) => Effect.Effect<Record<string, unknown>, JwtError>;
   }
 >()("@effect-auth/RemoteJwksVerifier") {
   static readonly layer = (config: RemoteJwksConfig) =>
@@ -601,7 +601,7 @@ interface JwksCache {
   readonly fetchedAt: number;
 }
 
-const fetchJwks = (uri: string): Effect.Effect<JwksCache, JWTError> =>
+const fetchJwks = (uri: string): Effect.Effect<JwksCache, JwtError> =>
   Effect.tryPromise({
     try: () =>
       fetch(uri, { headers: { Accept: "application/json" } })
@@ -610,7 +610,7 @@ const fetchJwks = (uri: string): Effect.Effect<JwksCache, JWTError> =>
           return res.json() as Promise<{ keys: Record<string, unknown>[] }>;
         })
         .then((data) => ({ keys: data.keys, fetchedAt: Date.now() })),
-    catch: (error) => new JWTError({ message: "Failed to fetch JWKS", cause: error }),
+    catch: (error) => new JwtError({ message: "Failed to fetch JWKS", cause: error }),
   });
 
 /**
@@ -628,12 +628,12 @@ export const remoteJwksVerifier = (
     const cacheRef = yield* Ref.make<JwksCache | null>(null);
 
     // Deduplicates concurrent JWKS fetches — only one HTTP request in-flight.
-    type FetchDeferred = Deferred.Deferred<JwksCache, JWTError>;
+    type FetchDeferred = Deferred.Deferred<JwksCache, JwtError>;
     const pendingFetch = yield* Ref.make<FetchDeferred | null>(null);
 
     const getKeys = (
       forceRefresh: boolean,
-    ): Effect.Effect<readonly Record<string, unknown>[], JWTError> =>
+    ): Effect.Effect<readonly Record<string, unknown>[], JwtError> =>
       Effect.gen(function* () {
         if (!forceRefresh) {
           const cached = yield* Ref.get(cacheRef);
@@ -642,7 +642,7 @@ export const remoteJwksVerifier = (
           }
         }
 
-        const deferred = yield* Deferred.make<JwksCache, JWTError>();
+        const deferred = yield* Deferred.make<JwksCache, JwtError>();
         const existing: FetchDeferred | null = yield* Ref.modify(
           pendingFetch,
           (current): readonly [FetchDeferred | null, FetchDeferred | null] =>
@@ -676,7 +676,7 @@ export const remoteJwksVerifier = (
           const segments = token.split(".");
           if (segments.length !== 3) {
             return yield* Effect.fail(
-              new JWTError({ message: "Malformed JWT: expected three dot-separated segments" }),
+              new JwtError({ message: "Malformed JWT: expected three dot-separated segments" }),
             );
           }
           const [headerSegment, payloadSegment, signatureSegment] = segments as [
@@ -690,7 +690,7 @@ export const remoteJwksVerifier = (
           const alg = header["alg"];
           if (alg !== "ES256" && alg !== "EdDSA") {
             return yield* Effect.fail(
-              new JWTError({ message: `Unsupported or missing algorithm: ${String(alg)}` }),
+              new JwtError({ message: `Unsupported or missing algorithm: ${String(alg)}` }),
             );
           }
 
@@ -707,42 +707,42 @@ export const remoteJwksVerifier = (
 
           if (!matchedKey) {
             return yield* Effect.fail(
-              new JWTError({ message: "Unknown signing key (kid not found in remote JWKS)" }),
+              new JwtError({ message: "Unknown signing key (kid not found in remote JWKS)" }),
             );
           }
 
           // If the JWKS key carries an alg field it must match the header.
           if (matchedKey["alg"] !== undefined && matchedKey["alg"] !== alg) {
             return yield* Effect.fail(
-              new JWTError({ message: "Token algorithm does not match the signing key" }),
+              new JwtError({ message: "Token algorithm does not match the signing key" }),
             );
           }
 
           const validSignature = yield* verifyBytesFromJwk(
             matchedKey,
-            alg as JWTAlgorithm,
+            alg as JwtAlgorithm,
             Buffer.from(`${headerSegment}.${payloadSegment}`, "utf8"),
             base64UrlDecode(signatureSegment),
           );
 
           if (!validSignature) {
-            return yield* Effect.fail(new JWTError({ message: "Invalid token signature" }));
+            return yield* Effect.fail(new JwtError({ message: "Invalid token signature" }));
           }
 
           const payload = yield* decodeJsonSegment(payloadSegment, "payload");
 
           const exp = payload["exp"];
           if (typeof exp !== "number" || Date.now() >= exp * 1000 + leewayMs) {
-            return yield* Effect.fail(new JWTError({ message: "Token has expired" }));
+            return yield* Effect.fail(new JwtError({ message: "Token has expired" }));
           }
 
           const nbf = payload["nbf"];
           if (typeof nbf === "number" && Date.now() < nbf * 1000 - leewayMs) {
-            return yield* Effect.fail(new JWTError({ message: "Token not yet valid" }));
+            return yield* Effect.fail(new JwtError({ message: "Token not yet valid" }));
           }
 
           if (payload["iss"] !== config.issuer) {
-            return yield* Effect.fail(new JWTError({ message: "Token issuer mismatch" }));
+            return yield* Effect.fail(new JwtError({ message: "Token issuer mismatch" }));
           }
 
           if (config.audience !== undefined) {
@@ -751,7 +751,7 @@ export const remoteJwksVerifier = (
               ? aud.includes(config.audience)
               : aud === config.audience;
             if (!matches) {
-              return yield* Effect.fail(new JWTError({ message: "Token audience mismatch" }));
+              return yield* Effect.fail(new JwtError({ message: "Token audience mismatch" }));
             }
           }
 

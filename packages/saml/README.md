@@ -3,7 +3,7 @@
 SAML 2.0 service-provider support for
 [`@thomasfosterau/effect-auth`](../effect-auth), as an Effect `Layer`.
 
-Core effect-auth declares the `SAMLVerifier` contract but implements none of it:
+Core effect-auth declares the `SamlVerifier` contract but implements none of it:
 XML canonicalisation, XML-DSig verification and DEFLATE are not things a
 dependency-free core can carry. This package is the implementation, over
 [`@node-saml/node-saml`](https://github.com/node-saml/node-saml) — the same
@@ -24,24 +24,24 @@ npm install @thomasfosterau/effect-auth-saml
 
 ```ts
 import { Layer } from "effect";
-import * as SAML from "@thomasfosterau/effect-auth-saml";
-import { SAMLReplayStore, SSOService, memorySAMLReplayStore } from "@thomasfosterau/effect-auth";
+import * as Saml from "@thomasfosterau/effect-auth-saml";
+import { SamlReplayStore, SsoService, memorySamlReplayStore } from "@thomasfosterau/effect-auth";
 
 const samlSupport = Layer.mergeAll(
-  SAML.layer,
-  Layer.succeed(SAMLReplayStore)(memorySAMLReplayStore()),
+  Saml.layer,
+  Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
 );
 
-const ssoLayer = SSOService.layer().pipe(Layer.provide(samlSupport));
+const ssoLayer = SsoService.layer().pipe(Layer.provide(samlSupport));
 ```
 
 Register a connection, then start and finish sign-ins:
 
 ```ts
 Effect.gen(function* () {
-  const sso = yield* SSOService;
+  const sso = yield* SsoService;
 
-  const provider = yield* sso.registerSAMLProvider(adminUserId, {
+  const provider = yield* sso.registerSamlProvider(adminUserId, {
     protocol: "saml",
     domain: "acme.test",
     entityId: "https://idp.acme.test/metadata", // the IdP's Issuer
@@ -56,12 +56,12 @@ Effect.gen(function* () {
   const { url, state } = yield* sso.signIn({ email: "worker@acme.test" });
 
   // …then, at the ACS endpoint:
-  return yield* sso.handleSAMLCallback(provider.id, SAMLResponse, RelayState);
+  return yield* sso.handleSamlCallback(provider.id, SAMLResponse, RelayState);
 });
 ```
 
-`memorySAMLReplayStore` is single-process. Behind more than one instance,
-implement `SAMLReplayStore` against shared storage — a replay defence that only
+`memorySamlReplayStore` is single-process. Behind more than one instance,
+implement `SamlReplayStore` against shared storage — a replay defence that only
 remembers what one process saw is not a replay defence. Both of its operations
 must be atomic; the tag's docs spell out what that means.
 
@@ -87,7 +87,7 @@ rejection, not a warning:
 | Signature/digest algorithms on an allow-list (SHA-256+ by default)    | this package               |
 | HMAC signature methods refused outright                               | this package               |
 | Encrypted assertions refused with an actionable message               | this package               |
-| `AuthnRequest` and `Assertion` ids each spendable once                | core `SSOService`          |
+| `AuthnRequest` and `Assertion` ids each spendable once                | core `SsoService`          |
 
 `src/Verifier.test.ts` reproduces the corresponding attack shapes against
 hand-built, signed XML fixtures.

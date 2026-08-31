@@ -1,5 +1,5 @@
 /**
- * {@link SMSSender} adapter for [Twilio](https://www.twilio.com), talking to
+ * {@link SmsSender} adapter for [Twilio](https://www.twilio.com), talking to
  * Twilio's Messages API (`POST /Accounts/:sid/Messages.json`) with plain
  * `fetch` — no SDK dependency.
  *
@@ -11,13 +11,13 @@
  * @module twilio/twilio
  */
 import { Effect, Layer, Redacted } from "effect";
-import { AuthError, SMSSender, type SMSMessage } from "@thomasfosterau/effect-auth";
+import { AuthError, SmsSender, type SmsMessage } from "@thomasfosterau/effect-auth";
 
 // ---------------------------------------------------------------------------
 // Default renderer
 // ---------------------------------------------------------------------------
 
-const purposeLead = (purpose: SMSMessage["purpose"]): string => {
+const purposeLead = (purpose: SmsMessage["purpose"]): string => {
   switch (purpose) {
     case "second-factor-otp":
       return "Your verification code";
@@ -32,9 +32,9 @@ const purposeLead = (purpose: SMSMessage["purpose"]): string => {
  * code" for OTP purposes) followed by the OTP or token from the message's
  * `params`. It has no branding and no localization; it's a functional
  * fallback, not a template system. Real applications should pass their own
- * `render` in {@link TwilioSMSSenderConfig}.
+ * `render` in {@link TwilioSmsSenderConfig}.
  */
-export const defaultRender = (message: SMSMessage): string => {
+export const defaultRender = (message: SmsMessage): string => {
   const lead = purposeLead(message.purpose);
   const { otp, token } = message.params;
   const value = otp ?? token;
@@ -45,8 +45,8 @@ export const defaultRender = (message: SMSMessage): string => {
 // Config
 // ---------------------------------------------------------------------------
 
-/** Configuration for {@link twilioSMSSender}. */
-export interface TwilioSMSSenderConfig {
+/** Configuration for {@link twilioSmsSender}. */
+export interface TwilioSmsSenderConfig {
   /** Twilio Account SID (starts with `AC`). */
   readonly accountSid: string;
   /** Twilio Auth Token. Wrap with `Redacted.make(...)` or read via `Config.redacted(...)`. */
@@ -57,7 +57,7 @@ export interface TwilioSMSSenderConfig {
    * Render a message into the SMS body. Defaults to {@link defaultRender};
    * supply your own for branded/localized copy.
    */
-  readonly render?: (message: SMSMessage) => string;
+  readonly render?: (message: SmsMessage) => string;
   /** Override the API base URL — for testing against a local stub. Defaults to `https://api.twilio.com`. */
   readonly baseUrl?: string;
   /** Inject a `fetch` implementation — for testing. Defaults to `globalThis.fetch`. */
@@ -94,7 +94,7 @@ const describeTwilioError = (status: number, bodyText: string): string => {
 // ---------------------------------------------------------------------------
 
 /**
- * Build an {@link SMSSender} service backed by Twilio's Messages API. Every
+ * Build an {@link SmsSender} service backed by Twilio's Messages API. Every
  * failure (network, non-2xx response) surfaces as an {@link AuthError} whose
  * `cause` carries the response `status`/`body` and, when parseable, Twilio's
  * own error `code`/`message` — the auth token is never included.
@@ -102,21 +102,21 @@ const describeTwilioError = (status: number, bodyText: string): string => {
  * @example
  * ```ts
  * import { Redacted } from "effect";
- * import { twilioSMSSender } from "@thomasfosterau/effect-auth-twilio";
+ * import { twilioSmsSender } from "@thomasfosterau/effect-auth-twilio";
  *
- * const sender = twilioSMSSender({
+ * const sender = twilioSmsSender({
  *   accountSid: process.env.TWILIO_ACCOUNT_SID!,
  *   authToken: Redacted.make(process.env.TWILIO_AUTH_TOKEN!),
  *   from: "+15551234567",
  * });
  * ```
  */
-export const twilioSMSSender = (config: TwilioSMSSenderConfig): typeof SMSSender.Service => {
+export const twilioSmsSender = (config: TwilioSmsSenderConfig): typeof SmsSender.Service => {
   const baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
   const doFetch = config.fetch ?? fetch;
   const render = config.render ?? defaultRender;
 
-  const send = (message: SMSMessage) =>
+  const send = (message: SmsMessage) =>
     Effect.gen(function* () {
       const body = render(message);
       const form = new URLSearchParams({ Body: body, From: config.from, To: message.to });
@@ -152,19 +152,19 @@ export const twilioSMSSender = (config: TwilioSMSSenderConfig): typeof SMSSender
 };
 
 /**
- * A `Layer` providing {@link SMSSender} backed by {@link twilioSMSSender}.
+ * A `Layer` providing {@link SmsSender} backed by {@link twilioSmsSender}.
  *
  * @example
  * ```ts
  * import { Redacted } from "effect";
  * import { layer as twilioLayer } from "@thomasfosterau/effect-auth-twilio";
  *
- * const SMSLayer = twilioLayer({
+ * const SmsLayer = twilioLayer({
  *   accountSid: process.env.TWILIO_ACCOUNT_SID!,
  *   authToken: Redacted.make(process.env.TWILIO_AUTH_TOKEN!),
  *   from: "+15551234567",
  * });
  * ```
  */
-export const layer = (config: TwilioSMSSenderConfig): Layer.Layer<SMSSender> =>
-  Layer.succeed(SMSSender, twilioSMSSender(config));
+export const layer = (config: TwilioSmsSenderConfig): Layer.Layer<SmsSender> =>
+  Layer.succeed(SmsSender, twilioSmsSender(config));

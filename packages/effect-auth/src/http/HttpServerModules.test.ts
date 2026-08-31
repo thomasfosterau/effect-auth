@@ -2,7 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import * as Cipher from "../Cipher.ts";
 import { type AuthServices } from "./HttpServer.ts";
-import * as HTTPServer from "./HttpServer.ts";
+import * as HttpServer from "./HttpServer.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import { SessionService } from "../SessionService.ts";
@@ -30,7 +30,7 @@ import {
 } from "../Organization.ts";
 import { AdminUserStore, AdminService } from "../Admin.ts";
 import { ApiKeyStore, type ApiKey, ApiKeyService } from "../ApiKey.ts";
-import { JWTKeyStore, type JWTKeyPair, JWTService } from "../JWT.ts";
+import { JwtKeyStore, type JwtKeyPair, JwtService } from "../Jwt.ts";
 import {
   IdentifierStore,
   makeIdentifier,
@@ -54,7 +54,7 @@ const makeFixture = () => {
   const teamMembers: TeamMember[] = [];
   const orgRoles = new Map<string, OrgRole>();
   const apiKeys = new Map<string, ApiKey>();
-  const jwtKeys: JWTKeyPair[] = [];
+  const jwtKeys: JwtKeyPair[] = [];
 
   const seedUser = (id: string, email: string, attributes: Record<string, unknown> = {}) => {
     const now = new Date();
@@ -278,7 +278,7 @@ const makeFixture = () => {
 
   const jwtKeyStore = {
     getActive: () => Effect.succeed(jwtKeys[0] ?? null),
-    create: (pair: JWTKeyPair) => Effect.sync(() => (jwtKeys.push(pair), pair)),
+    create: (pair: JwtKeyPair) => Effect.sync(() => (jwtKeys.push(pair), pair)),
     list: () => Effect.succeed(jwtKeys),
   };
 
@@ -308,7 +308,7 @@ const makeFixture = () => {
     Layer.succeed(OrganizationStore)(orgStore),
     Layer.succeed(AdminUserStore)(adminUserStore),
     Layer.succeed(ApiKeyStore)(apiKeyStore),
-    Layer.succeed(JWTKeyStore)(jwtKeyStore),
+    Layer.succeed(JwtKeyStore)(jwtKeyStore),
     Layer.succeed(RateLimitStore)(rateLimitStore),
     Layer.succeed(IdentifierStore)(memoryIdentifierStore(identifierRecords)),
     Hooks.Default,
@@ -342,7 +342,7 @@ const makeFixture = () => {
     Layer.provide(stage1),
   );
   const apiKeyServiceLayer = ApiKeyService.layer().pipe(Layer.provide(stage1));
-  const jwtServiceLayer = JWTService.layer({ issuer: "https://auth.test" }).pipe(
+  const jwtServiceLayer = JwtService.layer({ issuer: "https://auth.test" }).pipe(
     Layer.provide(stage1),
   );
 
@@ -353,7 +353,7 @@ const makeFixture = () => {
     apiKeyServiceLayer,
     jwtServiceLayer,
   ) as Layer.Layer<AuthServices>;
-  const { handler } = HTTPServer.make({ services, cookie: { secure: false } });
+  const { handler } = HttpServer.make({ services, cookie: { secure: false } });
 
   return { handler, seedUser, makeSession, sessions };
 };

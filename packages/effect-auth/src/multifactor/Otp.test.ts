@@ -1,25 +1,25 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect } from "effect";
-import * as OTP from "./OTP.ts";
+import * as Otp from "./Otp.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 
 describe("OTP Secret Generation", () => {
   it("should generate random bytes", async () => {
-    const secret = await Effect.runPromise(OTP.generateSecret(PlatformCrypto.instance, 20));
+    const secret = await Effect.runPromise(Otp.generateSecret(PlatformCrypto.instance, 20));
 
     expect(secret).toBeInstanceOf(Buffer);
     expect(secret.length).toBe(20);
   });
 
   it("should generate different secrets each time", async () => {
-    const secret1 = await Effect.runPromise(OTP.generateSecret(PlatformCrypto.instance, 20));
-    const secret2 = await Effect.runPromise(OTP.generateSecret(PlatformCrypto.instance, 20));
+    const secret1 = await Effect.runPromise(Otp.generateSecret(PlatformCrypto.instance, 20));
+    const secret2 = await Effect.runPromise(Otp.generateSecret(PlatformCrypto.instance, 20));
 
     expect(secret1.equals(secret2)).toBe(false);
   });
 
   it("should generate base32-encoded secret", async () => {
-    const secret = await Effect.runPromise(OTP.generateBase32Secret(PlatformCrypto.instance, 20));
+    const secret = await Effect.runPromise(Otp.generateBase32Secret(PlatformCrypto.instance, 20));
 
     expect(typeof secret).toBe("string");
     expect(secret.length).toBeGreaterThan(0);
@@ -31,16 +31,16 @@ describe("OTP Secret Generation", () => {
 describe("Base32 Encoding/Decoding", () => {
   it("should encode and decode correctly", async () => {
     const original = Buffer.from("Hello, World!");
-    const encoded = OTP.encodeBase32(original);
-    const decoded = await Effect.runPromise(OTP.decodeBase32(encoded));
+    const encoded = Otp.encodeBase32(original);
+    const decoded = await Effect.runPromise(Otp.decodeBase32(encoded));
 
     expect(decoded.toString()).toBe(original.toString());
   });
 
   it("should handle empty buffer", async () => {
     const original = Buffer.from("");
-    const encoded = OTP.encodeBase32(original);
-    const decoded = await Effect.runPromise(OTP.decodeBase32(encoded));
+    const encoded = Otp.encodeBase32(original);
+    const decoded = await Effect.runPromise(Otp.decodeBase32(encoded));
 
     expect(decoded.toString()).toBe("");
   });
@@ -49,8 +49,8 @@ describe("Base32 Encoding/Decoding", () => {
     const uppercase = "JBSWY3DPEBLW64TMMQ======";
     const lowercase = uppercase.toLowerCase();
 
-    const decodedUpper = await Effect.runPromise(OTP.decodeBase32(uppercase));
-    const decodedLower = await Effect.runPromise(OTP.decodeBase32(lowercase));
+    const decodedUpper = await Effect.runPromise(Otp.decodeBase32(uppercase));
+    const decodedLower = await Effect.runPromise(Otp.decodeBase32(lowercase));
 
     expect(decodedUpper.equals(decodedLower)).toBe(true);
   });
@@ -59,14 +59,14 @@ describe("Base32 Encoding/Decoding", () => {
     const withPadding = "JBSWY3DPEBLW64TMMQ======";
     const withoutPadding = "JBSWY3DPEBLW64TMMQ";
 
-    const decoded1 = await Effect.runPromise(OTP.decodeBase32(withPadding));
-    const decoded2 = await Effect.runPromise(OTP.decodeBase32(withoutPadding));
+    const decoded1 = await Effect.runPromise(Otp.decodeBase32(withPadding));
+    const decoded2 = await Effect.runPromise(Otp.decodeBase32(withoutPadding));
 
     expect(decoded1.equals(decoded2)).toBe(true);
   });
 
   it("should fail on invalid base32 characters", async () => {
-    const result = await Effect.runPromise(Effect.result(OTP.decodeBase32("INVALID@CHARS")));
+    const result = await Effect.runPromise(Effect.result(Otp.decodeBase32("INVALID@CHARS")));
 
     expect(result._tag).toBe("Failure");
   });
@@ -94,7 +94,7 @@ describe("HOTP (RFC 4226)", () => {
   rfcTestVectors.forEach(({ counter, otp }) => {
     it(`should generate correct HOTP for counter ${counter}`, async () => {
       const result = await Effect.runPromise(
-        OTP.generateHOTP(rfcSecret, counter, { digits: 6, algorithm: "sha1" }),
+        Otp.generateHotp(rfcSecret, counter, { digits: 6, algorithm: "sha1" }),
       );
 
       expect(result).toBe(otp);
@@ -104,7 +104,7 @@ describe("HOTP (RFC 4226)", () => {
   it("should verify correct HOTP token", async () => {
     const token = "755224";
     const isValid = await Effect.runPromise(
-      OTP.verifyHOTP(token, rfcSecret, 0, { digits: 6, algorithm: "sha1" }),
+      Otp.verifyHotp(token, rfcSecret, 0, { digits: 6, algorithm: "sha1" }),
     );
 
     expect(isValid).toBe(true);
@@ -113,7 +113,7 @@ describe("HOTP (RFC 4226)", () => {
   it("should reject incorrect HOTP token", async () => {
     const token = "123456";
     const isValid = await Effect.runPromise(
-      OTP.verifyHOTP(token, rfcSecret, 0, { digits: 6, algorithm: "sha1" }),
+      Otp.verifyHotp(token, rfcSecret, 0, { digits: 6, algorithm: "sha1" }),
     );
 
     expect(isValid).toBe(false);
@@ -122,7 +122,7 @@ describe("HOTP (RFC 4226)", () => {
   it("should reject HOTP with wrong counter", async () => {
     const token = "755224"; // Valid for counter 0
     const isValid = await Effect.runPromise(
-      OTP.verifyHOTP(token, rfcSecret, 1, { digits: 6, algorithm: "sha1" }),
+      Otp.verifyHotp(token, rfcSecret, 1, { digits: 6, algorithm: "sha1" }),
     );
 
     expect(isValid).toBe(false);
@@ -130,16 +130,16 @@ describe("HOTP (RFC 4226)", () => {
 
   it("should support different digit lengths", async () => {
     const result = await Effect.runPromise(
-      OTP.generateHOTP(rfcSecret, 0, { digits: 8, algorithm: "sha1" }),
+      Otp.generateHotp(rfcSecret, 0, { digits: 8, algorithm: "sha1" }),
     );
 
     expect(result.length).toBe(8);
   });
 
   it("should work with base32-encoded secret", async () => {
-    const base32Secret = OTP.encodeBase32(rfcSecret);
+    const base32Secret = Otp.encodeBase32(rfcSecret);
     const result = await Effect.runPromise(
-      OTP.generateHOTP(base32Secret, 0, { digits: 6, algorithm: "sha1" }),
+      Otp.generateHotp(base32Secret, 0, { digits: 6, algorithm: "sha1" }),
     );
 
     expect(result).toBe("755224");
@@ -156,9 +156,9 @@ describe("TOTP (RFC 6238)", () => {
   // But we can test the TOTP generation and verification logic
 
   it("should generate TOTP token", async () => {
-    const base32Secret = OTP.encodeBase32(rfcSecret);
+    const base32Secret = Otp.encodeBase32(rfcSecret);
     const result = await Effect.runPromise(
-      OTP.generateTOTP(base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
+      Otp.generateTotp(base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
     );
 
     expect(result).toBeDefined();
@@ -167,71 +167,71 @@ describe("TOTP (RFC 6238)", () => {
   });
 
   it("should verify correct TOTP token", async () => {
-    const base32Secret = OTP.encodeBase32(rfcSecret);
+    const base32Secret = Otp.encodeBase32(rfcSecret);
 
     // Generate and immediately verify
     const token = await Effect.runPromise(
-      OTP.generateTOTP(base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
+      Otp.generateTotp(base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
     );
 
     const counter = await Effect.runPromise(
-      OTP.verifyTOTP(token, base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
+      Otp.verifyTotp(token, base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
     );
 
     expect(counter).not.toBeNull();
   });
 
   it("should reject incorrect TOTP token", async () => {
-    const base32Secret = OTP.encodeBase32(rfcSecret);
+    const base32Secret = Otp.encodeBase32(rfcSecret);
     const counter = await Effect.runPromise(
-      OTP.verifyTOTP("000000", base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
+      Otp.verifyTotp("000000", base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
     );
 
     expect(counter).toBeNull();
   });
 
   it("should work with default config", async () => {
-    const base32Secret = OTP.encodeBase32(rfcSecret);
-    const token = await Effect.runPromise(OTP.generateTOTP(base32Secret));
+    const base32Secret = Otp.encodeBase32(rfcSecret);
+    const token = await Effect.runPromise(Otp.generateTotp(base32Secret));
 
     expect(token.length).toBe(6);
 
-    const counter = await Effect.runPromise(OTP.verifyTOTP(token, base32Secret));
+    const counter = await Effect.runPromise(Otp.verifyTotp(token, base32Secret));
 
     expect(counter).not.toBeNull();
   });
 
   it("should support different algorithms", async () => {
-    const base32Secret = OTP.encodeBase32(rfcSecret32);
+    const base32Secret = Otp.encodeBase32(rfcSecret32);
 
     const sha256Token = await Effect.runPromise(
-      OTP.generateTOTP(base32Secret, { algorithm: "sha256" }),
+      Otp.generateTotp(base32Secret, { algorithm: "sha256" }),
     );
 
     expect(sha256Token.length).toBe(6);
   });
 
   it("should support custom period", async () => {
-    const base32Secret = OTP.encodeBase32(rfcSecret);
+    const base32Secret = Otp.encodeBase32(rfcSecret);
 
-    const token = await Effect.runPromise(OTP.generateTOTP(base32Secret, { period: 60 }));
+    const token = await Effect.runPromise(Otp.generateTotp(base32Secret, { period: 60 }));
 
-    const counter = await Effect.runPromise(OTP.verifyTOTP(token, base32Secret, { period: 60 }));
+    const counter = await Effect.runPromise(Otp.verifyTotp(token, base32Secret, { period: 60 }));
 
     expect(counter).not.toBeNull();
   });
 
   it("should verify tokens within window", async () => {
-    const base32Secret = OTP.encodeBase32(rfcSecret);
+    const base32Secret = Otp.encodeBase32(rfcSecret);
 
     // Generate token with current time
     const token = await Effect.runPromise(
-      OTP.generateTOTP(base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
+      Otp.generateTotp(base32Secret, { digits: 6, period: 30, algorithm: "sha1" }),
     );
 
     // Verify with a window of 1 (should accept previous and next time steps)
     const counter = await Effect.runPromise(
-      OTP.verifyTOTP(token, base32Secret, { digits: 6, period: 30, algorithm: "sha1", window: 1 }),
+      Otp.verifyTotp(token, base32Secret, { digits: 6, period: 30, algorithm: "sha1", window: 1 }),
     );
 
     expect(counter).not.toBeNull();
@@ -240,7 +240,7 @@ describe("TOTP (RFC 6238)", () => {
 
 describe("OTP URI Generation", () => {
   it("should generate TOTP URI", () => {
-    const uri = OTP.generateOTPURI({
+    const uri = Otp.generateOtpUri({
       type: "totp",
       label: "user@example.com",
       issuer: "MyApp",
@@ -254,7 +254,7 @@ describe("OTP URI Generation", () => {
   });
 
   it("should generate HOTP URI with counter", () => {
-    const uri = OTP.generateOTPURI({
+    const uri = Otp.generateOtpUri({
       type: "hotp",
       label: "user@example.com",
       issuer: "MyApp",
@@ -267,7 +267,7 @@ describe("OTP URI Generation", () => {
   });
 
   it("should include optional parameters", () => {
-    const uri = OTP.generateOTPURI({
+    const uri = Otp.generateOtpUri({
       type: "totp",
       label: "user@example.com",
       issuer: "MyApp",
@@ -283,7 +283,7 @@ describe("OTP URI Generation", () => {
   });
 
   it("should encode special characters in label and issuer", () => {
-    const uri = OTP.generateOTPURI({
+    const uri = Otp.generateOtpUri({
       type: "totp",
       label: "user+test@example.com",
       issuer: "My App & Co.",
@@ -295,7 +295,7 @@ describe("OTP URI Generation", () => {
   });
 
   it("should not include default values", () => {
-    const uri = OTP.generateOTPURI({
+    const uri = Otp.generateOtpUri({
       type: "totp",
       label: "user@example.com",
       issuer: "MyApp",
@@ -314,10 +314,10 @@ describe("OTP URI Generation", () => {
 describe("Integration Tests", () => {
   it("should work end-to-end for TOTP enrollment", async () => {
     // Step 1: Generate a secret
-    const secret = await Effect.runPromise(OTP.generateBase32Secret(PlatformCrypto.instance, 20));
+    const secret = await Effect.runPromise(Otp.generateBase32Secret(PlatformCrypto.instance, 20));
 
     // Step 2: Generate URI for QR code
-    const uri = OTP.generateOTPURI({
+    const uri = Otp.generateOtpUri({
       type: "totp",
       label: "test@example.com",
       issuer: "TestApp",
@@ -327,20 +327,20 @@ describe("Integration Tests", () => {
     expect(uri).toContain("otpauth://totp/");
 
     // Step 3: Generate TOTP
-    const token = await Effect.runPromise(OTP.generateTOTP(secret));
+    const token = await Effect.runPromise(Otp.generateTotp(secret));
 
     // Step 4: Verify TOTP
-    const counter = await Effect.runPromise(OTP.verifyTOTP(token, secret));
+    const counter = await Effect.runPromise(Otp.verifyTotp(token, secret));
 
     expect(counter).not.toBeNull();
   });
 
   it("should work end-to-end for HOTP enrollment", async () => {
     // Step 1: Generate a secret
-    const secret = await Effect.runPromise(OTP.generateBase32Secret(PlatformCrypto.instance, 20));
+    const secret = await Effect.runPromise(Otp.generateBase32Secret(PlatformCrypto.instance, 20));
 
     // Step 2: Generate URI for QR code with initial counter
-    const uri = OTP.generateOTPURI({
+    const uri = Otp.generateOtpUri({
       type: "hotp",
       label: "test@example.com",
       issuer: "TestApp",
@@ -352,22 +352,22 @@ describe("Integration Tests", () => {
     expect(uri).toContain("counter=0");
 
     // Step 3: Generate HOTP for counter 0
-    const token = await Effect.runPromise(OTP.generateHOTP(secret, 0));
+    const token = await Effect.runPromise(Otp.generateHotp(secret, 0));
 
     // Step 4: Verify HOTP
-    const isValid = await Effect.runPromise(OTP.verifyHOTP(token, secret, 0));
+    const isValid = await Effect.runPromise(Otp.verifyHotp(token, secret, 0));
 
     expect(isValid).toBe(true);
   });
 });
 
 describe("Input Validation and Edge Cases", () => {
-  const validSecret = OTP.encodeBase32(Buffer.from("12345678901234567890", "ascii"));
+  const validSecret = Otp.encodeBase32(Buffer.from("12345678901234567890", "ascii"));
 
   describe("generateSecret validation", () => {
     it("should reject length less than 16 bytes", async () => {
       const result = await Effect.runPromise(
-        Effect.result(OTP.generateSecret(PlatformCrypto.instance, 15)),
+        Effect.result(Otp.generateSecret(PlatformCrypto.instance, 15)),
       );
 
       expect(result._tag).toBe("Failure");
@@ -379,7 +379,7 @@ describe("Input Validation and Edge Cases", () => {
 
     it("should reject negative length", async () => {
       const result = await Effect.runPromise(
-        Effect.result(OTP.generateSecret(PlatformCrypto.instance, -1)),
+        Effect.result(Otp.generateSecret(PlatformCrypto.instance, -1)),
       );
 
       expect(result._tag).toBe("Failure");
@@ -390,7 +390,7 @@ describe("Input Validation and Edge Cases", () => {
 
     it("should reject non-integer length", async () => {
       const result = await Effect.runPromise(
-        Effect.result(OTP.generateSecret(PlatformCrypto.instance, 20.5)),
+        Effect.result(Otp.generateSecret(PlatformCrypto.instance, 20.5)),
       );
 
       expect(result._tag).toBe("Failure");
@@ -400,9 +400,9 @@ describe("Input Validation and Edge Cases", () => {
     });
   });
 
-  describe("generateHOTP validation", () => {
+  describe("generateHotp validation", () => {
     it("should reject negative counter", async () => {
-      const result = await Effect.runPromise(Effect.result(OTP.generateHOTP(validSecret, -1)));
+      const result = await Effect.runPromise(Effect.result(Otp.generateHotp(validSecret, -1)));
 
       expect(result._tag).toBe("Failure");
       if (result._tag === "Failure") {
@@ -412,7 +412,7 @@ describe("Input Validation and Edge Cases", () => {
     });
 
     it("should reject non-integer counter", async () => {
-      const result = await Effect.runPromise(Effect.result(OTP.generateHOTP(validSecret, 1.5)));
+      const result = await Effect.runPromise(Effect.result(Otp.generateHotp(validSecret, 1.5)));
 
       expect(result._tag).toBe("Failure");
       if (result._tag === "Failure") {
@@ -422,7 +422,7 @@ describe("Input Validation and Edge Cases", () => {
 
     it("should reject digits less than 6", async () => {
       const result = await Effect.runPromise(
-        Effect.result(OTP.generateHOTP(validSecret, 0, { digits: 5 })),
+        Effect.result(Otp.generateHotp(validSecret, 0, { digits: 5 })),
       );
 
       expect(result._tag).toBe("Failure");
@@ -434,7 +434,7 @@ describe("Input Validation and Edge Cases", () => {
 
     it("should reject digits greater than 8", async () => {
       const result = await Effect.runPromise(
-        Effect.result(OTP.generateHOTP(validSecret, 0, { digits: 9 })),
+        Effect.result(Otp.generateHotp(validSecret, 0, { digits: 9 })),
       );
 
       expect(result._tag).toBe("Failure");
@@ -445,7 +445,7 @@ describe("Input Validation and Edge Cases", () => {
     });
 
     it("should reject empty string secret", async () => {
-      const result = await Effect.runPromise(Effect.result(OTP.generateHOTP("", 0)));
+      const result = await Effect.runPromise(Effect.result(Otp.generateHotp("", 0)));
 
       expect(result._tag).toBe("Failure");
       if (result._tag === "Failure") {
@@ -455,7 +455,7 @@ describe("Input Validation and Edge Cases", () => {
     });
 
     it("should reject empty buffer secret", async () => {
-      const result = await Effect.runPromise(Effect.result(OTP.generateHOTP(Buffer.from([]), 0)));
+      const result = await Effect.runPromise(Effect.result(Otp.generateHotp(Buffer.from([]), 0)));
 
       expect(result._tag).toBe("Failure");
       if (result._tag === "Failure") {
@@ -465,68 +465,68 @@ describe("Input Validation and Edge Cases", () => {
     });
   });
 
-  describe("verifyHOTP validation", () => {
+  describe("verifyHotp validation", () => {
     it("should reject empty token", async () => {
-      const result = await Effect.runPromise(OTP.verifyHOTP("", validSecret, 0));
+      const result = await Effect.runPromise(Otp.verifyHotp("", validSecret, 0));
 
       expect(result).toBe(false);
     });
 
     it("should reject non-numeric token", async () => {
-      const result = await Effect.runPromise(OTP.verifyHOTP("12a456", validSecret, 0));
+      const result = await Effect.runPromise(Otp.verifyHotp("12a456", validSecret, 0));
 
       expect(result).toBe(false);
     });
 
     it("should reject token with special characters", async () => {
-      const result = await Effect.runPromise(OTP.verifyHOTP("123-456", validSecret, 0));
+      const result = await Effect.runPromise(Otp.verifyHotp("123-456", validSecret, 0));
 
       expect(result).toBe(false);
     });
   });
 
-  describe("verifyTOTP validation", () => {
+  describe("verifyTotp validation", () => {
     it("should handle zero period by using default", async () => {
-      const token = await Effect.runPromise(OTP.generateTOTP(validSecret));
+      const token = await Effect.runPromise(Otp.generateTotp(validSecret));
 
       // Verify with zero period should fall back to default (30)
-      const result = await Effect.runPromise(OTP.verifyTOTP(token, validSecret, { period: 0 }));
+      const result = await Effect.runPromise(Otp.verifyTotp(token, validSecret, { period: 0 }));
 
       expect(result).not.toBeNull();
     });
 
     it("should handle negative period by using default", async () => {
-      const token = await Effect.runPromise(OTP.generateTOTP(validSecret));
+      const token = await Effect.runPromise(Otp.generateTotp(validSecret));
 
       // Verify with negative period should fall back to default (30)
-      const result = await Effect.runPromise(OTP.verifyTOTP(token, validSecret, { period: -10 }));
+      const result = await Effect.runPromise(Otp.verifyTotp(token, validSecret, { period: -10 }));
 
       expect(result).not.toBeNull();
     });
 
     it("should handle negative window by using default", async () => {
-      const token = await Effect.runPromise(OTP.generateTOTP(validSecret));
+      const token = await Effect.runPromise(Otp.generateTotp(validSecret));
 
       // Verify with negative window should fall back to default (1)
-      const result = await Effect.runPromise(OTP.verifyTOTP(token, validSecret, { window: -5 }));
+      const result = await Effect.runPromise(Otp.verifyTotp(token, validSecret, { window: -5 }));
 
       expect(result).not.toBeNull();
     });
 
     it("should floor non-integer period", async () => {
-      const token = await Effect.runPromise(OTP.generateTOTP(validSecret, { period: 30 }));
+      const token = await Effect.runPromise(Otp.generateTotp(validSecret, { period: 30 }));
 
       // Should floor 30.9 to 30 and work correctly
-      const result = await Effect.runPromise(OTP.verifyTOTP(token, validSecret, { period: 30.9 }));
+      const result = await Effect.runPromise(Otp.verifyTotp(token, validSecret, { period: 30.9 }));
 
       expect(result).not.toBeNull();
     });
   });
 
-  describe("generateOTPURI validation", () => {
+  describe("generateOtpUri validation", () => {
     it("should reject empty secret", () => {
       expect(() => {
-        OTP.generateOTPURI({
+        Otp.generateOtpUri({
           type: "totp",
           label: "test@example.com",
           issuer: "Test",
@@ -537,7 +537,7 @@ describe("Input Validation and Edge Cases", () => {
 
     it("should reject invalid base32 characters", () => {
       expect(() => {
-        OTP.generateOTPURI({
+        Otp.generateOtpUri({
           type: "totp",
           label: "test@example.com",
           issuer: "Test",
@@ -548,7 +548,7 @@ describe("Input Validation and Edge Cases", () => {
 
     it("should reject non-string secret", () => {
       expect(() => {
-        OTP.generateOTPURI({
+        Otp.generateOtpUri({
           type: "totp",
           label: "test@example.com",
           issuer: "Test",
@@ -559,7 +559,7 @@ describe("Input Validation and Edge Cases", () => {
 
     it("should require counter for HOTP", () => {
       expect(() => {
-        OTP.generateOTPURI({
+        Otp.generateOtpUri({
           type: "hotp",
           label: "test@example.com",
           issuer: "Test",
@@ -569,7 +569,7 @@ describe("Input Validation and Edge Cases", () => {
     });
 
     it("should accept valid base32 with padding", () => {
-      const uri = OTP.generateOTPURI({
+      const uri = Otp.generateOtpUri({
         type: "totp",
         label: "test@example.com",
         issuer: "Test",
@@ -580,7 +580,7 @@ describe("Input Validation and Edge Cases", () => {
     });
 
     it("should normalize secret to uppercase", () => {
-      const uri = OTP.generateOTPURI({
+      const uri = Otp.generateOtpUri({
         type: "totp",
         label: "test@example.com",
         issuer: "Test",

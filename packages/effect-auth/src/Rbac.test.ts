@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Context } from "effect";
-import * as RBAC from "./RBAC.ts";
+import * as Rbac from "./Rbac.ts";
 import { RoleStore } from "./Authorization.ts";
 import * as Authorization from "./Authorization.ts";
 import { formatPermission } from "./Permission.ts";
 
 describe("RBAC", () => {
-  describe("RBAC.make", () => {
+  describe("Rbac.make", () => {
     it("builds from a plain record", async () => {
-      const store = RBAC.make({
+      const store = Rbac.make({
         userRoles: { "user-1": ["editor"] },
         rolePermissions: { editor: [{ resource: "posts", action: "update" }] },
       });
@@ -21,7 +21,7 @@ describe("RBAC", () => {
     });
 
     it("builds from Maps", async () => {
-      const store = RBAC.make({
+      const store = Rbac.make({
         userRoles: new Map([["user-1", ["viewer"]]]),
         rolePermissions: new Map([["viewer", [{ resource: "posts", action: "read" }]]]),
       });
@@ -31,14 +31,14 @@ describe("RBAC", () => {
     });
 
     it("returns empty for unknown users and roles", async () => {
-      const store = RBAC.make({ userRoles: {}, rolePermissions: {} });
+      const store = Rbac.make({ userRoles: {}, rolePermissions: {} });
 
       expect(await Effect.runPromise(store.getUserRoles("nobody"))).toEqual([]);
       expect(await Effect.runPromise(store.getRolePermissions("ghost"))).toEqual([]);
     });
 
     it("inherits permissions from parent roles transitively", async () => {
-      const store = RBAC.make({
+      const store = Rbac.make({
         userRoles: {},
         rolePermissions: {
           viewer: [{ resource: "posts", action: "read" }],
@@ -58,7 +58,7 @@ describe("RBAC", () => {
     });
 
     it("de-duplicates inherited permissions", async () => {
-      const store = RBAC.make({
+      const store = Rbac.make({
         userRoles: {},
         rolePermissions: {
           base: [{ resource: "posts", action: "read" }],
@@ -72,7 +72,7 @@ describe("RBAC", () => {
     });
 
     it("tolerates cycles in the hierarchy", async () => {
-      const store = RBAC.make({
+      const store = Rbac.make({
         userRoles: {},
         rolePermissions: {
           a: [{ resource: "x", action: "read" }],
@@ -89,7 +89,7 @@ describe("RBAC", () => {
 
   describe("integration with Authorization.make", () => {
     it("grants inherited and wildcard permissions", async () => {
-      const store = RBAC.make({
+      const store = Rbac.make({
         userRoles: {
           "admin-user": ["admin"],
           "editor-user": ["editor"],

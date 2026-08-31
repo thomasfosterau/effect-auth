@@ -137,7 +137,7 @@ export interface OAuthUserInfo {
 /**
  * Authorization URL generation result
  */
-export interface AuthorizationURLResult {
+export interface AuthorizationUrlResult {
   readonly url: string;
   readonly state: string;
   readonly codeVerifier?: string;
@@ -200,7 +200,7 @@ export interface OAuthProvider {
   readonly generateAuthorizationUrl: (
     scopes?: readonly string[],
   ) => Effect.Effect<
-    AuthorizationURLResult,
+    AuthorizationUrlResult,
     OAuthProviderError | AuthError,
     OAuthStateStore | Crypto.Crypto
   >;
@@ -348,7 +348,7 @@ export const generateNonce = (): Effect.Effect<string, never, Crypto.Crypto> =>
     );
   });
 
-const decodeJWTSegment = (segment: string): Record<string, unknown> =>
+const decodeJwtSegment = (segment: string): Record<string, unknown> =>
   JSON.parse(Buffer.from(segment, "base64url").toString("utf8")) as Record<string, unknown>;
 
 /** A single JSON Web Key from a provider's JWKS document. */
@@ -388,8 +388,8 @@ export const verifyIdToken = (
     let header: Record<string, unknown>;
     let payload: Record<string, unknown>;
     try {
-      header = decodeJWTSegment(headerSeg);
-      payload = decodeJWTSegment(payloadSeg);
+      header = decodeJwtSegment(headerSeg);
+      payload = decodeJwtSegment(payloadSeg);
     } catch (cause) {
       return yield* new OAuthProviderError({
         message: "Failed to decode id_token",
@@ -583,7 +583,7 @@ export const provider = (
           url,
           state,
           ...(pkce?.codeVerifier && { codeVerifier: pkce.codeVerifier }),
-        } satisfies AuthorizationURLResult;
+        } satisfies AuthorizationUrlResult;
       }),
 
     exchangeCode: (code: string, codeVerifier?: string) =>
@@ -686,7 +686,7 @@ export class OAuthService extends Context.Service<
     readonly generateAuthorizationUrl: (
       provider: string,
       options?: { scopes?: readonly string[]; returnTo?: string },
-    ) => Effect.Effect<AuthorizationURLResult, AuthError | OAuthProviderError>;
+    ) => Effect.Effect<AuthorizationUrlResult, AuthError | OAuthProviderError>;
 
     readonly handleCallback: (
       state: string,

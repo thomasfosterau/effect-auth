@@ -2,15 +2,15 @@
  * OTP-based second-factor gate for effect-auth.
  *
  * After first-factor success, `begin` sends a numeric OTP to the user (via
- * email, SMS, or any other channel supplied through `sendOTP`) and returns a
+ * email, SMS, or any other channel supplied through `sendOtp`) and returns a
  * pending challenge token. `verify` redeems the token + OTP to create a
  * session.
  *
  * Reuses the generation, hashing, and attempt-limiting logic from the
- * EmailOTP / PhoneOTP engines (`generateOTP`, `hashToken`,
+ * EmailOtp / PhoneOtp engines (`generateOtp`, `hashToken`,
  * `constantTimeHashEqual`) without duplicating delivery or store concerns.
  *
- * Can serve as an **alternative** to TOTP (use `OTPSecondFactorGateLayer`
+ * Can serve as an **alternative** to TOTP (use `OtpSecondFactorGateLayer`
  * instead of `MultiFactorGateLayer`) or in **addition** to it by pairing with
  * `TrustedDevice.gate` from the TrustedDevice module.
  *
@@ -18,7 +18,7 @@
  */
 import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
-import { generateOTP } from "../email/EmailOTP.ts";
+import { generateOtp } from "../email/EmailOtp.ts";
 import { SecondFactorGate, type SecondFactorChallenge } from "../email/EmailPassword.ts";
 import { type HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -32,7 +32,7 @@ import type * as Types from "../Types.ts";
 // Error
 // ---------------------------------------------------------------------------
 
-export class OTPSecondFactorError extends Data.TaggedError("OTPSecondFactorError")<{
+export class OtpSecondFactorError extends Data.TaggedError("OtpSecondFactorError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
@@ -46,7 +46,7 @@ export class OTPSecondFactorError extends Data.TaggedError("OTPSecondFactorError
  * consumed (deleted) by a successful `verify`. Only the hash of the OTP is
  * stored; the plaintext is delivered out-of-band to the user.
  */
-export interface OTPSecondFactorRecord {
+export interface OtpSecondFactorRecord {
   /** Raw challenge token returned to the client; used as the store key. */
   readonly pendingToken: string;
   readonly userId: string;
@@ -57,27 +57,27 @@ export interface OTPSecondFactorRecord {
   readonly expiresAt: number;
 }
 
-export class OTPSecondFactorStore extends Context.Service<
-  OTPSecondFactorStore,
+export class OtpSecondFactorStore extends Context.Service<
+  OtpSecondFactorStore,
   {
     readonly create: (
-      record: OTPSecondFactorRecord,
-    ) => Effect.Effect<OTPSecondFactorRecord, Errors.AuthError>;
+      record: OtpSecondFactorRecord,
+    ) => Effect.Effect<OtpSecondFactorRecord, Errors.AuthError>;
     readonly get: (
       pendingToken: string,
-    ) => Effect.Effect<OTPSecondFactorRecord | null, Errors.AuthError>;
+    ) => Effect.Effect<OtpSecondFactorRecord | null, Errors.AuthError>;
     readonly update: (
-      record: OTPSecondFactorRecord,
-    ) => Effect.Effect<OTPSecondFactorRecord, Errors.AuthError>;
+      record: OtpSecondFactorRecord,
+    ) => Effect.Effect<OtpSecondFactorRecord, Errors.AuthError>;
     readonly delete: (pendingToken: string) => Effect.Effect<void, Errors.AuthError>;
   }
->()("@effect-auth/OTPSecondFactorStore") {}
+>()("@effect-auth/OtpSecondFactorStore") {}
 
 // ---------------------------------------------------------------------------
 // Config + Service
 // ---------------------------------------------------------------------------
 
-export interface OTPSecondFactorConfig {
+export interface OtpSecondFactorConfig {
   /** OTP digit length. Default: 6. */
   readonly otpLength?: number;
   /** Challenge lifetime in milliseconds. Default: 5 minutes. */
@@ -87,32 +87,32 @@ export interface OTPSecondFactorConfig {
   /**
    * Send the OTP to the user. Receives the full `User` record so the
    * implementation can route by email (`user.email`), phone number
-   * (`user.attributes.phoneNumber`), etc. Plug your `EmailOTPService.send` or
-   * `PhoneOTPService.send` call here.
+   * (`user.attributes.phoneNumber`), etc. Plug your `EmailOtpService.send` or
+   * `PhoneOtpService.send` call here.
    */
-  readonly sendOTP: (user: Types.User, otp: string) => Effect.Effect<void, Errors.AuthError>;
+  readonly sendOtp: (user: Types.User, otp: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
-export interface OTPSecondFactorVerifyOptions {
+export interface OtpSecondFactorVerifyOptions {
   readonly sessionAttributes?: Record<string, unknown>;
 }
 
-export interface OTPSecondFactorVerifyResult {
+export interface OtpSecondFactorVerifyResult {
   readonly userId: string;
   readonly session: Types.Session;
 }
 
-export class OTPSecondFactorService extends Context.Service<
-  OTPSecondFactorService,
+export class OtpSecondFactorService extends Context.Service<
+  OtpSecondFactorService,
   {
     /**
      * Begin a second-factor OTP challenge. Generates an OTP, stores it
-     * (hashed), sends it via `sendOTP`, and returns a `SecondFactorChallenge`
+     * (hashed), sends it via `sendOtp`, and returns a `SecondFactorChallenge`
      * with the pending token for the client to submit alongside the OTP.
      */
     readonly begin: (
       user: Types.User,
-    ) => Effect.Effect<SecondFactorChallenge, OTPSecondFactorError | Errors.AuthError>;
+    ) => Effect.Effect<SecondFactorChallenge, OtpSecondFactorError | Errors.AuthError>;
 
     /**
      * Verify the OTP for a pending challenge. On success: consumes the
@@ -121,15 +121,15 @@ export class OTPSecondFactorService extends Context.Service<
     readonly verify: (
       pendingToken: string,
       otp: string,
-      options?: OTPSecondFactorVerifyOptions,
+      options?: OtpSecondFactorVerifyOptions,
     ) => Effect.Effect<
-      OTPSecondFactorVerifyResult,
-      OTPSecondFactorError | Errors.AuthError | HookError
+      OtpSecondFactorVerifyResult,
+      OtpSecondFactorError | Errors.AuthError | HookError
     >;
   }
->()("@effect-auth/OTPSecondFactorService") {
-  static readonly layer = (config: OTPSecondFactorConfig) =>
-    Layer.effect(OTPSecondFactorService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
+>()("@effect-auth/OtpSecondFactorService") {
+  static readonly layer = (config: OtpSecondFactorConfig) =>
+    Layer.effect(OtpSecondFactorService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 // ---------------------------------------------------------------------------
@@ -137,23 +137,23 @@ export class OTPSecondFactorService extends Context.Service<
 // ---------------------------------------------------------------------------
 
 export const make = (
-  config: OTPSecondFactorConfig,
+  config: OtpSecondFactorConfig,
 ): Effect.Effect<
-  typeof OTPSecondFactorService.Service,
+  typeof OtpSecondFactorService.Service,
   never,
-  OTPSecondFactorStore | SessionService | Crypto.Crypto
+  OtpSecondFactorStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
     const expiresIn = config.expiresIn ?? 5 * 60 * 1000;
     const maxAttempts = config.maxAttempts ?? 3;
 
-    const store = yield* OTPSecondFactorStore;
+    const store = yield* OtpSecondFactorStore;
     const sessionManager = yield* SessionService;
     const crypto = yield* Crypto.Crypto;
 
-    const invalidOTP = () =>
-      Effect.fail(new OTPSecondFactorError({ message: "Invalid or expired OTP" }));
+    const invalidOtp = () =>
+      Effect.fail(new OtpSecondFactorError({ message: "Invalid or expired OTP" }));
 
     const generatePendingToken = (): Effect.Effect<string, Errors.AuthError> =>
       crypto.randomBytes(32).pipe(
@@ -164,12 +164,12 @@ export const make = (
       );
 
     return {
-      begin: Effect.fn("OTPSecondFactorService.begin")(function* (user: Types.User) {
-        const otp = yield* generateOTP(crypto, otpLength);
+      begin: Effect.fn("OtpSecondFactorService.begin")(function* (user: Types.User) {
+        const otp = yield* generateOtp(crypto, otpLength);
         const pendingToken = yield* generatePendingToken();
         const now = Date.now();
 
-        const record: OTPSecondFactorRecord = {
+        const record: OtpSecondFactorRecord = {
           pendingToken,
           userId: user.id,
           otpHash: hashToken(otp),
@@ -180,9 +180,9 @@ export const make = (
 
         yield* store.create(record);
 
-        yield* Effect.catch(config.sendOTP(user, otp), (err) =>
+        yield* Effect.catch(config.sendOtp(user, otp), (err) =>
           Effect.fail(
-            new OTPSecondFactorError({
+            new OtpSecondFactorError({
               message: "Failed to send second-factor OTP",
               cause: err,
             }),
@@ -195,28 +195,28 @@ export const make = (
         } satisfies SecondFactorChallenge;
       }),
 
-      verify: Effect.fn("OTPSecondFactorService.verify")(function* (
+      verify: Effect.fn("OtpSecondFactorService.verify")(function* (
         pendingToken: string,
         otp: string,
-        options?: OTPSecondFactorVerifyOptions,
+        options?: OtpSecondFactorVerifyOptions,
       ) {
         if (!pendingToken || !otp) {
-          return yield* invalidOTP();
+          return yield* invalidOtp();
         }
 
         const record = yield* store.get(pendingToken);
         if (!record) {
-          return yield* invalidOTP();
+          return yield* invalidOtp();
         }
 
         if (Date.now() > record.expiresAt) {
           yield* store.delete(pendingToken);
-          return yield* Effect.fail(new OTPSecondFactorError({ message: "OTP has expired" }));
+          return yield* Effect.fail(new OtpSecondFactorError({ message: "OTP has expired" }));
         }
 
         if (record.attempts >= maxAttempts) {
           yield* store.delete(pendingToken);
-          return yield* Effect.fail(new OTPSecondFactorError({ message: "Too many attempts" }));
+          return yield* Effect.fail(new OtpSecondFactorError({ message: "Too many attempts" }));
         }
 
         if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
@@ -224,9 +224,9 @@ export const make = (
           yield* store.update(updated);
           if (updated.attempts >= maxAttempts) {
             yield* store.delete(pendingToken);
-            return yield* Effect.fail(new OTPSecondFactorError({ message: "Too many attempts" }));
+            return yield* Effect.fail(new OtpSecondFactorError({ message: "Too many attempts" }));
           }
-          return yield* invalidOTP();
+          return yield* invalidOtp();
         }
 
         // Consume the pending challenge (one-time use)
@@ -240,7 +240,7 @@ export const make = (
         return {
           userId: record.userId,
           session,
-        } satisfies OTPSecondFactorVerifyResult;
+        } satisfies OtpSecondFactorVerifyResult;
       }),
     };
   });
@@ -253,28 +253,28 @@ export const make = (
  * Gate layer that requires an OTP second factor for every sign-in.
  *
  * `required(user)` always returns `true`. `begin(user)` generates and sends
- * an OTP via the configured `sendOTP`. The client then calls
- * `OTPSecondFactorService.verify(pendingToken, otp)` to redeem it.
+ * an OTP via the configured `sendOtp`. The client then calls
+ * `OtpSecondFactorService.verify(pendingToken, otp)` to redeem it.
  *
  * ```ts
  * const services = Layer.mergeAll(
  *   EmailPasswordService.layer(),
- *   OTPSecondFactorGateLayer.pipe(
- *     Layer.provide(OTPSecondFactorService.layer({
- *       sendOTP: (user, otp) => mailer.send(user.email, `Your code: ${otp}`),
+ *   OtpSecondFactorGateLayer.pipe(
+ *     Layer.provide(OtpSecondFactorService.layer({
+ *       sendOtp: (user, otp) => mailer.send(user.email, `Your code: ${otp}`),
  *     }).pipe(Layer.provide(otpSecondFactorStore))),
  *   ),
  * )
  * ```
  */
-export const OTPSecondFactorGateLayer: Layer.Layer<
+export const OtpSecondFactorGateLayer: Layer.Layer<
   SecondFactorGate,
   never,
-  OTPSecondFactorService
+  OtpSecondFactorService
 > = Layer.effect(
   SecondFactorGate,
   Effect.gen(function* () {
-    const service = yield* OTPSecondFactorService;
+    const service = yield* OtpSecondFactorService;
 
     const gate: typeof SecondFactorGate.Service = {
       required: (_user) => Effect.succeed(true),
@@ -282,7 +282,7 @@ export const OTPSecondFactorGateLayer: Layer.Layer<
         service
           .begin(user)
           .pipe(
-            Effect.catchTag("OTPSecondFactorError", (err) =>
+            Effect.catchTag("OtpSecondFactorError", (err) =>
               Effect.fail(new Errors.AuthError({ message: err.message })),
             ),
           ),
@@ -299,28 +299,28 @@ export const OTPSecondFactorGateLayer: Layer.Layer<
  * Gate layer combining trusted-device short-circuit with OTP second factor.
  *
  * When a valid device token is present in `TrustedDeviceCookieRef`, sign-in
- * skips the second factor entirely. Otherwise an OTP is sent via `sendOTP`
- * and the user must verify it with `OTPSecondFactorService.verify`.
+ * skips the second factor entirely. Otherwise an OTP is sent via `sendOtp`
+ * and the user must verify it with `OtpSecondFactorService.verify`.
  *
  * ```ts
  * const services = Layer.mergeAll(
  *   EmailPasswordService.layer(),
- *   TrustedDeviceWithOTPSecondFactorGateLayer.pipe(
+ *   TrustedDeviceWithOtpSecondFactorGateLayer.pipe(
  *     Layer.provide(TrustedDeviceService.layer({ secret: "..." }).pipe(Layer.provide(trustedDeviceStore))),
- *     Layer.provide(OTPSecondFactorService.layer({ sendOTP: ... }).pipe(Layer.provide(otpSecondFactorStore))),
+ *     Layer.provide(OtpSecondFactorService.layer({ sendOtp: ... }).pipe(Layer.provide(otpSecondFactorStore))),
  *   ),
  * )
  * ```
  */
-export const TrustedDeviceWithOTPSecondFactorGateLayer: Layer.Layer<
+export const TrustedDeviceWithOtpSecondFactorGateLayer: Layer.Layer<
   SecondFactorGate,
   never,
-  TrustedDeviceService | OTPSecondFactorService
+  TrustedDeviceService | OtpSecondFactorService
 > = Layer.effect(
   SecondFactorGate,
   Effect.gen(function* () {
     const tdService = yield* TrustedDeviceService;
-    const otpService = yield* OTPSecondFactorService;
+    const otpService = yield* OtpSecondFactorService;
 
     const otpGate: typeof SecondFactorGate.Service = {
       required: (_user) => Effect.succeed(true),
@@ -328,7 +328,7 @@ export const TrustedDeviceWithOTPSecondFactorGateLayer: Layer.Layer<
         otpService
           .begin(user)
           .pipe(
-            Effect.catchTag("OTPSecondFactorError", (err) =>
+            Effect.catchTag("OtpSecondFactorError", (err) =>
               Effect.fail(new Errors.AuthError({ message: err.message })),
             ),
           ),

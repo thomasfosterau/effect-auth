@@ -1,7 +1,7 @@
 /**
  * SAML 2.0 service-provider support for effect-auth.
  *
- * Core `effect-auth` declares the `SAMLVerifier` contract — parse and
+ * Core `effect-auth` declares the `SamlVerifier` contract — parse and
  * cryptographically verify a SAML Response, build an `AuthnRequest`, render SP
  * metadata — but implements none of it: XML canonicalisation, XML-DSig and
  * DEFLATE are not things a dependency-free core can carry. This package is the
@@ -15,17 +15,17 @@
  *
  * ```ts
  * import { Layer } from "effect";
- * import * as SAML from "@thomasfosterau/effect-auth-saml";
- * import { SAMLReplayStore, memorySAMLReplayStore, SSOService } from "@thomasfosterau/effect-auth";
+ * import * as Saml from "@thomasfosterau/effect-auth-saml";
+ * import { SamlReplayStore, memorySamlReplayStore, SsoService } from "@thomasfosterau/effect-auth";
  *
- * const ssoLayer = SSOService.layer().pipe(
+ * const ssoLayer = SsoService.layer().pipe(
  *   Layer.provide(
- *     Layer.mergeAll(SAML.layer, Layer.succeed(SAMLReplayStore)(memorySAMLReplayStore())),
+ *     Layer.mergeAll(Saml.layer, Layer.succeed(SamlReplayStore)(memorySamlReplayStore())),
  *   ),
  * );
  * ```
  *
- * Behind more than one instance, replace `memorySAMLReplayStore` with a shared
+ * Behind more than one instance, replace `memorySamlReplayStore` with a shared
  * implementation — a replay defence that only remembers what one process saw is
  * not a replay defence.
  *

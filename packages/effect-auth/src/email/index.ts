@@ -1,19 +1,19 @@
 export * from "./EmailAddress.ts";
 export {
-  EmailOTPError,
-  type EmailOTPPurpose,
-  type EmailOTPRecord,
-  type EmailOTPCreateUserInput,
-  EmailOTPStore,
-  EmailOTPUserStore,
-  type EmailOTPConfig,
-  type EmailOTPSignInOptions,
-  type EmailOTPAuthResult,
-  type EmailOTPCheckResult,
-  EmailOTPService,
-  hashOTP,
-  generateOTP,
-} from "./EmailOTP.ts";
+  EmailOtpError,
+  type EmailOtpPurpose,
+  type EmailOtpRecord,
+  type EmailOtpCreateUserInput,
+  EmailOtpStore,
+  EmailOtpUserStore,
+  type EmailOtpConfig,
+  type EmailOtpSignInOptions,
+  type EmailOtpAuthResult,
+  type EmailOtpCheckResult,
+  EmailOtpService,
+  hashOtp,
+  generateOtp,
+} from "./EmailOtp.ts";
 export {
   type CreateUserInput,
   EmailPasswordStore,

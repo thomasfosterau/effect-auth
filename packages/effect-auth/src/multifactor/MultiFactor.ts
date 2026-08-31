@@ -19,7 +19,7 @@ import * as Errors from "../Errors.ts";
 import * as Obs from "../Observability.ts";
 import { EmailPasswordStore, SecondFactorGate } from "../email/EmailPassword.ts";
 import { type HookError } from "../Hooks.ts";
-import { generateBase32Secret, generateOTPURI, verifyTOTP, type TOTPConfig } from "./OTP.ts";
+import { generateBase32Secret, generateOtpUri, verifyTotp, type TotpConfig } from "./Otp.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { hashToken, timingSafeEqualBytes } from "../TokenHash.ts";
@@ -107,7 +107,7 @@ export interface MultiFactorConfig {
   /** Issuer name embedded in the otpauth:// URI (e.g. your app name) */
   readonly issuer: string;
   /** TOTP parameters (period/digits/algorithm/window). Default: RFC 6238 defaults */
-  readonly totp?: TOTPConfig;
+  readonly totp?: TotpConfig;
   /** Number of backup codes to generate (default: 10) */
   readonly backupCodeCount?: number;
   /** Lifetime of a pending challenge in milliseconds (default: 5 minutes) */
@@ -497,7 +497,7 @@ export const make = (
           anyEmailValue(yield* identifierStore.listByUser(user.id)) ?? user.name ?? user.id;
         const totpUri = yield* Effect.try({
           try: () =>
-            generateOTPURI({
+            generateOtpUri({
               type: "totp",
               label,
               issuer: config.issuer,
@@ -534,7 +534,7 @@ export const make = (
         }
 
         const plainSecret = cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
-        const matchedCounter = yield* verifyTOTP(code, plainSecret, config.totp);
+        const matchedCounter = yield* verifyTotp(code, plainSecret, config.totp);
         if (matchedCounter === null) {
           return yield* Effect.fail(
             new MultiFactorError({
@@ -593,7 +593,7 @@ export const make = (
 
             const plainSecret =
               cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
-            const matchedCounter = yield* verifyTOTP(code, plainSecret, config.totp);
+            const matchedCounter = yield* verifyTotp(code, plainSecret, config.totp);
             if (matchedCounter === null) {
               return yield* Effect.fail(
                 new MultiFactorError({

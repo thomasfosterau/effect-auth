@@ -20,7 +20,7 @@ import {
   memoryIdentifierStore,
   type Identifier,
 } from "../Identifier.ts";
-import { generateHOTP, generateTOTP } from "./OTP.ts";
+import { generateHotp, generateTotp } from "./Otp.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as Password from "../password/Password.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
@@ -212,7 +212,7 @@ describe("MultiFactorService", () => {
       const enableResult = yield* service.enable("user-2fa-1", "correct-password");
       const enabledBeforeConfirm = yield* service.isEnabled("user-2fa-1");
 
-      const code = yield* generateTOTP(enableResult.secret);
+      const code = yield* generateTotp(enableResult.secret);
       yield* service.confirmEnable("user-2fa-1", code);
 
       const enabledAfterConfirm = yield* service.isEnabled("user-2fa-1");
@@ -332,7 +332,7 @@ describe("MultiFactorService", () => {
       const { secret } = yield* service.enable("user-2fa-5", "correct-password");
       const challenge = yield* service.beginChallenge("user-2fa-5");
 
-      const code = yield* generateTOTP(secret);
+      const code = yield* generateTotp(secret);
       return yield* service.verifyTotp(challenge.token, code, {
         sessionAttributes: { device: "test" },
       });
@@ -364,7 +364,7 @@ describe("MultiFactorService", () => {
       const { secret } = yield* service.enable("user-2fa-6", "correct-password");
       const challenge = yield* service.beginChallenge("user-2fa-6");
 
-      const code = yield* generateTOTP(secret);
+      const code = yield* generateTotp(secret);
       return yield* Effect.result(service.verifyTotp(challenge.token, code));
     });
 
@@ -394,10 +394,10 @@ describe("MultiFactorService", () => {
       const { secret } = yield* service.enable("user-2fa-7", "correct-password");
       const challenge = yield* service.beginChallenge("user-2fa-7");
 
-      const code = yield* generateTOTP(secret);
+      const code = yield* generateTotp(secret);
       yield* service.verifyTotp(challenge.token, code);
 
-      const replayCode = yield* generateTOTP(secret);
+      const replayCode = yield* generateTotp(secret);
       return yield* Effect.result(service.verifyTotp(challenge.token, replayCode));
     });
 
@@ -427,7 +427,7 @@ describe("MultiFactorService", () => {
 
       // First challenge: verify with code C1 → success
       const challenge1 = yield* service.beginChallenge("user-2fa-7b");
-      const code = yield* generateTOTP(secret);
+      const code = yield* generateTotp(secret);
       yield* service.verifyTotp(challenge1.token, code);
 
       // Second challenge: a fresh pending token, but same code C1 within window
@@ -589,13 +589,13 @@ describe("MultiFactorService with TOTP secret encryption", () => {
       // window) so the challenge verification below can use the current
       // step's code without tripping the replay guard.
       const currentCounter = Math.floor(Date.now() / 1000 / 30);
-      const confirmCode = yield* generateHOTP(enableResult.secret, currentCounter - 1);
+      const confirmCode = yield* generateHotp(enableResult.secret, currentCounter - 1);
       yield* service.confirmEnable("user-enc-1", confirmCode);
 
       const enabled = yield* service.isEnabled("user-enc-1");
 
       const challenge = yield* service.beginChallenge("user-enc-1");
-      const verifyCode = yield* generateTOTP(enableResult.secret);
+      const verifyCode = yield* generateTotp(enableResult.secret);
       const verifyResult = yield* service.verifyTotp(challenge.token, verifyCode);
 
       return { enableResult, enabled, verifyResult };
@@ -632,7 +632,7 @@ describe("MultiFactorService with TOTP secret encryption", () => {
       const enableResult = yield* service.enable("user-enc-2", "correct-password");
 
       const challenge = yield* service.beginChallenge("user-enc-2");
-      const code = yield* generateTOTP(enableResult.secret);
+      const code = yield* generateTotp(enableResult.secret);
       const verifyResult = yield* service.verifyTotp(challenge.token, code);
 
       return { enableResult, verifyResult };

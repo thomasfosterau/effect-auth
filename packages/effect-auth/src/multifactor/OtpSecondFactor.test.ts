@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { OTPSecondFactorStore, type OTPSecondFactorRecord } from "./OTPSecondFactor.ts";
-import * as OTPSecondFactor from "./OTPSecondFactor.ts";
+import { OtpSecondFactorStore, type OtpSecondFactorRecord } from "./OtpSecondFactor.ts";
+import * as OtpSecondFactor from "./OtpSecondFactor.ts";
 import { make, SessionService } from "../SessionService.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
@@ -13,12 +13,12 @@ import type { Session, SessionConfig, User } from "../Types.ts";
 // In-memory stores
 // ---------------------------------------------------------------------------
 
-const otpRecords = new Map<string, OTPSecondFactorRecord>(); // key: pendingToken
+const otpRecords = new Map<string, OtpSecondFactorRecord>(); // key: pendingToken
 const sessions = new Map<string, Session>();
 const users = new Map<string, User>();
 
 const otpStore = {
-  create: (record: OTPSecondFactorRecord) =>
+  create: (record: OtpSecondFactorRecord) =>
     Effect.sync(() => {
       otpRecords.set(record.pendingToken, record);
       return record;
@@ -26,7 +26,7 @@ const otpStore = {
 
   get: (pendingToken: string) => Effect.sync(() => otpRecords.get(pendingToken) ?? null),
 
-  update: (record: OTPSecondFactorRecord) =>
+  update: (record: OtpSecondFactorRecord) =>
     Effect.sync(() => {
       otpRecords.set(record.pendingToken, record);
       return record;
@@ -90,7 +90,7 @@ const makeTestContext = async () => {
   return Context.merge(
     Context.merge(
       Context.make(SessionService, sessionManager),
-      Context.make(OTPSecondFactorStore, otpStore),
+      Context.make(OtpSecondFactorStore, otpStore),
     ),
     Context.make(Crypto.Crypto, PlatformCrypto.instance),
   );
@@ -116,19 +116,19 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// OTPSecondFactorService
+// OtpSecondFactorService
 // ---------------------------------------------------------------------------
 
-describe("OTPSecondFactorService", () => {
+describe("OtpSecondFactorService", () => {
   it("begin sends the OTP and returns a pending challenge", async () => {
-    const sentOTPs: Array<{ user: User; otp: string }> = [];
+    const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* OTPSecondFactor.make({
-        sendOTP: (user, otp) =>
+      const service = yield* OtpSecondFactor.make({
+        sendOtp: (user, otp) =>
           Effect.sync(() => {
-            sentOTPs.push({ user, otp });
+            sentOtps.push({ user, otp });
           }),
       });
       return yield* service.begin(testUser);
@@ -140,29 +140,29 @@ describe("OTPSecondFactorService", () => {
 
     expect(challenge.token).toBeDefined();
     expect(challenge.expiresAt).toBeGreaterThan(Date.now());
-    expect(sentOTPs).toHaveLength(1);
-    expect(sentOTPs[0]!.user.id).toBe(testUser.id);
-    expect(sentOTPs[0]!.otp).toMatch(/^\d{6}$/);
+    expect(sentOtps).toHaveLength(1);
+    expect(sentOtps[0]!.user.id).toBe(testUser.id);
+    expect(sentOtps[0]!.otp).toMatch(/^\d{6}$/);
     // Only the hash is stored
     const stored = otpRecords.get(challenge.token);
     expect(stored).toBeDefined();
-    expect(stored!.otpHash).not.toBe(sentOTPs[0]!.otp);
+    expect(stored!.otpHash).not.toBe(sentOtps[0]!.otp);
     expect(stored!.attempts).toBe(0);
   });
 
   it("verify with the correct OTP creates a session", async () => {
-    const sentOTPs: Array<{ user: User; otp: string }> = [];
+    const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* OTPSecondFactor.make({
-        sendOTP: (user, otp) =>
+      const service = yield* OtpSecondFactor.make({
+        sendOtp: (user, otp) =>
           Effect.sync(() => {
-            sentOTPs.push({ user, otp });
+            sentOtps.push({ user, otp });
           }),
       });
       const challenge = yield* service.begin(testUser);
-      return yield* service.verify(challenge.token, sentOTPs[0]!.otp);
+      return yield* service.verify(challenge.token, sentOtps[0]!.otp);
     });
 
     const result = await Effect.runPromise(
@@ -176,19 +176,19 @@ describe("OTPSecondFactorService", () => {
   });
 
   it("challenge is single-use: second verify after success fails", async () => {
-    const sentOTPs: Array<{ user: User; otp: string }> = [];
+    const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* OTPSecondFactor.make({
-        sendOTP: (user, otp) =>
+      const service = yield* OtpSecondFactor.make({
+        sendOtp: (user, otp) =>
           Effect.sync(() => {
-            sentOTPs.push({ user, otp });
+            sentOtps.push({ user, otp });
           }),
       });
       const challenge = yield* service.begin(testUser);
-      yield* service.verify(challenge.token, sentOTPs[0]!.otp);
-      return yield* Effect.result(service.verify(challenge.token, sentOTPs[0]!.otp));
+      yield* service.verify(challenge.token, sentOtps[0]!.otp);
+      return yield* Effect.result(service.verify(challenge.token, sentOtps[0]!.otp));
     });
 
     const result = await Effect.runPromise(
@@ -197,19 +197,19 @@ describe("OTPSecondFactorService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OTPSecondFactorError");
+      expect(result.failure._tag).toBe("OtpSecondFactorError");
     }
   });
 
   it("verify with a wrong OTP fails and increments attempts", async () => {
-    const sentOTPs: Array<{ user: User; otp: string }> = [];
+    const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* OTPSecondFactor.make({
-        sendOTP: (user, otp) =>
+      const service = yield* OtpSecondFactor.make({
+        sendOtp: (user, otp) =>
           Effect.sync(() => {
-            sentOTPs.push({ user, otp });
+            sentOtps.push({ user, otp });
           }),
       });
       const challenge = yield* service.begin(testUser);
@@ -222,7 +222,7 @@ describe("OTPSecondFactorService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OTPSecondFactorError");
+      expect(result.failure._tag).toBe("OtpSecondFactorError");
     }
     // Attempt counter incremented, record still present
     const stored = Array.from(otpRecords.values())[0];
@@ -230,15 +230,15 @@ describe("OTPSecondFactorService", () => {
   });
 
   it("locks out after maxAttempts wrong guesses", async () => {
-    const sentOTPs: Array<{ user: User; otp: string }> = [];
+    const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* OTPSecondFactor.make({
+      const service = yield* OtpSecondFactor.make({
         maxAttempts: 3,
-        sendOTP: (user, otp) =>
+        sendOtp: (user, otp) =>
           Effect.sync(() => {
-            sentOTPs.push({ user, otp });
+            sentOtps.push({ user, otp });
           }),
       });
       const challenge = yield* service.begin(testUser);
@@ -259,27 +259,27 @@ describe("OTPSecondFactorService", () => {
     // Third attempt exhausts limit and deletes the record
     expect(r3._tag).toBe("Failure");
     if (r3._tag === "Failure") {
-      expect(r3.failure._tag).toBe("OTPSecondFactorError");
+      expect(r3.failure._tag).toBe("OtpSecondFactorError");
       expect((r3.failure as any).message).toContain("attempts");
     }
     expect(otpRecords.size).toBe(0);
   });
 
   it("verify fails when the challenge has expired", async () => {
-    const sentOTPs: Array<{ user: User; otp: string }> = [];
+    const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* OTPSecondFactor.make({
+      const service = yield* OtpSecondFactor.make({
         expiresIn: 1, // 1 ms → immediately expired
-        sendOTP: (user, otp) =>
+        sendOtp: (user, otp) =>
           Effect.sync(() => {
-            sentOTPs.push({ user, otp });
+            sentOtps.push({ user, otp });
           }),
       });
       const challenge = yield* service.begin(testUser);
       yield* Effect.sleep("5 millis");
-      return yield* Effect.result(service.verify(challenge.token, sentOTPs[0]!.otp));
+      return yield* Effect.result(service.verify(challenge.token, sentOtps[0]!.otp));
     });
 
     const result = await Effect.runPromise(
@@ -288,7 +288,7 @@ describe("OTPSecondFactorService", () => {
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OTPSecondFactorError");
+      expect(result.failure._tag).toBe("OtpSecondFactorError");
       expect((result.failure as any).message).toContain("expired");
     }
     // Expired pending record must be eagerly deleted
@@ -296,15 +296,15 @@ describe("OTPSecondFactorService", () => {
   });
 
   it("respects a custom OTP length", async () => {
-    const sentOTPs: Array<{ user: User; otp: string }> = [];
+    const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* OTPSecondFactor.make({
+      const service = yield* OtpSecondFactor.make({
         otpLength: 8,
-        sendOTP: (user, otp) =>
+        sendOtp: (user, otp) =>
           Effect.sync(() => {
-            sentOTPs.push({ user, otp });
+            sentOtps.push({ user, otp });
           }),
       });
       return yield* service.begin(testUser);
@@ -314,28 +314,28 @@ describe("OTPSecondFactorService", () => {
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
-    expect(sentOTPs[0]!.otp).toMatch(/^\d{8}$/);
+    expect(sentOtps[0]!.otp).toMatch(/^\d{8}$/);
   });
 
   it("OTP-second-factor full sign-in round-trip", async () => {
-    const sentOTPs: Array<{ user: User; otp: string }> = [];
+    const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
-      const service = yield* OTPSecondFactor.make({
-        sendOTP: (user, otp) =>
+      const service = yield* OtpSecondFactor.make({
+        sendOtp: (user, otp) =>
           Effect.sync(() => {
-            sentOTPs.push({ user, otp });
+            sentOtps.push({ user, otp });
           }),
       });
 
       // Step 1: begin second factor (simulates what the gate's begin() does)
       const challenge = yield* service.begin(testUser);
       expect(challenge.token).toBeDefined();
-      expect(sentOTPs).toHaveLength(1);
+      expect(sentOtps).toHaveLength(1);
 
       // Step 2: verify with the delivered OTP
-      const result = yield* service.verify(challenge.token, sentOTPs[0]!.otp, {
+      const result = yield* service.verify(challenge.token, sentOtps[0]!.otp, {
         sessionAttributes: { device: "mobile" },
       });
 

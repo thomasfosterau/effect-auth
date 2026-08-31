@@ -33,7 +33,7 @@
  *
  * ## Atomicity caveat
  *
- * `RateLimitStore.increment` (and `EmailOTPStore.incrementAttempts` / the
+ * `RateLimitStore.increment` (and `EmailOtpStore.incrementAttempts` / the
  * secondary index updates) are implemented as read-modify-write, which is not
  * atomic. Unlike a Redis `INCR`, two concurrent increments may both observe
  * the same count and only bump it once. This is acceptable for the KV
@@ -43,7 +43,7 @@
 import { Effect, Layer } from "effect";
 import { KeyValueStore } from "effect/unstable/persistence";
 import * as Errors from "./Errors.ts";
-import { type EmailOTPPurpose, type EmailOTPRecord, EmailOTPStore } from "./email/EmailOTP.ts";
+import { type EmailOtpPurpose, type EmailOtpRecord, EmailOtpStore } from "./email/EmailOtp.ts";
 import { type Identifier, IdentifierStore, type IdentifierType } from "./Identifier.ts";
 import { type EmailVerification, EmailVerificationStore } from "./email/EmailVerification.ts";
 import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
@@ -467,20 +467,20 @@ export const MagicLinkStoreKV: Layer.Layer<MagicLinkStore, never, KeyValueStore.
   Layer.effect(MagicLinkStore, magicLinkStoreKV);
 
 // ---------------------------------------------------------------------------
-// EmailOTPStore
+// EmailOtpStore
 // ---------------------------------------------------------------------------
 
-const emailOTPKey = (email: string, purpose: EmailOTPPurpose) => `email-otp:${purpose}:${email}`;
+const emailOtpKey = (email: string, purpose: EmailOtpPurpose) => `email-otp:${purpose}:${email}`;
 
 /**
- * Build an {@link EmailOTPStore} over the ambient `KeyValueStore`.
+ * Build an {@link EmailOtpStore} over the ambient `KeyValueStore`.
  *
  * There is at most one active OTP per email + purpose pair, so the pair is
  * the key itself and no secondary index is needed. `incrementAttempts` is
  * read-modify-write (see the module docs on atomicity).
  */
-export const emailOTPStoreKV: Effect.Effect<
-  typeof EmailOTPStore.Service,
+export const emailOtpStoreKV: Effect.Effect<
+  typeof EmailOtpStore.Service,
   never,
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
@@ -488,31 +488,31 @@ export const emailOTPStoreKV: Effect.Effect<
   return {
     upsert: (record) =>
       kv
-        .write(emailOTPKey(record.email, record.purpose), record, "emailOTP.upsert")
+        .write(emailOtpKey(record.email, record.purpose), record, "emailOtp.upsert")
         .pipe(Effect.as(record)),
-    get: (email, purpose) => kv.read<EmailOTPRecord>(emailOTPKey(email, purpose), "emailOTP.get"),
-    delete: (email, purpose) => kv.remove(emailOTPKey(email, purpose), "emailOTP.delete"),
+    get: (email, purpose) => kv.read<EmailOtpRecord>(emailOtpKey(email, purpose), "emailOtp.get"),
+    delete: (email, purpose) => kv.remove(emailOtpKey(email, purpose), "emailOtp.delete"),
     incrementAttempts: (email, purpose) =>
       Effect.gen(function* () {
-        const record = yield* kv.read<EmailOTPRecord>(
-          emailOTPKey(email, purpose),
-          "emailOTP.incrementAttempts",
+        const record = yield* kv.read<EmailOtpRecord>(
+          emailOtpKey(email, purpose),
+          "emailOtp.incrementAttempts",
         );
         if (record == null) {
           return yield* new Errors.AuthError({ message: "OTP record not found" });
         }
-        const updated: EmailOTPRecord = { ...record, attempts: record.attempts + 1 };
-        yield* kv.write(emailOTPKey(email, purpose), updated, "emailOTP.incrementAttempts");
+        const updated: EmailOtpRecord = { ...record, attempts: record.attempts + 1 };
+        yield* kv.write(emailOtpKey(email, purpose), updated, "emailOtp.incrementAttempts");
         return updated.attempts;
       }),
-  } satisfies typeof EmailOTPStore.Service;
+  } satisfies typeof EmailOtpStore.Service;
 });
 
 /**
- * `EmailOTPStore` layer backed by `KeyValueStore`.
+ * `EmailOtpStore` layer backed by `KeyValueStore`.
  */
-export const EmailOTPStoreKV: Layer.Layer<EmailOTPStore, never, KeyValueStore.KeyValueStore> =
-  Layer.effect(EmailOTPStore, emailOTPStoreKV);
+export const EmailOtpStoreKV: Layer.Layer<EmailOtpStore, never, KeyValueStore.KeyValueStore> =
+  Layer.effect(EmailOtpStore, emailOtpStoreKV);
 
 // ---------------------------------------------------------------------------
 // PendingMultiFactorStore
@@ -765,7 +765,7 @@ export const layerKV: Layer.Layer<
   | EmailVerificationStore
   | PasswordResetStore
   | MagicLinkStore
-  | EmailOTPStore
+  | EmailOtpStore
   | PendingMultiFactorStore,
   never,
   KeyValueStore.KeyValueStore
@@ -776,6 +776,6 @@ export const layerKV: Layer.Layer<
   EmailVerificationStoreKV,
   PasswordResetStoreKV,
   MagicLinkStoreKV,
-  EmailOTPStoreKV,
+  EmailOtpStoreKV,
   PendingMultiFactorStoreKV,
 );

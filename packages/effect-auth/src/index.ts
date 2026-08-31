@@ -64,18 +64,18 @@ export { UserServiceStore, type UpdateUserInput, UserService } from "./User.ts";
 
 // Feature modules
 export {
-  PhoneOTPError,
-  type PhoneOTPPurpose,
-  type PhoneOTPRecord,
-  PhoneOTPStore,
-  type PhoneOTPCreateUserInput,
-  PhoneOTPUserStore,
-  type PhoneOTPConfig,
-  type PhoneOTPSignInOptions,
-  type PhoneOTPAuthResult,
-  PhoneOTPService,
+  PhoneOtpError,
+  type PhoneOtpPurpose,
+  type PhoneOtpRecord,
+  PhoneOtpStore,
+  type PhoneOtpCreateUserInput,
+  PhoneOtpUserStore,
+  type PhoneOtpConfig,
+  type PhoneOtpSignInOptions,
+  type PhoneOtpAuthResult,
+  PhoneOtpService,
   getPhoneNumber,
-} from "./PhoneOTP.ts";
+} from "./PhoneOtp.ts";
 export {
   type MagicLinkToken,
   type MagicLinkCreateUserInput,
@@ -107,71 +107,71 @@ export {
   hashApiKey,
 } from "./ApiKey.ts";
 export {
-  JWTError,
-  type JWTAlgorithm,
-  type JWTKeyPair,
-  JWTKeyStore,
-  type JWTConfig,
-  type JWTSignResult,
+  JwtError,
+  type JwtAlgorithm,
+  type JwtKeyPair,
+  JwtKeyStore,
+  type JwtConfig,
+  type JwtSignResult,
   type Jwks,
-  JWTService,
+  JwtService,
   jwtServiceConfig,
   generateKeyPair,
   type RemoteJwksConfig,
   RemoteJwksVerifier,
   remoteJwksVerifier,
-} from "./JWT.ts";
+} from "./Jwt.ts";
 export {
-  SSOError,
-  type OIDCSSOProvider,
-  type SAMLSSOProvider,
-  type SSOProvider,
-  SSOProviderStore,
+  SsoError,
+  type OidcSsoProvider,
+  type SamlSsoProvider,
+  type SsoProvider,
+  SsoProviderStore,
   type RegisterProviderInput,
-  type RegisterSAMLProviderInput,
-  type SSOSignInResult,
-  type SSOSignInSelector,
-  SSOService,
-  type SSOConfig,
-} from "./SSO.ts";
+  type RegisterSamlProviderInput,
+  type SsoSignInResult,
+  type SsoSignInSelector,
+  SsoService,
+  type SsoConfig,
+} from "./Sso.ts";
 export {
-  SCIMError,
+  ScimError,
   SCIM_USERNAME_ATTRIBUTE,
   SCIM_DEACTIVATED_ATTRIBUTE,
   SCIM_EXTERNAL_ID_ATTRIBUTE,
-  isSCIMDeactivated,
-  SCIMDeactivatedPlugin,
-  type SCIMConnection,
-  SCIMConnectionStore,
-  memorySCIMConnectionStore,
-  SCIMUserStore,
-  type SCIMEmail,
-  type SCIMUserResource,
-  type SCIMGroupResource,
-  type SCIMListResult,
-  type SCIMListQuery,
-  type SCIMPatchOperation,
-  type SCIMUserInput,
-  type SCIMGroupInput,
-  type SCIMConfig,
-  SCIMService,
-} from "./SCIM.ts";
+  isScimDeactivated,
+  ScimDeactivatedPlugin,
+  type ScimConnection,
+  ScimConnectionStore,
+  memoryScimConnectionStore,
+  ScimUserStore,
+  type ScimEmail,
+  type ScimUserResource,
+  type ScimGroupResource,
+  type ScimListResult,
+  type ScimListQuery,
+  type ScimPatchOperation,
+  type ScimUserInput,
+  type ScimGroupInput,
+  type ScimConfig,
+  ScimService,
+} from "./Scim.ts";
 export {
-  SAMLError,
-  type SAMLSignatureAlgorithm,
+  SamlError,
+  type SamlSignatureAlgorithm,
   defaultSignatureAlgorithms,
   defaultClockSkewMs,
-  type SAMLVerifyInput,
-  type SAMLAssertion,
-  type SAMLAuthnRequestInput,
-  type SAMLAuthnRequest,
-  type SAMLMetadataInput,
-  SAMLVerifier,
-  type SAMLReplayKind,
-  type SAMLReplayRecord,
-  SAMLReplayStore,
-  memorySAMLReplayStore,
-} from "./SAML.ts";
+  type SamlVerifyInput,
+  type SamlAssertion,
+  type SamlAuthnRequestInput,
+  type SamlAuthnRequest,
+  type SamlMetadataInput,
+  SamlVerifier,
+  type SamlReplayKind,
+  type SamlReplayRecord,
+  SamlReplayStore,
+  memorySamlReplayStore,
+} from "./Saml.ts";
 export {
   GoogleOneTapError,
   GOOGLE_JWKS_ENDPOINT,
@@ -351,7 +351,7 @@ export {
   formatPermission,
   permissionMatches,
 } from "./Permission.ts";
-export { type InMemoryRoleStoreConfig } from "./RBAC.ts";
+export { type InMemoryRoleStoreConfig } from "./Rbac.ts";
 
 /** Policy-kernel decision types (the namespaced `Auth.Policy` carries the rest). */
 export { AuthorizationDeniedError, type Decision, type PolicyOutcome } from "./Policy.ts";
@@ -378,7 +378,7 @@ export {
 
 // Cluster namespaces (also available as `effect-auth/<cluster>` subpaths)
 export * as Email from "./email/index.ts";
-export * as HTTP from "./http/index.ts";
+export * as Http from "./http/index.ts";
 export * as OAuth from "./oauth/index.ts";
 export * as Password from "./password/index.ts";
 export * as Plugins from "./plugins/index.ts";

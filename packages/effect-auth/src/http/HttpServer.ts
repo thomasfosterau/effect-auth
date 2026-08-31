@@ -21,10 +21,10 @@ import { IdentifierStore, type Identifier } from "../Identifier.ts";
 import { MagicLinkService } from "../MagicLink.ts";
 import { AccountManagementService } from "../AccountManagement.ts";
 import { AnonymousService } from "../Anonymous.ts";
-import { PhoneOTPService } from "../PhoneOTP.ts";
+import { PhoneOtpService } from "../PhoneOtp.ts";
 import { UsernameService } from "../Username.ts";
 import { DeviceAuthorizationService, normalizeUserCode } from "../DeviceAuthorization.ts";
-import { EmailOTPService } from "../email/EmailOTP.ts";
+import { EmailOtpService } from "../email/EmailOtp.ts";
 import { MultiFactorService } from "../multifactor/MultiFactor.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { EmailVerificationService } from "../email/EmailVerification.ts";
@@ -42,23 +42,23 @@ import {
 } from "../Organization.ts";
 import { AdminService, isAdmin } from "../Admin.ts";
 import { ApiKeyService, type ApiKey } from "../ApiKey.ts";
-import { JWTService } from "../JWT.ts";
+import { JwtService } from "../Jwt.ts";
 import {
   OidcProviderService,
   type OidcClient,
   type OidcClientMetadata,
   type OidcRegistrationError,
 } from "../OidcProvider.ts";
-import { SSOService, type SSOProvider } from "../SSO.ts";
+import { SsoService, type SsoProvider } from "../Sso.ts";
 import {
-  SCIMService,
-  type SCIMError,
-  type SCIMGroupInput,
-  type SCIMGroupResource,
-  type SCIMListQuery,
-  type SCIMUserInput,
-  type SCIMUserResource,
-} from "../SCIM.ts";
+  ScimService,
+  type ScimError,
+  type ScimGroupInput,
+  type ScimGroupResource,
+  type ScimListQuery,
+  type ScimUserInput,
+  type ScimUserResource,
+} from "../Scim.ts";
 import type * as Errors from "../Errors.ts";
 import { hashToken } from "../TokenHash.ts";
 import { GoogleOneTapService } from "../GoogleOneTap.ts";
@@ -370,7 +370,7 @@ const resolveOptional = <I, S>(tag: Context.Key<I, S>, notEnabledMessage: string
 const resolveMagicLink = resolveOptional(MagicLinkService, "Magic link is not enabled");
 
 /** Resolve the email OTP service, or fail with 404. */
-const resolveEmailOTP = resolveOptional(EmailOTPService, "Email OTP is not enabled");
+const resolveEmailOtp = resolveOptional(EmailOtpService, "Email OTP is not enabled");
 
 /** Resolve the multi-factor service, or fail with 404. */
 const resolveMultiFactor = resolveOptional(
@@ -394,7 +394,7 @@ const resolveDevice = resolveOptional(
 const resolveUsername = resolveOptional(UsernameService, "Username sign-in is not enabled");
 
 /** Resolve the phone OTP service, or fail with 404. */
-const resolvePhoneOTP = resolveOptional(PhoneOTPService, "Phone OTP is not enabled");
+const resolvePhoneOtp = resolveOptional(PhoneOtpService, "Phone OTP is not enabled");
 
 /** Resolve the anonymous service, or fail with 404. */
 const resolveAnonymous = resolveOptional(AnonymousService, "Anonymous sign-in is not enabled");
@@ -409,10 +409,10 @@ const resolveAdmin = resolveOptional(AdminService, "Admin is not enabled");
 const resolveApiKey = resolveOptional(ApiKeyService, "API keys are not enabled");
 
 /** Resolve the JWT service, or fail with 404. */
-const resolveJWT = resolveOptional(JWTService, "JWT is not enabled");
+const resolveJwt = resolveOptional(JwtService, "JWT is not enabled");
 
 /** Resolve the SSO service, or fail with 404. */
-const resolveSSO = resolveOptional(SSOService, "SSO is not enabled");
+const resolveSso = resolveOptional(SsoService, "SSO is not enabled");
 
 /** Resolve the Google One Tap service, or fail with 404. */
 const resolveGoogleOneTap = resolveOptional(GoogleOneTapService, "Google One Tap is not enabled");
@@ -482,7 +482,7 @@ const encodeFullOrganization = (f: FullOrganization): S.FullOrganizationView => 
  * time. Neither arm carries a secret: the OIDC arm drops `clientSecret`, and
  * both drop the registrar's `userId`.
  */
-const encodeSSOProvider = (p: SSOProvider): S.SSOProviderView =>
+const encodeSsoProvider = (p: SsoProvider): S.SsoProviderView =>
   p.protocol === "saml"
     ? {
         id: p.id,
@@ -1324,15 +1324,15 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return yield* withSessionCookie(body, result.session, cfg, "magic-link");
         }),
       )
-      .handle("emailOTPSend", ({ payload }) =>
+      .handle("emailOtpSend", ({ payload }) =>
         Effect.gen(function* () {
-          const emailOTP = yield* resolveEmailOTP;
+          const emailOtp = yield* resolveEmailOtp;
           // Anti-enumeration: the service succeeds silently for unknown
           // accounts; only store/delivery failures surface (as 500).
-          yield* emailOTP.service.send(payload.email, payload.purpose).pipe(
+          yield* emailOtp.service.send(payload.email, payload.purpose).pipe(
             Effect.catchTags({
               AuthError: (e) => internalServerError(e),
-              EmailOTPError: (e) => internalServerError(e),
+              EmailOtpError: (e) => internalServerError(e),
               ResendTooSoonError: (e) =>
                 Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
             }),
@@ -1340,12 +1340,12 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return { status: true };
         }),
       )
-      .handle("signInEmailOTP", ({ payload }) =>
+      .handle("signInEmailOtp", ({ payload }) =>
         Effect.gen(function* () {
-          const emailOTP = yield* resolveEmailOTP;
-          const result = yield* emailOTP.service.signIn(payload.email, payload.otp).pipe(
+          const emailOtp = yield* resolveEmailOtp;
+          const result = yield* emailOtp.service.signIn(payload.email, payload.otp).pipe(
             Effect.catchTags({
-              EmailOTPError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              EmailOtpError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => internalServerError(e),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               AccountLockedError: (e) =>
@@ -1667,13 +1667,13 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return { status: true };
         }),
       )
-      .handle("phoneOTPSend", ({ payload }) =>
+      .handle("phoneOtpSend", ({ payload }) =>
         Effect.gen(function* () {
-          const phoneOTP = yield* resolvePhoneOTP;
-          yield* phoneOTP.service.send(payload.phoneNumber, payload.purpose).pipe(
+          const phoneOtp = yield* resolvePhoneOtp;
+          yield* phoneOtp.service.send(payload.phoneNumber, payload.purpose).pipe(
             Effect.catchTags({
               // Anti-enumeration: send never signals whether the number exists.
-              PhoneOTPError: (e) => internalServerError(e),
+              PhoneOtpError: (e) => internalServerError(e),
               AuthError: (e) => internalServerError(e),
               ResendTooSoonError: (e) =>
                 Effect.fail(new S.TooManyRequests({ message: e.message, code: e.code })),
@@ -1682,12 +1682,12 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return { status: true };
         }),
       )
-      .handle("signInPhoneOTP", ({ payload }) =>
+      .handle("signInPhoneOtp", ({ payload }) =>
         Effect.gen(function* () {
-          const phoneOTP = yield* resolvePhoneOTP;
-          const result = yield* phoneOTP.service.signIn(payload.phoneNumber, payload.otp).pipe(
+          const phoneOtp = yield* resolvePhoneOtp;
+          const result = yield* phoneOtp.service.signIn(payload.phoneNumber, payload.otp).pipe(
             Effect.catchTags({
-              PhoneOTPError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              PhoneOtpError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => internalServerError(e),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               AccountLockedError: (e) =>
@@ -2485,12 +2485,12 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           if (!isAdmin(resolved.user)) {
             return yield* new S.Forbidden({ message: "Admin privileges required" });
           }
-          const sso = yield* resolveSSO;
+          const sso = yield* resolveSso;
           // The payload is a union discriminated on `protocol`; a body without
           // one is an OIDC registration (what every pre-SAML client sends).
           if (payload.protocol === "saml") {
             const samlProvider = yield* sso.service
-              .registerSAMLProvider(resolved.user.id, {
+              .registerSamlProvider(resolved.user.id, {
                 protocol: "saml",
                 domain: payload.domain,
                 entityId: payload.entityId,
@@ -2514,11 +2514,11 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               })
               .pipe(
                 Effect.catchTags({
-                  SSOError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                  SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                   AuthError: (e) => internalServerError(e),
                 }),
               );
-            return encodeSSOProvider(samlProvider);
+            return encodeSsoProvider(samlProvider);
           }
           const provider = yield* sso.service
             .registerProvider(resolved.user.id, {
@@ -2546,16 +2546,16 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             })
             .pipe(
               Effect.catchTags({
-                SSOError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => internalServerError(e),
               }),
             );
-          return encodeSSOProvider(provider);
+          return encodeSsoProvider(provider);
         }),
       )
-      .handle("signInSSO", ({ payload }) =>
+      .handle("signInSso", ({ payload }) =>
         Effect.gen(function* () {
-          const sso = yield* resolveSSO;
+          const sso = yield* resolveSso;
           const result = yield* sso.service
             .signIn({
               ...(payload.email !== undefined && { email: payload.email }),
@@ -2564,7 +2564,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             })
             .pipe(
               Effect.catchTags({
-                SSOError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => internalServerError(e),
               }),
             );
@@ -2573,10 +2573,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("ssoCallback", ({ payload }) =>
         Effect.gen(function* () {
-          const sso = yield* resolveSSO;
+          const sso = yield* resolveSso;
           const result = yield* sso.service.handleCallback(payload.state, payload.code).pipe(
             Effect.catchTags({
-              SSOError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => internalServerError(e),
               RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
               AccountLockedError: (e) =>
@@ -2617,12 +2617,12 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       // callback uses — cookie, last-login-method hint, bearer header and all.
       .handle("samlAcs", ({ params, payload }) =>
         Effect.gen(function* () {
-          const sso = yield* resolveSSO;
+          const sso = yield* resolveSso;
           const result = yield* sso.service
-            .handleSAMLCallback(params.providerId, payload.SAMLResponse, payload.RelayState)
+            .handleSamlCallback(params.providerId, payload.SAMLResponse, payload.RelayState)
             .pipe(
               Effect.catchTags({
-                SSOError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+                SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
                 AuthError: (e) => internalServerError(e),
                 RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
                 AccountLockedError: (e) =>
@@ -2660,10 +2660,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("samlMetadata", ({ params }) =>
         Effect.gen(function* () {
-          const sso = yield* resolveSSO;
+          const sso = yield* resolveSso;
           return yield* sso.service.samlMetadata(params.providerId).pipe(
             Effect.catchTags({
-              SSOError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+              SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
               AuthError: (e) => internalServerError(e),
             }),
           );
@@ -2673,10 +2673,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("jwtToken", ({ request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          const jwt = yield* resolveJWT;
+          const jwt = yield* resolveJwt;
           const result = yield* jwt.service.sign(resolved.user).pipe(
             Effect.catchTags({
-              JWTError: (e) => internalServerError(e),
+              JwtError: (e) => internalServerError(e),
               AuthError: (e) => internalServerError(e),
             }),
           );
@@ -2685,7 +2685,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       )
       .handle("jwtJwks", () =>
         Effect.gen(function* () {
-          const jwt = yield* resolveJWT;
+          const jwt = yield* resolveJwt;
           const jwks = yield* jwt.service.getJwks().pipe(
             Effect.catchTags({
               AuthError: (e) => internalServerError(e),
@@ -3025,7 +3025,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("oidcJwks", () =>
         Effect.gen(function* () {
           yield* resolveOidcProvider; // 404 when the OIDC provider is disabled
-          const jwt = yield* resolveJWT;
+          const jwt = yield* resolveJwt;
           const jwks = yield* jwt.service.getJwks().pipe(
             Effect.catchTags({
               AuthError: (e) => internalServerError(e),
@@ -3099,22 +3099,22 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
  * Build a SCIM error body (RFC 7644 §3.12). `status` is a *string* there, and
  * `scimType` is the machine-readable half an IdP branches on.
  */
-const scimBadRequest = (detail: string, scimType?: string): S.SCIMBadRequest =>
-  new S.SCIMBadRequest({
+const scimBadRequest = (detail: string, scimType?: string): S.ScimBadRequest =>
+  new S.ScimBadRequest({
     schemas: [S.SCIM_ERROR_SCHEMA],
     status: "400",
     ...(scimType !== undefined && { scimType }),
     detail,
   });
 
-const scimUnauthorized = (detail: string): S.SCIMUnauthorized =>
-  new S.SCIMUnauthorized({ schemas: [S.SCIM_ERROR_SCHEMA], status: "401", detail });
+const scimUnauthorized = (detail: string): S.ScimUnauthorized =>
+  new S.ScimUnauthorized({ schemas: [S.SCIM_ERROR_SCHEMA], status: "401", detail });
 
-const scimNotFound = (detail: string): S.SCIMNotFound =>
-  new S.SCIMNotFound({ schemas: [S.SCIM_ERROR_SCHEMA], status: "404", detail });
+const scimNotFound = (detail: string): S.ScimNotFound =>
+  new S.ScimNotFound({ schemas: [S.SCIM_ERROR_SCHEMA], status: "404", detail });
 
-const scimConflict = (detail: string): S.SCIMConflict =>
-  new S.SCIMConflict({
+const scimConflict = (detail: string): S.ScimConflict =>
+  new S.ScimConflict({
     schemas: [S.SCIM_ERROR_SCHEMA],
     status: "409",
     scimType: "uniqueness",
@@ -3125,11 +3125,11 @@ const scimConflict = (detail: string): S.SCIMConflict =>
  * Log the real error and answer with a generic SCIM 500, so internals never
  * reach the IdP. The SCIM mirror of {@link internalServerError}.
  */
-const scimInternalError = (e: unknown): Effect.Effect<never, S.SCIMInternalError, never> =>
+const scimInternalError = (e: unknown): Effect.Effect<never, S.ScimInternalError, never> =>
   Effect.logError("[effect-auth] internal error", e).pipe(
     Effect.flatMap(() =>
       Effect.fail(
-        new S.SCIMInternalError({
+        new S.ScimInternalError({
           schemas: [S.SCIM_ERROR_SCHEMA],
           status: "500",
           detail: "Internal server error",
@@ -3138,12 +3138,12 @@ const scimInternalError = (e: unknown): Effect.Effect<never, S.SCIMInternalError
     ),
   );
 
-/** Translate a core {@link SCIMError} into the wire body its status calls for. */
+/** Translate a core {@link ScimError} into the wire body its status calls for. */
 const scimFailure = (
-  e: SCIMError,
+  e: ScimError,
 ): Effect.Effect<
   never,
-  S.SCIMBadRequest | S.SCIMUnauthorized | S.SCIMNotFound | S.SCIMConflict | S.SCIMInternalError
+  S.ScimBadRequest | S.ScimUnauthorized | S.ScimNotFound | S.ScimConflict | S.ScimInternalError
 > => {
   switch (e.status) {
     case 400:
@@ -3159,9 +3159,9 @@ const scimFailure = (
   }
 };
 
-/** The catch-set every SCIM handler applies to a `SCIMService` call. */
+/** The catch-set every SCIM handler applies to a `ScimService` call. */
 const scimCatch = {
-  SCIMError: scimFailure,
+  ScimError: scimFailure,
   AuthError: (e: Errors.AuthError) => scimInternalError(e),
 } as const;
 
@@ -3174,9 +3174,9 @@ const scimCatch = {
  * unknown token gets the same 401 — the service answers uniformly so a caller
  * cannot probe which tokens exist.
  */
-const requireSCIM = (request: HttpServerRequest.HttpServerRequest) =>
+const requireScim = (request: HttpServerRequest.HttpServerRequest) =>
   Effect.gen(function* () {
-    const service = yield* Effect.serviceOption(SCIMService);
+    const service = yield* Effect.serviceOption(ScimService);
     if (Option.isNone(service)) {
       return yield* scimNotFound("SCIM provisioning is not enabled");
     }
@@ -3189,8 +3189,8 @@ const requireSCIM = (request: HttpServerRequest.HttpServerRequest) =>
   });
 
 /** The discovery documents are static, so resolving the service is the only gate. */
-const requireSCIMService = Effect.gen(function* () {
-  const service = yield* Effect.serviceOption(SCIMService);
+const requireScimService = Effect.gen(function* () {
+  const service = yield* Effect.serviceOption(ScimService);
   if (Option.isNone(service)) {
     return yield* scimNotFound("SCIM provisioning is not enabled");
   }
@@ -3203,14 +3203,14 @@ const scimMeta = (
   id: string,
   createdAt: number,
   updatedAt: number,
-): S.SCIMMetaView => ({
+): S.ScimMetaView => ({
   resourceType,
   created: new Date(createdAt).toISOString(),
   lastModified: new Date(updatedAt).toISOString(),
   location: `${baseUrl}/${resourceType}s/${id}`,
 });
 
-const encodeSCIMUser = (resource: SCIMUserResource, baseUrl: string): S.SCIMUserView => ({
+const encodeScimUser = (resource: ScimUserResource, baseUrl: string): S.ScimUserView => ({
   schemas: [S.SCIM_USER_SCHEMA],
   id: resource.id,
   ...(resource.externalId !== undefined && { externalId: resource.externalId }),
@@ -3225,7 +3225,7 @@ const encodeSCIMUser = (resource: SCIMUserResource, baseUrl: string): S.SCIMUser
   meta: scimMeta("User", baseUrl, resource.id, resource.createdAt, resource.updatedAt),
 });
 
-const encodeSCIMGroup = (resource: SCIMGroupResource, baseUrl: string): S.SCIMGroupView => ({
+const encodeScimGroup = (resource: ScimGroupResource, baseUrl: string): S.ScimGroupView => ({
   schemas: [S.SCIM_GROUP_SCHEMA],
   id: resource.id,
   displayName: resource.displayName,
@@ -3242,7 +3242,7 @@ const scimListQuery = (query: {
   readonly filter?: string | undefined;
   readonly startIndex?: string | undefined;
   readonly count?: string | undefined;
-}): Effect.Effect<SCIMListQuery, S.SCIMBadRequest> => {
+}): Effect.Effect<ScimListQuery, S.ScimBadRequest> => {
   const parseInteger = (raw: string | undefined): number | null | undefined => {
     if (raw === undefined || raw.trim() === "") return undefined;
     const value = Number(raw);
@@ -3264,7 +3264,7 @@ const scimListQuery = (query: {
 };
 
 /** Fold Okta's `name` sub-attributes into a display name when it sent no `displayName`. */
-const scimDisplayName = (payload: S.SCIMUserPayload): string | undefined => {
+const scimDisplayName = (payload: S.ScimUserPayload): string | undefined => {
   if (payload.displayName !== undefined && payload.displayName.trim() !== "") {
     return payload.displayName;
   }
@@ -3277,7 +3277,7 @@ const scimDisplayName = (payload: S.SCIMUserPayload): string | undefined => {
   return parts.length === 0 ? undefined : parts.join(" ");
 };
 
-const toSCIMUserInput = (payload: S.SCIMUserPayload): SCIMUserInput => {
+const toScimUserInput = (payload: S.ScimUserPayload): ScimUserInput => {
   const displayName = scimDisplayName(payload);
   return {
     userName: payload.userName,
@@ -3294,7 +3294,7 @@ const toSCIMUserInput = (payload: S.SCIMUserPayload): SCIMUserInput => {
   };
 };
 
-const toSCIMGroupInput = (payload: S.SCIMGroupPayload): SCIMGroupInput => ({
+const toScimGroupInput = (payload: S.ScimGroupPayload): ScimGroupInput => ({
   displayName: payload.displayName,
   ...(payload.members !== undefined && {
     members: payload.members.map((member) => ({ value: member.value })),
@@ -3309,7 +3309,7 @@ const toSCIMGroupInput = (payload: S.SCIMGroupPayload): SCIMGroupInput => ({
  * `changePassword`, `sort` and `etag` all off, because pretending otherwise is
  * how provisioning silently half-works.
  */
-const scimServiceProviderConfig = (baseUrl: string, maxResults: number): S.SCIMDocumentView => ({
+const scimServiceProviderConfig = (baseUrl: string, maxResults: number): S.ScimDocumentView => ({
   schemas: [S.SCIM_SERVICE_PROVIDER_CONFIG_SCHEMA],
   documentationUri: "https://datatracker.ietf.org/doc/html/rfc7644",
   patch: { supported: true },
@@ -3336,7 +3336,7 @@ const scimServiceProviderConfig = (baseUrl: string, maxResults: number): S.SCIMD
 });
 
 /** `GET /ResourceTypes` (RFC 7643 §6) — the two resources this server exposes. */
-const scimResourceTypes = (baseUrl: string): S.SCIMDocumentView => {
+const scimResourceTypes = (baseUrl: string): S.ScimDocumentView => {
   const resource = (name: string, endpoint: string, schema: string) => ({
     schemas: [S.SCIM_RESOURCE_TYPE_SCHEMA],
     id: name,
@@ -3366,7 +3366,7 @@ const scimResourceTypes = (baseUrl: string): S.SCIMDocumentView => {
  * `GET /Schemas` (RFC 7643 §7) — the attributes of the two resources, limited
  * to the ones this server actually reads and writes.
  */
-const scimSchemas = (baseUrl: string): S.SCIMDocumentView => {
+const scimSchemas = (baseUrl: string): S.ScimDocumentView => {
   const attribute = (
     name: string,
     type: string,
@@ -3437,7 +3437,7 @@ const scimSchemas = (baseUrl: string): S.SCIMDocumentView => {
 /**
  * Layer implementing the `scim` group handlers.
  *
- * Every route resolves `SCIMService` optionally, so a deployment that never
+ * Every route resolves `ScimService` optionally, so a deployment that never
  * provisions answers `404` here and pays nothing for the feature.
  */
 export const scimGroupLayer = () =>
@@ -3445,16 +3445,16 @@ export const scimGroupLayer = () =>
     handlers
       .handle("scimCreateUser", ({ payload, request }) =>
         Effect.gen(function* () {
-          const scim = yield* requireSCIM(request);
+          const scim = yield* requireScim(request);
           const resource = yield* scim.service
-            .createUser(scim.connection, toSCIMUserInput(payload))
+            .createUser(scim.connection, toScimUserInput(payload))
             .pipe(Effect.catchTags(scimCatch));
-          return encodeSCIMUser(resource, scim.service.baseUrl);
+          return encodeScimUser(resource, scim.service.baseUrl);
         }),
       )
       .handle("scimListUsers", ({ query, request }) =>
         Effect.gen(function* () {
-          const scim = yield* requireSCIM(request);
+          const scim = yield* requireScim(request);
           const listQuery = yield* scimListQuery(query);
           const page = yield* scim.service
             .listUsers(scim.connection, listQuery)
@@ -3465,41 +3465,41 @@ export const scimGroupLayer = () =>
             startIndex: page.startIndex,
             itemsPerPage: page.itemsPerPage,
             Resources: page.resources.map((resource) =>
-              encodeSCIMUser(resource, scim.service.baseUrl),
+              encodeScimUser(resource, scim.service.baseUrl),
             ),
           };
         }),
       )
       .handle("scimGetUser", ({ params, request }) =>
         Effect.gen(function* () {
-          const scim = yield* requireSCIM(request);
+          const scim = yield* requireScim(request);
           const resource = yield* scim.service
             .getUser(scim.connection, params.id)
             .pipe(Effect.catchTags(scimCatch));
-          return encodeSCIMUser(resource, scim.service.baseUrl);
+          return encodeScimUser(resource, scim.service.baseUrl);
         }),
       )
       .handle("scimReplaceUser", ({ params, payload, request }) =>
         Effect.gen(function* () {
-          const scim = yield* requireSCIM(request);
+          const scim = yield* requireScim(request);
           const resource = yield* scim.service
-            .replaceUser(scim.connection, params.id, toSCIMUserInput(payload))
+            .replaceUser(scim.connection, params.id, toScimUserInput(payload))
             .pipe(Effect.catchTags(scimCatch));
-          return encodeSCIMUser(resource, scim.service.baseUrl);
+          return encodeScimUser(resource, scim.service.baseUrl);
         }),
       )
       .handle("scimPatchUser", ({ params, payload, request }) =>
         Effect.gen(function* () {
-          const scim = yield* requireSCIM(request);
+          const scim = yield* requireScim(request);
           const resource = yield* scim.service
             .patchUser(scim.connection, params.id, payload.Operations)
             .pipe(Effect.catchTags(scimCatch));
-          return encodeSCIMUser(resource, scim.service.baseUrl);
+          return encodeScimUser(resource, scim.service.baseUrl);
         }),
       )
       .handle("scimDeleteUser", ({ params, request }) =>
         Effect.gen(function* () {
-          const scim = yield* requireSCIM(request);
+          const scim = yield* requireScim(request);
           yield* scim.service
             .deactivateUser(scim.connection, params.id)
             .pipe(Effect.catchTags(scimCatch));
@@ -3507,16 +3507,16 @@ export const scimGroupLayer = () =>
       )
       .handle("scimCreateGroup", ({ payload, request }) =>
         Effect.gen(function* () {
-          const scim = yield* requireSCIM(request);
+          const scim = yield* requireScim(request);
           const resource = yield* scim.service
-            .createGroup(scim.connection, toSCIMGroupInput(payload))
+            .createGroup(scim.connection, toScimGroupInput(payload))
             .pipe(Effect.catchTags(scimCatch));
-          return encodeSCIMGroup(resource, scim.service.baseUrl);
+          return encodeScimGroup(resource, scim.service.baseUrl);
         }),
       )
       .handle("scimListGroups", ({ query, request }) =>
         Effect.gen(function* () {
-          const scim = yield* requireSCIM(request);
+          const scim = yield* requireScim(request);
           const listQuery = yield* scimListQuery(query);
           const page = yield* scim.service
             .listGroups(scim.connection, listQuery)
@@ -3527,56 +3527,56 @@ export const scimGroupLayer = () =>
             startIndex: page.startIndex,
             itemsPerPage: page.itemsPerPage,
             Resources: page.resources.map((resource) =>
-              encodeSCIMGroup(resource, scim.service.baseUrl),
+              encodeScimGroup(resource, scim.service.baseUrl),
             ),
           };
         }),
       )
       .handle("scimGetGroup", ({ params, request }) =>
         Effect.gen(function* () {
-          const scim = yield* requireSCIM(request);
+          const scim = yield* requireScim(request);
           const resource = yield* scim.service
             .getGroup(scim.connection, params.id)
             .pipe(Effect.catchTags(scimCatch));
-          return encodeSCIMGroup(resource, scim.service.baseUrl);
+          return encodeScimGroup(resource, scim.service.baseUrl);
         }),
       )
       .handle("scimReplaceGroup", ({ params, payload, request }) =>
         Effect.gen(function* () {
-          const scim = yield* requireSCIM(request);
+          const scim = yield* requireScim(request);
           const resource = yield* scim.service
-            .replaceGroup(scim.connection, params.id, toSCIMGroupInput(payload))
+            .replaceGroup(scim.connection, params.id, toScimGroupInput(payload))
             .pipe(Effect.catchTags(scimCatch));
-          return encodeSCIMGroup(resource, scim.service.baseUrl);
+          return encodeScimGroup(resource, scim.service.baseUrl);
         }),
       )
       .handle("scimPatchGroup", ({ params, payload, request }) =>
         Effect.gen(function* () {
-          const scim = yield* requireSCIM(request);
+          const scim = yield* requireScim(request);
           const resource = yield* scim.service
             .patchGroup(scim.connection, params.id, payload.Operations)
             .pipe(Effect.catchTags(scimCatch));
-          return encodeSCIMGroup(resource, scim.service.baseUrl);
+          return encodeScimGroup(resource, scim.service.baseUrl);
         }),
       )
       .handle("scimDeleteGroup", ({ params, request }) =>
         Effect.gen(function* () {
-          const scim = yield* requireSCIM(request);
+          const scim = yield* requireScim(request);
           yield* scim.service
             .deleteGroup(scim.connection, params.id)
             .pipe(Effect.catchTags(scimCatch));
         }),
       )
       .handle("scimServiceProviderConfig", () =>
-        Effect.map(requireSCIMService, (service) =>
+        Effect.map(requireScimService, (service) =>
           scimServiceProviderConfig(service.baseUrl, service.maxPageSize),
         ),
       )
       .handle("scimResourceTypes", () =>
-        Effect.map(requireSCIMService, (service) => scimResourceTypes(service.baseUrl)),
+        Effect.map(requireScimService, (service) => scimResourceTypes(service.baseUrl)),
       )
       .handle("scimSchemas", () =>
-        Effect.map(requireSCIMService, (service) => scimSchemas(service.baseUrl)),
+        Effect.map(requireScimService, (service) => scimSchemas(service.baseUrl)),
       ),
   );
 
@@ -3781,7 +3781,7 @@ export interface EndpointRateLimitRule {
  * When `rules` is omitted, {@link defaultEndpointRules} is used — sane
  * defaults for all sensitive auth endpoints.
  */
-export interface HTTPIPRateLimitConfig {
+export interface HttpIPRateLimitConfig {
   /**
    * Declarative rule set. First matching rule (in order) wins.
    * Omit to use the built-in defaults for all sensitive endpoints.
@@ -3938,7 +3938,7 @@ export interface AuthWebHandlerOptions {
    * Set to `{}` to use the built-in {@link defaultEndpointRules}, or supply
    * `{ rules: [...] }` for a custom rule set.
    */
-  readonly ipRateLimit?: HTTPIPRateLimitConfig;
+  readonly ipRateLimit?: HttpIPRateLimitConfig;
 }
 
 /** Minimal Scalar API reference shell pointing at the sibling `openapi.json`. */
@@ -4028,7 +4028,7 @@ export const make = (
 } => {
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
     Layer.provide(authGroupLayer(options.cookie, options.multiSession)),
-    // The SCIM group is always mounted; its handlers resolve `SCIMService`
+    // The SCIM group is always mounted; its handlers resolve `ScimService`
     // optionally and answer 404 when provisioning is not configured.
     Layer.provide(scimGroupLayer()),
     Layer.provide(PlatformLayer),

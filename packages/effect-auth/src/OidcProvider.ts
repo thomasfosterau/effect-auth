@@ -6,7 +6,7 @@
  * opaque access/refresh tokens plus signed `id_token`s so third-party apps can
  * federate sign-in to this server.
  *
- * The `id_token` is signed with the {@link module:jwt} `JWTService`, sharing
+ * The `id_token` is signed with the {@link module:jwt} `JwtService`, sharing
  * its signing keys — the JWKS published at `/.well-known/jwks.json` (or
  * `GET /jwks`) verifies both plain user JWTs and OIDC `id_token`s.
  *
@@ -19,7 +19,7 @@
  */
 import { Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
 import { AuthError } from "./Errors.ts";
-import { JWTService } from "./JWT.ts";
+import { JwtService } from "./Jwt.ts";
 import * as Obs from "./Observability.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type { RateLimitConfig } from "./RateLimit.ts";
@@ -731,7 +731,7 @@ export const make = (
   | OidcTokenStore
   | UserStore
   | IdentifierStore
-  | JWTService
+  | JwtService
   | Crypto.Crypto
 > =>
   Effect.gen(function* () {
@@ -790,7 +790,7 @@ export const make = (
     const tokenStore = yield* OidcTokenStore;
     const userStore = yield* UserStore;
     const identifierStore = yield* IdentifierStore;
-    const jwt = yield* JWTService;
+    const jwt = yield* JwtService;
     const crypto = yield* Crypto.Crypto;
 
     const randomToken = (): Effect.Effect<string, AuthError> =>
@@ -906,7 +906,7 @@ export const make = (
               ...(yield* claimsFor(user, grant.scopes)),
             })
             .pipe(
-              Effect.catchTag("JWTError", (e) =>
+              Effect.catchTag("JwtError", (e) =>
                 Effect.fail(new OidcTokenError({ error: "server_error", description: e.message })),
               ),
             );

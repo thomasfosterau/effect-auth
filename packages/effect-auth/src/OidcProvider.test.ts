@@ -22,8 +22,8 @@ import {
   PasswordResetUserStore,
 } from "./password/PasswordReset.ts";
 import { type AuthServices } from "./http/HttpServer.ts";
-import * as HTTPServer from "./http/HttpServer.ts";
-import { JWTKeyStore, type JWTKeyPair, JWTService } from "./JWT.ts";
+import * as HttpServer from "./http/HttpServer.ts";
+import { JwtKeyStore, type JwtKeyPair, JwtService } from "./Jwt.ts";
 import { generatePKCE, verifyIdToken } from "./oauth/OAuth.ts";
 import {
   OidcClientStore,
@@ -55,7 +55,7 @@ const makeOidcStores = () => {
   const codes = new Map<string, OidcAuthorizationCode>();
   const tokens = new Map<string, OidcToken>();
   const consents = new Map<string, OidcConsent>();
-  const jwtKeys: JWTKeyPair[] = [];
+  const jwtKeys: JwtKeyPair[] = [];
 
   const clientStore: typeof OidcClientStore.Service = {
     create: (c) => Effect.sync(() => (clients.set(c.clientId, c), c)),
@@ -81,7 +81,7 @@ const makeOidcStores = () => {
     upsert: (c) => Effect.sync(() => (consents.set(`${c.userId}:${c.clientId}`, c), c)),
     delete: (userId, clientId) => Effect.sync(() => void consents.delete(`${userId}:${clientId}`)),
   };
-  const jwtKeyStore: typeof JWTKeyStore.Service = {
+  const jwtKeyStore: typeof JwtKeyStore.Service = {
     getActive: () => Effect.succeed(jwtKeys[0] ?? null),
     create: (pair) => Effect.sync(() => (jwtKeys.push(pair), pair)),
     list: () => Effect.succeed([...jwtKeys]),
@@ -114,15 +114,15 @@ describe("OidcProviderService", () => {
 
   const setup = () => {
     const stores = makeOidcStores();
-    // `OidcProvider.make` also resolves `UserStore` and `JWTService` at
+    // `OidcProvider.make` also resolves `UserStore` and `JwtService` at
     // construction time (even though these service-level tests never exercise
     // the userinfo/token-signing paths), so both must be satisfiable here too.
     const userStore: typeof UserStore.Service = {
       get: () => Effect.succeed(null),
       getCredentials: () => Effect.succeed(null),
     };
-    const jwtServiceLayer = JWTService.layer({ issuer: ISSUER }).pipe(
-      Layer.provide(Layer.succeed(JWTKeyStore)(stores.jwtKeyStore)),
+    const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
+      Layer.provide(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore)),
     );
     const layer = Layer.mergeAll(
       Layer.succeed(OidcClientStore)(stores.clientStore),
@@ -441,8 +441,8 @@ describe("OidcProviderService dynamic client registration", () => {
       get: () => Effect.succeed(null),
       getCredentials: () => Effect.succeed(null),
     };
-    const jwtServiceLayer = JWTService.layer({ issuer: ISSUER }).pipe(
-      Layer.provide(Layer.succeed(JWTKeyStore)(stores.jwtKeyStore)),
+    const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
+      Layer.provide(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore)),
     );
     const layer = Layer.mergeAll(
       Layer.succeed(OidcClientStore)(stores.clientStore),
@@ -828,13 +828,13 @@ const makeHttpFixture = (
     Layer.succeed(PasswordResetUserStore)(undefined as never),
   );
 
-  const jwtKeyStoreLayer = Layer.succeed(JWTKeyStore)(oidc.jwtKeyStore);
-  const jwtServiceLayer = JWTService.layer({ issuer: ISSUER }).pipe(
+  const jwtKeyStoreLayer = Layer.succeed(JwtKeyStore)(oidc.jwtKeyStore);
+  const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
     Layer.provide(jwtKeyStoreLayer),
   );
 
   // `OidcProviderService` resolves the OIDC stores, the core `UserStore`, and
-  // `JWTService` at construction time, so all of them must already be built.
+  // `JwtService` at construction time, so all of them must already be built.
   const oidcDeps = Layer.mergeAll(
     Layer.succeed(OidcClientStore)(oidc.clientStore),
     Layer.succeed(OidcCodeStore)(oidc.codeStore),
@@ -865,8 +865,8 @@ const makeHttpFixture = (
     seedUser,
     makeSession,
     oidcTokenStore: oidc.tokens,
-    handler: HTTPServer.make({ services: withOidc, cookie: { secure: false } }).handler,
-    handlerWithoutOidc: HTTPServer.make({ services: withoutOidc, cookie: { secure: false } })
+    handler: HttpServer.make({ services: withOidc, cookie: { secure: false } }).handler,
+    handlerWithoutOidc: HttpServer.make({ services: withoutOidc, cookie: { secure: false } })
       .handler,
   };
 };

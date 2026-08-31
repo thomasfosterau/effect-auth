@@ -1,7 +1,7 @@
 /**
  * Phone number authentication via SMS one-time passwords.
  *
- * Mirrors `EmailOTP.ts` (hashed OTP at rest, attempt limiting, purpose scoping,
+ * Mirrors `EmailOtp.ts` (hashed OTP at rest, attempt limiting, purpose scoping,
  * anti-enumeration) — only the channel (SMS) and the user-lookup key (phone
  * number) differ. Two purposes are supported: `sign-in` and
  * `phone-verification`.
@@ -24,19 +24,19 @@ import { type HookError } from "./Hooks.ts";
 import { SessionService } from "./SessionService.ts";
 
 /** Error raised by phone OTP verification failures. */
-export class PhoneOTPError extends Data.TaggedError("PhoneOTPError")<{
+export class PhoneOtpError extends Data.TaggedError("PhoneOtpError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
 /** The purposes a phone OTP can be issued for. */
-export type PhoneOTPPurpose = "sign-in" | "phone-verification";
+export type PhoneOtpPurpose = "sign-in" | "phone-verification";
 
 /** Stored phone OTP record. Only the SHA-256 hash of the code is persisted. */
-export interface PhoneOTPRecord {
+export interface PhoneOtpRecord {
   readonly phoneNumber: string;
   readonly otpHash: string;
-  readonly purpose: PhoneOTPPurpose;
+  readonly purpose: PhoneOtpPurpose;
   readonly attempts: number;
   readonly createdAt: number;
   readonly expiresAt: number;
@@ -46,44 +46,44 @@ export interface PhoneOTPRecord {
  * Persistence for phone OTPs, keyed by the (normalized phoneNumber, purpose)
  * pair; `upsert` replaces any existing record for the pair.
  */
-export class PhoneOTPStore extends Context.Service<
-  PhoneOTPStore,
+export class PhoneOtpStore extends Context.Service<
+  PhoneOtpStore,
   {
-    readonly upsert: (record: PhoneOTPRecord) => Effect.Effect<PhoneOTPRecord, Errors.AuthError>;
+    readonly upsert: (record: PhoneOtpRecord) => Effect.Effect<PhoneOtpRecord, Errors.AuthError>;
     readonly get: (
       phoneNumber: string,
-      purpose: PhoneOTPPurpose,
-    ) => Effect.Effect<PhoneOTPRecord | null, Errors.AuthError>;
+      purpose: PhoneOtpPurpose,
+    ) => Effect.Effect<PhoneOtpRecord | null, Errors.AuthError>;
     readonly delete: (
       phoneNumber: string,
-      purpose: PhoneOTPPurpose,
+      purpose: PhoneOtpPurpose,
     ) => Effect.Effect<void, Errors.AuthError>;
     readonly incrementAttempts: (
       phoneNumber: string,
-      purpose: PhoneOTPPurpose,
+      purpose: PhoneOtpPurpose,
     ) => Effect.Effect<number, Errors.AuthError>;
   }
->()("@effect-auth/PhoneOTPStore") {}
+>()("@effect-auth/PhoneOtpStore") {}
 
 /**
  * Profile fields for a user created during phone OTP sign-in. The phone number
  * itself is recorded as a verified `phone` `Identifier` by the service.
  */
-export interface PhoneOTPCreateUserInput {
+export interface PhoneOtpCreateUserInput {
   readonly name?: string;
 }
 
 /** User creation seam for phone-OTP sign-up. */
-export class PhoneOTPUserStore extends Context.Service<
-  PhoneOTPUserStore,
+export class PhoneOtpUserStore extends Context.Service<
+  PhoneOtpUserStore,
   {
     readonly createUser: (
-      input: PhoneOTPCreateUserInput,
+      input: PhoneOtpCreateUserInput,
     ) => Effect.Effect<Types.User, Errors.AuthError>;
   }
->()("@effect-auth/PhoneOTPUserStore") {}
+>()("@effect-auth/PhoneOtpUserStore") {}
 
-export interface PhoneOTPConfig {
+export interface PhoneOtpConfig {
   readonly otpLength?: number; // Default: 6 digits
   readonly expiresIn?: number; // Default: 5 minutes
   readonly maxAttempts?: number; // Default: 3
@@ -96,10 +96,10 @@ export interface PhoneOTPConfig {
    * DoS exposure. Complements the global RateLimit.
    */
   readonly resendCooldown?: number;
-  readonly sendOTP: (
+  readonly sendOtp: (
     phoneNumber: string,
     otp: string,
-    purpose: PhoneOTPPurpose,
+    purpose: PhoneOtpPurpose,
   ) => Effect.Effect<void, unknown>;
   /**
    * Normalize a raw phone number before storage/lookup. Default trims
@@ -108,17 +108,17 @@ export interface PhoneOTPConfig {
   readonly normalizePhoneNumber?: (raw: string) => Effect.Effect<string, Errors.AuthError>;
 }
 
-export interface PhoneOTPSignInOptions {
+export interface PhoneOtpSignInOptions {
   readonly sessionAttributes?: Record<string, unknown>;
 }
 
-export interface PhoneOTPAuthResult {
+export interface PhoneOtpAuthResult {
   readonly user: Types.User;
   readonly session: Types.Session;
 }
 
-export class PhoneOTPService extends Context.Service<
-  PhoneOTPService,
+export class PhoneOtpService extends Context.Service<
+  PhoneOtpService,
   {
     /**
      * Generate an OTP for the given phone number + purpose (replacing any
@@ -132,8 +132,8 @@ export class PhoneOTPService extends Context.Service<
      */
     readonly send: (
       phoneNumber: string,
-      purpose: PhoneOTPPurpose,
-    ) => Effect.Effect<void, PhoneOTPError | Errors.AuthError | Errors.ResendTooSoonError>;
+      purpose: PhoneOtpPurpose,
+    ) => Effect.Effect<void, PhoneOtpError | Errors.AuthError | Errors.ResendTooSoonError>;
 
     /**
      * Verify a `sign-in` OTP (single use) and sign the user in, creating a new
@@ -142,8 +142,8 @@ export class PhoneOTPService extends Context.Service<
     readonly signIn: (
       phoneNumber: string,
       otp: string,
-      options?: PhoneOTPSignInOptions,
-    ) => Effect.Effect<PhoneOTPAuthResult, PhoneOTPError | Errors.AuthError | HookError>;
+      options?: PhoneOtpSignInOptions,
+    ) => Effect.Effect<PhoneOtpAuthResult, PhoneOtpError | Errors.AuthError | HookError>;
 
     /**
      * Verify a `phone-verification` OTP (single use) for an existing user and
@@ -153,14 +153,14 @@ export class PhoneOTPService extends Context.Service<
       userId: string,
       phoneNumber: string,
       otp: string,
-    ) => Effect.Effect<Types.User, PhoneOTPError | Errors.AuthError | Errors.UserNotFoundError>;
+    ) => Effect.Effect<Types.User, PhoneOtpError | Errors.AuthError | Errors.UserNotFoundError>;
   }
->()("@effect-auth/PhoneOTPService") {
+>()("@effect-auth/PhoneOtpService") {
   /**
    * Construct a Layer providing this service.
    */
-  static readonly layer = (config: PhoneOTPConfig) =>
-    Layer.effect(PhoneOTPService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
+  static readonly layer = (config: PhoneOtpConfig) =>
+    Layer.effect(PhoneOtpService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
 /**
@@ -180,11 +180,11 @@ export const getPhoneNumber = (
   });
 
 export const make = (
-  config: PhoneOTPConfig,
+  config: PhoneOtpConfig,
 ): Effect.Effect<
-  typeof PhoneOTPService.Service,
+  typeof PhoneOtpService.Service,
   never,
-  PhoneOTPStore | PhoneOTPUserStore | IdentifierStore | UserStore | SessionService | Crypto.Crypto
+  PhoneOtpStore | PhoneOtpUserStore | IdentifierStore | UserStore | SessionService | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
@@ -192,15 +192,15 @@ export const make = (
     const maxAttempts = config.maxAttempts ?? 3;
     const disableSignUp = config.disableSignUp ?? false;
 
-    const store = yield* PhoneOTPStore;
-    const userStore = yield* PhoneOTPUserStore;
+    const store = yield* PhoneOtpStore;
+    const userStore = yield* PhoneOtpUserStore;
     const identifiers = yield* IdentifierStore;
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const crypto = yield* Crypto.Crypto;
 
     /** Generate a numeric OTP with crypto-secure, unbiased randomness. */
-    const generateOTP = (length: number): Effect.Effect<string> =>
+    const generateOtp = (length: number): Effect.Effect<string> =>
       Effect.gen(function* () {
         let otp = "";
         for (let i = 0; i < length; i++) {
@@ -215,40 +215,40 @@ export const make = (
         ? config.normalizePhoneNumber(raw)
         : Effect.succeed(raw.trim());
 
-    const invalidOTP = () => Effect.fail(new PhoneOTPError({ message: "Invalid or expired OTP" }));
+    const invalidOtp = () => Effect.fail(new PhoneOtpError({ message: "Invalid or expired OTP" }));
 
-    const verifyOTP = (
+    const verifyOtp = (
       phoneNumber: string,
       otp: string,
-      purpose: PhoneOTPPurpose,
-    ): Effect.Effect<void, PhoneOTPError | Errors.AuthError> =>
+      purpose: PhoneOtpPurpose,
+    ): Effect.Effect<void, PhoneOtpError | Errors.AuthError> =>
       Effect.gen(function* () {
         if (!phoneNumber || !otp) {
-          return yield* invalidOTP();
+          return yield* invalidOtp();
         }
 
         const record = yield* store.get(phoneNumber, purpose);
         if (!record) {
-          return yield* invalidOTP();
+          return yield* invalidOtp();
         }
 
         if (Date.now() > record.expiresAt) {
           yield* store.delete(phoneNumber, purpose);
-          return yield* Effect.fail(new PhoneOTPError({ message: "OTP has expired" }));
+          return yield* Effect.fail(new PhoneOtpError({ message: "OTP has expired" }));
         }
 
         if (record.attempts >= maxAttempts) {
           yield* store.delete(phoneNumber, purpose);
-          return yield* Effect.fail(new PhoneOTPError({ message: "Too many attempts" }));
+          return yield* Effect.fail(new PhoneOtpError({ message: "Too many attempts" }));
         }
 
         if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
           const attempts = yield* store.incrementAttempts(phoneNumber, purpose);
           if (attempts >= maxAttempts) {
             yield* store.delete(phoneNumber, purpose);
-            return yield* Effect.fail(new PhoneOTPError({ message: "Too many attempts" }));
+            return yield* Effect.fail(new PhoneOtpError({ message: "Too many attempts" }));
           }
-          return yield* invalidOTP();
+          return yield* invalidOtp();
         }
 
         // Consume the OTP (one-time use).
@@ -256,9 +256,9 @@ export const make = (
       });
 
     return {
-      send: Effect.fn("PhoneOTPService.send")(function* (
+      send: Effect.fn("PhoneOtpService.send")(function* (
         rawPhoneNumber: string,
-        purpose: PhoneOTPPurpose,
+        purpose: PhoneOtpPurpose,
       ) {
         const phoneNumber = yield* normalize(rawPhoneNumber);
         if (!phoneNumber) {
@@ -292,8 +292,8 @@ export const make = (
           }
         }
 
-        const otp = yield* generateOTP(otpLength);
-        const record: PhoneOTPRecord = {
+        const otp = yield* generateOtp(otpLength);
+        const record: PhoneOtpRecord = {
           phoneNumber,
           otpHash: hashToken(otp),
           purpose,
@@ -304,30 +304,30 @@ export const make = (
 
         yield* store.upsert(record);
 
-        yield* Effect.catch(config.sendOTP(phoneNumber, otp, purpose), (error) =>
+        yield* Effect.catch(config.sendOtp(phoneNumber, otp, purpose), (error) =>
           Effect.fail(
-            new PhoneOTPError({ message: `Failed to send OTP to ${phoneNumber}`, cause: error }),
+            new PhoneOtpError({ message: `Failed to send OTP to ${phoneNumber}`, cause: error }),
           ),
         );
       }),
 
-      signIn: Effect.fn("PhoneOTPService.signIn")(function* (
+      signIn: Effect.fn("PhoneOtpService.signIn")(function* (
         rawPhoneNumber: string,
         otp: string,
-        options?: PhoneOTPSignInOptions,
+        options?: PhoneOtpSignInOptions,
       ) {
         const phoneNumber = yield* normalize(rawPhoneNumber);
 
-        yield* verifyOTP(phoneNumber, otp, "sign-in");
+        yield* verifyOtp(phoneNumber, otp, "sign-in");
 
         const identifier = yield* identifiers.getByValue("phone", phoneNumber);
         let user = identifier === null ? null : yield* users.get(identifier.userId);
         if (identifier !== null && user === null) {
-          return yield* Effect.fail(new PhoneOTPError({ message: "Account is unavailable" }));
+          return yield* Effect.fail(new PhoneOtpError({ message: "Account is unavailable" }));
         }
         if (!user) {
           if (disableSignUp) {
-            return yield* Effect.fail(new PhoneOTPError({ message: "Sign-up is disabled" }));
+            return yield* Effect.fail(new PhoneOtpError({ message: "Sign-up is disabled" }));
           }
           // A verified OTP proves ownership of the phone number.
           user = yield* userStore.createUser({});
@@ -342,7 +342,7 @@ export const make = (
             }),
           ).pipe(
             Effect.catchTag("IdentifierTakenError", () =>
-              Effect.fail(new PhoneOTPError({ message: "This phone number is already in use" })),
+              Effect.fail(new PhoneOtpError({ message: "This phone number is already in use" })),
             ),
           );
         } else if (identifier !== null && !identifier.verified) {
@@ -352,23 +352,23 @@ export const make = (
 
         const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);
 
-        return { user, session } satisfies PhoneOTPAuthResult;
+        return { user, session } satisfies PhoneOtpAuthResult;
       }),
 
-      verifyPhoneNumber: Effect.fn("PhoneOTPService.verifyPhoneNumber")(function* (
+      verifyPhoneNumber: Effect.fn("PhoneOtpService.verifyPhoneNumber")(function* (
         userId: string,
         rawPhoneNumber: string,
         otp: string,
       ) {
         const phoneNumber = yield* normalize(rawPhoneNumber);
 
-        yield* verifyOTP(phoneNumber, otp, "phone-verification");
+        yield* verifyOtp(phoneNumber, otp, "phone-verification");
 
         // Attach (or verify) the phone identifier for this user.
         const existing = yield* identifiers.getByValue("phone", phoneNumber);
         if (existing !== null && existing.userId !== userId) {
           return yield* Effect.fail(
-            new PhoneOTPError({ message: "This phone number is already in use" }),
+            new PhoneOtpError({ message: "This phone number is already in use" }),
           );
         }
         if (existing === null) {
@@ -383,7 +383,7 @@ export const make = (
             }),
           ).pipe(
             Effect.catchTag("IdentifierTakenError", () =>
-              Effect.fail(new PhoneOTPError({ message: "This phone number is already in use" })),
+              Effect.fail(new PhoneOtpError({ message: "This phone number is already in use" })),
             ),
           );
         } else if (!existing.verified) {

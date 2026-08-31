@@ -1,5 +1,5 @@
 /**
- * The {@link SAMLVerifier} implementation: `@node-saml/node-saml` wrapped in an
+ * The {@link SamlVerifier} implementation: `@node-saml/node-saml` wrapped in an
  * Effect service, plus the checks node-saml deliberately leaves to its caller.
  *
  * @module saml/verifier
@@ -8,16 +8,16 @@ import { Effect, Layer } from "effect";
 import { SAML, ValidateInResponseTo, generateServiceProviderMetadata } from "@node-saml/node-saml";
 import type { Profile } from "@node-saml/node-saml";
 import {
-  SAMLError,
-  SAMLVerifier,
+  SamlError,
+  SamlVerifier,
   defaultClockSkewMs,
   defaultSignatureAlgorithms,
-  type SAMLAssertion,
-  type SAMLAuthnRequest,
-  type SAMLAuthnRequestInput,
-  type SAMLMetadataInput,
-  type SAMLSignatureAlgorithm,
-  type SAMLVerifyInput,
+  type SamlAssertion,
+  type SamlAuthnRequest,
+  type SamlAuthnRequestInput,
+  type SamlMetadataInput,
+  type SamlSignatureAlgorithm,
+  type SamlVerifyInput,
 } from "@thomasfosterau/effect-auth";
 
 /** The emailAddress NameID format, the sensible default for a B2B SP. */
@@ -33,8 +33,8 @@ export const EMAIL_NAMEID_FORMAT = "urn:oasis:names:tc:SAML:1.1:nameid-format:em
  */
 const REQUEST_ONLY_IDP_CERT = "request-generation-only";
 
-const fail = (message: string, cause?: unknown): Effect.Effect<never, SAMLError> =>
-  Effect.fail(new SAMLError({ message, ...(cause !== undefined && { cause }) }));
+const fail = (message: string, cause?: unknown): Effect.Effect<never, SamlError> =>
+  Effect.fail(new SamlError({ message, ...(cause !== undefined && { cause }) }));
 
 const messageOf = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
@@ -74,7 +74,7 @@ const strengthOf = (uri: string): number | null => {
   return match === null ? null : Number(match[1]);
 };
 
-const namedStrength: Record<SAMLSignatureAlgorithm, number> = { sha1: 1, sha256: 256, sha512: 512 };
+const namedStrength: Record<SamlSignatureAlgorithm, number> = { sha1: 1, sha256: 256, sha512: 512 };
 
 /**
  * Reject weak or unacceptable signature/digest methods.
@@ -88,8 +88,8 @@ const namedStrength: Record<SAMLSignatureAlgorithm, number> = { sha1: 1, sha256:
  */
 const checkAlgorithms = (
   xml: string,
-  allowed: ReadonlyArray<SAMLSignatureAlgorithm>,
-): Effect.Effect<void, SAMLError> => {
+  allowed: ReadonlyArray<SamlSignatureAlgorithm>,
+): Effect.Effect<void, SamlError> => {
   const floor = Math.min(...allowed.map((name) => namedStrength[name]));
   for (const localName of ["SignatureMethod", "DigestMethod"]) {
     for (const uri of algorithmsOf(xml, localName)) {
@@ -220,7 +220,7 @@ const readSubjectConfirmation = (assertion: XmlNode): SubjectConfirmation => {
 // The service
 // -----------------------------------------------------------------------------
 
-const verify = (input: SAMLVerifyInput): Effect.Effect<SAMLAssertion, SAMLError> =>
+const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError> =>
   Effect.gen(function* () {
     if (input.idpCertificates.length === 0) {
       return yield* fail("No IdP certificate configured: there is nothing to verify against");
@@ -232,7 +232,7 @@ const verify = (input: SAMLVerifyInput): Effect.Effect<SAMLAssertion, SAMLError>
 
     const xml = yield* Effect.try({
       try: () => Buffer.from(input.samlResponse, "base64").toString("utf8"),
-      catch: (cause) => new SAMLError({ message: "SAMLResponse is not valid base64", cause }),
+      catch: (cause) => new SamlError({ message: "SAMLResponse is not valid base64", cause }),
     });
     if (!xml.includes("<")) {
       return yield* fail("SAMLResponse did not decode to XML");
@@ -270,7 +270,7 @@ const verify = (input: SAMLVerifyInput): Effect.Effect<SAMLAssertion, SAMLError>
           disableRequestedAuthnContext: true,
         }),
       catch: (cause) =>
-        new SAMLError({ message: `Invalid SAML configuration: ${messageOf(cause)}`, cause }),
+        new SamlError({ message: `Invalid SAML configuration: ${messageOf(cause)}`, cause }),
     });
 
     const profile = yield* Effect.tryPromise({
@@ -281,7 +281,7 @@ const verify = (input: SAMLVerifyInput): Effect.Effect<SAMLAssertion, SAMLError>
           })
         ).profile,
       catch: (cause) =>
-        new SAMLError({ message: `SAML response rejected: ${messageOf(cause)}`, cause }),
+        new SamlError({ message: `SAML response rejected: ${messageOf(cause)}`, cause }),
     });
     if (profile === null) {
       return yield* fail("SAML response carried no assertion");
@@ -370,14 +370,14 @@ const verify = (input: SAMLVerifyInput): Effect.Effect<SAMLAssertion, SAMLError>
       ...(inResponseTo !== undefined && { inResponseTo }),
       ...(notOnOrAfter !== undefined && { notOnOrAfter }),
       ...(input.relayState !== undefined && { relayState: input.relayState }),
-    } satisfies SAMLAssertion;
+    } satisfies SamlAssertion;
   });
 
 const buildAuthnRequest = (
-  input: SAMLAuthnRequestInput,
-): Effect.Effect<SAMLAuthnRequest, SAMLError> =>
+  input: SamlAuthnRequestInput,
+): Effect.Effect<SamlAuthnRequest, SamlError> =>
   Effect.tryPromise({
-    try: async (): Promise<SAMLAuthnRequest> => {
+    try: async (): Promise<SamlAuthnRequest> => {
       const saml = new SAML({
         idpCert: REQUEST_ONLY_IDP_CERT,
         issuer: input.spEntityId,
@@ -397,10 +397,10 @@ const buildAuthnRequest = (
       return { url, requestId: input.requestId };
     },
     catch: (cause) =>
-      new SAMLError({ message: `Failed to build AuthnRequest: ${messageOf(cause)}`, cause }),
+      new SamlError({ message: `Failed to build AuthnRequest: ${messageOf(cause)}`, cause }),
   });
 
-const spMetadataXml = (input: SAMLMetadataInput): Effect.Effect<string, SAMLError> =>
+const spMetadataXml = (input: SamlMetadataInput): Effect.Effect<string, SamlError> =>
   Effect.try({
     try: () =>
       generateServiceProviderMetadata({
@@ -410,22 +410,22 @@ const spMetadataXml = (input: SAMLMetadataInput): Effect.Effect<string, SAMLErro
         wantAssertionsSigned: input.wantAssertionsSigned ?? true,
       }),
     catch: (cause) =>
-      new SAMLError({ message: `Failed to render SP metadata: ${messageOf(cause)}`, cause }),
+      new SamlError({ message: `Failed to render SP metadata: ${messageOf(cause)}`, cause }),
   });
 
 /**
  * The verifier, as a plain object. Exposed alongside {@link layer} for the rare
  * call site that wants it without an Effect context — a metadata CLI, say.
  */
-export const verifier: typeof SAMLVerifier.Service = {
+export const verifier: typeof SamlVerifier.Service = {
   verify,
   buildAuthnRequest,
   spMetadataXml,
 };
 
 /**
- * A `Layer` providing core's `SAMLVerifier`. Compose it into the layer stack
- * that builds `SSOService` — together with a `SAMLReplayStore` — to turn on
+ * A `Layer` providing core's `SamlVerifier`. Compose it into the layer stack
+ * that builds `SsoService` — together with a `SamlReplayStore` — to turn on
  * SAML connections.
  */
-export const layer: Layer.Layer<SAMLVerifier> = Layer.succeed(SAMLVerifier, verifier);
+export const layer: Layer.Layer<SamlVerifier> = Layer.succeed(SamlVerifier, verifier);

@@ -1,0 +1,237 @@
+# Migrating from Better Auth
+
+This guide is for an application that already runs on [Better Auth](https://www.better-auth.com/) and wants to move to effect-auth. It maps Better Auth's concepts onto effect-auth's, walks each auth flow, covers the browser client, gives concrete guidance for moving the data, and ends with an honest list of what effect-auth does not do or deliberately does differently.
+
+Everything claimed here about effect-auth is taken from the tree: `packages/effect-auth/src/index.ts` is the public surface, `packages/effect-auth/src/http/HttpApi.ts` is the HTTP contract, and `packages/sql/src/Schema.ts` is the reference schema.
+
+## 1. The shape of the change
+
+Better Auth is a **framework instance**: `betterAuth({ ... })` returns an object that owns your database connection, your route handler, and a server-side API, and `plugins: [...]` bolts features onto that instance. effect-auth is a **headless toolkit** (see [ADR 0001](../adr/0001-headless-toolkit-not-framework-instance.md)): every feature is an Effect `Context.Service` you provide with a `Layer`, and the HTTP surface is one optional projection of those services rather than the thing they live inside.
+
+The practical consequences are worth internalising before you start:
+
+- There is no `auth` object and no `auth.api.*`. You get services from context (`yield* Auth.SessionService`) and compose them with `Layer.mergeAll` / `Layer.provide`.
+- There is no adapter for your ORM. Features depend on small store contracts (`SessionStore`, `UserStore`, `IdentifierStore`, …) that you either implement yourself or take from `@thomasfosterau/effect-auth-sql` / `-drizzle` / `-alchemy`.
+- A feature is "enabled" exactly when its layer is in the context. Optional HTTP routes answer `404` until the service behind them is provided — that is the whole configuration mechanism.
+- Errors are values in the typed error channel, not thrown exceptions; every service method has `R = never` once its layer is built.
+- There is no CLI. No `@better-auth/cli generate`, no `migrate` command that inspects your config. `@thomasfosterau/effect-auth-sql` ships a fixed DDL list (`schemaStatements`) and a `migrate` effect; everything else is your migration pipeline's job.
+
+## 2. Concept map
+
+| Better Auth                                      | effect-auth                                                                                                           |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `betterAuth({ ... })` instance                   | a `Layer` composed from per-service `X.layer(config)` calls                                                           |
+| `plugins: [twoFactor(), organization(), …]`      | merging `MultiFactorService.layer(…)`, `OrganizationService.layer(…)`, … into that layer                              |
+| `database: drizzleAdapter(db, …)`                | store contracts + one of `@thomasfosterau/effect-auth-sql`, `-drizzle`, `-alchemy`, or your own                       |
+| `auth.handler` (mounted at `/api/auth/*`)        | `Auth.Http.make({ services, prefix: "/api/auth" }).handler` — a plain `(Request) => Promise<Response>`                |
+| `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(id)` on `Auth.SessionService`, or `GET /session` over HTTP                           |
+| `emailAndPassword: { enabled: true }`            | `Auth.Email.EmailPasswordService.layer(config)` (+ `Auth.AuthLifecycleService` for the sign-up/sign-in orchestration) |
+| `socialProviders: { github: { … } }`             | `Auth.OAuth.OAuthService.layer({ github: Auth.OAuth.GitHubProvider({ … }) })`                                         |
+| `sendVerificationEmail` / `sendResetPassword` …  | per-feature callbacks, or derive all of them from one `EmailSender` with `Auth.emailCallbacks(sender, identifiers)`   |
+| `secret` (signing key)                           | per-feature secrets: `Cipher` keys, `SessionCacheConfig` HMAC key, `JwtKeyStore` keys — no single global secret       |
+| `session.cookieCache`                            | `cookie: { cache: { … } }` on `Auth.Http.make` (`SessionCookieCache.ts`)                                              |
+| `advanced.crossSubDomainCookies` / trusted hosts | `trustedOrigins` + `trustedProxy` options on `Auth.Http.make`                                                         |
+| `createAuthClient` from `better-auth/client`     | `createAuthClient` from `@thomasfosterau/effect-auth-client`                                                          |
+| `better-auth/react` \| `/svelte` \| `/vue`       | `@thomasfosterau/effect-auth-react` \| `-svelte` \| `-vue` \| `-solid`                                                |
+
+### Config → layers, concretely
+
+A minimal Better Auth instance with email+password and GitHub becomes a layer graph. Each service asks for its stores; you provide them once, and `Auth.Http.make` takes the whole thing as `services`:
+
+```ts
+import { Layer } from "effect";
+import * as Auth from "@thomasfosterau/effect-auth";
+import * as Sql from "@thomasfosterau/effect-auth-sql";
+
+const stores = Sql.layer.pipe(Layer.provide(SqlClientLayer));
+
+const services = Layer.mergeAll(
+  Auth.SessionService.layer({
+    sessionExpiresIn: { activePeriod: 30 * 864e5, idlePeriod: 14 * 864e5 },
+  }),
+  Auth.AuthLifecycleService.layer(),
+  Auth.Email.EmailPasswordService.layer(),
+  Auth.Password.PasswordHasher.layer(),
+  Auth.UserService.layer(),
+  Auth.Hooks.Default,
+).pipe(Layer.provideMerge(stores));
+
+const { handler } = Auth.Http.make({
+  services,
+  prefix: "/api/auth",
+  trustedOrigins: ["https://app.example.com"],
+});
+```
+
+`Auth.Http.make` returns `{ handler, dispose }`. `handler` is a standard Web `Request => Promise<Response>`, so it mounts anywhere Better Auth's handler did (Next.js route handlers, Hono, Elysia, Bun/Deno/Workers `fetch`) with the same catch-all path.
+
+The set of services `Auth.Http.make` requires is `AuthServices` in `http/HttpServer.ts`: `AuthLifecycleService`, `SessionService`, `EmailPasswordService`, `IdentifierStore`, `PasswordHasher`, `EmailVerificationService`, `PasswordResetService`, `UserService`, `Hooks`. Everything else — magic link, OTP, multi-factor, organizations, admin, API keys, SSO, the OIDC provider, SCIM — is resolved optionally per handler, which is why those routes return `404` until you merge the corresponding layer in.
+
+### Plugins vs hooks
+
+Better Auth's `plugins` array does two different jobs: it adds features, and it adds cross-cutting behaviour (`hooks.before` / `hooks.after`). In effect-auth those are separate mechanisms. Features are layers. Cross-cutting behaviour is the `Hooks` service (`src/Hooks.ts`) with first-party plugins under `src/plugins/` — `AccountLockoutPlugin`, `AuditPlugin`, `CaptchaPlugin`, `IPRateLimitPlugin`, `NormalizeEmailPlugin`, `RateLimitPlugin` and the last-login-method plugin (`make()` in `plugins/LastLoginMethod.ts`), plus `BannedUserPlugin` from `Admin.ts` and `ScimDeactivatedPlugin` from `Scim.ts`. Register them where you would have provided `Auth.Hooks.Default`.
+
+## 3. Storage: adapters → store contracts
+
+Better Auth owns your tables through an adapter and generates the schema for you. effect-auth inverts this: it declares ~42 store contracts and never touches a driver. Three routes exist, and you can mix them:
+
+- **`@thomasfosterau/effect-auth-sql`** — driver-agnostic over `effect/unstable/sql` (Postgres, MySQL, SQLite, D1). `Sql.layer` provides the implemented stores; `Sql.migrate` runs `Sql.schemaStatements`, all of them `CREATE TABLE IF NOT EXISTS`, so it is safe on every deploy. This is the closest analogue to a Better Auth adapter and the fastest path off it.
+- **`@thomasfosterau/effect-auth-drizzle`** — for apps that already model their schema in Drizzle and want the auth tables inside the existing migration pipeline. It covers the three stores every credential sign-in touches (`SessionStore`, `UserStore`, `IdentifierStore`) on PostgreSQL, SQLite, or MySQL; see that package's README for its exact tables.
+- **Bring your own** — implement `typeof Auth.XStore.Service` over whatever client you have. [`byo-stores.md`](./byo-stores.md) is the reference, including which methods **must** be atomic.
+
+Two invariants differ from Better Auth and matter for both wiring and data migration:
+
+- **Bearer secrets are stored hashed.** Session ids, magic-link / verification / reset / one-time tokens, API keys and OIDC codes reach a store as the unsalted SHA-256 hex digest produced by `hashToken` (`src/TokenHash.ts`). Stores index on the digest; the raw secret exists only in transit.
+- **Timestamps are epoch-millisecond `BIGINT` in `packages/sql`,** because epoch-ms overflows Postgres `int4` and MySQL signed `INT`. At the store boundary the domain records still use real `Date` objects.
+
+## 4. Flow-by-flow equivalents
+
+Names below are the exact exports; `Auth` is `import * as Auth from "@thomasfosterau/effect-auth"`.
+
+### Email + password
+
+`Auth.Email.EmailPasswordService` (`signUp`, `signIn`, `changePassword`, `setPassword`) over `EmailPasswordStore`, with `Auth.Password.PasswordHasher` doing the hashing and `Auth.AuthLifecycleService` (`signUp`, `signIn`, `verifyEmail`) orchestrating the sign-up → verification → session path that Better Auth hides inside its instance. Verification and reset are their own services — `Auth.Email.EmailVerificationService` and `Auth.Password.PasswordResetService` — reached over `POST /sign-up`, `POST /sign-in`, `POST /email-verification/send|verify`, `POST /password-reset/request|reset`, `POST /change-password`.
+
+The default hasher is PBKDF2-SHA256; Argon2id lives in `@thomasfosterau/effect-auth-argon2` as a drop-in `PasswordHasher`. Better Auth hashes with scrypt by default, so **existing password hashes do not verify** — see §6.
+
+### Social OAuth
+
+`Auth.OAuth.OAuthService` (`generateAuthorizationUrl`, `handleCallback`, `signInWithCallback`, `linkAccount`, `unlinkAccount`, `refreshAccessToken`) with providers built from the exported constructors: `GoogleProvider`, `GitHubProvider`, `DiscordProvider`, `MicrosoftProvider`, `AppleProvider`, `FacebookProvider`, `TwitterProvider`, `LinkedInProvider`, `TwitchProvider`, `SpotifyProvider`, `GitLabProvider`, `RedditProvider`, `DropboxProvider`, `NotionProvider`, `SlackProvider`, `ZoomProvider`, `TikTokProvider`, `RobloxProvider`, `KickProvider`, `HuggingFaceProvider`, or `Auth.OAuth.provider(...)` for anything else. Stores: `OAuthStateStore`, `OAuthAccountStore`, `OAuthUserStore`.
+
+**This is the one flow with no HTTP endpoints.** Better Auth gives you `/sign-in/social` and `/callback/:provider`; effect-auth's contract has neither, so you mount two routes of your own that call `generateAuthorizationUrl` and `signInWithCallback` and set the session cookie. Budget for that.
+
+### Magic link
+
+`Auth.MagicLinkService` (`send`, `verify`) over `MagicLinkStore` + `MagicLinkUserStore`, on `POST /magic-link/send` and `POST /magic-link/verify`. Delivery is the `sendMagicLink` callback in `MagicLinkConfig`.
+
+### Email OTP and phone OTP
+
+`Auth.Email.EmailOtpService` (`send`, `signIn`, `check`) on `POST /email-otp/send` and `POST /sign-in/email-otp`, and `Auth.PhoneOtpService` on `POST /phone-otp/send` and `POST /sign-in/phone-otp`. Both hash the code at rest, scope it by purpose, and limit attempts. Better Auth's `emailOtp` and `phoneNumber` plugins map here one for one.
+
+### Passkeys / WebAuthn
+
+`Auth.MultiFactor.WebAuthnService` (`generateRegistrationChallenge`, `verifyRegistration`, `generateAuthenticationChallenge`, `verifyAuthentication`, `listCredentials`, `deleteCredential`, `renameCredential`) over `ChallengeStore` + `CredentialStore`. The CBOR / COSE / `clientDataJSON` parsing is in-repo (`multifactor/WebAuthnCodec.ts`) — no `@simplewebauthn` dependency.
+
+**Also service-only**: there are no passkey endpoints on the HTTP contract and no passkey methods on the browser client, so the four routes Better Auth's `passkey` plugin exposes are yours to write.
+
+### Two-factor
+
+`Auth.MultiFactor.MultiFactorService` (`enable`, `confirmEnable`, `disable`, `isEnabled`, `beginChallenge`, `verifyTotp`, `verifyBackupCode`, `regenerateBackupCodes`) over `MultiFactorStore` + `PendingMultiFactorStore`, on `POST /multi-factor/enable|confirm|disable|verify-totp|verify-backup-code|regenerate-backup-codes`. TOTP/HOTP primitives are in `Auth.MultiFactor` (`generateTotp`, `verifyTotp`, `generateHotp`, `verifyHotp`, `generateOtpUri`).
+
+Password sign-in integrates through the `SecondFactorGate` seam: provide `MultiFactorGateLayer` (or `OtpSecondFactorGateLayer` for emailed/texted codes, or `TrustedDeviceWithMultiFactorGateLayer` / `TrustedDeviceWithOtpSecondFactorGateLayer` to honour remembered devices) and `signIn` returns a challenge instead of a session until the second factor clears. That replaces Better Auth's `twoFactor()` plugin plus its `trustDevice` option.
+
+### Organizations and teams
+
+`Auth.OrganizationService` covers organizations, members, invitations, teams and per-organization roles: `createOrganization`, `updateOrganization`, `deleteOrganization`, `getFullOrganization`, `listOrganizations`, `inviteMember`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `listInvitations`, `listUserInvitations`, `addMember`, `removeMember`, `updateMemberRole`, `createTeam`, `updateTeam`, `deleteTeam`, `addTeamMember`, `removeTeamMember`, `listTeams`, `listTeamMembers`, `listTeamsForMember`, `upsertOrgRole`, `deleteOrgRole`, `listOrgRoles`, `checkPermission`, `requirePermission`. Teams are hierarchical ([ADR 0016](../adr/0016-hierarchical-teams.md)) and roles are data, not a compile-time union ([ADR 0009](../adr/0009-organization-data-model-and-permissions.md)). The HTTP surface is `/organization/*`, `/organizations`, `/teams/*` and `/invitations/*`.
+
+### Admin
+
+`Auth.AdminService` (`listUsers`, `setRole`, `banUser`, `unbanUser`, `removeUser`, `revokeUserSessions`, `impersonateUser`, `createUser`, `setUserPassword`, `listUserSessions`) over `AdminUserStore`, on `/admin/*`. Pair it with `BannedUserPlugin` so a ban takes effect on the next request rather than at session expiry.
+
+### API keys
+
+`Auth.ApiKeyService` (`create`, `verify`, `verifyWithRateLimit`, `get`, `list`, `update`, `delete`, `deleteAllExpired`) over `ApiKeyStore`, on `/api-keys*`. Keys are stored as digests only and carry permissions plus time-based quota refill ([ADR 0012](../adr/0012-api-key-design.md)).
+
+### Enterprise SSO (as a relying party) and the OIDC provider
+
+Two separate features, as in Better Auth:
+
+- **`Auth.SsoService`** signs your users in _through_ someone else's IdP: `registerProvider`, `registerSamlProvider`, `resolveProviderForEmail`, `signIn`, `handleCallback`, `handleSamlCallback`, `samlMetadata`, on `POST /sso/register`, `POST /sign-in/sso`, `POST /sso/callback`, `POST /sso/saml/acs/:providerId`, `GET /sso/saml/metadata/:providerId`. OIDC providers work out of core; SAML additionally needs `SamlVerifier` + `SamlReplayStore`, implemented by `@thomasfosterau/effect-auth-saml`.
+- **`Auth.OidcProviderService`** makes _you_ the IdP: `registerClient`, `authorize`, `consent`, `token`, `userinfo`, `getMetadata`, RFC 7591/7592 dynamic client registration, on `/oauth2/*`, `/register*`, `/.well-known/openid-configuration` and `/.well-known/jwks.json`. `Auth.mcpProviderPreset` is a ready-made config for an MCP-facing auth server; see [`mcp-provider.md`](./mcp-provider.md).
+
+SCIM provisioning (`Auth.ScimService`) has no Better Auth counterpart; [`scim.md`](./scim.md) covers it.
+
+### Delivery of email and SMS
+
+Better Auth takes a `sendX` callback per feature. effect-auth does too, but adds a single seam so you write the transport once: implement `Auth.EmailSender` / `Auth.SmsSender` and derive every per-feature callback with `Auth.emailCallbacks(sender, identifiers)` and `Auth.smsCallbacks(sender, identifiers)`. `@thomasfosterau/effect-auth-resend` and `@thomasfosterau/effect-auth-twilio` are ready-made senders.
+
+## 5. Client migration
+
+`better-auth/client` → `@thomasfosterau/effect-auth-client`. Both export `createAuthClient`; both send credentialed `fetch` requests at a base URL and keep an observable session store. The differences that matter:
+
+- **No client plugins to mirror.** Better Auth requires the client plugin list to match the server's. The effect-auth client exposes every endpoint a browser would call up front — `signUp`, `signIn`, `signOut`, `getSession`, `identifiers`, `magicLink`, `emailOtp`, `phoneOtp`, `multiFactor`, `organization`, `apiKeys`, `admin`, `sso`, `oidc`, `device`, `googleOneTap`, `multiSession`, `changeEmail`, `deleteUser` — and endpoints whose server layer is absent simply reject with `404`. `extend()` is there for your own additions.
+- **Framework bindings are separate packages**, not subpath imports: `@thomasfosterau/effect-auth-react`, `-svelte`, `-vue`, `-solid`, each built on the vanilla client with out-of-the-box form components (`SignInForm`, `SignUpForm`, password reset, magic link, email OTP).
+- **Types come from the server package's `Http` namespace** (`Auth.Http.SessionWithUserView`, `Auth.Http.SignUpPayload`, …) and erase at compile time, so nothing server-side reaches the bundle.
+- **Errors reject with `AuthClientError`** carrying the HTTP `status` and the server's message — no `{ data, error }` tuple.
+- **Trusted origins are mandatory for cross-origin deployments.** Every call sends `credentials: "include"`, and the server rejects state-changing cross-origin requests whose `Origin` is not in `trustedOrigins`.
+
+[`client.md`](./client.md) is the full client guide.
+
+## 6. Moving the data
+
+Better Auth's core schema is four tables — `user`, `session`, `account`, `verification` — plus one per plugin. effect-auth's reference schema is `packages/sql/src/Schema.ts`, `auth_`-prefixed so it can sit beside your application tables. Migrate table by table.
+
+### `user` → `auth_users` + `auth_identifiers`
+
+This is the one structural change you cannot skip. effect-auth's `User` is **surrogate-keyed**: it has `id`, `name`, `image`, `password_hash`, `attributes`, `created_at`, `updated_at` and _no email column_ ([ADR 0002](../adr/0002-unified-data-model.md), DESIGN §D12). Every handle — email, username, phone — is a row in `auth_identifiers`, unique on `(type, value)`:
+
+```sql
+-- 1. the user row (note: no email, no email_verified)
+INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)
+SELECT u.id, u.name, u.image, NULL, '{}', ..., ...
+FROM "user" u;
+
+-- 2. Better Auth's user.email becomes an email Identifier row
+INSERT INTO auth_identifiers (id, user_id, type, value, verified, verified_at, created_at)
+SELECT <new uuid>, u.id, 'email', lower(trim(u.email)), u."emailVerified", ..., ...
+FROM "user" u;
+```
+
+Three rules the store enforces, so get them right in the migration: `value` is stored **normalized** (emails and usernames trimmed and lowercased, phones in E.164 — the store does not normalize for you); `(type, value)` must be backed by a **real unique index**, because `claimIdentifier`'s race repair depends on a concurrent duplicate `create` genuinely failing; and `verified` carries the verification state that used to live on `user.emailVerified`, with `verified_at` as its timestamp.
+
+If you used Better Auth's `username` plugin, its `user.username` becomes a second identifier row with `type = 'username'`. Same for `phoneNumber`, with `type = 'phone'`.
+
+Anything else you kept on the Better Auth user row through `additionalFields` goes into the `attributes` JSON bag.
+
+### `account` → `auth_users.password_hash` + `auth_oauth_accounts`
+
+Better Auth stores both credentials and social links in one `account` table, discriminated by `providerId`. effect-auth splits them:
+
+- Rows with `providerId = 'credential'`: the password belongs on `auth_users.password_hash`. **The hash format differs** — Better Auth defaults to scrypt, effect-auth to PBKDF2-SHA256 (or Argon2id via the argon2 package) — so copying the string across will not verify. Either force a password reset for credential users, or keep the Better Auth verifier alive behind a custom `PasswordHasher` implementation and re-hash on next successful sign-in ([ADR 0006](../adr/0006-credential-verification-typology.md) covers the verification typology).
+- Social rows: into `auth_oauth_accounts` (`user_id`, `provider`, `provider_id`, `email`, `name`, `picture`, `access_token`, `refresh_token`, `expires_at`), unique on `(provider, provider_id)`. Better Auth's `accountId` is `provider_id`; its `providerId` is `provider`. `idToken` and `scope` have no column — drop them or park them in your own table.
+
+### `session` → `auth_sessions`
+
+Columns map cleanly (`id`, `user_id`, `expires_at`, `created_at`, `last_activity_at`, `attributes`) with one critical difference: **`auth_sessions.id` is the SHA-256 hex digest of the session token, not the token itself** ([ADR 0004](../adr/0004-hashed-tokens-at-rest.md)). Better Auth's `session.token` is the raw value, so a row-for-row copy would make every session unusable.
+
+The recommended path is not to migrate sessions at all: let them lapse, and have users sign in again on the cut-over. Carrying them is possible — `hashToken` is unsalted SHA-256, so `auth_sessions.id = sha256(session.token)` reproduces the right key, and effect-auth's cookie value is the raw token — but you would also have to re-issue the cookie under the new name (`conduit_session` by default, `__Host-` prefixed when `secure`) with the signature stripped off Better Auth's cookie value. The forced re-authentication is almost always the better trade.
+
+Better Auth's `ipAddress` / `userAgent` columns have no first-class equivalent; put them in `attributes` if you want them.
+
+### `verification` → nothing
+
+Better Auth's generic `verification` table backs email verification, password reset, OTPs and more. effect-auth uses purpose-specific tables — `auth_email_verifications`, `auth_password_resets`, `auth_magic_links`, `auth_email_otps` — and stores the token as its digest. These rows are short-lived by construction, so **do not migrate them**: let outstanding links and codes expire, and tell users to request a new one after the cut-over.
+
+### Plugin tables
+
+`twoFactor` → `auth_multi_factor` (`user_id`, `secret`, `backup_codes`, `verified`, `last_used_counter`) plus `auth_pending_multi_factor` for in-flight challenges. TOTP secrets are portable, so this table _can_ be carried over; back-up codes are hashed. `passkey` → `auth_webauthn_credentials` (+ `auth_webauthn_challenges`). `organization` → the organization stores. Rate limits → `auth_rate_limits`; lockout counters → `auth_account_lockouts`. Run `Sql.migrate` first so every target table and index exists, then backfill.
+
+### Suggested order
+
+1. Stand up the new schema (`Sql.migrate`, or your own DDL) alongside the running Better Auth database.
+2. Backfill `auth_users` → `auth_identifiers` → `auth_oauth_accounts` → plugin tables, in that order (identifiers depend on users; everything depends on both).
+3. Wire the layers and mount `Auth.Http.make` at the same prefix Better Auth used, so client paths that survive (`/sign-in`, `/sign-up`, `/sign-out`, `/session`) keep working.
+4. Write the routes with no contract equivalent: social OAuth start/callback, and passkeys if you use them.
+5. Swap the browser client, then cut over and accept the forced re-authentication.
+
+## 7. Not covered, or different by design
+
+Be honest with yourself about these before committing:
+
+- **No CLI and no schema generation.** Better Auth's `generate`/`migrate` inspect your config and emit a schema. effect-auth ships a fixed DDL list in `packages/sql` and otherwise expects you to own your migrations.
+- **No social OAuth HTTP endpoints and no passkey HTTP endpoints.** Both features exist as services with full functionality; the routes are yours to mount. This is the largest single chunk of work in a typical migration.
+- **No `auth.api.*` server-side call surface.** The equivalent is calling the service directly inside an `Effect`, which means your call sites become Effects (or `Effect.runPromise` boundaries).
+- **You must adopt Effect.** Layers, `Context.Service`, typed error channels and `Effect.gen` are not an implementation detail you can ignore — they are the API. This is the real cost of the migration and it is not small.
+- **Sessions and password hashes do not carry over cleanly** (§6). Plan a forced re-authentication, and a re-hash-on-sign-in or reset strategy for passwords.
+- **No user email on the user record.** Code that reads `user.email` must go through `IdentifierStore` (or the derived optional `email` / `emailVerified` fields the HTTP `UserView` still exposes for wire compatibility).
+- **Protocol _server_ plugins are deliberately out of scope** except the ones that shipped — see [ADR 0003](../adr/0003-protocol-server-plugins-out-of-scope.md).
+- **Feature gaps at the edges.** Better Auth plugins with no effect-auth counterpart today include Stripe/polar-style billing integrations, SIWE, and the various framework-specific server helpers. Conversely, effect-auth has features Better Auth does not: SCIM 2.0 provisioning, a policy kernel with Cedar-shaped semantics (`Auth.Policy`, `Auth.Authorizer`, `protectedField`), and hierarchical teams.
+- **`packages/sql` does not implement every contract.** `OneTimeTokenStore`, `TrustedDeviceStore`, `PhoneOtp*Store`, `OrganizationStore`, `AdminUserStore`, `ApiKeyStore`, the OIDC provider stores, `SsoProviderStore`, `SamlReplayStore`, `DeviceAuthorizationStore`, `GoogleOneTapNonceStore`, `JwtKeyStore`, `OtpSecondFactorStore`, `AnonymousUserStore`, `AccountManagementStore` and `PolicyStore` are not covered — use the `KeyValueStore` defaults in `KeyValueStores.ts` or bring your own ([`byo-stores.md`](./byo-stores.md)).
+
+## Further reading
+
+- [ARCHITECTURE.md](../ARCHITECTURE.md) — the module map and store inventory
+- [DESIGN.md](../DESIGN.md) — why the API looks the way it does
+- [byo-stores.md](./byo-stores.md) — implementing store contracts over your own database
+- [client.md](./client.md) — the browser client and framework bindings
+- [better-auth-parity.md](../better-auth-parity.md) — the feature-by-feature parity tracker

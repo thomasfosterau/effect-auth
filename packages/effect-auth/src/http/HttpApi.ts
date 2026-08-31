@@ -144,14 +144,14 @@ export const authGroup = HttpApiGroup.make("auth").add(
     error: [S.NotFoundError, S.BadRequestError, S.InternalError],
   }),
   // Anti-enumeration: always `{ status: true }`; 500 only on store/delivery failure.
-  HttpApiEndpoint.post("emailOTPSend", "/email-otp/send", {
-    payload: S.EmailOTPSendPayload,
+  HttpApiEndpoint.post("emailOtpSend", "/email-otp/send", {
+    payload: S.EmailOtpSendPayload,
     success: S.StatusResponse,
     error: [S.NotFoundError, S.TooManyRequestsError, S.InternalError],
   }),
   // Invalid/expired OTPs and exhausted attempts -> 400 BadRequest.
-  HttpApiEndpoint.post("signInEmailOTP", "/sign-in/email-otp", {
-    payload: S.EmailOTPSignInPayload,
+  HttpApiEndpoint.post("signInEmailOtp", "/sign-in/email-otp", {
+    payload: S.EmailOtpSignInPayload,
     success: S.AuthSuccess,
     error: [
       S.NotFoundError,
@@ -235,13 +235,13 @@ export const authGroup = HttpApiGroup.make("auth").add(
     error: [S.NotFoundError, S.BadRequestError, S.TooManyRequestsError, S.InternalError],
   }),
   // Phone (SMS) OTP. Anti-enumeration: send always answers `{ status: true }`.
-  HttpApiEndpoint.post("phoneOTPSend", "/phone-otp/send", {
-    payload: S.PhoneOTPSendPayload,
+  HttpApiEndpoint.post("phoneOtpSend", "/phone-otp/send", {
+    payload: S.PhoneOtpSendPayload,
     success: S.StatusResponse,
     error: [S.NotFoundError, S.TooManyRequestsError, S.InternalError],
   }),
-  HttpApiEndpoint.post("signInPhoneOTP", "/sign-in/phone-otp", {
-    payload: S.PhoneOTPSignInPayload,
+  HttpApiEndpoint.post("signInPhoneOtp", "/sign-in/phone-otp", {
+    payload: S.PhoneOtpSignInPayload,
     success: S.AuthSuccess,
     error: [
       S.NotFoundError,
@@ -653,8 +653,8 @@ export const authGroup = HttpApiGroup.make("auth").add(
   // --- Enterprise SSO (OIDC relying party). 404 when the module is absent.
   // Register is admin-gated (403 for non-admins).
   HttpApiEndpoint.post("ssoRegister", "/sso/register", {
-    payload: S.SSORegisterPayload,
-    success: S.SSOProviderView,
+    payload: S.SsoRegisterPayload,
+    success: S.SsoProviderView,
     error: [
       S.NotFoundError,
       S.UnauthorizedError,
@@ -664,14 +664,14 @@ export const authGroup = HttpApiGroup.make("auth").add(
     ],
   }),
   // Returns the IdP authorization URL; unknown domain/provider -> 400.
-  HttpApiEndpoint.post("signInSSO", "/sign-in/sso", {
-    payload: S.SSOSignInPayload,
-    success: S.SSOURLView,
+  HttpApiEndpoint.post("signInSso", "/sign-in/sso", {
+    payload: S.SsoSignInPayload,
+    success: S.SsoUrlView,
     error: [S.NotFoundError, S.BadRequestError, S.InternalError],
   }),
   // Completes the OIDC callback and issues a session (cookie).
   HttpApiEndpoint.post("ssoCallback", "/sso/callback", {
-    payload: S.SSOCallbackPayload,
+    payload: S.SsoCallbackPayload,
     success: S.AuthSuccess,
     error: [
       S.NotFoundError,
@@ -685,7 +685,7 @@ export const authGroup = HttpApiGroup.make("auth").add(
   // behalf. Same session-issuing tail as `ssoCallback`.
   HttpApiEndpoint.post("samlAcs", "/sso/saml/acs/:providerId", {
     params: { providerId: Schema.String },
-    payload: S.SAMLACSPayload,
+    payload: S.SamlAcsPayload,
     success: S.AuthSuccess,
     error: [
       S.NotFoundError,
@@ -698,7 +698,7 @@ export const authGroup = HttpApiGroup.make("auth").add(
   // This SP's `EntityDescriptor` for a SAML connection, as XML.
   HttpApiEndpoint.get("samlMetadata", "/sso/saml/metadata/:providerId", {
     params: { providerId: Schema.String },
-    success: S.SAMLMetadataView,
+    success: S.SamlMetadataView,
     error: [S.NotFoundError, S.BadRequestError, S.InternalError],
   }),
   // --- Google One Tap: generate a server-side nonce for the One Tap prompt.
@@ -723,7 +723,7 @@ export const authGroup = HttpApiGroup.make("auth").add(
   }),
   // --- JWT: issue a token for the session (`/token`) and serve the JWKS.
   HttpApiEndpoint.get("jwtToken", "/token", {
-    success: S.JWTTokenView,
+    success: S.JwtTokenView,
     error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
   }),
   HttpApiEndpoint.get("jwtJwks", "/jwks", {
@@ -894,9 +894,9 @@ export const authGroup = HttpApiGroup.make("auth").add(
 export const scimGroup = HttpApiGroup.make("scim")
   .add(
     HttpApiEndpoint.post("scimCreateUser", "/Users", {
-      payload: S.SCIMUserPayload.pipe(S.asSCIMJson),
-      success: S.SCIMUserView.pipe(HttpApiSchema.status(201), S.asSCIMJson),
-      error: S.SCIMErrors,
+      payload: S.ScimUserPayload.pipe(S.asScimJson),
+      success: S.ScimUserView.pipe(HttpApiSchema.status(201), S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
   .add(
@@ -906,46 +906,46 @@ export const scimGroup = HttpApiGroup.make("scim")
         startIndex: Schema.optional(Schema.String),
         count: Schema.optional(Schema.String),
       },
-      success: S.SCIMUserListView.pipe(S.asSCIMJson),
-      error: S.SCIMErrors,
+      success: S.ScimUserListView.pipe(S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
   .add(
     HttpApiEndpoint.get("scimGetUser", "/Users/:id", {
       params: { id: Schema.String },
-      success: S.SCIMUserView.pipe(S.asSCIMJson),
-      error: S.SCIMErrors,
+      success: S.ScimUserView.pipe(S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
   .add(
     HttpApiEndpoint.put("scimReplaceUser", "/Users/:id", {
       params: { id: Schema.String },
-      payload: S.SCIMUserPayload.pipe(S.asSCIMJson),
-      success: S.SCIMUserView.pipe(S.asSCIMJson),
-      error: S.SCIMErrors,
+      payload: S.ScimUserPayload.pipe(S.asScimJson),
+      success: S.ScimUserView.pipe(S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
   .add(
     HttpApiEndpoint.patch("scimPatchUser", "/Users/:id", {
       params: { id: Schema.String },
-      payload: S.SCIMPatchPayload.pipe(S.asSCIMJson),
-      success: S.SCIMUserView.pipe(S.asSCIMJson),
-      error: S.SCIMErrors,
+      payload: S.ScimPatchPayload.pipe(S.asScimJson),
+      success: S.ScimUserView.pipe(S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
-  // A soft disable, not a hard delete — see `SCIMService.deactivateUser`.
+  // A soft disable, not a hard delete — see `ScimService.deactivateUser`.
   .add(
     HttpApiEndpoint.delete("scimDeleteUser", "/Users/:id", {
       params: { id: Schema.String },
       success: HttpApiSchema.NoContent,
-      error: S.SCIMErrors,
+      error: S.ScimErrors,
     }),
   )
   .add(
     HttpApiEndpoint.post("scimCreateGroup", "/Groups", {
-      payload: S.SCIMGroupPayload.pipe(S.asSCIMJson),
-      success: S.SCIMGroupView.pipe(HttpApiSchema.status(201), S.asSCIMJson),
-      error: S.SCIMErrors,
+      payload: S.ScimGroupPayload.pipe(S.asScimJson),
+      success: S.ScimGroupView.pipe(HttpApiSchema.status(201), S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
   .add(
@@ -955,38 +955,38 @@ export const scimGroup = HttpApiGroup.make("scim")
         startIndex: Schema.optional(Schema.String),
         count: Schema.optional(Schema.String),
       },
-      success: S.SCIMGroupListView.pipe(S.asSCIMJson),
-      error: S.SCIMErrors,
+      success: S.ScimGroupListView.pipe(S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
   .add(
     HttpApiEndpoint.get("scimGetGroup", "/Groups/:id", {
       params: { id: Schema.String },
-      success: S.SCIMGroupView.pipe(S.asSCIMJson),
-      error: S.SCIMErrors,
+      success: S.ScimGroupView.pipe(S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
   .add(
     HttpApiEndpoint.put("scimReplaceGroup", "/Groups/:id", {
       params: { id: Schema.String },
-      payload: S.SCIMGroupPayload.pipe(S.asSCIMJson),
-      success: S.SCIMGroupView.pipe(S.asSCIMJson),
-      error: S.SCIMErrors,
+      payload: S.ScimGroupPayload.pipe(S.asScimJson),
+      success: S.ScimGroupView.pipe(S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
   .add(
     HttpApiEndpoint.patch("scimPatchGroup", "/Groups/:id", {
       params: { id: Schema.String },
-      payload: S.SCIMPatchPayload.pipe(S.asSCIMJson),
-      success: S.SCIMGroupView.pipe(S.asSCIMJson),
-      error: S.SCIMErrors,
+      payload: S.ScimPatchPayload.pipe(S.asScimJson),
+      success: S.ScimGroupView.pipe(S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
   .add(
     HttpApiEndpoint.delete("scimDeleteGroup", "/Groups/:id", {
       params: { id: Schema.String },
       success: HttpApiSchema.NoContent,
-      error: S.SCIMErrors,
+      error: S.ScimErrors,
     }),
   )
   // Discovery (RFC 7644 §4). An IdP reads these before it provisions anything
@@ -994,20 +994,20 @@ export const scimGroup = HttpApiGroup.make("scim")
   // they describe the server, not any tenant's data.
   .add(
     HttpApiEndpoint.get("scimServiceProviderConfig", "/ServiceProviderConfig", {
-      success: S.SCIMDocumentView.pipe(S.asSCIMJson),
-      error: S.SCIMErrors,
+      success: S.ScimDocumentView.pipe(S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
   .add(
     HttpApiEndpoint.get("scimResourceTypes", "/ResourceTypes", {
-      success: S.SCIMDocumentView.pipe(S.asSCIMJson),
-      error: S.SCIMErrors,
+      success: S.ScimDocumentView.pipe(S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
   .add(
     HttpApiEndpoint.get("scimSchemas", "/Schemas", {
-      success: S.SCIMDocumentView.pipe(S.asSCIMJson),
-      error: S.SCIMErrors,
+      success: S.ScimDocumentView.pipe(S.asScimJson),
+      error: S.ScimErrors,
     }),
   )
   .prefix("/scim/v2");
@@ -1032,7 +1032,7 @@ export const AuthApi = HttpApi.make("AuthApi")
  * contract. The document describes every endpoint path together with its
  * request/response and error schemas (each carrying its HTTP status code).
  *
- * Served at `GET {prefix}/openapi.json` when `HTTPServer.make` is created
+ * Served at `GET {prefix}/openapi.json` when `HttpServer.make` is created
  * with `{ docs: true }`, and consumable by any OpenAPI tooling.
  */
 export const getOpenApiSpec = (): OpenApi.OpenAPISpec => OpenApi.fromApi(AuthApi);

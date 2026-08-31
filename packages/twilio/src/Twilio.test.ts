@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Redacted } from "effect";
-import { SMSSender, type SMSMessage } from "@thomasfosterau/effect-auth";
-import { defaultRender, layer, twilioSMSSender } from "./index.ts";
+import { SmsSender, type SmsMessage } from "@thomasfosterau/effect-auth";
+import { defaultRender, layer, twilioSmsSender } from "./index.ts";
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
 
@@ -33,7 +33,7 @@ const twilioSuccessBody = JSON.stringify({ sid: "SM1234", status: "queued" });
 
 describe("defaultRender", () => {
   it("uses a purpose-keyed lead-in and includes the OTP", () => {
-    const message: SMSMessage = {
+    const message: SmsMessage = {
       to: "+15559876543",
       purpose: "phone-otp:sign-in",
       params: { otp: "654321" },
@@ -42,7 +42,7 @@ describe("defaultRender", () => {
   });
 
   it("falls back to the token when there is no otp", () => {
-    const message: SMSMessage = {
+    const message: SmsMessage = {
       to: "+15559876543",
       purpose: "second-factor-otp",
       params: { token: "tok" },
@@ -55,10 +55,10 @@ describe("defaultRender", () => {
   });
 });
 
-describe("twilioSMSSender", () => {
+describe("twilioSmsSender", () => {
   it("posts to Twilio with Basic auth and form-encoded Body/From/To", async () => {
     const { fetch, calls } = stubFetch(new Response(twilioSuccessBody, { status: 201 }));
-    const sender = twilioSMSSender({ ...baseConfig, fetch });
+    const sender = twilioSmsSender({ ...baseConfig, fetch });
 
     await run(
       sender.send({ to: "+15559876543", purpose: "phone-otp:sign-in", params: { otp: "654321" } }),
@@ -85,7 +85,7 @@ describe("twilioSMSSender", () => {
 
   it("uses a custom render function when provided", async () => {
     const { fetch, calls } = stubFetch(new Response(twilioSuccessBody, { status: 201 }));
-    const sender = twilioSMSSender({ ...baseConfig, fetch, render: () => "Custom body" });
+    const sender = twilioSmsSender({ ...baseConfig, fetch, render: () => "Custom body" });
 
     await run(sender.send({ to: "+1", purpose: "second-factor-otp", params: { otp: "1" } }));
 
@@ -95,7 +95,7 @@ describe("twilioSMSSender", () => {
 
   it("honours a baseUrl override", async () => {
     const { fetch, calls } = stubFetch(new Response(twilioSuccessBody, { status: 201 }));
-    const sender = twilioSMSSender({ ...baseConfig, fetch, baseUrl: "https://stub.local" });
+    const sender = twilioSmsSender({ ...baseConfig, fetch, baseUrl: "https://stub.local" });
 
     await run(sender.send({ to: "+1", purpose: "second-factor-otp", params: { otp: "1" } }));
 
@@ -110,7 +110,7 @@ describe("twilioSMSSender", () => {
         status: 400,
       }),
     );
-    const sender = twilioSMSSender({ ...baseConfig, fetch });
+    const sender = twilioSmsSender({ ...baseConfig, fetch });
 
     const err = await run(
       Effect.flip(sender.send({ to: "bad", purpose: "second-factor-otp", params: { otp: "1" } })),
@@ -126,7 +126,7 @@ describe("twilioSMSSender", () => {
         status: 400,
       }),
     );
-    const sender = twilioSMSSender({ ...baseConfig, fetch });
+    const sender = twilioSmsSender({ ...baseConfig, fetch });
 
     const err = await run(
       Effect.flip(sender.send({ to: "bad", purpose: "second-factor-otp", params: { otp: "1" } })),
@@ -140,7 +140,7 @@ describe("twilioSMSSender", () => {
 
   it("maps a 5xx response without a parseable body to an AuthError with the raw status", async () => {
     const { fetch } = stubFetch(new Response("internal error", { status: 500 }));
-    const sender = twilioSMSSender({ ...baseConfig, fetch });
+    const sender = twilioSmsSender({ ...baseConfig, fetch });
 
     const err = await run(
       Effect.flip(sender.send({ to: "+1", purpose: "second-factor-otp", params: { otp: "1" } })),
@@ -154,7 +154,7 @@ describe("twilioSMSSender", () => {
     const failingFetch = (async () => {
       throw new Error("network down");
     }) as typeof fetch;
-    const sender = twilioSMSSender({ ...baseConfig, fetch: failingFetch });
+    const sender = twilioSmsSender({ ...baseConfig, fetch: failingFetch });
 
     const err = await run(
       Effect.flip(sender.send({ to: "+1", purpose: "second-factor-otp", params: { otp: "1" } })),
@@ -166,11 +166,11 @@ describe("twilioSMSSender", () => {
 });
 
 describe("layer", () => {
-  it("provides the SMSSender service", async () => {
+  it("provides the SmsSender service", async () => {
     const { fetch, calls } = stubFetch(new Response(twilioSuccessBody, { status: 201 }));
 
     const program = Effect.gen(function* () {
-      const sender = yield* SMSSender;
+      const sender = yield* SmsSender;
       yield* sender.send({ to: "+1", purpose: "second-factor-otp", params: { otp: "1" } });
     });
 

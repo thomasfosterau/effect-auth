@@ -537,8 +537,8 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     expect(result.user.name).toBe("Magic User");
   });
 
-  it("EmailOTPStore upserts per email+purpose and increments attempts", async () => {
-    const record: Auth.Email.EmailOTPRecord = {
+  it("EmailOtpStore upserts per email+purpose and increments attempts", async () => {
+    const record: Auth.Email.EmailOtpRecord = {
       email: "otp@example.com",
       otpHash: "hash",
       purpose: "sign-in",
@@ -548,8 +548,8 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     };
     const result = await run(
       Effect.gen(function* () {
-        const store = yield* Auth.Email.EmailOTPStore;
-        const userStore = yield* Auth.Email.EmailOTPUserStore;
+        const store = yield* Auth.Email.EmailOtpStore;
+        const userStore = yield* Auth.Email.EmailOtpUserStore;
         yield* store.upsert(record);
         yield* store.upsert({ ...record, purpose: "forget-password", otpHash: "other" });
         const attempts1 = yield* store.incrementAttempts("otp@example.com", "sign-in");

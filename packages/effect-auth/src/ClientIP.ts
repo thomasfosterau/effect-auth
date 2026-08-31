@@ -63,7 +63,7 @@ export type TrustedProxyConfig = TrustedProxyHopCount | TrustedProxyCidrs;
 /**
  * Per-request resolved client IP.
  *
- * Available in all hook and handler Effects after `HTTPServer.make` (or a
+ * Available in all hook and handler Effects after `HttpServer.make` (or a
  * custom `layer`) has been provided. Access via
  * `Effect.serviceOption(ClientIP)` — returns `None` when running outside an
  * HTTP request scope.
@@ -297,7 +297,7 @@ export const resolveClientIP = (
  *
  * @example
  * ```ts
- * // In HTTPServer.make the trustedProxy option wires this up automatically.
+ * // In HttpServer.make the trustedProxy option wires this up automatically.
  * // For custom usage:
  * const myLayer = Layer.mergeAll(services, clientIPLayer({ hopCount: 1 }))
  * ```
