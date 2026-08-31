@@ -349,9 +349,10 @@ export interface AuthClient {
   };
 
   /**
-   * Organizations: orgs, members, invitations, teams and per-organization
-   * roles. Every call is session-authenticated; 404 when the module is absent
-   * and 403 when the actor's role lacks the required permission.
+   * Organizations: orgs, members (including deactivation), invitations,
+   * claimed email domains, teams and per-organization roles. Every call is
+   * session-authenticated; 404 when the module is absent and 403 when the
+   * actor's role lacks the required permission.
    */
   readonly organization: {
     readonly create: (
@@ -371,6 +372,7 @@ export interface AuthClient {
       payload: Auth.Http.SetActiveOrganizationPayload,
     ) => Promise<Auth.Http.StatusResponse>;
 
+    /** Omit `role` to use the organization's default role. */
     readonly addMember: (
       organizationId: string,
       payload: Auth.Http.AddMemberPayload,
@@ -380,6 +382,26 @@ export interface AuthClient {
       payload: Auth.Http.UpdateMemberRolePayload,
     ) => Promise<Auth.Http.MemberView>;
     readonly removeMember: (organizationId: string, userId: string) => Promise<void>;
+    /**
+     * Suspend a membership without deleting it: the row (and the member's
+     * role, restored on reactivation) survives, but every permission check in
+     * the organization now denies them. Application sessions are left alone -
+     * the server exposes an `onMemberDeactivated` hook for apps that want to
+     * end them.
+     */
+    readonly deactivateMember: (
+      organizationId: string,
+      userId: string,
+    ) => Promise<Auth.Http.MemberView>;
+    readonly reactivateMember: (
+      organizationId: string,
+      userId: string,
+    ) => Promise<Auth.Http.MemberView>;
+    /** Set the role members added without one receive (owner-only). */
+    readonly setDefaultRole: (
+      organizationId: string,
+      payload: Auth.Http.SetDefaultRolePayload,
+    ) => Promise<Auth.Http.OrganizationView>;
 
     readonly invite: (
       organizationId: string,
@@ -390,6 +412,29 @@ export interface AuthClient {
     readonly acceptInvitation: (invitationId: string) => Promise<Auth.Http.MemberView>;
     readonly rejectInvitation: (invitationId: string) => Promise<Auth.Http.InvitationView>;
     readonly cancelInvitation: (invitationId: string) => Promise<Auth.Http.InvitationView>;
+    /** Re-send a pending invitation: same id, fresh expiry, delivered again. */
+    readonly resendInvitation: (invitationId: string) => Promise<Auth.Http.InvitationView>;
+
+    /** Email domains the organization has claimed, and their verification state. */
+    readonly listDomains: (organizationId: string) => Promise<Auth.Http.OrganizationDomainListView>;
+    /**
+     * Claim a domain. The `dns` strategy (the default) answers with the
+     * `verificationToken` to publish as a TXT record; `manual` is attested by
+     * an admin calling {@link verifyDomain}.
+     */
+    readonly addDomain: (
+      organizationId: string,
+      payload: Auth.Http.AddOrganizationDomainPayload,
+    ) => Promise<Auth.Http.OrganizationDomainView>;
+    readonly removeDomain: (organizationId: string, domainId: string) => Promise<void>;
+    /**
+     * Run the verification check. A DNS claim whose record is not published
+     * yet comes back in state `"failed"` - retry once it is.
+     */
+    readonly verifyDomain: (
+      organizationId: string,
+      domainId: string,
+    ) => Promise<Auth.Http.OrganizationDomainView>;
 
     /** Define (or redefine) a role's permissions for one organization. */
     readonly upsertRole: (
@@ -884,6 +929,22 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
           "DELETE",
           `/organization/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`,
         ),
+      deactivateMember: (organizationId, userId) =>
+        request<Auth.Http.MemberView>(
+          "POST",
+          `/organization/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}/deactivate`,
+        ),
+      reactivateMember: (organizationId, userId) =>
+        request<Auth.Http.MemberView>(
+          "POST",
+          `/organization/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}/reactivate`,
+        ),
+      setDefaultRole: (organizationId, payload) =>
+        request<Auth.Http.OrganizationView>(
+          "PUT",
+          `/organization/${encodeURIComponent(organizationId)}/default-role`,
+          payload,
+        ),
 
       invite: (organizationId, payload) =>
         request<Auth.Http.InvitationView>(
@@ -910,6 +971,33 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         request<Auth.Http.InvitationView>(
           "POST",
           `/invitations/${encodeURIComponent(invitationId)}/cancel`,
+        ),
+      resendInvitation: (invitationId) =>
+        request<Auth.Http.InvitationView>(
+          "POST",
+          `/invitations/${encodeURIComponent(invitationId)}/resend`,
+        ),
+
+      listDomains: (organizationId) =>
+        request<Auth.Http.OrganizationDomainListView>(
+          "GET",
+          `/organization/${encodeURIComponent(organizationId)}/domains`,
+        ),
+      addDomain: (organizationId, payload) =>
+        request<Auth.Http.OrganizationDomainView>(
+          "POST",
+          `/organization/${encodeURIComponent(organizationId)}/domains`,
+          payload,
+        ),
+      removeDomain: (organizationId, domainId) =>
+        request<void>(
+          "DELETE",
+          `/organization/${encodeURIComponent(organizationId)}/domains/${encodeURIComponent(domainId)}`,
+        ),
+      verifyDomain: (organizationId, domainId) =>
+        request<Auth.Http.OrganizationDomainView>(
+          "POST",
+          `/organization/${encodeURIComponent(organizationId)}/domains/${encodeURIComponent(domainId)}/verify`,
         ),
 
       upsertRole: (organizationId, role, payload) =>

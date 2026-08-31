@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { UserNotFoundError } from "./Errors.ts";
+import { AuthError, UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
@@ -21,7 +21,16 @@ import {
   memoryIdentifierStore,
   type Identifier,
 } from "./Identifier.ts";
-import { OrganizationStore, type Member, type SsoProvider } from "./index.ts";
+import {
+  memoryOrganizationDomainStore,
+  OrganizationDomainStore,
+  OrganizationService,
+  OrganizationStore,
+  type Member,
+  type Organization,
+  type OrganizationDomain,
+  type SsoProvider,
+} from "./index.ts";
 import { OAuthStateStore, OAuthUserStore, type OAuthState } from "./oauth/OAuth.ts";
 import { SsoProviderStore, SsoError, SsoService } from "./Sso.ts";
 import * as Sso from "./Sso.ts";
@@ -56,13 +65,18 @@ const withFetch = async <A>(
   }
 };
 
-const makeStores = () => {
+const makeStores = (
+  overrides: { readonly domainStore?: typeof OrganizationDomainStore.Service } = {},
+) => {
   const providers = new Map<string, SsoProvider>();
   const users = new Map<string, Types.User>();
   const identifierRecords = new Map<string, Identifier>();
   const identifiers = memoryIdentifierStore(identifierRecords);
   const states = new Map<string, OAuthState>();
   const members: Member[] = [];
+  const organizations = new Map<string, Organization>();
+  const domainRecords = new Map<string, OrganizationDomain>();
+  const domainStore = overrides.domainStore ?? memoryOrganizationDomainStore(domainRecords);
   let userSeq = 0;
 
   const ssoStore: typeof SsoProviderStore.Service = {
@@ -96,7 +110,6 @@ const makeStores = () => {
 
   const coreUserStore: typeof UserStore.Service = {
     get: (userId) => Effect.sync(() => users.get(userId) ?? null),
-    getCredentials: () => Effect.succeed(null),
   };
 
   const stateStore = {
@@ -129,9 +142,13 @@ const makeStores = () => {
       Effect.succeed(
         members.find((m) => m.organizationId === organizationId && m.userId === userId) ?? null,
       ),
+    // Read for the organization's `defaultRole`, and by JIT provisioning:
+    getOrganizationById: (organizationId: string) =>
+      Effect.succeed(organizations.get(organizationId) ?? null),
+    countMembersByOrganization: (organizationId: string) =>
+      Effect.succeed(members.filter((m) => m.organizationId === organizationId).length),
     // Unused by SSO:
     createOrganization: () => Effect.die("unused") as never,
-    getOrganizationById: () => Effect.die("unused") as never,
     getOrganizationBySlug: () => Effect.die("unused") as never,
     updateOrganization: () => Effect.die("unused") as never,
     deleteOrganization: () => Effect.die("unused") as never,
@@ -139,7 +156,6 @@ const makeStores = () => {
     deleteMember: () => Effect.die("unused") as never,
     listMembersByOrganization: () => Effect.die("unused") as never,
     listMembersByUser: () => Effect.die("unused") as never,
-    countMembersByOrganization: () => Effect.die("unused") as never,
     createInvitation: () => Effect.die("unused") as never,
     getInvitation: () => Effect.die("unused") as never,
     updateInvitation: () => Effect.die("unused") as never,
@@ -168,11 +184,69 @@ const makeStores = () => {
     Layer.succeed(UserStore)(coreUserStore),
     Layer.succeed(SessionService)(sessionManager),
     Layer.succeed(OrganizationStore)(orgStore),
+    Layer.succeed(OrganizationDomainStore)(domainStore),
+    // The organization service is what SSO asks for JIT membership; wiring it
+    // here means every sign-in test walks that path (and finds nothing to do
+    // unless the test claimed a domain).
+    OrganizationService.layer().pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(OrganizationStore)(orgStore),
+          Layer.succeed(IdentifierStore)(identifiers),
+          Layer.succeed(OrganizationDomainStore)(domainStore),
+        ),
+      ),
+    ),
     Hooks.Default,
     PlatformCrypto.layer,
   );
 
-  return { layer, providers, users, identifiers, members };
+  /** Register an organization row, with whatever JIT settings a test needs. */
+  const seedOrganization = (
+    organizationId: string,
+    overrides: Partial<Organization> = {},
+  ): Organization => {
+    const organization: Organization = {
+      id: organizationId,
+      name: organizationId,
+      slug: organizationId,
+      metadata: {},
+      createdAt: Date.now(),
+      ...overrides,
+    };
+    organizations.set(organization.id, organization);
+    return organization;
+  };
+
+  /** Claim `domain` for `organizationId`, in the given verification state. */
+  const seedDomain = (
+    organizationId: string,
+    domain: string,
+    verificationState: OrganizationDomain["verificationState"] = "verified",
+  ): OrganizationDomain => {
+    const record: OrganizationDomain = {
+      id: `dom-${domainRecords.size + 1}`,
+      organizationId,
+      domain,
+      verificationState,
+      verificationStrategy: "manual",
+      createdAt: Date.now(),
+      ...(verificationState === "verified" && { verifiedAt: Date.now() }),
+    };
+    domainRecords.set(record.id, record);
+    return record;
+  };
+
+  return {
+    layer,
+    providers,
+    users,
+    identifiers,
+    members,
+    organizations,
+    seedOrganization,
+    seedDomain,
+  };
 };
 
 const ACME = {
@@ -254,6 +328,89 @@ describe("SsoService", () => {
     expect(second.user.id).toBe(first.user.id);
     expect(users.size).toBe(1);
     expect(members.length).toBe(1);
+  });
+
+  /**
+   * The same IdP round trip as above, but with the connection carrying no
+   * organization: any membership that appears came from JIT provisioning.
+   */
+  const jitFixture = (
+    overrides: { readonly domainStore?: typeof OrganizationDomainStore.Service } = {},
+  ) => {
+    const { organizationId: _connectionOrganization, ...withoutOrganization } = ACME;
+    const stores = makeStores(overrides);
+    const idpRoutes = {
+      "https://idp.acme.test/token": { access_token: "at", token_type: "bearer" },
+      "https://idp.acme.test/userinfo": {
+        sub: "idp-user-42",
+        email: "worker@acme.test",
+        email_verified: true,
+      },
+    };
+    const signIn = async () => {
+      const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(stores.layer)));
+      await Effect.runPromise(
+        sso.registerProvider("admin", withoutOrganization).pipe(Effect.provide(stores.layer)),
+      );
+      return withFetch(idpRoutes, () =>
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const start = yield* sso.signIn({ email: "worker@acme.test" });
+            return yield* sso.handleCallback(start.state, "auth-code");
+          }).pipe(Effect.provide(stores.layer)),
+        ),
+      );
+    };
+    return { ...stores, signIn };
+  };
+
+  it("provisions JIT membership from a verified domain when the organization opts in", async () => {
+    const fx = jitFixture();
+    fx.seedOrganization("org-jit", { jitProvisioning: true, defaultRole: "admin" });
+    fx.seedDomain("org-jit", "acme.test");
+
+    const result = await fx.signIn();
+
+    expect(result.isNewUser).toBe(true);
+    expect(fx.members).toEqual([
+      {
+        ...fx.members[0],
+        organizationId: "org-jit",
+        userId: result.user.id,
+        role: "admin",
+        status: "active",
+      },
+    ]);
+  });
+
+  it("leaves JIT alone by default, and for an unverified domain claim", async () => {
+    const optedOut = jitFixture();
+    optedOut.seedOrganization("org-jit", {});
+    optedOut.seedDomain("org-jit", "acme.test");
+    await optedOut.signIn();
+    expect(optedOut.members).toEqual([]);
+
+    const unverified = jitFixture();
+    unverified.seedOrganization("org-jit", { jitProvisioning: true });
+    unverified.seedDomain("org-jit", "acme.test", "pending");
+    await unverified.signIn();
+    expect(unverified.members).toEqual([]);
+  });
+
+  it("still signs the user in when JIT provisioning fails", async () => {
+    const fx = jitFixture({
+      domainStore: {
+        ...memoryOrganizationDomainStore(),
+        getByDomain: () => Effect.fail(new AuthError({ message: "domain store is down" })),
+      },
+    });
+    fx.seedOrganization("org-jit", { jitProvisioning: true });
+
+    const result = await fx.signIn();
+
+    expect(result.user.id).toBeTypeOf("string");
+    expect(result.session.userId).toBe(result.user.id);
+    expect(fx.members).toEqual([]);
   });
 
   it("populates endpoints from OIDC discovery", async () => {
@@ -744,7 +901,6 @@ const makeHttpFixture = () => {
 
   const userStore = {
     get: (userId: string) => Effect.sync(() => usersById.get(userId) ?? null),
-    getCredentials: (_userId: string) => Effect.succeed(null),
   };
   const userServiceStore = {
     get: userStore.get,
@@ -796,13 +952,15 @@ const makeHttpFixture = () => {
     get: (state: string) => Effect.succeed(states.get(state) ?? null),
     delete: (state: string) => Effect.sync(() => void states.delete(state)),
   };
-  // SSO only ever calls getMember/createMember; the rest are unused stubs.
+  // SSO only ever calls getMember/createMember plus the organization read that
+  // resolves the default role; the rest are unused stubs.
   const orgStore = {
     createMember: (m: Member) => Effect.sync(() => (members.push(m), m)),
     getMember: (organizationId: string, userId: string) =>
       Effect.succeed(
         members.find((m) => m.organizationId === organizationId && m.userId === userId) ?? null,
       ),
+    getOrganizationById: () => Effect.succeed(null),
   };
 
   const coreStoreLayer = Layer.mergeAll(

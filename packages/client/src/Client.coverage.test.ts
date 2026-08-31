@@ -413,6 +413,148 @@ describe("organizations", () => {
     expect((await owner.organization.listTeams(org.id)).map((t) => t.name)).toEqual(["Design"]);
   });
 
+  it("deactivates and reactivates a member, restoring their role", async () => {
+    const { browser } = withServer({ organization: true });
+    const owner = browser();
+    const staff = browser();
+
+    await owner.signUp({ email: "boss@client.test", password: PW });
+    const employee = await staff.signUp({ email: "staff@client.test", password: PW });
+
+    const org = await owner.organization.create({ name: "Initech", slug: "initech" });
+    await owner.organization.addMember(org.id, { userId: employee.user.id, role: "admin" });
+
+    const deactivated = await owner.organization.deactivateMember(org.id, employee.user.id);
+    expect(deactivated).toMatchObject({
+      status: "inactive",
+      role: "member",
+      previousRole: "admin",
+    });
+
+    // Inactive members are non-members for authorization...
+    const denied = await staff.organization
+      .createTeam(org.id, { name: "Nope" })
+      .catch((e: unknown) => e);
+    expect(denied).toBeInstanceOf(AuthClientError);
+    expect((denied as AuthClientError).status).toBe(403);
+    // ...but the row is still on the organization.
+    expect((await owner.organization.get(org.id)).members).toHaveLength(2);
+    // The session survives: deactivation is organization-scoped.
+    expect((await staff.getSession())?.user.id).toBe(employee.user.id);
+
+    const reactivated = await owner.organization.reactivateMember(org.id, employee.user.id);
+    expect(reactivated).toMatchObject({ status: "active", role: "admin" });
+    expect((await staff.organization.createTeam(org.id, { name: "Platform" })).name).toBe(
+      "Platform",
+    );
+
+    // The last active owner cannot be deactivated.
+    const lastOwner = await owner.organization
+      .deactivateMember(org.id, (await owner.getSession())!.user.id)
+      .catch((e: unknown) => e);
+    expect(lastOwner).toBeInstanceOf(AuthClientError);
+    expect((lastOwner as AuthClientError).status).toBe(403);
+  });
+
+  it("sets a default role that addMember and the org view both use", async () => {
+    const { browser } = withServer({ organization: true });
+    const owner = browser();
+    const newcomer = browser();
+
+    await owner.signUp({ email: "founder@client.test", password: PW });
+    const hire = await newcomer.signUp({ email: "hire@client.test", password: PW });
+
+    const org = await owner.organization.create({ name: "Hooli", slug: "hooli" });
+    expect(org.defaultRole).toBe("member");
+    expect(org.jitProvisioning).toBe(false);
+
+    await owner.organization.upsertRole(org.id, "contributor", { permissions: ["team:create"] });
+    const updated = await owner.organization.setDefaultRole(org.id, { role: "contributor" });
+    expect(updated.defaultRole).toBe("contributor");
+
+    const member = await owner.organization.addMember(org.id, { userId: hire.user.id });
+    expect(member.role).toBe("contributor");
+    expect(member.status).toBe("active");
+
+    // A role no map defines is refused.
+    const unknown = await owner.organization
+      .setDefaultRole(org.id, { role: "auditor" })
+      .catch((e: unknown) => e);
+    expect(unknown).toBeInstanceOf(AuthClientError);
+    expect((unknown as AuthClientError).status).toBe(403);
+  });
+
+  it("resends a pending invitation on the same id", async () => {
+    const { browser } = withServer({ organization: true });
+    const owner = browser();
+
+    await owner.signUp({ email: "host@client.test", password: PW });
+    const org = await owner.organization.create({ name: "Umbrella", slug: "umbrella" });
+
+    const invitation = await owner.organization.invite(org.id, {
+      email: "guest@client.test",
+      role: "member",
+    });
+    const resent = await owner.organization.resendInvitation(invitation.id);
+    expect(resent.id).toBe(invitation.id);
+    expect(resent.status).toBe("pending");
+    expect(resent.expiresAt).toBeGreaterThanOrEqual(invitation.expiresAt);
+    expect(await owner.organization.listInvitations(org.id)).toHaveLength(1);
+
+    await owner.organization.cancelInvitation(invitation.id);
+    const canceled = await owner.organization
+      .resendInvitation(invitation.id)
+      .catch((e: unknown) => e);
+    expect(canceled).toBeInstanceOf(AuthClientError);
+    expect((canceled as AuthClientError).status).toBe(403);
+  });
+
+  it("claims a domain, verifies it over DNS, and keeps it unique across orgs", async () => {
+    const { server, browser } = withServer({ organization: true });
+    const owner = browser();
+
+    await owner.signUp({ email: "admin@client.test", password: PW });
+    const org = await owner.organization.create({ name: "Acme", slug: "acme" });
+
+    const claim = await owner.organization.addDomain(org.id, { domain: "Acme.test" });
+    expect(claim).toMatchObject({
+      domain: "acme.test",
+      verificationState: "pending",
+      verificationStrategy: "dns",
+    });
+    expect(claim.verificationToken).toBeTypeOf("string");
+    expect((await owner.organization.listDomains(org.id)).map((d) => d.domain)).toEqual([
+      "acme.test",
+    ]);
+
+    // The TXT record is not published yet.
+    expect((await owner.organization.verifyDomain(org.id, claim.id)).verificationState).toBe(
+      "failed",
+    );
+
+    server.publishedDnsDomains.add("acme.test");
+    const verified = await owner.organization.verifyDomain(org.id, claim.id);
+    expect(verified.verificationState).toBe("verified");
+    expect(verified.verifiedAt).toBeTypeOf("number");
+
+    // A second organization cannot claim the same domain.
+    const rival = browser();
+    await rival.signUp({ email: "rival@client.test", password: PW });
+    const other = await rival.organization.create({ name: "Globex", slug: "globex" });
+    const conflict = await rival.organization
+      .addDomain(other.id, { domain: "acme.test" })
+      .catch((e: unknown) => e);
+    expect(conflict).toBeInstanceOf(AuthClientError);
+    expect((conflict as AuthClientError).status).toBe(403);
+
+    // Releasing the claim frees the domain again.
+    await owner.organization.removeDomain(org.id, claim.id);
+    expect(await owner.organization.listDomains(org.id)).toEqual([]);
+    expect((await rival.organization.addDomain(other.id, { domain: "acme.test" })).domain).toBe(
+      "acme.test",
+    );
+  });
+
   it("answers 404 when the organization module is absent", async () => {
     const { client } = withServer();
     await client.signUp({ email: "noorg@client.test", password: PW });

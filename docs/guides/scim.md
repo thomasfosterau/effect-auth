@@ -29,7 +29,9 @@ const scim = ScimService.layer({
   // The externally-visible URL the endpoints are mounted at, used to build each
   // resource's `meta.location` so the IdP can follow what it is handed.
   baseUrl: "https://app.example.com/api/auth/scim/v2",
-  // Organization role granted to users the IdP provisions. Default "member".
+  // Organization role granted to users the IdP provisions, for every
+  // connection. Omit it to let each organization's own `defaultRole` decide
+  // (itself defaulting to "member").
   defaultRole: "member",
   // Page-size cap, advertised as `filter.maxResults`. Default 100.
   maxPageSize: 100,

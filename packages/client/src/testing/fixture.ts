@@ -25,7 +25,11 @@ export interface ServerFixtureOptions {
    * (change-email / delete-user), phone OTP and device authorization.
    */
   readonly features?: boolean;
-  /** Mount the organization module (orgs, members, invitations, teams, roles). */
+  /**
+   * Mount the organization module (orgs, members, invitations, domains, teams,
+   * roles), including an in-memory domain store and a `DomainVerifier` that
+   * answers `true` for the domains pushed into `publishedDnsDomains`.
+   */
   readonly organization?: boolean;
   /** Enable multi-session device lists (several accounts in one browser). */
   readonly multiSession?: { readonly maximumSessions?: number };
@@ -75,7 +79,6 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
 
   const userStore: typeof Auth.UserStore.Service = {
     get: getUserById,
-    getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
   };
 
   const emailPasswordStore: typeof Auth.Email.EmailPasswordStore.Service = {
@@ -289,6 +292,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const teams = new Map<string, Auth.Team>();
   const teamMembers: Auth.TeamMember[] = [];
   const orgRoles = new Map<string, Auth.OrgRole>();
+  const domainRecords = new Map<string, Auth.OrganizationDomain>();
+  /** Domains whose DNS TXT record the stub verifier should "find". */
+  const publishedDnsDomains = new Set<string>();
 
   const organizationStore: typeof Auth.OrganizationStore.Service = {
     createOrganization: (org) => Effect.sync(() => (orgs.set(org.id, org), org)),
@@ -386,9 +392,15 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       Effect.sync(() => void orgRoles.delete(`${organizationId} ${role}`)),
   };
 
+  const domainVerifier: typeof Auth.DomainVerifier.Service = {
+    verify: (domain) => Effect.succeed(publishedDnsDomains.has(domain)),
+  };
+
   const organizationBase = Layer.mergeAll(
     core,
     Layer.succeed(Auth.OrganizationStore)(organizationStore),
+    Layer.succeed(Auth.OrganizationDomainStore)(Auth.memoryOrganizationDomainStore(domainRecords)),
+    Layer.succeed(Auth.DomainVerifier)(domainVerifier),
   );
   const organizationLayer = Layer.mergeAll(
     organizationBase,
@@ -429,6 +441,10 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     sentDeleteTokens,
     /** Phone OTPs the server "texted". */
     sentPhoneOtps,
+    /** Domain claims the organization module stored. */
+    domainRecords,
+    /** Add a domain here to make the stub DNS verifier accept it. */
+    publishedDnsDomains,
   };
 };
 

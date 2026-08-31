@@ -493,6 +493,10 @@ export const OrganizationView = Schema.Struct({
   slug: Schema.String,
   logo: Schema.optional(Schema.String),
   metadata: Attributes,
+  /** Role given to members added without an explicit one. */
+  defaultRole: Schema.String,
+  /** Whether a matching verified domain provisions membership on SSO sign-in. */
+  jitProvisioning: Schema.Boolean,
   createdAt: Schema.Number,
 });
 export type OrganizationView = typeof OrganizationView.Type;
@@ -503,6 +507,10 @@ export const MemberView = Schema.Struct({
   organizationId: Schema.String,
   userId: Schema.String,
   role: Schema.String,
+  /** `"inactive"` members keep their row but fail every permission check. */
+  status: Schema.Literals(["active", "inactive"]),
+  /** The role restored on reactivation; only present while inactive. */
+  previousRole: Schema.optional(Schema.String),
   createdAt: Schema.Number,
 });
 export type MemberView = typeof MemberView.Type;
@@ -548,8 +556,15 @@ export const UpdateOrganizationPayload = Schema.Struct({
   slug: Schema.optional(Schema.String),
   logo: Schema.optional(Schema.String),
   metadata: Schema.optional(Attributes),
+  jitProvisioning: Schema.optional(Schema.Boolean),
 });
 export type UpdateOrganizationPayload = typeof UpdateOrganizationPayload.Type;
+
+/** Request body for setting the organization's default role (owner-only). */
+export const SetDefaultRolePayload = Schema.Struct({
+  role: Schema.String,
+});
+export type SetDefaultRolePayload = typeof SetDefaultRolePayload.Type;
 
 /** Request body for inviting a member. */
 export const InviteMemberPayload = Schema.Struct({
@@ -558,10 +573,10 @@ export const InviteMemberPayload = Schema.Struct({
 });
 export type InviteMemberPayload = typeof InviteMemberPayload.Type;
 
-/** Request body for adding a member directly. */
+/** Request body for adding a member directly (role defaults to the org's). */
 export const AddMemberPayload = Schema.Struct({
   userId: Schema.String,
-  role: Schema.String,
+  role: Schema.optional(Schema.String),
 });
 export type AddMemberPayload = typeof AddMemberPayload.Type;
 
@@ -632,6 +647,33 @@ export const UpsertOrgRolePayload = Schema.Struct({
   permissions: Schema.Array(Schema.String),
 });
 export type UpsertOrgRolePayload = typeof UpsertOrgRolePayload.Type;
+
+/**
+ * Public view of an organization's domain claim. `verificationToken` is the
+ * value to publish as a DNS TXT record; it is only present for `dns` claims,
+ * and only the organization's own admins ever see it.
+ */
+export const OrganizationDomainView = Schema.Struct({
+  id: Schema.String,
+  organizationId: Schema.String,
+  domain: Schema.String,
+  verificationState: Schema.Literals(["pending", "verified", "failed"]),
+  verificationStrategy: Schema.Literals(["dns", "manual"]),
+  verificationToken: Schema.optional(Schema.String),
+  createdAt: Schema.Number,
+  verifiedAt: Schema.optional(Schema.Number),
+});
+export type OrganizationDomainView = typeof OrganizationDomainView.Type;
+
+export const OrganizationDomainListView = Schema.Array(OrganizationDomainView);
+export type OrganizationDomainListView = typeof OrganizationDomainListView.Type;
+
+/** Request body for claiming a domain (strategy defaults to `"dns"`). */
+export const AddOrganizationDomainPayload = Schema.Struct({
+  domain: Schema.String,
+  verificationStrategy: Schema.optional(Schema.Literals(["dns", "manual"])),
+});
+export type AddOrganizationDomainPayload = typeof AddOrganizationDomainPayload.Type;
 
 /** Request body for setting the session's active organization (null clears it). */
 export const SetActiveOrganizationPayload = Schema.Struct({

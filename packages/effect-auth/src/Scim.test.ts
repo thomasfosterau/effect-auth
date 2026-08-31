@@ -12,7 +12,13 @@ import {
   makeIdentifier,
   type Identifier,
 } from "./Identifier.ts";
-import { OrganizationStore, type Member, type Team, type TeamMember } from "./Organization.ts";
+import {
+  OrganizationStore,
+  type Member,
+  type Organization,
+  type Team,
+  type TeamMember,
+} from "./Organization.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import { PasswordResetService } from "./password/PasswordReset.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -48,6 +54,7 @@ const makeStores = () => {
   const identifierRecords = new Map<string, Identifier>();
   const identifiers = memoryIdentifierStore(identifierRecords);
   const connectionRecords = new Map<string, ScimConnection>();
+  const organizations = new Map<string, Organization>();
   const members: Member[] = [];
   const teams = new Map<string, Team>();
   const teamMembers: TeamMember[] = [];
@@ -76,7 +83,6 @@ const makeStores = () => {
 
   const coreUserStore: typeof UserStore.Service = {
     get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
-    getCredentials: () => Effect.succeed(null),
   };
 
   const userServiceStore: typeof UserServiceStore.Service = {
@@ -155,9 +161,12 @@ const makeStores = () => {
       }),
     listTeamMembers: (teamId: string) =>
       Effect.succeed(teamMembers.filter((m) => m.teamId === teamId)),
+    // Read when provisioning a member, to pick up the organization's own
+    // `defaultRole`; tests that care seed `organizations`.
+    getOrganizationById: (organizationId: string) =>
+      Effect.succeed(organizations.get(organizationId) ?? null),
     // Never reached by SCIM.
     createOrganization: unused,
-    getOrganizationById: unused,
     getOrganizationBySlug: unused,
     updateOrganization: unused,
     deleteOrganization: unused,
@@ -231,9 +240,25 @@ const makeStores = () => {
     PlatformCrypto.layer,
   );
 
+  /** Register an organization row so its `defaultRole` is visible to SCIM. */
+  const seedOrganization = (organizationId: string, defaultRole?: string): Organization => {
+    const organization: Organization = {
+      id: organizationId,
+      name: organizationId,
+      slug: organizationId,
+      metadata: {},
+      ...(defaultRole !== undefined && { defaultRole }),
+      createdAt: Date.now(),
+    };
+    organizations.set(organization.id, organization);
+    return organization;
+  };
+
   return {
     layer,
     usersById,
+    organizations,
+    seedOrganization,
     identifiers,
     identifierRecords,
     members,
@@ -320,8 +345,18 @@ describe("ScimService — users", () => {
 
   it("honours a configured default role", async () => {
     const fx = await makeFixture({ defaultRole: "guest" });
+    fx.seedOrganization(ORG_A, "contributor");
     await fx.run(fx.service.createUser(fx.a.connection, ADA));
+    // The SCIM config pins the role for every connection, so the
+    // organization's own default does not get a say.
     expect(fx.members[0]?.role).toBe("guest");
+  });
+
+  it("falls back to the organization's own default role", async () => {
+    const fx = await makeFixture();
+    fx.seedOrganization(ORG_A, "contributor");
+    await fx.run(fx.service.createUser(fx.a.connection, ADA));
+    expect(fx.members[0]?.role).toBe("contributor");
   });
 
   it("normalizes userName and claims the extra emails alongside it", async () => {

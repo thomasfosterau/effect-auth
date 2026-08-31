@@ -7,7 +7,10 @@
  * optionally, organization members) on first login. Both protocols converge on
  * the same provisioning tail — find-or-create by IdP-verified email, claim the
  * identifier as verified, optionally add the user to the connection's
- * organization, then mint a session.
+ * organization, add just-in-time memberships for organizations that have
+ * verified the address's domain and opted into JIT, then mint a session. JIT
+ * failures never fail the sign-in: membership is fail-open, authentication is
+ * not.
  *
  * An **OIDC** connection is, under the hood, a dynamically-registered OAuth
  * provider, so that half reuses the machinery in {@link module:oauth} —
@@ -32,7 +35,7 @@ import { UserStore } from "./UserStore.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
-import { OrganizationStore, type Member } from "./Organization.ts";
+import { OrganizationService, OrganizationStore, type Member } from "./Organization.ts";
 import {
   defaultClockSkewMs,
   SamlReplayStore,
@@ -314,7 +317,11 @@ export class SsoService extends Context.Service<
 export interface SsoConfig {
   /** Default scopes when a connection doesn't specify any. */
   readonly defaultScopes?: readonly string[];
-  /** Role granted when auto-adding a user to a connection's organization. */
+  /**
+   * Role granted when auto-adding a user to a connection's organization.
+   * Unset, the organization's own `defaultRole` decides (itself defaulting to
+   * `"member"`), so a tenant that changed its default gets what it asked for.
+   */
   readonly defaultRole?: string;
   /**
    * How long a minted SAML `AuthnRequest` id stays spendable. Default 10
@@ -372,7 +379,6 @@ export const make = (
 ): Effect.Effect<typeof SsoService.Service, never, SsoProviderStore | Crypto.Crypto> =>
   Effect.gen(function* () {
     const defaultScopes = config.defaultScopes ?? ["openid", "email", "profile"];
-    const defaultRole = config.defaultRole ?? "member";
     const samlRequestTtl = config.samlRequestTtl ?? 10 * 60 * 1000;
     const samlClockSkewMs = config.samlClockSkewMs ?? defaultClockSkewMs;
     const samlAssertionReplayTtl = config.samlAssertionReplayTtl ?? 10 * 60 * 1000;
@@ -432,6 +438,35 @@ export const make = (
       });
 
     /**
+     * Just-in-time organization membership from the addresses this user has
+     * proved: the one the IdP just attested, plus any other *verified* email
+     * identifier on the account. {@link OrganizationService} decides whether
+     * each domain leads anywhere (verified claim, JIT enabled, not a member
+     * yet); it is resolved optionally, so apps without the organization module
+     * skip this entirely.
+     */
+    const provisionJitMemberships = Effect.fn("SsoService.provisionJitMemberships")(function* (
+      userId: string,
+      signInEmail: string,
+    ) {
+      const organizations = yield* Effect.serviceOption(OrganizationService);
+      if (organizations._tag === "None") return;
+
+      const identifiers = yield* IdentifierStore;
+      const owned = yield* identifiers.listByUser(userId);
+      // The sign-in address is IdP-attested; the rest must carry their own
+      // proof, or a self-asserted alias would be a free ticket into a tenant.
+      const proven = new Set<string>([signInEmail]);
+      for (const identifier of owned) {
+        if (identifier.type === "email" && identifier.verified) proven.add(identifier.value);
+      }
+
+      for (const address of proven) {
+        yield* organizations.value.provisionJitMembership(userId, address);
+      }
+    });
+
+    /**
      * The tail both protocols share: find-or-create the user by an
      * IdP-verified email, promote the identifier to verified, provision org
      * membership on first login, then mint the session.
@@ -488,17 +523,32 @@ export const make = (
         if (orgStore._tag === "Some") {
           const existing = yield* orgStore.value.getMember(provider.organizationId, user.id);
           if (existing === null) {
+            const organization =
+              config.defaultRole !== undefined
+                ? null
+                : yield* orgStore.value.getOrganizationById(provider.organizationId);
             const member: Member = {
               id: yield* randomId(),
               organizationId: provider.organizationId,
               userId: user.id,
-              role: defaultRole,
+              role: config.defaultRole ?? organization?.defaultRole ?? "member",
+              status: "active",
               createdAt: Date.now(),
             };
             yield* orgStore.value.createMember(member);
           }
         }
       }
+
+      // Just-in-time membership from a verified email domain. Opt-in per
+      // organization, and deliberately fail-open: a domain lookup that errors
+      // must not turn a successful authentication into a failed sign-in, so
+      // the whole step is logged and swallowed.
+      yield* provisionJitMemberships(user.id, email).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("SSO JIT provisioning failed; continuing sign-in", cause),
+        ),
+      );
 
       const session = yield* sessionManager.createSession(user.id);
       return { user, session, isNewUser, provider } satisfies SsoSignInResult;
