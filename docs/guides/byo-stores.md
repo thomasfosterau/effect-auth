@@ -1,124 +1,34 @@
 # Bring your own store
 
-effect-auth's core (`@thomasfosterau/effect-auth`) depends on `effect` alone —
-no database driver, no ORM. Every place a feature needs to read or write
-something durable, it asks for a small `Context.Service` contract instead:
-`SessionStore`, `UserStore`, `OAuthAccountStore`, and so on. This is the
-library's answer to "do you support Prisma/Kysely/Mongo?" — you implement the
-contracts your app uses, over whatever client you already have, and every
-feature built on them lights up.
+effect-auth's core (`@thomasfosterau/effect-auth`) depends on `effect` alone — no database driver, no ORM. Every place a feature needs to read or write something durable, it asks for a small `Context.Service` contract instead: `SessionStore`, `UserStore`, `OAuthAccountStore`, and so on. This is the library's answer to "do you support Prisma/Kysely/Mongo?" — you implement the contracts your app uses, over whatever client you already have, and every feature built on them lights up.
 
-If your database is Postgres/MySQL/SQLite via `effect/unstable/sql`,
-Cloudflare D1, or Postgres via Drizzle, a ready-made implementation already
-exists (§6) — reach for one of those before writing your own. This guide is
-for everyone else: Mongo, DynamoDB, Prisma, a REST backend, whatever `db`
-client you already have.
+If your database is Postgres/MySQL/SQLite via `effect/unstable/sql`, Cloudflare D1, or Postgres via Drizzle, a ready-made implementation already exists (§6) — reach for one of those before writing your own. This guide is for everyone else: Mongo, DynamoDB, Prisma, a REST backend, whatever `db` client you already have.
 
 ## 1. Conventions every store follows
 
-All 42 store contracts in core (§5) share the same shape, so once you've
-implemented one the rest are the same exercise:
+All 42 store contracts in core (§5) share the same shape, so once you've implemented one the rest are the same exercise:
 
-- **A contract is a plain object typed `typeof Auth.XStore.Service`.**
-  There's nothing to extend or subclass — write an object whose methods match
-  the interface and provide it with
-  `Layer.succeed(Auth.XStore)(impl)`. (`SessionStore` and `UserStore` live at
-  the package root; a handful of contracts are namespaced — `Auth.Email.*`,
-  `Auth.OAuth.*`, `Auth.Password.*`, `Auth.Plugins.*`,
-  `Auth.MultiFactor.*` — see the exact path in §5.)
-- **Lookups return `null` on a miss, never throw or fail.** A service
-  converts `null` into a typed domain error (`SessionNotFoundError`,
-  `UserNotFoundError`, …) at its own layer — the store just reports what it
-  found.
-- **Deletes of an unknown id are no-ops**, not errors. `deleteByUserId`/
-  `deleteByEmail`-style bulk deletes succeed (silently) when there's nothing
-  to delete.
-- **Infrastructure failures become `Errors.AuthError`, with `cause` set to
-  the original error.** Every store method's error channel is `AuthError`
-  (or `never` for the couple of methods, like `RoleStore.getUserRoles`, that
-  are documented as always succeeding). Wrap your driver calls with
-  `Effect.tryPromise`/`Effect.try` and map failures through
-  `new Errors.AuthError({ message: "...", cause })` — never let a driver
-  exception surface as an unhandled defect, and never drop `cause` (it's
-  what makes a production incident readable).
-- **Domain records use real `Date` objects and plain JS values at the store
-  boundary.** `User`, `Session`, and `Identifier` are `Schema.Struct`s with
-  `Schema.Date` fields and a `Schema.Record` `attributes` bag — your store
-  receives and must return actual `Date`s and a plain object, not
-  driver-specific types. Codec choice is yours: `packages/sql` stores dates
-  as epoch-millisecond integers and `attributes` as a JSON `TEXT` column;
-  `packages/drizzle` keeps native `timestamptz` and `jsonb` columns and lets
-  the Postgres driver round-trip them directly. Pick whatever your database
-  does best and convert at the edges of your store implementation.
-- **Bearer secrets are handed to you pre-hashed.** Session ids, magic-link/
-  verification/reset/one-time tokens, API keys, and OIDC codes/tokens are all
-  SHA-256 hex digests (`hashToken` in `TokenHash.ts`) by the time they reach
-  a store — the raw secret is never persisted, so your store just indexes on
-  the digest string like any other primary key. You don't need to hash
-  anything yourself.
+- **A contract is a plain object typed `typeof Auth.XStore.Service`.** There's nothing to extend or subclass — write an object whose methods match the interface and provide it with `Layer.succeed(Auth.XStore)(impl)`. (`SessionStore` and `UserStore` live at the package root; a handful of contracts are namespaced — `Auth.Email.*`, `Auth.OAuth.*`, `Auth.Password.*`, `Auth.Plugins.*`, `Auth.MultiFactor.*` — see the exact path in §5.)
+- **Lookups return `null` on a miss, never throw or fail.** A service converts `null` into a typed domain error (`SessionNotFoundError`, `UserNotFoundError`, …) at its own layer — the store just reports what it found.
+- **Deletes of an unknown id are no-ops**, not errors. `deleteByUserId`/ `deleteByEmail`-style bulk deletes succeed (silently) when there's nothing to delete.
+- **Infrastructure failures become `Errors.AuthError`, with `cause` set to the original error.** Every store method's error channel is `AuthError` (or `never` for the couple of methods, like `RoleStore.getUserRoles`, that are documented as always succeeding). Wrap your driver calls with `Effect.tryPromise`/`Effect.try` and map failures through `new Errors.AuthError({ message: "...", cause })` — never let a driver exception surface as an unhandled defect, and never drop `cause` (it's what makes a production incident readable).
+- **Domain records use real `Date` objects and plain JS values at the store boundary.** `User`, `Session`, and `Identifier` are `Schema.Struct`s with `Schema.Date` fields and a `Schema.Record` `attributes` bag — your store receives and must return actual `Date`s and a plain object, not driver-specific types. Codec choice is yours: `packages/sql` stores dates as epoch-millisecond integers and `attributes` as a JSON `TEXT` column; `packages/drizzle` keeps native `timestamptz` and `jsonb` columns and lets the Postgres driver round-trip them directly. Pick whatever your database does best and convert at the edges of your store implementation.
+- **Bearer secrets are handed to you pre-hashed.** Session ids, magic-link/ verification/reset/one-time tokens, API keys, and OIDC codes/tokens are all SHA-256 hex digests (`hashToken` in `TokenHash.ts`) by the time they reach a store — the raw secret is never persisted, so your store just indexes on the digest string like any other primary key. You don't need to hash anything yourself.
 
 ## 2. Atomicity: what MUST be a single indivisible operation
 
-Most store methods are ordinary CRUD and tolerate a read-then-write
-implementation. A few are security-load-bearing and **must** be one atomic
-operation (a single `UPDATE ... RETURNING`/`INSERT ... ON CONFLICT`
-statement, a conditional delete, a compare-and-swap — whatever your backend's
-equivalent is) because a read-modify-write race there is directly
-exploitable, not just a minor undercount:
+Most store methods are ordinary CRUD and tolerate a read-then-write implementation. A few are security-load-bearing and **must** be one atomic operation (a single `UPDATE ... RETURNING`/`INSERT ... ON CONFLICT` statement, a conditional delete, a compare-and-swap — whatever your backend's equivalent is) because a read-modify-write race there is directly exploitable, not just a minor undercount:
 
-- **`AccountLockoutStore.registerAttempt`** (`src/plugins/AccountLockout.ts`).
-  The whole failures-in/lock-out transition — active lock unchanged, expired
-  lock resets to 1, otherwise increment, crossing `maxAttempts` sets
-  `lockedUntil` — must happen in one statement. A read-modify-write
-  implementation lets concurrent sign-in attempts race the counter and
-  undercounts failures, which weakens the brute-force protection the whole
-  feature exists to provide. `packages/sql`'s implementation
-  (`makeAccountLockoutStore`) is a single `INSERT ... ON CONFLICT(key) DO
-UPDATE` with the whole transition encoded in `CASE` expressions — copy that
-  shape.
-- **`SAMLReplayStore.consume`** (`src/SAML.ts`). Must be an atomic
-  get-and-delete: two concurrent callers passing the same assertion/request
-  id must not both receive the record — the loser gets `null`. This is the
-  one-time-use replay guard for SAML AuthnRequest and assertion ids; a
-  non-atomic implementation reopens the replay window the store exists to
-  close. Implement it as a conditional `DELETE ... RETURNING` (or
-  compare-and-swap), the same way `DeviceAuthorizationStore.claimApproval`
-  does.
-- **`DeviceAuthorizationStore.claimApproval`**
-  (`src/DeviceAuthorization.ts`). Must atomically consume an approved record:
-  if it exists and is `"approved"`, delete it and return it; otherwise
-  return `null`. Two concurrent polls on the same approved `device_code`
-  must each see at most one win — a read-then-delete implementation lets
-  both polls mint a session from the same approval.
-- **`IdentifierStore`'s `(type, value)` uniqueness** (`src/Identifier.ts`).
-  `create` isn't itself required to be a single statement, but the
-  `(type, value)` pair _must_ be enforced unique by the store (a real unique
-  index/constraint), not just checked in application code first. The
-  `claimIdentifier` helper's race-repair logic depends on a concurrent
-  duplicate `create` actually failing — it re-checks `getByValue` after a
-  failed `create` and only then decides between "someone beat you to this
-  email" (`IdentifierTakenError`) and a genuine infrastructure error. Without
-  a real unique constraint, two concurrent sign-ups can both claim the same
-  email.
+- **`AccountLockoutStore.registerAttempt`** (`src/plugins/AccountLockout.ts`). The whole failures-in/lock-out transition — active lock unchanged, expired lock resets to 1, otherwise increment, crossing `maxAttempts` sets `lockedUntil` — must happen in one statement. A read-modify-write implementation lets concurrent sign-in attempts race the counter and undercounts failures, which weakens the brute-force protection the whole feature exists to provide. `packages/sql`'s implementation (`makeAccountLockoutStore`) is a single `INSERT ... ON CONFLICT(key) DO UPDATE` with the whole transition encoded in `CASE` expressions — copy that shape.
+- **`SAMLReplayStore.consume`** (`src/SAML.ts`). Must be an atomic get-and-delete: two concurrent callers passing the same assertion/request id must not both receive the record — the loser gets `null`. This is the one-time-use replay guard for SAML AuthnRequest and assertion ids; a non-atomic implementation reopens the replay window the store exists to close. Implement it as a conditional `DELETE ... RETURNING` (or compare-and-swap), the same way `DeviceAuthorizationStore.claimApproval` does.
+- **`DeviceAuthorizationStore.claimApproval`** (`src/DeviceAuthorization.ts`). Must atomically consume an approved record: if it exists and is `"approved"`, delete it and return it; otherwise return `null`. Two concurrent polls on the same approved `device_code` must each see at most one win — a read-then-delete implementation lets both polls mint a session from the same approval.
+- **`IdentifierStore`'s `(type, value)` uniqueness** (`src/Identifier.ts`). `create` isn't itself required to be a single statement, but the `(type, value)` pair _must_ be enforced unique by the store (a real unique index/constraint), not just checked in application code first. The `claimIdentifier` helper's race-repair logic depends on a concurrent duplicate `create` actually failing — it re-checks `getByValue` after a failed `create` and only then decides between "someone beat you to this email" (`IdentifierTakenError`) and a genuine infrastructure error. Without a real unique constraint, two concurrent sign-ups can both claim the same email.
 
-A second tier is **strongly recommended** atomic (packages/sql and
-packages/alchemy both treat these as single `INSERT ... ON CONFLICT ... DO
-UPDATE` / `UPDATE ... RETURNING` statements, never a separate SELECT then
-write): `RateLimitStore.set`/`increment`, `Auth.OAuth.OAuthAccountStore`'s
-link-or-update path, `Auth.MultiFactor.MultiFactorStore.upsert`, and the
-`Email`/`PhoneOTPStore` `upsert`/`incrementAttempts` pair. A race here just
-double-counts an OTP attempt or drops a rate-limit tick — annoying, not a
-security bypass — so a read-modify-write implementation is a legitimate
-starting point, but reach for a real atomic statement once your driver
-supports one. The `KeyValueStore`-backed defaults in `KeyValueStores.ts`
-document taking the read-modify-write shortcut here deliberately, for
-exactly this reason.
+A second tier is **strongly recommended** atomic (packages/sql and packages/alchemy both treat these as single `INSERT ... ON CONFLICT ... DO UPDATE` / `UPDATE ... RETURNING` statements, never a separate SELECT then write): `RateLimitStore.set`/`increment`, `Auth.OAuth.OAuthAccountStore`'s link-or-update path, `Auth.MultiFactor.MultiFactorStore.upsert`, and the `Email`/`PhoneOTPStore` `upsert`/`incrementAttempts` pair. A race here just double-counts an OTP attempt or drops a rate-limit tick — annoying, not a security bypass — so a read-modify-write implementation is a legitimate starting point, but reach for a real atomic statement once your driver supports one. The `KeyValueStore`-backed defaults in `KeyValueStores.ts` document taking the read-modify-write shortcut here deliberately, for exactly this reason.
 
 ## 3. Worked example: SessionStore + UserStore + IdentifierStore
 
-The three contracts every credential-based sign-in flow touches, over an
-imaginary async `db` client (`db.query(sql, params)` returns rows,
-`db.execute(sql, params)` returns nothing):
+The three contracts every credential-based sign-in flow touches, over an imaginary async `db` client (`db.query(sql, params)` returns rows, `db.execute(sql, params)` returns nothing):
 
 ```ts
 import { Effect, Layer } from "effect";
@@ -365,28 +275,15 @@ const storesLayer = Layer.mergeAll(
 );
 ```
 
-Provide `storesLayer` underneath `Auth.SessionService.layer(config)` and
-whichever sign-in feature's own store (`Auth.Email.EmailPasswordStore`,
-`Auth.PhoneOTPStore` + `Auth.PhoneOTPUserStore`, …) the same way — one
-`Layer.succeed(Auth.XStore)(impl)` per contract, merged together.
+Provide `storesLayer` underneath `Auth.SessionService.layer(config)` and whichever sign-in feature's own store (`Auth.Email.EmailPasswordStore`, `Auth.PhoneOTPStore` + `Auth.PhoneOTPUserStore`, …) the same way — one `Layer.succeed(Auth.XStore)(impl)` per contract, merged together.
 
 ## 4. What "implement only what you use" means in practice
 
-A store contract's methods correspond 1:1 to what the feature that owns it
-needs — there's no unused surface to stub out. If your app never enables
-WebAuthn, you never implement `ChallengeStore`/`CredentialStore`; if you don't
-mount the OIDC provider, `OidcClientStore`/`OidcCodeStore`/`OidcTokenStore`/
-`OidcConsentStore` don't exist for you. A handful of methods are themselves
-optional on the interface (`OAuthAccountStore.hasPassword`,
-`OAuthUserStore.updateUser`, `OidcTokenStore.listByFamily`) — each is
-documented at the call site with what's skipped when it's absent.
+A store contract's methods correspond 1:1 to what the feature that owns it needs — there's no unused surface to stub out. If your app never enables WebAuthn, you never implement `ChallengeStore`/`CredentialStore`; if you don't mount the OIDC provider, `OidcClientStore`/`OidcCodeStore`/`OidcTokenStore`/ `OidcConsentStore` don't exist for you. A handful of methods are themselves optional on the interface (`OAuthAccountStore.hasPassword`, `OAuthUserStore.updateUser`, `OidcTokenStore.listByFamily`) — each is documented at the call site with what's skipped when it's absent.
 
 ## 5. Every store contract in core
 
-Grouped by cluster, in the same order the source is organized. "Namespace"
-is how you reach it from `import * as Auth from "@thomasfosterau/effect-auth"`
-(a bare name is exported at the package root); "Powers" names the service
-that consumes it.
+Grouped by cluster, in the same order the source is organized. "Namespace" is how you reach it from `import * as Auth from "@thomasfosterau/effect-auth"` (a bare name is exported at the package root); "Powers" names the service that consumes it.
 
 **Session & identity (core spine)**
 
@@ -470,47 +367,13 @@ that consumes it.
 | `RoleStore`           | `Auth.RoleStore`                   | User → roles, role → permissions                                    | The legacy permission-string RBAC facade (`AuthorizationPolicy`)                       |
 | `PolicyStore`         | `Auth.PolicyStore.PolicyStore`     | Versioned policy documents, templates, and template-linked policies | Policies-as-data — the M3 authorization framework, organization dynamic access control |
 
-That's 42 store contracts. None are required — only implement the ones behind
-the features you actually enable.
+That's 42 store contracts. None are required — only implement the ones behind the features you actually enable.
 
 ## 6. Reference implementations
 
 Prefer one of these over writing your own when it fits your stack:
 
-- **[`packages/sql`](../../packages/sql)** — driver-agnostic over
-  `effect/unstable/sql` (works with any dialect the driver supports: pg,
-  mysql, sqlite, D1, …). Implements 22 of the 42 contracts — the whole
-  credential/session/OAuth/WebAuthn/MFA/passwordless/lockout core. Not yet
-  covered: `OneTimeTokenStore`, `TrustedDeviceStore`, `PhoneOTP*Store`,
-  `OrganizationStore`, `AdminUserStore`, `ApiKeyStore`, the OIDC provider
-  stores, `SSOProviderStore`, `SAMLReplayStore`, `DeviceAuthorizationStore`,
-  `GoogleOneTapNonceStore`, `JWTKeyStore`, `OTPSecondFactorStore`,
-  `AnonymousUserStore`, `AccountManagementStore`, and `PolicyStore` — bring
-  your own or use the `KeyValueStore` defaults for those until they land.
-  `Stores.ts`'s module doc comment is the authoritative source for the
-  atomicity guarantees (`ON CONFLICT ... DO UPDATE` / `UPDATE ... RETURNING`
-  for single-row upserts and counters; `sql.withTransaction` for multi-step
-  writes) — read it before copying the patterns into your own store.
-- **[`packages/alchemy`](../../packages/alchemy)** — the same store coverage
-  as `packages/sql`, over Cloudflare D1 via Alchemy v2, plus the `AuthSchema`
-  infrastructure resource that reconciles the D1 schema on every deploy.
-  Good default if you're already on D1/Alchemy; same "not yet covered" list
-  as above.
-- **[`packages/drizzle`](../../packages/drizzle)** — `SessionStore` +
-  `UserStore` + `IdentifierStore` only, over `drizzle-orm/pg-core`, with
-  native `jsonb`/`timestamptz` columns instead of `packages/sql`'s
-  TEXT/epoch-ms codecs. Stands alone (doesn't wrap `packages/sql`) — reach
-  for it when your app already models its schema in Drizzle and you want the
-  auth tables in the same migration pipeline; reach for `packages/sql`
-  instead when you need the other 39 contracts too.
-- **[`KeyValueStores.ts`](../../packages/effect-auth/src/KeyValueStores.ts)**
-  — `KeyValueStore`-backed (from `effect/unstable/persistence`) defaults for
-  the ephemeral/token-shaped stores: OAuth state, WebAuthn challenges, rate
-  limits, verification/reset/magic-link tokens, email OTPs, pending
-  multi-factor challenges, and Google One Tap nonces. A natural fit for
-  Redis, Cloudflare KV, or an in-memory map — provide any
-  `KeyValueStore` backend (`KeyValueStore.layerMemory`,
-  `KeyValueStore.layerFileSystem`, `KeyValueStore.layerSql`, …) underneath.
-  Its module doc documents a deliberate read-modify-write shortcut on
-  `RateLimitStore.increment`/`EmailOTPStore.incrementAttempts` — fine for
-  best-effort limiting, not for the §2 MUST-be-atomic tier.
+- **[`packages/sql`](../../packages/sql)** — driver-agnostic over `effect/unstable/sql` (works with any dialect the driver supports: pg, mysql, sqlite, D1, …). Implements 22 of the 42 contracts — the whole credential/session/OAuth/WebAuthn/MFA/passwordless/lockout core. Not yet covered: `OneTimeTokenStore`, `TrustedDeviceStore`, `PhoneOTP*Store`, `OrganizationStore`, `AdminUserStore`, `ApiKeyStore`, the OIDC provider stores, `SSOProviderStore`, `SAMLReplayStore`, `DeviceAuthorizationStore`, `GoogleOneTapNonceStore`, `JWTKeyStore`, `OTPSecondFactorStore`, `AnonymousUserStore`, `AccountManagementStore`, and `PolicyStore` — bring your own or use the `KeyValueStore` defaults for those until they land. `Stores.ts`'s module doc comment is the authoritative source for the atomicity guarantees (`ON CONFLICT ... DO UPDATE` / `UPDATE ... RETURNING` for single-row upserts and counters; `sql.withTransaction` for multi-step writes) — read it before copying the patterns into your own store.
+- **[`packages/alchemy`](../../packages/alchemy)** — the same store coverage as `packages/sql`, over Cloudflare D1 via Alchemy v2, plus the `AuthSchema` infrastructure resource that reconciles the D1 schema on every deploy. Good default if you're already on D1/Alchemy; same "not yet covered" list as above.
+- **[`packages/drizzle`](../../packages/drizzle)** — `SessionStore` + `UserStore` + `IdentifierStore` only, over `drizzle-orm/pg-core`, with native `jsonb`/`timestamptz` columns instead of `packages/sql`'s TEXT/epoch-ms codecs. Stands alone (doesn't wrap `packages/sql`) — reach for it when your app already models its schema in Drizzle and you want the auth tables in the same migration pipeline; reach for `packages/sql` instead when you need the other 39 contracts too.
+- **[`KeyValueStores.ts`](../../packages/effect-auth/src/KeyValueStores.ts)** — `KeyValueStore`-backed (from `effect/unstable/persistence`) defaults for the ephemeral/token-shaped stores: OAuth state, WebAuthn challenges, rate limits, verification/reset/magic-link tokens, email OTPs, pending multi-factor challenges, and Google One Tap nonces. A natural fit for Redis, Cloudflare KV, or an in-memory map — provide any `KeyValueStore` backend (`KeyValueStore.layerMemory`, `KeyValueStore.layerFileSystem`, `KeyValueStore.layerSql`, …) underneath. Its module doc documents a deliberate read-modify-write shortcut on `RateLimitStore.increment`/`EmailOTPStore.incrementAttempts` — fine for best-effort limiting, not for the §2 MUST-be-atomic tier.

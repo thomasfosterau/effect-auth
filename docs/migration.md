@@ -1,14 +1,10 @@
 # Migration guide: API restructure (0.1.0 → next)
 
-This is a breaking release. It covers every public rename and move made across the six-issue API
-restructure milestone (`docs/refactor-plan.md`): directory layout, the `package.json` exports map,
-service-class consolidation, `R = never` signatures, `Crypto` service adoption, and the final
-conventions sweep. There is no compat layer — update call sites to the new names/paths directly.
+This is a breaking release. It covers every public rename and move made across the six-issue API restructure milestone (`docs/refactor-plan.md`): directory layout, the `package.json` exports map, service-class consolidation, `R = never` signatures, `Crypto` service adoption, and the final conventions sweep. There is no compat layer — update call sites to the new names/paths directly.
 
 ## 1. Directory layout and import paths
 
-Feature modules moved into lowercase cluster directories. Update relative imports (internal) or
-subpath imports (external) accordingly.
+Feature modules moved into lowercase cluster directories. Update relative imports (internal) or subpath imports (external) accordingly.
 
 | Old path                                                           | New path                                                     |
 | ------------------------------------------------------------------ | ------------------------------------------------------------ |
@@ -49,8 +45,7 @@ subpath imports (external) accordingly.
 | `src/WebAuthn.ts`                                                  | `src/multifactor/WebAuthn.ts`                                |
 | `src/OTP.ts`                                                       | `src/multifactor/OTP.ts`                                     |
 
-Flat feature modules that only got acronym-case fixes (still exported from the package root, not
-clustered):
+Flat feature modules that only got acronym-case fixes (still exported from the package root, not clustered):
 
 | Old file             | New file                                                           |
 | -------------------- | ------------------------------------------------------------------ |
@@ -65,9 +60,7 @@ clustered):
 
 ## 2. Package exports
 
-Before the restructure, `effect-auth` had a single root export. It now publishes per-cluster
-subpaths, with the `types` condition listed first (TypeScript's own guidance for conditional
-exports):
+Before the restructure, `effect-auth` had a single root export. It now publishes per-cluster subpaths, with the `types` condition listed first (TypeScript's own guidance for conditional exports):
 
 ```jsonc
 {
@@ -86,18 +79,13 @@ exports):
 }
 ```
 
-There is no `./session` subpath (§11) and no `./authz` subpath (§10): both clusters dissolved into
-flat `src/` modules covered by the root export.
+There is no `./session` subpath (§11) and no `./authz` subpath (§10): both clusters dissolved into flat `src/` modules covered by the root export.
 
-The root package (`effect-auth`) still re-exports every cluster as a namespace (`Email`, `HTTP`,
-`OAuth`, `Password`, `Plugins`, `MultiFactor`) alongside the flat, non-clustered feature modules
-(SessionService, JWT, Admin, Organization, …) — no import changes needed there beyond the renames
-below.
+The root package (`effect-auth`) still re-exports every cluster as a namespace (`Email`, `HTTP`, `OAuth`, `Password`, `Plugins`, `MultiFactor`) alongside the flat, non-clustered feature modules (SessionService, JWT, Admin, Organization, …) — no import changes needed there beyond the renames below.
 
 ## 3. Tag-string and identifier acronym fixes
 
-Service tag strings (the `"@effect-auth/…"` string passed to `Context.Service`) and exported type
-names now match their class names exactly, with acronyms fully capitalized:
+Service tag strings (the `"@effect-auth/…"` string passed to `Context.Service`) and exported type names now match their class names exactly, with acronyms fully capitalized:
 
 | Old                                                                                                                | New                                                                        |
 | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
@@ -118,11 +106,7 @@ names now match their class names exactly, with acronyms fully capitalized:
 
 ## 4. Service classes: `*Shape` interfaces deleted
 
-Every standalone `FooServiceShape`/`FooStoreShape` interface (~65 across the codebase, e.g.
-`SessionServiceShape`, `EmailPasswordServiceShape`, `OAuthServiceShape`, `PasswordHasherShape`,
-`WebAuthnServiceShape`, `MessagesShape`, …) has been deleted. Service and store contracts are now
-plain `Context.Service` classes; consumers who need the shape type reference
-`typeof FooService.Service` instead:
+Every standalone `FooServiceShape`/`FooStoreShape` interface (~65 across the codebase, e.g. `SessionServiceShape`, `EmailPasswordServiceShape`, `OAuthServiceShape`, `PasswordHasherShape`, `WebAuthnServiceShape`, `MessagesShape`, …) has been deleted. Service and store contracts are now plain `Context.Service` classes; consumers who need the shape type reference `typeof FooService.Service` instead:
 
 ```ts
 // before
@@ -134,15 +118,11 @@ import { EmailPasswordService } from "effect-auth";
 const impl: typeof EmailPasswordService.Service = { ... };
 ```
 
-The `SessionManager` / `makeSessionManager` compat aliases (and `SessionManagerShape`) for the old
-`SessionService` name are also gone — use `SessionService` / `SessionService.layer(...)` directly.
+The `SessionManager` / `makeSessionManager` compat aliases (and `SessionManagerShape`) for the old `SessionService` name are also gone — use `SessionService` / `SessionService.layer(...)` directly.
 
 ## 5. `R = never` service construction
 
-Every service's `make`/`layer` now resolves its store and session/hook dependencies **once at
-Layer construction** instead of per method call. Method signatures on the returned service object
-carry only the error channel (`R = never`); callers no longer provide stores per call — wire the
-store layer into the service layer instead:
+Every service's `make`/`layer` now resolves its store and session/hook dependencies **once at Layer construction** instead of per method call. Method signatures on the returned service object carry only the error channel (`R = never`); callers no longer provide stores per call — wire the store layer into the service layer instead:
 
 ```ts
 // before: dependency threaded through every call
@@ -154,21 +134,13 @@ const layer = EmailPasswordService.layer(config).pipe(Layer.provide(storeLayer))
 
 ## 6. `Crypto` service adoption
 
-Most services now use Effect's `Crypto` service (`randomBytes`, `randomInt*`, `digest`, UUIDs)
-instead of `node:crypto`, yielded once at layer construction like other dependencies. Layers that
-previously worked with no extra wiring may now require `Crypto.layer` (or a test double) in
-context. Direct `node:crypto` usage is now corralled into exactly three modules:
-`password/Password.ts` (scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM,
-HMAC, JWS/DER asymmetric primitives).
+Most services now use Effect's `Crypto` service (`randomBytes`, `randomInt*`, `digest`, UUIDs) instead of `node:crypto`, yielded once at layer construction like other dependencies. Layers that previously worked with no extra wiring may now require `Crypto.layer` (or a test double) in context. Direct `node:crypto` usage is now corralled into exactly three modules: `password/Password.ts` (scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC, JWS/DER asymmetric primitives).
 
-The `hashOtp` deprecated alias for `hashToken` (previously left over in the email-OTP module) is
-gone — call `hashToken` directly.
+The `hashOtp` deprecated alias for `hashToken` (previously left over in the email-OTP module) is gone — call `hashToken` directly.
 
 ## 7. Constructor naming: `makeFooService` → module-scoped `make`/`layer`
 
-Every relative import now uses the `.ts` extension (`rewriteRelativeImportExtensions` rewrites it
-to `.js` at emit time), and every `makeFooService`-style constructor has been renamed to a
-module-scoped export. Import the module as a namespace to disambiguate:
+Every relative import now uses the `.ts` extension (`rewriteRelativeImportExtensions` rewrites it to `.js` at emit time), and every `makeFooService`-style constructor has been renamed to a module-scoped export. Import the module as a namespace to disambiguate:
 
 ```ts
 // before
@@ -239,16 +211,11 @@ const service = yield * EmailPassword.make(config);
 | `makePBKDF2Hasher`                | `password/Password.ts`            | `pbkdf2Hasher`                |
 | `makeScryptHasher`                | `password/Password.ts`            | `scryptHasher`                |
 
-`makePlugin` (the generic plugin-Layer factory in `Hooks.ts`, shared across every plugin module —
-not a per-service constructor) is unchanged.
+`makePlugin` (the generic plugin-Layer factory in `Hooks.ts`, shared across every plugin module — not a per-service constructor) is unchanged.
 
 ## 8. Second-factor cluster: `TwoFactor` → `MultiFactor` rename
 
-The TOTP/backup-code module (moved into `src/secondfactor/` above) is renamed from `TwoFactor` to
-`MultiFactor` throughout — the class, its tag string, every exported identifier, the HTTP routes
-and wire schema types, the client SDK namespace, and the observability metrics. This reuses the
-`MultiFactorService` name freed up by the orphaned-duplicate deletion in §1 — it is not related to
-that deleted file.
+The TOTP/backup-code module (moved into `src/secondfactor/` above) is renamed from `TwoFactor` to `MultiFactor` throughout — the class, its tag string, every exported identifier, the HTTP routes and wire schema types, the client SDK namespace, and the observability metrics. This reuses the `MultiFactorService` name freed up by the orphaned-duplicate deletion in §1 — it is not related to that deleted file.
 
 | Old                                                                                                                                                                                  | New                                                                                                                                                                                |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -275,17 +242,11 @@ that deleted file.
 | `effect-auth.two_factor_challenges.total`, `effect-auth.two_factor_verifications.total` (metrics)                                                                                    | `effect-auth.multi_factor_challenges.total`, `effect-auth.multi_factor_verifications.total`                                                                                        |
 | `recordTwoFactorChallenge`, `recordTwoFactorVerification`                                                                                                                            | `recordMultiFactorChallenge`, `recordMultiFactorVerification`                                                                                                                      |
 
-`SecondFactorGate`/`SecondFactorChallenge` (the generic gate abstraction in `email/EmailPassword.ts`,
-shared with `OTPSecondFactor`) were **not** part of this rename — only the TOTP-specific module and
-its symbols changed. The directory itself was left as `secondfactor/` at the time; it became
-`multifactor/` later, in §11.
+`SecondFactorGate`/`SecondFactorChallenge` (the generic gate abstraction in `email/EmailPassword.ts`, shared with `OTPSecondFactor`) were **not** part of this rename — only the TOTP-specific module and its symbols changed. The directory itself was left as `secondfactor/` at the time; it became `multifactor/` later, in §11.
 
 ## 9. Surrogate-keyed identity: `user.email` → identifiers
 
-Design rationale: `docs/DESIGN.md` § D12. `User` no longer carries
-`email`/`emailVerified`; login handles (email, username, phone) are
-`Identifier` records with global uniqueness on `(type, value)` behind the
-`IdentifierStore` contract.
+Design rationale: `docs/DESIGN.md` § D12. `User` no longer carries `email`/`emailVerified`; login handles (email, username, phone) are `Identifier` records with global uniqueness on `(type, value)` behind the `IdentifierStore` contract.
 
 ### API changes
 
@@ -303,15 +264,11 @@ Design rationale: `docs/DESIGN.md` § D12. `User` no longer carries
 | `Auth.HTTP.AuthServices` includes `EmailPasswordStore`                                     | includes `IdentifierStore` instead                                                                         |
 | `UserView.email` / `UserView.emailVerified` (required)                                     | optional, derived from the primary/any email identifier; omitted on cookie-cache-served responses          |
 
-New HTTP endpoints: `GET /identifiers` (list the signed-in user's identifiers)
-and `DELETE /identifiers/:identifierId` (refuses foreign ids and the account's
-last identifier). New test/single-instance helper: `memoryIdentifierStore()`.
+New HTTP endpoints: `GET /identifiers` (list the signed-in user's identifiers) and `DELETE /identifiers/:identifierId` (refuses foreign ids and the account's last identifier). New test/single-instance helper: `memoryIdentifierStore()`.
 
 ### Data migration (sql/alchemy deployments)
 
-`auth_users` drops `email` and `email_verified` (and `auth_users_email_idx`);
-`auth_identifiers` becomes the handle table. Backfill **before** deploying the
-new schema, then drop the columns:
+`auth_users` drops `email` and `email_verified` (and `auth_users_email_idx`); `auth_identifiers` becomes the handle table. Backfill **before** deploying the new schema, then drop the columns:
 
 ```sql
 -- 1. Backfill: one email identifier per existing user.
@@ -333,24 +290,13 @@ ALTER TABLE auth_users DROP COLUMN email;
 ALTER TABLE auth_users DROP COLUMN email_verified;
 ```
 
-If your app stored phone numbers in `attributes.phoneNumber` (the old PhoneOTP
-convention), backfill those as `type = 'phone'` identifiers with
-`verified = attributes.phoneNumberVerified` the same way, then remove the
-attribute keys. Username deployments backfill from wherever the old
-`UsernameStore` implementation kept its mapping, with `verified = 1`.
+If your app stored phone numbers in `attributes.phoneNumber` (the old PhoneOTP convention), backfill those as `type = 'phone'` identifiers with `verified = attributes.phoneNumberVerified` the same way, then remove the attribute keys. Username deployments backfill from wherever the old `UsernameStore` implementation kept its mapping, with `verified = 1`.
 
 ## 10. Authorization is flat: the `authz/` cluster dissolved
 
-Authorization is a first-class feature, not a side cluster, so the `authz`
-abbreviation is gone everywhere and `src/authz/` dissolved into flat top-level
-modules. `Auth.Authz.X` is now `Auth.X` (or, for the policy kernel's
-data-shaped modules, still a namespace — just one hop shallower:
-`Auth.Policy.permit`, `Auth.Entity.ref`, `Auth.Condition.eq`).
+Authorization is a first-class feature, not a side cluster, so the `authz` abbreviation is gone everywhere and `src/authz/` dissolved into flat top-level modules. `Auth.Authz.X` is now `Auth.X` (or, for the policy kernel's data-shaped modules, still a namespace — just one hop shallower: `Auth.Policy.permit`, `Auth.Entity.ref`, `Auth.Condition.eq`).
 
-The `./authz` subpath export was **removed with no replacement** — the root
-barrel covers everything it exported. `import { ... } from
-"@thomasfosterau/effect-auth/authz"` becomes `import { ... } from
-"@thomasfosterau/effect-auth"`.
+The `./authz` subpath export was **removed with no replacement** — the root barrel covers everything it exported. `import { ... } from "@thomasfosterau/effect-auth/authz"` becomes `import { ... } from "@thomasfosterau/effect-auth"`.
 
 | Old                                   | New                                        |
 | ------------------------------------- | ------------------------------------------ |
@@ -370,13 +316,9 @@ barrel covers everything it exported. `import { ... } from
 | `AuthzMiddlewareClass`                | `AuthorizationMiddlewareClass`             |
 | `AuthzInput`                          | `AuthorizationMiddlewareInput`             |
 
-The middleware tag-id prefix changed from `"@effect-auth/AuthzMiddleware#"` to
-`"@effect-auth/AuthorizationMiddleware#"`; ids stay per-instance and are not
-part of the public contract.
+The middleware tag-id prefix changed from `"@effect-auth/AuthzMiddleware#"` to `"@effect-auth/AuthorizationMiddleware#"`; ids stay per-instance and are not part of the public contract.
 
-`AuthorizationMiddlewareInput` is deliberately _not_ named `AuthorizationInput`:
-`AuthorizeInput` (the `Authorizer`'s own request shape) already exists at the
-root, and the two must stay distinguishable.
+`AuthorizationMiddlewareInput` is deliberately _not_ named `AuthorizationInput`: `AuthorizeInput` (the `Authorizer`'s own request shape) already exists at the root, and the two must stay distinguishable.
 
 ## 11. Pascal-case acronyms, `multifactor/`, and the flat session spine
 
@@ -384,11 +326,7 @@ Four PR-review follow-ups, all mechanical.
 
 ### 11.1 `OIDCProvider` → `OidcProvider`
 
-Effect's own convention writes a leading acronym as a Pascal-case word
-(`HttpApi`, not `HTTPApi` — §1's http-layer file renames), so the OIDC provider
-module follows it: `src/OIDCProvider.ts` → `src/OidcProvider.ts`, with every
-`OIDC`-prefixed identifier in that module respelled `Oidc`. §3 had briefly gone
-the other way; this supersedes it.
+Effect's own convention writes a leading acronym as a Pascal-case word (`HttpApi`, not `HTTPApi` — §1's http-layer file renames), so the OIDC provider module follows it: `src/OIDCProvider.ts` → `src/OidcProvider.ts`, with every `OIDC`-prefixed identifier in that module respelled `Oidc`. §3 had briefly gone the other way; this supersedes it.
 
 | Old                                                                                                                                    | New                                                                                                                    |
 | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -409,19 +347,11 @@ the other way; this supersedes it.
 | `OIDCConsentPayload`, `OIDCRedirectView`, `OIDCTokenPayload`, `OIDCTokenView` (wire)                                                   | `OidcConsentPayload`, `OidcRedirectView`, `OidcTokenPayload`, `OidcTokenView`                                          |
 | `OIDCRegisterClientPayload`, `OIDCRegistrationPayload`, `OIDCRegistrationView` (wire)                                                  | `OidcRegisterClientPayload`, `OidcRegistrationPayload`, `OidcRegistrationView`                                         |
 
-Unchanged: the `SCREAMING_SNAKE_CASE` constants keep the acronym as a whole word
-(`DEFAULT_OIDC_SCOPES`, `DEFAULT_OIDC_REGISTRATION_RATE_LIMIT`,
-`OIDC_TOKEN_ENDPOINT_AUTH_METHODS`, `OIDC_DYNAMIC_GRANT_TYPES`,
-`OIDC_DYNAMIC_RESPONSE_TYPES`); so do the client SDK's `client.oidc.*` methods,
-every HTTP path and operationId, and the metric
-`effect-auth.oidc_token_requests.total`. `SSO.ts`'s `OIDCSSOProvider` (with its
-`OIDCSSOProviderView` / `SSORegisterOIDCPayload` wire schemas) also stays as it
-is — it is an SSO type, and `SSO.ts` was not part of this round.
+Unchanged: the `SCREAMING_SNAKE_CASE` constants keep the acronym as a whole word (`DEFAULT_OIDC_SCOPES`, `DEFAULT_OIDC_REGISTRATION_RATE_LIMIT`, `OIDC_TOKEN_ENDPOINT_AUTH_METHODS`, `OIDC_DYNAMIC_GRANT_TYPES`, `OIDC_DYNAMIC_RESPONSE_TYPES`); so do the client SDK's `client.oidc.*` methods, every HTTP path and operationId, and the metric `effect-auth.oidc_token_requests.total`. `SSO.ts`'s `OIDCSSOProvider` (with its `OIDCSSOProviderView` / `SSORegisterOIDCPayload` wire schemas) also stays as it is — it is an SSO type, and `SSO.ts` was not part of this round.
 
 ### 11.2 `APIKey` → `ApiKey`
 
-The same convention, applied to the API-key module: `src/APIKey.ts` →
-`src/ApiKey.ts`. §3 had briefly gone the other way; this supersedes it.
+The same convention, applied to the API-key module: `src/APIKey.ts` → `src/ApiKey.ts`. §3 had briefly gone the other way; this supersedes it.
 
 | Old                                                                               | New                                                                               |
 | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
@@ -434,13 +364,11 @@ The same convention, applied to the API-key module: `src/APIKey.ts` →
 | `APIKeyView`, `APIKeyCreatedView`, `APIKeyListView` (wire)                        | `ApiKeyView`, `ApiKeyCreatedView`, `ApiKeyListView`                               |
 | `APIKeyCreatePayload`, `APIKeyUpdatePayload`, `APIKeyRateLimit` (wire)            | `ApiKeyCreatePayload`, `ApiKeyUpdatePayload`, `ApiKeyRateLimit`                   |
 
-Unchanged: the client SDK's `client.apiKeys.*` methods, the `/api-key/*` paths
-and their `apiKey*` operationIds.
+Unchanged: the client SDK's `client.apiKeys.*` methods, the `/api-key/*` paths and their `apiKey*` operationIds.
 
 ### 11.3 `secondfactor/` → `multifactor/`
 
-The cluster is named after the feature it ships (`MultiFactorService`), not after
-the position of the factor in the flow.
+The cluster is named after the feature it ships (`MultiFactorService`), not after the position of the factor in the flow.
 
 | Old                                          | New                                         |
 | -------------------------------------------- | ------------------------------------------- |
@@ -448,20 +376,11 @@ the position of the factor in the flow.
 | `"@thomasfosterau/effect-auth/secondfactor"` | `"@thomasfosterau/effect-auth/multifactor"` |
 | `Auth.SecondFactor.X`                        | `Auth.MultiFactor.X`                        |
 
-The module files inside keep their names (`MultiFactor.ts`,
-`OTPSecondFactor.ts`, `WebAuthn.ts`, `OTP.ts`), as do every exported identifier,
-tag string, HTTP route and wire schema in them — including the deliberately
-second-factor-specific `OTPSecondFactor*` symbols and the generic
-`SecondFactorGate` / `SecondFactorChallenge` seam in `email/EmailPassword.ts`.
-There was no collision at the root: nothing else exports the name `MultiFactor`.
+The module files inside keep their names (`MultiFactor.ts`, `OTPSecondFactor.ts`, `WebAuthn.ts`, `OTP.ts`), as do every exported identifier, tag string, HTTP route and wire schema in them — including the deliberately second-factor-specific `OTPSecondFactor*` symbols and the generic `SecondFactorGate` / `SecondFactorChallenge` seam in `email/EmailPassword.ts`. There was no collision at the root: nothing else exports the name `MultiFactor`.
 
 ### 11.4 The `session/` cluster dissolved
 
-Session management is the spine nearly every feature module depends on, not a
-side cluster, so — exactly as with `authz/` in §10 — `src/session/` dissolved
-into flat top-level modules and the `./session` subpath was **removed with no
-replacement**. `import { ... } from "@thomasfosterau/effect-auth/session"`
-becomes `import { ... } from "@thomasfosterau/effect-auth"`.
+Session management is the spine nearly every feature module depends on, not a side cluster, so — exactly as with `authz/` in §10 — `src/session/` dissolved into flat top-level modules and the `./session` subpath was **removed with no replacement**. `import { ... } from "@thomasfosterau/effect-auth/session"` becomes `import { ... } from "@thomasfosterau/effect-auth"`.
 
 | Old                                     | New                                         |
 | --------------------------------------- | ------------------------------------------- |
@@ -472,10 +391,7 @@ becomes `import { ... } from "@thomasfosterau/effect-auth"`.
 | `src/session/index.ts`                  | **deleted** — dissolved into `src/index.ts` |
 | `"@thomasfosterau/effect-auth/session"` | `"@thomasfosterau/effect-auth"` (root)      |
 
-`SessionService`, `SessionStore`, `UserStore` and `UserServiceStore` were already
-re-exported flat from the root, so they are unaffected. The `TrustedDevice`
-symbols were reachable **only** through the `./session` subpath before; they now
-sit on the flat spine:
+`SessionService`, `SessionStore`, `UserStore` and `UserServiceStore` were already re-exported flat from the root, so they are unaffected. The `TrustedDevice` symbols were reachable **only** through the `./session` subpath before; they now sit on the flat spine:
 
 | Old                                                                      | New                                                       |
 | ------------------------------------------------------------------------ | --------------------------------------------------------- |
@@ -486,11 +402,7 @@ sit on the flat spine:
 | `TrustedDeviceWithMultiFactorGateLayer`                                  | `Auth.TrustedDeviceWithMultiFactorGateLayer`              |
 | `gate`                                                                   | `Auth.TrustedDevice.gate`                                 |
 
-`make` and `gate` are too generic to sit at the root, so `TrustedDevice.ts` is
-_also_ re-exported as the namespace `Auth.TrustedDevice` — the same treatment
-`Auth.PolicyStore` got in §10. There is still no `Auth.Session` namespace, for
-the reason recorded in the root barrel's module comment: `Types.ts` owns that
-name for the flat `Session` record.
+`make` and `gate` are too generic to sit at the root, so `TrustedDevice.ts` is _also_ re-exported as the namespace `Auth.TrustedDevice` — the same treatment `Auth.PolicyStore` got in §10. There is still no `Auth.Session` namespace, for the reason recorded in the root barrel's module comment: `Types.ts` owns that name for the flat `Session` record.
 
 ## Validation
 
