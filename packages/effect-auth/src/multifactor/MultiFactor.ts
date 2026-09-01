@@ -401,20 +401,16 @@ export const make = (
       Effect.gen(function* () {
         const passwordHash = yield* emailPasswordStore.getPasswordHash(userId);
         if (!passwordHash) {
-          return yield* Effect.fail(
-            new Errors.InvalidCredentialsError({
-              message: "Invalid password",
-            }),
-          );
+          return yield* new Errors.InvalidCredentialsError({
+            message: "Invalid password",
+          });
         }
 
         const isValid = yield* passwordHasher.verify(password, passwordHash);
         if (!isValid) {
-          return yield* Effect.fail(
-            new Errors.InvalidCredentialsError({
-              message: "Invalid password",
-            }),
-          );
+          return yield* new Errors.InvalidCredentialsError({
+            message: "Invalid password",
+          });
         }
       });
 
@@ -427,20 +423,16 @@ export const make = (
       Effect.gen(function* () {
         const pending = yield* pendingStore.get(pendingToken);
         if (!pending) {
-          return yield* Effect.fail(
-            new MultiFactorError({
-              message: "Invalid or expired multi-factor challenge token",
-            }),
-          );
+          return yield* new MultiFactorError({
+            message: "Invalid or expired multi-factor challenge token",
+          });
         }
 
         if (Date.now() > pending.expiresAt) {
           yield* pendingStore.delete(pendingToken);
-          return yield* Effect.fail(
-            new MultiFactorError({
-              message: "Two-factor challenge token has expired",
-            }),
-          );
+          return yield* new MultiFactorError({
+            message: "Two-factor challenge token has expired",
+          });
         }
 
         return pending;
@@ -454,11 +446,9 @@ export const make = (
       Effect.gen(function* () {
         const record = yield* store.get(userId);
         if (!record || !record.verified) {
-          return yield* Effect.fail(
-            new MultiFactorError({
-              message: "Two-factor authentication is not enabled for this user",
-            }),
-          );
+          return yield* new MultiFactorError({
+            message: "Two-factor authentication is not enabled for this user",
+          });
         }
         return record;
       });
@@ -526,21 +516,17 @@ export const make = (
       ) {
         const record = yield* store.get(userId);
         if (!record) {
-          return yield* Effect.fail(
-            new MultiFactorError({
-              message: "Two-factor authentication has not been set up for this user",
-            }),
-          );
+          return yield* new MultiFactorError({
+            message: "Two-factor authentication has not been set up for this user",
+          });
         }
 
         const plainSecret = cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
         const matchedCounter = yield* verifyTotp(code, plainSecret, config.totp);
         if (matchedCounter === null) {
-          return yield* Effect.fail(
-            new MultiFactorError({
-              message: "Invalid multi-factor code",
-            }),
-          );
+          return yield* new MultiFactorError({
+            message: "Invalid multi-factor code",
+          });
         }
 
         yield* store.upsert({ ...record, verified: true, lastUsedCounter: matchedCounter });
@@ -595,20 +581,16 @@ export const make = (
               cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
             const matchedCounter = yield* verifyTotp(code, plainSecret, config.totp);
             if (matchedCounter === null) {
-              return yield* Effect.fail(
-                new MultiFactorError({
-                  message: "Invalid multi-factor code",
-                }),
-              );
+              return yield* new MultiFactorError({
+                message: "Invalid multi-factor code",
+              });
             }
 
             // Reject replays: a code whose matched counter has already been used.
             if (record.lastUsedCounter !== undefined && matchedCounter <= record.lastUsedCounter) {
-              return yield* Effect.fail(
-                new MultiFactorError({
-                  message: "Multi-factor code has already been used",
-                }),
-              );
+              return yield* new MultiFactorError({
+                message: "Multi-factor code has already been used",
+              });
             }
 
             // Persist the counter before creating the session so concurrent
@@ -643,11 +625,9 @@ export const make = (
 
             const index = findBackupCodeIndex(record.backupCodes, hashBackupCode(code));
             if (index === -1) {
-              return yield* Effect.fail(
-                new MultiFactorError({
-                  message: "Invalid backup code",
-                }),
-              );
+              return yield* new MultiFactorError({
+                message: "Invalid backup code",
+              });
             }
 
             // Remove the used code (single use)
@@ -683,11 +663,9 @@ export const make = (
 
         const record = yield* store.get(userId);
         if (!record) {
-          return yield* Effect.fail(
-            new MultiFactorError({
-              message: "Two-factor authentication is not enabled for this user",
-            }),
-          );
+          return yield* new MultiFactorError({
+            message: "Two-factor authentication is not enabled for this user",
+          });
         }
 
         const backupCodes = yield* Effect.all(

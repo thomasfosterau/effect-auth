@@ -958,7 +958,7 @@ export const makeEmailOtpStore: Effect.Effect<
         );
         const attempts = rows[0]?.attempts;
         if (attempts == null) {
-          return yield* Effect.fail(new Auth.AuthError({ message: "OTP record not found" }));
+          return yield* new Auth.AuthError({ message: "OTP record not found" });
         }
         return attempts;
       }),
@@ -1206,9 +1206,9 @@ export const makeAccountLockoutStore: Effect.Effect<
         );
         const row = rows[0];
         if (row === undefined) {
-          return yield* Effect.fail(
-            new Auth.AuthError({ message: "accountLockout.registerAttempt returned no row" }),
-          );
+          return yield* new Auth.AuthError({
+            message: "accountLockout.registerAttempt returned no row",
+          });
         }
         return rowToLockout(row);
       }),

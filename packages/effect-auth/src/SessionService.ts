@@ -83,36 +83,30 @@ export const make = (
           const now = new Date();
           if (session.expiresAt.getTime() < now.getTime()) {
             yield* Effect.ignore(sessionStore.delete(tokenHash));
-            return yield* Effect.fail(
-              new Errors.SessionExpiredError({
-                message: "Session has expired",
-                sessionId: tokenHash,
-              }),
-            );
+            return yield* new Errors.SessionExpiredError({
+              message: "Session has expired",
+              sessionId: tokenHash,
+            });
           }
 
           // Check if session has been idle for too long
           const timeSinceLastActivity = now.getTime() - session.lastActivityAt.getTime();
           if (timeSinceLastActivity > config.sessionExpiresIn.idlePeriod) {
             yield* Effect.ignore(sessionStore.delete(tokenHash));
-            return yield* Effect.fail(
-              new Errors.SessionExpiredError({
-                message: "Session expired due to inactivity",
-                sessionId: tokenHash,
-              }),
-            );
+            return yield* new Errors.SessionExpiredError({
+              message: "Session expired due to inactivity",
+              sessionId: tokenHash,
+            });
           }
 
           // Check if session has exceeded its absolute maximum lifetime
           const sessionLifetime = now.getTime() - session.createdAt.getTime();
           if (sessionLifetime > config.sessionExpiresIn.activePeriod) {
             yield* Effect.ignore(sessionStore.delete(tokenHash));
-            return yield* Effect.fail(
-              new Errors.SessionExpiredError({
-                message: "Session exceeded maximum lifetime",
-                sessionId: tokenHash,
-              }),
-            );
+            return yield* new Errors.SessionExpiredError({
+              message: "Session exceeded maximum lifetime",
+              sessionId: tokenHash,
+            });
           }
 
           // Extend expiration (capped at absolute max lifetime).

@@ -125,11 +125,9 @@ const emailOtpStore = {
     Effect.gen(function* () {
       const record = otpRecords.get(recordKey(email, purpose));
       if (!record) {
-        return yield* Effect.fail(
-          new Errors.AuthError({
-            message: "OTP record not found",
-          }),
-        );
+        return yield* new Errors.AuthError({
+          message: "OTP record not found",
+        });
       }
       const updated = { ...record, attempts: record.attempts + 1 };
       otpRecords.set(recordKey(email, purpose), updated);

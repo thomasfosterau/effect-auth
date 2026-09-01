@@ -74,11 +74,9 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
         Effect.gen(function* () {
           const count = yield* breachCount(password);
           if (count >= threshold) {
-            return yield* Effect.fail(
-              new PwnedPasswordError({
-                message: "This password has appeared in a data breach; please choose another",
-              }),
-            );
+            return yield* new PwnedPasswordError({
+              message: "This password has appeared in a data breach; please choose another",
+            });
           }
         });
 

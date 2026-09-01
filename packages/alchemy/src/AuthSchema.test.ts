@@ -56,11 +56,18 @@ const platform = Layer.mergeAll(
 const STACK = "effect-auth-alchemy-test";
 const STAGE = "test";
 
-/** A stack with its own in-memory state, deployable more than once. */
-const makeEngine = () => {
-  const store: Record<string, never> = {};
+/**
+ * A stack with its own in-memory state, deployable more than once. Pass an
+ * existing `store` to drive the same state with a differently-built provider,
+ * the way a later `alchemy destroy` runs against state an earlier deploy left
+ * behind.
+ */
+const makeEngine = (
+  options: Parameters<typeof AuthSchemaProvider>[0],
+  store: Record<string, never> = {},
+) => {
   const state = Layer.succeed(State.State, State.InMemoryService(store));
-  const providers = AuthSchemaProvider();
+  const providers = AuthSchemaProvider(options);
 
   const withRuntime = <A>(effect: Effect.Effect<A, unknown, never>): Promise<A> =>
     Effect.runPromise(
@@ -83,6 +90,8 @@ const makeEngine = () => {
     );
 
   return {
+    /** The engine's persisted state, so another engine can pick it up. */
+    store,
     /** `alchemy deploy` for one program. */
     deploy: <A>(program: Effect.Effect<A, never, never>): Promise<unknown> =>
       withRuntime(
@@ -159,7 +168,7 @@ const insertUser = (database: D1Client.D1Database): Promise<void> =>
 describe("AuthSchema resource", () => {
   it("is a real Alchemy resource whose provider mounts on Alchemy's own tag", async () => {
     const provider = await Effect.runPromise(
-      AuthSchema.Provider.pipe(Effect.provide(AuthSchemaProvider())),
+      AuthSchema.Provider.pipe(Effect.provide(AuthSchemaProvider({ database: makeTestD1() }))),
     );
     expect(typeof provider.reconcile).toBe("function");
     expect(typeof provider.delete).toBe("function");
@@ -175,10 +184,8 @@ describe("AuthSchema resource", () => {
 
   it("deploys the schema, converges on a redeploy, and keeps data by default", async () => {
     const database = makeTestD1();
-    const engine = makeEngine();
-    const program = Effect.gen(function* () {
-      return yield* AuthSchema("auth-schema", { database });
-    });
+    const engine = makeEngine({ database });
+    const program = AuthSchema("auth-schema");
 
     const created = (await engine.deploy(program as never)) as {
       tables: readonly string[];
@@ -203,15 +210,47 @@ describe("AuthSchema resource", () => {
 
   it("drops every auth table on destroy when dropOnDelete is set", async () => {
     const database = makeTestD1();
-    const engine = makeEngine();
-    const program = Effect.gen(function* () {
-      return yield* AuthSchema("auth-schema", { database, dropOnDelete: true });
-    });
+    const engine = makeEngine({ database });
+    const program = AuthSchema("auth-schema", { dropOnDelete: true });
 
     await engine.deploy(program as never);
     expect(await tablesIn(database)).toEqual([...authTableNames].sort());
 
     await engine.destroy();
     expect(await tablesIn(database)).toEqual([]);
+  });
+
+  it("reconciles and drops the database each resource names", async () => {
+    const primary = makeTestD1();
+    const tenants = makeTestD1();
+    const engine = makeEngine({ databases: { primary, tenants } });
+    const program = Effect.gen(function* () {
+      yield* AuthSchema("primary-auth", { database: "primary" });
+      yield* AuthSchema("tenant-auth", { database: "tenants", dropOnDelete: true });
+    });
+
+    await engine.deploy(program as never);
+    expect(await tablesIn(primary)).toEqual([...authTableNames].sort());
+    expect(await tablesIn(tenants)).toEqual([...authTableNames].sort());
+
+    // Only the resource that opted in loses its tables.
+    await engine.destroy();
+    expect(await tablesIn(primary)).toEqual([...authTableNames].sort());
+    expect(await tablesIn(tenants)).toEqual([]);
+  });
+
+  it("fails the destroy rather than silently skipping an unregistered database", async () => {
+    const database = makeTestD1();
+    const engine = makeEngine({ databases: { primary: database } });
+    await engine.deploy(
+      AuthSchema("auth-schema", { database: "primary", dropOnDelete: true }) as never,
+    );
+
+    // The stack is torn down by a provider that no longer holds the binding:
+    // dropping is impossible, so the destroy must fail loudly and leave the
+    // tables (and the state row) alone.
+    const detached = makeEngine({ databases: {} }, engine.store);
+    await expect(detached.destroy()).rejects.toThrow(/UnknownDatabaseError/);
+    expect(await tablesIn(database)).toEqual([...authTableNames].sort());
   });
 });

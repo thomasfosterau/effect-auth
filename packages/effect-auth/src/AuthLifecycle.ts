@@ -134,7 +134,7 @@ export const make = (
               const existing = identifier === null ? null : yield* userStore.get(identifier.userId);
 
               if (!identifier || !existing || identifier.verified) {
-                return yield* Effect.fail(e);
+                return yield* e;
               }
 
               // Unverified duplicate: resend (also invalidates stale tokens,
@@ -182,11 +182,9 @@ export const make = (
               const user = identifier === null ? null : yield* userStore.get(identifier.userId);
 
               if (!user) {
-                return yield* Effect.fail(
-                  new Errors.InvalidCredentialsError({
-                    message: "Invalid email or password",
-                  }),
-                );
+                return yield* new Errors.InvalidCredentialsError({
+                  message: "Invalid email or password",
+                });
               }
 
               // FIX 5: use resendVerification (which invalidates prior tokens
@@ -230,11 +228,9 @@ export const make = (
         const tokenEmail = normalizeEmail(verificationRecord.email);
         const identifier = yield* identifiers.getByValue("email", tokenEmail);
         if (identifier === null || identifier.userId !== verificationRecord.userId) {
-          return yield* Effect.fail(
-            new Errors.EmailVerificationError({
-              message: "Verification token is no longer valid for this email address",
-            }),
-          );
+          return yield* new Errors.EmailVerificationError({
+            message: "Verification token is no longer valid for this email address",
+          });
         }
 
         // FIX 4: durable state change BEFORE burning the token.

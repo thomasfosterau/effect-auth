@@ -1118,43 +1118,43 @@ export type ScimPatchPayload = typeof ScimPatchPayload.Type;
 // -----------------------------------------------------------------------------
 
 /** 401 — missing/invalid credentials or session. */
-export class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()("Unauthorized", {
+export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthorized", {
   message: Schema.String,
   code: Schema.optional(Schema.String),
 }) {}
 
 /** 403 — authenticated but not allowed (e.g. email not verified, account locked, banned). */
-export class Forbidden extends Schema.TaggedErrorClass<Forbidden>()("Forbidden", {
+export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
   message: Schema.String,
   code: Schema.optional(Schema.String),
 }) {}
 
 /** 409 — conflict (e.g. user already exists). */
-export class Conflict extends Schema.TaggedErrorClass<Conflict>()("Conflict", {
+export class Conflict extends Schema.TaggedError<Conflict>()("Conflict", {
   message: Schema.String,
   code: Schema.optional(Schema.String),
 }) {}
 
 /** 400 — malformed/invalid request (e.g. password policy violation, invalid input). */
-export class BadRequest extends Schema.TaggedErrorClass<BadRequest>()("BadRequest", {
+export class BadRequest extends Schema.TaggedError<BadRequest>()("BadRequest", {
   message: Schema.String,
   code: Schema.optional(Schema.String),
 }) {}
 
 /** 404 — resource or optional feature not available (e.g. plugin not enabled). */
-export class NotFound extends Schema.TaggedErrorClass<NotFound>()("NotFound", {
+export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
   message: Schema.String,
   code: Schema.optional(Schema.String),
 }) {}
 
 /** 429 — rate limited; retry later. */
-export class TooManyRequests extends Schema.TaggedErrorClass<TooManyRequests>()("TooManyRequests", {
+export class TooManyRequests extends Schema.TaggedError<TooManyRequests>()("TooManyRequests", {
   message: Schema.String,
   code: Schema.optional(Schema.String),
 }) {}
 
 /** 500 — unexpected server error. */
-export class InternalServerError extends Schema.TaggedErrorClass<InternalServerError>()(
+export class InternalServerError extends Schema.TaggedError<InternalServerError>()(
   "InternalServerError",
   { message: Schema.String },
 ) {}
@@ -1165,7 +1165,7 @@ export class InternalServerError extends Schema.TaggedErrorClass<InternalServerE
  * for the dynamic client registration endpoint, and generic OAuth clients
  * (MCP clients included) read `error` to decide what to do next.
  */
-export class OAuthError extends Schema.TaggedErrorClass<OAuthError>()("OAuthError", {
+export class OAuthError extends Schema.TaggedError<OAuthError>()("OAuthError", {
   /** RFC 7591 §3.2.2 code, e.g. `invalid_redirect_uri`, `invalid_client_metadata`. */
   error: Schema.String,
   error_description: Schema.optional(Schema.String),
@@ -1176,8 +1176,8 @@ export class OAuthError extends Schema.TaggedErrorClass<OAuthError>()("OAuthErro
  *
  * SCIM specifies the failure body exactly — `schemas`, a **string** `status`,
  * an optional `scimType` detail code and a human-readable `detail` — and
- * conformance suites check it, so these are `Schema.ErrorClass` rather than the
- * repo's usual `Schema.TaggedErrorClass`: a `_tag` discriminator would be an
+ * conformance suites check it, so these are `Schema.Error` rather than the
+ * repo's usual `Schema.TaggedError`: a `_tag` discriminator would be an
  * extra member in a body that is meant to be verbatim.
  *
  * The `status` literal takes the discriminator's place. Effect encodes an
@@ -1185,7 +1185,7 @@ export class OAuthError extends Schema.TaggedErrorClass<OAuthError>()("OAuthErro
  * arm's `status` literal can match a given value, the right status code is
  * always chosen.
  */
-export class ScimBadRequest extends Schema.ErrorClass<ScimBadRequest>("ScimBadRequest")({
+export class ScimBadRequest extends Schema.Error<ScimBadRequest>("ScimBadRequest")({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("400"),
   /** RFC 7644 §3.12 code: `invalidFilter`, `invalidPath`, `invalidValue`, … */
@@ -1194,7 +1194,7 @@ export class ScimBadRequest extends Schema.ErrorClass<ScimBadRequest>("ScimBadRe
 }) {}
 
 /** 401 — missing or unknown provisioning token. */
-export class ScimUnauthorized extends Schema.ErrorClass<ScimUnauthorized>("ScimUnauthorized")({
+export class ScimUnauthorized extends Schema.Error<ScimUnauthorized>("ScimUnauthorized")({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("401"),
   scimType: Schema.optional(Schema.String),
@@ -1202,7 +1202,7 @@ export class ScimUnauthorized extends Schema.ErrorClass<ScimUnauthorized>("ScimU
 }) {}
 
 /** 404 — no such resource, or one outside the connection's organization. */
-export class ScimNotFound extends Schema.ErrorClass<ScimNotFound>("ScimNotFound")({
+export class ScimNotFound extends Schema.Error<ScimNotFound>("ScimNotFound")({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("404"),
   scimType: Schema.optional(Schema.String),
@@ -1210,7 +1210,7 @@ export class ScimNotFound extends Schema.ErrorClass<ScimNotFound>("ScimNotFound"
 }) {}
 
 /** 409 — the `uniqueness` conflict an IdP reconciles against. */
-export class ScimConflict extends Schema.ErrorClass<ScimConflict>("ScimConflict")({
+export class ScimConflict extends Schema.Error<ScimConflict>("ScimConflict")({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("409"),
   scimType: Schema.optional(Schema.String),
@@ -1218,7 +1218,7 @@ export class ScimConflict extends Schema.ErrorClass<ScimConflict>("ScimConflict"
 }) {}
 
 /** 500 — unexpected server error, in SCIM's shape. */
-export class ScimInternalError extends Schema.ErrorClass<ScimInternalError>("ScimInternalError")({
+export class ScimInternalError extends Schema.Error<ScimInternalError>("ScimInternalError")({
   schemas: Schema.Array(Schema.String),
   status: Schema.Literal("500"),
   scimType: Schema.optional(Schema.String),

@@ -144,11 +144,9 @@ export const multiAlgorithmVerifier = (
         const hasher = hasherMap.get(algorithm);
 
         if (!hasher) {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: `Unsupported algorithm: ${algorithm}. Available: ${Array.from(hasherMap.keys()).join(", ")}`,
-            }),
-          );
+          return yield* new Errors.HashingError({
+            message: `Unsupported algorithm: ${algorithm}. Available: ${Array.from(hasherMap.keys()).join(", ")}`,
+          });
         }
 
         return yield* hasher.verify(password, hash);
@@ -209,130 +207,112 @@ export const pbkdf2Hasher = (): typeof PasswordHasher.Service => {
       return false;
     },
 
-    hash: (password: string) =>
-      Effect.gen(function* () {
-        if (!password || typeof password !== "string") {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Password must be a non-empty string",
-            }),
-          );
-        }
-
-        if (password.length < 1) {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Password cannot be empty",
-            }),
-          );
-        }
-
-        if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Password exceeds maximum length",
-            }),
-          );
-        }
-
-        const salt = crypto.randomBytes(SALT_LENGTH);
-
-        const derivedKey = yield* Effect.tryPromise({
-          try: () => pbkdf2(password, salt, ITERATIONS, KEY_LENGTH, "sha256"),
-          catch: (error) =>
-            new Errors.HashingError({
-              message: "Failed to hash password",
-              cause: error,
-            }),
+    hash: Effect.fn("effect-auth.password.hash", {
+      attributes: { algorithm: ALGORITHM },
+    })(function* (password: string) {
+      if (!password || typeof password !== "string") {
+        return yield* new Errors.HashingError({
+          message: "Password must be a non-empty string",
         });
+      }
 
-        // Format: algorithm$iterations$salt$hash
-        const hash = `${ALGORITHM}$${ITERATIONS}$${salt.toString("hex")}$${derivedKey.toString("hex")}`;
-
-        return {
-          hash,
-          algorithm: ALGORITHM,
-        };
-      }).pipe(
-        Effect.withSpan("effect-auth.password.hash", { attributes: { algorithm: ALGORITHM } }),
-      ),
-
-    verify: (password: string, hash: string) =>
-      Effect.gen(function* () {
-        if (!password || typeof password !== "string") {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Password must be a non-empty string",
-            }),
-          );
-        }
-
-        if (!hash || typeof hash !== "string") {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Hash must be a non-empty string",
-            }),
-          );
-        }
-
-        // Anti-DoS: bail out before the expensive KDF for absurdly long inputs.
-        if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
-          return false;
-        }
-
-        const parts = hash.split("$");
-
-        if (parts.length !== 4) {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Invalid hash format",
-            }),
-          );
-        }
-
-        const [algorithm, iterationsStr, saltHex, hashHex] = parts;
-
-        if (algorithm !== ALGORITHM) {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: `Unsupported algorithm: ${algorithm}`,
-            }),
-          );
-        }
-
-        const iterCount = parseInt(iterationsStr!, 10);
-        if (!Number.isFinite(iterCount) || iterCount <= 0) {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Invalid hash parameters",
-            }),
-          );
-        }
-
-        const salt = Buffer.from(saltHex!, "hex");
-        const expectedHash = Buffer.from(hashHex!, "hex");
-
-        // Derive using the stored key length so hashes produced with an older
-        // KEY_LENGTH value still verify correctly (needsRehash detects and
-        // upgrades them on the next successful login).
-        const derivedKey = yield* Effect.tryPromise({
-          try: () => pbkdf2(password, salt, iterCount, expectedHash.length, "sha256"),
-          catch: (error) =>
-            new Errors.HashingError({
-              message: "Failed to verify password",
-              cause: error,
-            }),
+      if (password.length < 1) {
+        return yield* new Errors.HashingError({
+          message: "Password cannot be empty",
         });
+      }
 
-        if (derivedKey.length !== expectedHash.length) {
-          return false;
-        }
+      if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+        return yield* new Errors.HashingError({
+          message: "Password exceeds maximum length",
+        });
+      }
 
-        // Use timing-safe comparison
-        return crypto.timingSafeEqual(derivedKey, expectedHash);
-      }).pipe(
-        Effect.withSpan("effect-auth.password.verify", { attributes: { algorithm: ALGORITHM } }),
-      ),
+      const salt = crypto.randomBytes(SALT_LENGTH);
+
+      const derivedKey = yield* Effect.tryPromise({
+        try: () => pbkdf2(password, salt, ITERATIONS, KEY_LENGTH, "sha256"),
+        catch: (error) =>
+          new Errors.HashingError({
+            message: "Failed to hash password",
+            cause: error,
+          }),
+      });
+
+      // Format: algorithm$iterations$salt$hash
+      const hash = `${ALGORITHM}$${ITERATIONS}$${salt.toString("hex")}$${derivedKey.toString("hex")}`;
+
+      return {
+        hash,
+        algorithm: ALGORITHM,
+      };
+    }),
+
+    verify: Effect.fn("effect-auth.password.verify", {
+      attributes: { algorithm: ALGORITHM },
+    })(function* (password: string, hash: string) {
+      if (!password || typeof password !== "string") {
+        return yield* new Errors.HashingError({
+          message: "Password must be a non-empty string",
+        });
+      }
+
+      if (!hash || typeof hash !== "string") {
+        return yield* new Errors.HashingError({
+          message: "Hash must be a non-empty string",
+        });
+      }
+
+      // Anti-DoS: bail out before the expensive KDF for absurdly long inputs.
+      if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+        return false;
+      }
+
+      const parts = hash.split("$");
+
+      if (parts.length !== 4) {
+        return yield* new Errors.HashingError({
+          message: "Invalid hash format",
+        });
+      }
+
+      const [algorithm, iterationsStr, saltHex, hashHex] = parts;
+
+      if (algorithm !== ALGORITHM) {
+        return yield* new Errors.HashingError({
+          message: `Unsupported algorithm: ${algorithm}`,
+        });
+      }
+
+      const iterCount = parseInt(iterationsStr!, 10);
+      if (!Number.isFinite(iterCount) || iterCount <= 0) {
+        return yield* new Errors.HashingError({
+          message: "Invalid hash parameters",
+        });
+      }
+
+      const salt = Buffer.from(saltHex!, "hex");
+      const expectedHash = Buffer.from(hashHex!, "hex");
+
+      // Derive using the stored key length so hashes produced with an older
+      // KEY_LENGTH value still verify correctly (needsRehash detects and
+      // upgrades them on the next successful login).
+      const derivedKey = yield* Effect.tryPromise({
+        try: () => pbkdf2(password, salt, iterCount, expectedHash.length, "sha256"),
+        catch: (error) =>
+          new Errors.HashingError({
+            message: "Failed to verify password",
+            cause: error,
+          }),
+      });
+
+      if (derivedKey.length !== expectedHash.length) {
+        return false;
+      }
+
+      // Use timing-safe comparison
+      return crypto.timingSafeEqual(derivedKey, expectedHash);
+    }),
   };
 };
 
@@ -402,102 +382,86 @@ export const scryptHasher = (options?: {
       return false;
     },
 
-    hash: (password: string) =>
-      Effect.gen(function* () {
-        if (!password || typeof password !== "string") {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Password must be a non-empty string",
-            }),
-          );
-        }
+    hash: Effect.fn("effect-auth.password.hash", {
+      attributes: { algorithm: ALGORITHM },
+    })(function* (password: string) {
+      if (!password || typeof password !== "string") {
+        return yield* new Errors.HashingError({
+          message: "Password must be a non-empty string",
+        });
+      }
 
-        if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Password exceeds maximum length",
-            }),
-          );
-        }
+      if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+        return yield* new Errors.HashingError({
+          message: "Password exceeds maximum length",
+        });
+      }
 
-        const salt = crypto.randomBytes(SALT_LENGTH);
-        const derivedKey = yield* scrypt(password, salt, COST, BLOCK_SIZE, PARALLELIZATION);
+      const salt = crypto.randomBytes(SALT_LENGTH);
+      const derivedKey = yield* scrypt(password, salt, COST, BLOCK_SIZE, PARALLELIZATION);
 
-        const hash = `${ALGORITHM}$${COST}$${BLOCK_SIZE}$${PARALLELIZATION}$${salt.toString("hex")}$${derivedKey.toString("hex")}`;
+      const hash = `${ALGORITHM}$${COST}$${BLOCK_SIZE}$${PARALLELIZATION}$${salt.toString("hex")}$${derivedKey.toString("hex")}`;
 
-        return {
-          hash,
-          algorithm: ALGORITHM,
-        };
-      }).pipe(
-        Effect.withSpan("effect-auth.password.hash", { attributes: { algorithm: ALGORITHM } }),
-      ),
+      return {
+        hash,
+        algorithm: ALGORITHM,
+      };
+    }),
 
-    verify: (password: string, hash: string) =>
-      Effect.gen(function* () {
-        if (!password || typeof password !== "string") {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Password must be a non-empty string",
-            }),
-          );
-        }
+    verify: Effect.fn("effect-auth.password.verify", {
+      attributes: { algorithm: ALGORITHM },
+    })(function* (password: string, hash: string) {
+      if (!password || typeof password !== "string") {
+        return yield* new Errors.HashingError({
+          message: "Password must be a non-empty string",
+        });
+      }
 
-        if (!hash || typeof hash !== "string") {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Hash must be a non-empty string",
-            }),
-          );
-        }
+      if (!hash || typeof hash !== "string") {
+        return yield* new Errors.HashingError({
+          message: "Hash must be a non-empty string",
+        });
+      }
 
-        // Anti-DoS: bail out before the expensive KDF for absurdly long inputs.
-        if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
-          return false;
-        }
+      // Anti-DoS: bail out before the expensive KDF for absurdly long inputs.
+      if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+        return false;
+      }
 
-        const parts = hash.split("$");
-        if (parts.length !== 6) {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Invalid hash format",
-            }),
-          );
-        }
+      const parts = hash.split("$");
+      if (parts.length !== 6) {
+        return yield* new Errors.HashingError({
+          message: "Invalid hash format",
+        });
+      }
 
-        const [algorithm, costStr, blockSizeStr, parallelizationStr, saltHex, hashHex] = parts;
+      const [algorithm, costStr, blockSizeStr, parallelizationStr, saltHex, hashHex] = parts;
 
-        if (algorithm !== ALGORITHM) {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: `Unsupported algorithm: ${algorithm}`,
-            }),
-          );
-        }
+      if (algorithm !== ALGORITHM) {
+        return yield* new Errors.HashingError({
+          message: `Unsupported algorithm: ${algorithm}`,
+        });
+      }
 
-        const N = parseInt(costStr!, 10);
-        const r = parseInt(blockSizeStr!, 10);
-        const p = parseInt(parallelizationStr!, 10);
-        if (!Number.isFinite(N) || !Number.isFinite(r) || !Number.isFinite(p)) {
-          return yield* Effect.fail(
-            new Errors.HashingError({
-              message: "Invalid hash parameters",
-            }),
-          );
-        }
+      const N = parseInt(costStr!, 10);
+      const r = parseInt(blockSizeStr!, 10);
+      const p = parseInt(parallelizationStr!, 10);
+      if (!Number.isFinite(N) || !Number.isFinite(r) || !Number.isFinite(p)) {
+        return yield* new Errors.HashingError({
+          message: "Invalid hash parameters",
+        });
+      }
 
-        const salt = Buffer.from(saltHex!, "hex");
-        const expectedHash = Buffer.from(hashHex!, "hex");
-        const derivedKey = yield* scrypt(password, salt, N, r, p);
+      const salt = Buffer.from(saltHex!, "hex");
+      const expectedHash = Buffer.from(hashHex!, "hex");
+      const derivedKey = yield* scrypt(password, salt, N, r, p);
 
-        if (derivedKey.length !== expectedHash.length) {
-          return false;
-        }
+      if (derivedKey.length !== expectedHash.length) {
+        return false;
+      }
 
-        // Use timing-safe comparison
-        return crypto.timingSafeEqual(derivedKey, expectedHash);
-      }).pipe(
-        Effect.withSpan("effect-auth.password.verify", { attributes: { algorithm: ALGORITHM } }),
-      ),
+      // Use timing-safe comparison
+      return crypto.timingSafeEqual(derivedKey, expectedHash);
+    }),
   };
 };

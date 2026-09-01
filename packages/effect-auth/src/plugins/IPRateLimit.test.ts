@@ -48,10 +48,11 @@ const makeHooksLayer = (cfg?: Parameters<typeof IPRateLimitPlugin>[0]) => {
   const storeImpl = makeMemStore();
   const storeLayer = Layer.succeed(RateLimitStore, storeImpl);
   const limiterLayer = RateLimiter.layer().pipe(Layer.provide(storeLayer));
-  return IPRateLimitPlugin(cfg)
-    .pipe(Layer.provide(Hooks.Default))
-    .pipe(Layer.provide(limiterLayer))
-    .pipe(Layer.provide(storeLayer));
+  return IPRateLimitPlugin(cfg).pipe(
+    Layer.provide(Hooks.Default),
+    Layer.provide(limiterLayer),
+    Layer.provide(storeLayer),
+  );
 };
 
 const signIn: SignInInput = { email: "u@example.com", password: "pw" };

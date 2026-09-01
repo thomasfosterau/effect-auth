@@ -205,12 +205,10 @@ export const claimIdentifier = (
   Effect.gen(function* () {
     const existing = yield* store.getByValue(identifier.type, identifier.value);
     if (existing !== null) {
-      return yield* Effect.fail(
-        new IdentifierTakenError({
-          message: `This ${identifier.type} is already in use`,
-          identifierType: identifier.type,
-        }),
-      );
+      return yield* new IdentifierTakenError({
+        message: `This ${identifier.type} is already in use`,
+        identifierType: identifier.type,
+      });
     }
     return yield* store.create(identifier).pipe(
       Effect.catchTag(
@@ -221,14 +219,12 @@ export const claimIdentifier = (
             // so the caller sees a conflict, not an infrastructure error.
             const raced = yield* store.getByValue(identifier.type, identifier.value);
             if (raced !== null) {
-              return yield* Effect.fail(
-                new IdentifierTakenError({
-                  message: `This ${identifier.type} is already in use`,
-                  identifierType: identifier.type,
-                }),
-              );
+              return yield* new IdentifierTakenError({
+                message: `This ${identifier.type} is already in use`,
+                identifierType: identifier.type,
+              });
             }
-            return yield* Effect.fail(error);
+            return yield* error;
           }),
       ),
     );

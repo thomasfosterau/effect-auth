@@ -204,21 +204,17 @@ export const make = (
         const verification = yield* store.get(tokenHash);
 
         if (!verification) {
-          return yield* Effect.fail(
-            new EmailVerificationError({
-              message: "Invalid or expired verification token",
-            }),
-          );
+          return yield* new EmailVerificationError({
+            message: "Invalid or expired verification token",
+          });
         }
 
         // Check expiration
         if (Date.now() > verification.expiresAt) {
           yield* store.delete(tokenHash);
-          return yield* Effect.fail(
-            new EmailVerificationError({
-              message: "Verification token has expired",
-            }),
-          );
+          return yield* new EmailVerificationError({
+            message: "Verification token has expired",
+          });
         }
 
         // Delete token after successful verification (one-time use)
@@ -238,19 +234,15 @@ export const make = (
         const tokenHash = hashToken(token);
         const verification = yield* store.get(tokenHash);
         if (!verification) {
-          return yield* Effect.fail(
-            new EmailVerificationError({
-              message: "Invalid or expired verification token",
-            }),
-          );
+          return yield* new EmailVerificationError({
+            message: "Invalid or expired verification token",
+          });
         }
         if (Date.now() > verification.expiresAt) {
           yield* store.delete(tokenHash);
-          return yield* Effect.fail(
-            new EmailVerificationError({
-              message: "Verification token has expired",
-            }),
-          );
+          return yield* new EmailVerificationError({
+            message: "Verification token has expired",
+          });
         }
         return verification;
       }),

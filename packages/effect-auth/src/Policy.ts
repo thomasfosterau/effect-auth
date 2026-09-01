@@ -71,10 +71,10 @@ export const request = (input: {
  * entity of a type.
  */
 export const Scope = Schema.Union([
-  Schema.Struct({ _tag: Schema.Literal("any") }),
-  Schema.Struct({ _tag: Schema.Literal("eq"), ref: Entity.EntityRef }),
-  Schema.Struct({ _tag: Schema.Literal("in"), ref: Entity.EntityRef }),
-  Schema.Struct({ _tag: Schema.Literal("is"), entityType: Schema.String }),
+  Schema.TaggedStruct("any", {}),
+  Schema.TaggedStruct("eq", { ref: Entity.EntityRef }),
+  Schema.TaggedStruct("in", { ref: Entity.EntityRef }),
+  Schema.TaggedStruct("is", { entityType: Schema.String }),
 ]);
 export type Scope = typeof Scope.Type;
 
@@ -109,8 +109,7 @@ export type PolicyEffect = typeof PolicyEffect.Type;
  * The declarative subset: pure data, Schema-validated. This same shape is
  * the body of the stored policy document format (`PolicyStore`).
  */
-export const DeclarativePolicy = Schema.Struct({
-  _tag: Schema.Literal("DeclarativePolicy"),
+export const DeclarativePolicy = Schema.TaggedStruct("DeclarativePolicy", {
   id: Schema.String,
   effect: PolicyEffect,
   principal: Scope,

@@ -175,64 +175,62 @@ export const argon2Hasher = (options?: Argon2Options): PasswordHasherService => 
   return {
     algorithm: ARGON2ID,
 
-    hash: (password: string) =>
-      Effect.gen(function* () {
-        yield* requireHashablePassword(password);
+    hash: Effect.fn("effect-auth.password.hash", {
+      attributes: { algorithm: ARGON2ID },
+    })(function* (password: string) {
+      yield* requireHashablePassword(password);
 
-        const phc = yield* Effect.tryPromise({
-          try: () =>
-            argon2id({
-              password,
-              salt: randomSalt(),
-              iterations: timeCost,
-              parallelism,
-              memorySize: memoryCost,
-              hashLength: HASH_LENGTH,
-              outputType: "encoded" as const,
-            }),
-          catch: (cause) =>
-            new HashingError({ message: "Failed to hash password with Argon2id", cause }),
-        });
+      const phc = yield* Effect.tryPromise({
+        try: () =>
+          argon2id({
+            password,
+            salt: randomSalt(),
+            iterations: timeCost,
+            parallelism,
+            memorySize: memoryCost,
+            hashLength: HASH_LENGTH,
+            outputType: "encoded" as const,
+          }),
+        catch: (cause) =>
+          new HashingError({ message: "Failed to hash password with Argon2id", cause }),
+      });
 
-        return { hash: phc, algorithm: ARGON2ID } satisfies HashedPassword;
-      }).pipe(
-        Effect.withSpan("effect-auth.password.hash", { attributes: { algorithm: ARGON2ID } }),
-      ),
+      return { hash: phc, algorithm: ARGON2ID } satisfies HashedPassword;
+    }),
 
-    verify: (password: string, hash: string) =>
-      Effect.gen(function* () {
-        yield* requireNonEmptyPassword(password);
-        yield* requireNonEmptyHash(hash);
+    verify: Effect.fn("effect-auth.password.verify", {
+      attributes: { algorithm: ARGON2ID },
+    })(function* (password: string, hash: string) {
+      yield* requireNonEmptyPassword(password);
+      yield* requireNonEmptyHash(hash);
 
-        // Anti-DoS: bail out before the expensive KDF for absurdly long inputs.
-        if (!isWithinMaxLength(password)) return false;
+      // Anti-DoS: bail out before the expensive KDF for absurdly long inputs.
+      if (!isWithinMaxLength(password)) return false;
 
-        // Cost parameters come from the stored hash, never from `options`, so
-        // hashes written under a different configuration still verify.
-        const parsed = yield* parseHash(hash);
+      // Cost parameters come from the stored hash, never from `options`, so
+      // hashes written under a different configuration still verify.
+      const parsed = yield* parseHash(hash);
 
-        const computed = yield* Effect.tryPromise({
-          try: () =>
-            variants[parsed.variant]({
-              password,
-              salt: parsed.salt,
-              iterations: parsed.timeCost,
-              parallelism: parsed.parallelism,
-              memorySize: parsed.memoryCost,
-              hashLength: parsed.digest.length,
-              outputType: "binary" as const,
-            }),
-          catch: (cause) =>
-            new HashingError({
-              message: "Failed to verify password against Argon2 hash",
-              cause,
-            }),
-        });
+      const computed = yield* Effect.tryPromise({
+        try: () =>
+          variants[parsed.variant]({
+            password,
+            salt: parsed.salt,
+            iterations: parsed.timeCost,
+            parallelism: parsed.parallelism,
+            memorySize: parsed.memoryCost,
+            hashLength: parsed.digest.length,
+            outputType: "binary" as const,
+          }),
+        catch: (cause) =>
+          new HashingError({
+            message: "Failed to verify password against Argon2 hash",
+            cause,
+          }),
+      });
 
-        return timingSafeEqual(computed, parsed.digest);
-      }).pipe(
-        Effect.withSpan("effect-auth.password.verify", { attributes: { algorithm: ARGON2ID } }),
-      ),
+      return timingSafeEqual(computed, parsed.digest);
+    }),
   };
 };
 

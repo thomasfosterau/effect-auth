@@ -169,9 +169,12 @@ const guard = <A, E>(
       if (allowed) return Option.some(value);
       if (behavior === "redact") return Option.none<A>();
       return yield* Effect.fail(
-        new SchemaIssue.Forbidden(Option.some(value), {
-          message: `Authorization denied: ${Entity.formatRef(request.principal)} may not ${Entity.formatRef(request.action)} on ${Entity.formatRef(request.resource)}`,
-        }),
+        new SchemaIssue.Forbidden(
+          {
+            message: `Authorization denied: ${Entity.formatRef(request.principal)} may not ${Entity.formatRef(request.action)} on ${Entity.formatRef(request.resource)}`,
+          },
+          value,
+        ),
       );
     }),
   );

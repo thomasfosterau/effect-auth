@@ -256,32 +256,26 @@ export const make = (
         // Check expiration
         if (Date.now() > record.expiresAt) {
           yield* store.delete(email, purpose);
-          return yield* Effect.fail(
-            new EmailOtpError({
-              message: "OTP has expired",
-            }),
-          );
+          return yield* new EmailOtpError({
+            message: "OTP has expired",
+          });
         }
 
         // Defensive: a record that already exhausted its attempts is unusable.
         if (record.attempts >= maxAttempts) {
           yield* store.delete(email, purpose);
-          return yield* Effect.fail(
-            new EmailOtpError({
-              message: "Too many attempts",
-            }),
-          );
+          return yield* new EmailOtpError({
+            message: "Too many attempts",
+          });
         }
 
         if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
           const attempts = yield* store.incrementAttempts(email, purpose);
           if (attempts >= maxAttempts) {
             yield* store.delete(email, purpose);
-            return yield* Effect.fail(
-              new EmailOtpError({
-                message: "Too many attempts",
-              }),
-            );
+            return yield* new EmailOtpError({
+              message: "Too many attempts",
+            });
           }
           return yield* invalidOtp();
         }
@@ -327,12 +321,10 @@ export const make = (
           if (existing !== null) {
             const elapsed = Date.now() - existing.createdAt;
             if (elapsed < config.resendCooldown) {
-              return yield* Effect.fail(
-                new Errors.ResendTooSoonError({
-                  message: "Please wait before requesting another OTP",
-                  retryAfter: config.resendCooldown - elapsed,
-                }),
-              );
+              return yield* new Errors.ResendTooSoonError({
+                message: "Please wait before requesting another OTP",
+                retryAfter: config.resendCooldown - elapsed,
+              });
             }
           }
         }
@@ -372,15 +364,13 @@ export const make = (
         const identifier = yield* identifiers.getByValue("email", email);
         let user = identifier === null ? null : yield* users.get(identifier.userId);
         if (identifier !== null && user === null) {
-          return yield* Effect.fail(new EmailOtpError({ message: "Account is unavailable" }));
+          return yield* new EmailOtpError({ message: "Account is unavailable" });
         }
         if (!user) {
           if (disableSignUp) {
-            return yield* Effect.fail(
-              new EmailOtpError({
-                message: "Sign-up is disabled",
-              }),
-            );
+            return yield* new EmailOtpError({
+              message: "Sign-up is disabled",
+            });
           }
 
           // A verified OTP proves ownership of the email.

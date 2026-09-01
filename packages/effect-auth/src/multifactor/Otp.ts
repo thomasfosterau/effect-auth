@@ -66,11 +66,9 @@ export const generateSecret = (
 ): Effect.Effect<Buffer, Errors.HashingError> =>
   Effect.gen(function* () {
     if (!Number.isInteger(length) || length < 16) {
-      return yield* Effect.fail(
-        new Errors.HashingError({
-          message: "Invalid secret length: must be a positive integer of at least 16 bytes",
-        }),
-      );
+      return yield* new Errors.HashingError({
+        message: "Invalid secret length: must be a positive integer of at least 16 bytes",
+      });
     }
     const bytes = yield* crypto
       .randomBytes(length)
@@ -164,21 +162,17 @@ export const generateHotp = (
   Effect.gen(function* () {
     // Validate counter
     if (!Number.isInteger(counter) || counter < 0) {
-      return yield* Effect.fail(
-        new Errors.HashingError({
-          message: "Counter must be a non-negative integer",
-        }),
-      );
+      return yield* new Errors.HashingError({
+        message: "Counter must be a non-negative integer",
+      });
     }
 
     // Validate digits
     const digits = config?.digits ?? 6;
     if (!Number.isInteger(digits) || digits < 6 || digits > 8) {
-      return yield* Effect.fail(
-        new Errors.HashingError({
-          message: "Invalid digits parameter for HOTP. It must be an integer between 6 and 8.",
-        }),
-      );
+      return yield* new Errors.HashingError({
+        message: "Invalid digits parameter for HOTP. It must be an integer between 6 and 8.",
+      });
     }
 
     const algorithm = config?.algorithm ?? "sha1";
@@ -187,11 +181,9 @@ export const generateHotp = (
     if (typeof secret === "string") {
       const trimmed = secret.trim();
       if (trimmed.length === 0) {
-        return yield* Effect.fail(
-          new Errors.HashingError({
-            message: "Secret must be a non-empty string",
-          }),
-        );
+        return yield* new Errors.HashingError({
+          message: "Secret must be a non-empty string",
+        });
       }
     }
 
@@ -200,11 +192,9 @@ export const generateHotp = (
 
     // Validate buffer is not empty
     if (secretBuffer.length === 0) {
-      return yield* Effect.fail(
-        new Errors.HashingError({
-          message: "Secret buffer cannot be empty",
-        }),
-      );
+      return yield* new Errors.HashingError({
+        message: "Secret buffer cannot be empty",
+      });
     }
 
     // Create counter buffer (8 bytes, big-endian)

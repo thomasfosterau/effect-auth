@@ -794,12 +794,10 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     };
     const brokenClientLayer = Layer.effect(
       SqlClient.SqlClient,
-      Effect.gen(function* () {
-        return yield* SqlClient.make({
-          acquirer: Effect.succeed(brokenConnection),
-          compiler: Statement.makeCompilerSqlite(),
-          spanAttributes: [],
-        });
+      SqlClient.make({
+        acquirer: Effect.succeed(brokenConnection),
+        compiler: Statement.makeCompilerSqlite(),
+        spanAttributes: [],
       }),
     ).pipe(Layer.provide(Reactivity.layer));
 

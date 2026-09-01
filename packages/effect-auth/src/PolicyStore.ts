@@ -59,8 +59,8 @@ import * as Policy from "./Policy.ts";
  */
 export const TemplateScope = Schema.Union([
   Policy.Scope,
-  Schema.Struct({ _tag: Schema.Literal("eqSlot") }),
-  Schema.Struct({ _tag: Schema.Literal("inSlot") }),
+  Schema.TaggedStruct("eqSlot", {}),
+  Schema.TaggedStruct("inSlot", {}),
 ]);
 export type TemplateScope = typeof TemplateScope.Type;
 
@@ -78,8 +78,7 @@ export const isSlot = (scope: TemplateScope): boolean =>
  * that `principal` and `resource` may be slots; `action` may not be (Cedar
  * has no action slot).
  */
-export const PolicyTemplate = Schema.Struct({
-  _tag: Schema.Literal("PolicyTemplate"),
+export const PolicyTemplate = Schema.TaggedStruct("PolicyTemplate", {
   id: Schema.String,
   effect: Policy.PolicyEffect,
   principal: TemplateScope,
