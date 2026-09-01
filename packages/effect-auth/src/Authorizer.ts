@@ -234,13 +234,11 @@ export const make = <E = unknown>(
       );
       const issues = AuthorizationModel.validatePolicies(config.model, declarative);
       if (issues.length > 0) {
-        return yield* Effect.fail(
-          new PolicyValidationError({
-            message: `Policy validation failed: ${issues
-              .map((issue) => `[${issue.policyId}] ${issue.message}`)
-              .join("; ")}`,
-          }),
-        );
+        return yield* new PolicyValidationError({
+          message: `Policy validation failed: ${issues
+            .map((issue) => `[${issue.policyId}] ${issue.message}`)
+            .join("; ")}`,
+        });
       }
     }
 

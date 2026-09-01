@@ -91,13 +91,11 @@ export const requirePermission = (
     const hasPermission = yield* policy.checkPermission(userId, resource, action);
 
     if (!hasPermission) {
-      return yield* Effect.fail(
-        new Errors.PermissionDeniedError({
-          message: `Permission denied: ${action} on ${resource}`,
-          resource,
-          action,
-        }),
-      );
+      return yield* new Errors.PermissionDeniedError({
+        message: `Permission denied: ${action} on ${resource}`,
+        resource,
+        action,
+      });
     }
   });
 
@@ -245,14 +243,12 @@ export const requireAnyPermission = (
 
     const first = permissions[0];
     const summary = permissions.map(formatPermission).join(", ");
-    return yield* Effect.fail(
-      new Errors.PermissionDeniedError({
-        message:
-          permissions.length === 0
-            ? "Permission denied: no permissions provided"
-            : `Permission denied: requires any of [${summary}]`,
-        resource: first?.resource ?? "*",
-        action: first?.action ?? "*",
-      }),
-    );
+    return yield* new Errors.PermissionDeniedError({
+      message:
+        permissions.length === 0
+          ? "Permission denied: no permissions provided"
+          : `Permission denied: requires any of [${summary}]`,
+      resource: first?.resource ?? "*",
+      action: first?.action ?? "*",
+    });
   });

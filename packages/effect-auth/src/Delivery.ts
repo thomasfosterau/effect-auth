@@ -173,9 +173,7 @@ export const emailCallbacks = (
     Effect.gen(function* () {
       const email = anyEmailValue(yield* identifiers.listByUser(user.id));
       if (email === null) {
-        return yield* Effect.fail(
-          new Errors.AuthError({ message: "User has no email for second-factor OTP" }),
-        );
+        return yield* new Errors.AuthError({ message: "User has no email for second-factor OTP" });
       }
       yield* sender.send({ to: email, purpose: "second-factor-otp", params: { otp } });
     }),
@@ -202,9 +200,9 @@ export const smsCallbacks = (
     Effect.gen(function* () {
       const phoneNumber = yield* getPhoneNumber(identifiers, user.id);
       if (phoneNumber === null) {
-        return yield* Effect.fail(
-          new Errors.AuthError({ message: "User has no phone number for second-factor OTP" }),
-        );
+        return yield* new Errors.AuthError({
+          message: "User has no phone number for second-factor OTP",
+        });
       }
       yield* sender.send({ to: phoneNumber, purpose: "second-factor-otp", params: { otp } });
     }),

@@ -211,12 +211,12 @@ export const make = (
 
         if (Date.now() > record.expiresAt) {
           yield* store.delete(pendingToken);
-          return yield* Effect.fail(new OtpSecondFactorError({ message: "OTP has expired" }));
+          return yield* new OtpSecondFactorError({ message: "OTP has expired" });
         }
 
         if (record.attempts >= maxAttempts) {
           yield* store.delete(pendingToken);
-          return yield* Effect.fail(new OtpSecondFactorError({ message: "Too many attempts" }));
+          return yield* new OtpSecondFactorError({ message: "Too many attempts" });
         }
 
         if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
@@ -224,7 +224,7 @@ export const make = (
           yield* store.update(updated);
           if (updated.attempts >= maxAttempts) {
             yield* store.delete(pendingToken);
-            return yield* Effect.fail(new OtpSecondFactorError({ message: "Too many attempts" }));
+            return yield* new OtpSecondFactorError({ message: "Too many attempts" });
           }
           return yield* invalidOtp();
         }

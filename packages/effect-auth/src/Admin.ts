@@ -374,7 +374,7 @@ export const make = (
         yield* requireAdmin(actor);
 
         if (userId === actor.id) {
-          return yield* Effect.fail(new AdminError({ message: "You cannot ban yourself" }));
+          return yield* new AdminError({ message: "You cannot ban yourself" });
         }
 
         const user = yield* userStore.get(userId);
@@ -383,7 +383,7 @@ export const make = (
         }
 
         if (isAdmin(user, config)) {
-          return yield* Effect.fail(new AdminError({ message: "Administrators cannot be banned" }));
+          return yield* new AdminError({ message: "Administrators cannot be banned" });
         }
 
         const expiresIn = options.expiresIn ?? config.defaultBanExpiresIn;
@@ -443,7 +443,7 @@ export const make = (
         yield* requireAdmin(actor);
 
         if (userId === actor.id) {
-          return yield* Effect.fail(new AdminError({ message: "You cannot remove yourself" }));
+          return yield* new AdminError({ message: "You cannot remove yourself" });
         }
 
         yield* sessionManager.invalidateUserSessions(userId);

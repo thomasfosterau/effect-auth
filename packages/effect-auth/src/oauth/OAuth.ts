@@ -385,18 +385,18 @@ export const verifyIdToken = (
     }
     const [headerSeg, payloadSeg, signatureSeg] = parts as [string, string, string];
 
-    let header: Record<string, unknown>;
-    let payload: Record<string, unknown>;
-    try {
-      header = decodeJwtSegment(headerSeg);
-      payload = decodeJwtSegment(payloadSeg);
-    } catch (cause) {
-      return yield* new OAuthProviderError({
-        message: "Failed to decode id_token",
-        provider: params.provider,
-        cause,
-      });
-    }
+    const { header, payload } = yield* Effect.try({
+      try: (): { header: Record<string, unknown>; payload: Record<string, unknown> } => ({
+        header: decodeJwtSegment(headerSeg),
+        payload: decodeJwtSegment(payloadSeg),
+      }),
+      catch: (cause) =>
+        new OAuthProviderError({
+          message: "Failed to decode id_token",
+          provider: params.provider,
+          cause,
+        }),
+    });
 
     const alg = header["alg"];
     if (alg !== "RS256" && alg !== "ES256" && alg !== "EdDSA") {
@@ -488,12 +488,10 @@ export const provider = (
   const getUserInfo = (accessToken: string): Effect.Effect<OAuthUserInfo, OAuthProviderError> =>
     Effect.gen(function* () {
       if (!config.userInfoEndpoint) {
-        return yield* Effect.fail(
-          new OAuthProviderError({
-            message: `Provider ${name} does not have a user info endpoint`,
-            provider: name,
-          }),
-        );
+        return yield* new OAuthProviderError({
+          message: `Provider ${name} does not have a user info endpoint`,
+          provider: name,
+        });
       }
 
       const response = yield* Effect.tryPromise({
@@ -516,12 +514,10 @@ export const provider = (
 
       if (!response.ok) {
         const errorText = yield* Effect.promise(() => response.text());
-        return yield* Effect.fail(
-          new OAuthProviderError({
-            message: `User info request failed: ${errorText}`,
-            provider: name,
-          }),
-        );
+        return yield* new OAuthProviderError({
+          message: `User info request failed: ${errorText}`,
+          provider: name,
+        });
       }
 
       const data = (yield* Effect.promise(() => response.json())) as Record<string, unknown>;
@@ -628,12 +624,10 @@ export const provider = (
 
         if (!response.ok) {
           const errorText = yield* Effect.promise(() => response.text());
-          return yield* Effect.fail(
-            new OAuthProviderError({
-              message: `Token exchange failed: ${errorText}`,
-              provider: name,
-            }),
-          );
+          return yield* new OAuthProviderError({
+            message: `Token exchange failed: ${errorText}`,
+            provider: name,
+          });
         }
 
         const data = (yield* Effect.promise(() => response.json())) as OAuthTokenResponse;
@@ -647,20 +641,16 @@ export const provider = (
       Effect.gen(function* () {
         if (config.getUserInfoFromIdToken) {
           if (!tokens.id_token) {
-            return yield* Effect.fail(
-              new OAuthProviderError({
-                message: `Provider ${name} did not return an id_token`,
-                provider: name,
-              }),
-            );
+            return yield* new OAuthProviderError({
+              message: `Provider ${name} did not return an id_token`,
+              provider: name,
+            });
           }
           if (!config.jwksEndpoint) {
-            return yield* Effect.fail(
-              new OAuthProviderError({
-                message: `Provider ${name} is missing a jwksEndpoint for id_token verification`,
-                provider: name,
-              }),
-            );
+            return yield* new OAuthProviderError({
+              message: `Provider ${name} is missing a jwksEndpoint for id_token verification`,
+              provider: name,
+            });
           }
           const claims = yield* verifyIdToken(tokens.id_token, {
             provider: name,
@@ -953,12 +943,10 @@ export const make = (
           Effect.gen(function* () {
             const providerInstance = providers[provider];
             if (!providerInstance) {
-              return yield* Effect.fail(
-                new OAuthProviderError({
-                  message: `Provider ${provider} not found`,
-                  provider,
-                }),
-              );
+              return yield* new OAuthProviderError({
+                message: `Provider ${provider} not found`,
+                provider,
+              });
             }
 
             const result = yield* providerInstance
@@ -1003,22 +991,18 @@ export const make = (
         // Check expiration
         if (Date.now() > stateEntry.expiresAt) {
           yield* stateStore.delete(state);
-          return yield* Effect.fail(
-            new OAuthStateExpiredError({
-              message: "OAuth state expired",
-              state,
-            }),
-          );
+          return yield* new OAuthStateExpiredError({
+            message: "OAuth state expired",
+            state,
+          });
         }
 
         const providerInstance = providers[stateEntry.provider];
         if (!providerInstance) {
-          return yield* Effect.fail(
-            new OAuthProviderError({
-              message: `Provider ${stateEntry.provider} not found`,
-              provider: stateEntry.provider,
-            }),
-          );
+          return yield* new OAuthProviderError({
+            message: `Provider ${stateEntry.provider} not found`,
+            provider: stateEntry.provider,
+          });
         }
 
         // Exchange code for tokens
@@ -1165,11 +1149,9 @@ export const make = (
                 // The email belongs to an account we may not auto-link to
                 // (unverified provider email, untrusted provider, or a
                 // dangling identifier). Refuse rather than double-claim.
-                return yield* Effect.fail(
-                  new AuthError({
-                    message: "This email is already associated with an account",
-                  }),
-                );
+                return yield* new AuthError({
+                  message: "This email is already associated with an account",
+                });
               }
               user = yield* userStore.createUser({
                 ...(userInfo.name !== undefined && { name: userInfo.name }),
@@ -1245,33 +1227,27 @@ export const make = (
         }
 
         if (stateEntry.provider !== provider) {
-          return yield* Effect.fail(
-            new OAuthProviderError({
-              message: `State provider mismatch: expected ${provider}, got ${stateEntry.provider}`,
-              provider,
-            }),
-          );
+          return yield* new OAuthProviderError({
+            message: `State provider mismatch: expected ${provider}, got ${stateEntry.provider}`,
+            provider,
+          });
         }
 
         // Check expiration
         if (Date.now() > stateEntry.expiresAt) {
           yield* stateStore.delete(state);
-          return yield* Effect.fail(
-            new OAuthStateExpiredError({
-              message: "OAuth state expired",
-              state,
-            }),
-          );
+          return yield* new OAuthStateExpiredError({
+            message: "OAuth state expired",
+            state,
+          });
         }
 
         const providerInstance = providers[provider];
         if (!providerInstance) {
-          return yield* Effect.fail(
-            new OAuthProviderError({
-              message: `Provider ${provider} not found`,
-              provider,
-            }),
-          );
+          return yield* new OAuthProviderError({
+            message: `Provider ${provider} not found`,
+            provider,
+          });
         }
 
         // Exchange code for tokens
@@ -1294,12 +1270,10 @@ export const make = (
             (id) => id.type === "email" && id.value === providerEmail,
           );
           if (!ownsEmail) {
-            return yield* Effect.fail(
-              new OAuthEmailMismatchError({
-                message: `Cannot link ${provider} account: provider email (${providerEmail}) does not belong to this account`,
-                provider,
-              }),
-            );
+            return yield* new OAuthEmailMismatchError({
+              message: `Cannot link ${provider} account: provider email (${providerEmail}) does not belong to this account`,
+              provider,
+            });
           }
         }
 
@@ -1307,12 +1281,10 @@ export const make = (
         const existingAccount = yield* accountStore.get(provider, userInfo.id);
 
         if (existingAccount && existingAccount.userId !== userId) {
-          return yield* Effect.fail(
-            new OAuthAccountConflictError({
-              message: `This ${provider} account is already linked to another user`,
-              provider,
-            }),
-          );
+          return yield* new OAuthAccountConflictError({
+            message: `This ${provider} account is already linked to another user`,
+            provider,
+          });
         }
 
         // Create or update the account linked to this user
@@ -1363,12 +1335,10 @@ export const make = (
         const account = accounts.find((a) => a.provider === provider);
 
         if (!account) {
-          return yield* Effect.fail(
-            new OAuthAccountNotFoundError({
-              message: `No ${provider} account linked to this user`,
-              provider,
-            }),
-          );
+          return yield* new OAuthAccountNotFoundError({
+            message: `No ${provider} account linked to this user`,
+            provider,
+          });
         }
 
         // Last-credential lockout guard: refuse to remove the user's only
@@ -1380,12 +1350,10 @@ export const make = (
           const remainingOAuth = accounts.filter((a) => a.provider !== provider).length;
           const hasPass = accountStore.hasPassword ? yield* accountStore.hasPassword(userId) : true;
           if (remainingOAuth === 0 && !hasPass) {
-            return yield* Effect.fail(
-              new OAuthLastCredentialError({
-                message: `Cannot unlink the last sign-in credential for user ${userId}`,
-                userId,
-              }),
-            );
+            return yield* new OAuthLastCredentialError({
+              message: `Cannot unlink the last sign-in credential for user ${userId}`,
+              userId,
+            });
           }
         }
 
@@ -1399,32 +1367,26 @@ export const make = (
             const account = accounts.find((a) => a.provider === provider);
 
             if (!account) {
-              return yield* Effect.fail(
-                new OAuthAccountNotFoundError({
-                  message: `No ${provider} account linked to this user`,
-                  provider,
-                }),
-              );
+              return yield* new OAuthAccountNotFoundError({
+                message: `No ${provider} account linked to this user`,
+                provider,
+              });
             }
             if (!account.refreshToken) {
-              return yield* Effect.fail(
-                new OAuthNoRefreshTokenError({
-                  message: `No refresh token available for ${provider}`,
-                  provider,
-                }),
-              );
+              return yield* new OAuthNoRefreshTokenError({
+                message: `No refresh token available for ${provider}`,
+                provider,
+              });
             }
 
             const plainAccount = yield* decryptAccount(account);
 
             const providerInstance = providers[provider];
             if (!providerInstance) {
-              return yield* Effect.fail(
-                new OAuthProviderError({
-                  message: `Provider ${provider} not found`,
-                  provider,
-                }),
-              );
+              return yield* new OAuthProviderError({
+                message: `Provider ${provider} not found`,
+                provider,
+              });
             }
 
             // Exchange refresh token for new access token
@@ -1463,12 +1425,10 @@ export const make = (
 
             if (!response.ok) {
               const errorText = yield* Effect.promise(() => response.text());
-              return yield* Effect.fail(
-                new OAuthProviderError({
-                  message: `Token refresh failed: ${errorText}`,
-                  provider,
-                }),
-              );
+              return yield* new OAuthProviderError({
+                message: `Token refresh failed: ${errorText}`,
+                provider,
+              });
             }
 
             const data = (yield* Effect.promise(() => response.json())) as OAuthTokenResponse;
@@ -2052,23 +2012,19 @@ export const discoverOAuthEndpoints = (
         }),
     });
     if (!response.ok) {
-      return yield* Effect.fail(
-        new OAuthProviderError({
-          message: `OIDC discovery request failed with status ${response.status}`,
-          provider: issuerUrl,
-        }),
-      );
+      return yield* new OAuthProviderError({
+        message: `OIDC discovery request failed with status ${response.status}`,
+        provider: issuerUrl,
+      });
     }
     const doc = (yield* Effect.promise(() => response.json())) as Record<string, unknown>;
     const authorization = str(doc["authorization_endpoint"]);
     const token = str(doc["token_endpoint"]);
     if (!authorization || !token) {
-      return yield* Effect.fail(
-        new OAuthProviderError({
-          message: "OIDC discovery document is missing authorization_endpoint or token_endpoint",
-          provider: issuerUrl,
-        }),
-      );
+      return yield* new OAuthProviderError({
+        message: "OIDC discovery document is missing authorization_endpoint or token_endpoint",
+        provider: issuerUrl,
+      });
     }
     const userInfo = str(doc["userinfo_endpoint"]);
     const jwks = str(doc["jwks_uri"]);

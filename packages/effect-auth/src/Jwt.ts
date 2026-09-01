@@ -441,11 +441,9 @@ export const make = (
         Effect.gen(function* () {
           const segments = token.split(".");
           if (segments.length !== 3) {
-            return yield* Effect.fail(
-              new JwtError({
-                message: "Malformed JWT: expected three dot-separated segments",
-              }),
-            );
+            return yield* new JwtError({
+              message: "Malformed JWT: expected three dot-separated segments",
+            });
           }
           const [headerSegment, payloadSegment, signatureSegment] = segments as [
             string,
@@ -458,19 +456,15 @@ export const make = (
           const keys = yield* store.list();
           const pair = keys.find((candidate) => candidate.id === header["kid"]);
           if (!pair) {
-            return yield* Effect.fail(
-              new JwtError({
-                message: "Unknown signing key (kid not found)",
-              }),
-            );
+            return yield* new JwtError({
+              message: "Unknown signing key (kid not found)",
+            });
           }
 
           if (header["alg"] !== pair.algorithm) {
-            return yield* Effect.fail(
-              new JwtError({
-                message: "Token algorithm does not match the signing key",
-              }),
-            );
+            return yield* new JwtError({
+              message: "Token algorithm does not match the signing key",
+            });
           }
 
           const validSignature = yield* verifyBytesFromJwk(
@@ -480,39 +474,31 @@ export const make = (
             base64UrlDecode(signatureSegment),
           );
           if (!validSignature) {
-            return yield* Effect.fail(
-              new JwtError({
-                message: "Invalid token signature",
-              }),
-            );
+            return yield* new JwtError({
+              message: "Invalid token signature",
+            });
           }
 
           const payload = yield* decodeJsonSegment(payloadSegment, "payload");
 
           const exp = payload["exp"];
           if (typeof exp !== "number" || Date.now() >= exp * 1000 + leewayMs) {
-            return yield* Effect.fail(
-              new JwtError({
-                message: "Token has expired",
-              }),
-            );
+            return yield* new JwtError({
+              message: "Token has expired",
+            });
           }
 
           const nbf = payload["nbf"];
           if (typeof nbf === "number" && Date.now() < nbf * 1000 - leewayMs) {
-            return yield* Effect.fail(
-              new JwtError({
-                message: "Token not yet valid",
-              }),
-            );
+            return yield* new JwtError({
+              message: "Token not yet valid",
+            });
           }
 
           if (payload["iss"] !== config.issuer) {
-            return yield* Effect.fail(
-              new JwtError({
-                message: "Token issuer mismatch",
-              }),
-            );
+            return yield* new JwtError({
+              message: "Token issuer mismatch",
+            });
           }
 
           if (config.audience !== undefined) {
@@ -521,11 +507,9 @@ export const make = (
               ? aud.includes(config.audience)
               : aud === config.audience;
             if (!matches) {
-              return yield* Effect.fail(
-                new JwtError({
-                  message: "Token audience mismatch",
-                }),
-              );
+              return yield* new JwtError({
+                message: "Token audience mismatch",
+              });
             }
           }
 
@@ -675,9 +659,9 @@ export const remoteJwksVerifier = (
         Effect.gen(function* () {
           const segments = token.split(".");
           if (segments.length !== 3) {
-            return yield* Effect.fail(
-              new JwtError({ message: "Malformed JWT: expected three dot-separated segments" }),
-            );
+            return yield* new JwtError({
+              message: "Malformed JWT: expected three dot-separated segments",
+            });
           }
           const [headerSegment, payloadSegment, signatureSegment] = segments as [
             string,
@@ -689,9 +673,9 @@ export const remoteJwksVerifier = (
 
           const alg = header["alg"];
           if (alg !== "ES256" && alg !== "EdDSA") {
-            return yield* Effect.fail(
-              new JwtError({ message: `Unsupported or missing algorithm: ${String(alg)}` }),
-            );
+            return yield* new JwtError({
+              message: `Unsupported or missing algorithm: ${String(alg)}`,
+            });
           }
 
           const kid = header["kid"];
@@ -706,16 +690,16 @@ export const remoteJwksVerifier = (
           }
 
           if (!matchedKey) {
-            return yield* Effect.fail(
-              new JwtError({ message: "Unknown signing key (kid not found in remote JWKS)" }),
-            );
+            return yield* new JwtError({
+              message: "Unknown signing key (kid not found in remote JWKS)",
+            });
           }
 
           // If the JWKS key carries an alg field it must match the header.
           if (matchedKey["alg"] !== undefined && matchedKey["alg"] !== alg) {
-            return yield* Effect.fail(
-              new JwtError({ message: "Token algorithm does not match the signing key" }),
-            );
+            return yield* new JwtError({
+              message: "Token algorithm does not match the signing key",
+            });
           }
 
           const validSignature = yield* verifyBytesFromJwk(
@@ -726,23 +710,23 @@ export const remoteJwksVerifier = (
           );
 
           if (!validSignature) {
-            return yield* Effect.fail(new JwtError({ message: "Invalid token signature" }));
+            return yield* new JwtError({ message: "Invalid token signature" });
           }
 
           const payload = yield* decodeJsonSegment(payloadSegment, "payload");
 
           const exp = payload["exp"];
           if (typeof exp !== "number" || Date.now() >= exp * 1000 + leewayMs) {
-            return yield* Effect.fail(new JwtError({ message: "Token has expired" }));
+            return yield* new JwtError({ message: "Token has expired" });
           }
 
           const nbf = payload["nbf"];
           if (typeof nbf === "number" && Date.now() < nbf * 1000 - leewayMs) {
-            return yield* Effect.fail(new JwtError({ message: "Token not yet valid" }));
+            return yield* new JwtError({ message: "Token not yet valid" });
           }
 
           if (payload["iss"] !== config.issuer) {
-            return yield* Effect.fail(new JwtError({ message: "Token issuer mismatch" }));
+            return yield* new JwtError({ message: "Token issuer mismatch" });
           }
 
           if (config.audience !== undefined) {
@@ -751,7 +735,7 @@ export const remoteJwksVerifier = (
               ? aud.includes(config.audience)
               : aud === config.audience;
             if (!matches) {
-              return yield* Effect.fail(new JwtError({ message: "Token audience mismatch" }));
+              return yield* new JwtError({ message: "Token audience mismatch" });
             }
           }
 

@@ -29,8 +29,7 @@ export const RequestSlot = Schema.Literals(["principal", "action", "resource", "
 export type RequestSlot = typeof RequestSlot.Type;
 
 /** A literal {@link Entity.AttributeValue}. */
-export const Lit = Schema.Struct({
-  _tag: Schema.Literal("Lit"),
+export const Lit = Schema.TaggedStruct("Lit", {
   value: Entity.AttributeValue,
 });
 export type Lit = typeof Lit.Type;
@@ -41,16 +40,14 @@ export type Lit = typeof Lit.Type;
  * attribute that is absent (or traversing through a non-record) is an
  * evaluation error — guard with {@link Has} where absence is expected.
  */
-export const Attr = Schema.Struct({
-  _tag: Schema.Literal("Attr"),
+export const Attr = Schema.TaggedStruct("Attr", {
   of: RequestSlot,
   path: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
 });
 export type Attr = typeof Attr.Type;
 
 /** The request's principal/action/resource reference itself, as a value. */
-export const SlotRef = Schema.Struct({
-  _tag: Schema.Literal("SlotRef"),
+export const SlotRef = Schema.TaggedStruct("SlotRef", {
   of: Schema.Literals(["principal", "action", "resource"]),
 });
 export type SlotRef = typeof SlotRef.Type;
@@ -113,29 +110,24 @@ export interface Has {
 export type Condition = And | Or | Not | Eq | Compare | Contains | In | Has;
 
 export const Condition: Schema.Codec<Condition> = Schema.Union([
-  Schema.Struct({
-    _tag: Schema.Literal("And"),
+  Schema.TaggedStruct("And", {
     conditions: Schema.Array(Schema.suspend((): Schema.Codec<Condition> => Condition)),
   }),
-  Schema.Struct({
-    _tag: Schema.Literal("Or"),
+  Schema.TaggedStruct("Or", {
     conditions: Schema.Array(Schema.suspend((): Schema.Codec<Condition> => Condition)),
   }),
-  Schema.Struct({
-    _tag: Schema.Literal("Not"),
+  Schema.TaggedStruct("Not", {
     condition: Schema.suspend((): Schema.Codec<Condition> => Condition),
   }),
-  Schema.Struct({ _tag: Schema.Literal("Eq"), left: Operand, right: Operand }),
-  Schema.Struct({
-    _tag: Schema.Literal("Compare"),
+  Schema.TaggedStruct("Eq", { left: Operand, right: Operand }),
+  Schema.TaggedStruct("Compare", {
     op: Schema.Literals(["lt", "lte", "gt", "gte"]),
     left: Operand,
     right: Operand,
   }),
-  Schema.Struct({ _tag: Schema.Literal("Contains"), collection: Operand, value: Operand }),
-  Schema.Struct({ _tag: Schema.Literal("In"), left: Operand, right: Operand }),
-  Schema.Struct({
-    _tag: Schema.Literal("Has"),
+  Schema.TaggedStruct("Contains", { collection: Operand, value: Operand }),
+  Schema.TaggedStruct("In", { left: Operand, right: Operand }),
+  Schema.TaggedStruct("Has", {
     of: RequestSlot,
     path: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
   }),

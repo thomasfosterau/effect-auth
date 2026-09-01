@@ -197,11 +197,9 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
               existing.lockedUntil !== undefined &&
               existing.lockedUntil > now
             ) {
-              return yield* Effect.fail(
-                new Errors.AccountLockedError({
-                  message: "Account temporarily locked due to too many failed sign-in attempts",
-                }),
-              );
+              return yield* new Errors.AccountLockedError({
+                message: "Account temporarily locked due to too many failed sign-in attempts",
+              });
             }
 
             // Atomic increment-or-reset: concurrent attempts each count.

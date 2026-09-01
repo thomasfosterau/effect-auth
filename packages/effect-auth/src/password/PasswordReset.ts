@@ -86,19 +86,15 @@ const validatePasswordLength = (
 ): Effect.Effect<void, Errors.PasswordResetError> =>
   Effect.gen(function* () {
     if (newPassword.length < minPasswordLength) {
-      return yield* Effect.fail(
-        new Errors.PasswordResetError({
-          message: `Password must be at least ${minPasswordLength} characters`,
-        }),
-      );
+      return yield* new Errors.PasswordResetError({
+        message: `Password must be at least ${minPasswordLength} characters`,
+      });
     }
 
     if (newPassword.length > maxPasswordLength) {
-      return yield* Effect.fail(
-        new Errors.PasswordResetError({
-          message: `Password must be at most ${maxPasswordLength} characters`,
-        }),
-      );
+      return yield* new Errors.PasswordResetError({
+        message: `Password must be at most ${maxPasswordLength} characters`,
+      });
     }
   });
 
@@ -203,11 +199,9 @@ export const make = (
         });
 
         if (!token) {
-          return yield* Effect.fail(
-            new Errors.PasswordResetError({
-              message: "Invalid password reset token",
-            }),
-          );
+          return yield* new Errors.PasswordResetError({
+            message: "Invalid password reset token",
+          });
         }
 
         yield* validatePasswordLength(newPassword, minPasswordLength, maxPasswordLength);
@@ -215,20 +209,16 @@ export const make = (
         const tokenHash = hashToken(token);
         const reset = yield* resetStore.get(tokenHash);
         if (!reset) {
-          return yield* Effect.fail(
-            new Errors.PasswordResetError({
-              message: "Invalid or expired password reset token",
-            }),
-          );
+          return yield* new Errors.PasswordResetError({
+            message: "Invalid or expired password reset token",
+          });
         }
 
         if (Date.now() > reset.expiresAt) {
           yield* resetStore.delete(tokenHash);
-          return yield* Effect.fail(
-            new Errors.PasswordResetError({
-              message: "Password reset token has expired",
-            }),
-          );
+          return yield* new Errors.PasswordResetError({
+            message: "Password reset token has expired",
+          });
         }
 
         const hashedPassword = yield* passwordHasher.hash(newPassword);

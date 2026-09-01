@@ -234,19 +234,19 @@ export const make = (
 
         if (Date.now() > record.expiresAt) {
           yield* store.delete(phoneNumber, purpose);
-          return yield* Effect.fail(new PhoneOtpError({ message: "OTP has expired" }));
+          return yield* new PhoneOtpError({ message: "OTP has expired" });
         }
 
         if (record.attempts >= maxAttempts) {
           yield* store.delete(phoneNumber, purpose);
-          return yield* Effect.fail(new PhoneOtpError({ message: "Too many attempts" }));
+          return yield* new PhoneOtpError({ message: "Too many attempts" });
         }
 
         if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
           const attempts = yield* store.incrementAttempts(phoneNumber, purpose);
           if (attempts >= maxAttempts) {
             yield* store.delete(phoneNumber, purpose);
-            return yield* Effect.fail(new PhoneOtpError({ message: "Too many attempts" }));
+            return yield* new PhoneOtpError({ message: "Too many attempts" });
           }
           return yield* invalidOtp();
         }
@@ -282,12 +282,10 @@ export const make = (
           if (existing !== null) {
             const elapsed = Date.now() - existing.createdAt;
             if (elapsed < config.resendCooldown) {
-              return yield* Effect.fail(
-                new Errors.ResendTooSoonError({
-                  message: "Please wait before requesting another OTP",
-                  retryAfter: config.resendCooldown - elapsed,
-                }),
-              );
+              return yield* new Errors.ResendTooSoonError({
+                message: "Please wait before requesting another OTP",
+                retryAfter: config.resendCooldown - elapsed,
+              });
             }
           }
         }
@@ -323,11 +321,11 @@ export const make = (
         const identifier = yield* identifiers.getByValue("phone", phoneNumber);
         let user = identifier === null ? null : yield* users.get(identifier.userId);
         if (identifier !== null && user === null) {
-          return yield* Effect.fail(new PhoneOtpError({ message: "Account is unavailable" }));
+          return yield* new PhoneOtpError({ message: "Account is unavailable" });
         }
         if (!user) {
           if (disableSignUp) {
-            return yield* Effect.fail(new PhoneOtpError({ message: "Sign-up is disabled" }));
+            return yield* new PhoneOtpError({ message: "Sign-up is disabled" });
           }
           // A verified OTP proves ownership of the phone number.
           user = yield* userStore.createUser({});
@@ -367,9 +365,7 @@ export const make = (
         // Attach (or verify) the phone identifier for this user.
         const existing = yield* identifiers.getByValue("phone", phoneNumber);
         if (existing !== null && existing.userId !== userId) {
-          return yield* Effect.fail(
-            new PhoneOtpError({ message: "This phone number is already in use" }),
-          );
+          return yield* new PhoneOtpError({ message: "This phone number is already in use" });
         }
         if (existing === null) {
           yield* claimIdentifier(
@@ -392,9 +388,7 @@ export const make = (
 
         const user = yield* users.get(userId);
         if (user === null) {
-          return yield* Effect.fail(
-            new Errors.UserNotFoundError({ message: "User not found", userId }),
-          );
+          return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
         }
         return user;
       }),

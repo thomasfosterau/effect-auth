@@ -328,11 +328,9 @@ export const make = (
       Effect.gen(function* () {
         const apiKey = yield* store.get(keyId);
         if (!apiKey || apiKey.userId !== userId) {
-          return yield* Effect.fail(
-            new ApiKeyError({
-              message: "API key not found",
-            }),
-          );
+          return yield* new ApiKeyError({
+            message: "API key not found",
+          });
         }
         return apiKey;
       });
@@ -416,11 +414,9 @@ export const make = (
       ) {
         const existing = yield* store.listByUserId(userId);
         if (existing.length >= maxKeysPerUser) {
-          return yield* Effect.fail(
-            new ApiKeyError({
-              message: `User already has the maximum of ${maxKeysPerUser} API keys`,
-            }),
-          );
+          return yield* new ApiKeyError({
+            message: `User already has the maximum of ${maxKeysPerUser} API keys`,
+          });
         }
 
         const prefix = options?.prefix ?? defaultPrefix;
@@ -501,11 +497,9 @@ export const make = (
       get: Effect.fn("ApiKeyService.get")(function* (keyId: string) {
         const apiKey = yield* store.get(keyId);
         if (!apiKey) {
-          return yield* Effect.fail(
-            new ApiKeyError({
-              message: "API key not found",
-            }),
-          );
+          return yield* new ApiKeyError({
+            message: "API key not found",
+          });
         }
         return apiKey;
       }),

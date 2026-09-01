@@ -201,12 +201,10 @@ export const make = (
           if (existing !== null) {
             const elapsed = Date.now() - existing.createdAt;
             if (elapsed < config.resendCooldown) {
-              return yield* Effect.fail(
-                new Errors.ResendTooSoonError({
-                  message: "Please wait before requesting another magic link",
-                  retryAfter: config.resendCooldown - elapsed,
-                }),
-              );
+              return yield* new Errors.ResendTooSoonError({
+                message: "Please wait before requesting another magic link",
+                retryAfter: config.resendCooldown - elapsed,
+              });
             }
           }
         }
@@ -240,31 +238,25 @@ export const make = (
         options?: MagicLinkVerifyOptions,
       ) {
         if (!rawToken) {
-          return yield* Effect.fail(
-            new Errors.MagicLinkError({
-              message: "Invalid or expired magic link token",
-            }),
-          );
+          return yield* new Errors.MagicLinkError({
+            message: "Invalid or expired magic link token",
+          });
         }
 
         const tokenHash = hashToken(rawToken);
         const magicLink = yield* store.get(tokenHash);
         if (!magicLink) {
-          return yield* Effect.fail(
-            new Errors.MagicLinkError({
-              message: "Invalid or expired magic link token",
-            }),
-          );
+          return yield* new Errors.MagicLinkError({
+            message: "Invalid or expired magic link token",
+          });
         }
 
         // Check expiration
         if (Date.now() > magicLink.expiresAt) {
           yield* store.delete(tokenHash);
-          return yield* Effect.fail(
-            new Errors.MagicLinkError({
-              message: "Magic link token has expired",
-            }),
-          );
+          return yield* new Errors.MagicLinkError({
+            message: "Magic link token has expired",
+          });
         }
 
         // Consume the token (one-time use)
@@ -275,17 +267,13 @@ export const make = (
         if (identifier !== null && user === null) {
           // Dangling identifier (owner row is gone) — fail rather than
           // silently creating a second claimant.
-          return yield* Effect.fail(
-            new Errors.MagicLinkError({ message: "Account is unavailable" }),
-          );
+          return yield* new Errors.MagicLinkError({ message: "Account is unavailable" });
         }
         if (!user) {
           if (disableSignUp) {
-            return yield* Effect.fail(
-              new Errors.MagicLinkError({
-                message: "Sign-up is disabled",
-              }),
-            );
+            return yield* new Errors.MagicLinkError({
+              message: "Sign-up is disabled",
+            });
           }
 
           // A verified magic link proves ownership of the email.

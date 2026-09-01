@@ -375,12 +375,7 @@ export const composePlugins = <RIn = never>(
 ): Layer.Layer<Hooks, never, RIn | Hooks> => {
   if (plugins.length === 0) {
     // Identity passthrough: requires Hooks, provides Hooks unchanged.
-    return Layer.effect(
-      Hooks,
-      Effect.gen(function* () {
-        return yield* Hooks;
-      }),
-    );
+    return Layer.effect(Hooks, Hooks);
   }
   return plugins.reduce((acc, plugin) => plugin.pipe(Layer.provide(acc))) as Layer.Layer<
     Hooks,

@@ -52,7 +52,7 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
       const verify = (token: string | undefined): Effect.Effect<void, CaptchaError> =>
         Effect.gen(function* () {
           if (token === undefined || token === "") {
-            return yield* Effect.fail(new CaptchaError({ message: "Captcha verification failed" }));
+            return yield* new CaptchaError({ message: "Captcha verification failed" });
           }
           const success = yield* client
             .execute(
@@ -69,7 +69,7 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
               Effect.catch(() => Effect.succeed(false)),
             );
           if (!success) {
-            return yield* Effect.fail(new CaptchaError({ message: "Captcha verification failed" }));
+            return yield* new CaptchaError({ message: "Captcha verification failed" });
           }
         });
 

@@ -163,17 +163,13 @@ export const make = (
 
       verify: Effect.fn("OneTimeTokenService.verify")(function* (rawToken: string) {
         if (!rawToken) {
-          return yield* Effect.fail(
-            new Errors.OneTimeTokenError({ message: "Invalid or expired token" }),
-          );
+          return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
         }
 
         const tokenHash = hashToken(rawToken);
         const record = yield* store.get(tokenHash);
         if (!record) {
-          return yield* Effect.fail(
-            new Errors.OneTimeTokenError({ message: "Invalid or expired token" }),
-          );
+          return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
         }
 
         // Consume the token immediately — delete before the expiry check so
@@ -182,9 +178,7 @@ export const make = (
         yield* store.delete(tokenHash);
 
         if (Date.now() > record.expiresAt) {
-          return yield* Effect.fail(
-            new Errors.OneTimeTokenError({ message: "Invalid or expired token" }),
-          );
+          return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
         }
 
         return {

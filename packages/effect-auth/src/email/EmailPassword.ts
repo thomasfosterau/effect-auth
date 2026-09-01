@@ -202,23 +202,19 @@ const validatePasswordLength = (
 ): Effect.Effect<void, Errors.PasswordPolicyError> =>
   Effect.gen(function* () {
     if (password.length < config.minPasswordLength) {
-      return yield* Effect.fail(
-        new Errors.PasswordPolicyError({
-          code: Errors.ErrorCode.PASSWORD_TOO_SHORT,
-          message: `Password must be at least ${config.minPasswordLength} characters`,
-          params: { minLength: config.minPasswordLength },
-        }),
-      );
+      return yield* new Errors.PasswordPolicyError({
+        code: Errors.ErrorCode.PASSWORD_TOO_SHORT,
+        message: `Password must be at least ${config.minPasswordLength} characters`,
+        params: { minLength: config.minPasswordLength },
+      });
     }
 
     if (password.length > config.maxPasswordLength) {
-      return yield* Effect.fail(
-        new Errors.PasswordPolicyError({
-          code: Errors.ErrorCode.PASSWORD_TOO_LONG,
-          message: `Password must be at most ${config.maxPasswordLength} characters`,
-          params: { maxLength: config.maxPasswordLength },
-        }),
-      );
+      return yield* new Errors.PasswordPolicyError({
+        code: Errors.ErrorCode.PASSWORD_TOO_LONG,
+        message: `Password must be at most ${config.maxPasswordLength} characters`,
+        params: { maxLength: config.maxPasswordLength },
+      });
     }
   });
 
@@ -261,21 +257,17 @@ export const make = (
           const input = yield* hooks.beforeSignUp(rawInput);
 
           if (resolved.disableSignUp) {
-            return yield* Effect.fail(
-              new Errors.SignUpDisabledError({
-                message: "Email/password sign-up is disabled",
-              }),
-            );
+            return yield* new Errors.SignUpDisabledError({
+              message: "Email/password sign-up is disabled",
+            });
           }
 
           const email = normalizeEmail(input.email);
           if (!email) {
-            return yield* Effect.fail(
-              new Errors.InvalidInputError({
-                message: "Email is required",
-                field: "email",
-              }),
-            );
+            return yield* new Errors.InvalidInputError({
+              message: "Email is required",
+              field: "email",
+            });
           }
 
           yield* validatePasswordLength(input.password, {
@@ -361,11 +353,9 @@ export const make = (
 
           const email = normalizeEmail(input.email);
           if (!email) {
-            return yield* Effect.fail(
-              new Errors.InvalidCredentialsError({
-                message: "Invalid email or password",
-              }),
-            );
+            return yield* new Errors.InvalidCredentialsError({
+              message: "Invalid email or password",
+            });
           }
 
           const resolvedUser = yield* resolveUserByIdentifier(
@@ -390,11 +380,9 @@ export const make = (
             Effect.catchTag("HashingError", () => Effect.succeed(false)),
           );
           if (user === null || passwordHash === null || !isValid) {
-            return yield* Effect.fail(
-              new Errors.InvalidCredentialsError({
-                message: "Invalid email or password",
-              }),
-            );
+            return yield* new Errors.InvalidCredentialsError({
+              message: "Invalid email or password",
+            });
           }
 
           // Silently upgrade the stored hash when the current hasher considers
@@ -409,12 +397,10 @@ export const make = (
           }
 
           if (resolved.requireEmailVerification && !resolvedUser!.identifier.verified) {
-            return yield* Effect.fail(
-              new Errors.EmailNotVerifiedError({
-                message: "Email must be verified before sign-in",
-                email,
-              }),
-            );
+            return yield* new Errors.EmailNotVerifiedError({
+              message: "Email must be verified before sign-in",
+              email,
+            });
           }
 
           const handle = { type: "email" as const, value: resolvedUser!.identifier.value };

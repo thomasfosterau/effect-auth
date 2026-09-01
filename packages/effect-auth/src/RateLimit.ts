@@ -99,13 +99,11 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
 
           // Check if blocked
           if (entry?.blockedUntil && now < entry.blockedUntil) {
-            return yield* Effect.fail(
-              new RateLimitError({
-                message: `Rate limit exceeded for ${key}`,
-                key,
-                retryAfter: Math.ceil((entry.blockedUntil - now) / 1000),
-              }),
-            );
+            return yield* new RateLimitError({
+              message: `Rate limit exceeded for ${key}`,
+              key,
+              retryAfter: Math.ceil((entry.blockedUntil - now) / 1000),
+            });
           }
 
           // Check if window expired
@@ -125,13 +123,11 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
               yield* store.set(key, blockedEntry, Math.ceil(config.blockDurationMs / 1000));
             }
 
-            return yield* Effect.fail(
-              new RateLimitError({
-                message: `Rate limit exceeded for ${key}`,
-                key,
-                retryAfter: Math.ceil((entry.resetAt - now) / 1000),
-              }),
-            );
+            return yield* new RateLimitError({
+              message: `Rate limit exceeded for ${key}`,
+              key,
+              retryAfter: Math.ceil((entry.resetAt - now) / 1000),
+            });
           }
 
           return true;
@@ -164,13 +160,11 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
 
           // Check if blocked
           if (entry.blockedUntil && now < entry.blockedUntil) {
-            return yield* Effect.fail(
-              new RateLimitError({
-                message: `Rate limit exceeded for ${key}`,
-                key,
-                retryAfter: Math.ceil((entry.blockedUntil - now) / 1000),
-              }),
-            );
+            return yield* new RateLimitError({
+              message: `Rate limit exceeded for ${key}`,
+              key,
+              retryAfter: Math.ceil((entry.blockedUntil - now) / 1000),
+            });
           }
 
           // Increment counter
@@ -184,13 +178,11 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
               yield* store.set(key, blockedEntry, Math.ceil(config.blockDurationMs / 1000));
             }
 
-            return yield* Effect.fail(
-              new RateLimitError({
-                message: `Rate limit exceeded for ${key}`,
-                key,
-                retryAfter: Math.ceil((entry.resetAt - now) / 1000),
-              }),
-            );
+            return yield* new RateLimitError({
+              message: `Rate limit exceeded for ${key}`,
+              key,
+              retryAfter: Math.ceil((entry.resetAt - now) / 1000),
+            });
           }
 
           // Increment

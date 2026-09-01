@@ -324,33 +324,26 @@ export const make = (
 
             if (Date.now() > storedChallenge.expiresAt) {
               yield* challengeStore.delete(challenge);
-              return yield* Effect.fail(
-                new Errors.ChallengeExpiredError({
-                  message: "Challenge has expired",
-                }),
-              );
+              return yield* new Errors.ChallengeExpiredError({
+                message: "Challenge has expired",
+              });
             }
 
             // Parse client data JSON
-            let clientData: ClientData;
-            try {
-              clientData = parseClientDataJSON(response.clientDataJSON);
-            } catch (error) {
-              return yield* Effect.fail(
+            const clientData: ClientData = yield* Effect.try({
+              try: () => parseClientDataJSON(response.clientDataJSON),
+              catch: (error) =>
                 new Errors.WebAuthnVerificationError({
                   message: "Failed to parse client data JSON",
                   cause: error,
                 }),
-              );
-            }
+            });
 
             // Verify challenge matches
             if (!compareUint8Arrays(clientData.challenge, challenge)) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: "Challenge mismatch",
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: "Challenge mismatch",
+              });
             }
 
             // Verify origin
@@ -359,61 +352,47 @@ export const make = (
               : [config.expectedOrigin];
 
             if (!origins.includes(clientData.origin)) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: `Invalid origin: ${clientData.origin}`,
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: `Invalid origin: ${clientData.origin}`,
+              });
             }
 
             // Verify type
             if (clientData.type !== ClientDataType.Create) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: `Invalid type: ${clientData.type}`,
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: `Invalid type: ${clientData.type}`,
+              });
             }
 
             // Parse attestation object
-            let authenticatorData: AuthenticatorData;
-            try {
-              const parsed = parseAttestationObject(response.attestationObject);
-              authenticatorData = parsed.authenticatorData;
-            } catch (error) {
-              return yield* Effect.fail(
+            const authenticatorData: AuthenticatorData = yield* Effect.try({
+              try: () => parseAttestationObject(response.attestationObject).authenticatorData,
+              catch: (error) =>
                 new Errors.WebAuthnVerificationError({
                   message: "Failed to parse attestation object",
                   cause: error,
                 }),
-              );
-            }
+            });
 
             // Verify authenticator data
             if (!authenticatorData.userPresent) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: "User not present",
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: "User not present",
+              });
             }
 
             // Verify relying party ID hash
             if (!authenticatorData.verifyRelyingPartyIdHash(config.relyingPartyId)) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: "Invalid relying party ID hash",
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: "Invalid relying party ID hash",
+              });
             }
 
             // Extract credential
             if (!authenticatorData.credential) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: "No credential in authenticator data",
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: "No credential in authenticator data",
+              });
             }
 
             // Verify algorithm — ES256, RS256, and EdDSA are supported.
@@ -421,11 +400,9 @@ export const make = (
             const algorithm = publicKey.algorithm();
 
             if (!(SUPPORTED_COSE_ALGORITHMS as readonly number[]).includes(algorithm)) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: `Unsupported algorithm: ${algorithm}. Supported: ES256 (-7), RS256 (-257), EdDSA (-8).`,
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: `Unsupported algorithm: ${algorithm}. Supported: ES256 (-7), RS256 (-257), EdDSA (-8).`,
+              });
             }
 
             // Encode credential ID as base64url for storage
@@ -436,11 +413,9 @@ export const make = (
 
             // Validate userId is present
             if (!storedChallenge.userId) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: "Challenge missing user ID",
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: "Challenge missing user ID",
+              });
             }
 
             // Create credential object
@@ -493,18 +468,14 @@ export const make = (
             // Get and verify challenge
             const storedChallenge = yield* challengeStore.get(challenge);
             if (storedChallenge === null) {
-              return yield* Effect.fail(
-                new Errors.ChallengeNotFoundError({ message: "Challenge not found" }),
-              );
+              return yield* new Errors.ChallengeNotFoundError({ message: "Challenge not found" });
             }
 
             if (Date.now() > storedChallenge.expiresAt) {
               yield* challengeStore.delete(challenge);
-              return yield* Effect.fail(
-                new Errors.ChallengeExpiredError({
-                  message: "Challenge has expired",
-                }),
-              );
+              return yield* new Errors.ChallengeExpiredError({
+                message: "Challenge has expired",
+              });
             }
 
             // Get credential — on the usernameless path the credentialId is the
@@ -512,12 +483,10 @@ export const make = (
             const credentialId = base64UrlEncode(response.credentialId);
             const credential = yield* credentialStore.get(credentialId);
             if (credential === null) {
-              return yield* Effect.fail(
-                new Errors.CredentialNotFoundError({
-                  message: "Credential not found",
-                  credentialId,
-                }),
-              );
+              return yield* new Errors.CredentialNotFoundError({
+                message: "Credential not found",
+                credentialId,
+              });
             }
 
             // Bound challenge: verify the credential belongs to the expected user.
@@ -525,33 +494,26 @@ export const make = (
               storedChallenge.userId !== undefined &&
               credential.userId !== storedChallenge.userId
             ) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: "Credential does not belong to the expected user",
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: "Credential does not belong to the expected user",
+              });
             }
 
             // Parse client data JSON
-            let clientData: ClientData;
-            try {
-              clientData = parseClientDataJSON(response.clientDataJSON);
-            } catch (error) {
-              return yield* Effect.fail(
+            const clientData: ClientData = yield* Effect.try({
+              try: () => parseClientDataJSON(response.clientDataJSON),
+              catch: (error) =>
                 new Errors.WebAuthnVerificationError({
                   message: "Failed to parse client data JSON",
                   cause: error,
                 }),
-              );
-            }
+            });
 
             // Verify challenge matches
             if (!compareUint8Arrays(clientData.challenge, challenge)) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: "Challenge mismatch",
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: "Challenge mismatch",
+              });
             }
 
             // Verify origin
@@ -560,51 +522,40 @@ export const make = (
               : [config.expectedOrigin];
 
             if (!origins.includes(clientData.origin)) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: `Invalid origin: ${clientData.origin}`,
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: `Invalid origin: ${clientData.origin}`,
+              });
             }
 
             // Verify type
             if (clientData.type !== ClientDataType.Get) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: `Invalid type: ${clientData.type}`,
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: `Invalid type: ${clientData.type}`,
+              });
             }
 
             // Parse authenticator data
-            let authenticatorData: AuthenticatorData;
-            try {
-              authenticatorData = parseAuthenticatorData(response.authenticatorData);
-            } catch (error) {
-              return yield* Effect.fail(
+            const authenticatorData: AuthenticatorData = yield* Effect.try({
+              try: () => parseAuthenticatorData(response.authenticatorData),
+              catch: (error) =>
                 new Errors.WebAuthnVerificationError({
                   message: "Failed to parse authenticator data",
                   cause: error,
                 }),
-              );
-            }
+            });
 
             // Verify user presence
             if (!authenticatorData.userPresent) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: "User not present",
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: "User not present",
+              });
             }
 
             // Verify relying party ID hash
             if (!authenticatorData.verifyRelyingPartyIdHash(config.relyingPartyId)) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: "Invalid relying party ID hash",
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: "Invalid relying party ID hash",
+              });
             }
 
             // Verify counter (anti-replay protection)
@@ -612,11 +563,9 @@ export const make = (
             // and the counter check must be skipped per WebAuthn specification.
             if (!(authenticatorData.signatureCounter === 0 && credential.counter === 0)) {
               if (authenticatorData.signatureCounter <= credential.counter) {
-                return yield* Effect.fail(
-                  new Errors.WebAuthnVerificationError({
-                    message: "Invalid counter value (possible cloned authenticator)",
-                  }),
-                );
+                return yield* new Errors.WebAuthnVerificationError({
+                  message: "Invalid counter value (possible cloned authenticator)",
+                });
               }
             }
 
@@ -631,11 +580,9 @@ export const make = (
             );
 
             if (!verified) {
-              return yield* Effect.fail(
-                new Errors.WebAuthnVerificationError({
-                  message: "Invalid signature",
-                }),
-              );
+              return yield* new Errors.WebAuthnVerificationError({
+                message: "Invalid signature",
+              });
             }
 
             // Update credential counter
@@ -669,14 +616,15 @@ export const make = (
       ) {
         const credential = yield* credentialStore.get(credentialId);
         if (credential === null) {
-          return yield* Effect.fail(
-            new Errors.CredentialNotFoundError({ message: "Credential not found", credentialId }),
-          );
+          return yield* new Errors.CredentialNotFoundError({
+            message: "Credential not found",
+            credentialId,
+          });
         }
         if (credential.userId !== userId) {
-          return yield* Effect.fail(
-            new Errors.AuthError({ message: "Not authorized to delete this credential" }),
-          );
+          return yield* new Errors.AuthError({
+            message: "Not authorized to delete this credential",
+          });
         }
         yield* credentialStore.delete(credentialId);
       }),
@@ -688,14 +636,15 @@ export const make = (
       ) {
         const credential = yield* credentialStore.get(credentialId);
         if (credential === null) {
-          return yield* Effect.fail(
-            new Errors.CredentialNotFoundError({ message: "Credential not found", credentialId }),
-          );
+          return yield* new Errors.CredentialNotFoundError({
+            message: "Credential not found",
+            credentialId,
+          });
         }
         if (credential.userId !== userId) {
-          return yield* Effect.fail(
-            new Errors.AuthError({ message: "Not authorized to rename this credential" }),
-          );
+          return yield* new Errors.AuthError({
+            message: "Not authorized to rename this credential",
+          });
         }
         return yield* credentialStore.update({ ...credential, name });
       }),
