@@ -22,12 +22,12 @@ A generic authentication and authorization library for [Effect](https://effect.w
 - 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets, an optional `effect/unstable/persistence` backend (in-memory or Redis) via `rateLimiterPersistenceLayer`, and an `AccountLockoutPlugin` (OWASP-style lockout after N failed sign-ins)
 - 🚫 **Abuse Protection**: Captcha verification (Turnstile/reCAPTCHA/hCaptcha) and Have-I-Been-Pwned compromised-password checks as composable hooks plugins
 - 🔓 **WebAuthn / Passkeys**: Passwordless authentication with FIDO2 compliance
-- 🏢 **Organizations & Admin**: Multi-tenant organizations (members, invitations, roles) and admin tooling (ban, impersonate)
+- 🏢 **Organizations & Admin**: Multi-tenant organizations (members with deactivation, invitations, roles, per-org default role, verified email domains with opt-in JIT provisioning) and admin tooling (ban, impersonate)
 - 🗝️ **API Keys & JWT**: Hashed API keys with permissions/quotas; ES256/EdDSA JWTs with JWKS
 - 🌍 **HTTP Protocol**: A typed `effect/unstable/httpapi` contract serving the whole surface as a mountable Web handler with a derived typed client, session cookies, and trusted-origin CSRF protection
 - 📖 **OpenAPI Document + Reference UI**: Derive an OpenAPI 3.1 spec from the HTTP contract (`Http.getOpenApiSpec()`) and optionally serve it plus a Scalar reference page via `Http.make({ docs: true })`
 - 🍪 **Session Cookie Cache**: Optional HMAC-signed session-data cookie (`cookie.cache`) that serves authenticated requests without a session-store read for a short window
-- 🏛️ **Enterprise SSO**: OIDC relying party with per-organization connections, email-domain routing, and first-login provisioning
+- 🏛️ **Enterprise SSO**: OIDC relying party with per-organization connections, email-domain routing, first-login provisioning, and just-in-time membership from verified organization domains
 - 🪞 **OIDC Provider**: Act as an OpenID Connect identity provider — client registry, authorization-code flow with PKCE, consent, opaque access/refresh tokens, id_tokens on a shared JWKS, and discovery metadata
 - 🔌 **MCP / dynamic client registration**: RFC 7591 self-registration (with RFC 7592 management) and RFC 8414 authorization-server metadata, so MCP clients can register and sign in unattended — see the [MCP provider guide](./docs/guides/mcp-provider.md)
 - 🅶 **Google One Tap**: Verify the One Tap credential against Google's JWKS and sign in by verified email
@@ -94,7 +94,6 @@ const sessionStore: typeof Auth.SessionStore.Service = {
 // `attributes` bag for app-specific data.
 const userStore: typeof Auth.UserStore.Service = {
   get: (userId) => Effect.succeed(null), // Look up by id; null if not found
-  getCredentials: (userId) => Effect.succeed("hashed-password"),
 };
 ```
 
@@ -695,9 +694,10 @@ const login = (email: string, password: string, ip: string) =>
     // Proceed with login...
     const hasher = yield* Auth.Password.PasswordHasher;
     const userStore = yield* Auth.UserStore;
+    const passwordStore = yield* Auth.Email.EmailPasswordStore;
 
     const user = yield* userStore.get(email);
-    const hash = yield* userStore.getCredentials(user.id);
+    const hash = yield* passwordStore.getPasswordHash(user.id);
     const isValid = yield* hasher.verify(password, hash);
 
     if (!isValid) {

@@ -392,10 +392,11 @@ the engine for org dynamic access control (M4), which with teams unblocks SCIM g
   schema-generation CLI and the `packages/cedar`/SIWE/payments door-open
   candidates remain open whenever demand appears.
 - **M7 — DX & breadth (#92.2 done 2026-08-30; breadth ongoing).** The client
-  now covers 89 of the contract's 101 endpoints as first-party typed
-  sections (identifiers, the full organization surface incl. teams and
-  dynamic roles, phone OTP, One Tap, SSO, device authorization, API keys,
-  JWKS, admin, OIDC client management; the 12 gaps are protocol endpoints
+  now covers 97 of the contract's 109 endpoints as first-party typed
+  sections (identifiers, the full organization surface incl. teams,
+  dynamic roles, member deactivation and domain claims, phone OTP, One Tap,
+  SSO, device authorization, API keys, JWKS, admin, OIDC client management;
+  the 12 gaps are protocol endpoints
   consumed by other clients), plus `multiFactor.continueChallenge` binding
   `AuthSuccess.secondFactor` into the verify calls with client-side expiry
   awareness; `docs/guides/client.md` documents the whole client. Still

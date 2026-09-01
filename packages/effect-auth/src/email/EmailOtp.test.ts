@@ -68,8 +68,6 @@ const sessionStore = {
 
 const userStore = {
   get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
-
-  getCredentials: (_userId: string) => Effect.succeed(null),
 };
 
 const addUser = (user: User) => {

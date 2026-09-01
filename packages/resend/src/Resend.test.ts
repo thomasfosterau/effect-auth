@@ -15,7 +15,9 @@ const stubFetch = (
   response: Response | ((request: CapturedRequest) => Response),
 ): { readonly fetch: typeof fetch; readonly calls: CapturedRequest[] } => {
   const calls: CapturedRequest[] = [];
-  const fetchStub = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  // `RequestInfo` is not a global under `types: ["node"]`; take fetch's own
+  // input type instead of naming the DOM alias.
+  const fetchStub = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const request = { url: String(input), init: init ?? {} };
     calls.push(request);
     return typeof response === "function" ? response(request) : response;

@@ -360,7 +360,6 @@ describe("Hooks - integration with EmailPasswordService", () => {
 
     const userStore = {
       get: (userId: string) => Effect.sync(() => users.get(userId) ?? null),
-      getCredentials: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     };
 
     const emailPasswordStore = {

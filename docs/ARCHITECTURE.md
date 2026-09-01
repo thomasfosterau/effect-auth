@@ -215,7 +215,7 @@ Any design change that would weaken timing-safety, entropy, cookie flags, CSRF/t
 
 ## Testing
 
-- 490+ core tests plus package suites (SQL storage, client adapters, hashers) run with `vp test`; test files typecheck via the repo's `tsconfig.test.json`.
+- 490+ core tests plus package suites (SQL storage, client adapters, hashers) run with `vp test`. Each package's `tsconfig.json` excludes `*.test.ts` (it drives the declaration build), so test files are type-checked by a sibling `tsconfig.test.json` — the same config with the test exclusion dropped — which every package's `typecheck` script runs as a second `tsc --noEmit -p tsconfig.test.json` pass.
 - The Effect language service enforces idioms at typecheck time (yieldable errors, single-provide layering, requirement leakage).
 
 ## Dependencies

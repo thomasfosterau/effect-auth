@@ -18,6 +18,16 @@ const members: ReadonlyArray<Member> = [
   { id: "m1", organizationId: ACME, userId: "alice", role: "admin", createdAt: 1 },
   { id: "m2", organizationId: GLOBEX, userId: "alice", role: "member", createdAt: 1 },
   { id: "m3", organizationId: ACME, userId: "bob", role: "member", createdAt: 1 },
+  // Deactivated: the row is still there, the authority is not.
+  {
+    id: "m4",
+    organizationId: GLOBEX,
+    userId: "carol",
+    role: "member",
+    status: "inactive",
+    previousRole: "admin",
+    createdAt: 1,
+  },
 ];
 
 const teams: ReadonlyArray<Team> = [
@@ -119,6 +129,29 @@ describe("organizationEntityResolver", () => {
         slice,
         OrganizationEntities.userRef("alice"),
         OrganizationEntities.roleRef(GLOBEX, "admin"),
+      ),
+    ).toBe(false);
+  });
+
+  it("projects nothing for a deactivated membership", async () => {
+    const resolved = await resolve([OrganizationEntities.userRef("carol")]);
+    const slice = Entity.slice(resolved);
+
+    const carol = Entity.getEntity(slice, OrganizationEntities.userRef("carol"));
+    expect(carol?.parents).toEqual([]);
+    // Neither the parked role nor the one the row currently carries.
+    expect(
+      Entity.entityIn(
+        slice,
+        OrganizationEntities.userRef("carol"),
+        OrganizationEntities.roleRef(GLOBEX, "admin"),
+      ),
+    ).toBe(false);
+    expect(
+      Entity.entityIn(
+        slice,
+        OrganizationEntities.userRef("carol"),
+        OrganizationEntities.organizationRef(GLOBEX),
       ),
     ).toBe(false);
   });

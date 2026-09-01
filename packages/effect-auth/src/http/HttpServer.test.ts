@@ -179,7 +179,6 @@ const makeFixture = (): Fixture => {
 
   const userStore: typeof UserStore.Service = {
     get: getUserById,
-    getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
   };
 
   const emailPasswordStore: typeof EmailPasswordStore.Service = {
@@ -266,7 +265,13 @@ const makeFixture = (): Fixture => {
   // Stage 3: AuthLifecycleService needs EmailPasswordService + others from stage 2.
   const authLifecycleServiceLayer = AuthLifecycleService.layer().pipe(Layer.provide(stage2));
 
-  const services: Layer.Layer<AuthServices> = Layer.mergeAll(stage2, authLifecycleServiceLayer);
+  // `baseServices` keeps every output of the stage layers — the optional
+  // feature services below are built on top of it and read the raw stores
+  // (`UserStore`, `UserServiceStore`, `EmailPasswordStore`) directly, so
+  // narrowing to `AuthServices` first would leave those in their `RIn`.
+  // `services` is the same layer, narrowed to what the HTTP server asks for.
+  const baseServices = Layer.mergeAll(stage2, authLifecycleServiceLayer);
+  const services: Layer.Layer<AuthServices> = baseServices;
 
   // --- optional feature stores -----------------------------------------------
   const magicLinks = new Map<string, MagicLinkToken>();
@@ -419,12 +424,12 @@ const makeFixture = (): Fixture => {
     deleteUser: (userId) => Effect.sync(() => void usersById.delete(userId)),
   };
 
-  // Every optional-feature store, merged with the base `services` layer:
+  // Every optional-feature store, merged with the base services layer:
   // enough to satisfy any feature service's construction-time dependencies
   // (their own store(s) plus SessionService/IdentifierStore/PasswordHasher/
-  // UserStore/Hooks already provided by `services`).
+  // UserStore/Hooks already provided by `baseServices`).
   const featureBase = Layer.mergeAll(
-    services,
+    baseServices,
     Layer.succeed(AnonymousUserStore)(anonymousUserStore),
     Layer.succeed(DeviceAuthorizationStore)(deviceStore),
     Layer.succeed(PhoneOtpStore)(phoneOtpStore),

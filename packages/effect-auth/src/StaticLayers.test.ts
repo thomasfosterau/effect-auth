@@ -44,8 +44,6 @@ describe("static service layers", () => {
     const sessions = new Map<string, Auth.Session>();
     const user: Auth.User = {
       id: "user-1",
-      email: "user@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
@@ -71,7 +69,6 @@ describe("static service layers", () => {
 
     const userStore: typeof Auth.UserStore.Service = {
       get: (userId) => Effect.succeed(userId === user.id ? user : null),
-      getCredentials: () => Effect.succeed(null),
     };
 
     const config: Auth.SessionConfig = {
@@ -108,15 +105,12 @@ describe("static service layers", () => {
     // UserService.layer() requires only its store; exercise it end-to-end.
     const user: Auth.User = {
       id: "user-2",
-      email: "user2@example.com",
-      emailVerified: false,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
     const store: typeof Auth.UserServiceStore.Service = {
       get: (userId) => Effect.succeed(userId === user.id ? user : null),
-      getByEmail: () => Effect.succeed(null),
       update: (u) => Effect.succeed(u),
       delete: () => Effect.void,
     };

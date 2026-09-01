@@ -40,7 +40,7 @@
   "scripts": {
     "build": "vp build && vue-tsc --emitDeclarationOnly",
     "test": "vp test run",
-    "typecheck": "vue-tsc --noEmit && vp test --typecheck --run"
+    "typecheck": "vue-tsc --noEmit && vue-tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run"
   },
   "dependencies": {
     "@thomasfosterau/effect-auth-client": "workspace:*"

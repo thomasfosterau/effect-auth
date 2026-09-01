@@ -25,13 +25,14 @@ const RAW_TOKEN = "validrawtoken1234567890abcdef123456";
 const USER_ID = "user-42";
 const now = new Date();
 
+// `email` is not a first-class `User` field (login handles are `Identifier`
+// records); it rides along in `attributes` here purely so the assertions can
+// check that a non-trivial user payload survives the middleware.
 const testUser: Types.User = {
   id: USER_ID,
-  email: "user@example.com",
-  emailVerified: true,
   createdAt: now,
   updatedAt: now,
-  attributes: {},
+  attributes: { email: "user@example.com", emailVerified: true },
 };
 
 const testSession: Types.Session = {
@@ -72,6 +73,17 @@ const ok = HttpServerResponse.empty({ status: 200 });
 type Cell<T> = { value: T | undefined };
 const cell = <T>(): Cell<T> => ({ value: undefined });
 
+/**
+ * `HttpApiMiddleware.Service` types its scheme handlers against the whole
+ * `HttpApi` surface, which these unit tests deliberately do not build — so the
+ * handlers are invoked through an `any` cast. Re-annotating the *result* keeps
+ * the effect's requirements honest (the middleware leaves `SessionService`,
+ * `Hooks` and — on the cookie path — `HttpServerRequest` to be provided below)
+ * instead of letting `any` swallow them.
+ */
+type MiddlewareResult<A, R> = Effect.Effect<A, unknown, R>;
+type PerRequestServices = SessionService | Hooks;
+
 // ---------------------------------------------------------------------------
 // AuthMiddleware – conduit_session handler
 // ---------------------------------------------------------------------------
@@ -85,10 +97,14 @@ describe("HttpMiddleware.layer – conduit_session handler", () => {
   ) =>
     Effect.gen(function* () {
       const svc = yield* AuthMiddleware;
-      return yield* (svc.conduit_session as any)(handler, undefined).pipe(
+      const applied: MiddlewareResult<
+        typeof ok,
+        PerRequestServices | HttpServerRequest.HttpServerRequest
+      > = (svc.conduit_session as any)(handler, undefined);
+      return yield* applied.pipe(
         Effect.provideService(HttpServerRequest.HttpServerRequest, request),
       );
-    }).pipe(Effect.provide(authLayer), Effect.provide(baseLayer));
+    }).pipe(Effect.provide(Layer.mergeAll(authLayer, baseLayer)));
 
   it("valid session cookie → CurrentSession and CurrentUser are provided", async () => {
     const sessionCell = cell<Types.Session>();
@@ -107,7 +123,7 @@ describe("HttpMiddleware.layer – conduit_session handler", () => {
     expect(sessionCell.value?.id).toBe(RAW_TOKEN);
     expect(sessionCell.value?.userId).toBe(USER_ID);
     expect(userCell.value?.id).toBe(USER_ID);
-    expect(userCell.value?.email).toBe("user@example.com");
+    expect(userCell.value?.attributes.email).toBe("user@example.com");
   });
 
   it("no session cookie → Unauthorized failure", async () => {
@@ -203,12 +219,16 @@ describe("HttpMiddleware.layer – bearer handler", () => {
   ) =>
     Effect.gen(function* () {
       const svc = yield* AuthMiddleware;
-      return yield* (svc.bearer as any)(handler, {
-        credential: Redacted.make(token),
-        endpoint: undefined,
-        group: undefined,
-      });
-    }).pipe(Effect.provide(authLayer), Effect.provide(baseLayer));
+      const applied: MiddlewareResult<typeof ok, PerRequestServices> = (svc.bearer as any)(
+        handler,
+        {
+          credential: Redacted.make(token),
+          endpoint: undefined,
+          group: undefined,
+        },
+      );
+      return yield* applied;
+    }).pipe(Effect.provide(Layer.mergeAll(authLayer, baseLayer)));
 
   it("valid Bearer token → CurrentSession and CurrentUser are provided", async () => {
     const sessionCell = cell<Types.Session>();
@@ -267,10 +287,12 @@ describe("HttpMiddleware.optionalLayer", () => {
     });
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
-      yield* (svc as any)(handler, undefined).pipe(
-        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
-      );
-    }).pipe(Effect.provide(optionalLayer), Effect.provide(baseLayer));
+      const applied: MiddlewareResult<
+        typeof ok,
+        PerRequestServices | HttpServerRequest.HttpServerRequest
+      > = (svc as any)(handler, undefined);
+      yield* applied.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
+    }).pipe(Effect.provide(Layer.mergeAll(optionalLayer, baseLayer)));
     return { maybeCell, effect };
   };
 
@@ -316,10 +338,12 @@ describe("HttpMiddleware.optionalLayer", () => {
     });
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
-      yield* (svc as any)(handler, undefined).pipe(
-        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
-      );
-    }).pipe(Effect.provide(optionalLayer), Effect.provide(baseLayer));
+      const applied: MiddlewareResult<
+        typeof ok,
+        PerRequestServices | HttpServerRequest.HttpServerRequest
+      > = (svc as any)(handler, undefined);
+      yield* applied.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
+    }).pipe(Effect.provide(Layer.mergeAll(optionalLayer, baseLayer)));
     return { principalCell, effect };
   };
 

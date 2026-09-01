@@ -43,13 +43,14 @@ const makeHarness = (config?: AnonymousConfig): Harness => {
       Effect.sync(() => {
         const id = `anon-${++seq}`;
         const now = new Date();
+        // `email` is not a first-class `User` field — anonymous users hold no
+        // identifiers at all (see `Anonymous.ts`), so this fixture's
+        // placeholder address rides in `attributes`.
         const user: Types.User = {
           id,
-          email: `${id}@anonymous.local`,
-          emailVerified: false,
           createdAt: now,
           updatedAt: now,
-          attributes: { isAnonymous: true },
+          attributes: { isAnonymous: true, email: `${id}@anonymous.local` },
         };
         users.set(id, user);
         created.push(id);
@@ -121,7 +122,7 @@ describe("Anonymous", () => {
     const h = makeHarness();
     const { user, session } = await run(h, (svc) => svc.signInAnonymous());
     expect(isAnonymousUser(user)).toBe(true);
-    expect(user.email).toMatch(/@anonymous\.local$/);
+    expect(user.attributes["email"]).toMatch(/@anonymous\.local$/);
     expect(session.userId).toBe(user.id);
     expect(h.users.has(user.id)).toBe(true);
   });
@@ -138,8 +139,6 @@ describe("Anonymous", () => {
     const { user: anon } = await run(h, (svc) => svc.signInAnonymous());
     const realUser: Types.User = {
       id: "real-1",
-      email: "real@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
@@ -152,13 +151,11 @@ describe("Anonymous", () => {
   it("isAnonymousUser detects the convention flag", () => {
     const anon: Types.User = {
       id: "a",
-      email: "a@anonymous.local",
-      emailVerified: false,
       createdAt: new Date(),
       updatedAt: new Date(),
-      attributes: { isAnonymous: true },
+      attributes: { isAnonymous: true, email: "a@anonymous.local" },
     };
-    const real: Types.User = { ...anon, id: "b", email: "b@example.com", attributes: {} };
+    const real: Types.User = { ...anon, id: "b", attributes: { email: "b@example.com" } };
     expect(isAnonymousUser(anon)).toBe(true);
     expect(isAnonymousUser(real)).toBe(false);
   });
@@ -167,16 +164,12 @@ describe("Anonymous", () => {
     const h = makeHarness();
     const notAnon: Types.User = {
       id: "real-99",
-      email: "real99@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
     };
     const target: Types.User = {
       id: "real-100",
-      email: "real100@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
@@ -198,8 +191,6 @@ describe("Anonymous", () => {
     const h = makeHarness();
     const realUser: Types.User = {
       id: "real-2",
-      email: "real2@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},
@@ -223,8 +214,6 @@ describe("Anonymous", () => {
     const { user: anon } = await run(h, (svc) => svc.signInAnonymous());
     const realUser: Types.User = {
       id: "real-3",
-      email: "real3@example.com",
-      emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       attributes: {},

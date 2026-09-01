@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect";
 import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";
 import * as Policy from "./Policy.ts";
+import * as Errors from "./Errors.ts";
 
 const alice = Entity.ref("User", "alice");
 const bob = Entity.ref("User", "bob");
@@ -195,7 +196,7 @@ describe("custom policies", () => {
       Policy.custom({
         id,
         effect,
-        predicate: () => Effect.fail(new Error("store down")),
+        predicate: () => Effect.fail(new Errors.AuthError({ message: "store down" })),
       });
     const denied = await Effect.runPromise(
       Policy.decide([failing("p", "permit")], requestFor(alice, readDoc, doc1)),

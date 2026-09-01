@@ -140,7 +140,7 @@ session or one user at a time.
 
 Application code often has the opposite shape — a page that resolves twenty
 users, or a list that asks "does this identifier exist?" once per row. For
-that, the same five read paths are also exposed as Effect `Request`s backed by
+that, the same four read paths are also exposed as Effect `Request`s backed by
 `RequestResolver`s, so concurrent lookups collapse into a single
 `WHERE ... IN (...)` query:
 
@@ -156,13 +156,12 @@ const program = Effect.forEach(userIds, Drizzle.Requests.getUser, { concurrency:
 program.pipe(Effect.provide(requests));
 ```
 
-| Constructor                                  | Request                 | Resolves to                      |
-| -------------------------------------------- | ----------------------- | -------------------------------- |
-| `Requests.getSession(id)`                    | `GetSession`            | `Session \| null`                |
-| `Requests.getUser(id)`                       | `GetUser`               | `User \| null`                   |
-| `Requests.getUserCredentials(id)`            | `GetUserCredentials`    | `string \| null` (password hash) |
-| `Requests.getIdentifierByValue(type, value)` | `GetIdentifierByValue`  | `Identifier \| null`             |
-| `Requests.listIdentifiersByUser(userId)`     | `ListIdentifiersByUser` | `ReadonlyArray<Identifier>`      |
+| Constructor                                  | Request                 | Resolves to                 |
+| -------------------------------------------- | ----------------------- | --------------------------- |
+| `Requests.getSession(id)`                    | `GetSession`            | `Session \| null`           |
+| `Requests.getUser(id)`                       | `GetUser`               | `User \| null`              |
+| `Requests.getIdentifierByValue(type, value)` | `GetIdentifierByValue`  | `Identifier \| null`        |
+| `Requests.listIdentifiersByUser(userId)`     | `ListIdentifiersByUser` | `ReadonlyArray<Identifier>` |
 
 Each returns an `Effect<…, AuthError, AuthRequests>`; provide
 `Drizzle.Requests.layer()` (on top of a `DrizzleDatabase` layer) to satisfy it.
@@ -173,8 +172,6 @@ What the resolvers do inside a batch:
   twenty.
 - **Coalesce.** Different ids in the same batch become one
   `WHERE id IN (...)`.
-- **Share a row.** `getUser` and `getUserCredentials` read the same row, so
-  they share a resolver and therefore a single query.
 - **Group composite keys.** `(type, value)` pairs are grouped by type and
   `OR`-ed together — still one round trip when a batch mixes emails, usernames
   and phone numbers.
@@ -316,16 +313,17 @@ CREATE TABLE IF NOT EXISTS effect_auth_identifiers (
 
 The stores implement effect-auth's contracts exactly:
 
-- **`null` on a miss.** `get`, `getCredentials`, `getByValue` and `setVerified`
-  return `null` rather than failing when there is no matching row.
+- **`null` on a miss.** `get`, `getByValue` and `setVerified` return `null`
+  rather than failing when there is no matching row.
 - **Deletes are no-ops** when the row does not exist.
 - **Driver failures become `AuthError`** with the original error preserved as
   `cause` — including the unique-index violation raised when two users race for
   the same `(type, value)`. `Auth.claimIdentifier` in core re-reads the pair on
   failure and turns that race into an `IdentifierTakenError`.
-- **`getCredentials` reads `password_hash`.** Writing it is the job of a store
-  this package does not implement yet (`EmailPasswordStore`), so pair it with
-  the `sql` package or your own writer for sign-up flows.
+- **Password hashes live outside `UserStore`.** Reading and writing
+  `password_hash` is the job of a store this package does not implement yet
+  (`EmailPasswordStore`), so pair it with the `sql` package or your own writer
+  for sign-up flows.
 - **Session ids are token hashes.** The service layer hashes the bearer token
   before it reaches the store; the database never sees a raw token.
 

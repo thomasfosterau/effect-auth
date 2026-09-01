@@ -52,8 +52,6 @@ const mockUserStore = {
       "user1",
       {
         id: "user1",
-        email: "user1@example.com",
-        emailVerified: false,
         name: "Test User",
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -64,8 +62,6 @@ const mockUserStore = {
       "user2",
       {
         id: "user2",
-        email: "user2@example.com",
-        emailVerified: false,
         name: "Another User",
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -75,8 +71,6 @@ const mockUserStore = {
   ]),
 
   get: (userId: string) => Effect.sync(() => mockUserStore.users.get(userId) ?? null),
-
-  getCredentials: (_userId: string) => Effect.succeed("hashed-password"),
 };
 
 const SessionStoreTest = Context.make(SessionStore, mockSessionStore);

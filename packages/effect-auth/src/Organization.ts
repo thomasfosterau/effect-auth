@@ -19,6 +19,18 @@
  * *replaces* the static entry of the same name for that organization - the
  * two are never merged, so what a tenant sees is exactly what it defined.
  *
+ * **Member status:** a membership can be deactivated ({@link Member.status})
+ * instead of deleted. The row - and the member's team memberships and role -
+ * survive, but every authorization question in the organization answers as if
+ * the user were not a member. Application sessions are deliberately left
+ * alone; see {@link OrganizationConfig.onMemberDeactivated}.
+ *
+ * **Domains:** an organization may claim email domains
+ * ({@link OrganizationDomain}), each proved through DNS (via an app-provided
+ * {@link DomainVerifier}) or attested manually. A *verified* domain is what
+ * lets an SSO sign-in provision membership just in time, per organization and
+ * off by default ({@link Organization.jitProvisioning}).
+ *
  * **Active organization:** this module deliberately does not manage a
  * per-session "active organization" (better-auth's `setActiveOrganization`).
  * The conventional integration is to store the selected organization id on
@@ -57,9 +69,31 @@ export interface Organization {
   readonly logo?: string;
   /** Arbitrary app-specific metadata */
   readonly metadata: Record<string, unknown>;
+  /**
+   * Role given to members added without an explicit one (direct
+   * {@link OrganizationService.addMember}, JIT provisioning, SCIM). Absent
+   * means `"member"`. Only owners may change it - see
+   * {@link OrganizationService.setDefaultRole}.
+   */
+  readonly defaultRole?: string;
+  /**
+   * Whether a user signing in through SSO whose verified email domain matches
+   * one of this organization's *verified* domains is added as a member
+   * automatically. Absent means `false`: silent domain absorption is opt-in.
+   */
+  readonly jitProvisioning?: boolean;
   /** Epoch milliseconds */
   readonly createdAt: number;
 }
+
+/**
+ * Lifecycle states of a membership.
+ *
+ * An `inactive` member keeps its row (history, team memberships and the
+ * restorable role survive) but is treated as a non-member by every
+ * authorization question - see {@link isActiveMember}.
+ */
+export type MemberStatus = "active" | "inactive";
 
 /**
  * A user's membership in an organization.
@@ -70,9 +104,25 @@ export interface Member {
   readonly userId: string;
   /** Role name, resolved against the configured role → permission map */
   readonly role: string;
+  /**
+   * Membership lifecycle state. Absent means `"active"`, so rows written
+   * before member deactivation existed keep working unchanged.
+   */
+  readonly status?: MemberStatus;
+  /**
+   * The role the member held when they were deactivated, restored on
+   * reactivation. Only set while `status` is `"inactive"`.
+   */
+  readonly previousRole?: string;
   /** Epoch milliseconds */
   readonly createdAt: number;
 }
+
+/**
+ * Whether a membership counts for authorization: `status` absent (the
+ * historical shape) or `"active"`.
+ */
+export const isActiveMember = (member: Member): boolean => member.status !== "inactive";
 
 /**
  * Lifecycle states of an invitation.
@@ -153,17 +203,150 @@ export interface OrgRole {
 }
 
 /**
+ * How far along a domain claim is.
+ *
+ * `pending` - the claim exists but nothing has proved it yet; `verified` - the
+ * organization has proved control (and only then does the domain carry any
+ * authority, e.g. for JIT provisioning); `failed` - the last verification
+ * attempt did not find the proof. A `failed` claim can be retried.
+ */
+export type DomainVerificationState = "pending" | "verified" | "failed";
+
+/**
+ * How a domain claim is proved.
+ *
+ * `dns` - a TXT record carrying {@link OrganizationDomain.verificationToken},
+ * checked by a {@link DomainVerifier} the app provides; `manual` - the app (or
+ * an org owner/admin acting through the verify endpoint) attests to it out of
+ * band.
+ */
+export type DomainVerificationStrategy = "dns" | "manual";
+
+/**
+ * An email domain claimed by an organization.
+ *
+ * Domains are globally unique: `domain` identifies at most one row across all
+ * organizations, pending claims included. Allowing two tenants to hold pending
+ * claims on the same domain would make "who gets it" a race decided by
+ * verification order, and would leak one tenant's claim to another - so a
+ * second organization claiming a domain is refused outright, whatever state
+ * the first claim is in.
+ */
+export interface OrganizationDomain {
+  readonly id: string;
+  readonly organizationId: string;
+  /** Normalized (trimmed, lowercased) domain, e.g. `"acme.test"` */
+  readonly domain: string;
+  readonly verificationState: DomainVerificationState;
+  readonly verificationStrategy: DomainVerificationStrategy;
+  /**
+   * Random token the DNS TXT record must contain, generated server-side when
+   * the claim is added with the `dns` strategy. Absent for `manual` claims.
+   */
+  readonly verificationToken?: string;
+  /** Epoch milliseconds */
+  readonly createdAt: number;
+  /** Epoch milliseconds; set when the claim reached `verified` */
+  readonly verifiedAt?: number;
+}
+
+/**
+ * Storage for {@link OrganizationDomain} claims.
+ *
+ * A separate contract from {@link OrganizationStore} so apps that never use
+ * domains implement nothing: {@link OrganizationService} resolves it from
+ * ambient context and answers "Organization domains are not enabled" when it
+ * is absent, exactly as the SAML pieces do in `Sso.ts`.
+ *
+ * Conventions: lookups answer `null` when the record does not exist, deletes of
+ * unknown ids are no-ops, and failures are reported as `AuthError`. Put a
+ * unique index on `domain` - the service checks for a conflicting claim before
+ * writing, but the index is what makes the guarantee hold under concurrency.
+ * {@link OrganizationService.deleteOrganization} releases an organization's
+ * claims before deleting it, so this store needs no cascade of its own - but a
+ * direct `OrganizationStore.deleteOrganization` call bypasses that, so delete
+ * the domain rows alongside it if you go around the service.
+ */
+export class OrganizationDomainStore extends Context.Service<
+  OrganizationDomainStore,
+  {
+    readonly create: (
+      domain: OrganizationDomain,
+    ) => Effect.Effect<OrganizationDomain, Errors.AuthError>;
+    readonly getById: (
+      domainId: string,
+    ) => Effect.Effect<OrganizationDomain | null, Errors.AuthError>;
+    /** Resolve a claim by its normalized domain, across every organization. */
+    readonly getByDomain: (
+      domain: string,
+    ) => Effect.Effect<OrganizationDomain | null, Errors.AuthError>;
+    readonly listByOrganization: (
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<OrganizationDomain>, Errors.AuthError>;
+    readonly update: (
+      domain: OrganizationDomain,
+    ) => Effect.Effect<OrganizationDomain, Errors.AuthError>;
+    /** Release a claim. A no-op for unknown ids. */
+    readonly delete: (domainId: string) => Effect.Effect<void, Errors.AuthError>;
+  }
+>()("@effect-auth/OrganizationDomainStore") {}
+
+/**
+ * In-memory {@link OrganizationDomainStore}, keyed by claim id. Single-process
+ * only - good for tests and single-instance deployments.
+ *
+ * Pass your own `Map` to inspect or pre-seed state in tests.
+ */
+export const memoryOrganizationDomainStore = (
+  records: Map<string, OrganizationDomain> = new Map(),
+): typeof OrganizationDomainStore.Service => ({
+  create: (domain) => Effect.sync(() => (records.set(domain.id, domain), domain)),
+  getById: (domainId) => Effect.sync(() => records.get(domainId) ?? null),
+  getByDomain: (domain) =>
+    Effect.sync(() => [...records.values()].find((record) => record.domain === domain) ?? null),
+  listByOrganization: (organizationId) =>
+    Effect.sync(() =>
+      [...records.values()]
+        .filter((record) => record.organizationId === organizationId)
+        .sort((a, b) => a.createdAt - b.createdAt),
+    ),
+  update: (domain) => Effect.sync(() => (records.set(domain.id, domain), domain)),
+  delete: (domainId) => Effect.sync(() => void records.delete(domainId)),
+});
+
+/**
+ * Proof-of-control check for a claimed domain, kept as a contract so core adds
+ * no DNS dependency.
+ *
+ * `verify` answers whether `domain` currently publishes `token` (conventionally
+ * as a TXT record). Implement it over whatever resolver your runtime has - Node
+ * `dns/promises`, Cloudflare's DoH endpoint, a hosting provider's API - and
+ * provide it with `Layer.succeed(DomainVerifier)(impl)`. Without it in context
+ * the `dns` strategy is unavailable and `manual` attestation is the only route
+ * to a verified domain.
+ */
+export class DomainVerifier extends Context.Service<
+  DomainVerifier,
+  {
+    readonly verify: (domain: string, token: string) => Effect.Effect<boolean, Errors.AuthError>;
+  }
+>()("@effect-auth/DomainVerifier") {}
+
+/**
  * Default role → permission map, mirroring better-auth's built-in
  * organization roles. Permissions are `"resource:action"` strings.
  *
- * - `owner` - full control (organization update/delete, member, invitation
- *   and team management, plus `role:manage` for custom organization roles)
- * - `admin` - member, invitation and team management plus organization
+ * - `owner` - full control (organization update/delete, member, invitation,
+ *   domain and team management, plus `role:manage` for custom organization
+ *   roles and the organization's default role)
+ * - `admin` - member, invitation, domain and team management plus organization
  *   updates, but cannot delete the organization or manage custom roles
  * - `member` - read-only participant (no management permissions; may still
- *   read the organization's teams)
+ *   read the organization's teams and domains)
  *
- * Override via {@link OrganizationConfig.roles}.
+ * Override via {@link OrganizationConfig.roles}. A map that omits
+ * `domain:manage` simply leaves domain management to nobody - resolution fails
+ * closed, as it does for every other permission.
  */
 export const defaultOrganizationRoles: Record<string, ReadonlyArray<string>> = {
   owner: [
@@ -174,6 +357,7 @@ export const defaultOrganizationRoles: Record<string, ReadonlyArray<string>> = {
     "member:delete",
     "invitation:create",
     "invitation:cancel",
+    "domain:manage",
     "team:create",
     "team:update",
     "team:delete",
@@ -187,6 +371,7 @@ export const defaultOrganizationRoles: Record<string, ReadonlyArray<string>> = {
     "member:delete",
     "invitation:create",
     "invitation:cancel",
+    "domain:manage",
     "team:create",
     "team:update",
     "team:delete",
@@ -333,6 +518,30 @@ export interface OrganizationConfig {
     invitation: Invitation,
     organization: Organization,
   ) => Effect.Effect<void, OrganizationError>;
+  /**
+   * Called after a member is deactivated, with the updated (inactive)
+   * membership.
+   *
+   * **Deliberate deviation from WorkOS:** deactivating a member there ends
+   * that user's sessions. Here it does not, because a session is *app*-scoped
+   * while a membership is *organization*-scoped: one user may belong to
+   * several organizations, and revoking their sessions because one tenant
+   * deactivated them would sign them out of the others too. Everything
+   * organization-scoped is already denied the moment the row flips (every
+   * permission check treats an inactive member as a non-member), so what
+   * remains is an app-level policy question - single-tenant apps usually do
+   * want the sign-out, multi-tenant ones usually do not. This hook is where
+   * that policy goes: call
+   * `sessionManager.invalidateUserSessions(member.userId)` from it if your app
+   * wants WorkOS's behavior.
+   *
+   * Failures propagate to the caller of `deactivateMember` (the membership is
+   * already stored by then), matching `sendInvitationEmail`.
+   */
+  readonly onMemberDeactivated?: (
+    member: Member,
+    organization: Organization,
+  ) => Effect.Effect<void, OrganizationError>;
 }
 
 /**
@@ -353,6 +562,23 @@ export interface UpdateOrganizationInput {
   readonly slug?: string;
   readonly logo?: string;
   readonly metadata?: Record<string, unknown>;
+  /**
+   * Turn JIT provisioning on or off. Gated on `organization:update` like the
+   * rest of this input - the same tier that adds the verified domains JIT
+   * acts on. The *role* JIT hands out stays owner-only
+   * ({@link OrganizationService.setDefaultRole}).
+   */
+  readonly jitProvisioning?: boolean;
+}
+
+/**
+ * Input for claiming an email domain for an organization
+ */
+export interface AddOrganizationDomainInput {
+  /** Domain to claim; normalized (trimmed, lowercased) before storage */
+  readonly domain: string;
+  /** Defaults to `"dns"` */
+  readonly verificationStrategy?: DomainVerificationStrategy;
 }
 
 /**
@@ -423,6 +649,9 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Delete an organization. Requires the `organization:delete` permission.
+     * Its domain claims are released first (they are globally unique, so
+     * leaving them behind would squat those domains forever); the store
+     * cascades members, invitations, teams and custom roles.
      */
     readonly deleteOrganization: (
       userId: string,
@@ -500,14 +729,28 @@ export class OrganizationService extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
 
     /**
+     * Resend a pending invitation: the same row and id, its `expiresAt` pushed
+     * out by the configured invitation TTL from now, and
+     * `sendInvitationEmail` invoked again. Requires the `invitation:create`
+     * permission, like issuing one. Unknown, accepted, rejected and canceled
+     * invitations are refused with an `OrganizationError` rather than silently
+     * re-issued.
+     */
+    readonly resendInvitation: (
+      actorId: string,
+      invitationId: string,
+    ) => Effect.Effect<Invitation, OrganizationError | Errors.AuthError>;
+
+    /**
      * Add a user to the organization directly (no invitation). Requires the
-     * `member:create` permission and enforces `membershipLimit`.
+     * `member:create` permission and enforces `membershipLimit`. Omitting
+     * `role` uses the organization's `defaultRole` (default `"member"`).
      */
     readonly addMember: (
       actorId: string,
       organizationId: string,
       userId: string,
-      role: string,
+      role?: string,
     ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
 
     /**
@@ -524,7 +767,9 @@ export class OrganizationService extends Context.Service<
 
     /**
      * Change a member's role. Requires the `member:update` permission. The last
-     * owner cannot be demoted.
+     * active owner cannot be demoted, and an inactive member's role is not
+     * editable - reactivate them first, or the restore would overwrite the
+     * change.
      */
     readonly updateMemberRole: (
       actorId: string,
@@ -532,6 +777,116 @@ export class OrganizationService extends Context.Service<
       memberUserId: string,
       role: string,
     ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Suspend a membership without deleting it. Requires the `member:update`
+     * permission; an owner may only be deactivated by another owner, and the
+     * last active owner never can.
+     *
+     * The row survives (history, team memberships and the member's role, kept
+     * in `previousRole`), the member is demoted to the organization's
+     * `defaultRole` so nothing reading `member.role` directly - the entity
+     * projection, your own dashboards - still sees a privileged role, and
+     * every permission check in this organization now denies them.
+     * Application sessions are deliberately *not* revoked; see
+     * {@link OrganizationConfig.onMemberDeactivated}.
+     */
+    readonly deactivateMember: (
+      actorId: string,
+      organizationId: string,
+      memberUserId: string,
+    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Restore a deactivated membership, putting back the role it held when it
+     * was deactivated. Requires the `member:update` permission. No capacity
+     * check: the row never stopped occupying a seat, so reactivating it adds
+     * nothing to `membershipLimit`.
+     */
+    readonly reactivateMember: (
+      actorId: string,
+      organizationId: string,
+      memberUserId: string,
+    ) => Effect.Effect<Member, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Set the role new members receive when none is given (direct
+     * `addMember`, JIT provisioning, SCIM). Requires the `role:manage`
+     * permission - owner-only by default, matching custom-role management -
+     * and the role must exist in the organization's role set (a custom
+     * {@link OrgRole} or an entry of the static `config.roles` map).
+     */
+    readonly setDefaultRole: (
+      actorUserId: string,
+      organizationId: string,
+      role: string,
+    ) => Effect.Effect<Organization, OrganizationError | Errors.AuthError>;
+
+    /**
+     * List an organization's claimed email domains. Any member may do so.
+     */
+    readonly listDomains: (
+      actorUserId: string,
+      organizationId: string,
+    ) => Effect.Effect<ReadonlyArray<OrganizationDomain>, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Claim an email domain for the organization. Requires the
+     * `domain:manage` permission. The claim starts `pending`; with the `dns`
+     * strategy a random verification token is generated server-side to publish
+     * as a TXT record. A domain already claimed by any organization - pending
+     * or verified - is refused.
+     */
+    readonly addDomain: (
+      actorUserId: string,
+      organizationId: string,
+      input: AddOrganizationDomainInput,
+    ) => Effect.Effect<OrganizationDomain, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Release a domain claim. Requires the `domain:manage` permission.
+     * Releasing an unknown id is refused (the id is scoped to the
+     * organization, so a wrong one is a mistake, not a no-op).
+     */
+    readonly removeDomain: (
+      actorUserId: string,
+      organizationId: string,
+      domainId: string,
+    ) => Effect.Effect<void, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Attempt to verify a domain claim. Requires the `domain:manage`
+     * permission.
+     *
+     * `dns` claims ask the ambient {@link DomainVerifier} whether the domain
+     * publishes the claim's token; without that service the strategy is
+     * unavailable and the call fails. `manual` claims are attested by the
+     * caller's `domain:manage` permission alone. A failed DNS check answers
+     * with the claim in state `"failed"` (retryable) rather than an error -
+     * "the record is not there yet" is an outcome, not a fault.
+     */
+    readonly verifyDomain: (
+      actorUserId: string,
+      organizationId: string,
+      domainId: string,
+    ) => Effect.Effect<OrganizationDomain, OrganizationError | Errors.AuthError>;
+
+    /**
+     * Just-in-time membership for an SSO sign-in: if `email`'s domain is a
+     * *verified* domain of an organization with `jitProvisioning` enabled and
+     * the user is not a member yet, add them as an active member with that
+     * organization's `defaultRole`.
+     *
+     * Answers the new membership, or `null` when nothing applies (no matching
+     * domain, the claim is not verified, JIT is off, the user is already a
+     * member, or no {@link OrganizationDomainStore} is configured). Callers
+     * must only pass addresses whose ownership has been proved - this is what
+     * turns a domain claim into membership.
+     */
+    readonly provisionJitMembership: (
+      userId: string,
+      email: string,
+    ) => Effect.Effect<Member | null, OrganizationError | Errors.AuthError>;
 
     /**
      * Create a team inside an organization. Requires the `team:create`
@@ -651,7 +1006,9 @@ export class OrganizationService extends Context.Service<
      * Whether the user's role in the organization grants the given
      * `"resource:action"` permission - resolved against the organization's
      * custom {@link OrgRole} first, then the static `config.roles` map, and
-     * denied when neither defines the role. Non-members simply get `false`.
+     * denied when neither defines the role. Non-members - and *inactive*
+     * members, which every authorization path treats as non-members - simply
+     * get `false`.
      */
     readonly checkPermission: (
       userId: string,
@@ -677,6 +1034,12 @@ export class OrganizationService extends Context.Service<
     Layer.effect(OrganizationService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
+/** Trim surrounding whitespace and lower-case a domain. */
+const normalizeDomain = (domain: string): string => domain.trim().toLowerCase();
+
+/** The domain part of an email address, normalized; `""` when there is none. */
+const domainOfEmail = (email: string): string => normalizeDomain(email.split("@")[1] ?? "");
+
 /**
  * Create an organization service
  */
@@ -698,6 +1061,15 @@ export const make = (
     const store = yield* OrganizationStore;
     const identifiers = yield* IdentifierStore;
     const crypto = yield* Crypto.Crypto;
+
+    /**
+     * Domains are an optional half of the module: resolved from ambient
+     * context so apps that never claim one implement no extra store. Every
+     * domain path goes through {@link requireDomainStore}, which explains the
+     * absence rather than failing obscurely.
+     */
+    const domainStoreOption = yield* Effect.serviceOption(OrganizationDomainStore);
+    const domainVerifierOption = yield* Effect.serviceOption(DomainVerifier);
 
     /** Generate a random identifier for organizations, members, and invitations. */
     const generateId = (): Effect.Effect<string, Errors.AuthError> =>
@@ -766,12 +1138,22 @@ export const make = (
       });
 
     /**
+     * The actor's membership *for authorization purposes*: the row only counts
+     * while it is active, so a deactivated member is indistinguishable from a
+     * stranger everywhere a permission is decided.
+     */
+    const getActiveMember = (organizationId: string, userId: string) =>
+      Effect.map(store.getMember(organizationId, userId), (member) =>
+        member !== null && isActiveMember(member) ? member : null,
+      );
+
+    /**
      * Resolve the actor's membership and enforce a permission, returning the
      * membership so callers can inspect the actor's role.
      */
     const requireMemberPermission = (userId: string, organizationId: string, permission: string) =>
       Effect.gen(function* () {
-        const member = yield* store.getMember(organizationId, userId);
+        const member = yield* getActiveMember(organizationId, userId);
         const granted =
           member !== null && (yield* roleHasPermission(organizationId, member.role, permission));
         if (!member || !granted) {
@@ -786,11 +1168,12 @@ export const make = (
 
     /**
      * Resolve the actor's membership without requiring any permission - used
-     * by the read-only team listings, which any organization member may call.
+     * by the read-only team/domain/role listings, which any organization
+     * member may call. Inactive members are not members here either.
      */
     const requireMembership = (userId: string, organizationId: string) =>
       Effect.gen(function* () {
-        const member = yield* store.getMember(organizationId, userId);
+        const member = yield* getActiveMember(organizationId, userId);
         if (!member) {
           return yield* Effect.fail(
             new OrganizationError({ message: "You are not a member of this organization" }),
@@ -798,6 +1181,19 @@ export const make = (
         }
         return member;
       });
+
+    /** Resolve the domain store, explaining its absence when it is not wired. */
+    const requireDomainStore = Effect.gen(function* () {
+      if (domainStoreOption._tag === "None") {
+        return yield* Effect.fail(
+          new OrganizationError({
+            message:
+              "Organization domains are not enabled: provide an OrganizationDomainStore layer",
+          }),
+        );
+      }
+      return domainStoreOption.value;
+    });
 
     /** Load a team, failing when it does not exist. */
     const getTeamOrFail = (teamId: string) =>
@@ -833,12 +1229,21 @@ export const make = (
         }
       });
 
-    /** Number of members holding the protected owner (creator) role. */
+    /**
+     * Number of *active* members holding the protected owner (creator) role.
+     * Inactive owners cannot act, so counting them would let an organization
+     * deactivate its way into having nobody who can administer it.
+     */
     const countOwners = (organizationId: string) =>
       Effect.gen(function* () {
         const members = yield* store.listMembersByOrganization(organizationId);
-        return members.filter((member) => member.role === creatorRole).length;
+        return members.filter((member) => member.role === creatorRole && isActiveMember(member))
+          .length;
       });
+
+    /** The role new members get when the caller names none. */
+    const defaultRoleOf = (organization: Organization): string =>
+      organization.defaultRole ?? "member";
 
     /**
      * Refuse custom-role writes against the protected owner role: owner
@@ -862,9 +1267,38 @@ export const make = (
           organizationId,
           userId,
           role,
+          status: "active",
           createdAt: Date.now(),
         };
         return yield* store.createMember(member);
+      });
+
+    /** Load a membership (active or not), failing when there is none. */
+    const getMemberOrFail = (organizationId: string, memberUserId: string) =>
+      Effect.gen(function* () {
+        const member = yield* store.getMember(organizationId, memberUserId);
+        if (!member) {
+          return yield* Effect.fail(new OrganizationError({ message: "Member not found" }));
+        }
+        return member;
+      });
+
+    /**
+     * Load one of the organization's domain claims. Claims are addressed by id
+     * *within* an organization: a claim belonging to another tenant answers
+     * "not found" rather than confirming it exists.
+     */
+    const getDomainOrFail = (
+      domainStore: typeof OrganizationDomainStore.Service,
+      organizationId: string,
+      domainId: string,
+    ) =>
+      Effect.gen(function* () {
+        const domain = yield* domainStore.getById(domainId);
+        if (!domain || domain.organizationId !== organizationId) {
+          return yield* Effect.fail(new OrganizationError({ message: "Domain not found" }));
+        }
+        return domain;
       });
 
     /**
@@ -937,6 +1371,8 @@ export const make = (
           slug: input.slug,
           ...(input.logo !== undefined && { logo: input.logo }),
           metadata: input.metadata ?? {},
+          defaultRole: "member",
+          jitProvisioning: false,
           createdAt: Date.now(),
         };
 
@@ -971,6 +1407,9 @@ export const make = (
           ...(updates.slug !== undefined && { slug: updates.slug }),
           ...(updates.logo !== undefined && { logo: updates.logo }),
           ...(updates.metadata !== undefined && { metadata: updates.metadata }),
+          ...(updates.jitProvisioning !== undefined && {
+            jitProvisioning: updates.jitProvisioning,
+          }),
         };
 
         return yield* store.updateOrganization(updated);
@@ -982,6 +1421,13 @@ export const make = (
       ) {
         yield* requireMemberPermission(userId, organizationId, "organization:delete");
         yield* getOrganizationOrFail(organizationId);
+
+        // Release the organization's domain claims first: they are globally
+        // unique, so leaving them behind would squat those domains forever.
+        if (domainStoreOption._tag === "Some") {
+          const claims = yield* domainStoreOption.value.listByOrganization(organizationId);
+          yield* Effect.forEach(claims, (claim) => domainStoreOption.value.delete(claim.id));
+        }
 
         yield* store.deleteOrganization(organizationId);
       }),
@@ -1102,6 +1548,37 @@ export const make = (
         return yield* store.updateInvitation({ ...invitation, status: "canceled" });
       }),
 
+      resendInvitation: Effect.fn("OrganizationService.resendInvitation")(function* (
+        actorId: string,
+        invitationId: string,
+      ) {
+        const invitation = yield* store.getInvitation(invitationId);
+        if (!invitation) {
+          return yield* Effect.fail(new OrganizationError({ message: "Invitation not found" }));
+        }
+        if (invitation.status !== "pending") {
+          return yield* Effect.fail(
+            new OrganizationError({ message: "Invitation is no longer pending" }),
+          );
+        }
+
+        yield* requireMemberPermission(actorId, invitation.organizationId, "invitation:create");
+        const organization = yield* getOrganizationOrFail(invitation.organizationId);
+
+        // The same row and id: an already-delivered link keeps working, and an
+        // expired-but-pending invitation is revived rather than duplicated.
+        const refreshed = yield* store.updateInvitation({
+          ...invitation,
+          expiresAt: Date.now() + invitationExpiresIn,
+        });
+
+        if (config.sendInvitationEmail) {
+          yield* config.sendInvitationEmail(refreshed, organization);
+        }
+
+        return refreshed;
+      }),
+
       listInvitations: Effect.fn("OrganizationService.listInvitations")(function* (
         organizationId: string,
       ) {
@@ -1122,10 +1599,10 @@ export const make = (
         actorId: string,
         organizationId: string,
         userId: string,
-        role: string,
+        role?: string,
       ) {
         yield* requireMemberPermission(actorId, organizationId, "member:create");
-        yield* getOrganizationOrFail(organizationId);
+        const organization = yield* getOrganizationOrFail(organizationId);
 
         const existing = yield* store.getMember(organizationId, userId);
         if (existing) {
@@ -1137,7 +1614,7 @@ export const make = (
         }
 
         yield* ensureMembershipCapacity(organizationId);
-        return yield* createMembership(organizationId, userId, role);
+        return yield* createMembership(organizationId, userId, role ?? defaultRoleOf(organization));
       }),
 
       removeMember: Effect.fn("OrganizationService.removeMember")(function* (
@@ -1147,10 +1624,7 @@ export const make = (
       ) {
         const actor = yield* requireMemberPermission(actorId, organizationId, "member:delete");
 
-        const target = yield* store.getMember(organizationId, memberUserId);
-        if (!target) {
-          return yield* Effect.fail(new OrganizationError({ message: "Member not found" }));
-        }
+        const target = yield* getMemberOrFail(organizationId, memberUserId);
 
         if (target.role === creatorRole) {
           if (actor.role !== creatorRole) {
@@ -1182,9 +1656,14 @@ export const make = (
       ) {
         yield* requireMemberPermission(actorId, organizationId, "member:update");
 
-        const target = yield* store.getMember(organizationId, memberUserId);
-        if (!target) {
-          return yield* Effect.fail(new OrganizationError({ message: "Member not found" }));
+        const target = yield* getMemberOrFail(organizationId, memberUserId);
+
+        if (!isActiveMember(target)) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: "Reactivate the member before changing their role",
+            }),
+          );
         }
 
         if (target.role === creatorRole && role !== creatorRole) {
@@ -1199,6 +1678,95 @@ export const make = (
         }
 
         return yield* store.updateMember({ ...target, role });
+      }),
+
+      deactivateMember: Effect.fn("OrganizationService.deactivateMember")(function* (
+        actorId: string,
+        organizationId: string,
+        memberUserId: string,
+      ) {
+        const actor = yield* requireMemberPermission(actorId, organizationId, "member:update");
+        const organization = yield* getOrganizationOrFail(organizationId);
+        const target = yield* getMemberOrFail(organizationId, memberUserId);
+
+        if (!isActiveMember(target)) {
+          return yield* Effect.fail(
+            new OrganizationError({ message: "Member is already inactive" }),
+          );
+        }
+
+        // Same shape as removal: owners are each other's peers, and the last
+        // one standing keeps the organization administrable.
+        if (target.role === creatorRole) {
+          if (actor.role !== creatorRole) {
+            return yield* Effect.fail(
+              new OrganizationError({ message: "Only an owner can deactivate another owner" }),
+            );
+          }
+          const owners = yield* countOwners(organizationId);
+          if (owners <= 1) {
+            return yield* Effect.fail(
+              new OrganizationError({
+                message: "The last owner of an organization cannot be deactivated",
+              }),
+            );
+          }
+        }
+
+        const deactivated = yield* store.updateMember({
+          ...target,
+          status: "inactive",
+          previousRole: target.role,
+          role: defaultRoleOf(organization),
+        });
+
+        if (config.onMemberDeactivated) {
+          yield* config.onMemberDeactivated(deactivated, organization);
+        }
+
+        return deactivated;
+      }),
+
+      reactivateMember: Effect.fn("OrganizationService.reactivateMember")(function* (
+        actorId: string,
+        organizationId: string,
+        memberUserId: string,
+      ) {
+        yield* requireMemberPermission(actorId, organizationId, "member:update");
+        const target = yield* getMemberOrFail(organizationId, memberUserId);
+
+        if (isActiveMember(target)) {
+          return yield* Effect.fail(new OrganizationError({ message: "Member is already active" }));
+        }
+
+        const { previousRole, ...rest } = target;
+        return yield* store.updateMember({
+          ...rest,
+          status: "active",
+          role: previousRole ?? target.role,
+        });
+      }),
+
+      setDefaultRole: Effect.fn("OrganizationService.setDefaultRole")(function* (
+        actorUserId: string,
+        organizationId: string,
+        role: string,
+      ) {
+        yield* requireMemberPermission(actorUserId, organizationId, "role:manage");
+        const organization = yield* getOrganizationOrFail(organizationId);
+
+        // Fail closed on a role nothing defines: a default nobody can resolve
+        // would hand every new member an empty permission set silently.
+        const permissions = yield* resolveRolePermissions(organizationId, role);
+        if (permissions === null) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message: `Role '${role}' is not defined for this organization`,
+            }),
+          );
+        }
+
+        return yield* store.updateOrganization({ ...organization, defaultRole: role });
       }),
 
       createTeam: Effect.fn("OrganizationService.createTeam")(function* (
@@ -1308,6 +1876,130 @@ export const make = (
         return yield* store.listTeamsForMember(organizationId, userId);
       }),
 
+      listDomains: Effect.fn("OrganizationService.listDomains")(function* (
+        actorUserId: string,
+        organizationId: string,
+      ) {
+        const domainStore = yield* requireDomainStore;
+        yield* requireMembership(actorUserId, organizationId);
+        return yield* domainStore.listByOrganization(organizationId);
+      }),
+
+      addDomain: Effect.fn("OrganizationService.addDomain")(function* (
+        actorUserId: string,
+        organizationId: string,
+        input: AddOrganizationDomainInput,
+      ) {
+        const domainStore = yield* requireDomainStore;
+        yield* requireMemberPermission(actorUserId, organizationId, "domain:manage");
+        yield* getOrganizationOrFail(organizationId);
+
+        const domain = normalizeDomain(input.domain);
+        if (domain === "" || domain.includes("@") || !domain.includes(".")) {
+          return yield* Effect.fail(
+            new OrganizationError({ message: `'${input.domain}' is not a valid domain` }),
+          );
+        }
+
+        const conflicting = yield* domainStore.getByDomain(domain);
+        if (conflicting) {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message:
+                conflicting.organizationId === organizationId
+                  ? "This organization has already claimed that domain"
+                  : "That domain is already claimed by another organization",
+            }),
+          );
+        }
+
+        const strategy = input.verificationStrategy ?? "dns";
+        const claim: OrganizationDomain = {
+          id: yield* generateId(),
+          organizationId,
+          domain,
+          verificationState: "pending",
+          verificationStrategy: strategy,
+          // The token is ours to mint: a client-chosen one would let a tenant
+          // "prove" a domain with a record it had already published elsewhere.
+          ...(strategy === "dns" && { verificationToken: yield* generateId() }),
+          createdAt: Date.now(),
+        };
+        return yield* domainStore.create(claim);
+      }),
+
+      removeDomain: Effect.fn("OrganizationService.removeDomain")(function* (
+        actorUserId: string,
+        organizationId: string,
+        domainId: string,
+      ) {
+        const domainStore = yield* requireDomainStore;
+        yield* requireMemberPermission(actorUserId, organizationId, "domain:manage");
+        const domain = yield* getDomainOrFail(domainStore, organizationId, domainId);
+        yield* domainStore.delete(domain.id);
+      }),
+
+      verifyDomain: Effect.fn("OrganizationService.verifyDomain")(function* (
+        actorUserId: string,
+        organizationId: string,
+        domainId: string,
+      ) {
+        const domainStore = yield* requireDomainStore;
+        yield* requireMemberPermission(actorUserId, organizationId, "domain:manage");
+        const domain = yield* getDomainOrFail(domainStore, organizationId, domainId);
+
+        if (domain.verificationState === "verified") return domain;
+
+        if (domain.verificationStrategy === "manual") {
+          // The `domain:manage` permission *is* the attestation here.
+          return yield* domainStore.update({
+            ...domain,
+            verificationState: "verified",
+            verifiedAt: Date.now(),
+          });
+        }
+
+        if (domainVerifierOption._tag === "None") {
+          return yield* Effect.fail(
+            new OrganizationError({
+              message:
+                "DNS domain verification is not available: provide a DomainVerifier layer, or claim the domain with the 'manual' strategy",
+            }),
+          );
+        }
+
+        const proved = yield* domainVerifierOption.value.verify(
+          domain.domain,
+          domain.verificationToken ?? "",
+        );
+        return yield* domainStore.update({
+          ...domain,
+          verificationState: proved ? "verified" : "failed",
+          ...(proved && { verifiedAt: Date.now() }),
+        });
+      }),
+
+      provisionJitMembership: Effect.fn("OrganizationService.provisionJitMembership")(function* (
+        userId: string,
+        email: string,
+      ) {
+        if (domainStoreOption._tag === "None") return null;
+
+        const domain = yield* domainStoreOption.value.getByDomain(domainOfEmail(email));
+        // Only a *verified* claim carries authority; a pending one is just a
+        // request, and honoring it would let anyone absorb a domain by asking.
+        if (!domain || domain.verificationState !== "verified") return null;
+
+        const organization = yield* store.getOrganizationById(domain.organizationId);
+        if (!organization || organization.jitProvisioning !== true) return null;
+
+        const existing = yield* store.getMember(organization.id, userId);
+        if (existing) return null;
+
+        yield* ensureMembershipCapacity(organization.id);
+        return yield* createMembership(organization.id, userId, defaultRoleOf(organization));
+      }),
+
       upsertOrgRole: Effect.fn("OrganizationService.upsertOrgRole")(function* (
         actorUserId: string,
         organizationId: string,
@@ -1351,7 +2043,7 @@ export const make = (
         organizationId: string,
         permission: string,
       ) {
-        const member = yield* store.getMember(organizationId, userId);
+        const member = yield* getActiveMember(organizationId, userId);
         if (!member) return false;
         return yield* roleHasPermission(organizationId, member.role, permission);
       }),

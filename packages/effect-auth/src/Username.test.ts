@@ -83,7 +83,6 @@ const sessionStore: typeof SessionStore.Service = {
 
 const userStore: typeof UserStore.Service = {
   get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
-  getCredentials: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
 };
 
 const hasherLayer = Layer.succeed(PasswordHasher)(hasher);

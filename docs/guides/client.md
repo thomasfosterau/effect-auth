@@ -154,12 +154,13 @@ const session = await client.device.token({ deviceCode }); // 400 until decided
 
 **Multi-factor** — `multiFactor.enable`, `confirm`, `disable`, `regenerateBackupCodes`, `verifyTotp`, `verifyBackupCode`, plus the continuation helper in §5.
 
-**Organizations** — orgs, members, invitations, teams and per-organization roles, all under `client.organization`:
+**Organizations** — orgs, members, invitations, claimed email domains, teams and per-organization roles, all under `client.organization`:
 
 ```ts
 const org = await client.organization.create({ name: "Acme", slug: "acme" });
 await client.organization.invite(org.id, { email: "new@acme.test", role: "member" });
 await client.organization.acceptInvitation(invitationId); // as the invitee
+await client.organization.resendInvitation(invitationId); // same id, fresh expiry
 
 const team = await client.organization.createTeam(org.id, { name: "Engineering" });
 await client.organization.addTeamMember(team.id, { userId });
@@ -167,10 +168,28 @@ await client.organization.addTeamMember(team.id, { userId });
 // Dynamic access control: redefine a role for this organization only.
 await client.organization.upsertRole(org.id, "member", { permissions: ["team:create"] });
 
+// The role members added without one receive (owner-only).
+await client.organization.setDefaultRole(org.id, { role: "member" });
+await client.organization.addMember(org.id, { userId }); // ...gets that role
+
+// Suspend a membership instead of deleting it. The row and the member's role
+// survive (the role comes back on reactivate), every permission check in this
+// organization now denies them, and their app session is left alone.
+await client.organization.deactivateMember(org.id, userId);
+await client.organization.reactivateMember(org.id, userId);
+
+// Claim a domain, publish the TXT record, then verify it. A verified domain
+// plus `update(org.id, { jitProvisioning: true })` provisions membership on
+// SSO sign-in for anyone with a verified address at that domain.
+const claim = await client.organization.addDomain(org.id, { domain: "acme.test" });
+claim.verificationToken; // publish as a TXT record, then:
+const verified = await client.organization.verifyDomain(org.id, claim.id);
+verified.verificationState; // "verified" | "failed" — retry a failed check
+
 await client.organization.setActive({ organizationId: org.id }); // recorded on the session
 ```
 
-Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `addMember`, `updateMemberRole`, `removeMember`, `invite`, `listInvitations`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `upsertRole`, `listRoles`, `deleteRole`, `createTeam`, `listTeams`, `listTeamsForMember`, `updateTeam`, `deleteTeam`, `addTeamMember`, `listTeamMembers`, `removeTeamMember`. Calls answer `403` when the actor's role lacks the required permission.
+Full surface: `create`, `list`, `get`, `update`, `delete`, `setActive`, `setDefaultRole`, `addMember`, `updateMemberRole`, `removeMember`, `deactivateMember`, `reactivateMember`, `invite`, `listInvitations`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `resendInvitation`, `listDomains`, `addDomain`, `verifyDomain`, `removeDomain`, `upsertRole`, `listRoles`, `deleteRole`, `createTeam`, `listTeams`, `listTeamsForMember`, `updateTeam`, `deleteTeam`, `addTeamMember`, `listTeamMembers`, `removeTeamMember`. Calls answer `403` when the actor's role lacks the required permission — including a domain call when the server has no `OrganizationDomainStore` wired, and a DNS verification when it has no `DomainVerifier` (claim the domain with `verificationStrategy: "manual"` instead).
 
 **API keys** — `apiKeys.{create,list,update,delete}`. The plaintext key comes back exactly once, from `create`.
 

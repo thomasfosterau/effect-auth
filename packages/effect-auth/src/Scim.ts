@@ -356,8 +356,10 @@ export interface ScimGroupInput {
 
 export interface ScimConfig {
   /**
-   * Organization role granted to users provisioned through SCIM.
-   * Default `"member"`.
+   * Organization role granted to users provisioned through SCIM, for every
+   * connection. Unset, the provisioned organization's own `defaultRole`
+   * decides (itself defaulting to `"member"`), which is what a tenant that
+   * changed its default expects.
    */
   readonly defaultRole?: string;
   /**
@@ -658,7 +660,6 @@ export const make = (
   | Crypto.Crypto
 > =>
   Effect.gen(function* () {
-    const defaultRole = config.defaultRole ?? "member";
     const baseUrl = (config.baseUrl ?? "/scim/v2").replace(/\/+$/, "");
     const maxPageSize = config.maxPageSize ?? 100;
 
@@ -683,6 +684,19 @@ export const make = (
           (cause) => new Errors.AuthError({ message: "Failed to generate token", cause }),
         ),
       );
+
+    /**
+     * The organization role a SCIM-provisioned member receives: the SCIM
+     * config's role when the app pinned one for every connection, else the
+     * organization's own `defaultRole`, else `"member"`.
+     */
+    const provisioningRole = (organizationId: string): Effect.Effect<string, Errors.AuthError> =>
+      config.defaultRole !== undefined
+        ? Effect.succeed(config.defaultRole)
+        : Effect.map(
+            orgs.getOrganizationById(organizationId),
+            (organization) => organization?.defaultRole ?? "member",
+          );
 
     // --- Reads -------------------------------------------------------------
 
@@ -930,7 +944,8 @@ export const make = (
             id: yield* randomId(),
             organizationId: connection.organizationId,
             userId: user.id,
-            role: defaultRole,
+            role: yield* provisioningRole(connection.organizationId),
+            status: "active",
             createdAt: Date.now(),
           };
           yield* orgs.createMember(member);

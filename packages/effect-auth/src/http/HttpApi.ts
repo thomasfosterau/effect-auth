@@ -394,6 +394,18 @@ export const authGroup = HttpApiGroup.make("auth").add(
       S.InternalError,
     ],
   }),
+  // Same row, same id, a fresh expiry and another delivery attempt.
+  HttpApiEndpoint.post("orgResendInvitation", "/invitations/:invitationId/resend", {
+    params: { invitationId: Schema.String },
+    success: S.InvitationView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
   HttpApiEndpoint.post("orgAddMember", "/organization/:organizationId/members", {
     params: { organizationId: Schema.String },
     payload: S.AddMemberPayload,
@@ -429,6 +441,104 @@ export const authGroup = HttpApiGroup.make("auth").add(
       S.InternalError,
     ],
   }),
+  // Member lifecycle: deactivation suspends a membership without deleting it,
+  // gated on `member:update` like a role change. The last active owner can be
+  // neither.
+  HttpApiEndpoint.post(
+    "orgDeactivateMember",
+    "/organization/:organizationId/members/:userId/deactivate",
+    {
+      params: { organizationId: Schema.String, userId: Schema.String },
+      success: S.MemberView,
+      error: [
+        S.NotFoundError,
+        S.UnauthorizedError,
+        S.ForbiddenError,
+        S.BadRequestError,
+        S.InternalError,
+      ],
+    },
+  ),
+  HttpApiEndpoint.post(
+    "orgReactivateMember",
+    "/organization/:organizationId/members/:userId/reactivate",
+    {
+      params: { organizationId: Schema.String, userId: Schema.String },
+      success: S.MemberView,
+      error: [
+        S.NotFoundError,
+        S.UnauthorizedError,
+        S.ForbiddenError,
+        S.BadRequestError,
+        S.InternalError,
+      ],
+    },
+  ),
+  // The role new members get when none is named: `role:manage`, i.e. owners.
+  HttpApiEndpoint.put("orgSetDefaultRole", "/organization/:organizationId/default-role", {
+    params: { organizationId: Schema.String },
+    payload: S.SetDefaultRolePayload,
+    success: S.OrganizationView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  // Email-domain claims. Writes need `domain:manage`; any member may list.
+  // 404 means the organization module itself is absent; a server with no
+  // `OrganizationDomainStore` wired answers 403 like any other refusal.
+  HttpApiEndpoint.get("orgListDomains", "/organization/:organizationId/domains", {
+    params: { organizationId: Schema.String },
+    success: S.OrganizationDomainListView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.post("orgAddDomain", "/organization/:organizationId/domains", {
+    params: { organizationId: Schema.String },
+    payload: S.AddOrganizationDomainPayload,
+    success: S.OrganizationDomainView,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.delete("orgRemoveDomain", "/organization/:organizationId/domains/:domainId", {
+    params: { organizationId: Schema.String, domainId: Schema.String },
+    success: HttpApiSchema.NoContent,
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
+  }),
+  HttpApiEndpoint.post(
+    "orgVerifyDomain",
+    "/organization/:organizationId/domains/:domainId/verify",
+    {
+      params: { organizationId: Schema.String, domainId: Schema.String },
+      success: S.OrganizationDomainView,
+      error: [
+        S.NotFoundError,
+        S.UnauthorizedError,
+        S.ForbiddenError,
+        S.BadRequestError,
+        S.InternalError,
+      ],
+    },
+  ),
   // Dynamic access control: per-organization role definitions. Writes need the
   // `role:manage` permission (owner-only by default); any member may list.
   HttpApiEndpoint.put("orgUpsertRole", "/organization/:organizationId/roles/:role", {

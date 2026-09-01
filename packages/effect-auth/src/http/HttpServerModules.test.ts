@@ -97,7 +97,6 @@ const makeFixture = () => {
 
   const userStore = {
     get: (userId: string) => Effect.sync(() => usersById.get(userId) ?? null),
-    getCredentials: (_userId: string) => Effect.succeed(null),
   };
 
   const userServiceStore = {

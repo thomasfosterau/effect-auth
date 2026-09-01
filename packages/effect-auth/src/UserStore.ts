@@ -13,11 +13,5 @@ export class UserStore extends Context.Service<
      * Get a user by ID, or `null` when no such user exists.
      */
     readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
-
-    /**
-     * Get user credentials (hashed password), or `null` when the user does not
-     * exist or has no password set.
-     */
-    readonly getCredentials: (userId: string) => Effect.Effect<string | null, Errors.AuthError>;
   }
 >()("@effect-auth/UserStore") {}

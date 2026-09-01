@@ -3,6 +3,7 @@ import { Effect, Exit, Layer } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import * as Entity from "../Entity.ts";
 import * as Condition from "../Condition.ts";
+import * as Errors from "../Errors.ts";
 import * as Policy from "../Policy.ts";
 import {
   Authorizer,
@@ -10,7 +11,11 @@ import {
   EntityResolver,
   memoryEntityResolver,
 } from "../Authorizer.ts";
-import { makeAuthorizationMiddleware } from "./AuthorizationMiddleware.ts";
+import {
+  makeAuthorizationMiddleware,
+  type AuthorizationMiddlewareClass,
+} from "./AuthorizationMiddleware.ts";
+import * as S from "./HttpApiSchema.ts";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -52,27 +57,40 @@ const makeWebRequest = (headers: Record<string, string> = {}) =>
  * `AuthMiddleware` would have provided it) and a custom `Authorizer.layer`.
  */
 const runGate = (
-  Guard: ReturnType<typeof makeAuthorizationMiddleware>,
+  Guard: AuthorizationMiddlewareClass,
   options: {
     readonly principal?: Entity.EntityRef;
     readonly request?: HttpServerRequest.HttpServerRequest;
-    readonly overrideAuthorizerLayer?: Layer.Layer<Authorizer>;
+    readonly overrideAuthorizerLayer?: Layer.Layer<Authorizer, Errors.AuthError>;
   } = {},
-) => {
+): Effect.Effect<typeof ok, S.Forbidden | Errors.AuthError> => {
   const request = options.request ?? makeWebRequest();
   const program = Effect.gen(function* () {
     const svc = yield* Guard;
-    return yield* (svc as any)(Effect.succeed(ok), undefined).pipe(
-      Effect.provideService(HttpServerRequest.HttpServerRequest, request),
-    );
+    // `HttpApiMiddleware.Service` types the wrapped handler against the whole
+    // `HttpApi` surface, which this unit test deliberately does not build —
+    // hence the `any` call. Re-annotating the result keeps what the middleware
+    // still needs from context visible instead of letting `any` erase it.
+    const applied: Effect.Effect<
+      typeof ok,
+      S.Forbidden,
+      Authorizer | CurrentPrincipal | HttpServerRequest.HttpServerRequest
+    > = (svc as any)(Effect.succeed(ok), undefined);
+    return yield* applied.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
   }).pipe(
-    Effect.provide(Guard.layer),
-    Effect.provide(options.overrideAuthorizerLayer ?? authorizerLayer),
+    Effect.provide(Layer.mergeAll(Guard.layer, options.overrideAuthorizerLayer ?? authorizerLayer)),
   );
 
-  return options.principal !== undefined
-    ? program.pipe(CurrentPrincipal.provide(options.principal))
-    : program;
+  // The no-principal case leaves `CurrentPrincipal` deliberately unprovided to
+  // prove the gate fails closed rather than silently allowing; that is a
+  // runtime defect, so the requirement is erased here — in one documented
+  // place — rather than with a cast at every call site. Only the context is
+  // erased; the error channel stays honest.
+  return (
+    options.principal !== undefined
+      ? program.pipe(CurrentPrincipal.provide(options.principal))
+      : program
+  ) as Effect.Effect<typeof ok, S.Forbidden | Errors.AuthError>;
 };
 
 // ---------------------------------------------------------------------------
@@ -82,7 +100,7 @@ const runGate = (
 describe("makeAuthorizationMiddleware – allow path", () => {
   it("the resource owner is authorized and the handler runs unchanged", async () => {
     const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
-    const response = await Effect.runPromise(runGate(Guard, { principal: alice }) as any);
+    const response = await Effect.runPromise(runGate(Guard, { principal: alice }));
     expect((response as HttpServerResponse.HttpServerResponse).status).toBe(200);
   });
 });
@@ -94,18 +112,14 @@ describe("makeAuthorizationMiddleware – allow path", () => {
 describe("makeAuthorizationMiddleware – deny path", () => {
   it("a non-owner is refused with 403 Forbidden naming the decision reason (default-deny)", async () => {
     const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
-    const error = await Effect.runPromise(
-      runGate(Guard, { principal: bob }).pipe(Effect.flip) as any,
-    );
+    const error = await Effect.runPromise(runGate(Guard, { principal: bob }).pipe(Effect.flip));
     expect(error._tag).toBe("Forbidden");
     expect(error.message).toContain("default-deny");
   });
 
   it("the wire error carries only message/code — never the policy trace (determining/outcomes)", async () => {
     const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
-    const error = await Effect.runPromise(
-      runGate(Guard, { principal: bob }).pipe(Effect.flip) as any,
-    );
+    const error = await Effect.runPromise(runGate(Guard, { principal: bob }).pipe(Effect.flip));
     expect(error._tag).toBe("Forbidden");
     expect(typeof error.message).toBe("string");
     expect(error).not.toHaveProperty("decision");
@@ -123,7 +137,7 @@ describe("makeAuthorizationMiddleware – deny path", () => {
     );
     const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
     const error = await Effect.runPromise(
-      runGate(Guard, { principal: alice, overrideAuthorizerLayer: layer }).pipe(Effect.flip) as any,
+      runGate(Guard, { principal: alice, overrideAuthorizerLayer: layer }).pipe(Effect.flip),
     );
     expect(error._tag).toBe("Forbidden");
     expect(error.message).toContain("forbid");
@@ -144,7 +158,7 @@ describe("makeAuthorizationMiddleware – composition with AuthMiddleware", () =
     // `CurrentPrincipal` is a required `Context.Service` with no default, so
     // accessing it unprovided is a defect, not a typed `Forbidden` — either
     // way the request must not reach the handler.
-    const exit = await Effect.runPromiseExit(runGate(Guard) as any);
+    const exit = await Effect.runPromiseExit(runGate(Guard));
     expect(Exit.isFailure(exit)).toBe(true);
   });
 });
@@ -168,7 +182,7 @@ describe("makeAuthorizationMiddleware – dynamic AuthorizeInput", () => {
       runGate(byHeader, {
         principal: alice,
         request: makeWebRequest({ "x-doc-id": "doc-1" }),
-      }) as any,
+      }),
     );
     expect((response as HttpServerResponse.HttpServerResponse).status).toBe(200);
   });
@@ -178,7 +192,7 @@ describe("makeAuthorizationMiddleware – dynamic AuthorizeInput", () => {
       runGate(byHeader, {
         principal: alice,
         request: makeWebRequest({ "x-doc-id": "doc-2" }),
-      }).pipe(Effect.flip) as any,
+      }).pipe(Effect.flip),
     );
     expect(error._tag).toBe("Forbidden");
   });
@@ -195,7 +209,7 @@ describe("makeAuthorizationMiddleware – dynamic AuthorizeInput", () => {
       runGate(byHeaderEffectful, {
         principal: bob,
         request: makeWebRequest({ "x-doc-id": "doc-2" }),
-      }) as any,
+      }),
     );
     expect((allowedResponse as HttpServerResponse.HttpServerResponse).status).toBe(200);
 
@@ -203,7 +217,7 @@ describe("makeAuthorizationMiddleware – dynamic AuthorizeInput", () => {
       runGate(byHeaderEffectful, {
         principal: bob,
         request: makeWebRequest({ "x-doc-id": "doc-1" }),
-      }).pipe(Effect.flip) as any,
+      }).pipe(Effect.flip),
     );
     expect(deniedError._tag).toBe("Forbidden");
   });
@@ -218,12 +232,8 @@ describe("makeAuthorizationMiddleware – instance isolation", () => {
     const GuardDoc1 = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
     const GuardDoc2 = makeAuthorizationMiddleware({ action: readDoc, resource: doc2 });
 
-    const aliceOnDoc1 = await Effect.runPromiseExit(
-      runGate(GuardDoc1, { principal: alice }) as any,
-    );
-    const aliceOnDoc2 = await Effect.runPromiseExit(
-      runGate(GuardDoc2, { principal: alice }) as any,
-    );
+    const aliceOnDoc1 = await Effect.runPromiseExit(runGate(GuardDoc1, { principal: alice }));
+    const aliceOnDoc2 = await Effect.runPromiseExit(runGate(GuardDoc2, { principal: alice }));
 
     expect(Exit.isSuccess(aliceOnDoc1)).toBe(true);
     expect(Exit.isFailure(aliceOnDoc2)).toBe(true);

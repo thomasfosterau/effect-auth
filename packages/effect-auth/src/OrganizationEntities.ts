@@ -17,7 +17,8 @@
  * The projection, for the reference types it recognizes:
  *
  * - `User::"<userId>"` - parents `Org::"<organizationId>"` and
- *   `Role::"org:<organizationId>:<role>"` for every membership, plus
+ *   `Role::"org:<organizationId>:<role>"` for every *active* membership
+ *   (deactivated ones project nothing, matching `Organization.ts`), plus
  *   `Team::"<teamId>"` for every team membership.
  * - `Team::"<teamId>"` - attributes `{ name, organizationId }`, parent
  *   `Org::"<organizationId>"`.
@@ -44,7 +45,7 @@
  */
 import { Effect, Layer } from "effect";
 import type * as Errors from "./Errors.ts";
-import { OrganizationStore } from "./Organization.ts";
+import { OrganizationStore, isActiveMember } from "./Organization.ts";
 import * as Entity from "./Entity.ts";
 import { EntityResolver } from "./Authorizer.ts";
 
@@ -113,10 +114,16 @@ export const organizationEntityResolver = (
    * A user's parents: one `Org::` and one `Role::` per membership, plus a
    * `Team::` per team membership. A user with no memberships still resolves
    * (to an entity with no parents) - absence of parents is the answer.
+   *
+   * Deactivated memberships are skipped: `Organization.ts` treats an inactive
+   * member as a non-member for every permission question, and the policy
+   * kernel has to agree - otherwise a deactivated owner would keep deciding
+   * policies through `Role::"org:<id>:owner"`.
    */
   const resolveUser = (userId: string): Effect.Effect<Entity.Entity, Errors.AuthError> =>
     Effect.gen(function* () {
-      const memberships = yield* store.listMembersByUser(userId);
+      const allMemberships = yield* store.listMembersByUser(userId);
+      const memberships = allMemberships.filter(isActiveMember);
       const parents: Entity.EntityRef[] = [];
       for (const membership of memberships) {
         parents.push(organizationRef(membership.organizationId));

@@ -130,8 +130,11 @@ describe("Authorizer", () => {
     );
     const error = await Effect.runPromise(Effect.provide(program, layer).pipe(Effect.flip));
     expect(error._tag).toBe("AuthorizationDeniedError");
-    expect(error.decision.reason).toBe("default-deny");
-    expect(error.decision.allowed).toBe(false);
+    // `authorize` can also fail with `AuthError`; the assertion above pins the
+    // tag, so reading the decision trace off the denial is safe here.
+    const denied = error as Policy.AuthorizationDeniedError;
+    expect(denied.decision.reason).toBe("default-deny");
+    expect(denied.decision.allowed).toBe(false);
   });
 
   it("check returns booleans without failing", async () => {

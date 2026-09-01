@@ -38,6 +38,7 @@ import {
   type Team,
   type TeamMember,
   type OrgRole,
+  type OrganizationDomain,
   type FullOrganization,
 } from "../Organization.ts";
 import { AdminService, isAdmin } from "../Admin.ts";
@@ -422,12 +423,17 @@ const resolveOidcProvider = resolveOptional(OidcProviderService, "OIDC provider 
 
 // --- Encoders for the organization / API-key domain types --------------------
 
+// The stored record leaves the newer fields optional (rows written before they
+// existed keep working); the wire view is total, so clients never branch on
+// "absent means the default".
 const encodeOrganization = (o: Organization): S.OrganizationView => ({
   id: o.id,
   name: o.name,
   slug: o.slug,
   ...(o.logo !== undefined && { logo: o.logo }),
   metadata: o.metadata,
+  defaultRole: o.defaultRole ?? "member",
+  jitProvisioning: o.jitProvisioning ?? false,
   createdAt: o.createdAt,
 });
 
@@ -436,7 +442,20 @@ const encodeMember = (m: Member): S.MemberView => ({
   organizationId: m.organizationId,
   userId: m.userId,
   role: m.role,
+  status: m.status ?? "active",
+  ...(m.previousRole !== undefined && { previousRole: m.previousRole }),
   createdAt: m.createdAt,
+});
+
+const encodeOrganizationDomain = (d: OrganizationDomain): S.OrganizationDomainView => ({
+  id: d.id,
+  organizationId: d.organizationId,
+  domain: d.domain,
+  verificationState: d.verificationState,
+  verificationStrategy: d.verificationStrategy,
+  ...(d.verificationToken !== undefined && { verificationToken: d.verificationToken }),
+  createdAt: d.createdAt,
+  ...(d.verifiedAt !== undefined && { verifiedAt: d.verifiedAt }),
 });
 
 const encodeInvitation = (i: Invitation): S.InvitationView => ({
@@ -2032,6 +2051,21 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           return encodeInvitation(invitation);
         }),
       )
+      .handle("orgResendInvitation", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const invitation = yield* org.service
+            .resendInvitation(resolved.user.id, params.invitationId)
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return encodeInvitation(invitation);
+        }),
+      )
       .handle("orgAddMember", ({ params, payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
@@ -2074,6 +2108,116 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 AuthError: (e) => internalServerError(e),
               }),
             );
+        }),
+      )
+      .handle("orgDeactivateMember", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const member = yield* org.service
+            .deactivateMember(resolved.user.id, params.organizationId, params.userId)
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return encodeMember(member);
+        }),
+      )
+      .handle("orgReactivateMember", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const member = yield* org.service
+            .reactivateMember(resolved.user.id, params.organizationId, params.userId)
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return encodeMember(member);
+        }),
+      )
+      .handle("orgSetDefaultRole", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const organization = yield* org.service
+            .setDefaultRole(resolved.user.id, params.organizationId, payload.role)
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return encodeOrganization(organization);
+        }),
+      )
+      // --- Organization domains ----------------------------------------------
+      .handle("orgListDomains", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const domains = yield* org.service
+            .listDomains(resolved.user.id, params.organizationId)
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return domains.map(encodeOrganizationDomain);
+        }),
+      )
+      .handle("orgAddDomain", ({ params, payload, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const domain = yield* org.service
+            .addDomain(resolved.user.id, params.organizationId, {
+              domain: payload.domain,
+              ...(payload.verificationStrategy !== undefined && {
+                verificationStrategy: payload.verificationStrategy,
+              }),
+            })
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return encodeOrganizationDomain(domain);
+        }),
+      )
+      .handle("orgRemoveDomain", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          yield* org.service
+            .removeDomain(resolved.user.id, params.organizationId, params.domainId)
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+        }),
+      )
+      .handle("orgVerifyDomain", ({ params, request }) =>
+        Effect.gen(function* () {
+          const resolved = yield* requireSession(request, cfg);
+          const org = yield* resolveOrganization;
+          const domain = yield* org.service
+            .verifyDomain(resolved.user.id, params.organizationId, params.domainId)
+            .pipe(
+              Effect.catchTags({
+                OrganizationError: (e) => Effect.fail(new S.Forbidden({ message: e.message })),
+                AuthError: (e) => internalServerError(e),
+              }),
+            );
+          return encodeOrganizationDomain(domain);
         }),
       )
       // --- Organization roles (dynamic access control) -----------------------
