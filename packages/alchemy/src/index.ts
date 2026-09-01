@@ -2,9 +2,9 @@
  * `@thomasfosterau/effect-auth-alchemy` — run effect-auth on Cloudflare D1,
  * on both sides of the deploy:
  *
- * - **Provider side** — declare the {@link AuthSchema} resource in your
- *   Alchemy program and the engine keeps the auth tables reconciled on every
- *   deploy.
+ * - **Provider side** — mount {@link AuthSchemaProvider} with your D1 binding,
+ *   declare the {@link AuthSchema} resource in your Alchemy program, and the
+ *   engine keeps the auth tables reconciled on every deploy.
  * - **Consumer side** — provide {@link layer} with your D1 binding and the
  *   whole auth stack (SessionService, EmailPasswordService, OAuth, WebAuthn,
  *   ...) has persistence.
