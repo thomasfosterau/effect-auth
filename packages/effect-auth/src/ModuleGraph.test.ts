@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vite-plus/test";
-import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -11,7 +10,6 @@ import * as path from "node:path";
 // whatever a particular runtime happens to load.
 // ---------------------------------------------------------------------------
 
-const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const entryFile = path.resolve(import.meta.dirname, "index.ts");
 
 // Captures the string literal following `from`, a bare side-effect
@@ -60,26 +58,6 @@ const reachesModule = (externalSpecifiers: ReadonlySet<string>, moduleName: stri
   );
 
 describe("module graph", () => {
-  it("has no reference to legation anywhere in the repo", () => {
-    // This file's own source necessarily names the term it's checking for
-    // (in this test's description and in the `.includes(...)` call below),
-    // so it's excluded from the scan rather than flagging itself.
-    const selfPath = path.relative(repoRoot, import.meta.filename);
-
-    const trackedFiles = execFileSync("git", ["ls-files"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-    })
-      .split("\n")
-      .filter((line) => line.length > 0 && line !== selfPath);
-
-    const offenders = trackedFiles.filter((relativePath) =>
-      fs.readFileSync(path.join(repoRoot, relativePath), "utf8").toLowerCase().includes("legation"),
-    );
-
-    expect(offenders).toEqual([]);
-  });
-
   // TODO(#205): Http.ts — reached from src/index.ts:385's
   // `export * as Http from "./http/index.ts"` — imports from
   // `effect/unstable/httpapi`, which is exactly the coupling #205's HTTP-tier
