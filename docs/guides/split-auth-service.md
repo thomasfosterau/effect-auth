@@ -10,8 +10,10 @@ app does not have to.
 Mounting `Http.make` directly in the app's Worker is simpler and should be the default:
 
 ```ts
-const { handler } = yield * Http.make({ prefix: "/api/auth" /* … */ });
-// mount `handler` in your framework
+const mount = Effect.gen(function* () {
+  const { handler } = yield* Http.make({ prefix: "/api/auth" /* … */ });
+  return handler; // mount it in your framework
+});
 ```
 
 One deployment, no transport, no relay, and the session is resolved in-process. Split when
@@ -58,19 +60,20 @@ What it cannot carry is `Set-Cookie`. That is the next two sections.
 ```ts
 const auth = Http.RemoteSession.make({ fetcher: env.AUTH, prefix: "/api/auth" });
 
-const { session, outcome, setCookie } =
-  yield *
-  Http.RemoteSession.resolveAtEdgeFailOpen({
-    client: auth,
-    request,
-    onDegraded: (cause) => Effect.logError("auth service unreachable", cause),
+const handle = (request: Request) =>
+  Effect.gen(function* () {
+    const { session, setCookie } = yield* Http.RemoteSession.resolveAtEdgeFailOpen({
+      client: auth,
+      request,
+      onDegraded: (cause) => Effect.logError("auth service unreachable", cause),
+    });
+
+    // Run the rest of the request as this viewer.
+    const response = yield* app(request).pipe(Effect.provide(SessionContext.layer(session)));
+
+    // Replay the cookies the auth service asked for (see below).
+    return Http.RemoteSession.withSetCookie(response, setCookie);
   });
-
-// Run the rest of the request as this viewer.
-const context = SessionContext.layer(session);
-
-// Replay the cookies the auth service asked for (see below).
-return Http.RemoteSession.withSetCookie(response, setCookie);
 ```
 
 Three things happen there that are worth naming.
@@ -131,7 +134,7 @@ therefore need a raw passthrough:
 
 ```ts
 // POST /session/sign-in on the app's Worker
-const response = yield * auth.relay(request, "/sign-in");
+const signIn = (request: Request) => auth.relay(request, "/sign-in");
 ```
 
 `relay` forwards the request and returns the upstream response verbatim — status, body and
