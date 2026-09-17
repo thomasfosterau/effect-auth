@@ -140,12 +140,14 @@ policy system ([video](https://www.youtube.com/watch?v=6IaEhu8epnA), article
 ABAC ([video](https://www.youtube.com/watch?v=fKtpZ7STRKc), "Schemas are more than
 just validators").
 
-**What exists today** (then the `src/authz/` cluster): `PermissionRef` (`resource:action` with
-wildcard matching), `RoleStore` + in-memory RBAC, and an `AuthorizationPolicy`
-service with combinators (`allOf`/`anyOf`/`not`/`fromPredicate`, `requirePermission`,
-`allowAll`/`denyAll`). A solid RBAC seed — but checks are service-method calls, there
-is no reusable policy _value_, no resource/attribute model, no policies-as-data, and
-the Organization plugin runs its own parallel role→permission map (#78).
+**What existed before the kernel** (then the `src/authz/` cluster): `PermissionRef`
+(`resource:action` with wildcard matching), `RoleStore` + in-memory RBAC, and an
+`AuthorizationPolicy` service with combinators (`allOf`/`anyOf`/`not`/`fromPredicate`,
+`requirePermission`, `allowAll`/`denyAll`). A solid RBAC seed — but checks were
+service-method calls, there was no reusable policy _value_, no resource/attribute
+model, no policies-as-data, and the Organization plugin ran its own parallel
+role→permission map (#78). That flat path is now removed and `Rbac` compiles into the
+kernel instead ([ADR 0018](adr/0018-one-authorization-kernel.md)).
 
 **Governing principle (owner decision): Effect-native-first.** The `Policy` value is
 the primary object of the whole framework — not a builder for Cedar policies. Cedar

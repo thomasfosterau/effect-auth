@@ -5,6 +5,7 @@ import { Reactivity } from "effect/unstable/reactivity";
 import Database from "better-sqlite3";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { migrate, schemaStatements } from "./Schema.ts";
+import * as Sql from "./Stores.ts";
 import { layer } from "./Stores.ts";
 
 // ---------------------------------------------------------------------------
@@ -257,23 +258,68 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     expect(result.hash).toBe("reset-hash");
   });
 
-  it("RoleStore reads roles and permissions", async () => {
+  it("RBAC entity resolver projects auth_user_roles as Role parents", async () => {
     const result = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        const store = yield* Auth.RoleStore;
+        const resolver = yield* Sql.makeRbacEntityResolver;
         yield* sql`INSERT INTO auth_user_roles (user_id, role) VALUES ('user-1', 'admin')`;
         yield* sql`INSERT INTO auth_user_roles (user_id, role) VALUES ('user-1', 'editor')`;
-        yield* sql`INSERT INTO auth_role_permissions (role, resource, action) VALUES ('admin', 'posts', 'delete')`;
-        const roles = yield* store.getUserRoles("user-1");
-        const permissions = yield* store.getRolePermissions("admin");
-        const none = yield* store.getUserRoles("user-2");
-        return { roles, permissions, none };
+        const resolved = yield* resolver.resolve([
+          Auth.Entity.ref("User", "user-1"),
+          Auth.Entity.ref("User", "user-2"),
+          Auth.Entity.ref("Widget", "w-1"),
+        ]);
+        return { slice: Auth.Entity.slice(resolved), resolved };
       }),
     );
-    expect([...result.roles].sort()).toEqual(["admin", "editor"]);
-    expect(result.permissions).toEqual([{ resource: "posts", action: "delete" }]);
-    expect(result.none).toEqual([]);
+    const { slice, resolved } = result;
+    // Only `User::` references are answered; the Widget is omitted.
+    expect(resolved.map((entity) => entity.ref.id).sort()).toEqual(["user-1", "user-2"]);
+    expect(
+      Auth.Entity.entityIn(slice, Auth.Entity.ref("User", "user-1"), Auth.Rbac.roleRef("admin")),
+    ).toBe(true);
+    expect(
+      Auth.Entity.entityIn(slice, Auth.Entity.ref("User", "user-1"), Auth.Rbac.roleRef("viewer")),
+    ).toBe(false);
+    expect(
+      Auth.Entity.entityIn(slice, Auth.Entity.ref("User", "user-2"), Auth.Rbac.roleRef("admin")),
+    ).toBe(false);
+  });
+
+  it("RBAC policies compile auth_role_permissions into declarative permits", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`INSERT INTO auth_user_roles (user_id, role) VALUES ('user-1', 'admin')`;
+        yield* sql`INSERT INTO auth_role_permissions (role, resource, action) VALUES ('admin', 'posts', 'delete')`;
+        const policies = yield* Sql.readRbacPolicies;
+        const resolver = yield* Sql.makeRbacEntityResolver;
+        const slice = Auth.Entity.slice(
+          yield* resolver.resolve([Auth.Entity.ref("User", "user-1")]),
+        );
+        const decide = (userId: string, action: string) =>
+          Auth.Policy.decide<never, never>(
+            policies,
+            Auth.Policy.request({
+              principal: Auth.Entity.ref("User", userId),
+              action: Auth.Entity.ref("Action", action),
+              resource: Auth.Entity.ref("posts", "post-1"),
+            }),
+            slice,
+          );
+        return {
+          policies,
+          allowed: (yield* decide("user-1", "delete")).allowed,
+          otherAction: (yield* decide("user-1", "read")).allowed,
+          otherUser: (yield* decide("user-2", "delete")).allowed,
+        };
+      }),
+    );
+    expect(result.policies.map((policy) => policy.id)).toEqual(["rbac:admin:posts:delete"]);
+    expect(result.allowed).toBe(true);
+    expect(result.otherAction).toBe(false);
+    expect(result.otherUser).toBe(false);
   });
 
   it("RateLimitStore get/set/increment/delete (atomic upsert)", async () => {

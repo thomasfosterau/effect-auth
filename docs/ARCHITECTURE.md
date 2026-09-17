@@ -124,10 +124,19 @@ directories, each with its own `index.ts` barrel and matching
   `AuthorizationModel.ts` / `PolicyStore.ts` (namespaced at the root as
   `Auth.Entity`, `Auth.Policy`, … because their member names are generic),
   the `Authorizer.ts` shell, `Protected.ts` (schema-embedded field guards),
-  `OrganizationEntities.ts` (the organization → entity-graph bridge), and the
-  permission-string RBAC facade `Authorization.ts` (`AuthorizationPolicy`,
-  `RoleStore`), `Rbac.ts`, `Permission.ts`. Route-level gating lives in
+  `OrganizationEntities.ts` (the organization → entity-graph bridge), and
+  `Rbac.ts` + `Permission.ts` (RBAC authoring sugar and the
+  `"resource:action"` vocabulary it is written in). Route-level gating lives in
   `http/AuthorizationMiddleware.ts`.
+
+  **There is one authorization model** ([ADR 0018](adr/0018-one-authorization-kernel.md)).
+  The kernel is it; everything else is a projection of, or a way of authoring
+  for, that kernel — `Protected.ts` is its data-boundary projection, a read
+  scope is its set-shaped projection, and `Rbac.ts` compiles a flat
+  role/permission configuration into `DeclarativePolicy` values plus the
+  principal → role entity fragment. No module evaluates authorization
+  independently of `Policy.decide`.
+
 - **`oauth/` cluster**: `OAuth.ts` (providers + PKCE), `Scope.ts`.
 - **`plugins/` cluster**: `AccountLockout.ts`, `Audit.ts`, `Captcha.ts`,
   `IPRateLimit.ts`, `LastLoginMethod.ts`, `NormalizeEmail.ts`, `RateLimit.ts`

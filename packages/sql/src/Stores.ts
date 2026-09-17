@@ -316,36 +316,88 @@ export const makePasswordResetUserStore: Effect.Effect<
 });
 
 // ---------------------------------------------------------------------------
-// RoleStore (fails closed: storage errors become defects, never empty grants)
+// RBAC (fails closed: storage errors become defects, never empty grants)
 // ---------------------------------------------------------------------------
+//
+// `auth_user_roles` and `auth_role_permissions` feed the one authorization
+// kernel, in its two halves (ADR 0018): role *assignment* is entity hierarchy,
+// so it becomes an `EntityResolver`; role *grants* are policy, so they become
+// declarative permits. There is no `RoleStore` service and no second
+// evaluation path — both halves flow into `Authorizer`/`Policy.decide`.
 
 interface RoleRow {
   readonly role: string;
 }
 
-interface PermissionRow {
+interface RolePermissionRow {
+  readonly role: string;
   readonly resource: string;
   readonly action: string;
 }
 
-export const makeRoleStore: Effect.Effect<
-  typeof Auth.RoleStore.Service,
+/**
+ * An {@link Auth.EntityResolver} projecting `auth_user_roles` into the entity
+ * graph: `User::"<userId>"` with a `Role::"<role>"` parent per assigned role,
+ * which is what `principal in Role::"admin"` decides over.
+ *
+ * Only `User::` references are answered; every other reference is omitted (the
+ * kernel reads an absent entity as "no attributes, no parents"), so compose
+ * this with an application's own resolver when policies also name domain
+ * entities. The table carries no role-to-role edges, so this resolver
+ * contributes no role inheritance — author that with `Auth.Rbac.entities` or
+ * an application resolver.
+ */
+export const makeRbacEntityResolver: Effect.Effect<
+  typeof Auth.EntityResolver.Service,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const rolesFor = (userId: string) =>
+    sql<RoleRow>`SELECT role FROM auth_user_roles WHERE user_id = ${userId}`.pipe(
+      Effect.map((rows) => rows.map((row) => row.role)),
+      Effect.orDie,
+    );
   return {
-    getUserRoles: (userId) =>
-      sql<RoleRow>`SELECT role FROM auth_user_roles WHERE user_id = ${userId}`.pipe(
-        Effect.map((rows) => rows.map((row) => row.role)),
-        Effect.orDie,
-      ),
-    getRolePermissions: (role) =>
-      sql<PermissionRow>`SELECT resource, action FROM auth_role_permissions WHERE role = ${role}`.pipe(
-        Effect.map((rows) => rows.map((row) => ({ resource: row.resource, action: row.action }))),
-        Effect.orDie,
-      ),
-  } satisfies typeof Auth.RoleStore.Service;
+    resolve: Effect.fn("Sql.rbacEntityResolver.resolve")(function* (
+      refs: ReadonlyArray<Auth.Entity.EntityRef>,
+    ) {
+      const users = refs.filter((ref) => ref.type === Auth.Rbac.DefaultPrincipalType);
+      return yield* Effect.forEach(users, (ref) =>
+        Effect.map(rolesFor(ref.id), (roles) =>
+          Auth.Entity.entity(ref, { parents: roles.map(Auth.Rbac.roleRef) }),
+        ),
+      );
+    }),
+  } satisfies typeof Auth.EntityResolver.Service;
+});
+
+/**
+ * Read `auth_role_permissions` into declarative permits — the policy half of
+ * the RBAC data, compiled by {@link Auth.Rbac.policies} so the SQL rows and a
+ * hand-written `Auth.Rbac` configuration produce byte-identical policies.
+ *
+ * Policies are read once, where they are needed: pass the result to
+ * `Auth.Authorizer.layer({ policies })` at startup, or re-read it behind a
+ * `PolicyStore` if tenant edits must apply without a restart.
+ */
+export const readRbacPolicies: Effect.Effect<
+  ReadonlyArray<Auth.Policy.DeclarativePolicy>,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows =
+    yield* sql<RolePermissionRow>`SELECT role, resource, action FROM auth_role_permissions`.pipe(
+      Effect.orDie,
+    );
+  const rolePermissions = new Map<string, { resource: string; action: string }[]>();
+  for (const row of rows) {
+    const permissions = rolePermissions.get(row.role) ?? [];
+    permissions.push({ resource: row.resource, action: row.action });
+    rolePermissions.set(row.role, permissions);
+  }
+  return Auth.Rbac.policies({ userRoles: {}, rolePermissions });
 });
 
 // ---------------------------------------------------------------------------
@@ -1416,10 +1468,15 @@ export const PasswordResetUserStoreLayer: Layer.Layer<
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.Password.PasswordResetUserStore, makePasswordResetUserStore);
-export const RoleStoreLayer: Layer.Layer<Auth.RoleStore, never, SqlClient.SqlClient> = Layer.effect(
-  Auth.RoleStore,
-  makeRoleStore,
-);
+/**
+ * Layer providing {@link Auth.EntityResolver} from `auth_user_roles`.
+ *
+ * Deliberately outside {@link layer}: `EntityResolver` is a single slot an
+ * application usually fills with a composed resolver (its own entities, the
+ * organization bridge, this one), not a storage interface to bundle.
+ */
+export const RbacEntityResolverLayer: Layer.Layer<Auth.EntityResolver, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.EntityResolver, makeRbacEntityResolver);
 export const RateLimitStoreLayer: Layer.Layer<Auth.RateLimitStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.RateLimitStore, makeRateLimitStore);
 export const EmailVerificationStoreLayer: Layer.Layer<
@@ -1504,6 +1561,10 @@ export const AdminUserStoreLayer: Layer.Layer<Auth.AdminUserStore, never, SqlCli
  * TrustedDevice, PhoneOtp, Organization, OIDC provider, SSO,
  * DeviceAuthorization, ...) are not yet covered here — use the
  * `KeyValueStore`-backed layers from core or bring your own until they land.
+ *
+ * Authorization is not bundled: wire {@link RbacEntityResolverLayer} and
+ * {@link readRbacPolicies} into an `Authorizer` yourself, because
+ * `EntityResolver` is one slot an application composes rather than a store.
  */
 export const layer: Layer.Layer<
   | Auth.SessionStore
@@ -1511,7 +1572,6 @@ export const layer: Layer.Layer<
   | Auth.UserServiceStore
   | Auth.Email.EmailPasswordStore
   | Auth.Password.PasswordResetUserStore
-  | Auth.RoleStore
   | Auth.RateLimitStore
   | Auth.Email.EmailVerificationStore
   | Auth.MultiFactor.ChallengeStore
@@ -1538,7 +1598,6 @@ export const layer: Layer.Layer<
   UserServiceStoreLayer,
   EmailPasswordStoreLayer,
   PasswordResetUserStoreLayer,
-  RoleStoreLayer,
   RateLimitStoreLayer,
   EmailVerificationStoreLayer,
   ChallengeStoreLayer,
