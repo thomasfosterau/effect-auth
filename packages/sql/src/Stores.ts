@@ -1218,6 +1218,183 @@ export const makeAccountLockoutStore: Effect.Effect<
 });
 
 // ---------------------------------------------------------------------------
+// ApiKeyStore
+// ---------------------------------------------------------------------------
+
+interface ApiKeyRow {
+  readonly id: string;
+  readonly name: string | null;
+  readonly prefix: string | null;
+  readonly start: string;
+  readonly key_hash: string;
+  readonly user_id: string;
+  readonly enabled: number;
+  readonly expires_at: number | null;
+  readonly last_used_at: number | null;
+  readonly permissions: string | null;
+  readonly metadata: string | null;
+  readonly remaining: number | null;
+  readonly refill_amount: number | null;
+  readonly refill_interval: number | null;
+  readonly refill_max: number | null;
+  readonly last_refill_at: number | null;
+  readonly rate_limit_max_requests: number | null;
+  readonly rate_limit_window_ms: number | null;
+  readonly created_at: number;
+  readonly updated_at: number;
+}
+
+const rowToApiKey = (row: ApiKeyRow): Effect.Effect<Auth.ApiKey, Auth.AuthError> =>
+  Effect.try({
+    try: () => ({
+      id: row.id,
+      ...(row.name != null ? { name: row.name } : {}),
+      ...(row.prefix != null ? { prefix: row.prefix } : {}),
+      start: row.start,
+      keyHash: row.key_hash,
+      userId: row.user_id,
+      enabled: row.enabled !== 0,
+      ...(row.expires_at != null ? { expiresAt: row.expires_at } : {}),
+      ...(row.last_used_at != null ? { lastUsedAt: row.last_used_at } : {}),
+      ...(row.permissions != null
+        ? { permissions: JSON.parse(row.permissions) as Record<string, readonly string[]> }
+        : {}),
+      metadata: row.metadata != null ? (JSON.parse(row.metadata) as Record<string, unknown>) : {},
+      ...(row.remaining != null ? { remaining: row.remaining } : {}),
+      ...(row.refill_amount != null ? { refillAmount: row.refill_amount } : {}),
+      ...(row.refill_interval != null ? { refillInterval: row.refill_interval } : {}),
+      ...(row.refill_max != null ? { refillMax: row.refill_max } : {}),
+      ...(row.last_refill_at != null ? { lastRefillAt: row.last_refill_at } : {}),
+      ...(row.rate_limit_max_requests != null && row.rate_limit_window_ms != null
+        ? {
+            rateLimit: {
+              maxRequests: row.rate_limit_max_requests,
+              windowMs: row.rate_limit_window_ms,
+            },
+          }
+        : {}),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }),
+    catch: (cause) => new Auth.AuthError({ message: "api key decode failed", cause }),
+  });
+
+export const makeApiKeyStore: Effect.Effect<
+  typeof Auth.ApiKeyStore.Service,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+
+  const getById = (id: string, label: string) =>
+    firstRow(label, sql<ApiKeyRow>`SELECT * FROM auth_api_keys WHERE id = ${id}`).pipe(
+      Effect.flatMap((row) => (row ? rowToApiKey(row) : Effect.succeed(null))),
+    );
+
+  return {
+    create: (apiKey) =>
+      asVoid(
+        "apiKey.create",
+        sql`INSERT INTO auth_api_keys (id, name, prefix, start, key_hash, user_id, enabled, expires_at, last_used_at, permissions, metadata, remaining, refill_amount, refill_interval, refill_max, last_refill_at, rate_limit_max_requests, rate_limit_window_ms, created_at, updated_at)
+              VALUES (${apiKey.id}, ${apiKey.name ?? null}, ${apiKey.prefix ?? null}, ${apiKey.start}, ${apiKey.keyHash}, ${apiKey.userId}, ${apiKey.enabled ? 1 : 0}, ${apiKey.expiresAt ?? null}, ${apiKey.lastUsedAt ?? null}, ${apiKey.permissions ? JSON.stringify(apiKey.permissions) : null}, ${encodeAttributes(apiKey.metadata)}, ${apiKey.remaining ?? null}, ${apiKey.refillAmount ?? null}, ${apiKey.refillInterval ?? null}, ${apiKey.refillMax ?? null}, ${apiKey.lastRefillAt ?? null}, ${apiKey.rateLimit?.maxRequests ?? null}, ${apiKey.rateLimit?.windowMs ?? null}, ${apiKey.createdAt}, ${apiKey.updatedAt})`,
+      ).pipe(Effect.as(apiKey)),
+    get: (id) => getById(id, "apiKey.get"),
+    getByHash: (keyHash) =>
+      firstRow(
+        "apiKey.getByHash",
+        sql<ApiKeyRow>`SELECT * FROM auth_api_keys WHERE key_hash = ${keyHash}`,
+      ).pipe(Effect.flatMap((row) => (row ? rowToApiKey(row) : Effect.succeed(null)))),
+    update: (apiKey) =>
+      asVoid(
+        "apiKey.update",
+        sql`UPDATE auth_api_keys SET
+              name = ${apiKey.name ?? null},
+              prefix = ${apiKey.prefix ?? null},
+              start = ${apiKey.start},
+              key_hash = ${apiKey.keyHash},
+              user_id = ${apiKey.userId},
+              enabled = ${apiKey.enabled ? 1 : 0},
+              expires_at = ${apiKey.expiresAt ?? null},
+              last_used_at = ${apiKey.lastUsedAt ?? null},
+              permissions = ${apiKey.permissions ? JSON.stringify(apiKey.permissions) : null},
+              metadata = ${encodeAttributes(apiKey.metadata)},
+              remaining = ${apiKey.remaining ?? null},
+              refill_amount = ${apiKey.refillAmount ?? null},
+              refill_interval = ${apiKey.refillInterval ?? null},
+              refill_max = ${apiKey.refillMax ?? null},
+              last_refill_at = ${apiKey.lastRefillAt ?? null},
+              rate_limit_max_requests = ${apiKey.rateLimit?.maxRequests ?? null},
+              rate_limit_window_ms = ${apiKey.rateLimit?.windowMs ?? null},
+              updated_at = ${apiKey.updatedAt}
+            WHERE id = ${apiKey.id}`,
+      ).pipe(Effect.as(apiKey)),
+    delete: (id) => asVoid("apiKey.delete", sql`DELETE FROM auth_api_keys WHERE id = ${id}`),
+    listByUserId: (userId) =>
+      allRows(
+        "apiKey.listByUserId",
+        sql<ApiKeyRow>`SELECT * FROM auth_api_keys WHERE user_id = ${userId}`,
+      ).pipe(Effect.flatMap((rows) => Effect.all(rows.map((row) => rowToApiKey(row))))),
+  } satisfies typeof Auth.ApiKeyStore.Service;
+});
+
+// ---------------------------------------------------------------------------
+// AdminUserStore (reuses auth_users + auth_identifiers — no dedicated table)
+// ---------------------------------------------------------------------------
+
+interface UserRowWithEmail extends UserRow {
+  readonly primary_email: string | null;
+}
+
+export const makeAdminUserStore: Effect.Effect<
+  typeof Auth.AdminUserStore.Service,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const users = userQueries(sql);
+
+  return {
+    // No SQL-side pagination: matches/sorts on each user's earliest email
+    // identifier, which lives in a different table and isn't indexable as a
+    // plain column, so the candidate set is materialized once and paged in
+    // memory (mirrors the reference semantics in Admin.test.ts's test store).
+    listUsers: (query) =>
+      Effect.gen(function* () {
+        const rows = yield* allRows(
+          "adminUser.listUsers",
+          sql<UserRowWithEmail>`
+            SELECT u.*, (
+              SELECT value FROM auth_identifiers ie
+              WHERE ie.user_id = u.id AND ie.type = 'email'
+              ORDER BY ie.created_at ASC LIMIT 1
+            ) AS primary_email
+            FROM auth_users u`,
+        );
+        const decorated = yield* Effect.all(
+          rows.map((row) =>
+            rowToUser(row, "adminUser.listUsers").pipe(
+              Effect.map((user) => ({ user, email: row.primary_email ?? "" })),
+            ),
+          ),
+        );
+        const search = query.searchEmail?.toLowerCase();
+        const matching = decorated
+          .filter(({ email }) => (search ? email.toLowerCase().includes(search) : true))
+          .sort((a, b) => a.email.localeCompare(b.email));
+        const offset = query.offset ?? 0;
+        const limit = query.limit ?? matching.length;
+        return {
+          users: matching.slice(offset, offset + limit).map(({ user }) => user),
+          total: matching.length,
+        } satisfies Auth.ListUsersResult;
+      }),
+    createUser: (input) => users.create(input, "adminUser.createUser"),
+    setPasswordHash: (userId, hash) =>
+      users.setPasswordHash(userId, hash, "adminUser.setPasswordHash"),
+  } satisfies typeof Auth.AdminUserStore.Service;
+});
+
+// ---------------------------------------------------------------------------
 // Layers
 // ---------------------------------------------------------------------------
 
@@ -1311,15 +1488,20 @@ export const AccountLockoutStoreLayer: Layer.Layer<
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.Plugins.AccountLockoutStore, makeAccountLockoutStore);
+export const ApiKeyStoreLayer: Layer.Layer<Auth.ApiKeyStore, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.ApiKeyStore, makeApiKeyStore);
+export const AdminUserStoreLayer: Layer.Layer<Auth.AdminUserStore, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.AdminUserStore, makeAdminUserStore);
 
 /**
  * A single layer that provides every SQL-backed effect-auth store on top of
  * the ambient `SqlClient`. Provide it once (together with any `SqlClient`
  * layer) and the core auth stack (SessionService, EmailPasswordService,
- * OAuth, WebAuthn, MagicLink, EmailOtp, MultiFactor, ...) has persistence.
+ * OAuth, WebAuthn, MagicLink, EmailOtp, MultiFactor, Admin, ApiKey, ...) has
+ * persistence.
  *
  * Stores added to core after this package's restoration (OneTimeToken,
- * TrustedDevice, PhoneOtp, Organization, Admin, ApiKey, OIDC provider, SSO,
+ * TrustedDevice, PhoneOtp, Organization, OIDC provider, SSO,
  * DeviceAuthorization, ...) are not yet covered here — use the
  * `KeyValueStore`-backed layers from core or bring your own until they land.
  */
@@ -1345,7 +1527,9 @@ export const layer: Layer.Layer<
   | Auth.MultiFactor.MultiFactorStore
   | Auth.MultiFactor.PendingMultiFactorStore
   | Auth.IdentifierStore
-  | Auth.Plugins.AccountLockoutStore,
+  | Auth.Plugins.AccountLockoutStore
+  | Auth.ApiKeyStore
+  | Auth.AdminUserStore,
   never,
   SqlClient.SqlClient
 > = Layer.mergeAll(
@@ -1371,4 +1555,6 @@ export const layer: Layer.Layer<
   PendingMultiFactorStoreLayer,
   IdentifierStoreLayer,
   AccountLockoutStoreLayer,
+  ApiKeyStoreLayer,
+  AdminUserStoreLayer,
 );
