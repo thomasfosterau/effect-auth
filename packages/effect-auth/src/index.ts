@@ -339,28 +339,21 @@ export * as PolicyStore from "./PolicyStore.ts";
 // `roleRef` names stay qualified.
 export * as OrganizationEntities from "./OrganizationEntities.ts";
 
-/** Permission-string RBAC facade (`Auth.RoleStore`, `Auth.requirePermission`, …). */
-export {
-  AuthorizationPolicy,
-  RoleStore,
-  requirePermission,
-  allowAll,
-  denyAll,
-  fromPredicate,
-  anyOf,
-  allOf,
-  not,
-  can,
-  requireAllPermissions,
-  requireAnyPermission,
-} from "./Authorization.ts";
+/**
+ * RBAC as authoring sugar over the kernel (`Auth.Rbac.layer`,
+ * `Auth.Rbac.policies`, …): a flat role/permission configuration compiles to
+ * declarative policies plus the principal → role entity fragment. Namespaced
+ * because its member names (`layer`, `policies`, `entities`, `model`) are
+ * generic. There is no second evaluation path behind it — see ADR 0017.
+ */
+export * as Rbac from "./Rbac.ts";
+/** The `"resource:action"` permission vocabulary the RBAC sugar is authored in. */
 export {
   type PermissionRef,
   parsePermission,
   formatPermission,
   permissionMatches,
 } from "./Permission.ts";
-export { type InMemoryRoleStoreConfig } from "./Rbac.ts";
 
 /** Policy-kernel decision types (the namespaced `Auth.Policy` carries the rest). */
 export { AuthorizationDeniedError, type Decision, type PolicyOutcome } from "./Policy.ts";

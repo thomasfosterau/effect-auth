@@ -14,7 +14,7 @@ layer, so every consumer needs to update call sites. Highlights:
   the root export. Authorization and session management are deliberately _not_ clusters: their
   modules (`Policy.ts`, `Entity.ts`, `Authorizer.ts`, `Protected.ts`, `Rbac.ts`,
   `SessionService.ts`, `SessionStore.ts`, `UserStore.ts`, `TrustedDevice.ts`, …) sit flat in
-  `src/` and are reached from the root (`Auth.Policy.permit`, `Auth.RoleStore`,
+  `src/` and are reached from the root (`Auth.Policy.permit`, `Auth.Rbac.layer`,
   `Auth.SessionService`), with no `./authz` or `./session` subpath.
 - Service tag strings and exported type names now match their class names exactly, and every
   acronym follows Effect's Pascal-case convention — `ApiKeyService`, `OidcProviderService`,

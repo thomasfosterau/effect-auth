@@ -202,7 +202,8 @@ _Avoid_: putting `bannedAt` / `banReason` on the User row.
 
 **System-admin role**:
 The reserved role string `"system-admin"`, anchoring `AdminAccessControl.requireSystemAdmin`. The
-role-to-user resolution flows through the existing `AuthorizationPolicy`/`RoleStore`; the library
+role-to-user resolution flows through the policy kernel — `Role::"system-admin"` as a parent of the
+principal entity, resolved by whatever `EntityResolver` the deployment provides; the library
 doesn't dictate how membership in the role is stored.
 _Avoid_: hardcoding a single admin User; the role is a check, not an identity.
 

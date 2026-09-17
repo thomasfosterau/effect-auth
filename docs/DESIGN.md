@@ -194,7 +194,7 @@ only broad `AuthError`. Method vocabulary drifts: `get` vs `getById` vs
 1. **Stores are dumb persistence.** Lookup methods return `X | null` when the row
    may legitimately be absent; the _service_ converts `null` into the typed
    domain error. Store error channel is `AuthError` only (infrastructure
-   failure), `never` where the store cannot fail meaningfully (`RoleStore`).
+   failure), `never` where the store cannot fail meaningfully.
    `Option<X>` is rejected: implementors write these against raw drivers and
    `null` keeps implementations dependency-light and obvious.
 2. **Vocabulary:** `create`, `get` (by natural/primary key), `getBy<Key>` for
@@ -620,9 +620,16 @@ semantics adopted on merit and, at most, an interop serialization (door-open
   `CurrentPrincipal` flowing through the struct's Requirements channel, and
   `AuthMiddleware` providing the principal per request.
 
-The M0-era `AuthorizationPolicy`/`RoleStore` API remains during the
-transition; M4 migrates Organization/Admin/ApiKey onto `Policy` and decides
-its retirement.
+**Retirement of the M0-era API (applied; [ADR 0017](adr/0017-one-authorization-kernel.md)).**
+`AuthorizationPolicy`, `RoleStore` and the flat `checkPermission` evaluation
+path are deleted rather than carried: only the kernel can be partially
+evaluated into a read scope, so a rule authored through the flat path could
+never participate in read authorization. `Rbac.ts` survives as **authoring
+sugar** — the same `{ userRoles, rolePermissions, roleHierarchy }`
+configuration now compiles to `DeclarativePolicy` values plus the
+principal → role entity fragment, with role inheritance carried as `Role -> Role`
+hierarchy rather than a pre-expanded permission set. There is one model and
+one thing to compile.
 
 ---
 
