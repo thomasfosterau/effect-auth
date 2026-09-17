@@ -109,6 +109,17 @@ export const oidcTokenRequests = Metric.counter("effect-auth.oidc_token_requests
   incremental: true,
 });
 
+/**
+ * Delivery sends dispatched off the response path (see `Delivery.ts`).
+ * Attributes: `{ purpose, outcome }`. Since these sends are never awaited by
+ * their caller, this counter — together with the error log emitted
+ * alongside it — is the only way a failed send is observed.
+ */
+export const deliverySends = Metric.counter("effect-auth.delivery_sends.total", {
+  description: "Delivery sends dispatched off the response path — tagged by purpose and outcome",
+  incremental: true,
+});
+
 // ---------------------------------------------------------------------------
 // Record helpers — each returns Effect<void, never, never>
 // ---------------------------------------------------------------------------
@@ -166,3 +177,9 @@ export const recordOidcTokenRequest = (
   outcome: "success" | "failure",
 ): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(oidcTokenRequests, { grant, outcome }), 1);
+
+export const recordDeliverySend = (
+  purpose: string,
+  outcome: "success" | "failure",
+): Effect.Effect<void> =>
+  Metric.update(Metric.withAttributes(deliverySends, { purpose, outcome }), 1);

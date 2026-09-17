@@ -46,6 +46,23 @@ export interface EmailPasswordConfig {
   readonly minPasswordLength?: number;
   readonly maxPasswordLength?: number;
   readonly autoSignIn?: boolean;
+  /**
+   * Opt-in anti-enumeration mode for `signUp`. When `true`, the
+   * duplicate-registration branch does not disclose that the email is
+   * already registered: it hashes the submitted password (so the two
+   * branches cost comparable work) and answers with the same no-session
+   * result shape a fresh sign-up gets, instead of `EmailInUseError`. Never
+   * touches the real account — the result carries only the caller's own
+   * submitted input, never the existing user's data.
+   *
+   * Implies no immediate session on the fresh branch either (as if
+   * `autoSignIn: false`), so both branches are answered identically —
+   * otherwise "a session came back" would itself be the oracle.
+   *
+   * Default `false`: existing behaviour (`EmailInUseError`) is unchanged
+   * unless explicitly opted in.
+   */
+  readonly antiEnumeration?: boolean;
 }
 
 export interface SignUpInput {
@@ -232,6 +249,7 @@ export const make = (
       minPasswordLength: config.minPasswordLength ?? 8,
       maxPasswordLength: config.maxPasswordLength ?? 128,
       autoSignIn: config.autoSignIn ?? true,
+      antiEnumeration: config.antiEnumeration ?? false,
     };
 
     const store = yield* EmailPasswordStore;
@@ -277,9 +295,28 @@ export const make = (
 
           const taken = yield* identifiers.getByValue("email", email);
           if (taken) {
-            return yield* new Errors.EmailInUseError({
-              message: "A user with this email already exists",
-            });
+            if (!resolved.antiEnumeration) {
+              return yield* new Errors.EmailInUseError({
+                message: "A user with this email already exists",
+              });
+            }
+
+            // Anti-enumeration: pay the same hashing cost a fresh sign-up
+            // would, then answer with an identical, no-session result built
+            // only from the caller's own input — never the real account's
+            // data — so this branch discloses nothing about the address.
+            yield* passwordHasher.hash(input.password);
+            return {
+              user: {
+                id: globalThis.crypto.randomUUID(),
+                ...(input.name !== undefined && { name: input.name }),
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                attributes: input.attributes ?? {},
+              },
+              identifier: { type: "email" as const, value: email },
+              method: "email-password" as const,
+            };
           }
 
           const user = yield* store.createUser({
@@ -309,11 +346,14 @@ export const make = (
 
           const handle = { type: "email" as const, value: emailIdentifier.value };
 
-          if (!resolved.autoSignIn) {
-            return yield* hooks.afterSignUp({ user, identifier: handle, method: "email-password" });
-          }
-
-          if (resolved.requireEmailVerification) {
+          // `antiEnumeration` forces the same no-session shape here as the
+          // duplicate branch above returns, so "a session came back" can
+          // never itself be the oracle.
+          if (
+            !resolved.autoSignIn ||
+            resolved.requireEmailVerification ||
+            resolved.antiEnumeration
+          ) {
             // A freshly claimed email identifier is always unverified.
             return yield* hooks.afterSignUp({ user, identifier: handle, method: "email-password" });
           }
