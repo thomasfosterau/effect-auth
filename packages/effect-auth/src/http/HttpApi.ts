@@ -739,11 +739,18 @@ export const authGroup = HttpApiGroup.make("auth").add(
     success: S.StatusResponse,
     error: [S.NotFoundError, S.UnauthorizedError, S.InternalError],
   }),
-  // --- API keys (session-authenticated management).
+  // --- API keys (session-authenticated management; `apiKeyCreate` additionally
+  // requires an interactive credential — see `requireInteractiveCredential`).
   HttpApiEndpoint.post("apiKeyCreate", "/api-keys", {
     payload: S.ApiKeyCreatePayload,
     success: S.ApiKeyCreatedView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
+    error: [
+      S.NotFoundError,
+      S.UnauthorizedError,
+      S.ForbiddenError,
+      S.BadRequestError,
+      S.InternalError,
+    ],
   }),
   HttpApiEndpoint.get("apiKeyList", "/api-keys", {
     success: S.ApiKeyListView,
