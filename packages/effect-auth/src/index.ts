@@ -385,6 +385,20 @@ export {
   Authorizer,
 } from "./Authorizer.ts";
 
+/**
+ * The session-context services. Provided by the HTTP middleware *and* by
+ * `SessionContext`'s Layer constructors, so the same effect runs inside an
+ * `HttpApi` handler, at a hand-rolled app edge, and in a test.
+ *
+ * `MaybeCurrentSession` (`Option<SessionWithUser>`) is the service read-path
+ * code should depend on: "signed out" is a value there, not the absence of a
+ * service.
+ */
+export { CurrentSession, CurrentUser, MaybeCurrentSession } from "./SessionContext.ts";
+
+/** Layer constructors and accessors for an already-resolved session. */
+export * as SessionContext from "./SessionContext.ts";
+
 // Cluster namespaces (also available as `effect-auth/<cluster>` subpaths)
 export * as Email from "./email/index.ts";
 export * as Http from "./http/index.ts";

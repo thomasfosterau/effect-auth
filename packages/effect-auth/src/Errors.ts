@@ -36,6 +36,7 @@ export const ErrorCode = {
   USER_BANNED: "USER_BANNED",
 
   // Permissions / scopes
+  NOT_AUTHENTICATED: "NOT_AUTHENTICATED",
   PERMISSION_DENIED: "PERMISSION_DENIED",
   INSUFFICIENT_SCOPE: "INSUFFICIENT_SCOPE",
 
@@ -299,6 +300,25 @@ export class UserBannedError extends Data.TaggedError("UserBannedError")<{
 // ---------------------------------------------------------------------------
 // Permissions / scopes
 // ---------------------------------------------------------------------------
+
+/**
+ * No principal is present: the effect required an authenticated user and the
+ * current execution is anonymous.
+ *
+ * The authentication counterpart to {@link PermissionDeniedError}: that one
+ * means "we know who you are and you may not"; this one means "we do not know
+ * who you are". Raised by the failing accessors in `SessionContext`
+ * (`requireCurrentUser`, `requireCurrentSession`) so a guard can turn an
+ * anonymous context into a typed failure without reaching for the HTTP layer's
+ * `Unauthorized`.
+ */
+export class NotAuthenticatedError extends Data.TaggedError("NotAuthenticatedError")<{
+  readonly message: string;
+}> {
+  get code(): typeof ErrorCode.NOT_AUTHENTICATED {
+    return ErrorCode.NOT_AUTHENTICATED;
+  }
+}
 
 /**
  * Caller lacks the required permission.
