@@ -61,12 +61,17 @@ const reachesModule = (externalSpecifiers: ReadonlySet<string>, moduleName: stri
 
 describe("module graph", () => {
   it("has no reference to legation anywhere in the repo", () => {
+    // This file's own source necessarily names the term it's checking for
+    // (in this test's description and in the `.includes(...)` call below),
+    // so it's excluded from the scan rather than flagging itself.
+    const selfPath = path.relative(repoRoot, import.meta.filename);
+
     const trackedFiles = execFileSync("git", ["ls-files"], {
       cwd: repoRoot,
       encoding: "utf8",
     })
       .split("\n")
-      .filter((line) => line.length > 0);
+      .filter((line) => line.length > 0 && line !== selfPath);
 
     const offenders = trackedFiles.filter((relativePath) =>
       fs.readFileSync(path.join(repoRoot, relativePath), "utf8").toLowerCase().includes("legation"),
