@@ -1,8 +1,11 @@
 # Effect Auth
 
-A headless, storage-agnostic toolkit of composable Effect primitives for authentication and
-authorization. It aims to match the _capabilities_ of better-auth while staying a library of
-pieces you assemble yourself — not a configured server instance.
+A storage-agnostic, batteries-included authentication and authorization framework on Effect: a
+headless core of composable primitives, plus an optional HTTP API, a typed client, framework
+bindings and protocol servers, each opt-in. There is still no configured server instance — you
+assemble layers. See [ADR-0017](./adr/0017-batteries-included-auth-framework.md) for the scope
+decision and [BOUNDARY.md](./BOUNDARY.md) for how this library relates to effect-jsonapi and
+legation.
 
 Every entity in this library belongs to exactly one of three categories, organised by the
 **key–signature duality**: a persistent registered Credential, paired with a single-use ephemeral

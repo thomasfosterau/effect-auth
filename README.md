@@ -2,6 +2,8 @@
 
 A generic authentication and authorization library for [Effect](https://effect.website/), following best practices from [Lucia](https://lucia-auth.com/), [Copenhagen](https://lucia-auth.com/copenhagen), [Oslo](https://github.com/pilcrowonpaper/oslo), and [BetterAuth](https://www.better-auth.com/) projects.
 
+effect-auth is batteries-included: a headless core, plus an optional HTTP API, a typed client, framework bindings and protocol servers — each opt-in. What that means, and how this library relates to `effect-jsonapi` and `legation`, is stated once in [the three-library boundary](./docs/BOUNDARY.md).
+
 ## Features
 
 - 🔐 **Generic and Flexible**: Effect-native services and layers — provide only the features you need, swap any implementation
@@ -992,6 +994,8 @@ Following BetterAuth and OWASP guidelines:
 
 - [Contributing Guide](./docs/CONTRIBUTING.md) - How to contribute to this project
 - [Architecture](./docs/ARCHITECTURE.md) - Architectural overview and design patterns
+- [The Three-Library Boundary](./docs/BOUNDARY.md) - What effect-auth is, and how it relates to effect-jsonapi and legation
+- [Architecture Decision Records](./docs/adr/README.md) - The decisions behind the design, with their supersessions
 - [Bring Your Own Store](./docs/guides/byo-stores.md) - Store-contract conventions, atomicity rules, and a worked example for any database
 - [MCP Provider Guide](./docs/guides/mcp-provider.md) - Dynamic client registration and PKCE auth-code for MCP clients
 - [Migrating from Better Auth](./docs/guides/better-auth-migration.md) - Concept map, flow equivalents, client swap, and schema migration
