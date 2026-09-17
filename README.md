@@ -2,6 +2,8 @@
 
 A generic authentication and authorization library for [Effect](https://effect.website/), following best practices from [Lucia](https://lucia-auth.com/), [Copenhagen](https://lucia-auth.com/copenhagen), [Oslo](https://github.com/pilcrowonpaper/oslo), and [BetterAuth](https://www.better-auth.com/) projects.
 
+effect-auth is batteries-included: a headless core, plus an optional HTTP API, a typed client, framework bindings and protocol servers — each opt-in. What that means, and how this library relates to `effect-jsonapi` and `legation`, is stated once in [the three-library boundary](./docs/BOUNDARY.md).
+
 ## Features
 
 - 🔐 **Generic and Flexible**: Effect-native services and layers — provide only the features you need, swap any implementation
@@ -185,40 +187,52 @@ const customSessionLayer = Layer.effect(
 
 ## Authorization
 
-Implement role-based access control:
+There is **one** authorization model: the policy kernel (`Policy`, `Entity`, `Condition`,
+`Authorizer`). RBAC is a way of _authoring_ policies for it, not a second engine — see
+[ADR 0018](docs/adr/0018-one-authorization-kernel.md). `Auth.Rbac` turns a flat role/permission
+configuration into declarative policies plus the principal → role entity graph:
 
 ```typescript
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
-// Implement your role store
-const roleStore: typeof Auth.RoleStore.Service = {
-  getUserRoles: (userId) => Effect.succeed(["admin", "user"]),
-  getRolePermissions: (role) =>
-    Effect.succeed([
-      { resource: "posts", action: "create" },
-      { resource: "posts", action: "read" },
-    ]),
-};
-
-// `AuthorizationPolicy` only exposes `.layer()` (its raw `make` isn't
-// re-exported from the root barrel), so provide it as a Layer.
-const layer = Auth.AuthorizationPolicy.layer().pipe(
-  Layer.provide(Layer.succeed(Auth.RoleStore)(roleStore)),
-);
+const layer = Auth.Rbac.layer({
+  userRoles: { "user-123": ["editor"] },
+  rolePermissions: {
+    viewer: [{ resource: "posts", action: "read" }],
+    editor: [{ resource: "posts", action: "create" }],
+    admin: [{ resource: "*", action: "*" }], // superadmin wildcard
+  },
+  roleHierarchy: { editor: ["viewer"] }, // editor also gets viewer's grants
+});
 
 const program = Effect.gen(function* () {
-  const policy = yield* Auth.AuthorizationPolicy;
+  const authorizer = yield* Auth.Authorizer;
 
-  // Check permission
-  const canCreate = yield* policy.checkPermission("user-123", "posts", "create");
+  // Boolean form
+  const canCreate = yield* authorizer.check({
+    action: "create",
+    resource: Auth.Entity.ref("posts", "post-1"),
+  });
 
-  // Or require permission (throws if denied)
-  yield* Auth.requirePermission("user-123", "posts", "create");
-});
+  // Or the enforced form — fails with `AuthorizationDeniedError`, carrying the
+  // full decision trace (which policies determined it, and why).
+  yield* authorizer.authorize({
+    action: "create",
+    resource: Auth.Entity.ref("posts", "post-1"),
+  });
+}).pipe(Auth.CurrentPrincipal.provide(Auth.Entity.ref("User", "user-123")));
 
 const result = await Effect.runPromise(Effect.provide(program, layer));
 ```
+
+Because the output is `DeclarativePolicy` data, a rule authored this way is storable, traceable,
+validatable against an `AuthorizationModel`, and enforceable at the data boundary via
+`Auth.protectedField`. Mix it with hand-authored policies by composing `Auth.Rbac.policies(...)`
+into your own `Auth.Authorizer.layer({ policies })`.
+
+Migrating from the removed `RoleStore` / `AuthorizationPolicy` API?
+See [docs/guides/authorization-kernel-migration.md](docs/guides/authorization-kernel-migration.md).
 
 ## Multi-Factor Authentication (TOTP/HOTP)
 
@@ -802,8 +816,9 @@ Flat root exports (`Auth.X`) unless noted:
 - `UserStore`: Interface for user data retrieval
 - `SessionService`: Service for managing sessions
 - `Auth.Password.PasswordHasher`: Service for password hashing and verification
-- `Auth.AuthorizationPolicy`: Interface for permission checking
-- `Auth.RoleStore`: Interface for role-based authorization
+- `Auth.Authorizer`: The authorization service — decides, checks and enforces policy
+- `Auth.EntityResolver`: Interface for resolving the entity slice a decision is made over
+- `Auth.PolicyStore.PolicyStore`: Interface for stored (tenant-editable) policies
 - `ChallengeStore`: Interface for WebAuthn challenge storage
 - `CredentialStore`: Interface for WebAuthn credential storage
 - `WebAuthnService`: Service for passkey registration and authentication
@@ -992,6 +1007,8 @@ Following BetterAuth and OWASP guidelines:
 
 - [Contributing Guide](./docs/CONTRIBUTING.md) - How to contribute to this project
 - [Architecture](./docs/ARCHITECTURE.md) - Architectural overview and design patterns
+- [The Three-Library Boundary](./docs/BOUNDARY.md) - What effect-auth is, and how it relates to effect-jsonapi and legation
+- [Architecture Decision Records](./docs/adr/README.md) - The decisions behind the design, with their supersessions
 - [Bring Your Own Store](./docs/guides/byo-stores.md) - Store-contract conventions, atomicity rules, and a worked example for any database
 - [MCP Provider Guide](./docs/guides/mcp-provider.md) - Dynamic client registration and PKCE auth-code for MCP clients
 - [Migrating from Better Auth](./docs/guides/better-auth-migration.md) - Concept map, flow equivalents, client swap, and schema migration

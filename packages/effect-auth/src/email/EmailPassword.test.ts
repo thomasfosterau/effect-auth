@@ -847,3 +847,134 @@ describe("EmailPasswordService - dangling session protection", () => {
     );
   });
 });
+
+describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
+  beforeEach(() => {
+    users.clear();
+    identifierRecords.clear();
+    passwordHashes.clear();
+    sessions.clear();
+  });
+
+  it("default mode: duplicate email still returns EmailInUseError (unchanged)", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* EmailPassword.make();
+      yield* service.signUp({ email: "dup@example.com", password: "strong-password-123" });
+      return yield* Effect.result(
+        service.signUp({ email: "DUP@Example.com", password: "another-strong-pw" }),
+      );
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("EmailInUseError");
+    }
+  });
+
+  it("antiEnumeration mode: fresh and duplicate sign-ups are indistinguishable", async () => {
+    const testContext = await makeTestContext();
+
+    const program = Effect.gen(function* () {
+      const service = yield* EmailPassword.make({ antiEnumeration: true });
+      const fresh = yield* service.signUp({
+        email: "shape@example.com",
+        password: "strong-password-123",
+        name: "Fresh User",
+      });
+      const duplicate = yield* service.signUp({
+        email: "Shape@Example.com",
+        password: "different-strong-pw",
+        name: "Attacker Supplied Name",
+      });
+      return { fresh, duplicate };
+    });
+
+    const { fresh, duplicate } = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    // Neither branch creates a session — no Set-Cookie on either at the
+    // HTTP layer, so "a session came back" can't itself be the oracle.
+    expect(fresh.session).toBeUndefined();
+    expect(duplicate.session).toBeUndefined();
+
+    // Same body shape: same set of top-level fields on both branches.
+    expect(Object.keys(duplicate).sort()).toEqual(Object.keys(fresh).sort());
+    expect(fresh.method).toBe("email-password");
+    expect(duplicate.method).toBe("email-password");
+    expect(duplicate.identifier).toEqual({ type: "email", value: "shape@example.com" });
+
+    // The duplicate branch never touches the real account: different user
+    // id, and its fields reflect only what THIS request submitted.
+    expect(duplicate.user.id).not.toBe(fresh.user.id);
+    expect(duplicate.user.name).toBe("Attacker Supplied Name");
+
+    // The real, pre-existing account is untouched (no second identifier or
+    // password write landed against it).
+    const identifiersForEmail = Array.from(identifierRecords.values()).filter(
+      (identifier) => identifier.type === "email" && identifier.value === "shape@example.com",
+    );
+    expect(identifiersForEmail).toHaveLength(1);
+    expect(identifiersForEmail[0]?.userId).toBe(fresh.user.id);
+  });
+
+  it("antiEnumeration mode: the duplicate branch still hashes the submitted password", async () => {
+    let hashCalls = 0;
+    const realHasher = Password.pbkdf2Hasher();
+    const spyHasher: typeof PasswordHasher.Service = {
+      algorithm: realHasher.algorithm,
+      hash: (password) => {
+        hashCalls++;
+        return realHasher.hash(password);
+      },
+      verify: (password, hash) => realHasher.verify(password, hash),
+    };
+
+    const sessionManager = await Effect.runPromise(
+      Effect.provide(
+        make(sessionConfig),
+        Context.merge(
+          Context.merge(
+            Context.make(SessionStore, sessionStore),
+            Context.make(UserStore, userStore),
+          ),
+          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        ),
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    const ctx = Context.merge(
+      Context.make(SessionService, sessionManager),
+      Context.merge(
+        Context.merge(
+          Context.make(EmailPasswordStore, emailPasswordStore),
+          Context.make(PasswordHasher, spyHasher),
+        ),
+        Context.merge(
+          Context.merge(
+            Context.make(UserStore, userStore),
+            Context.make(IdentifierStore, identifierStore),
+          ),
+          Context.make(Crypto.Crypto, PlatformCrypto.instance),
+        ),
+      ),
+    );
+
+    const program = Effect.gen(function* () {
+      const service = yield* EmailPassword.make({ antiEnumeration: true });
+      yield* service.signUp({ email: "hash@example.com", password: "strong-password-123" });
+      return yield* service.signUp({ email: "Hash@Example.com", password: "another-strong-pw" });
+    });
+
+    await Effect.runPromise(Effect.provide(program, ctx).pipe(Effect.provide(Hooks.Default)));
+
+    // One hash for the fresh branch, one for the duplicate branch.
+    expect(hashCalls).toBe(2);
+  });
+});

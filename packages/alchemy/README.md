@@ -35,7 +35,7 @@ const AppLayer = (db: AuthD1.D1Database) =>
 ```
 
 `AuthD1.layer(db)` provides every store `@thomasfosterau/effect-auth-sql`
-implements — `SessionStore`, `UserStore`, `EmailPasswordStore`, `RoleStore`,
+implements — `SessionStore`, `UserStore`, `EmailPasswordStore`,
 `RateLimitStore`, `EmailVerificationStore`, `ChallengeStore`, `CredentialStore`,
 `OAuthStateStore`, `OAuthAccountStore`, `PasswordResetStore`, `MagicLinkStore`,
 `EmailOtpStore`, `MultiFactorStore`, `IdentifierStore`, … — all backed by

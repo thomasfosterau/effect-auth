@@ -1,5 +1,10 @@
 # Headless toolkit, not a framework instance
 
+> **Superseded by [ADR-0017](0017-batteries-included-auth-framework.md).** effect-auth ships an
+> optional HTTP edge, a typed client and framework bindings; the headless core described below
+> survives as one tier of a batteries-included framework rather than as the whole library. The text
+> below is left as written.
+
 When asked to "match better-auth's functionality," we deliberately scoped effect-auth as a
 **toolkit of composable Effect primitives** rather than a `betterAuth()`-style instance. There is
 no central instance, no plugin runtime, no auto-mounted HTTP routes, no shipped client, no

@@ -11,7 +11,6 @@ describe("static service layers", () => {
     const services: ReadonlyArray<[string, { readonly layer: (...args: never[]) => unknown }]> = [
       ["SessionService", Auth.SessionService],
       ["RateLimiter", Auth.RateLimiter],
-      ["AuthorizationPolicy", Auth.AuthorizationPolicy],
       ["UserService", Auth.UserService],
       ["EmailPasswordService", Auth.Email.EmailPasswordService],
       ["EmailOtpService", Auth.Email.EmailOtpService],

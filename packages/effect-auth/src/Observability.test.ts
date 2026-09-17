@@ -7,27 +7,32 @@ describe("Observability", () => {
       const prometheusNamePattern = /^[a-zA-Z_:][a-zA-Z0-9_:]*$/;
 
       const metrics = [
-        { name: "signInTotal", value: Obs.signInTotal },
-        { name: "signUpTotal", value: Obs.signUpTotal },
-        { name: "sessionsCreated", value: Obs.sessionsCreated },
-        { name: "sessionsValidated", value: Obs.sessionsValidated },
-        { name: "sessionsInvalidated", value: Obs.sessionsInvalidated },
-        { name: "tokenVerifications", value: Obs.tokenVerifications },
-        { name: "rateLimitHits", value: Obs.rateLimitHits },
-        { name: "multiFactorChallenges", value: Obs.multiFactorChallenges },
-        { name: "multiFactorVerifications", value: Obs.multiFactorVerifications },
-        { name: "oauthCallbacks", value: Obs.oauthCallbacks },
-        { name: "oauthRefreshes", value: Obs.oauthRefreshes },
-        { name: "webauthnRegistrations", value: Obs.webauthnRegistrations },
-        { name: "webauthnAuthentications", value: Obs.webauthnAuthentications },
-        { name: "oidcTokenRequests", value: Obs.oidcTokenRequests },
+        { name: "signInTotal", metricName: "effect_auth_sign_in_total" },
+        { name: "signUpTotal", metricName: "effect_auth_sign_up_total" },
+        { name: "sessionsCreated", metricName: "effect_auth_sessions_created_total" },
+        { name: "sessionsValidated", metricName: "effect_auth_sessions_validated_total" },
+        { name: "sessionsInvalidated", metricName: "effect_auth_sessions_invalidated_total" },
+        { name: "tokenVerifications", metricName: "effect_auth_token_verifications_total" },
+        { name: "rateLimitHits", metricName: "effect_auth_rate_limit_hits_total" },
+        { name: "multiFactorChallenges", metricName: "effect_auth_multi_factor_challenges_total" },
+        {
+          name: "multiFactorVerifications",
+          metricName: "effect_auth_multi_factor_verifications_total",
+        },
+        { name: "oauthCallbacks", metricName: "effect_auth_oauth_callbacks_total" },
+        { name: "oauthRefreshes", metricName: "effect_auth_oauth_refreshes_total" },
+        { name: "webauthnRegistrations", metricName: "effect_auth_webauthn_registrations_total" },
+        {
+          name: "webauthnAuthentications",
+          metricName: "effect_auth_webauthn_authentications_total",
+        },
+        { name: "oidcTokenRequests", metricName: "effect_auth_oidc_token_requests_total" },
       ];
 
       for (const metric of metrics) {
-        const metricName = metric.value.id;
         expect(
-          prometheusNamePattern.test(metricName),
-          `Metric '${metric.name}' has invalid name '${metricName}'. ` +
+          prometheusNamePattern.test(metric.metricName),
+          `Metric '${metric.name}' has invalid name '${metric.metricName}'. ` +
             `Must match pattern /^[a-zA-Z_:][a-zA-Z0-9_:]*$/`,
         ).toBe(true);
       }

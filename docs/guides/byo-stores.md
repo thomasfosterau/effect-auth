@@ -6,12 +6,12 @@ If your database is Postgres/MySQL/SQLite via `effect/unstable/sql`, Cloudflare 
 
 ## 1. Conventions every store follows
 
-All 43 store contracts in core (§5) share the same shape, so once you've implemented one the rest are the same exercise:
+All 42 store contracts in core (§5) share the same shape, so once you've implemented one the rest are the same exercise:
 
 - **A contract is a plain object typed `typeof Auth.XStore.Service`.** There's nothing to extend or subclass — write an object whose methods match the interface and provide it with `Layer.succeed(Auth.XStore)(impl)`. (`SessionStore` and `UserStore` live at the package root; a handful of contracts are namespaced — `Auth.Email.*`, `Auth.OAuth.*`, `Auth.Password.*`, `Auth.Plugins.*`, `Auth.MultiFactor.*` — see the exact path in §5.)
 - **Lookups return `null` on a miss, never throw or fail.** A service converts `null` into a typed domain error (`SessionNotFoundError`, `UserNotFoundError`, …) at its own layer — the store just reports what it found.
 - **Deletes of an unknown id are no-ops**, not errors. `deleteByUserId`/ `deleteByEmail`-style bulk deletes succeed (silently) when there's nothing to delete.
-- **Infrastructure failures become `Errors.AuthError`, with `cause` set to the original error.** Every store method's error channel is `AuthError` (or `never` for the couple of methods, like `RoleStore.getUserRoles`, that are documented as always succeeding). Wrap your driver calls with `Effect.tryPromise`/`Effect.try` and map failures through `new Errors.AuthError({ message: "...", cause })` — never let a driver exception surface as an unhandled defect, and never drop `cause` (it's what makes a production incident readable).
+- **Infrastructure failures become `Errors.AuthError`, with `cause` set to the original error.** Every store method's error channel is `AuthError` (or `never` for the couple of methods that are documented as always succeeding). Wrap your driver calls with `Effect.tryPromise`/`Effect.try` and map failures through `new Errors.AuthError({ message: "...", cause })` — never let a driver exception surface as an unhandled defect, and never drop `cause` (it's what makes a production incident readable).
 - **Domain records use real `Date` objects and plain JS values at the store boundary.** `User`, `Session`, and `Identifier` are `Schema.Struct`s with `Schema.Date` fields and a `Schema.Record` `attributes` bag — your store receives and must return actual `Date`s and a plain object, not driver-specific types. Codec choice is yours: `packages/sql` stores dates as epoch-millisecond integers and `attributes` as a JSON `TEXT` column; `packages/drizzle` keeps native column types per dialect (`timestamptz`/`jsonb` on Postgres) and lets the driver round-trip them directly. Pick whatever your database does best and convert at the edges of your store implementation.
 - **Bearer secrets are handed to you pre-hashed.** Session ids, magic-link/ verification/reset/one-time tokens, API keys, and OIDC codes/tokens are all SHA-256 hex digests (`hashToken` in `TokenHash.ts`) by the time they reach a store — the raw secret is never persisted, so your store just indexes on the digest string like any other primary key. You don't need to hash anything yourself.
 
@@ -353,10 +353,9 @@ Grouped by cluster, in the same order the source is organized. "Namespace" is ho
 | --------------------- | ---------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | `RateLimitStore`      | `Auth.RateLimitStore`              | Rate-limit counters                                                 | `RateLimiter`                                                                          |
 | `AccountLockoutStore` | `Auth.Plugins.AccountLockoutStore` | Atomic lockout counters (see §2)                                    | `AccountLockoutPlugin`                                                                 |
-| `RoleStore`           | `Auth.RoleStore`                   | User → roles, role → permissions                                    | The legacy permission-string RBAC facade (`AuthorizationPolicy`)                       |
 | `PolicyStore`         | `Auth.PolicyStore.PolicyStore`     | Versioned policy documents, templates, and template-linked policies | Policies-as-data — the M3 authorization framework, organization dynamic access control |
 
-That's 43 store contracts. None are required — only implement the ones behind the features you actually enable.
+That's 42 store contracts. None are required — only implement the ones behind the features you actually enable.
 
 ## 6. Reference implementations
 

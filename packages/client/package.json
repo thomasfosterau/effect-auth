@@ -49,7 +49,7 @@
     "@thomasfosterau/effect-auth": "workspace:*"
   },
   "devDependencies": {
-    "effect": ">=4.0.0-rc.112"
+    "effect": "4.0.0-rc.112"
   },
   "peerDependencies": {
     "effect": ">=4.0.0-rc.112"
