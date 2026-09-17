@@ -12,6 +12,10 @@ import {
 import * as ApiKey from "./ApiKey.ts";
 import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.ts";
 import * as RateLimit from "./RateLimit.ts";
+import * as Authorizer from "./Authorizer.ts";
+import * as Entity from "./Entity.ts";
+import * as Condition from "./Condition.ts";
+import * as Policy from "./Policy.ts";
 
 const apiKeys = new Map<string, ApiKeyRecord>();
 const rateLimitEntries = new Map<string, RateLimitEntry>();
@@ -503,5 +507,60 @@ describe("ApiKeyService", () => {
 
     expect(result.every((outcome) => outcome.valid)).toBe(true);
     expect(rateLimitEntries.size).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Credential class: an API key must not be able to mint another API key
+// (issue #198 — "a key can mint a key").
+// ---------------------------------------------------------------------------
+
+describe("ApiKeyService + Authorizer: credential class", () => {
+  beforeEach(() => {
+    apiKeys.clear();
+    rateLimitEntries.clear();
+  });
+
+  const mintKey = Entity.ref("Action", "ApiKey.create");
+  const keyResource = Entity.ref("ApiKey", "any");
+  const interactiveOnly = Policy.permit({
+    id: "mint-key-requires-interactive-session",
+    action: Policy.eq(mintKey),
+    when: Condition.eq(Condition.attr("context", "credentialClass"), Condition.lit("interactive")),
+  });
+
+  const checkMint = (principal: Entity.EntityRef, credentialClass: Authorizer.CredentialClass) =>
+    Effect.provide(
+      Authorizer.Authorizer.pipe(
+        Effect.flatMap((authorizer) =>
+          authorizer.check({ action: mintKey, resource: keyResource }),
+        ),
+        Authorizer.CurrentPrincipal.provide(principal),
+        Authorizer.CurrentCredential.provide(credentialClass),
+      ),
+      Authorizer.Authorizer.layer({ policies: [interactiveOnly] }),
+    );
+
+  it("a real, verified API key authenticates as its owner but cannot mint another key", async () => {
+    const { key, apiKey } = await runService((service) => service.create("user-1", { name: "CI" }));
+
+    // The key is genuine — it authenticates as `user-1`.
+    const verified = await runService((service) => service.verify(key));
+    expect(verified.valid).toBe(true);
+    expect(verified.apiKey?.userId).toBe(apiKey.userId);
+
+    // An app's own API-key middleware would provide `CurrentPrincipal` from
+    // exactly this `userId` and classify the credential as "machine" — the
+    // same taxonomy `HttpMiddleware`'s bearer/cookie paths use.
+    const principal = Entity.ref("User", apiKey.userId);
+    const deniedForKey = await Effect.runPromise(checkMint(principal, "machine"));
+    expect(deniedForKey).toBe(false);
+  });
+
+  it("the same user, authenticated interactively (a session), may mint a key", async () => {
+    const { apiKey } = await runService((service) => service.create("user-1", { name: "CI" }));
+    const principal = Entity.ref("User", apiKey.userId);
+    const allowedForSession = await Effect.runPromise(checkMint(principal, "interactive"));
+    expect(allowedForSession).toBe(true);
   });
 });

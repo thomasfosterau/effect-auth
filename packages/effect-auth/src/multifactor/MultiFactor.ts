@@ -566,7 +566,7 @@ export const make = (
             expiresAt: pending.expiresAt,
           } satisfies MultiFactorChallenge;
         }).pipe(
-          Effect.withSpan("effect-auth.2fa.challenge"),
+          Effect.withSpan(Obs.spanNames.twoFactorChallenge),
           Effect.tap(() => Obs.recordMultiFactorChallenge()),
         ),
       ),
@@ -611,7 +611,7 @@ export const make = (
               session,
             } satisfies MultiFactorVerifyResult;
           }).pipe(
-            Effect.withSpan("effect-auth.2fa.verify", { attributes: { type: "totp" } }),
+            Effect.withSpan(Obs.spanNames.twoFactorVerify, { attributes: { type: "totp" } }),
             Effect.tap(() => Obs.recordMultiFactorVerification("totp", "success")),
             Effect.tapError(() => Obs.recordMultiFactorVerification("totp", "failure")),
           ),
@@ -649,7 +649,7 @@ export const make = (
               session,
             } satisfies MultiFactorVerifyResult;
           }).pipe(
-            Effect.withSpan("effect-auth.2fa.verify", { attributes: { type: "backup-code" } }),
+            Effect.withSpan(Obs.spanNames.twoFactorVerify, { attributes: { type: "backup-code" } }),
             Effect.tap(() => Obs.recordMultiFactorVerification("backup-code", "success")),
             Effect.tapError(() => Obs.recordMultiFactorVerification("backup-code", "failure")),
           ),

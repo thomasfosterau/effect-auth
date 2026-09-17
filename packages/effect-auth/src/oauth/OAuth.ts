@@ -971,7 +971,7 @@ export const make = (
             }
 
             return result;
-          }).pipe(Effect.withSpan("effect-auth.oauth.authorize", { attributes: { provider } })),
+          }).pipe(Effect.withSpan(Obs.spanNames.oauthAuthorize, { attributes: { provider } })),
       ),
 
       handleCallback: Effect.fn("OAuthService.handleCallback")(function* (
@@ -1202,7 +1202,7 @@ export const make = (
               ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
             } satisfies OAuthSignInResult;
           }).pipe(
-            Effect.withSpan("effect-auth.oauth.callback"),
+            Effect.withSpan(Obs.spanNames.oauthCallback),
             Effect.tap(() => Obs.recordOAuthCallback("success")),
             Effect.tapError(() => Obs.recordOAuthCallback("failure")),
           ),
@@ -1448,7 +1448,7 @@ export const make = (
 
             return data.access_token;
           }).pipe(
-            Effect.withSpan("effect-auth.oauth.refresh", { attributes: { provider } }),
+            Effect.withSpan(Obs.spanNames.oauthRefresh, { attributes: { provider } }),
             Effect.tap(() => Obs.recordOAuthRefresh(provider, "success")),
             Effect.tapError(() => Obs.recordOAuthRefresh(provider, "failure")),
           ),
