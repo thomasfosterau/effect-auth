@@ -38,6 +38,7 @@
  */
 import { Cause, Effect, Option } from "effect";
 import { identity } from "effect/Function";
+import type { CredentialClass } from "./Authorizer.ts";
 import * as Observability from "./Observability.ts";
 import * as SessionCookies from "./SessionCookies.ts";
 import type * as Types from "./Types.ts";
@@ -50,6 +51,15 @@ import type * as Types from "./Types.ts";
  * @category models
  */
 export type AuthOutcome = Observability.AuthOutcome;
+
+/**
+ * How a caller got in. Re-exported from `Authorizer`, where `CurrentCredential`
+ * carries it.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type { CredentialClass };
 
 // ---------------------------------------------------------------------------
 // Credential sources
@@ -311,6 +321,24 @@ export const detectCredential = (
 };
 
 /**
+ * Which credential class the caller presented, for `CurrentCredential`.
+ *
+ * A bearer token or an API key is a `"machine"` credential; a cookie is
+ * `"interactive"`. Mirrors the middleware's own read, so an app edge that
+ * provides the session context by hand classifies the caller the same way the
+ * HTTP stack would.
+ *
+ * A credential class changes *who* the request is, never *what* it may do —
+ * the policy kernel reads it to enforce rules like "an API key may act as this
+ * user, but may not mint another API key".
+ *
+ * @since 1.0.0
+ * @category accessors
+ */
+export const credentialClassOf = (presence: CredentialPresence): CredentialClass =>
+  presence.hasApiKey || presence.hasBearer ? "machine" : "interactive";
+
+/**
  * Whether the request carries any credential — the cookieless fast-path
  * predicate, in one call.
  *
@@ -516,7 +544,7 @@ export const resolveWith = <A, E, R>(
     const outcome: AuthOutcome = Option.isSome(options.session(value)) ? "resolved" : "anonymous";
     yield* report(outcome);
     return { value, outcome };
-  }).pipe(Effect.withSpan("effect-auth.resolve-session"));
+  }).pipe(Effect.withSpan(Observability.spanNames.resolveSession));
 
 /**
  * {@link resolveFailOpen}, generalised over a transport that carries more than
@@ -550,4 +578,4 @@ export const resolveWithFailOpen = <A, E, R>(
         }),
       ),
     );
-  }).pipe(Effect.withSpan("effect-auth.resolve-session"));
+  }).pipe(Effect.withSpan(Observability.spanNames.resolveSession));

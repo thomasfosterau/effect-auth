@@ -24,6 +24,8 @@ const resolved: Types.SessionWithUser = {
   user: { id: "user-42", createdAt: now, updatedAt: now, attributes: {} },
 };
 
+const withSessionCookie = { cookie: "__Host-conduit_session=raw-token" };
+
 const request = (headers: Record<string, string>) =>
   SessionResolution.fromRequest(new Request("https://app.example.com/", { headers }));
 
@@ -97,6 +99,19 @@ describe("SessionResolution.detectCredential", () => {
     );
     expect(presence.hasSessionCookie).toBe(true);
     expect(presence.hasApiKey).toBe(true);
+  });
+});
+
+describe("SessionResolution.credentialClassOf", () => {
+  it.each([
+    ["a session cookie", withSessionCookie, "interactive"],
+    ["a bearer token", { authorization: "Bearer tok" }, "machine"],
+    ["an API key", { "x-api-key": "k" }, "machine"],
+    ["a cookie and a key", { ...withSessionCookie, "x-api-key": "k" }, "machine"],
+  ])("classifies %s as %s", (_label, headers, expected) => {
+    expect(
+      SessionResolution.credentialClassOf(SessionResolution.detectCredential(request(headers))),
+    ).toBe(expected);
   });
 });
 

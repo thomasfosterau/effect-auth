@@ -44,6 +44,7 @@ import {
 } from "../Organization.ts";
 import { AdminService, isAdmin } from "../Admin.ts";
 import { ApiKeyService, type ApiKey } from "../ApiKey.ts";
+import { type CredentialClass } from "../Authorizer.ts";
 import { JwtService } from "../Jwt.ts";
 import {
   OidcProviderService,
@@ -323,6 +324,26 @@ export const sessionIdFromRequest = (
     if ((scheme === "Token" || scheme === "Bearer") && value) return value;
   }
   return request.cookies[cfg.name];
+};
+
+/**
+ * The {@link CredentialClass} implied by *how* the request carried its
+ * credential: the session cookie only a browser sends automatically is
+ * "interactive"; an `Authorization: Bearer/Token` header — copy-pasted into
+ * a script, a CLI, or a machine caller, the same delivery mechanism a
+ * consuming app's own API-key middleware uses — is "machine". Mirrors the
+ * branch `sessionIdFromRequest` takes so the two never disagree about which
+ * credential a request presented.
+ */
+export const credentialClassFromRequest = (
+  request: HttpServerRequest.HttpServerRequest,
+): CredentialClass => {
+  const auth = request.headers["authorization"];
+  if (auth) {
+    const [scheme, value] = auth.split(" ");
+    if ((scheme === "Token" || scheme === "Bearer") && value) return "machine";
+  }
+  return "interactive";
 };
 
 // -----------------------------------------------------------------------------
@@ -2551,6 +2572,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
       .handle("apiKeyCreate", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
+          yield* requireInteractiveCredential(request);
           const apiKey = yield* resolveApiKey;
           const result = yield* apiKey.service
             .create(resolved.user.id, {
@@ -3817,6 +3839,21 @@ const requireSession = (
   cfg: ResolvedCookieConfig,
 ): Effect.Effect<Types.SessionWithUser, S.Unauthorized, SessionService | Hooks> =>
   resolveSession(request, cfg).pipe(Effect.map((r) => r.resolved));
+
+/**
+ * Fail with `Forbidden` unless the request's credential is
+ * `"interactive"` — i.e. presented as the session cookie, not the
+ * `Authorization: Bearer/Token` header. Gates operations that must not be
+ * reachable by a machine credential (a bearer-delivered session token, or —
+ * for an app that wires its own API-key middleware on top of this library —
+ * an API key), such as minting a new API key from one already in hand.
+ */
+const requireInteractiveCredential = (
+  request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<void, S.Forbidden> =>
+  credentialClassFromRequest(request) === "interactive"
+    ? Effect.void
+    : Effect.fail(new S.Forbidden({ message: "This operation requires an interactive session" }));
 
 /**
  * Attach the session cookie to a JSON `AuthSuccess` response when a session is

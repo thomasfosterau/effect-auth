@@ -6,6 +6,11 @@
  * - `CurrentSession` / `CurrentUser` — context services injected by the
  *   required-auth middleware so downstream handlers can `yield* CurrentUser`
  *   without knowing how the session was resolved.
+ * - `CurrentPrincipal` / `CurrentCredential` — the resolved principal
+ *   (`Authorizer.ts`) and how it was authenticated: `"interactive"` for the
+ *   session cookie, `"machine"` for the `Authorization` header. Read by
+ *   `Authorizer.authorize`/`check` so a policy can gate an operation on
+ *   credential class, not just identity.
  * - `MaybeCurrentSession` — analogous service for optional-auth handlers;
  *   holds `Option<SessionWithUser>` (some when authenticated, none otherwise).
  * - `AuthMiddleware` — required-auth `HttpApiMiddleware.Service` tag.
@@ -66,7 +71,7 @@ import { HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi";
 import { HttpServerRequest } from "effect/unstable/http";
 import { Hooks } from "../Hooks.ts";
 import { SessionService } from "../SessionService.ts";
-import { CurrentPrincipal } from "../Authorizer.ts";
+import { CurrentPrincipal, CurrentCredential } from "../Authorizer.ts";
 import {
   CurrentSession,
   CurrentUser,
@@ -80,6 +85,7 @@ import {
   dataCookieName,
   resolveCookieConfig,
   sessionIdFromRequest,
+  credentialClassFromRequest,
   type CookieConfig,
   type ResolvedCookieConfig,
 } from "./HttpServer.ts";
@@ -151,8 +157,9 @@ const _authSecurity = {
  * Reads the session from the request (session cookie or
  * `Authorization: Bearer/Token` header), validates it via `SessionService`
  * (honoring the signed cookie cache), and provides `CurrentSession`,
- * `CurrentUser` and `CurrentPrincipal` (`User::"<user.id>"`) to the downstream
- * handler.
+ * `CurrentUser`, `CurrentPrincipal` (`User::"<user.id>"`) and
+ * `CurrentCredential` (`"interactive"` for the session cookie, `"machine"`
+ * for the `Authorization` header) to the downstream handler.
  *
  * Fails with `Unauthorized` (HTTP 401) when the session is absent, expired, or
  * invalid.
@@ -188,7 +195,12 @@ export class AuthMiddleware extends HttpApiMiddleware.Service<
   AuthMiddleware,
   {
     requires: SessionService | Hooks;
-    provides: CurrentSession | CurrentUser | MaybeCurrentSession | CurrentPrincipal;
+    provides:
+      | CurrentSession
+      | CurrentUser
+      | MaybeCurrentSession
+      | CurrentPrincipal
+      | CurrentCredential;
   }
 >()("@effect-auth/AuthMiddleware", {
   error: S.UnauthorizedError,
@@ -208,10 +220,11 @@ export class AuthMiddleware extends HttpApiMiddleware.Service<
  * `MaybeCurrentSession` with `Option.none()`.
  *
  * When (and only when) a session resolves, `CurrentPrincipal`
- * (`User::"<user.id>"`) is provided too. It is deliberately **not** listed in
- * `provides`: the service is conditional, and declaring it unconditionally
- * would let a handler `yield* CurrentPrincipal` and die on the anonymous path.
- * Read it with `Effect.serviceOption(CurrentPrincipal)`, which is exactly the
+ * (`User::"<user.id>"`) and `CurrentCredential` are provided too. Neither is
+ * listed in `provides`: both are conditional, and declaring them
+ * unconditionally would let a handler `yield* CurrentPrincipal` and die on
+ * the anonymous path. Read them with `Effect.serviceOption(CurrentPrincipal)`
+ * / `Effect.serviceOption(CurrentCredential)`, which is exactly the
  * "authorize if authenticated" shape optional-auth routes want.
  *
  * Requires `SessionService` and `Hooks` in the application's service context.
@@ -350,12 +363,15 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
           Effect.provideService(CurrentUser, user),
           Effect.provideService(MaybeCurrentSession, maybeResolved),
           Effect.provideService(CurrentPrincipal, principalOf(user)),
+          Effect.provideService(CurrentCredential, credentialClassFromRequest(request)),
         );
       }),
 
     // `bearer` scheme handler: fallback tried when `conduit_session` fails.
     // At this point no valid session was found via cookie or bearer in the
     // primary path, so this re-validates the pre-decoded Bearer credential.
+    // Reached only via the `Authorization` header, so the credential is
+    // unconditionally "machine".
     bearer: (handler, { credential }) =>
       Effect.gen(function* () {
         const token = Redacted.value(credential);
@@ -368,6 +384,7 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
           Effect.provideService(CurrentUser, resolved.user),
           Effect.provideService(MaybeCurrentSession, Option.some(resolved)),
           Effect.provideService(CurrentPrincipal, principalOf(resolved.user)),
+          Effect.provideService(CurrentCredential, "machine"),
         );
       }),
   });
@@ -408,17 +425,22 @@ export const optionalLayer = (config?: CookieConfig): Layer.Layer<OptionalAuthMi
       const maybeResolved = yield* resolveSessionFromRequest(request, cfg).pipe(
         Effect.catch(() => Effect.succeed(Option.none<Types.SessionWithUser>())),
       );
-      // `CurrentPrincipal` only exists when someone is actually authenticated,
-      // so it is added to the context but never subtracted from the handler's
-      // requirements (see `OptionalAuthMiddleware`). Re-widening `R` after
-      // `provideService` is sound: providing a service only ever removes one.
+      // `CurrentPrincipal`/`CurrentCredential` only exist when someone is
+      // actually authenticated, so they are added to the context but never
+      // subtracted from the handler's requirements (see
+      // `OptionalAuthMiddleware`). Re-widening `R` after `provideService` is
+      // sound: providing a service only ever removes one.
       const withPrincipal = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
         Option.isNone(maybeResolved)
           ? effect
           : (Effect.provideService(
-              effect,
-              CurrentPrincipal,
-              principalOf(maybeResolved.value.user),
+              Effect.provideService(
+                effect,
+                CurrentPrincipal,
+                principalOf(maybeResolved.value.user),
+              ),
+              CurrentCredential,
+              credentialClassFromRequest(request),
             ) as Effect.Effect<A, E, R>);
 
       return yield* withPrincipal(

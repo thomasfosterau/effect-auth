@@ -376,6 +376,8 @@ export {
 /** The `Authorizer` service and its supporting context tags. */
 export {
   CurrentPrincipal,
+  type CredentialClass,
+  CurrentCredential,
   EntityResolver,
   memoryEntityResolver,
   requestRefs,

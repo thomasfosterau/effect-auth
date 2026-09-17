@@ -236,6 +236,7 @@ describe("RemoteSession.resolveAtEdge", () => {
 
     expect(result.outcome).toBe("resolved");
     expect(Option.isSome(result.session)).toBe(true);
+    expect(result.credentialClass).toBe("interactive");
     // The cookies survive the outcome wrapper — that is why the generic
     // `resolveWith` exists rather than calling the transport twice.
     expect(result.setCookie).toStrictEqual(["__Host-conduit_session_data=x"]);
@@ -280,6 +281,9 @@ describe("RemoteSession.resolveAtEdge", () => {
     expect(result.outcome).toBe("resolved");
     expect(calls).toHaveLength(1);
     expect(calls[0]!.headers["x-api-key"]).toBe("key_live_1");
+    // And it is carried as a machine credential, so the policy kernel sees the
+    // same class the HTTP middleware would have provided.
+    expect(result.credentialClass).toBe("machine");
   });
 });
 

@@ -10,7 +10,7 @@ import {
 } from "./SessionContext.ts";
 import * as Entity from "./Entity.ts";
 import * as Policy from "./Policy.ts";
-import { Authorizer, CurrentPrincipal } from "./Authorizer.ts";
+import { Authorizer, CurrentCredential, CurrentPrincipal } from "./Authorizer.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -114,6 +114,25 @@ describe("SessionContext.authenticatedLayer", () => {
 
     expect(result.allowed).toBe(true);
     expect(result.denied).toBe(false);
+  });
+
+  it("provides CurrentCredential, defaulting to interactive", async () => {
+    const credential = await Effect.runPromise(
+      CurrentCredential.pipe(Effect.provide(SessionContext.authenticatedLayer(resolved))),
+    );
+    expect(credential).toBe("interactive");
+  });
+
+  it("a machine caller's credential class is carried, not assumed", async () => {
+    // The middleware derives this from the Authorization header; an app edge
+    // that provides the context by hand has to be able to say the same thing,
+    // or an API key silently reads as an interactive session.
+    const credential = await Effect.runPromise(
+      CurrentCredential.pipe(
+        Effect.provide(SessionContext.authenticatedLayer(resolved, { credentialClass: "machine" })),
+      ),
+    );
+    expect(credential).toBe("machine");
   });
 
   it("the read-path effect sees the resolved user", async () => {

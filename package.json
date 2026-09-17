@@ -29,7 +29,7 @@
     "@effect/docgen": "^0.5.2",
     "@effect/language-service": "^0.87.2",
     "@types/node": "^26.1.0",
-    "effect": ">=4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
     "tsx": "^4.19.0",
     "typescript": "^6.0.3",
     "vite-plus": "^0.2.2"

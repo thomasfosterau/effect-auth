@@ -51,7 +51,7 @@
  * @module session-context
  */
 import { Context, Effect, Layer, Option } from "effect";
-import { CurrentPrincipal } from "./Authorizer.ts";
+import { CurrentCredential, CurrentPrincipal, type CredentialClass } from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
@@ -134,26 +134,51 @@ export const principalOf = (user: Types.User): Entity.EntityRef => Entity.ref("U
 // ---------------------------------------------------------------------------
 
 /**
+ * How the caller got in, for the constructors below.
+ *
+ * Defaults to `"interactive"`: a session handed to a runtime by an app edge
+ * came from a browser credential unless the edge says otherwise. Pass
+ * `"machine"` when the request authenticated with an API key — a credential
+ * changes *who* the request is, never *what* it may do, and the policy kernel
+ * reads `CurrentCredential` to enforce exactly that.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface CredentialOptions {
+  readonly credentialClass?: CredentialClass;
+}
+
+/**
  * Provide the full authenticated context from an already-resolved session:
  * {@link CurrentSession}, {@link CurrentUser}, {@link MaybeCurrentSession}
- * (as `Option.some`) and `CurrentPrincipal`.
+ * (as `Option.some`), `CurrentPrincipal` and `CurrentCredential`.
  *
  * This is the constructor for "I resolved the session at my own edge and want
  * to run gated code as that viewer" — a SvelteKit load reading
  * `event.locals`, a Worker route that dispatched before the router, an
  * integration test running an effect as a fixture user.
  *
+ * `CurrentCredential` is provided because the required-auth middleware provides
+ * it: an effect that reads it has to run in all three contexts, which is the
+ * whole point of this module. It defaults to `"interactive"` — see
+ * {@link CredentialOptions}.
+ *
  * @since 1.0.0
  * @category layers
  */
 export const authenticatedLayer = (
   resolved: Types.SessionWithUser,
-): Layer.Layer<CurrentSession | CurrentUser | MaybeCurrentSession | CurrentPrincipal> =>
+  options?: CredentialOptions,
+): Layer.Layer<
+  CurrentSession | CurrentUser | MaybeCurrentSession | CurrentPrincipal | CurrentCredential
+> =>
   Layer.mergeAll(
     Layer.succeed(CurrentSession, resolved.session),
     Layer.succeed(CurrentUser, resolved.user),
     Layer.succeed(MaybeCurrentSession, Option.some(resolved)),
     Layer.succeed(CurrentPrincipal, principalOf(resolved.user)),
+    Layer.succeed(CurrentCredential, options?.credentialClass ?? "interactive"),
   );
 
 /**
@@ -197,7 +222,7 @@ export const layer = (
 
 /**
  * Provide the authenticated context for a user with no session record:
- * {@link CurrentUser} and `CurrentPrincipal`.
+ * {@link CurrentUser}, `CurrentPrincipal` and `CurrentCredential`.
  *
  * For contexts where a viewer exists but a session genuinely does not — a job
  * runner acting as a known user, a fixture viewer in a unit test.
@@ -212,10 +237,14 @@ export const layer = (
  * @since 1.0.0
  * @category layers
  */
-export const userLayer = (user: Types.User): Layer.Layer<CurrentUser | CurrentPrincipal> =>
+export const userLayer = (
+  user: Types.User,
+  options?: CredentialOptions,
+): Layer.Layer<CurrentUser | CurrentPrincipal | CurrentCredential> =>
   Layer.mergeAll(
     Layer.succeed(CurrentUser, user),
     Layer.succeed(CurrentPrincipal, principalOf(user)),
+    Layer.succeed(CurrentCredential, options?.credentialClass ?? "interactive"),
   );
 
 /**
@@ -228,8 +257,10 @@ export const userLayer = (user: Types.User): Layer.Layer<CurrentUser | CurrentPr
 export const userSessionLayer = (
   session: Types.Session,
   user: Types.User,
-): Layer.Layer<CurrentSession | CurrentUser | MaybeCurrentSession | CurrentPrincipal> =>
-  authenticatedLayer({ session, user });
+  options?: CredentialOptions,
+): Layer.Layer<
+  CurrentSession | CurrentUser | MaybeCurrentSession | CurrentPrincipal | CurrentCredential
+> => authenticatedLayer({ session, user }, options);
 
 // ---------------------------------------------------------------------------
 // Accessors

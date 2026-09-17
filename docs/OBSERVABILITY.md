@@ -22,6 +22,8 @@ OpenTelemetry-compatible backend (Jaeger, Honeycomb, Datadog, etc.) when a
 | `effect-auth.create-session`        | New session creation                 |
 | `effect-auth.validate-session`      | Session token validation             |
 | `effect-auth.resolve-session`       | Session resolution at an app edge    |
+| `effect-auth.remote-session.read`   | Session read over a remote transport |
+| `effect-auth.remote-session.relay`  | Credential relay to a remote service |
 | `effect-auth.oauth.authorize`       | OAuth authorization URL generation   |
 | `effect-auth.oauth.callback`        | OAuth callback / token exchange      |
 | `effect-auth.oauth.refresh`         | OAuth access-token refresh           |
@@ -71,7 +73,7 @@ Effect pipelines as the spans.
 | `effect-auth.sessions_created.total`           | Sessions successfully created                    |
 | `effect-auth.sessions_validated.total`         | Session validations (by `outcome`)               |
 | `effect-auth.sessions_invalidated.total`       | Sessions invalidated                             |
-| `effect-auth.session_resolutions.total`        | Edge resolution attempts (by `outcome`)          |
+| `effect_auth_session_resolutions_total`        | Edge resolution attempts (by `outcome`)          |
 | `effect-auth.token_verifications.total`        | Token verifications (by `type`, `outcome`)       |
 | `effect-auth.rate_limit_hits.total`            | Rate-limit threshold breaches (by `operation`)   |
 | `effect-auth.multi_factor_challenges.total`    | 2FA challenges started                           |

@@ -1,5 +1,10 @@
 # Protocol-server plugins out of scope; token primitives in
 
+> **Superseded by [ADR-0017](0017-batteries-included-auth-framework.md).** The protocol-server tier
+> scoped out below — OIDC Provider, SSO, SCIM, MCP Provider, Device Authorization — has since
+> shipped, on the reversal condition this record names in its closing paragraph. The text below is
+> left as written.
+
 Given the headless boundary (ADR-0001), better-auth plugins whose entire purpose is to expose a
 standardized protocol _endpoint_ deliver ~10% of their value as headless logic. We scope them out
 for now: **OIDC Provider**, **OAuth 2.1 Provider**, **SSO** (SAML/OIDC consumer), **SCIM**, **MCP

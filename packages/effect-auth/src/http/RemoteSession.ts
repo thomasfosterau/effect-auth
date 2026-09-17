@@ -54,6 +54,7 @@
  */
 import { Data, Effect, Layer, Option, Schema } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
+import { spanNames } from "../Observability.ts";
 import * as SessionResolution from "../SessionResolution.ts";
 import type * as Types from "../Types.ts";
 import * as S from "./HttpApiSchema.ts";
@@ -360,7 +361,7 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       );
 
       return { session: Option.some(fromSessionWithUserView(view)), setCookie };
-    }).pipe(Effect.withSpan("effect-auth.remote-session.read"));
+    }).pipe(Effect.withSpan(spanNames.remoteSessionRead));
 
   const relay = (request: Request, path?: string): Effect.Effect<Response> =>
     Effect.gen(function* () {
@@ -386,7 +387,7 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       );
 
       return relayResponse(response, credential(request));
-    }).pipe(Effect.withSpan("effect-auth.remote-session.relay"));
+    }).pipe(Effect.withSpan(spanNames.remoteSessionRelay));
 
   return { credential, read, relay };
 };
@@ -436,6 +437,13 @@ export const relayResponse = (
  */
 export interface EdgeSession extends RemoteSessionResult {
   readonly outcome: SessionResolution.AuthOutcome;
+  /**
+   * How this caller got in, derived from the credential it presented. Pass it
+   * straight to `SessionContext.authenticatedLayer(session, { credentialClass })`
+   * so the policy kernel sees the same credential class the HTTP middleware
+   * would have provided.
+   */
+  readonly credentialClass: SessionResolution.CredentialClass;
 }
 
 /** Options for {@link resolveAtEdge} and {@link resolveAtEdgeFailOpen}. */
@@ -444,10 +452,16 @@ export interface ResolveAtEdgeOptions {
   readonly request: Request;
 }
 
-const toEdge = (result: {
-  readonly value: RemoteSessionResult;
-  readonly outcome: SessionResolution.AuthOutcome;
-}): EdgeSession => ({ ...result.value, outcome: result.outcome });
+const toEdge =
+  (credential: SessionResolution.CredentialPresence) =>
+  (result: {
+    readonly value: RemoteSessionResult;
+    readonly outcome: SessionResolution.AuthOutcome;
+  }): EdgeSession => ({
+    ...result.value,
+    outcome: result.outcome,
+    credentialClass: SessionResolution.credentialClassOf(credential),
+  });
 
 /**
  * Resolve the session over the transport at an app edge, **failing closed**.
@@ -460,16 +474,18 @@ const toEdge = (result: {
  */
 export const resolveAtEdge = (
   options: ResolveAtEdgeOptions,
-): Effect.Effect<EdgeSession, RemoteSessionError> =>
-  Effect.map(
+): Effect.Effect<EdgeSession, RemoteSessionError> => {
+  const credential = options.client.credential(options.request);
+  return Effect.map(
     SessionResolution.resolveWith({
-      credential: options.client.credential(options.request),
+      credential,
       resolve: options.client.read(options.request),
       session: (result) => result.session,
       empty: emptyResult,
     }),
-    toEdge,
+    toEdge(credential),
   );
+};
 
 /**
  * Resolve the session over the transport at an app edge, **failing open**: an
@@ -503,17 +519,19 @@ export const resolveAtEdgeFailOpen = (
       never
     >["onDegraded"];
   },
-): Effect.Effect<EdgeSession> =>
-  Effect.map(
+): Effect.Effect<EdgeSession> => {
+  const credential = options.client.credential(options.request);
+  return Effect.map(
     SessionResolution.resolveWithFailOpen({
-      credential: options.client.credential(options.request),
+      credential,
       resolve: options.client.read(options.request),
       session: (result) => result.session,
       empty: emptyResult,
       onDegraded: options.onDegraded,
     }),
-    toEdge,
+    toEdge(credential),
   );
+};
 
 /**
  * Replay relayed `Set-Cookie` lines onto an outgoing response.

@@ -62,21 +62,29 @@ const auth = Http.RemoteSession.make({ fetcher: env.AUTH, prefix: "/api/auth" })
 
 const handle = (request: Request) =>
   Effect.gen(function* () {
-    const { session, setCookie } = yield* Http.RemoteSession.resolveAtEdgeFailOpen({
-      client: auth,
-      request,
-      onDegraded: (cause) => Effect.logError("auth service unreachable", cause),
-    });
+    const { session, setCookie, credentialClass } = yield* Http.RemoteSession.resolveAtEdgeFailOpen(
+      {
+        client: auth,
+        request,
+        onDegraded: (cause) => Effect.logError("auth service unreachable", cause),
+      },
+    );
 
     // Run the rest of the request as this viewer.
-    const response = yield* app(request).pipe(Effect.provide(SessionContext.layer(session)));
+    const response = yield* app(request).pipe(
+      Effect.provide(
+        Option.isSome(session)
+          ? SessionContext.authenticatedLayer(session.value, { credentialClass })
+          : SessionContext.anonymousLayer,
+      ),
+    );
 
     // Replay the cookies the auth service asked for (see below).
     return Http.RemoteSession.withSetCookie(response, setCookie);
   });
 ```
 
-Three things happen there that are worth naming.
+Four things happen there that are worth naming.
 
 ### The cookieless skip
 
@@ -100,6 +108,17 @@ fails closed for those.
 
 `onDegraded` is mandatory. A silently degrading auth service looks exactly like a site
 where nobody happens to be signed in.
+
+### The credential class travels with the session
+
+`credentialClass` says _how_ the caller got in — `"machine"` for an API key or bearer token,
+`"interactive"` for a cookie. Pass it to `SessionContext.authenticatedLayer` so the policy
+kernel sees the same value the HTTP middleware would have provided.
+
+It matters because a key and a cookie can resolve to the _same user_: a credential changes who
+the request is, never what it may do. Without it, a key-bearing request reads as an interactive
+session and a policy like "an API key may act as this user, but may not mint another API key"
+silently stops holding at your edge.
 
 ### Header forwarding is the library's job
 

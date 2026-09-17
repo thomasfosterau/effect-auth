@@ -21,7 +21,7 @@ importers:
         specifier: ^26.1.0
         version: 26.1.1
       effect:
-        specifier: '>=4.0.0-rc.112'
+        specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
       tsx:
         specifier: ^4.19.0
@@ -55,7 +55,7 @@ importers:
         specifier: ^11.7.0
         version: 11.10.0
       effect:
-        specifier: '>=4.0.0-rc.112'
+        specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
 
   packages/argon2:
@@ -71,7 +71,7 @@ importers:
         specifier: ^26.1.0
         version: 26.1.1
       effect:
-        specifier: '>=4.0.0-rc.112'
+        specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
 
   packages/client:
@@ -81,7 +81,7 @@ importers:
         version: link:../effect-auth
     devDependencies:
       effect:
-        specifier: '>=4.0.0-rc.112'
+        specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
 
   packages/drizzle:
@@ -109,7 +109,7 @@ importers:
         specifier: ^0.45.0
         version: 0.45.2(@cloudflare/workers-types@5.20260829.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(mysql2@3.24.2(@types/node@26.1.1))(pg@8.23.0)
       effect:
-        specifier: '>=4.0.0-rc.112'
+        specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
 
   packages/effect-auth:
@@ -118,7 +118,7 @@ importers:
         specifier: ^26.1.0
         version: 26.1.1
       effect:
-        specifier: '>=4.0.0-rc.112'
+        specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
 
   packages/react:
@@ -156,7 +156,7 @@ importers:
         specifier: ^26.1.0
         version: 26.1.1
       effect:
-        specifier: '>=4.0.0-rc.112'
+        specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
 
   packages/saml:
@@ -172,7 +172,7 @@ importers:
         specifier: ^26.1.0
         version: 26.1.1
       effect:
-        specifier: '>=4.0.0-rc.112'
+        specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
       xml-crypto:
         specifier: ^6.1.2
@@ -213,7 +213,7 @@ importers:
         specifier: ^11.7.0
         version: 11.10.0
       effect:
-        specifier: '>=4.0.0-rc.112'
+        specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
 
   packages/svelte:
@@ -251,7 +251,7 @@ importers:
         specifier: ^26.1.0
         version: 26.1.1
       effect:
-        specifier: '>=4.0.0-rc.112'
+        specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
 
   packages/vue:

@@ -48,7 +48,7 @@
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^26.1.0",
     "better-sqlite3": "^11.7.0",
-    "effect": ">=4.0.0-rc.112"
+    "effect": "4.0.0-rc.112"
   },
   "peerDependencies": {
     "effect": ">=4.0.0-rc.112"
