@@ -21,6 +21,9 @@ OpenTelemetry-compatible backend (Jaeger, Honeycomb, Datadog, etc.) when a
 | `effect-auth.sign-out`              | Session invalidation                 |
 | `effect-auth.create-session`        | New session creation                 |
 | `effect-auth.validate-session`      | Session token validation             |
+| `effect-auth.resolve-session`       | Session resolution at an app edge    |
+| `effect-auth.remote-session.read`   | Session read over a remote transport |
+| `effect-auth.remote-session.relay`  | Credential relay to a remote service |
 | `effect-auth.oauth.authorize`       | OAuth authorization URL generation   |
 | `effect-auth.oauth.callback`        | OAuth callback / token exchange      |
 | `effect-auth.oauth.refresh`         | OAuth access-token refresh           |
@@ -42,13 +45,14 @@ OpenTelemetry-compatible backend (Jaeger, Honeycomb, Datadog, etc.) when a
 Attributes carry only **non-PII discriminators** — never emails, passwords,
 session IDs, or tokens.
 
-| Attribute   | Values                                    | Spans                          |
-| ----------- | ----------------------------------------- | ------------------------------ |
-| `method`    | `"email-password"`                        | sign-in, sign-up               |
-| `provider`  | `"github"`, `"google"`, …                 | oauth.authorize, oauth.refresh |
-| `algorithm` | `"pbkdf2-sha256"`, `"scrypt"`             | password.hash, password.verify |
-| `type`      | `"jwt"`, `"totp"`, `"backup-code"`        | token.verify, 2fa.verify       |
-| `grant`     | `"authorization_code"`, `"refresh_token"` | oidc.token                     |
+| Attribute      | Values                                                 | Spans                          |
+| -------------- | ------------------------------------------------------ | ------------------------------ |
+| `method`       | `"email-password"`                                     | sign-in, sign-up               |
+| `provider`     | `"github"`, `"google"`, …                              | oauth.authorize, oauth.refresh |
+| `algorithm`    | `"pbkdf2-sha256"`, `"scrypt"`                          | password.hash, password.verify |
+| `type`         | `"jwt"`, `"totp"`, `"backup-code"`                     | token.verify, 2fa.verify       |
+| `auth.outcome` | `"skipped"`, `"resolved"`, `"anonymous"`, `"degraded"` | resolve-session                |
+| `grant`        | `"authorization_code"`, `"refresh_token"`              | oidc.token                     |
 
 ---
 
@@ -69,6 +73,7 @@ Effect pipelines as the spans.
 | `effect-auth.sessions_created.total`           | Sessions successfully created                    |
 | `effect-auth.sessions_validated.total`         | Session validations (by `outcome`)               |
 | `effect-auth.sessions_invalidated.total`       | Sessions invalidated                             |
+| `effect_auth_session_resolutions_total`        | Edge resolution attempts (by `outcome`)          |
 | `effect-auth.token_verifications.total`        | Token verifications (by `type`, `outcome`)       |
 | `effect-auth.rate_limit_hits.total`            | Rate-limit threshold breaches (by `operation`)   |
 | `effect-auth.multi_factor_challenges.total`    | 2FA challenges started                           |
@@ -81,13 +86,32 @@ Effect pipelines as the spans.
 
 ### Attribute values
 
-| Attribute   | Values                                                           |
-| ----------- | ---------------------------------------------------------------- |
-| `outcome`   | `"success"` \| `"failure"` \| `"not_found"` \| `"expired"`       |
-| `method`    | `"email-password"`, `"oauth"`, …                                 |
-| `type`      | `"jwt"`, `"totp"`, `"backup-code"`                               |
-| `grant`     | `"authorization_code"`, `"refresh_token"`                        |
-| `operation` | First segment of the rate-limit key (e.g. `"login"`, `"signup"`) |
+| Attribute              | Values                                                           |
+| ---------------------- | ---------------------------------------------------------------- |
+| `outcome`              | `"success"` \| `"failure"` \| `"not_found"` \| `"expired"`       |
+| `outcome` (resolution) | `"skipped"` \| `"resolved"` \| `"anonymous"` \| `"degraded"`     |
+| `method`               | `"email-password"`, `"oauth"`, …                                 |
+| `type`                 | `"jwt"`, `"totp"`, `"backup-code"`                               |
+| `grant`                | `"authorization_code"`, `"refresh_token"`                        |
+| `operation`            | First segment of the rate-limit key (e.g. `"login"`, `"signup"`) |
+
+### Session-resolution outcomes
+
+`SessionResolution.resolve` / `resolveFailOpen` report an `AuthOutcome` themselves — there is
+no derivation for a caller to reimplement, and nothing to wire up. The four states are kept
+distinct on purpose:
+
+| Outcome     | Meaning                                                                  |
+| ----------- | ------------------------------------------------------------------------ |
+| `skipped`   | No credential; resolution never ran (near-zero duration by construction) |
+| `resolved`  | Ran and returned a session                                               |
+| `anonymous` | Ran and returned nothing — a stale or expired credential                 |
+| `degraded`  | Could not run, or threw; the request was degraded to anonymous           |
+
+`anonymous` is deliberately not folded into `skipped`: it still paid the round trip, and
+merging them corrupts the duration bucket. `degraded` is deliberately not folded into
+`anonymous`: the caller is signed out because something broke, which is the state worth
+alerting on. See `docs/SECURITY.md` for the fail-open posture that produces it.
 
 ---
 

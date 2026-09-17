@@ -1012,6 +1012,7 @@ Following BetterAuth and OWASP guidelines:
 - [Bring Your Own Store](./docs/guides/byo-stores.md) - Store-contract conventions, atomicity rules, and a worked example for any database
 - [MCP Provider Guide](./docs/guides/mcp-provider.md) - Dynamic client registration and PKCE auth-code for MCP clients
 - [Migrating from Better Auth](./docs/guides/better-auth-migration.md) - Concept map, flow equivalents, client swap, and schema migration
+- [Auth as a Separate Service](./docs/guides/split-auth-service.md) - Remote session resolution over a service binding, and the `Set-Cookie` relay
 - [Security Policy](./docs/SECURITY.md) - Security best practices and vulnerability reporting
 - [Better Auth Parity Plan](./docs/better-auth-parity.md) - Target architecture, roadmap, and feature parity tracking
 

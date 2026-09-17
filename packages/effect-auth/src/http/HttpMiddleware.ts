@@ -66,13 +66,18 @@
  * ```
  */
 
-import { Context, Effect, Layer, Option, Redacted } from "effect";
+import { Effect, Layer, Option, Redacted } from "effect";
 import { HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi";
 import { HttpServerRequest } from "effect/unstable/http";
 import { Hooks } from "../Hooks.ts";
 import { SessionService } from "../SessionService.ts";
 import { CurrentPrincipal, CurrentCredential } from "../Authorizer.ts";
-import * as Entity from "../Entity.ts";
+import {
+  CurrentSession,
+  CurrentUser,
+  MaybeCurrentSession,
+  principalOf,
+} from "../SessionContext.ts";
 import { resolveMessage } from "../Messages.ts";
 import * as S from "./HttpApiSchema.ts";
 import type * as Types from "../Types.ts";
@@ -91,56 +96,21 @@ import { decodeSessionCacheCookie } from "../SessionCookieCache.ts";
 // =============================================================================
 
 /**
- * Context service that holds the validated `Session` for the current request.
+ * The session-context services, re-exported from `SessionContext.ts`.
  *
- * Available in handlers that have `AuthMiddleware` applied. Use
- * `MaybeCurrentSession` when auth is optional.
+ * They are declared there rather than here because *providing* a resolved
+ * session is not an HTTP concern: the same tags are filled by the middleware
+ * below, by `SessionContext.authenticatedLayer` at a non-HTTP edge, and by a
+ * test harness. Re-exported so `Http.CurrentUser` keeps resolving.
  *
- * @since 1.0.0
- * @category context
- */
-export class CurrentSession extends Context.Service<CurrentSession, Types.Session>()(
-  "@effect-auth/CurrentSession",
-) {}
-
-/**
- * Context service that holds the authenticated `User` for the current request.
- *
- * Available in handlers that have `AuthMiddleware` applied. Use
- * `MaybeCurrentSession` when auth is optional.
+ * - `CurrentSession` / `CurrentUser` — provided by `AuthMiddleware`.
+ * - `MaybeCurrentSession` — `Option<SessionWithUser>`, provided by **both**
+ *   middlewares, and the service read-path code should depend on.
  *
  * @since 1.0.0
  * @category context
  */
-export class CurrentUser extends Context.Service<CurrentUser, Types.User>()(
-  "@effect-auth/CurrentUser",
-) {}
-
-/**
- * Context service that holds an `Option<SessionWithUser>` for optional-auth
- * handlers.
- *
- * Available in handlers that have `OptionalAuthMiddleware` applied.
- * `Option.some(resolved)` when a valid session is present; `Option.none()`
- * when unauthenticated or session is invalid.
- *
- * @since 1.0.0
- * @category context
- */
-export class MaybeCurrentSession extends Context.Service<
-  MaybeCurrentSession,
-  Option.Option<Types.SessionWithUser>
->()("@effect-auth/MaybeCurrentSession") {}
-
-/**
- * The authenticated user as the authorization {@link CurrentPrincipal}:
- * `User::"<user.id>"`.
- *
- * Provided alongside `CurrentSession`/`CurrentUser` so an authenticated handler
- * can call `Authorizer.check`/`authorize` — or run a schema built from
- * `protectedField` — without restating who the principal is.
- */
-const principalOf = (user: Types.User): Entity.EntityRef => Entity.ref("User", user.id);
+export { CurrentSession, CurrentUser, MaybeCurrentSession } from "../SessionContext.ts";
 
 // =============================================================================
 // HttpApiSecurity definitions (for OpenAPI advertising)
@@ -194,6 +164,12 @@ const _authSecurity = {
  * Fails with `Unauthorized` (HTTP 401) when the session is absent, expired, or
  * invalid.
  *
+ * It also provides `MaybeCurrentSession` — always `Option.some` here, since
+ * this middleware only reaches the handler when a session resolved. That is
+ * what lets one effect written against the read-path service run unchanged
+ * under this middleware, under `OptionalAuthMiddleware`, and under
+ * `SessionContext.layer` at a non-HTTP edge.
+ *
  * The tag carries `HttpApiSecurity` definitions for the cookie and Bearer
  * schemes so the derived OpenAPI spec advertises both.
  *
@@ -219,7 +195,12 @@ export class AuthMiddleware extends HttpApiMiddleware.Service<
   AuthMiddleware,
   {
     requires: SessionService | Hooks;
-    provides: CurrentSession | CurrentUser | CurrentPrincipal | CurrentCredential;
+    provides:
+      | CurrentSession
+      | CurrentUser
+      | MaybeCurrentSession
+      | CurrentPrincipal
+      | CurrentCredential;
   }
 >()("@effect-auth/AuthMiddleware", {
   error: S.UnauthorizedError,
@@ -380,6 +361,7 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
         return yield* handler.pipe(
           Effect.provideService(CurrentSession, session),
           Effect.provideService(CurrentUser, user),
+          Effect.provideService(MaybeCurrentSession, maybeResolved),
           Effect.provideService(CurrentPrincipal, principalOf(user)),
           Effect.provideService(CurrentCredential, credentialClassFromRequest(request)),
         );
@@ -400,6 +382,7 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
         return yield* handler.pipe(
           Effect.provideService(CurrentSession, resolved.session),
           Effect.provideService(CurrentUser, resolved.user),
+          Effect.provideService(MaybeCurrentSession, Option.some(resolved)),
           Effect.provideService(CurrentPrincipal, principalOf(resolved.user)),
           Effect.provideService(CurrentCredential, "machine"),
         );

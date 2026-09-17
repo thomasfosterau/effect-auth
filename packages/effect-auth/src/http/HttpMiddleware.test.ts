@@ -13,6 +13,7 @@ import {
   OptionalAuthMiddleware,
 } from "./HttpMiddleware.ts";
 import * as HttpMiddleware from "./HttpMiddleware.ts";
+import * as SessionContext from "../SessionContext.ts";
 import * as Entity from "../Entity.ts";
 import * as Policy from "../Policy.ts";
 import { Authorizer, CurrentPrincipal } from "../Authorizer.ts";
@@ -361,5 +362,84 @@ describe("HttpMiddleware.optionalLayer", () => {
     const exit = await Effect.runPromiseExit(effect);
     expect(Exit.isSuccess(exit)).toBe(true);
     expect(Option.isNone(principalCell.value!)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One effect, three contexts (#185)
+// ---------------------------------------------------------------------------
+
+/**
+ * A read-path effect written against `MaybeCurrentSession` — the shape an
+ * app's zero-IO guard has. The point of the test is that this *exact value*
+ * runs under required auth, under optional auth, and under
+ * `SessionContext.authenticatedLayer` with no HTTP request in sight.
+ */
+const viewerRole = Effect.map(
+  SessionContext.currentUserOption,
+  Option.match({
+    onNone: () => "anonymous",
+    onSome: (user) => String(user.attributes.email),
+  }),
+);
+
+describe("MaybeCurrentSession is provided by both middlewares", () => {
+  const authLayer = HttpMiddleware.layer({ secure: false });
+  const optionalLayer = HttpMiddleware.optionalLayer({ secure: false });
+
+  it("AuthMiddleware provides it as Option.some, so read-path code runs under required auth", async () => {
+    const roleCell = cell<string>();
+    const handler = Effect.gen(function* () {
+      roleCell.value = yield* viewerRole;
+      return ok;
+    });
+
+    const effect = Effect.gen(function* () {
+      const svc = yield* AuthMiddleware;
+      const applied: MiddlewareResult<
+        typeof ok,
+        PerRequestServices | HttpServerRequest.HttpServerRequest
+      > = (svc.conduit_session as any)(handler, undefined);
+      yield* applied.pipe(
+        Effect.provideService(
+          HttpServerRequest.HttpServerRequest,
+          makeWebRequest({ cookie: RAW_TOKEN }),
+        ),
+      );
+    }).pipe(Effect.provide(Layer.mergeAll(authLayer, baseLayer)));
+
+    await Effect.runPromise(effect);
+    expect(roleCell.value).toBe("user@example.com");
+  });
+
+  it("OptionalAuthMiddleware runs the same effect and answers anonymous", async () => {
+    const roleCell = cell<string>();
+    const handler = Effect.gen(function* () {
+      roleCell.value = yield* viewerRole;
+      return ok;
+    });
+
+    const effect = Effect.gen(function* () {
+      const svc = yield* OptionalAuthMiddleware;
+      const applied: MiddlewareResult<
+        typeof ok,
+        PerRequestServices | HttpServerRequest.HttpServerRequest
+      > = (svc as any)(handler, undefined);
+      yield* applied.pipe(
+        Effect.provideService(HttpServerRequest.HttpServerRequest, makeWebRequest()),
+      );
+    }).pipe(Effect.provide(Layer.mergeAll(optionalLayer, baseLayer)));
+
+    await Effect.runPromise(effect);
+    expect(roleCell.value).toBe("anonymous");
+  });
+
+  it("SessionContext.authenticatedLayer runs the same effect with no request at all", async () => {
+    const role = await Effect.runPromise(
+      viewerRole.pipe(
+        Effect.provide(SessionContext.authenticatedLayer({ session: testSession, user: testUser })),
+      ),
+    );
+    expect(role).toBe("user@example.com");
   });
 });
