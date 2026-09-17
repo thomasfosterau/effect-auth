@@ -80,7 +80,7 @@ describe("module graph", () => {
     expect(offenders).toEqual([]);
   });
 
-  // TODO(#205): Http.ts — reached from src/index.ts:390's
+  // TODO(#205): Http.ts — reached from src/index.ts:392's
   // `export * as Http from "./http/index.ts"` — imports from
   // `effect/unstable/httpapi`, which is exactly the coupling #205's HTTP-tier
   // restructure exists to remove. Un-skip once that lands.

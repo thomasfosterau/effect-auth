@@ -24,7 +24,7 @@ describe("Observability", () => {
       ];
 
       for (const metric of metrics) {
-        const metricName = metric.value.name;
+        const metricName = metric.value.id;
         expect(
           prometheusNamePattern.test(metricName),
           `Metric '${metric.name}' has invalid name '${metricName}'. ` +
