@@ -179,6 +179,50 @@ Follow **Copenhagen Book** guidelines for session management:
    - Set TTL on session records
    - Clean up expired sessions regularly
 
+### Fail-Open vs Fail-Closed Session Resolution
+
+An app that resolves the session at its own edge — a SvelteKit `hooks.server.ts`, a Worker
+calling an auth service binding — has to decide what a **fault** means. Not "no session": a
+fault. The store is down, the binding is unreachable, the call threw.
+
+effect-auth ships both directions and defaults to neither, because the right answer depends on
+a property of _your_ app that the library cannot see:
+
+| Helper                              | Fault becomes                                | Use when                                         |
+| ----------------------------------- | -------------------------------------------- | ------------------------------------------------ |
+| `SessionResolution.resolve`         | a failure in the error channel               | anonymous is **not** the lower-privilege outcome |
+| `SessionResolution.resolveFailOpen` | an anonymous request, reported as `degraded` | anonymous **is** the lower-privilege outcome     |
+
+**The precondition for fail-open.** Degrading to anonymous is safe only if anonymous is
+strictly less privileged than any signed-in viewer — reads are public, and every write is
+separately gated server-side on the resolved viewer. Then a session-service fault costs
+signed-in users their personalisation and nothing else.
+
+It is **unsafe**, and an escalation, whenever anonymous is privileged in your app:
+
+- A read path that is public by default and gated _down_ for some viewers (a "shadow-banned
+  user sees less than a stranger" rule degrades into the stranger's view).
+- A deployment where a missing session means "trusted internal caller" rather than "nobody".
+- Any surface where authorization is expressed as "deny if the viewer is X" rather than
+  "allow if the viewer is Y" — an absent viewer matches no deny rule.
+
+Fail-closed is not free either: with a `SessionStore` behind a database, _any_ store fault
+becomes a site-wide 500, including on routes that never touch auth. Choose deliberately.
+
+**Fail-open must be loud.** Its failure mode is silence — an unreachable session service looks
+exactly like a site where nobody happens to be signed in, and stays that way until someone
+notices the sign-in rate. `resolveFailOpen` therefore takes a mandatory `onDegraded` callback,
+and there is no overload that omits it. Log it, count it, alert on it. The `degraded` outcome
+is also emitted on the `effect-auth.session_resolutions.total` counter and as an `auth.outcome`
+span attribute, distinct from `anonymous`, precisely so a fault is distinguishable from a quiet
+day.
+
+**The cookieless skip is not a fault path.** `SessionResolution.hasSessionCredential` answers
+"could this request resolve at all?" from the credential names alone; a request with no
+credential is reported as `skipped` and never reaches either resolver. Keep the predicate and
+the middleware's cookie name derived from one config (`SessionCookies.cookieNames`) — a
+predicate that disagrees with the middleware silently signs users out.
+
 ### Multi-Factor Authentication (MFA)
 
 While effect-auth doesn't currently include MFA primitives, you should consider:

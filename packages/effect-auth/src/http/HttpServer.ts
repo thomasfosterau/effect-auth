@@ -9,6 +9,7 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http";
 import { AuthApi, getOpenApiSpec } from "./HttpApi.ts";
+import * as SessionCookies from "../SessionCookies.ts";
 import { ClientIP, resolveClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import { RateLimiter, type RateLimitConfig } from "../RateLimit.ts";
 import * as S from "./HttpApiSchema.ts";
@@ -214,20 +215,15 @@ export const resolveCookieConfig = (
   config?: CookieConfig,
   multiSession?: MultiSessionConfig,
 ): ResolvedCookieConfig => {
-  const secureCookies = config?.secure ?? true;
-  const configuredPath = config?.path ?? "/";
-  // Apply __Host- prefix by default when secure and path is root; the prefix
-  // forces path=/ so browsers enforce host-binding (no Domain, Secure, Path=/).
-  const useHostPrefix = config?.hostPrefix ?? (secureCookies && configuredPath === "/");
-  const baseName = config?.name ?? "conduit_session";
-  const effectiveName = useHostPrefix && secureCookies ? `__Host-${baseName}` : baseName;
-  // __Host- cookies must have Path=/; override whatever path was configured.
-  const effectivePath = useHostPrefix && secureCookies ? "/" : configuredPath;
+  // Name/path/secure derivation lives in `SessionCookies` so an app edge can
+  // run the SAME derivation to learn which cookie to look for, without
+  // restating the `__Host-` rule. There is deliberately only one copy.
+  const naming = SessionCookies.resolveNaming(config);
   const bm = config?.bearerMode;
   return {
-    name: effectiveName,
-    secure: secureCookies,
-    path: effectivePath,
+    name: naming.name,
+    secure: naming.secure,
+    path: naming.path,
     cache: resolveSessionCache(config?.cache),
     multiSession:
       multiSession === undefined

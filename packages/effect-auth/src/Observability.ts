@@ -43,6 +43,38 @@ export const sessionsValidated = Metric.counter("effect-auth.sessions_validated.
   incremental: true,
 });
 
+/**
+ * The four outcomes of a session-resolution *attempt* at an application edge.
+ *
+ * Deliberately four and not two. `skipped` and `anonymous` both end with no
+ * viewer, but only `anonymous` paid the round trip — folding them corrupts the
+ * duration bucket, since a skip is near-zero by construction. `degraded` is
+ * separate again: the caller is anonymous because something broke, not because
+ * nobody was signed in, and that distinction is the whole point of alerting on
+ * it.
+ *
+ * One derivation, in `SessionResolution`, so two edges reporting the same fault
+ * cannot label it differently.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type AuthOutcome =
+  /** No credential was present; resolution never ran. */
+  | "skipped"
+  /** Resolution ran and returned a session. */
+  | "resolved"
+  /** Resolution ran and returned nothing (stale or expired credential). */
+  | "anonymous"
+  /** Resolution could not run, or threw. The caller degraded to anonymous. */
+  | "degraded";
+
+/** Session-resolution attempts at an app edge. Attributes: `{ outcome }`. */
+export const sessionResolutions = Metric.counter("effect-auth.session_resolutions.total", {
+  description: "Session-resolution attempts at an app edge — tagged by outcome",
+  incremental: true,
+});
+
 /** Sessions invalidated (sign-out). */
 export const sessionsInvalidated = Metric.counter("effect-auth.sessions_invalidated.total", {
   description: "Sessions invalidated",
@@ -127,6 +159,9 @@ export const recordSessionValidated = (
 
 export const recordSessionInvalidated = (): Effect.Effect<void> =>
   Metric.update(sessionsInvalidated, 1);
+
+export const recordSessionResolution = (outcome: AuthOutcome): Effect.Effect<void> =>
+  Metric.update(Metric.withAttributes(sessionResolutions, { outcome }), 1);
 
 export const recordTokenVerification = (
   type: string,

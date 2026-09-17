@@ -399,6 +399,19 @@ export { CurrentSession, CurrentUser, MaybeCurrentSession } from "./SessionConte
 /** Layer constructors and accessors for an already-resolved session. */
 export * as SessionContext from "./SessionContext.ts";
 
+/**
+ * Session resolution at an application's own edge: credential-presence
+ * predicates over a raw `Request`, fail-open and fail-closed resolution, and
+ * one `AuthOutcome` the resolver reports itself.
+ */
+export * as SessionResolution from "./SessionResolution.ts";
+
+/**
+ * Cookie naming, shared by the middleware and the app-edge predicates so the
+ * computed `__Host-` name has exactly one derivation.
+ */
+export * as SessionCookies from "./SessionCookies.ts";
+
 // Cluster namespaces (also available as `effect-auth/<cluster>` subpaths)
 export * as Email from "./email/index.ts";
 export * as Http from "./http/index.ts";
