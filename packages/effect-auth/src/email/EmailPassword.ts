@@ -341,7 +341,7 @@ export const make = (
               ),
             );
         }).pipe(
-          Effect.withSpan("effect-auth.sign-up", { attributes: { method: "email-password" } }),
+          Effect.withSpan(Obs.spanNames.signUp, { attributes: { method: "email-password" } }),
           Effect.tap(() => Obs.recordSignUp("email-password", "success")),
           Effect.tapError(() => Obs.recordSignUp("email-password", "failure")),
         ),
@@ -442,7 +442,7 @@ export const make = (
               ),
             );
         }).pipe(
-          Effect.withSpan("effect-auth.sign-in", { attributes: { method: "email-password" } }),
+          Effect.withSpan(Obs.spanNames.signIn, { attributes: { method: "email-password" } }),
           Effect.tap(() => Obs.recordSignIn("email-password", "success")),
           Effect.tapError(() => Obs.recordSignIn("email-password", "failure")),
         ),
