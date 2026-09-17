@@ -47,10 +47,10 @@
 
 import { Context, Effect, Layer, RequestResolver } from "effect";
 import type * as Auth from "@thomasfosterau/effect-auth";
+import type { SchemaInput } from "./Columns.ts";
 import type { DrizzleDatabase } from "./Database.ts";
 import * as IdentifierStore from "./IdentifierStore.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
-import type { Tables } from "./Schema.ts";
 import * as SessionStore from "./SessionStore.ts";
 import * as UserStore from "./UserStore.ts";
 
@@ -73,14 +73,14 @@ export class AuthRequests extends Context.Service<
 
 /** Build the resolver set over the ambient {@link DrizzleDatabase}. */
 export const make = (
-  tables: Tables = defaultTables,
+  schema: SchemaInput = defaultTables,
 ): Effect.Effect<typeof AuthRequests.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     return {
-      session: yield* SessionStore.makeResolver(tables),
-      user: yield* UserStore.makeResolver(tables),
-      identifierByValue: yield* IdentifierStore.makeByValueResolver(tables),
-      identifiersByUser: yield* IdentifierStore.makeByUserResolver(tables),
+      session: yield* SessionStore.makeResolver(schema),
+      user: yield* UserStore.makeResolver(schema),
+      identifierByValue: yield* IdentifierStore.makeByValueResolver(schema),
+      identifiersByUser: yield* IdentifierStore.makeByUserResolver(schema),
     } satisfies typeof AuthRequests.Service;
   });
 
@@ -91,8 +91,8 @@ export const make = (
  * to this layer's lifetime, since that is what owns the resolver instances.
  */
 export const layer = (
-  tables: Tables = defaultTables,
-): Layer.Layer<AuthRequests, never, DrizzleDatabase> => Layer.effect(AuthRequests, make(tables));
+  schema: SchemaInput = defaultTables,
+): Layer.Layer<AuthRequests, never, DrizzleDatabase> => Layer.effect(AuthRequests, make(schema));
 
 // ---------------------------------------------------------------------------
 // Constructors

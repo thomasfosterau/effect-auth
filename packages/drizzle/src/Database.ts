@@ -75,7 +75,14 @@
  */
 
 import { Context, Effect, Layer } from "effect";
-import type { SQL, SQLWrapper, Table, TablesRelationalConfig } from "drizzle-orm";
+import type {
+  Column,
+  InferColumnsDataTypes,
+  SQL,
+  SQLWrapper,
+  Table,
+  TablesRelationalConfig,
+} from "drizzle-orm";
 import type {
   MySqlDatabase,
   MySqlQueryResultHKT,
@@ -106,24 +113,57 @@ export interface DrizzleExecutable<out A> {
 export type DrizzleRows<TTable extends Table> = Array<TTable["$inferSelect"]>;
 
 /**
- * A `SELECT` with its `WHERE` already applied: it can still be narrowed by
- * `limit`/`orderBy`, or run as-is.
+ * A `SELECT` yielding `TRow`s, with its `WHERE` already applied: it can still be
+ * narrowed by `limit`/`orderBy`, or run as-is.
  */
-export interface DrizzleSelectFiltered<TTable extends Table> extends DrizzleExecutable<
-  DrizzleRows<TTable>
-> {
-  limit(limit: number): DrizzleExecutable<DrizzleRows<TTable>>;
-  orderBy(...columns: Array<SQLWrapper>): DrizzleExecutable<DrizzleRows<TTable>>;
+export interface DrizzleRowSelectFiltered<out TRow> extends DrizzleExecutable<Array<TRow>> {
+  limit(limit: number): DrizzleExecutable<Array<TRow>>;
+  orderBy(...columns: Array<SQLWrapper>): DrizzleExecutable<Array<TRow>>;
 }
 
-/** A `SELECT ... FROM table`, before any `WHERE`. */
-export interface DrizzleSelectFrom<TTable extends Table> extends DrizzleSelectFiltered<TTable> {
-  where(where: SQL | undefined): DrizzleSelectFiltered<TTable>;
+/** A `SELECT` yielding `TRow`s, before any `WHERE`. */
+export interface DrizzleRowSelectFrom<out TRow> extends DrizzleRowSelectFiltered<TRow> {
+  where(where: SQL | undefined): DrizzleRowSelectFiltered<TRow>;
 }
+
+/** A `SELECT *` over `TTable` with its `WHERE` already applied. */
+export interface DrizzleSelectFiltered<TTable extends Table> extends DrizzleRowSelectFiltered<
+  TTable["$inferSelect"]
+> {}
+
+/** A `SELECT * ... FROM table`, before any `WHERE`. */
+export interface DrizzleSelectFrom<TTable extends Table> extends DrizzleRowSelectFrom<
+  TTable["$inferSelect"]
+> {}
 
 /** The value `db.select()` returns. */
 export interface DrizzleSelectBuilder {
   from<TTable extends Table>(table: TTable): DrizzleSelectFrom<TTable>;
+}
+
+/**
+ * The columns a projected `SELECT` names, keyed by what the caller wants them
+ * called in the result.
+ */
+export type DrizzleSelectFields = Readonly<Record<string, Column>>;
+
+/**
+ * The row a projected `SELECT` over `TFields` yields — drizzle's own
+ * `InferColumnsDataTypes`, which reads each column's `data` and nullability
+ * straight off the column object.
+ */
+export type DrizzleSelected<TFields extends DrizzleSelectFields> = InferColumnsDataTypes<TFields>;
+
+/**
+ * The value `db.select(fields)` returns.
+ *
+ * Projecting by column rather than by table is what lets one store serve tables
+ * whose column names it does not know: the result is keyed by the store's own
+ * field names whatever the columns are called, and typed from the columns
+ * themselves. See `Columns.ts`.
+ */
+export interface DrizzleFieldsSelectBuilder<TFields extends DrizzleSelectFields> {
+  from(table: Table): DrizzleRowSelectFrom<DrizzleSelected<TFields>>;
 }
 
 /** The value `db.insert(table)` returns. */
@@ -152,6 +192,7 @@ export interface DrizzleUpdateBuilder<TTable extends Table> {
  */
 export interface AuthDatabase {
   select(): DrizzleSelectBuilder;
+  select<TFields extends DrizzleSelectFields>(fields: TFields): DrizzleFieldsSelectBuilder<TFields>;
   insert<TTable extends Table>(table: TTable): DrizzleInsertBuilder<TTable>;
   update<TTable extends Table>(table: TTable): DrizzleUpdateBuilder<TTable>;
   delete<TTable extends Table>(table: TTable): DrizzleWhereStep;

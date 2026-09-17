@@ -22,6 +22,12 @@
  * `Record<string, unknown>`, `boolean` — which is why one store implementation
  * serves all three. Column names are identical across dialects.
  *
+ * ### Tables this package did not define
+ *
+ * Everything here describes the tables this package builds. An application
+ * adopting effect-auth onto tables it already owns — its own column names, its
+ * own key types — maps them instead; see `Columns.ts` and `defineSchema`.
+ *
  * ### What is *not* here
  *
  * `effect_auth_users` carries no `email`/`email_verified` columns. Since the

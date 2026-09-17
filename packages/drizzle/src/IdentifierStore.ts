@@ -4,9 +4,10 @@
  *
  * {@link make} is an `Effect` that reads {@link DrizzleDatabase} out of context
  * and returns a plain store object; {@link layer} lifts it into a `Layer` keyed
- * by `Auth.IdentifierStore`. Both take an optional {@link Tables} set — any
- * dialect's, under any names — so switching database or table names is a
- * one-argument change.
+ * by `Auth.IdentifierStore`. Both take an optional schema — any dialect's
+ * {@link Tables} under any names, or an {@link AuthSchema} mapped onto the
+ * application's own table — so switching database, table names or table shape
+ * is a one-argument change.
  *
  * ### Contract notes
  *
@@ -23,10 +24,33 @@
 import { and, asc, eq, inArray, or } from "drizzle-orm";
 import { Effect, Exit, Layer, Request, RequestResolver } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
-import { DrizzleDatabase } from "./Database.ts";
+import {
+  type IdentifierColumns,
+  type IdentifierSchema,
+  resolveSchema,
+  type SchemaInput,
+  writeValues,
+} from "./Columns.ts";
+import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
 import { makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
-import type { Tables } from "./Schema.ts";
+
+// ---------------------------------------------------------------------------
+// Rows
+// ---------------------------------------------------------------------------
+
+/** What an identifier read projects, under the store's own field names. */
+type IdentifierRow = DrizzleSelected<IdentifierColumns>;
+
+const toIdentifier = (row: IdentifierRow): Auth.Identifier => ({
+  id: row.id,
+  userId: row.userId,
+  type: row.type,
+  value: row.value,
+  verified: row.verified,
+  ...(row.verifiedAt !== null ? { verifiedAt: row.verifiedAt } : {}),
+  createdAt: row.createdAt,
+});
 
 // ---------------------------------------------------------------------------
 // Store
@@ -34,59 +58,39 @@ import type { Tables } from "./Schema.ts";
 
 /** Build an `IdentifierStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
-  tables: Tables = defaultTables,
+  schema: SchemaInput = defaultTables,
 ): Effect.Effect<typeof Auth.IdentifierStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     const query = makeQuery(yield* DrizzleDatabase);
-    const identifiers = tables.identifiers;
+    const identifiers: IdentifierSchema = resolveSchema(schema).identifiers;
+    const column = identifiers.columns;
+    const table = identifiers.table;
 
     return {
       getByValue: (type, value) =>
         query("identifier.getByValue", (db) =>
           db
-            .select()
-            .from(identifiers)
-            .where(and(eq(identifiers.type, type), eq(identifiers.value, value)))
+            .select(column)
+            .from(table)
+            .where(and(eq(column.type, type), eq(column.value, value)))
             .limit(1)
             .execute(),
         ).pipe(
           Effect.map((rows) => {
             const row = rows[0];
-            return row === undefined
-              ? null
-              : {
-                  id: row.id,
-                  userId: row.userId,
-                  type: row.type,
-                  value: row.value,
-                  verified: row.verified,
-                  ...(row.verifiedAt !== null ? { verifiedAt: row.verifiedAt } : {}),
-                  createdAt: row.createdAt,
-                };
+            return row === undefined ? null : toIdentifier(row);
           }),
         ),
 
       listByUser: (userId) =>
         query("identifier.listByUser", (db) =>
           db
-            .select()
-            .from(identifiers)
-            .where(eq(identifiers.userId, userId))
-            .orderBy(asc(identifiers.createdAt))
+            .select(column)
+            .from(table)
+            .where(eq(column.userId, userId))
+            .orderBy(asc(column.createdAt))
             .execute(),
-        ).pipe(
-          Effect.map((rows) =>
-            rows.map((row) => ({
-              id: row.id,
-              userId: row.userId,
-              type: row.type,
-              value: row.value,
-              verified: row.verified,
-              ...(row.verifiedAt !== null ? { verifiedAt: row.verifiedAt } : {}),
-              createdAt: row.createdAt,
-            })),
-          ),
-        ),
+        ).pipe(Effect.map((rows) => rows.map(toIdentifier))),
 
       // The `(type, value)` unique index is the claim mechanism: a losing
       // racer's INSERT is rejected by the database and surfaces here as an
@@ -95,16 +99,18 @@ export const make = (
       create: (identifier) =>
         query("identifier.create", (db) =>
           db
-            .insert(identifiers)
-            .values({
-              id: identifier.id,
-              userId: identifier.userId,
-              type: identifier.type,
-              value: identifier.value,
-              verified: identifier.verified,
-              verifiedAt: identifier.verifiedAt ?? null,
-              createdAt: identifier.createdAt,
-            })
+            .insert(table)
+            .values(
+              writeValues(identifiers, {
+                id: identifier.id,
+                userId: identifier.userId,
+                type: identifier.type,
+                value: identifier.value,
+                verified: identifier.verified,
+                verifiedAt: identifier.verifiedAt ?? null,
+                createdAt: identifier.createdAt,
+              }),
+            )
             .execute(),
         ).pipe(Effect.as(identifier)),
 
@@ -115,47 +121,37 @@ export const make = (
         Effect.gen(function* () {
           yield* query("identifier.setVerified", (db) =>
             db
-              .update(identifiers)
-              .set({ verified: true, verifiedAt })
-              .where(eq(identifiers.id, id))
+              .update(table)
+              .set(writeValues(identifiers, { verified: true, verifiedAt }))
+              .where(eq(column.id, id))
               .execute(),
           );
 
           const rows = yield* query("identifier.setVerified.read", (db) =>
-            db.select().from(identifiers).where(eq(identifiers.id, id)).limit(1).execute(),
+            db.select(column).from(table).where(eq(column.id, id)).limit(1).execute(),
           );
 
           const row = rows[0];
-          return row === undefined
-            ? null
-            : {
-                id: row.id,
-                userId: row.userId,
-                type: row.type,
-                value: row.value,
-                verified: row.verified,
-                ...(row.verifiedAt !== null ? { verifiedAt: row.verifiedAt } : {}),
-                createdAt: row.createdAt,
-              };
+          return row === undefined ? null : toIdentifier(row);
         }),
 
       delete: (id) =>
         query("identifier.delete", (db) =>
-          db.delete(identifiers).where(eq(identifiers.id, id)).execute(),
+          db.delete(table).where(eq(column.id, id)).execute(),
         ).pipe(Effect.asVoid),
 
       deleteByUser: (userId) =>
         query("identifier.deleteByUser", (db) =>
-          db.delete(identifiers).where(eq(identifiers.userId, userId)).execute(),
+          db.delete(table).where(eq(column.userId, userId)).execute(),
         ).pipe(Effect.asVoid),
     } satisfies typeof Auth.IdentifierStore.Service;
   });
 
 /** `IdentifierStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const layer = (
-  tables: Tables = defaultTables,
+  schema: SchemaInput = defaultTables,
 ): Layer.Layer<Auth.IdentifierStore, never, DrizzleDatabase> =>
-  Layer.effect(Auth.IdentifierStore, make(tables));
+  Layer.effect(Auth.IdentifierStore, make(schema));
 
 // ---------------------------------------------------------------------------
 // Requests / Resolvers
@@ -200,11 +196,14 @@ const pairKey = (type: Auth.IdentifierType, value: string): string => `${type} $
  * `Requests.AuthRequests`/`Requests.layer` rather than per call site.
  */
 export const makeByValueResolver = (
-  tables: Tables = defaultTables,
+  schema: SchemaInput = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<GetIdentifierByValue>, never, DrizzleDatabase> =>
   Effect.map(DrizzleDatabase, (handle) => {
     const query = makeQuery(handle);
-    const identifiers = tables.identifiers;
+    const identifiers: IdentifierSchema = resolveSchema(schema).identifiers;
+    const column = identifiers.columns;
+    const table = identifiers.table;
+
     return RequestResolver.make<GetIdentifierByValue>((entries) =>
       Effect.gen(function* () {
         const byType = new Map<Auth.IdentifierType, Set<string>>();
@@ -218,30 +217,19 @@ export const makeByValueResolver = (
         }
 
         const clauses = Array.from(byType, ([type, values]) =>
-          and(eq(identifiers.type, type), inArray(identifiers.value, Array.from(values))),
+          and(eq(column.type, type), inArray(column.value, Array.from(values))),
         );
 
         const rows = yield* query("identifier.getByValueMany", (db) =>
           db
-            .select()
-            .from(identifiers)
+            .select(column)
+            .from(table)
             .where(clauses.length === 1 ? clauses[0] : or(...clauses))
             .execute(),
         );
 
         const byPair = new Map(
-          rows.map((row) => [
-            pairKey(row.type, row.value),
-            {
-              id: row.id,
-              userId: row.userId,
-              type: row.type,
-              value: row.value,
-              verified: row.verified,
-              ...(row.verifiedAt !== null ? { verifiedAt: row.verifiedAt } : {}),
-              createdAt: row.createdAt,
-            } satisfies Auth.Identifier,
-          ]),
+          rows.map((row) => [pairKey(row.type, row.value), toIdentifier(row)]),
         );
         for (const entry of entries) {
           entry.completeUnsafe(
@@ -266,34 +254,29 @@ export const makeByValueResolver = (
  * `Requests.AuthRequests`/`Requests.layer` rather than per call site.
  */
 export const makeByUserResolver = (
-  tables: Tables = defaultTables,
+  schema: SchemaInput = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<ListIdentifiersByUser>, never, DrizzleDatabase> =>
   Effect.map(DrizzleDatabase, (handle) => {
     const query = makeQuery(handle);
-    const identifiers = tables.identifiers;
+    const identifiers: IdentifierSchema = resolveSchema(schema).identifiers;
+    const column = identifiers.columns;
+    const table = identifiers.table;
+
     return RequestResolver.make<ListIdentifiersByUser>((entries) =>
       Effect.gen(function* () {
         const userIds = Array.from(new Set(entries.map((entry) => entry.request.userId)));
         const rows = yield* query("identifier.listByUserMany", (db) =>
           db
-            .select()
-            .from(identifiers)
-            .where(inArray(identifiers.userId, userIds))
-            .orderBy(asc(identifiers.createdAt))
+            .select(column)
+            .from(table)
+            .where(inArray(column.userId, userIds))
+            .orderBy(asc(column.createdAt))
             .execute(),
         );
 
         const byUser = new Map<string, Array<Auth.Identifier>>();
         for (const row of rows) {
-          const identifier: Auth.Identifier = {
-            id: row.id,
-            userId: row.userId,
-            type: row.type,
-            value: row.value,
-            verified: row.verified,
-            ...(row.verifiedAt !== null ? { verifiedAt: row.verifiedAt } : {}),
-            createdAt: row.createdAt,
-          };
+          const identifier = toIdentifier(row);
           const existing = byUser.get(row.userId);
           if (existing === undefined) {
             byUser.set(row.userId, [identifier]);
