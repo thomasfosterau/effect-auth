@@ -31,6 +31,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/fixture.d.ts",
+      "import": "./dist/testing/fixture.js"
     }
   },
   "publishConfig": {
@@ -46,5 +50,8 @@
   },
   "devDependencies": {
     "effect": "4.0.0-rc.112"
+  },
+  "peerDependencies": {
+    "effect": ">=4.0.0-rc.112"
   }
 }
