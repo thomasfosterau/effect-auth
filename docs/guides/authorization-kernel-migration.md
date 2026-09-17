@@ -2,7 +2,7 @@
 
 effect-auth used to ship two authorization models. It now ships one — the policy kernel — and RBAC
 is authoring sugar that compiles into it. See
-[ADR 0017](../adr/0017-one-authorization-kernel.md) for why.
+[ADR 0018](../adr/0018-one-authorization-kernel.md) for why.
 
 This is a breaking change with no compatibility shim. Everything below is a compile error until
 you migrate, which is deliberate: an authorization surface that silently changes meaning is worse

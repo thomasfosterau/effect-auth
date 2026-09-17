@@ -7,7 +7,7 @@ BREAKING: one authorization model. The flat permission-string path is **removed*
 recast as authoring sugar that compiles into the policy kernel. Pre-1.0, so this ships as a minor
 per semver's 0.x carve-out; there is no compatibility shim, and every consumer of `RoleStore` or
 `AuthorizationPolicy` will get compile errors until they migrate. See
-[ADR 0017](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/adr/0017-one-authorization-kernel.md)
+[ADR 0018](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/adr/0018-one-authorization-kernel.md)
 for the decision and the rejected alternative, and
 [the migration guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/authorization-kernel-migration.md)
 for a step-by-step.

@@ -439,7 +439,7 @@ export const make = (
               verified: authenticatorData.userVerified,
             };
           }).pipe(
-            Effect.withSpan("effect-auth.webauthn.register"),
+            Effect.withSpan(Obs.spanNames.webauthnRegister),
             Effect.tap(() => Obs.recordWebAuthnRegistration("success")),
             Effect.tapError(() => Obs.recordWebAuthnRegistration("failure")),
           ),
@@ -600,7 +600,7 @@ export const make = (
               newCounter: authenticatorData.signatureCounter,
             };
           }).pipe(
-            Effect.withSpan("effect-auth.webauthn.authenticate"),
+            Effect.withSpan(Obs.spanNames.webauthnAuthenticate),
             Effect.tap(() => Obs.recordWebAuthnAuthentication("success")),
             Effect.tapError(() => Obs.recordWebAuthnAuthentication("failure")),
           ),

@@ -129,7 +129,7 @@ directories, each with its own `index.ts` barrel and matching
   `"resource:action"` vocabulary it is written in). Route-level gating lives in
   `http/AuthorizationMiddleware.ts`.
 
-  **There is one authorization model** ([ADR 0017](adr/0017-one-authorization-kernel.md)).
+  **There is one authorization model** ([ADR 0018](adr/0018-one-authorization-kernel.md)).
   The kernel is it; everything else is a projection of, or a way of authoring
   for, that kernel — `Protected.ts` is its data-boundary projection, a read
   scope is its set-shaped projection, and `Rbac.ts` compiles a flat

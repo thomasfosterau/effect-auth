@@ -20,56 +20,56 @@ import { Effect, Metric } from "effect";
 // ---------------------------------------------------------------------------
 
 /** Sign-in attempts. Attributes: `{ method, outcome }`. */
-export const signInTotal = Metric.counter("effect-auth.sign_in.total", {
+export const signInTotal = Metric.counter("effect_auth_sign_in_total", {
   description: "Sign-in attempts — tagged by method and outcome",
   incremental: true,
 });
 
 /** Sign-up attempts. Attributes: `{ method, outcome }`. */
-export const signUpTotal = Metric.counter("effect-auth.sign_up.total", {
+export const signUpTotal = Metric.counter("effect_auth_sign_up_total", {
   description: "Sign-up attempts — tagged by method and outcome",
   incremental: true,
 });
 
 /** Sessions successfully created. */
-export const sessionsCreated = Metric.counter("effect-auth.sessions_created.total", {
+export const sessionsCreated = Metric.counter("effect_auth_sessions_created_total", {
   description: "Sessions successfully created",
   incremental: true,
 });
 
 /** Session validation attempts. Attributes: `{ outcome }`. */
-export const sessionsValidated = Metric.counter("effect-auth.sessions_validated.total", {
+export const sessionsValidated = Metric.counter("effect_auth_sessions_validated_total", {
   description: "Session validation attempts — tagged by outcome",
   incremental: true,
 });
 
 /** Sessions invalidated (sign-out). */
-export const sessionsInvalidated = Metric.counter("effect-auth.sessions_invalidated.total", {
+export const sessionsInvalidated = Metric.counter("effect_auth_sessions_invalidated_total", {
   description: "Sessions invalidated",
   incremental: true,
 });
 
 /** Token verification attempts. Attributes: `{ type, outcome }`. */
-export const tokenVerifications = Metric.counter("effect-auth.token_verifications.total", {
+export const tokenVerifications = Metric.counter("effect_auth_token_verifications_total", {
   description: "Token verification attempts — tagged by type and outcome",
   incremental: true,
 });
 
 /** Rate-limit threshold breaches. Attributes: `{ operation }`. */
-export const rateLimitHits = Metric.counter("effect-auth.rate_limit_hits.total", {
+export const rateLimitHits = Metric.counter("effect_auth_rate_limit_hits_total", {
   description: "Rate-limit threshold breaches — tagged by operation",
   incremental: true,
 });
 
 /** Two-factor challenges started. */
-export const multiFactorChallenges = Metric.counter("effect-auth.multi_factor_challenges.total", {
+export const multiFactorChallenges = Metric.counter("effect_auth_multi_factor_challenges_total", {
   description: "Two-factor challenges started",
   incremental: true,
 });
 
 /** Two-factor verification attempts. Attributes: `{ type, outcome }`. */
 export const multiFactorVerifications = Metric.counter(
-  "effect-auth.multi_factor_verifications.total",
+  "effect_auth_multi_factor_verifications_total",
   {
     description: "Two-factor verification attempts — tagged by type and outcome",
     incremental: true,
@@ -77,26 +77,26 @@ export const multiFactorVerifications = Metric.counter(
 );
 
 /** OAuth callback completions. Attributes: `{ outcome }`. */
-export const oauthCallbacks = Metric.counter("effect-auth.oauth_callbacks.total", {
+export const oauthCallbacks = Metric.counter("effect_auth_oauth_callbacks_total", {
   description: "OAuth callback completions — tagged by outcome",
   incremental: true,
 });
 
 /** OAuth access-token refresh attempts. Attributes: `{ provider, outcome }`. */
-export const oauthRefreshes = Metric.counter("effect-auth.oauth_refreshes.total", {
+export const oauthRefreshes = Metric.counter("effect_auth_oauth_refreshes_total", {
   description: "OAuth access-token refresh attempts — tagged by provider and outcome",
   incremental: true,
 });
 
 /** WebAuthn registration verifications. Attributes: `{ outcome }`. */
-export const webauthnRegistrations = Metric.counter("effect-auth.webauthn_registrations.total", {
+export const webauthnRegistrations = Metric.counter("effect_auth_webauthn_registrations_total", {
   description: "WebAuthn registration verifications — tagged by outcome",
   incremental: true,
 });
 
 /** WebAuthn authentication verifications. Attributes: `{ outcome }`. */
 export const webauthnAuthentications = Metric.counter(
-  "effect-auth.webauthn_authentications.total",
+  "effect_auth_webauthn_authentications_total",
   {
     description: "WebAuthn authentication verifications — tagged by outcome",
     incremental: true,
@@ -104,10 +104,47 @@ export const webauthnAuthentications = Metric.counter(
 );
 
 /** OIDC token endpoint requests. Attributes: `{ grant, outcome }`. */
-export const oidcTokenRequests = Metric.counter("effect-auth.oidc_token_requests.total", {
+export const oidcTokenRequests = Metric.counter("effect_auth_oidc_token_requests_total", {
   description: "OIDC token endpoint requests — tagged by grant type and outcome",
   incremental: true,
 });
+
+/**
+ * Delivery sends dispatched off the response path (see `Delivery.ts`).
+ * Attributes: `{ purpose, outcome }`. Since these sends are never awaited by
+ * their caller, this counter — together with the error log emitted
+ * alongside it — is the only way a failed send is observed.
+ */
+export const deliverySends = Metric.counter("effect-auth.delivery_sends.total", {
+  description: "Delivery sends dispatched off the response path — tagged by purpose and outcome",
+  incremental: true,
+});
+
+// ---------------------------------------------------------------------------
+// Span names (OpenTelemetry)
+// ---------------------------------------------------------------------------
+
+export const spanNames = {
+  oauthAuthorize: "effect-auth.oauth.authorize",
+  oauthCallback: "effect-auth.oauth.callback",
+  oauthRefresh: "effect-auth.oauth.refresh",
+  createSession: "effect-auth.create-session",
+  validateSession: "effect-auth.validate-session",
+  signOut: "effect-auth.sign-out",
+  twoFactorChallenge: "effect-auth.2fa.challenge",
+  twoFactorVerify: "effect-auth.2fa.verify",
+  webauthnRegister: "effect-auth.webauthn.register",
+  webauthnAuthenticate: "effect-auth.webauthn.authenticate",
+  oidcRegisterDynamicClient: "effect-auth.oidc.registerDynamicClient",
+  oidcAuthorize: "effect-auth.oidc.authorize",
+  oidcConsent: "effect-auth.oidc.consent",
+  oidcToken: "effect-auth.oidc.token",
+  oidcUserinfo: "effect-auth.oidc.userinfo",
+  signUp: "effect-auth.sign-up",
+  signIn: "effect-auth.sign-in",
+  tokenSign: "effect-auth.token.sign",
+  tokenVerify: "effect-auth.token.verify",
+} as const;
 
 // ---------------------------------------------------------------------------
 // Record helpers — each returns Effect<void, never, never>
@@ -166,3 +203,9 @@ export const recordOidcTokenRequest = (
   outcome: "success" | "failure",
 ): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(oidcTokenRequests, { grant, outcome }), 1);
+
+export const recordDeliverySend = (
+  purpose: string,
+  outcome: "success" | "failure",
+): Effect.Effect<void> =>
+  Metric.update(Metric.withAttributes(deliverySends, { purpose, outcome }), 1);

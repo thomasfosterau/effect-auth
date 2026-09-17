@@ -297,6 +297,68 @@ describe("Authorizer", () => {
 });
 
 // ---------------------------------------------------------------------------
+// CurrentCredential
+// ---------------------------------------------------------------------------
+
+describe("Authorizer + CurrentCredential", () => {
+  const mintKey = Entity.ref("Action", "ApiKey.create");
+  const keyResource = Entity.ref("ApiKey", "any");
+  const interactiveOnly = Policy.permit({
+    id: "mint-key-requires-interactive-session",
+    action: Policy.eq(mintKey),
+    when: Condition.eq(Condition.attr("context", "credentialClass"), Condition.lit("interactive")),
+  });
+
+  it("permits a session-derived (interactive) principal to mint a key", async () => {
+    const layer = Authorizer.Authorizer.layer({ policies: [interactiveOnly] });
+    const program = Authorizer.Authorizer.pipe(
+      Effect.flatMap((authorizer) => authorizer.check({ action: mintKey, resource: keyResource })),
+      Authorizer.CurrentPrincipal.provide(alice),
+      Authorizer.CurrentCredential.provide("interactive"),
+    );
+    expect(await Effect.runPromise(Effect.provide(program, layer))).toBe(true);
+  });
+
+  it("denies an API-key-derived (machine) principal from minting another key", async () => {
+    const layer = Authorizer.Authorizer.layer({ policies: [interactiveOnly] });
+    const program = Authorizer.Authorizer.pipe(
+      Effect.flatMap((authorizer) => authorizer.check({ action: mintKey, resource: keyResource })),
+      Authorizer.CurrentPrincipal.provide(alice),
+      Authorizer.CurrentCredential.provide("machine"),
+    );
+    expect(await Effect.runPromise(Effect.provide(program, layer))).toBe(false);
+  });
+
+  it("denies a request with no CurrentCredential in context at all (fail-closed default)", async () => {
+    const layer = Authorizer.Authorizer.layer({ policies: [interactiveOnly] });
+    const program = Authorizer.Authorizer.pipe(
+      Effect.flatMap((authorizer) => authorizer.check({ action: mintKey, resource: keyResource })),
+      Authorizer.CurrentPrincipal.provide(alice),
+    );
+    expect(await Effect.runPromise(Effect.provide(program, layer))).toBe(false);
+  });
+
+  it("the ambient CurrentCredential overrides a caller-supplied context.credentialClass (not spoofable)", async () => {
+    const layer = Authorizer.Authorizer.layer({ policies: [interactiveOnly] });
+    const program = Authorizer.Authorizer.pipe(
+      Effect.flatMap((authorizer) =>
+        authorizer.check({
+          action: mintKey,
+          resource: keyResource,
+          // A machine caller cannot talk its way into "interactive" by
+          // passing it in `context` directly — `requestFrom` applies the
+          // ambient `CurrentCredential` last.
+          context: { credentialClass: "interactive" },
+        }),
+      ),
+      Authorizer.CurrentPrincipal.provide(alice),
+      Authorizer.CurrentCredential.provide("machine"),
+    );
+    expect(await Effect.runPromise(Effect.provide(program, layer))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // PolicyStore integration
 // ---------------------------------------------------------------------------
 

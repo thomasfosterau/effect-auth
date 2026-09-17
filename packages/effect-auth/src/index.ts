@@ -344,7 +344,7 @@ export * as OrganizationEntities from "./OrganizationEntities.ts";
  * `Auth.Rbac.policies`, …): a flat role/permission configuration compiles to
  * declarative policies plus the principal → role entity fragment. Namespaced
  * because its member names (`layer`, `policies`, `entities`, `model`) are
- * generic. There is no second evaluation path behind it — see ADR 0017.
+ * generic. There is no second evaluation path behind it — see ADR 0018.
  */
 export * as Rbac from "./Rbac.ts";
 /** The `"resource:action"` permission vocabulary the RBAC sugar is authored in. */
@@ -369,6 +369,8 @@ export {
 /** The `Authorizer` service and its supporting context tags. */
 export {
   CurrentPrincipal,
+  type CredentialClass,
+  CurrentCredential,
   EntityResolver,
   memoryEntityResolver,
   requestRefs,

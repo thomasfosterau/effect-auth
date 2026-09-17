@@ -147,7 +147,7 @@ just validators").
 service-method calls, there was no reusable policy _value_, no resource/attribute
 model, no policies-as-data, and the Organization plugin ran its own parallel
 role→permission map (#78). That flat path is now removed and `Rbac` compiles into the
-kernel instead ([ADR 0017](adr/0017-one-authorization-kernel.md)).
+kernel instead ([ADR 0018](adr/0018-one-authorization-kernel.md)).
 
 **Governing principle (owner decision): Effect-native-first.** The `Policy` value is
 the primary object of the whole framework — not a builder for Cedar policies. Cedar

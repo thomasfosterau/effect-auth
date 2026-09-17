@@ -620,7 +620,7 @@ semantics adopted on merit and, at most, an interop serialization (door-open
   `CurrentPrincipal` flowing through the struct's Requirements channel, and
   `AuthMiddleware` providing the principal per request.
 
-**Retirement of the M0-era API (applied; [ADR 0017](adr/0017-one-authorization-kernel.md)).**
+**Retirement of the M0-era API (applied; [ADR 0018](adr/0018-one-authorization-kernel.md)).**
 `AuthorizationPolicy`, `RoleStore` and the flat `checkPermission` evaluation
 path are deleted rather than carried: only the kernel can be partially
 evaluated into a read scope, so a rule authored through the flat path could

@@ -137,6 +137,7 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     );
     expect(tables).toEqual([
       "auth_account_lockouts",
+      "auth_api_keys",
       "auth_email_otps",
       "auth_email_verifications",
       "auth_identifiers",
@@ -698,6 +699,15 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
       auth_multi_factor: ["created_at"],
       auth_pending_multi_factor: ["expires_at", "created_at"],
       auth_identifiers: ["verified_at", "created_at"],
+      auth_api_keys: [
+        "expires_at",
+        "last_used_at",
+        "refill_interval",
+        "last_refill_at",
+        "rate_limit_window_ms",
+        "created_at",
+        "updated_at",
+      ],
     };
 
     interface PragmaRow {
@@ -805,6 +815,151 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     expect(result.afterDeleteUser).toHaveLength(0);
   });
 
+  it("ApiKeyStore roundtrips full records incl. permissions/metadata/refill/rateLimit", async () => {
+    const now = Date.now();
+    const apiKey: Auth.ApiKey = {
+      id: "key-1",
+      name: "CI deploy key",
+      prefix: "ak_",
+      start: "abcdef",
+      keyHash: "hash-1",
+      userId: "user-1",
+      enabled: true,
+      expiresAt: now + 3_600_000,
+      permissions: { posts: ["read", "write"] },
+      metadata: { plan: "pro" },
+      remaining: 10,
+      refillAmount: 5,
+      refillInterval: 60_000,
+      refillMax: 10,
+      lastRefillAt: now,
+      rateLimit: { maxRequests: 100, windowMs: 60_000 },
+      createdAt: now,
+      updatedAt: now,
+    };
+    const result = await run(
+      Effect.gen(function* () {
+        const store = yield* Auth.ApiKeyStore;
+        yield* store.create(apiKey);
+        yield* store.create({ ...apiKey, id: "key-2", keyHash: "hash-2" });
+        yield* store.create({ ...apiKey, id: "key-3", userId: "user-2", keyHash: "hash-3" });
+        const loaded = yield* store.get("key-1");
+        const byHash = yield* store.getByHash("hash-1");
+        const missingHash = yield* store.getByHash("no-such-hash");
+        const updated = yield* store.update({
+          ...apiKey,
+          enabled: false,
+          remaining: 9,
+          lastUsedAt: now + 1000,
+          updatedAt: now + 1000,
+        });
+        const afterUpdate = yield* store.get("key-1");
+        const byUser = yield* store.listByUserId("user-1");
+        yield* store.delete("key-2");
+        const deleted = yield* store.get("key-2");
+        return { loaded, byHash, missingHash, updated, afterUpdate, byUser, deleted };
+      }),
+    );
+    expect(result.loaded?.name).toBe("CI deploy key");
+    expect(result.loaded?.permissions).toEqual({ posts: ["read", "write"] });
+    expect(result.loaded?.metadata).toEqual({ plan: "pro" });
+    expect(result.loaded?.rateLimit).toEqual({ maxRequests: 100, windowMs: 60_000 });
+    expect(result.loaded?.refillAmount).toBe(5);
+    expect(result.byHash?.id).toBe("key-1");
+    expect(result.missingHash).toBeNull();
+    expect(result.updated.enabled).toBe(false);
+    expect(result.afterUpdate?.enabled).toBe(false);
+    expect(result.afterUpdate?.remaining).toBe(9);
+    expect(result.afterUpdate?.lastUsedAt).toBe(now + 1000);
+    expect(result.byUser).toHaveLength(2);
+    expect(result.deleted).toBeNull();
+  });
+
+  it("ApiKeyStore treats minimal records (no permissions/metadata/refill/rateLimit) as absent, not null", async () => {
+    const now = Date.now();
+    const minimal: Auth.ApiKey = {
+      id: "key-min",
+      start: "ghijkl",
+      keyHash: "hash-min",
+      userId: "user-1",
+      enabled: true,
+      metadata: {},
+      createdAt: now,
+      updatedAt: now,
+    };
+    const result = await run(
+      Effect.gen(function* () {
+        const store = yield* Auth.ApiKeyStore;
+        yield* store.create(minimal);
+        return yield* store.get("key-min");
+      }),
+    );
+    expect(result?.name).toBeUndefined();
+    expect(result?.prefix).toBeUndefined();
+    expect(result?.expiresAt).toBeUndefined();
+    expect(result?.permissions).toBeUndefined();
+    expect(result?.metadata).toEqual({});
+    expect(result?.remaining).toBeUndefined();
+    expect(result?.rateLimit).toBeUndefined();
+  });
+
+  it("ApiKeyStore surfaces malformed JSON permissions as AuthError not defect", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const now = Date.now();
+        yield* sql`INSERT INTO auth_api_keys (id, name, prefix, start, key_hash, user_id, enabled, expires_at, last_used_at, permissions, metadata, remaining, refill_amount, refill_interval, refill_max, last_refill_at, rate_limit_max_requests, rate_limit_window_ms, created_at, updated_at)
+          VALUES (${"key-corrupt"}, ${null}, ${null}, ${"abcdef"}, ${"hash-corrupt"}, ${"user-1"}, ${1}, ${null}, ${null}, ${"INVALID_JSON"}, ${"{}"}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${now}, ${now})`;
+        const store = yield* Auth.ApiKeyStore;
+        return yield* Effect.flip(store.get("key-corrupt"));
+      }),
+    );
+    expect(result._tag).toBe("AuthError");
+    expect(result.cause).toBeDefined();
+  });
+
+  it("AdminUserStore lists/paginates/searches users by earliest email and manages passwords", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const store = yield* Auth.AdminUserStore;
+        const emailPassword = yield* Auth.Email.EmailPasswordStore;
+        const alice = yield* makeUser("alice@example.com");
+        const bob = yield* makeUser("bob@example.com");
+        const created = yield* store.createUser({ name: "Carol", attributes: { role: "admin" } });
+
+        const all = yield* store.listUsers({});
+        const page = yield* store.listUsers({ limit: 2, offset: 1 });
+        const searched = yield* store.listUsers({ searchEmail: "example.com" });
+        const searchedNarrow = yield* store.listUsers({ searchEmail: "alice" });
+
+        yield* store.setPasswordHash(created.id, "admin-hash");
+        const hash = yield* emailPassword.getPasswordHash(created.id);
+
+        return { alice, bob, created, all, page, searched, searchedNarrow, hash };
+      }),
+    );
+    expect(result.all.total).toBe(3);
+    // No email identifier sorts first (empty string), so the admin-created
+    // user (no identifier claimed) leads the ascending email sort.
+    expect(result.all.users[0]?.id).toBe(result.created.id);
+    expect(result.all.users.map((u) => u.id)).toEqual([
+      result.created.id,
+      result.alice.id,
+      result.bob.id,
+    ]);
+    expect(result.page.total).toBe(3);
+    expect(result.page.users.map((u) => u.id)).toEqual([result.alice.id, result.bob.id]);
+    expect(result.searched.total).toBe(2);
+    expect(result.searched.users.map((u) => u.id).sort()).toEqual(
+      [result.alice.id, result.bob.id].sort(),
+    );
+    expect(result.searchedNarrow.total).toBe(1);
+    expect(result.searchedNarrow.users[0]?.id).toBe(result.alice.id);
+    expect(result.created.name).toBe("Carol");
+    expect(result.created.attributes).toEqual({ role: "admin" });
+    expect(result.hash).toBe("admin-hash");
+  });
+
   it("integration: SessionService runs over the aggregate layer", async () => {
     const config: Auth.SessionConfig = {
       sessionExpiresIn: { activePeriod: 60_000, idlePeriod: 30_000 },
@@ -851,10 +1006,14 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
       const challenges = yield* Auth.MultiFactor.ChallengeStore;
       const credentials = yield* Auth.MultiFactor.CredentialStore;
       const rateLimits = yield* Auth.RateLimitStore;
+      const apiKeys = yield* Auth.ApiKeyStore;
+      const adminUsers = yield* Auth.AdminUserStore;
       const e1 = yield* Effect.flip(challenges.get(new Uint8Array([1, 2, 3])));
       const e2 = yield* Effect.flip(credentials.get("cred-id"));
       const e3 = yield* Effect.flip(rateLimits.get("key"));
-      return { e1, e2, e3 };
+      const e4 = yield* Effect.flip(apiKeys.get("key-id"));
+      const e5 = yield* Effect.flip(adminUsers.listUsers({}));
+      return { e1, e2, e3, e4, e5 };
     });
 
     const result = await Effect.runPromise(
@@ -865,6 +1024,8 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
     expect(result.e1.cause).toBeDefined();
     expect(result.e2._tag).toBe("AuthError");
     expect(result.e3._tag).toBe("AuthError");
+    expect(result.e4._tag).toBe("AuthError");
+    expect(result.e5._tag).toBe("AuthError");
   });
 
   it("decodeAttributes surfaces malformed JSON attributes as AuthError not defect", async () => {

@@ -16,7 +16,7 @@
  *
  * There is no `RoleStore` and no `checkPermission` behind this: the output
  * feeds `Authorizer`/`Policy.decide` like any other policy set. See
- * [ADR 0017](../../../docs/adr/0017-one-authorization-kernel.md) and
+ * [ADR 0018](../../../docs/adr/0018-one-authorization-kernel.md) and
  * [the migration guide](../../../docs/guides/authorization-kernel-migration.md).
  *
  * @example One-call RBAC setup
