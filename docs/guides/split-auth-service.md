@@ -217,7 +217,7 @@ const handle = (request: Request) =>
 
 ## What to watch
 
-`effect-auth.session_resolutions.total` is tagged with the four outcomes, and the
+`effect_auth_session_resolutions_total` is tagged with the four outcomes, and the
 `effect-auth.resolve-session` span carries the same value as `auth.outcome`:
 
 - `skipped` climbing is the fast path working.

@@ -213,7 +213,7 @@ becomes a site-wide 500, including on routes that never touch auth. Choose delib
 exactly like a site where nobody happens to be signed in, and stays that way until someone
 notices the sign-in rate. `resolveFailOpen` therefore takes a mandatory `onDegraded` callback,
 and there is no overload that omits it. Log it, count it, alert on it. The `degraded` outcome
-is also emitted on the `effect-auth.session_resolutions.total` counter and as an `auth.outcome`
+is also emitted on the `effect_auth_session_resolutions_total` counter and as an `auth.outcome`
 span attribute, distinct from `anonymous`, precisely so a fault is distinguishable from a quiet
 day.
 

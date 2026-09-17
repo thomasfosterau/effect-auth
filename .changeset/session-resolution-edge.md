@@ -29,7 +29,7 @@ lower-privilege outcome) and the shapes where it is an escalation instead.
 
 **What just happened?** One `AuthOutcome` — `skipped` | `resolved` | `anonymous` | `degraded` —
 derived in one place and reported by the resolver itself, on a new
-`effect-auth.session_resolutions.total` counter and as an `auth.outcome` attribute on the
+`effect_auth_session_resolutions_total` counter and as an `auth.outcome` attribute on the
 `effect-auth.resolve-session` span. Callers do not derive it and do not wire it up. The four
 states stay distinct: `anonymous` paid the round trip that `skipped` did not, so folding them
 corrupts the duration bucket, and `degraded` means something broke rather than that nobody was
