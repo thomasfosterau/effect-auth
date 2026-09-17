@@ -26,6 +26,7 @@
  */
 import { Context, Effect } from "effect";
 import * as Errors from "./Errors.ts";
+import * as Obs from "./Observability.ts";
 import type * as Types from "./Types.ts";
 import type { EmailOtpPurpose } from "./email/EmailOtp.ts";
 import type { PhoneOtpPurpose } from "./PhoneOtp.ts";
@@ -90,6 +91,42 @@ export class SmsSender extends Context.Service<
 >()("@effect-auth/SmsSender") {}
 
 // ---------------------------------------------------------------------------
+// Off-response-path dispatch
+// ---------------------------------------------------------------------------
+
+/**
+ * Dispatch a send on its own detached fiber instead of awaiting it inline.
+ *
+ * Every delivery flow (verification email, magic link, OTP, ...) sends on
+ * only one of its branches — e.g. sign-up's fresh-registration branch mails
+ * a token, its duplicate-registration branch does not. Awaiting the vendor
+ * round-trip inline before answering the caller makes that difference in
+ * work itself a timing oracle, exactly the asymmetry `EmailPasswordConfig`'s
+ * `antiEnumeration` mode closes at the response-body level. `forkDetach`
+ * (rather than `forkChild`) is required here: a child fiber is interrupted
+ * when its parent — the request's fiber — completes, which for a
+ * `Effect.sync`-only test double happens before the fiber is even
+ * scheduled; a detached fiber outlives the request and actually finishes
+ * the send.
+ *
+ * The outcome is never surfaced to the caller — a failed send must not fail
+ * the flow that triggered it — so it is logged and counted here instead;
+ * that log/metric pair is the only place a failed send is observable.
+ */
+const dispatch = <E>(purpose: DeliveryPurpose, send: Effect.Effect<void, E>): Effect.Effect<void> =>
+  send.pipe(
+    Effect.tap(() => Obs.recordDeliverySend(purpose, "success")),
+    Effect.tapError((cause) =>
+      Effect.logError("[effect-auth] delivery send failed", { purpose, cause }).pipe(
+        Effect.andThen(Obs.recordDeliverySend(purpose, "failure")),
+      ),
+    ),
+    Effect.ignore,
+    Effect.forkDetach,
+    Effect.asVoid,
+  );
+
+// ---------------------------------------------------------------------------
 // Per-feature callback derivation
 // ---------------------------------------------------------------------------
 
@@ -105,40 +142,28 @@ export const emailCallbacks = (
 ) => ({
   /** `EmailVerificationConfig.sendEmail` */
   sendVerificationEmail: (to: string, token: string) =>
-    sender.send({ to, purpose: "email-verification", params: { token } }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new Errors.EmailVerificationError({
-            message: "Failed to send verification email",
-            cause,
-          }),
-      ),
+    dispatch(
+      "email-verification",
+      sender.send({ to, purpose: "email-verification", params: { token } }),
     ),
 
   /** `MagicLinkConfig.sendMagicLink` */
   sendMagicLink: (email: string, token: string) =>
-    sender
-      .send({ to: email, purpose: "magic-link", params: { token } })
-      .pipe(
-        Effect.mapError(
-          (cause) => new Errors.MagicLinkError({ message: "Failed to send magic link", cause }),
-        ),
-      ),
+    dispatch("magic-link", sender.send({ to: email, purpose: "magic-link", params: { token } })),
 
   /** `EmailOtpConfig.sendVerificationOtp` */
   sendVerificationOtp: (email: string, otp: string, purpose: EmailOtpPurpose) =>
-    sender.send({ to: email, purpose: `email-otp:${purpose}`, params: { otp } }),
+    dispatch(
+      `email-otp:${purpose}`,
+      sender.send({ to: email, purpose: `email-otp:${purpose}`, params: { otp } }),
+    ),
 
   /** `PasswordResetConfig.sendResetPassword` */
   sendResetPassword: (email: string, token: string) =>
-    sender
-      .send({ to: email, purpose: "password-reset", params: { token } })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new Errors.PasswordResetError({ message: "Failed to send reset email", cause }),
-        ),
-      ),
+    dispatch(
+      "password-reset",
+      sender.send({ to: email, purpose: "password-reset", params: { token } }),
+    ),
 
   /** `AccountManagementConfig.sendChangeEmailVerification` (sent to the NEW address) */
   sendChangeEmailVerification: (params: {
@@ -146,11 +171,14 @@ export const emailCallbacks = (
     readonly newEmail: string;
     readonly token: string;
   }) =>
-    sender.send({
-      to: params.newEmail,
-      purpose: "change-email",
-      params: { token: params.token },
-    }),
+    dispatch(
+      "change-email",
+      sender.send({
+        to: params.newEmail,
+        purpose: "change-email",
+        params: { token: params.token },
+      }),
+    ),
 
   /** `AccountManagementConfig.sendDeleteAccountVerification` */
   sendDeleteAccountVerification: (params: {
@@ -162,11 +190,14 @@ export const emailCallbacks = (
       ? Effect.fail(
           new Errors.AuthError({ message: "User has no email for account-deletion delivery" }),
         )
-      : sender.send({
-          to: params.email,
-          purpose: "delete-account",
-          params: { token: params.token },
-        }),
+      : dispatch(
+          "delete-account",
+          sender.send({
+            to: params.email,
+            purpose: "delete-account",
+            params: { token: params.token },
+          }),
+        ),
 
   /** `OtpSecondFactorConfig.sendOtp`, delivering the code to the user's email identifier. */
   sendSecondFactorOtp: (user: Types.User, otp: string) =>
@@ -175,7 +206,10 @@ export const emailCallbacks = (
       if (email === null) {
         return yield* new Errors.AuthError({ message: "User has no email for second-factor OTP" });
       }
-      yield* sender.send({ to: email, purpose: "second-factor-otp", params: { otp } });
+      yield* dispatch(
+        "second-factor-otp",
+        sender.send({ to: email, purpose: "second-factor-otp", params: { otp } }),
+      );
     }),
 });
 
@@ -189,7 +223,10 @@ export const smsCallbacks = (
 ) => ({
   /** `PhoneOtpConfig.sendOtp` */
   sendPhoneOtp: (phoneNumber: string, otp: string, purpose: PhoneOtpPurpose) =>
-    sender.send({ to: phoneNumber, purpose: `phone-otp:${purpose}`, params: { otp } }),
+    dispatch(
+      `phone-otp:${purpose}`,
+      sender.send({ to: phoneNumber, purpose: `phone-otp:${purpose}`, params: { otp } }),
+    ),
 
   /**
    * `OtpSecondFactorConfig.sendOtp`, delivering the code to the user's
@@ -204,6 +241,9 @@ export const smsCallbacks = (
           message: "User has no phone number for second-factor OTP",
         });
       }
-      yield* sender.send({ to: phoneNumber, purpose: "second-factor-otp", params: { otp } });
+      yield* dispatch(
+        "second-factor-otp",
+        sender.send({ to: phoneNumber, purpose: "second-factor-otp", params: { otp } }),
+      );
     }),
 });

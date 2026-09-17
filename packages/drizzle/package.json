@@ -59,7 +59,7 @@
     "better-sqlite3": "^11.7.0",
     "drizzle-orm": "^0.45.0",
     "drizzle-orm-effect": "npm:drizzle-orm@1.0.0-rc.5-ab785fc",
-    "effect": ">=4.0.0-rc.112"
+    "effect": "4.0.0-rc.112"
   },
   "peerDependencies": {
     "@types/pg": "^8.15.0",

@@ -359,6 +359,15 @@ const makeFixture = () => {
 
 const withCookie = (sessionId: string) => ({ cookie: `conduit_session=${sessionId}` });
 
+// Same raw session token, delivered as `Authorization: Bearer` instead of
+// the cookie — the "machine" credential path (`credentialClassFromRequest`).
+const jsonReqBearer = (path: string, body: unknown, sessionId: string): Request =>
+  new Request(`http://test${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${sessionId}` },
+    body: JSON.stringify(body),
+  });
+
 const jsonReq = (path: string, body: unknown, sessionId?: string): Request =>
   new Request(`http://test${path}`, {
     method: "POST",
@@ -695,6 +704,22 @@ describe("HTTP admin endpoints", () => {
 });
 
 describe("HTTP api-key endpoints", () => {
+  it("rejects minting a key over a machine (bearer) credential, and allows it over the session cookie", async () => {
+    const fx = makeFixture();
+    fx.seedUser("u", "u@test.com");
+    const sid = fx.makeSession("u");
+
+    // Same valid, unexpired session token — but presented as a bearer
+    // credential rather than the cookie. `apiKeyCreate` requires an
+    // interactive session, so this is a 403, not a 401: the caller is
+    // authenticated, just not with a credential class allowed to mint.
+    const deniedOverBearer = await fx.handler(jsonReqBearer("/api-keys", { name: "CI" }, sid));
+    expect(deniedOverBearer.status).toBe(403);
+
+    const allowedOverCookie = await fx.handler(jsonReq("/api-keys", { name: "CI" }, sid));
+    expect(allowedOverCookie.status).toBe(200);
+  });
+
   it("creates, lists, updates, and deletes keys", async () => {
     const fx = makeFixture();
     fx.seedUser("u", "u@test.com");

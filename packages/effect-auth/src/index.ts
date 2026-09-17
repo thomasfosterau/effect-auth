@@ -339,28 +339,21 @@ export * as PolicyStore from "./PolicyStore.ts";
 // `roleRef` names stay qualified.
 export * as OrganizationEntities from "./OrganizationEntities.ts";
 
-/** Permission-string RBAC facade (`Auth.RoleStore`, `Auth.requirePermission`, …). */
-export {
-  AuthorizationPolicy,
-  RoleStore,
-  requirePermission,
-  allowAll,
-  denyAll,
-  fromPredicate,
-  anyOf,
-  allOf,
-  not,
-  can,
-  requireAllPermissions,
-  requireAnyPermission,
-} from "./Authorization.ts";
+/**
+ * RBAC as authoring sugar over the kernel (`Auth.Rbac.layer`,
+ * `Auth.Rbac.policies`, …): a flat role/permission configuration compiles to
+ * declarative policies plus the principal → role entity fragment. Namespaced
+ * because its member names (`layer`, `policies`, `entities`, `model`) are
+ * generic. There is no second evaluation path behind it — see ADR 0018.
+ */
+export * as Rbac from "./Rbac.ts";
+/** The `"resource:action"` permission vocabulary the RBAC sugar is authored in. */
 export {
   type PermissionRef,
   parsePermission,
   formatPermission,
   permissionMatches,
 } from "./Permission.ts";
-export { type InMemoryRoleStoreConfig } from "./Rbac.ts";
 
 /** Policy-kernel decision types (the namespaced `Auth.Policy` carries the rest). */
 export { AuthorizationDeniedError, type Decision, type PolicyOutcome } from "./Policy.ts";
@@ -376,6 +369,8 @@ export {
 /** The `Authorizer` service and its supporting context tags. */
 export {
   CurrentPrincipal,
+  type CredentialClass,
+  CurrentCredential,
   EntityResolver,
   memoryEntityResolver,
   requestRefs,
@@ -384,6 +379,33 @@ export {
   PolicyValidationError,
   Authorizer,
 } from "./Authorizer.ts";
+
+/**
+ * The session-context services. Provided by the HTTP middleware *and* by
+ * `SessionContext`'s Layer constructors, so the same effect runs inside an
+ * `HttpApi` handler, at a hand-rolled app edge, and in a test.
+ *
+ * `MaybeCurrentSession` (`Option<SessionWithUser>`) is the service read-path
+ * code should depend on: "signed out" is a value there, not the absence of a
+ * service.
+ */
+export { CurrentSession, CurrentUser, MaybeCurrentSession } from "./SessionContext.ts";
+
+/** Layer constructors and accessors for an already-resolved session. */
+export * as SessionContext from "./SessionContext.ts";
+
+/**
+ * Session resolution at an application's own edge: credential-presence
+ * predicates over a raw `Request`, fail-open and fail-closed resolution, and
+ * one `AuthOutcome` the resolver reports itself.
+ */
+export * as SessionResolution from "./SessionResolution.ts";
+
+/**
+ * Cookie naming, shared by the middleware and the app-edge predicates so the
+ * computed `__Host-` name has exactly one derivation.
+ */
+export * as SessionCookies from "./SessionCookies.ts";
 
 // Cluster namespaces (also available as `effect-auth/<cluster>` subpaths)
 export * as Email from "./email/index.ts";

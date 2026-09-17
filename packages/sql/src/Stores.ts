@@ -316,36 +316,88 @@ export const makePasswordResetUserStore: Effect.Effect<
 });
 
 // ---------------------------------------------------------------------------
-// RoleStore (fails closed: storage errors become defects, never empty grants)
+// RBAC (fails closed: storage errors become defects, never empty grants)
 // ---------------------------------------------------------------------------
+//
+// `auth_user_roles` and `auth_role_permissions` feed the one authorization
+// kernel, in its two halves (ADR 0018): role *assignment* is entity hierarchy,
+// so it becomes an `EntityResolver`; role *grants* are policy, so they become
+// declarative permits. There is no `RoleStore` service and no second
+// evaluation path — both halves flow into `Authorizer`/`Policy.decide`.
 
 interface RoleRow {
   readonly role: string;
 }
 
-interface PermissionRow {
+interface RolePermissionRow {
+  readonly role: string;
   readonly resource: string;
   readonly action: string;
 }
 
-export const makeRoleStore: Effect.Effect<
-  typeof Auth.RoleStore.Service,
+/**
+ * An {@link Auth.EntityResolver} projecting `auth_user_roles` into the entity
+ * graph: `User::"<userId>"` with a `Role::"<role>"` parent per assigned role,
+ * which is what `principal in Role::"admin"` decides over.
+ *
+ * Only `User::` references are answered; every other reference is omitted (the
+ * kernel reads an absent entity as "no attributes, no parents"), so compose
+ * this with an application's own resolver when policies also name domain
+ * entities. The table carries no role-to-role edges, so this resolver
+ * contributes no role inheritance — author that with `Auth.Rbac.entities` or
+ * an application resolver.
+ */
+export const makeRbacEntityResolver: Effect.Effect<
+  typeof Auth.EntityResolver.Service,
   never,
   SqlClient.SqlClient
 > = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const rolesFor = (userId: string) =>
+    sql<RoleRow>`SELECT role FROM auth_user_roles WHERE user_id = ${userId}`.pipe(
+      Effect.map((rows) => rows.map((row) => row.role)),
+      Effect.orDie,
+    );
   return {
-    getUserRoles: (userId) =>
-      sql<RoleRow>`SELECT role FROM auth_user_roles WHERE user_id = ${userId}`.pipe(
-        Effect.map((rows) => rows.map((row) => row.role)),
-        Effect.orDie,
-      ),
-    getRolePermissions: (role) =>
-      sql<PermissionRow>`SELECT resource, action FROM auth_role_permissions WHERE role = ${role}`.pipe(
-        Effect.map((rows) => rows.map((row) => ({ resource: row.resource, action: row.action }))),
-        Effect.orDie,
-      ),
-  } satisfies typeof Auth.RoleStore.Service;
+    resolve: Effect.fn("Sql.rbacEntityResolver.resolve")(function* (
+      refs: ReadonlyArray<Auth.Entity.EntityRef>,
+    ) {
+      const users = refs.filter((ref) => ref.type === Auth.Rbac.DefaultPrincipalType);
+      return yield* Effect.forEach(users, (ref) =>
+        Effect.map(rolesFor(ref.id), (roles) =>
+          Auth.Entity.entity(ref, { parents: roles.map(Auth.Rbac.roleRef) }),
+        ),
+      );
+    }),
+  } satisfies typeof Auth.EntityResolver.Service;
+});
+
+/**
+ * Read `auth_role_permissions` into declarative permits — the policy half of
+ * the RBAC data, compiled by {@link Auth.Rbac.policies} so the SQL rows and a
+ * hand-written `Auth.Rbac` configuration produce byte-identical policies.
+ *
+ * Policies are read once, where they are needed: pass the result to
+ * `Auth.Authorizer.layer({ policies })` at startup, or re-read it behind a
+ * `PolicyStore` if tenant edits must apply without a restart.
+ */
+export const readRbacPolicies: Effect.Effect<
+  ReadonlyArray<Auth.Policy.DeclarativePolicy>,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows =
+    yield* sql<RolePermissionRow>`SELECT role, resource, action FROM auth_role_permissions`.pipe(
+      Effect.orDie,
+    );
+  const rolePermissions = new Map<string, { resource: string; action: string }[]>();
+  for (const row of rows) {
+    const permissions = rolePermissions.get(row.role) ?? [];
+    permissions.push({ resource: row.resource, action: row.action });
+    rolePermissions.set(row.role, permissions);
+  }
+  return Auth.Rbac.policies({ userRoles: {}, rolePermissions });
 });
 
 // ---------------------------------------------------------------------------
@@ -1218,6 +1270,183 @@ export const makeAccountLockoutStore: Effect.Effect<
 });
 
 // ---------------------------------------------------------------------------
+// ApiKeyStore
+// ---------------------------------------------------------------------------
+
+interface ApiKeyRow {
+  readonly id: string;
+  readonly name: string | null;
+  readonly prefix: string | null;
+  readonly start: string;
+  readonly key_hash: string;
+  readonly user_id: string;
+  readonly enabled: number;
+  readonly expires_at: number | null;
+  readonly last_used_at: number | null;
+  readonly permissions: string | null;
+  readonly metadata: string | null;
+  readonly remaining: number | null;
+  readonly refill_amount: number | null;
+  readonly refill_interval: number | null;
+  readonly refill_max: number | null;
+  readonly last_refill_at: number | null;
+  readonly rate_limit_max_requests: number | null;
+  readonly rate_limit_window_ms: number | null;
+  readonly created_at: number;
+  readonly updated_at: number;
+}
+
+const rowToApiKey = (row: ApiKeyRow): Effect.Effect<Auth.ApiKey, Auth.AuthError> =>
+  Effect.try({
+    try: () => ({
+      id: row.id,
+      ...(row.name != null ? { name: row.name } : {}),
+      ...(row.prefix != null ? { prefix: row.prefix } : {}),
+      start: row.start,
+      keyHash: row.key_hash,
+      userId: row.user_id,
+      enabled: row.enabled !== 0,
+      ...(row.expires_at != null ? { expiresAt: row.expires_at } : {}),
+      ...(row.last_used_at != null ? { lastUsedAt: row.last_used_at } : {}),
+      ...(row.permissions != null
+        ? { permissions: JSON.parse(row.permissions) as Record<string, readonly string[]> }
+        : {}),
+      metadata: row.metadata != null ? (JSON.parse(row.metadata) as Record<string, unknown>) : {},
+      ...(row.remaining != null ? { remaining: row.remaining } : {}),
+      ...(row.refill_amount != null ? { refillAmount: row.refill_amount } : {}),
+      ...(row.refill_interval != null ? { refillInterval: row.refill_interval } : {}),
+      ...(row.refill_max != null ? { refillMax: row.refill_max } : {}),
+      ...(row.last_refill_at != null ? { lastRefillAt: row.last_refill_at } : {}),
+      ...(row.rate_limit_max_requests != null && row.rate_limit_window_ms != null
+        ? {
+            rateLimit: {
+              maxRequests: row.rate_limit_max_requests,
+              windowMs: row.rate_limit_window_ms,
+            },
+          }
+        : {}),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }),
+    catch: (cause) => new Auth.AuthError({ message: "api key decode failed", cause }),
+  });
+
+export const makeApiKeyStore: Effect.Effect<
+  typeof Auth.ApiKeyStore.Service,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+
+  const getById = (id: string, label: string) =>
+    firstRow(label, sql<ApiKeyRow>`SELECT * FROM auth_api_keys WHERE id = ${id}`).pipe(
+      Effect.flatMap((row) => (row ? rowToApiKey(row) : Effect.succeed(null))),
+    );
+
+  return {
+    create: (apiKey) =>
+      asVoid(
+        "apiKey.create",
+        sql`INSERT INTO auth_api_keys (id, name, prefix, start, key_hash, user_id, enabled, expires_at, last_used_at, permissions, metadata, remaining, refill_amount, refill_interval, refill_max, last_refill_at, rate_limit_max_requests, rate_limit_window_ms, created_at, updated_at)
+              VALUES (${apiKey.id}, ${apiKey.name ?? null}, ${apiKey.prefix ?? null}, ${apiKey.start}, ${apiKey.keyHash}, ${apiKey.userId}, ${apiKey.enabled ? 1 : 0}, ${apiKey.expiresAt ?? null}, ${apiKey.lastUsedAt ?? null}, ${apiKey.permissions ? JSON.stringify(apiKey.permissions) : null}, ${encodeAttributes(apiKey.metadata)}, ${apiKey.remaining ?? null}, ${apiKey.refillAmount ?? null}, ${apiKey.refillInterval ?? null}, ${apiKey.refillMax ?? null}, ${apiKey.lastRefillAt ?? null}, ${apiKey.rateLimit?.maxRequests ?? null}, ${apiKey.rateLimit?.windowMs ?? null}, ${apiKey.createdAt}, ${apiKey.updatedAt})`,
+      ).pipe(Effect.as(apiKey)),
+    get: (id) => getById(id, "apiKey.get"),
+    getByHash: (keyHash) =>
+      firstRow(
+        "apiKey.getByHash",
+        sql<ApiKeyRow>`SELECT * FROM auth_api_keys WHERE key_hash = ${keyHash}`,
+      ).pipe(Effect.flatMap((row) => (row ? rowToApiKey(row) : Effect.succeed(null)))),
+    update: (apiKey) =>
+      asVoid(
+        "apiKey.update",
+        sql`UPDATE auth_api_keys SET
+              name = ${apiKey.name ?? null},
+              prefix = ${apiKey.prefix ?? null},
+              start = ${apiKey.start},
+              key_hash = ${apiKey.keyHash},
+              user_id = ${apiKey.userId},
+              enabled = ${apiKey.enabled ? 1 : 0},
+              expires_at = ${apiKey.expiresAt ?? null},
+              last_used_at = ${apiKey.lastUsedAt ?? null},
+              permissions = ${apiKey.permissions ? JSON.stringify(apiKey.permissions) : null},
+              metadata = ${encodeAttributes(apiKey.metadata)},
+              remaining = ${apiKey.remaining ?? null},
+              refill_amount = ${apiKey.refillAmount ?? null},
+              refill_interval = ${apiKey.refillInterval ?? null},
+              refill_max = ${apiKey.refillMax ?? null},
+              last_refill_at = ${apiKey.lastRefillAt ?? null},
+              rate_limit_max_requests = ${apiKey.rateLimit?.maxRequests ?? null},
+              rate_limit_window_ms = ${apiKey.rateLimit?.windowMs ?? null},
+              updated_at = ${apiKey.updatedAt}
+            WHERE id = ${apiKey.id}`,
+      ).pipe(Effect.as(apiKey)),
+    delete: (id) => asVoid("apiKey.delete", sql`DELETE FROM auth_api_keys WHERE id = ${id}`),
+    listByUserId: (userId) =>
+      allRows(
+        "apiKey.listByUserId",
+        sql<ApiKeyRow>`SELECT * FROM auth_api_keys WHERE user_id = ${userId}`,
+      ).pipe(Effect.flatMap((rows) => Effect.all(rows.map((row) => rowToApiKey(row))))),
+  } satisfies typeof Auth.ApiKeyStore.Service;
+});
+
+// ---------------------------------------------------------------------------
+// AdminUserStore (reuses auth_users + auth_identifiers — no dedicated table)
+// ---------------------------------------------------------------------------
+
+interface UserRowWithEmail extends UserRow {
+  readonly primary_email: string | null;
+}
+
+export const makeAdminUserStore: Effect.Effect<
+  typeof Auth.AdminUserStore.Service,
+  never,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const users = userQueries(sql);
+
+  return {
+    // No SQL-side pagination: matches/sorts on each user's earliest email
+    // identifier, which lives in a different table and isn't indexable as a
+    // plain column, so the candidate set is materialized once and paged in
+    // memory (mirrors the reference semantics in Admin.test.ts's test store).
+    listUsers: (query) =>
+      Effect.gen(function* () {
+        const rows = yield* allRows(
+          "adminUser.listUsers",
+          sql<UserRowWithEmail>`
+            SELECT u.*, (
+              SELECT value FROM auth_identifiers ie
+              WHERE ie.user_id = u.id AND ie.type = 'email'
+              ORDER BY ie.created_at ASC LIMIT 1
+            ) AS primary_email
+            FROM auth_users u`,
+        );
+        const decorated = yield* Effect.all(
+          rows.map((row) =>
+            rowToUser(row, "adminUser.listUsers").pipe(
+              Effect.map((user) => ({ user, email: row.primary_email ?? "" })),
+            ),
+          ),
+        );
+        const search = query.searchEmail?.toLowerCase();
+        const matching = decorated
+          .filter(({ email }) => (search ? email.toLowerCase().includes(search) : true))
+          .sort((a, b) => a.email.localeCompare(b.email));
+        const offset = query.offset ?? 0;
+        const limit = query.limit ?? matching.length;
+        return {
+          users: matching.slice(offset, offset + limit).map(({ user }) => user),
+          total: matching.length,
+        } satisfies Auth.ListUsersResult;
+      }),
+    createUser: (input) => users.create(input, "adminUser.createUser"),
+    setPasswordHash: (userId, hash) =>
+      users.setPasswordHash(userId, hash, "adminUser.setPasswordHash"),
+  } satisfies typeof Auth.AdminUserStore.Service;
+});
+
+// ---------------------------------------------------------------------------
 // Layers
 // ---------------------------------------------------------------------------
 
@@ -1239,10 +1468,15 @@ export const PasswordResetUserStoreLayer: Layer.Layer<
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.Password.PasswordResetUserStore, makePasswordResetUserStore);
-export const RoleStoreLayer: Layer.Layer<Auth.RoleStore, never, SqlClient.SqlClient> = Layer.effect(
-  Auth.RoleStore,
-  makeRoleStore,
-);
+/**
+ * Layer providing {@link Auth.EntityResolver} from `auth_user_roles`.
+ *
+ * Deliberately outside {@link layer}: `EntityResolver` is a single slot an
+ * application usually fills with a composed resolver (its own entities, the
+ * organization bridge, this one), not a storage interface to bundle.
+ */
+export const RbacEntityResolverLayer: Layer.Layer<Auth.EntityResolver, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.EntityResolver, makeRbacEntityResolver);
 export const RateLimitStoreLayer: Layer.Layer<Auth.RateLimitStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.RateLimitStore, makeRateLimitStore);
 export const EmailVerificationStoreLayer: Layer.Layer<
@@ -1311,17 +1545,26 @@ export const AccountLockoutStoreLayer: Layer.Layer<
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.Plugins.AccountLockoutStore, makeAccountLockoutStore);
+export const ApiKeyStoreLayer: Layer.Layer<Auth.ApiKeyStore, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.ApiKeyStore, makeApiKeyStore);
+export const AdminUserStoreLayer: Layer.Layer<Auth.AdminUserStore, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.AdminUserStore, makeAdminUserStore);
 
 /**
  * A single layer that provides every SQL-backed effect-auth store on top of
  * the ambient `SqlClient`. Provide it once (together with any `SqlClient`
  * layer) and the core auth stack (SessionService, EmailPasswordService,
- * OAuth, WebAuthn, MagicLink, EmailOtp, MultiFactor, ...) has persistence.
+ * OAuth, WebAuthn, MagicLink, EmailOtp, MultiFactor, Admin, ApiKey, ...) has
+ * persistence.
  *
  * Stores added to core after this package's restoration (OneTimeToken,
- * TrustedDevice, PhoneOtp, Organization, Admin, ApiKey, OIDC provider, SSO,
+ * TrustedDevice, PhoneOtp, Organization, OIDC provider, SSO,
  * DeviceAuthorization, ...) are not yet covered here — use the
  * `KeyValueStore`-backed layers from core or bring your own until they land.
+ *
+ * Authorization is not bundled: wire {@link RbacEntityResolverLayer} and
+ * {@link readRbacPolicies} into an `Authorizer` yourself, because
+ * `EntityResolver` is one slot an application composes rather than a store.
  */
 export const layer: Layer.Layer<
   | Auth.SessionStore
@@ -1329,7 +1572,6 @@ export const layer: Layer.Layer<
   | Auth.UserServiceStore
   | Auth.Email.EmailPasswordStore
   | Auth.Password.PasswordResetUserStore
-  | Auth.RoleStore
   | Auth.RateLimitStore
   | Auth.Email.EmailVerificationStore
   | Auth.MultiFactor.ChallengeStore
@@ -1345,7 +1587,9 @@ export const layer: Layer.Layer<
   | Auth.MultiFactor.MultiFactorStore
   | Auth.MultiFactor.PendingMultiFactorStore
   | Auth.IdentifierStore
-  | Auth.Plugins.AccountLockoutStore,
+  | Auth.Plugins.AccountLockoutStore
+  | Auth.ApiKeyStore
+  | Auth.AdminUserStore,
   never,
   SqlClient.SqlClient
 > = Layer.mergeAll(
@@ -1354,7 +1598,6 @@ export const layer: Layer.Layer<
   UserServiceStoreLayer,
   EmailPasswordStoreLayer,
   PasswordResetUserStoreLayer,
-  RoleStoreLayer,
   RateLimitStoreLayer,
   EmailVerificationStoreLayer,
   ChallengeStoreLayer,
@@ -1371,4 +1614,6 @@ export const layer: Layer.Layer<
   PendingMultiFactorStoreLayer,
   IdentifierStoreLayer,
   AccountLockoutStoreLayer,
+  ApiKeyStoreLayer,
+  AdminUserStoreLayer,
 );

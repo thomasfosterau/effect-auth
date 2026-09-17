@@ -15,9 +15,9 @@
  * - Attribute bags and other structured values are JSON `TEXT`.
  *
  * Token columns (`auth_sessions.id`, `auth_magic_links.token`,
- * `auth_email_verifications.token`, `auth_password_resets.token`) store the
- * SHA-256 hash computed by the service layer — the database never sees a raw
- * bearer token.
+ * `auth_email_verifications.token`, `auth_password_resets.token`,
+ * `auth_api_keys.key_hash`) store the SHA-256 hash computed by the service
+ * layer — the database never sees a raw bearer token.
  */
 
 import { Effect } from "effect";
@@ -167,6 +167,30 @@ export const schemaStatements: readonly string[] = [
     failures INTEGER NOT NULL,
     locked_until BIGINT
   )`,
+  `CREATE TABLE IF NOT EXISTS auth_api_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    prefix TEXT,
+    start TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    enabled INTEGER NOT NULL,
+    expires_at BIGINT,
+    last_used_at BIGINT,
+    permissions TEXT,
+    metadata TEXT,
+    remaining INTEGER,
+    refill_amount INTEGER,
+    refill_interval BIGINT,
+    refill_max INTEGER,
+    last_refill_at BIGINT,
+    rate_limit_max_requests INTEGER,
+    rate_limit_window_ms BIGINT,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS auth_api_keys_hash_idx ON auth_api_keys (key_hash)`,
+  `CREATE INDEX IF NOT EXISTS auth_api_keys_user_idx ON auth_api_keys (user_id)`,
 ];
 
 /**

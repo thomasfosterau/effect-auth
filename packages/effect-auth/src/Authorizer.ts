@@ -38,6 +38,43 @@ export class CurrentPrincipal extends Context.Service<CurrentPrincipal, Entity.E
       Effect.provideService(effect, CurrentPrincipal, ref);
 }
 
+/**
+ * What kind of credential resolved {@link CurrentPrincipal}: an interactive
+ * session (a human at a keyboard, cookie or bearer session token) versus a
+ * machine credential (an API key, a service-to-service bearer token) acting
+ * on the principal's behalf.
+ *
+ * A principal alone answers *who*; this answers *how they got in* — the
+ * distinction a policy needs to say "an API key may act as this user, but
+ * may not mint another API key" (epic #180: a credential changes WHO the
+ * request is, never WHAT it may do, unless a policy explicitly extends that
+ * trust). Kept as its own service rather than folded into the principal
+ * entity or the session record: neither a bare `EntityRef` nor a machine
+ * credential (which has no `Types.Session`) has a natural place to carry it,
+ * and a separate tag lets non-HTTP callers (a worker, a CLI, an RPC handler)
+ * provide it without fabricating either.
+ */
+export type CredentialClass = "interactive" | "machine";
+
+/**
+ * Context service carrying the {@link CredentialClass} of the credential that
+ * resolved {@link CurrentPrincipal}. Optional: providers that never set it
+ * (existing non-HTTP callers, tests) leave policies that don't ask about it
+ * unaffected — `Authorizer.authorize`/`check` merge it into the decision's
+ * `context.credentialClass` attribute when present, so declarative policies
+ * can condition on it (`Condition.attr("context", "credentialClass")`)
+ * without every call site restating it by hand.
+ */
+export class CurrentCredential extends Context.Service<CurrentCredential, CredentialClass>()(
+  "@effect-auth/CurrentCredential",
+) {
+  /** Provide a credential class for a scoped effect. */
+  static readonly provide =
+    (credentialClass: CredentialClass) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, CurrentCredential>> =>
+      Effect.provideService(effect, CurrentCredential, credentialClass);
+}
+
 // ---------------------------------------------------------------------------
 // Slice resolution
 // ---------------------------------------------------------------------------
@@ -278,11 +315,19 @@ export const make = <E = unknown>(
     ): Effect.Effect<Policy.PolicyRequest, never, CurrentPrincipal> =>
       Effect.gen(function* () {
         const principal = yield* CurrentPrincipal;
+        // `CurrentCredential`, when present, is authoritative over anything
+        // a caller passed in `input.context.credentialClass`: it is spread
+        // last so a call site cannot spoof its own credential class.
+        const credentialClass = yield* Effect.serviceOption(CurrentCredential);
+        const context = {
+          ...input.context,
+          ...(Option.isSome(credentialClass) ? { credentialClass: credentialClass.value } : {}),
+        };
         return Policy.request({
           principal,
           action: toActionRef(input.action),
           resource: input.resource,
-          ...(input.context !== undefined ? { context: input.context } : {}),
+          context,
         });
       });
 

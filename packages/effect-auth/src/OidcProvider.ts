@@ -1205,7 +1205,7 @@ export const make = (
               ...(clientSecret !== undefined && { clientSecret }),
               registrationAccessToken,
             } satisfies DynamicallyRegisteredOidcClient;
-          }).pipe(Effect.withSpan("effect-auth.oidc.registerDynamicClient")),
+          }).pipe(Effect.withSpan(Obs.spanNames.oidcRegisterDynamicClient)),
       ),
 
       readDynamicClient: Effect.fn("OidcProviderService.readDynamicClient")(function* (
@@ -1444,7 +1444,7 @@ export const make = (
                 ...(request.state !== undefined && { state: request.state }),
               }),
             } satisfies OidcAuthorizeResult;
-          }).pipe(Effect.withSpan("effect-auth.oidc.authorize")),
+          }).pipe(Effect.withSpan(Obs.spanNames.oidcAuthorize)),
       ),
 
       consent: Effect.fn("OidcProviderService.consent")(
@@ -1497,7 +1497,7 @@ export const make = (
                 ...(pending.state !== undefined && { state: pending.state }),
               }),
             };
-          }).pipe(Effect.withSpan("effect-auth.oidc.consent")),
+          }).pipe(Effect.withSpan(Obs.spanNames.oidcConsent)),
       ),
 
       token: Effect.fn("OidcProviderService.token")((request: OidcTokenRequest) =>
@@ -1648,7 +1648,7 @@ export const make = (
 
           return yield* new OidcTokenError({ error: "unsupported_grant_type" });
         }).pipe(
-          Effect.withSpan("effect-auth.oidc.token", { attributes: { grant: request.grantType } }),
+          Effect.withSpan(Obs.spanNames.oidcToken, { attributes: { grant: request.grantType } }),
           Effect.tap(() => Obs.recordOidcTokenRequest(request.grantType, "success")),
           Effect.tapError(() => Obs.recordOidcTokenRequest(request.grantType, "failure")),
         ),
@@ -1671,7 +1671,7 @@ export const make = (
             return yield* new OidcProviderError({ message: "Invalid or expired access token" });
           }
           return yield* claimsFor(user, record.scopes);
-        }).pipe(Effect.withSpan("effect-auth.oidc.userinfo")),
+        }).pipe(Effect.withSpan(Obs.spanNames.oidcUserinfo)),
       ),
 
       getMetadata: () => ({
