@@ -37,6 +37,7 @@
  * @module session-resolution
  */
 import { Cause, Effect, Option } from "effect";
+import { identity } from "effect/Function";
 import * as Observability from "./Observability.ts";
 import * as SessionCookies from "./SessionCookies.ts";
 import type * as Types from "./Types.ts";
@@ -359,8 +360,6 @@ export interface ResolveOptions<E, R> {
 const isPresent = (credential: CredentialPresence | boolean): boolean =>
   typeof credential === "boolean" ? credential : credential.present;
 
-const skipped: SessionResolutionResult = { session: Option.none(), outcome: "skipped" };
-
 const report = (outcome: AuthOutcome): Effect.Effect<void> =>
   Effect.andThen(
     Observability.recordSessionResolution(outcome),
@@ -385,16 +384,15 @@ const report = (outcome: AuthOutcome): Effect.Effect<void> =>
 export const resolve = <E, R>(
   options: ResolveOptions<E, R>,
 ): Effect.Effect<SessionResolutionResult, E, R> =>
-  Effect.gen(function* () {
-    if (!isPresent(options.credential)) {
-      yield* report("skipped");
-      return skipped;
-    }
-    const session = yield* options.resolve.pipe(Effect.tapCause(() => report("degraded")));
-    const outcome: AuthOutcome = Option.isSome(session) ? "resolved" : "anonymous";
-    yield* report(outcome);
-    return { session, outcome };
-  }).pipe(Effect.withSpan("effect-auth.resolve-session"));
+  Effect.map(
+    resolveWith({
+      credential: options.credential,
+      resolve: options.resolve,
+      session: identity,
+      empty: Option.none(),
+    }),
+    ({ value, outcome }) => ({ session: value, outcome }),
+  );
 
 /** Options for {@link resolveFailOpen}. */
 export interface ResolveFailOpenOptions<E, R> extends ResolveOptions<E, R> {
@@ -449,22 +447,105 @@ export interface ResolveFailOpenOptions<E, R> extends ResolveOptions<E, R> {
 export const resolveFailOpen = <E, R>(
   options: ResolveFailOpenOptions<E, R>,
 ): Effect.Effect<SessionResolutionResult, never, R> =>
+  Effect.map(
+    resolveWithFailOpen({
+      credential: options.credential,
+      resolve: options.resolve,
+      session: identity,
+      empty: Option.none(),
+      onDegraded: options.onDegraded,
+    }),
+    ({ value, outcome }) => ({ session: value, outcome }),
+  );
+
+// ---------------------------------------------------------------------------
+// Carrying a payload alongside the session
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for {@link resolveWith} — {@link ResolveOptions} generalised over
+ * what the resolution returns.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface ResolveWithOptions<A, E, R> {
+  /** As {@link ResolveOptions.credential}. */
+  readonly credential: CredentialPresence | boolean;
+  /** The resolution, returning whatever the transport carries. */
+  readonly resolve: Effect.Effect<A, E, R>;
+  /** Where the session lives inside that payload. */
+  readonly session: (value: A) => Option.Option<Types.SessionWithUser>;
+  /** The payload to report when resolution is skipped or degrades. */
+  readonly empty: A;
+}
+
+/** Options for {@link resolveWithFailOpen}. */
+export interface ResolveWithFailOpenOptions<A, E, R> extends ResolveWithOptions<A, E, R> {
+  /** As {@link ResolveFailOpenOptions.onDegraded}. Mandatory, for the same reason. */
+  readonly onDegraded: (cause: Cause.Cause<E>) => Effect.Effect<void>;
+}
+
+/** A resolution attempt over an arbitrary payload. */
+export interface ResolveWithResult<A> {
+  readonly value: A;
+  readonly outcome: AuthOutcome;
+}
+
+/**
+ * {@link resolve}, generalised over a transport that carries more than the
+ * session.
+ *
+ * A remote resolver returns `Set-Cookie` headers to replay alongside the
+ * session (see `Http.RemoteSession`); composing it with {@link resolve} would
+ * mean either dropping them or calling the transport twice. This keeps the
+ * outcome derivation in one place while letting the payload through.
+ *
+ * @since 1.0.0
+ * @category resolution
+ */
+export const resolveWith = <A, E, R>(
+  options: ResolveWithOptions<A, E, R>,
+): Effect.Effect<ResolveWithResult<A>, E, R> =>
   Effect.gen(function* () {
     if (!isPresent(options.credential)) {
       yield* report("skipped");
-      return skipped;
+      return { value: options.empty, outcome: "skipped" as const };
+    }
+    const value = yield* options.resolve.pipe(Effect.tapCause(() => report("degraded")));
+    const outcome: AuthOutcome = Option.isSome(options.session(value)) ? "resolved" : "anonymous";
+    yield* report(outcome);
+    return { value, outcome };
+  }).pipe(Effect.withSpan("effect-auth.resolve-session"));
+
+/**
+ * {@link resolveFailOpen}, generalised over a transport that carries more than
+ * the session. On a degrade the payload is `options.empty`.
+ *
+ * @since 1.0.0
+ * @category resolution
+ */
+export const resolveWithFailOpen = <A, E, R>(
+  options: ResolveWithFailOpenOptions<A, E, R>,
+): Effect.Effect<ResolveWithResult<A>, never, R> =>
+  Effect.gen(function* () {
+    if (!isPresent(options.credential)) {
+      yield* report("skipped");
+      return { value: options.empty, outcome: "skipped" as const };
     }
     return yield* options.resolve.pipe(
-      Effect.flatMap((session) => {
-        const outcome: AuthOutcome = Option.isSome(session) ? "resolved" : "anonymous";
-        return Effect.as(report(outcome), { session, outcome });
+      Effect.flatMap((value) => {
+        const outcome: AuthOutcome = Option.isSome(options.session(value))
+          ? "resolved"
+          : "anonymous";
+        return Effect.as(report(outcome), { value, outcome });
       }),
       // Catches defects as well as failures: an unreachable binding often
       // arrives as a thrown `TypeError`, and degrading only on typed failures
       // would 500 on exactly the fault this exists for.
       Effect.catchCause((cause) =>
         Effect.as(Effect.andThen(report("degraded"), options.onDegraded(cause)), {
-          session: Option.none<Types.SessionWithUser>(),
+          value: options.empty,
           outcome: "degraded" as const,
         }),
       ),
