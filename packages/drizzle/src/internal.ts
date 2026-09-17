@@ -11,6 +11,7 @@
 
 import { Effect } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
+import type { AuthDatabase, DrizzleHandle, DrizzleResult } from "./Database.ts";
 import { defaultTableNames, type TableNames } from "./Schema.ts";
 
 /**
@@ -21,13 +22,57 @@ import { defaultTableNames, type TableNames } from "./Schema.ts";
  * shows up verbatim in the error message, so a failure points at the call site
  * without a stack trace.
  *
+ * A built query is a `Promise` on the classic drivers and an `Effect` on
+ * drizzle's Effect drivers; both are handled here so the store code is written
+ * once. The Effect branch runs the driver's own Effect directly — no
+ * `Promise` round trip, no fiber hand-off.
+ *
  * @internal
  */
-export const run = <A>(label: string, query: () => Promise<A>): Effect.Effect<A, Auth.AuthError> =>
-  Effect.tryPromise({
-    try: query,
-    catch: (cause) => new Auth.AuthError({ message: `drizzle ${label} failed`, cause }),
+export const run = <A>(
+  label: string,
+  query: () => DrizzleResult<A>,
+): Effect.Effect<A, Auth.AuthError> => {
+  const toAuthError = (cause: unknown): Auth.AuthError =>
+    new Auth.AuthError({ message: `drizzle ${label} failed`, cause });
+
+  return Effect.suspend(() => {
+    // Building the query can itself throw (a malformed `WHERE`, a column the
+    // handle does not know); that is the same class of failure as a rejection
+    // and surfaces the same way.
+    let result: DrizzleResult<A>;
+    try {
+      result = query();
+    } catch (cause) {
+      return Effect.fail(toAuthError(cause));
+    }
+
+    return Effect.isEffect(result)
+      ? Effect.mapError(result as Effect.Effect<A, unknown>, toAuthError)
+      : Effect.tryPromise({ try: () => result as Promise<A>, catch: toAuthError });
   });
+};
+
+/**
+ * Bind a {@link DrizzleHandle} into the `run`-shaped helper the stores use.
+ *
+ * The handle is resolved *per query* rather than captured once, which is what
+ * lets an application hand over a request-scoped connection: `build` runs in the
+ * calling fiber, so a handle held in a `Context.Reference` is the one that
+ * fiber's request set.
+ *
+ * @internal
+ */
+export const makeQuery =
+  (handle: DrizzleHandle) =>
+  <A>(
+    label: string,
+    build: (db: AuthDatabase) => DrizzleResult<A>,
+  ): Effect.Effect<A, Auth.AuthError> =>
+    Effect.flatMap(handle.database, (db) => run(label, () => build(db)));
+
+/** The per-query runner {@link makeQuery} produces. @internal */
+export type Query = ReturnType<typeof makeQuery>;
 
 /**
  * Fill in the `effect_auth_*` defaults for any table name the caller omitted.

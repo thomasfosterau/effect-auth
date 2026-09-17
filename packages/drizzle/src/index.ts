@@ -16,7 +16,8 @@
  * - `Pg` / `Sqlite` / `MySql` — one dialect's tables and DDL each
  *   (`defineTables`, `tables`, `sessionsTable`, `migrationStatements`, ...).
  * - `layer` — the aggregate of all three stores.
- * - `DrizzleDatabase` / `databaseLayer` / `AuthDatabase` — the database seam.
+ * - `DrizzleDatabase` / `databaseLayer` / `effectDatabaseLayer` / `AuthDatabase`
+ *   — the database seam.
  * - `TableNames` / `defaultTableNames` / `Tables` and the row types — what the
  *   three dialects agree on.
  *
@@ -44,6 +45,17 @@
  * // Batched reads for application code (one query per batch of lookups).
  * const requests = Drizzle.Requests.layer().pipe(Layer.provide(Drizzle.databaseLayer(db)));
  * const users = Effect.forEach(ids, Drizzle.Requests.getUser, { concurrency: "unbounded" });
+ *
+ * // A drizzle Effect driver: the stores run its queries directly, no Promise
+ * // boundary anywhere between `Auth.SessionStore` and the database.
+ * import * as PgDrizzle from "drizzle-orm/effect-postgres";
+ * const effectStores = Drizzle.layer().pipe(
+ *   Layer.provide(Drizzle.effectDatabaseLayer(PgDrizzle.makeWithDefaults())),
+ * );
+ *
+ * // A handle the application owns the lifetime of: passing an `Effect` instead
+ * // of a handle resolves it per query, in the calling request's scope.
+ * const perRequest = Drizzle.layer().pipe(Layer.provide(Drizzle.databaseLayer(RequestDatabase)));
  * ```
  */
 

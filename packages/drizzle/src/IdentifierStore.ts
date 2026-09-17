@@ -24,7 +24,7 @@ import { and, asc, eq, inArray, or } from "drizzle-orm";
 import { Effect, Exit, Layer, Request, RequestResolver } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { DrizzleDatabase } from "./Database.ts";
-import { run } from "./internal.ts";
+import { makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 import type { Tables } from "./Schema.ts";
 
@@ -37,12 +37,12 @@ export const make = (
   tables: Tables = defaultTables,
 ): Effect.Effect<typeof Auth.IdentifierStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const db = yield* DrizzleDatabase;
+    const query = makeQuery(yield* DrizzleDatabase);
     const identifiers = tables.identifiers;
 
     return {
       getByValue: (type, value) =>
-        run("identifier.getByValue", () =>
+        query("identifier.getByValue", (db) =>
           db
             .select()
             .from(identifiers)
@@ -67,7 +67,7 @@ export const make = (
         ),
 
       listByUser: (userId) =>
-        run("identifier.listByUser", () =>
+        query("identifier.listByUser", (db) =>
           db
             .select()
             .from(identifiers)
@@ -93,7 +93,7 @@ export const make = (
       // `AuthError`, which `Auth.claimIdentifier` re-reads into an
       // `IdentifierTakenError`.
       create: (identifier) =>
-        run("identifier.create", () =>
+        query("identifier.create", (db) =>
           db
             .insert(identifiers)
             .values({
@@ -113,7 +113,7 @@ export const make = (
       // two statements on all three dialects rather than a per-dialect branch.
       setVerified: (id, verifiedAt) =>
         Effect.gen(function* () {
-          yield* run("identifier.setVerified", () =>
+          yield* query("identifier.setVerified", (db) =>
             db
               .update(identifiers)
               .set({ verified: true, verifiedAt })
@@ -121,7 +121,7 @@ export const make = (
               .execute(),
           );
 
-          const rows = yield* run("identifier.setVerified.read", () =>
+          const rows = yield* query("identifier.setVerified.read", (db) =>
             db.select().from(identifiers).where(eq(identifiers.id, id)).limit(1).execute(),
           );
 
@@ -140,12 +140,12 @@ export const make = (
         }),
 
       delete: (id) =>
-        run("identifier.delete", () =>
+        query("identifier.delete", (db) =>
           db.delete(identifiers).where(eq(identifiers.id, id)).execute(),
         ).pipe(Effect.asVoid),
 
       deleteByUser: (userId) =>
-        run("identifier.deleteByUser", () =>
+        query("identifier.deleteByUser", (db) =>
           db.delete(identifiers).where(eq(identifiers.userId, userId)).execute(),
         ).pipe(Effect.asVoid),
     } satisfies typeof Auth.IdentifierStore.Service;
@@ -202,7 +202,8 @@ const pairKey = (type: Auth.IdentifierType, value: string): string => `${type} $
 export const makeByValueResolver = (
   tables: Tables = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<GetIdentifierByValue>, never, DrizzleDatabase> =>
-  Effect.map(DrizzleDatabase, (db) => {
+  Effect.map(DrizzleDatabase, (handle) => {
+    const query = makeQuery(handle);
     const identifiers = tables.identifiers;
     return RequestResolver.make<GetIdentifierByValue>((entries) =>
       Effect.gen(function* () {
@@ -220,7 +221,7 @@ export const makeByValueResolver = (
           and(eq(identifiers.type, type), inArray(identifiers.value, Array.from(values))),
         );
 
-        const rows = yield* run("identifier.getByValueMany", () =>
+        const rows = yield* query("identifier.getByValueMany", (db) =>
           db
             .select()
             .from(identifiers)
@@ -267,12 +268,13 @@ export const makeByValueResolver = (
 export const makeByUserResolver = (
   tables: Tables = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<ListIdentifiersByUser>, never, DrizzleDatabase> =>
-  Effect.map(DrizzleDatabase, (db) => {
+  Effect.map(DrizzleDatabase, (handle) => {
+    const query = makeQuery(handle);
     const identifiers = tables.identifiers;
     return RequestResolver.make<ListIdentifiersByUser>((entries) =>
       Effect.gen(function* () {
         const userIds = Array.from(new Set(entries.map((entry) => entry.request.userId)));
-        const rows = yield* run("identifier.listByUserMany", () =>
+        const rows = yield* query("identifier.listByUserMany", (db) =>
           db
             .select()
             .from(identifiers)

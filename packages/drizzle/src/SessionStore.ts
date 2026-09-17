@@ -22,7 +22,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { Effect, Exit, Layer, Request, RequestResolver } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { DrizzleDatabase } from "./Database.ts";
-import { run } from "./internal.ts";
+import { makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 import type { Tables } from "./Schema.ts";
 
@@ -35,12 +35,12 @@ export const make = (
   tables: Tables = defaultTables,
 ): Effect.Effect<typeof Auth.SessionStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const db = yield* DrizzleDatabase;
+    const query = makeQuery(yield* DrizzleDatabase);
     const sessions = tables.sessions;
 
     return {
       create: (session) =>
-        run("session.create", () =>
+        query("session.create", (db) =>
           db
             .insert(sessions)
             .values({
@@ -55,7 +55,7 @@ export const make = (
         ).pipe(Effect.as(session)),
 
       get: (sessionId) =>
-        run("session.get", () =>
+        query("session.get", (db) =>
           db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1).execute(),
         ).pipe(
           Effect.map((rows) => {
@@ -74,7 +74,7 @@ export const make = (
         ),
 
       update: (session) =>
-        run("session.update", () =>
+        query("session.update", (db) =>
           db
             .update(sessions)
             .set({
@@ -87,17 +87,17 @@ export const make = (
         ).pipe(Effect.as(session)),
 
       delete: (sessionId) =>
-        run("session.delete", () =>
+        query("session.delete", (db) =>
           db.delete(sessions).where(eq(sessions.id, sessionId)).execute(),
         ).pipe(Effect.asVoid),
 
       deleteByUserId: (userId) =>
-        run("session.deleteByUserId", () =>
+        query("session.deleteByUserId", (db) =>
           db.delete(sessions).where(eq(sessions.userId, userId)).execute(),
         ).pipe(Effect.asVoid),
 
       listByUserId: (userId) =>
-        run("session.listByUserId", () =>
+        query("session.listByUserId", (db) =>
           db
             .select()
             .from(sessions)
@@ -155,12 +155,13 @@ export class GetSession extends Request.TaggedClass("GetSession")<
 export const makeResolver = (
   tables: Tables = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<GetSession>, never, DrizzleDatabase> =>
-  Effect.map(DrizzleDatabase, (db) => {
+  Effect.map(DrizzleDatabase, (handle) => {
+    const query = makeQuery(handle);
     const sessions = tables.sessions;
     return RequestResolver.make<GetSession>((entries) =>
       Effect.gen(function* () {
         const ids = Array.from(new Set(entries.map((entry) => entry.request.id)));
-        const rows = yield* run("session.getMany", () =>
+        const rows = yield* query("session.getMany", (db) =>
           db.select().from(sessions).where(inArray(sessions.id, ids)).execute(),
         );
 

@@ -19,7 +19,7 @@ import { eq, inArray } from "drizzle-orm";
 import { Effect, Exit, Layer, Request, RequestResolver } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { DrizzleDatabase } from "./Database.ts";
-import { run } from "./internal.ts";
+import { makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 import type { Tables, UserRow } from "./Schema.ts";
 
@@ -32,13 +32,13 @@ export const make = (
   tables: Tables = defaultTables,
 ): Effect.Effect<typeof Auth.UserStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const db = yield* DrizzleDatabase;
+    const query = makeQuery(yield* DrizzleDatabase);
     const users = tables.users;
 
     const byId = (userId: string, label: string): Effect.Effect<UserRow | null, Auth.AuthError> =>
-      run(label, () => db.select().from(users).where(eq(users.id, userId)).limit(1).execute()).pipe(
-        Effect.map((rows) => rows[0] ?? null),
-      );
+      query(label, (db) =>
+        db.select().from(users).where(eq(users.id, userId)).limit(1).execute(),
+      ).pipe(Effect.map((rows) => rows[0] ?? null));
 
     return {
       get: (userId) =>
@@ -95,12 +95,13 @@ export type UserRequest = GetUser;
 export const makeResolver = (
   tables: Tables = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<UserRequest>, never, DrizzleDatabase> =>
-  Effect.map(DrizzleDatabase, (db) => {
+  Effect.map(DrizzleDatabase, (handle) => {
+    const query = makeQuery(handle);
     const users = tables.users;
     return RequestResolver.make<UserRequest>((entries) =>
       Effect.gen(function* () {
         const ids = Array.from(new Set(entries.map((entry) => entry.request.id)));
-        const rows = yield* run("user.getMany", () =>
+        const rows = yield* query("user.getMany", (db) =>
           db.select().from(users).where(inArray(users.id, ids)).execute(),
         );
 
