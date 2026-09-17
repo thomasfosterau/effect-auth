@@ -58,7 +58,7 @@ export const make = (
             // Return the raw token as session.id so the HTTP layer can set it as the cookie value.
             return yield* hooks.afterCreateSession({ ...session, id: rawToken });
           }).pipe(
-            Effect.withSpan("effect-auth.create-session"),
+            Effect.withSpan(Obs.spanNames.createSession),
             Effect.tap(() => Obs.recordSessionCreated()),
           ),
       ),
@@ -147,7 +147,7 @@ export const make = (
             user,
           });
         }).pipe(
-          Effect.withSpan("effect-auth.validate-session"),
+          Effect.withSpan(Obs.spanNames.validateSession),
           Effect.tap(() => Obs.recordSessionValidated("success")),
           Effect.tapError((e) =>
             "_tag" in e && e._tag === "SessionNotFoundError"
@@ -165,7 +165,7 @@ export const make = (
           yield* sessionStore.delete(hashToken(rawToken));
           yield* hooks.afterSignOut({ sessionId: rawToken });
         }).pipe(
-          Effect.withSpan("effect-auth.sign-out"),
+          Effect.withSpan(Obs.spanNames.signOut),
           Effect.tap(() => Obs.recordSessionInvalidated()),
         ),
       ),

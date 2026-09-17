@@ -434,7 +434,7 @@ export const make = (
               token: `${signingInput}.${base64UrlEncode(signature)}`,
               expiresAt: exp * 1000,
             } satisfies JwtSignResult;
-          }).pipe(Effect.withSpan("effect-auth.token.sign")),
+          }).pipe(Effect.withSpan(Obs.spanNames.tokenSign)),
       ),
 
       verify: Effect.fn("JwtService.verify")((token: string) =>
@@ -515,7 +515,7 @@ export const make = (
 
           return payload;
         }).pipe(
-          Effect.withSpan("effect-auth.token.verify", { attributes: { type: "jwt" } }),
+          Effect.withSpan(Obs.spanNames.tokenVerify, { attributes: { type: "jwt" } }),
           Effect.tap(() => Obs.recordTokenVerification("jwt", "success")),
           Effect.tapError(() => Obs.recordTokenVerification("jwt", "failure")),
         ),
