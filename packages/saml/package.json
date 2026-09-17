@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.0",
-    "effect": ">=4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
     "xml-crypto": "^6.1.2"
   },
   "peerDependencies": {
