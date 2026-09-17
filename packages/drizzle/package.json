@@ -50,12 +50,15 @@
     "@thomasfosterau/effect-auth": "workspace:*"
   },
   "devDependencies": {
+    "@effect/sql-pg": "4.0.0-rc.112",
+    "@effect/sql-pglite": "4.0.0-rc.112",
     "@electric-sql/pglite": "^0.5.8",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^26.1.0",
     "@types/pg": "^8.15.0",
     "better-sqlite3": "^11.7.0",
     "drizzle-orm": "^0.45.0",
+    "drizzle-orm-effect": "npm:drizzle-orm@1.0.0-rc.5-ab785fc",
     "effect": "4.0.0-rc.112"
   },
   "peerDependencies": {

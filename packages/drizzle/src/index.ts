@@ -16,9 +16,12 @@
  * - `Pg` / `Sqlite` / `MySql` — one dialect's tables and DDL each
  *   (`defineTables`, `tables`, `sessionsTable`, `migrationStatements`, ...).
  * - `layer` — the aggregate of all three stores.
- * - `DrizzleDatabase` / `databaseLayer` / `AuthDatabase` — the database seam.
+ * - `DrizzleDatabase` / `databaseLayer` / `effectDatabaseLayer` / `AuthDatabase`
+ *   — the database seam.
  * - `TableNames` / `defaultTableNames` / `Tables` and the row types — what the
  *   three dialects agree on.
+ * - `defineSchema` / `fromTables` / `AuthSchema` and the `*ColumnNames` types —
+ *   how to point the stores at tables this package did not define.
  *
  * @example
  * ```ts
@@ -44,9 +47,49 @@
  * // Batched reads for application code (one query per batch of lookups).
  * const requests = Drizzle.Requests.layer().pipe(Layer.provide(Drizzle.databaseLayer(db)));
  * const users = Effect.forEach(ids, Drizzle.Requests.getUser, { concurrency: "unbounded" });
+ *
+ * // A drizzle Effect driver: the stores run its queries directly, no Promise
+ * // boundary anywhere between `Auth.SessionStore` and the database.
+ * import * as PgDrizzle from "drizzle-orm/effect-postgres";
+ * const effectStores = Drizzle.layer().pipe(
+ *   Layer.provide(Drizzle.effectDatabaseLayer(PgDrizzle.makeWithDefaults())),
+ * );
+ *
+ * // A handle the application owns the lifetime of: passing an `Effect` instead
+ * // of a handle resolves it per query, in the calling request's scope.
+ * const perRequest = Drizzle.layer().pipe(Layer.provide(Drizzle.databaseLayer(RequestDatabase)));
+ *
+ * // An application's own tables, under its own column names and key types: the
+ * // mapping says where each field the stores need actually lives.
+ * const adopted = Drizzle.layer(
+ *   Drizzle.defineSchema({
+ *     sessions: { table: appSessions, columns: { id: "digest", userId: "account", ... } },
+ *     users: { table: appUsers, columns: { id: "key", name: "displayName", ... } },
+ *     identifiers: { table: appHandles, columns: { id: "key", type: "kind", ... } },
+ *   }),
+ * ).pipe(Layer.provide(Drizzle.databaseLayer(db)));
  * ```
  */
 
+export {
+  type AuthSchema,
+  type AuthSchemaSpec,
+  type ColumnKey,
+  defineSchema,
+  fromTables,
+  type IdentifierColumnNames,
+  type IdentifierColumns,
+  type IdentifierSchema,
+  type SchemaInput,
+  type SessionColumnNames,
+  type SessionColumns,
+  type SessionSchema,
+  type TableSchema,
+  type TableSpec,
+  type UserColumnNames,
+  type UserColumns,
+  type UserSchema,
+} from "./Columns.ts";
 export * from "./Database.ts";
 export * from "./Schema.ts";
 export { layer } from "./Layers.ts";

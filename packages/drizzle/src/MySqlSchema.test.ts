@@ -32,6 +32,7 @@ import { drizzle, type MySqlRemoteDatabase } from "drizzle-orm/mysql-proxy";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
+import { fromTables } from "./Columns.ts";
 import { databaseLayer } from "./Database.ts";
 import { layer } from "./Layers.ts";
 import { defineTables, migrationStatements, tables, type Tables } from "./MySqlSchema.ts";
@@ -78,14 +79,17 @@ const makeProxy = (): Proxy => {
   };
 };
 
+/** Which column of each table holds each field the stores read. */
+const projection = fromTables(tables);
+
 /**
- * A row in the shape the MySQL driver delivers it: positional, in the table's
- * column order, carrying driver values rather than domain values.
+ * A row in the shape the MySQL driver delivers it: positional, in the order the
+ * store projects its columns, carrying driver values rather than domain values.
  */
 const wireRow = (
-  table: Tables[keyof Tables],
+  names: Readonly<Record<string, string>>,
   values: Record<string, unknown>,
-): ReadonlyArray<unknown> => Object.keys(getTableColumns(table)).map((column) => values[column]);
+): ReadonlyArray<unknown> => Object.values(names).map((field) => values[field]);
 
 const run = <A, E>(
   proxy: Proxy,
@@ -142,7 +146,7 @@ describe("MySQL / statements", () => {
   it("reads a session back out of MySQL's wire shape", async () => {
     const proxy = makeProxy();
     proxy.respondWith([
-      wireRow(tables.sessions, {
+      wireRow(projection.sessions.names, {
         id: "session-1",
         userId: "user-1",
         expiresAt: "2026-01-01 00:01:00.000",
@@ -179,7 +183,7 @@ describe("MySQL / statements", () => {
     // MySQL has no `RETURNING`; the store re-reads instead, on every dialect.
     const proxy = makeProxy();
     proxy.respondWith([
-      wireRow(tables.identifiers, {
+      wireRow(projection.identifiers.names, {
         id: "identifier-1",
         userId: "user-1",
         type: "email",
@@ -230,7 +234,7 @@ describe("MySQL / statements", () => {
 
     const proxyWithRow = makeProxy();
     proxyWithRow.respondWith([
-      wireRow(tables.identifiers, {
+      wireRow(projection.identifiers.names, {
         id: "identifier-1",
         userId: "user-1",
         type: "email",
@@ -258,7 +262,7 @@ describe("MySQL / statements", () => {
   it("batches the same way through the request resolvers", async () => {
     const proxy = makeProxy();
     proxy.respondWith([
-      wireRow(tables.users, {
+      wireRow(projection.users.names, {
         id: "user-1",
         name: "Ada",
         image: null,

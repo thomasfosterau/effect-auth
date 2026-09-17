@@ -4,9 +4,10 @@
  *
  * {@link make} is an `Effect` that reads {@link DrizzleDatabase} out of context
  * and returns a plain store object; {@link layer} lifts it into a `Layer` keyed
- * by `Auth.SessionStore`. Both take an optional {@link Tables} set — any
- * dialect's, under any names — so switching database or table names is a
- * one-argument change.
+ * by `Auth.SessionStore`. Both take an optional schema — any dialect's
+ * {@link Tables} under any names, or an {@link AuthSchema} mapped onto the
+ * application's own table — so switching database, table names or table shape
+ * is a one-argument change.
  *
  * ### Contract notes
  *
@@ -21,10 +22,35 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { Effect, Exit, Layer, Request, RequestResolver } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
-import { DrizzleDatabase } from "./Database.ts";
-import { run } from "./internal.ts";
+import {
+  resolveSchema,
+  type SchemaInput,
+  type SessionColumns,
+  type SessionSchema,
+  writeValues,
+} from "./Columns.ts";
+import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
+import { makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
-import type { Tables } from "./Schema.ts";
+
+// ---------------------------------------------------------------------------
+// Rows
+// ---------------------------------------------------------------------------
+
+/**
+ * What a session read projects, whatever the underlying columns are called: the
+ * mapping names them, so the row comes back under the store's own field names.
+ */
+type SessionRow = DrizzleSelected<SessionColumns>;
+
+const toSession = (row: SessionRow): Auth.Session => ({
+  id: row.id,
+  userId: row.userId,
+  expiresAt: row.expiresAt,
+  createdAt: row.createdAt,
+  lastActivityAt: row.lastActivityAt,
+  attributes: row.attributes ?? {},
+});
 
 // ---------------------------------------------------------------------------
 // Store
@@ -32,98 +58,84 @@ import type { Tables } from "./Schema.ts";
 
 /** Build a `SessionStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
-  tables: Tables = defaultTables,
+  schema: SchemaInput = defaultTables,
 ): Effect.Effect<typeof Auth.SessionStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const db = yield* DrizzleDatabase;
-    const sessions = tables.sessions;
+    const query = makeQuery(yield* DrizzleDatabase);
+    const sessions: SessionSchema = resolveSchema(schema).sessions;
+    const column = sessions.columns;
+    const table = sessions.table;
 
     return {
       create: (session) =>
-        run("session.create", () =>
+        query("session.create", (db) =>
           db
-            .insert(sessions)
-            .values({
-              id: session.id,
-              userId: session.userId,
-              expiresAt: session.expiresAt,
-              createdAt: session.createdAt,
-              lastActivityAt: session.lastActivityAt,
-              attributes: session.attributes,
-            })
+            .insert(table)
+            .values(
+              writeValues(sessions, {
+                id: session.id,
+                userId: session.userId,
+                expiresAt: session.expiresAt,
+                createdAt: session.createdAt,
+                lastActivityAt: session.lastActivityAt,
+                attributes: session.attributes,
+              }),
+            )
             .execute(),
         ).pipe(Effect.as(session)),
 
       get: (sessionId) =>
-        run("session.get", () =>
-          db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1).execute(),
+        query("session.get", (db) =>
+          db.select(column).from(table).where(eq(column.id, sessionId)).limit(1).execute(),
         ).pipe(
           Effect.map((rows) => {
             const row = rows[0];
-            return row === undefined
-              ? null
-              : {
-                  id: row.id,
-                  userId: row.userId,
-                  expiresAt: row.expiresAt,
-                  createdAt: row.createdAt,
-                  lastActivityAt: row.lastActivityAt,
-                  attributes: row.attributes ?? {},
-                };
+            return row === undefined ? null : toSession(row);
           }),
         ),
 
       update: (session) =>
-        run("session.update", () =>
+        query("session.update", (db) =>
           db
-            .update(sessions)
-            .set({
-              expiresAt: session.expiresAt,
-              lastActivityAt: session.lastActivityAt,
-              attributes: session.attributes,
-            })
-            .where(eq(sessions.id, session.id))
+            .update(table)
+            .set(
+              writeValues(sessions, {
+                expiresAt: session.expiresAt,
+                lastActivityAt: session.lastActivityAt,
+                attributes: session.attributes,
+              }),
+            )
+            .where(eq(column.id, session.id))
             .execute(),
         ).pipe(Effect.as(session)),
 
       delete: (sessionId) =>
-        run("session.delete", () =>
-          db.delete(sessions).where(eq(sessions.id, sessionId)).execute(),
+        query("session.delete", (db) =>
+          db.delete(table).where(eq(column.id, sessionId)).execute(),
         ).pipe(Effect.asVoid),
 
       deleteByUserId: (userId) =>
-        run("session.deleteByUserId", () =>
-          db.delete(sessions).where(eq(sessions.userId, userId)).execute(),
+        query("session.deleteByUserId", (db) =>
+          db.delete(table).where(eq(column.userId, userId)).execute(),
         ).pipe(Effect.asVoid),
 
       listByUserId: (userId) =>
-        run("session.listByUserId", () =>
+        query("session.listByUserId", (db) =>
           db
-            .select()
-            .from(sessions)
-            .where(eq(sessions.userId, userId))
-            .orderBy(asc(sessions.createdAt))
+            .select(column)
+            .from(table)
+            .where(eq(column.userId, userId))
+            .orderBy(asc(column.createdAt))
             .execute(),
-        ).pipe(
-          Effect.map((rows) =>
-            rows.map((row) => ({
-              id: row.id,
-              userId: row.userId,
-              expiresAt: row.expiresAt,
-              createdAt: row.createdAt,
-              lastActivityAt: row.lastActivityAt,
-              attributes: row.attributes ?? {},
-            })),
-          ),
-        ),
+        ).pipe(Effect.map((rows) => rows.map(toSession))),
     } satisfies typeof Auth.SessionStore.Service;
   });
 
 /** `SessionStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const layer = (
-  tables: Tables = defaultTables,
+  schema: SchemaInput = defaultTables,
 ): Layer.Layer<Auth.SessionStore, never, DrizzleDatabase> =>
-  Layer.effect(Auth.SessionStore, make(tables));
+  Layer.effect(Auth.SessionStore, make(schema));
 
 // ---------------------------------------------------------------------------
 // Request / Resolver
@@ -153,30 +165,22 @@ export class GetSession extends Request.TaggedClass("GetSession")<
  * `Requests.AuthRequests`/`Requests.layer` rather than per call site.
  */
 export const makeResolver = (
-  tables: Tables = defaultTables,
+  schema: SchemaInput = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<GetSession>, never, DrizzleDatabase> =>
-  Effect.map(DrizzleDatabase, (db) => {
-    const sessions = tables.sessions;
+  Effect.map(DrizzleDatabase, (handle) => {
+    const query = makeQuery(handle);
+    const sessions: SessionSchema = resolveSchema(schema).sessions;
+    const column = sessions.columns;
+    const table = sessions.table;
+
     return RequestResolver.make<GetSession>((entries) =>
       Effect.gen(function* () {
         const ids = Array.from(new Set(entries.map((entry) => entry.request.id)));
-        const rows = yield* run("session.getMany", () =>
-          db.select().from(sessions).where(inArray(sessions.id, ids)).execute(),
+        const rows = yield* query("session.getMany", (db) =>
+          db.select(column).from(table).where(inArray(column.id, ids)).execute(),
         );
 
-        const byId = new Map(
-          rows.map((row) => [
-            row.id,
-            {
-              id: row.id,
-              userId: row.userId,
-              expiresAt: row.expiresAt,
-              createdAt: row.createdAt,
-              lastActivityAt: row.lastActivityAt,
-              attributes: row.attributes ?? {},
-            } satisfies Auth.Session,
-          ]),
-        );
+        const byId = new Map(rows.map((row) => [row.id, toSession(row)]));
         for (const entry of entries) {
           entry.completeUnsafe(Exit.succeed(byId.get(entry.request.id) ?? null));
         }

@@ -4,9 +4,10 @@
  *
  * {@link make} is an `Effect` that reads {@link DrizzleDatabase} out of context
  * and returns a plain store object; {@link layer} lifts it into a `Layer` keyed
- * by `Auth.UserStore`. Both take an optional {@link Tables} set — any dialect's,
- * under any names — so switching database or table names is a one-argument
- * change.
+ * by `Auth.UserStore`. Both take an optional schema — any dialect's
+ * {@link Tables} under any names, or an {@link AuthSchema} mapped onto the
+ * application's own table — so switching database, table names or table shape
+ * is a one-argument change.
  *
  * ### Contract notes
  *
@@ -18,10 +19,26 @@
 import { eq, inArray } from "drizzle-orm";
 import { Effect, Exit, Layer, Request, RequestResolver } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
-import { DrizzleDatabase } from "./Database.ts";
-import { run } from "./internal.ts";
+import { resolveSchema, type SchemaInput, type UserColumns, type UserSchema } from "./Columns.ts";
+import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
+import { makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
-import type { Tables, UserRow } from "./Schema.ts";
+
+// ---------------------------------------------------------------------------
+// Rows
+// ---------------------------------------------------------------------------
+
+/** What a user read projects, under the store's own field names. */
+type UserRow = DrizzleSelected<UserColumns>;
+
+const toUser = (row: UserRow): Auth.User => ({
+  id: row.id,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+  attributes: row.attributes ?? {},
+  ...(row.name !== null ? { name: row.name } : {}),
+  ...(row.image !== null ? { image: row.image } : {}),
+});
 
 // ---------------------------------------------------------------------------
 // Store
@@ -29,41 +46,30 @@ import type { Tables, UserRow } from "./Schema.ts";
 
 /** Build a `UserStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
-  tables: Tables = defaultTables,
+  schema: SchemaInput = defaultTables,
 ): Effect.Effect<typeof Auth.UserStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const db = yield* DrizzleDatabase;
-    const users = tables.users;
+    const query = makeQuery(yield* DrizzleDatabase);
+    const users: UserSchema = resolveSchema(schema).users;
+    const column = users.columns;
+    const table = users.table;
 
     const byId = (userId: string, label: string): Effect.Effect<UserRow | null, Auth.AuthError> =>
-      run(label, () => db.select().from(users).where(eq(users.id, userId)).limit(1).execute()).pipe(
-        Effect.map((rows) => rows[0] ?? null),
-      );
+      query(label, (db) =>
+        db.select(column).from(table).where(eq(column.id, userId)).limit(1).execute(),
+      ).pipe(Effect.map((rows) => rows[0] ?? null));
 
     return {
       get: (userId) =>
-        byId(userId, "user.get").pipe(
-          Effect.map((row) =>
-            row === null
-              ? null
-              : {
-                  id: row.id,
-                  createdAt: row.createdAt,
-                  updatedAt: row.updatedAt,
-                  attributes: row.attributes ?? {},
-                  ...(row.name !== null ? { name: row.name } : {}),
-                  ...(row.image !== null ? { image: row.image } : {}),
-                },
-          ),
-        ),
+        byId(userId, "user.get").pipe(Effect.map((row) => (row === null ? null : toUser(row)))),
     } satisfies typeof Auth.UserStore.Service;
   });
 
 /** `UserStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const layer = (
-  tables: Tables = defaultTables,
+  schema: SchemaInput = defaultTables,
 ): Layer.Layer<Auth.UserStore, never, DrizzleDatabase> =>
-  Layer.effect(Auth.UserStore, make(tables));
+  Layer.effect(Auth.UserStore, make(schema));
 
 // ---------------------------------------------------------------------------
 // Requests / Resolver
@@ -93,34 +99,25 @@ export type UserRequest = GetUser;
  * `Requests.AuthRequests`/`Requests.layer` rather than per call site.
  */
 export const makeResolver = (
-  tables: Tables = defaultTables,
+  schema: SchemaInput = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<UserRequest>, never, DrizzleDatabase> =>
-  Effect.map(DrizzleDatabase, (db) => {
-    const users = tables.users;
+  Effect.map(DrizzleDatabase, (handle) => {
+    const query = makeQuery(handle);
+    const users: UserSchema = resolveSchema(schema).users;
+    const column = users.columns;
+    const table = users.table;
+
     return RequestResolver.make<UserRequest>((entries) =>
       Effect.gen(function* () {
         const ids = Array.from(new Set(entries.map((entry) => entry.request.id)));
-        const rows = yield* run("user.getMany", () =>
-          db.select().from(users).where(inArray(users.id, ids)).execute(),
+        const rows = yield* query("user.getMany", (db) =>
+          db.select(column).from(table).where(inArray(column.id, ids)).execute(),
         );
 
         const byId = new Map(rows.map((row) => [row.id, row]));
         for (const entry of entries) {
           const row = byId.get(entry.request.id);
-          entry.completeUnsafe(
-            Exit.succeed(
-              row === undefined
-                ? null
-                : {
-                    id: row.id,
-                    createdAt: row.createdAt,
-                    updatedAt: row.updatedAt,
-                    attributes: row.attributes ?? {},
-                    ...(row.name !== null ? { name: row.name } : {}),
-                    ...(row.image !== null ? { image: row.image } : {}),
-                  },
-            ),
-          );
+          entry.completeUnsafe(Exit.succeed(row === undefined ? null : toUser(row)));
         }
       }),
     );
