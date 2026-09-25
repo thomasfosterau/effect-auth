@@ -49,6 +49,7 @@
  * @module owned-access
  */
 import { Context, Effect, Layer, Option } from "effect";
+import type { ServeableAxis } from "./Cacheability.ts";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import type * as Guard from "./Guard.ts";
@@ -130,6 +131,25 @@ export type OwnedReadScope =
   | { readonly kind: "all" }
   | { readonly kind: "public" }
   | { readonly kind: "member"; readonly userId: string; readonly following: FollowingSet };
+
+/**
+ * The axes a representation of an owned row must satisfy to be stored in, and
+ * served from, a viewer-less cache (`Cacheability.publiclyServeable`): the
+ * `owned:public` permit — the one arm of {@link OwnedAccess.canView} that
+ * admits the anonymous viewer — restated over the wire attributes.
+ *
+ * `visibility` is **required**: an owned representation missing it is one
+ * whose projection dropped the attribute deciding who may see it, and reading
+ * that as public is a fail-open. `draft` is optional, since a leaf without the
+ * draft axis never emits it; when present it must be exactly `false`.
+ *
+ * @since 1.0.0
+ * @category cacheability
+ */
+export const serveableAxes: ReadonlyArray<ServeableAxis> = [
+  { attribute: "visibility", equals: "public" },
+  { attribute: "draft", equals: false, optional: true },
+];
 
 // ---------------------------------------------------------------------------
 // The follower seam

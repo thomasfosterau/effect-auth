@@ -135,7 +135,10 @@ directories, each with its own `index.ts` barrel and matching
   `Unauthorized` / `Forbidden`), and `OwnedAccess.ts` (owned-material reads:
   three-state visibility plus drafts, the fail-closed `IsFollower` seam, the
   per-row `canView` and the per-request `readScope` — rendered as SQL by
-  `effect-auth-drizzle`'s `ownedListFilter`). Route-level gating lives in
+  `effect-auth-drizzle`'s `ownedListFilter`), and `Cacheability.ts` (the two
+  viewer-less-cache questions — may this representation be served to anyone,
+  and must this viewer bypass the cache for freshness — plus the
+  `private, no-store` rule). Route-level gating lives in
   `http/AuthorizationMiddleware.ts`.
 
   **There is one authorization model** ([ADR 0018](adr/0018-one-authorization-kernel.md)).

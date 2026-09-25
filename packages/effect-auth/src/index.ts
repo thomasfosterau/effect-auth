@@ -369,6 +369,12 @@ export { Unauthorized, Forbidden } from "./Guard.ts";
  * per-row `canView` predicate and the per-request `readScope` a list renders.
  */
 export * as OwnedAccess from "./OwnedAccess.ts";
+/**
+ * Viewer-less cache questions, kept apart: may this representation be served
+ * to anyone (`publiclyServeable`), and must this viewer bypass the cache for
+ * freshness (`bypassesForFreshness`)?
+ */
+export * as Cacheability from "./Cacheability.ts";
 /** The `"resource:action"` permission vocabulary the RBAC sugar is authored in. */
 export {
   type PermissionRef,
