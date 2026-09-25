@@ -22,6 +22,7 @@
  *   three dialects agree on.
  * - `defineSchema` / `fromTables` / `AuthSchema` and the `*ColumnNames` types —
  *   how to point the stores at tables this package did not define.
+ * - `ladderCheck` — a role column's `CHECK`, derived from the app's `Ladder`.
  *
  * @example
  * ```ts
@@ -93,6 +94,7 @@ export {
 export * from "./Database.ts";
 export * from "./Schema.ts";
 export { layer } from "./Layers.ts";
+export { ladderCheck } from "./LadderCheck.ts";
 
 export * as IdentifierStore from "./IdentifierStore.ts";
 export * as MySql from "./MySqlSchema.ts";

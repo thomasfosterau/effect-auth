@@ -94,15 +94,56 @@ describe("UserService", () => {
     const program = Effect.gen(function* () {
       const service = yield* User.make();
       return yield* service.updateUserAttributes("user-1", {
-        role: "admin",
+        theme: "dark",
         displayName: "Updated User",
       });
     });
 
     const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
 
-    expect(result.attributes.role).toBe("admin");
+    expect(result.attributes.theme).toBe("dark");
     expect(result.attributes.displayName).toBe("Updated User");
+    expect(result.attributes.role).toBe("member");
+  });
+
+  it("refuses a role in a profile update — the rung is server-only by default (#193)", async () => {
+    const program = Effect.gen(function* () {
+      const service = yield* User.make();
+      return yield* Effect.flip(
+        service.updateUserAttributes("user-1", { displayName: "Sneaky", role: "admin" }),
+      );
+    });
+
+    const error = await Effect.runPromise(Effect.provide(program, makeTestContext()));
+
+    expect(error._tag).toBe("InvalidInputError");
+    expect(error).toMatchObject({ field: "role" });
+    // Nothing was written — not even the harmless half of the update.
+    expect(users.get("user-1")!.attributes).toEqual({ role: "member" });
+  });
+
+  it("refuses every configured server-only attribute, and can be opted out of", async () => {
+    const refused = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* User.make({ serverOnlyAttributes: ["role", "plan"] });
+          return yield* Effect.flip(service.updateUserAttributes("user-1", { plan: "pro" }));
+        }),
+        makeTestContext(),
+      ),
+    );
+    expect(refused).toMatchObject({ _tag: "InvalidInputError", field: "plan" });
+
+    const allowed = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* User.make({ serverOnlyAttributes: [] });
+          return yield* service.updateUserAttributes("user-1", { role: "admin" });
+        }),
+        makeTestContext(),
+      ),
+    );
+    expect(allowed.attributes.role).toBe("admin");
   });
 
   it("should mark the user's email identifier as verified", async () => {

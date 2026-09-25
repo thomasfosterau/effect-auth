@@ -14,6 +14,24 @@ export class UserServiceStore extends Context.Service<
   }
 >()("@effect-auth/UserServiceStore") {}
 
+/**
+ * `UserService` configuration.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface UserServiceConfig {
+  /**
+   * Attribute keys `updateUserAttributes` refuses to write, whoever calls it
+   * (default `["role"]`). These are the attributes that carry authority — the
+   * rung the guards read above all — so a profile-update path built on
+   * `updateUserAttributes` cannot let a user set their own role. Change them
+   * through their privileged door instead (`AdminService.setRole` for `role`).
+   * Pass `[]` to opt out.
+   */
+  readonly serverOnlyAttributes?: ReadonlyArray<string>;
+}
+
 /** Partial update of a user's first-class profile fields. */
 export interface UpdateUserInput {
   readonly name?: string;
@@ -27,10 +45,18 @@ export class UserService extends Context.Service<
       userId: string,
     ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
 
+    /**
+     * Merge `attributes` into the user's attribute bag. Fails with
+     * `InvalidInputError` — writing nothing — when any key is one of
+     * {@link UserServiceConfig.serverOnlyAttributes}.
+     */
     readonly updateUserAttributes: (
       userId: string,
       attributes: Record<string, unknown>,
-    ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
+    ) => Effect.Effect<
+      Types.User,
+      Errors.AuthError | Errors.UserNotFoundError | Errors.InvalidInputError
+    >;
 
     readonly updateUser: (
       userId: string,
@@ -43,7 +69,7 @@ export class UserService extends Context.Service<
   /**
    * Construct a Layer providing this service.
    */
-  static readonly layer = () => Layer.effect(UserService, make());
+  static readonly layer = (config?: UserServiceConfig) => Layer.effect(UserService, make(config));
 }
 
 /** Fetch a user from the store, failing with `UserNotFoundError` on a miss. */
@@ -57,9 +83,12 @@ const getUserOrFail = (
       : Effect.succeed(user),
   );
 
-export const make = (): Effect.Effect<typeof UserService.Service, never, UserServiceStore> =>
+export const make = (
+  config?: UserServiceConfig,
+): Effect.Effect<typeof UserService.Service, never, UserServiceStore> =>
   Effect.gen(function* () {
     const store = yield* UserServiceStore;
+    const serverOnly = new Set(config?.serverOnlyAttributes ?? ["role"]);
 
     return {
       getUser: Effect.fn("UserService.getUser")((userId: string) => getUserOrFail(store, userId)),
@@ -68,6 +97,13 @@ export const make = (): Effect.Effect<typeof UserService.Service, never, UserSer
         userId: string,
         attributes: Record<string, unknown>,
       ) {
+        const refused = Object.keys(attributes).find((key) => serverOnly.has(key));
+        if (refused !== undefined) {
+          return yield* new Errors.InvalidInputError({
+            message: `"${refused}" is a server-only attribute and cannot be set here`,
+            field: refused,
+          });
+        }
         const existing = yield* getUserOrFail(store, userId);
 
         const updated: Types.User = {
