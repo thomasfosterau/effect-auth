@@ -314,7 +314,7 @@ Our test suite currently includes:
 - Password hashing security tests
 - Session expiration tests
 
-Run tests with: `pnpm run test`
+Run tests with: `vp run -r test:unit`
 
 ### Manual Security Review
 

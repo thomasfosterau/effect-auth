@@ -40,18 +40,13 @@
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {
-    "build": "tsc",
-    "test": "vp test run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run"
-  },
   "dependencies": {
     "@thomasfosterau/effect-auth": "workspace:*"
   },
   "devDependencies": {
-    "effect": "4.0.0-rc.112"
+    "effect": "catalog:"
   },
   "peerDependencies": {
-    "effect": ">=4.0.0-rc.112"
+    "effect": "catalog:peers"
   }
 }

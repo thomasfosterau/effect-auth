@@ -1,8 +1,14 @@
 import { resolve } from "node:path";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vite-plus";
+import { packageTasks } from "../../vite.tasks.ts";
 
 export default defineConfig({
+  run: packageTasks({
+    build: "vp build && vue-tsc --emitDeclarationOnly",
+    check:
+      "vue-tsc --noEmit && vue-tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run",
+  }),
   plugins: [vue()],
   build: {
     outDir: "dist",

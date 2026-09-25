@@ -37,22 +37,17 @@
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {
-    "build": "tsc",
-    "test": "vp test run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run"
-  },
   "dependencies": {
-    "@node-saml/node-saml": "^5.1.0",
+    "@node-saml/node-saml": "catalog:",
     "@thomasfosterau/effect-auth": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^26.1.0",
-    "effect": "4.0.0-rc.112",
-    "xml-crypto": "^6.1.2"
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "xml-crypto": "catalog:"
   },
   "peerDependencies": {
-    "effect": ">=4.0.0-rc.112"
+    "effect": "catalog:peers"
   },
   "engines": {
     "node": "^20.19.0 || ^22.18.0 || >=24.11.0"

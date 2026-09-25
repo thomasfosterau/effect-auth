@@ -15,24 +15,26 @@
   },
   "type": "module",
   "scripts": {
-    "prepare": "vp config && pnpm exec effect-language-service patch",
-    "build": "pnpm -r run build",
-    "check": "vp check",
-    "test": "pnpm -r run test",
-    "typecheck": "pnpm -r run typecheck",
-    "docs": "pnpm --filter @thomasfosterau/effect-auth run docs",
+    "prepare": "vp config --no-agent && pnpm exec effect-language-service patch",
+    "build": "vp run -r build",
+    "check": "vp run -r check",
+    "docs": "vp run --filter @thomasfosterau/effect-auth docs",
     "changeset": "changeset",
-    "release": "changeset publish"
+    "version": "changeset version && pnpm install --lockfile-only",
+    "release": "pnpm -r --filter \"./packages/*\" publish --access public --no-git-checks && changeset tag"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.31.0",
-    "@effect/docgen": "^0.5.2",
-    "@effect/language-service": "^0.87.2",
-    "@types/node": "^26.1.0",
-    "effect": "4.0.0-rc.112",
-    "tsx": "^4.19.0",
-    "typescript": "^6.0.3",
-    "vite-plus": "^0.2.2"
+    "@changesets/cli": "catalog:",
+    "@effect/docgen": "catalog:",
+    "@effect/language-service": "catalog:",
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "effect-solutions": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   },
   "engines": {
     "node": "^20.19.0 || ^22.18.0 || >=24.11.0"

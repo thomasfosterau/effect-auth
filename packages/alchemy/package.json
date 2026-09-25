@@ -43,25 +43,20 @@
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {
-    "build": "tsc",
-    "test": "vp test run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run"
-  },
   "dependencies": {
     "@thomasfosterau/effect-auth": "workspace:*",
     "@thomasfosterau/effect-auth-sql": "workspace:*"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^26.1.0",
-    "alchemy": "2.0.0-beta.76",
-    "better-sqlite3": "^11.7.0",
-    "effect": "4.0.0-rc.112"
+    "@types/better-sqlite3": "catalog:",
+    "@types/node": "catalog:",
+    "alchemy": "catalog:",
+    "better-sqlite3": "catalog:",
+    "effect": "catalog:"
   },
   "peerDependencies": {
-    "alchemy": ">=2.0.0-beta.75",
-    "effect": ">=4.0.0-rc.112"
+    "alchemy": "catalog:peers",
+    "effect": "catalog:peers"
   },
   "engines": {
     "node": "^20.19.0 || ^22.18.0 || >=24.11.0"

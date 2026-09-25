@@ -37,22 +37,17 @@
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {
-    "build": "vp build && vue-tsc --emitDeclarationOnly",
-    "test": "vp test run",
-    "typecheck": "vue-tsc --noEmit && vue-tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run"
-  },
   "dependencies": {
     "@thomasfosterau/effect-auth-client": "workspace:*"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^6.0.8",
-    "@vue/test-utils": "^2.5.0",
-    "jsdom": "^25.0.1",
-    "vue": "^3.5.13",
-    "vue-tsc": "^3.3.11"
+    "@vitejs/plugin-vue": "catalog:",
+    "@vue/test-utils": "catalog:",
+    "jsdom": "catalog:",
+    "vue": "catalog:",
+    "vue-tsc": "catalog:"
   },
   "peerDependencies": {
-    "vue": ">=3"
+    "vue": "catalog:peers"
   }
 }

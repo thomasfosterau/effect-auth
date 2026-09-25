@@ -42,21 +42,16 @@
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {
-    "build": "vp build && tsc --emitDeclarationOnly --incremental false && tsc --outDir dist/source --declaration false --declarationMap false --incremental false",
-    "test": "vp test run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run"
-  },
   "dependencies": {
     "@thomasfosterau/effect-auth-client": "workspace:*"
   },
   "devDependencies": {
-    "@solidjs/testing-library": "^0.8.10",
-    "jsdom": "^25.0.1",
-    "solid-js": "^1.9.15",
-    "vite-plugin-solid": "^2.11.14"
+    "@solidjs/testing-library": "catalog:",
+    "jsdom": "catalog:",
+    "solid-js": "catalog:",
+    "vite-plugin-solid": "catalog:"
   },
   "peerDependencies": {
-    "solid-js": ">=1.8"
+    "solid-js": "catalog:peers"
   }
 }

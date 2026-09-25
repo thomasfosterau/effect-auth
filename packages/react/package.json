@@ -37,23 +37,18 @@
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {
-    "build": "tsc",
-    "test": "vp test run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run"
-  },
   "dependencies": {
     "@thomasfosterau/effect-auth-client": "workspace:*"
   },
   "devDependencies": {
-    "@testing-library/react": "^16.1.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "jsdom": "^25.0.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "@testing-library/react": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "jsdom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "peerDependencies": {
-    "react": ">=18"
+    "react": "catalog:peers"
   }
 }

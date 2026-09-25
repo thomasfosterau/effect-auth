@@ -353,13 +353,11 @@ export const decide = <E, R>(
       return Effect.succeed(evaluateDeclarative(slice, req, policy));
     }
     return policy.predicate(req, slice).pipe(
-      Effect.map(
-        (matched): PolicyOutcome => ({
-          policyId: policy.id,
-          effect: policy.effect,
-          result: matched ? "matched" : "not-matched",
-        }),
-      ),
+      Effect.map((matched): PolicyOutcome => ({
+        policyId: policy.id,
+        effect: policy.effect,
+        result: matched ? "matched" : "not-matched",
+      })),
       Effect.catch((error) =>
         Effect.succeed<PolicyOutcome>({
           policyId: policy.id,

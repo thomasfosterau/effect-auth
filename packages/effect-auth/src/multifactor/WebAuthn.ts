@@ -285,13 +285,11 @@ export const make = (
           // Exclude the user's existing credentials to prevent re-registering
           // the same authenticator.
           const existing = yield* credentialStore.listByUserId(user.id);
-          const excludeCredentials = existing.map(
-            (c): PublicKeyCredentialDescriptor => ({
-              type: "public-key",
-              id: c.id,
-              ...(c.transports && { transports: c.transports }),
-            }),
-          );
+          const excludeCredentials = existing.map((c): PublicKeyCredentialDescriptor => ({
+            type: "public-key",
+            id: c.id,
+            ...(c.transports && { transports: c.transports }),
+          }));
 
           const authenticatorSelection: AuthenticatorSelectionCriteria = {
             ...(config.residentKey && {

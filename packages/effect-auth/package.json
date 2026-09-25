@@ -61,17 +61,14 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc",
-    "test": "vp test run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run",
     "docs": "docgen"
   },
   "devDependencies": {
-    "@types/node": "^26.1.0",
-    "effect": "4.0.0-rc.112"
+    "@types/node": "catalog:",
+    "effect": "catalog:"
   },
   "peerDependencies": {
-    "effect": ">=4.0.0-rc.112"
+    "effect": "catalog:peers"
   },
   "engines": {
     "node": "^20.19.0 || ^22.18.0 || >=24.11.0"

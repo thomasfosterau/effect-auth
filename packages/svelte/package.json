@@ -41,23 +41,18 @@
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {
-    "build": "svelte-package -i src -o dist && node ./scripts/postbuild.mjs",
-    "test": "vp test run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && vp test --typecheck --run"
-  },
   "dependencies": {
     "@thomasfosterau/effect-auth-client": "workspace:*"
   },
   "devDependencies": {
-    "@sveltejs/package": "^2.5.8",
-    "@sveltejs/vite-plugin-svelte": "^7.3.0",
-    "@testing-library/svelte": "^5.4.2",
-    "jsdom": "^25.0.1",
-    "svelte": "^5.16.0",
-    "svelte-check": "^4.7.6"
+    "@sveltejs/package": "catalog:",
+    "@sveltejs/vite-plugin-svelte": "catalog:",
+    "@testing-library/svelte": "catalog:",
+    "jsdom": "catalog:",
+    "svelte": "catalog:",
+    "svelte-check": "catalog:"
   },
   "peerDependencies": {
-    "svelte": "^5.20.0"
+    "svelte": "catalog:peers"
   }
 }
