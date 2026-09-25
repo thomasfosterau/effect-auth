@@ -200,6 +200,33 @@ is no cache by default: results live only for the batch window. Wrap a resolver
 with `RequestResolver.withCache` if you want request-level memoization,
 remembering that a cached auth read is a stale auth read.
 
+## Effect drivers, request-scoped pools and transactions
+
+Drizzle's Effect drivers (`drizzle-orm/effect-postgres` and its siblings, drizzle
+`1.0`) build queries that _are_ `Effect`s. Bind one with `effectDatabaseLayer`
+and the stores run its queries directly — there is no Promise boundary anywhere
+between `Auth.SessionStore` and the database.
+
+**On Cloudflare Workers, a pool's sockets are pinned to the request that opened
+them**: a pool shared across requests deadlocks every later request, so each
+request has to bring its own. Both `databaseLayer` and `effectDatabaseLayer`
+therefore accept an `Effect` that yields the handle, not only a handle. The
+`Effect` is run once per query, in the calling fiber, so a handle the
+application keeps in a `Context.Reference` (or any per-request service) follows
+the request that set it — the request scope _is_ the Effect context, and no
+`AsyncLocalStorage` is needed. Passing a plain handle pins it for the life of
+the layer, which is right for a long-lived server and wrong on Workers.
+
+**Transactions compose the same way.** Inside an application's own
+`db.transaction((tx) => …)` on an Effect driver, every store call — the direct
+methods and the batched `Requests` alike — runs on the transaction's fiber, so
+`@effect/sql` picks the transaction's connection for it: the stores see the
+transaction's uncommitted writes and commit or roll back with it.
+`Transaction.test.ts` pins this per query. (A Promise-bridged adapter has to
+capture and re-provide the transaction fiber's services by hand to get the same
+property; these stores need nothing of the kind because they never leave the
+caller's fiber.)
+
 ## Schema
 
 Each dialect namespace exports `sessionsTable`, `usersTable` and
