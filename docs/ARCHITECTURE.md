@@ -132,7 +132,10 @@ directories, each with its own `index.ts` barrel and matching
   axis into a declarative policy), and `Guard.ts` (the zero-IO gates,
   predicates and capability hooks over an application-declared viewer — the
   kernel's fast path over a slice built from facts the caller holds; defines
-  `Unauthorized` / `Forbidden`). Route-level gating lives in
+  `Unauthorized` / `Forbidden`), and `OwnedAccess.ts` (owned-material reads:
+  three-state visibility plus drafts, the fail-closed `IsFollower` seam, the
+  per-row `canView` and the per-request `readScope` — rendered as SQL by
+  `effect-auth-drizzle`'s `ownedListFilter`). Route-level gating lives in
   `http/AuthorizationMiddleware.ts`.
 
   **There is one authorization model** ([ADR 0018](adr/0018-one-authorization-kernel.md)).

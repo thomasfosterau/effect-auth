@@ -152,6 +152,14 @@ export interface Guards<Id, User extends ViewerShape, Rung extends string> {
   readonly ladder: Ladder.Ladder<Rung>;
   /** The resolved viewer, `Option.none()` when anonymous. Never fails. */
   readonly viewer: Effect.Effect<Option.Option<User>, never, Id>;
+  /**
+   * The viewer as the kernel's principal entity — `<principalType>::"<id>"`
+   * carrying the rung as its `role` attribute. Exposed so a module deciding
+   * over the same slice shape (`OwnedAccess`) builds it identically.
+   */
+  readonly principal: (viewer: User) => Entity.Entity;
+  /** The entity type {@link Guards.principal} builds. */
+  readonly principalType: string;
 
   // -- gates ---------------------------------------------------------------
 
@@ -354,6 +362,8 @@ export const make = <Id, User extends ViewerShape, Rung extends string>(
   return {
     ladder,
     viewer,
+    principal: principalOf,
+    principalType,
     requireUser,
     requireRoleAtLeast: (min) => gate((user) => decideRole(user, min)),
     requireOwnerOrRole: (ownerId, min) => gate((user) => decideOwnerOrRole(user, ownerId, min)),

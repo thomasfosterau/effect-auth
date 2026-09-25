@@ -363,6 +363,12 @@ export * as LadderSchema from "./LadderSchema.ts";
  */
 export * as Guard from "./Guard.ts";
 export { Unauthorized, Forbidden } from "./Guard.ts";
+/**
+ * Owned-material read access (`Auth.OwnedAccess.make({ guards, viewPrivate })`):
+ * three-state visibility plus drafts, the fail-closed `IsFollower` seam, the
+ * per-row `canView` predicate and the per-request `readScope` a list renders.
+ */
+export * as OwnedAccess from "./OwnedAccess.ts";
 /** The `"resource:action"` permission vocabulary the RBAC sugar is authored in. */
 export {
   type PermissionRef,
