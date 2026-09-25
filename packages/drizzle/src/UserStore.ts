@@ -61,7 +61,9 @@ const selection = (users: UserSchema): UserColumns => {
 const makeToUser =
   (users: UserSchema) =>
   (row: UserRow): Auth.User => {
-    const attributes: Record<string, unknown> = { ...row.attributes };
+    // A users table with no mapped attribute bag reads back `undefined` here.
+    const bag = (row.attributes ?? {}) as Readonly<Record<string, unknown>>;
+    const attributes: Record<string, unknown> = { ...bag };
     const promoted = row as unknown as Readonly<Record<string, unknown>>;
     for (const attribute of Object.keys(users.promoted)) {
       const value = promoted[promotedKey(attribute)];
