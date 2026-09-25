@@ -355,6 +355,14 @@ export * as Rbac from "./Rbac.ts";
 export * as Ladder from "./Ladder.ts";
 /** The ladder's rungs as a `Schema` (`Auth.LadderSchema.rung(Roles)`). */
 export * as LadderSchema from "./LadderSchema.ts";
+/**
+ * Zero-IO guards over an already-resolved viewer (`Auth.Guard.make({ ladder,
+ * viewer })`): gates failing `Unauthorized` / `Forbidden`, never-failing
+ * predicates, and per-viewer capability hooks — all decided by the kernel over
+ * a slice built from facts the caller holds.
+ */
+export * as Guard from "./Guard.ts";
+export { Unauthorized, Forbidden } from "./Guard.ts";
 /** The `"resource:action"` permission vocabulary the RBAC sugar is authored in. */
 export {
   type PermissionRef,

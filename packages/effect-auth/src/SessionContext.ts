@@ -355,3 +355,97 @@ export const requireCurrentSession: Effect.Effect<
     ? Effect.succeed(session.value)
     : Effect.fail(new Errors.NotAuthenticatedError({ message: "Not authenticated" })),
 );
+
+// ---------------------------------------------------------------------------
+// The application's viewer (generic in its own user type)
+// ---------------------------------------------------------------------------
+
+/**
+ * Provide an application-declared viewer service from whatever the edge
+ * produced: the app's own user, an `Option` of one, or `null` / `undefined`
+ * for anonymous.
+ *
+ * The viewer service is the application's, not this library's, because its
+ * user type is: an app declares
+ * `class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser>>()("@app/CurrentViewer") {}`
+ * with `AppUser extends { id: string; role: string }`, hands it to
+ * `Guard.make`, and every gate then yields `AppUser` — no inference twin, no
+ * `attributes["role"] as string` at call sites.
+ *
+ * @example
+ * ```ts
+ * import { Context, Option } from "effect"
+ * import * as Auth from "@thomasfosterau/effect-auth"
+ *
+ * interface AppUser { readonly id: string; readonly role: string }
+ * class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser>>()(
+ *   "@app/CurrentViewer",
+ * ) {}
+ *
+ * // A job or a test running as a known account:
+ * const asModerator = Auth.SessionContext.viewerLayer(CurrentViewer, { id: "u1", role: "moderator" })
+ * // …and as nobody:
+ * const asAnonymous = Auth.SessionContext.viewerLayer(CurrentViewer, null)
+ * ```
+ *
+ * @since 1.0.0
+ * @category layers
+ */
+export const viewerLayer = <Id, User>(
+  viewer: Context.Key<Id, Option.Option<User>>,
+  user: User | Option.Option<User> | null | undefined,
+): Layer.Layer<Id> =>
+  Layer.succeed(
+    viewer,
+    user === null || user === undefined
+      ? Option.none()
+      : Option.isOption(user)
+        ? (user as Option.Option<User>)
+        : Option.some(user as User),
+  );
+
+/**
+ * Provide an application-declared viewer service from the resolved session
+ * ({@link MaybeCurrentSession}), projecting this library's `SessionWithUser`
+ * into the app's user type. Anonymous stays anonymous; a projection that
+ * answers `none` makes the viewer anonymous too.
+ *
+ * {@link withRole} is the projection for a deployment that keeps the rung in
+ * the user's `attributes`.
+ *
+ * @since 1.0.0
+ * @category layers
+ */
+export const viewerFromSession = <Id, User>(
+  viewer: Context.Key<Id, Option.Option<User>>,
+  project: (resolved: Types.SessionWithUser) => Option.Option<User>,
+): Layer.Layer<Id, never, MaybeCurrentSession> =>
+  Layer.effect(viewer, MaybeCurrentSession.useSync(Option.flatMap(project)));
+
+/**
+ * The library's `User` with its rung lifted out of `attributes` — the viewer
+ * shape `Guard.make` needs, for a deployment that stores the rung as a user
+ * attribute.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type UserWithRole = Types.User & { readonly role: string };
+
+/**
+ * A {@link viewerFromSession} projection that reads the rung from
+ * `user.attributes[attribute]` (default `"role"`).
+ *
+ * A signed-in user with no string there is still signed in — `requireUser`
+ * admits them — but holds no rung: the role is the empty string, which is on
+ * no ladder, so every rung gate refuses them (fail closed).
+ *
+ * @since 1.0.0
+ * @category conversions
+ */
+export const withRole =
+  (attribute = "role") =>
+  (resolved: Types.SessionWithUser): Option.Option<UserWithRole> => {
+    const role = resolved.user.attributes[attribute];
+    return Option.some({ ...resolved.user, role: typeof role === "string" ? role : "" });
+  };
