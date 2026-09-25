@@ -52,9 +52,9 @@ Branch off `trunk`, open the PR against `trunk`, one issue per PR. Fill the PR b
 
 ## Effect
 
-**Consult effect-solutions before writing Effect code** — `vp exec effect-solutions list`, then `vp exec effect-solutions show <topic>…` (topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli). The Effect v4 source is cloned to `~/.local/share/effect-solutions/effect` for when the guides run out. Never guess at an Effect pattern.
+**Consult effect-solutions before writing Effect code** — `vp exec effect-solutions list`, then `vp exec effect-solutions show <topic>…` (topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli). When the guides run out, read the Effect source itself in `node_modules/effect/src`. Never guess at an Effect pattern.
 
-House style, enforced by review rather than lint: services are `Context.Service` classes with a static `layer`; errors are `Schema.TaggedErrorClass`; dependencies are resolved at layer construction so service methods carry `R = never`; HTTP is `effect/unstable/httpapi`.
+House style, enforced by review rather than lint: services are `Context.Service` classes with a static `layer`; errors are `Schema.TaggedError` classes (older modules still use `Data.TaggedError`); dependencies are resolved at layer construction so service methods carry `R = never`; HTTP is `effect/unstable/httpapi`.
 
 ## Claude Code sessions
 
