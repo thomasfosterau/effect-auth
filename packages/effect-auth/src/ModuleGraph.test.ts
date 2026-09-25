@@ -69,3 +69,18 @@ describe("module graph", () => {
     expect(reachesModule(externalSpecifiers, "effect-jsonapi")).toBe(false);
   });
 });
+
+describe("the ladder subpath", () => {
+  // `@thomasfosterau/effect-auth/ladder` is imported by browser bundles for UX
+  // gates, so it must not pull `effect` — or anything else — in with it.
+  it("imports nothing at all", () => {
+    const ladder = path.resolve(import.meta.dirname, "Ladder.ts");
+    // Comments stripped first: the module's JSDoc `@example` imports it by
+    // its own subpath, which is documentation, not an edge.
+    const code = fs
+      .readFileSync(ladder, "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+    expect(extractSpecifiers(code)).toEqual([]);
+  });
+});

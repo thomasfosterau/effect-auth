@@ -177,6 +177,69 @@ const collectConditionRefs = (condition: Condition.Condition, out: Entity.Entity
   }
 };
 
+const collectAttrOperands = (condition: Condition.Condition, out: Condition.Attr[]): void => {
+  const fromOperand = (operand: Condition.Operand): void => {
+    if (operand._tag === "Attr") out.push(operand);
+  };
+  switch (condition._tag) {
+    case "And":
+    case "Or":
+      for (const inner of condition.conditions) collectAttrOperands(inner, out);
+      return;
+    case "Not":
+      collectAttrOperands(condition.condition, out);
+      return;
+    case "Eq":
+    case "Compare":
+    case "In":
+      fromOperand(condition.left);
+      fromOperand(condition.right);
+      return;
+    case "Contains":
+      fromOperand(condition.collection);
+      fromOperand(condition.value);
+      return;
+    case "Has":
+      return;
+  }
+};
+
+const pinnedType = (scope: Scope): string | null =>
+  scope._tag === "is" ? scope.entityType : scope._tag === "eq" ? scope.ref.type : null;
+
+/**
+ * When a policy pins its principal or resource to one declared type whose
+ * attributes are a struct, check every attribute its condition reads on that
+ * slot against the struct's fields. A misspelt attribute otherwise evaluates
+ * as absent — an error the decision treats fail-closed, so a permit that
+ * silently never grants (and a forbid that silently always denies).
+ * `Has` is exempt: testing presence of an undeclared attribute is legitimate.
+ */
+const validateAttributes = (
+  model: Model,
+  policy: DeclarativePolicy,
+  condition: Condition.Condition,
+  issues: ValidationIssue[],
+): void => {
+  const attrs: Condition.Attr[] = [];
+  collectAttrOperands(condition, attrs);
+  for (const slot of ["principal", "resource"] as const) {
+    const type = pinnedType(policy[slot]);
+    const fields = type === null ? undefined : model.entities[type]?.attributes?.fields;
+    if (fields === undefined) continue;
+    for (const attr of attrs) {
+      if (attr.of !== slot) continue;
+      const [head] = attr.path;
+      if (head !== undefined && !(head in fields)) {
+        issues.push({
+          policyId: policy.id,
+          message: `condition reads ${slot}.${attr.path.join(".")}, but "${type}" declares no attribute "${head}"`,
+        });
+      }
+    }
+  }
+};
+
 /**
  * When both the action scope and the principal/resource scopes pin concrete
  * types, check them against the action's `appliesTo` signature.
@@ -209,8 +272,10 @@ const validateAppliesTo = (
  * Validate declarative policies against a model. Returns every issue found
  * (an empty array means the set is well-formed). Checks: scope entity types
  * and action ids are declared, action scopes reference `Action` entities,
- * pinned principal/resource types satisfy the action's `appliesTo`, and
- * entity literals inside conditions use declared types.
+ * pinned principal/resource types satisfy the action's `appliesTo`, entity
+ * literals inside conditions use declared types, and — where a scope pins a
+ * type whose attributes are declared — the attributes a condition reads on
+ * that slot exist.
  */
 export const validatePolicies = (
   model: Model,
@@ -223,6 +288,7 @@ export const validatePolicies = (
     validateScope(model, policy, "resource", policy.resource, issues);
     validateAppliesTo(model, policy, issues);
     if (policy.when !== undefined) {
+      validateAttributes(model, policy, policy.when, issues);
       const refs: Entity.EntityRef[] = [];
       collectConditionRefs(policy.when, refs);
       for (const ref of refs) {
