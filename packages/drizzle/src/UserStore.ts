@@ -31,14 +31,52 @@ import { tables as defaultTables } from "./PgSchema.ts";
 /** What a user read projects, under the store's own field names. */
 type UserRow = DrizzleSelected<UserColumns>;
 
-const toUser = (row: UserRow): Auth.User => ({
-  id: row.id,
-  createdAt: row.createdAt,
-  updatedAt: row.updatedAt,
-  attributes: row.attributes ?? {},
-  ...(row.name !== null ? { name: row.name } : {}),
-  ...(row.image !== null ? { image: row.image } : {}),
-});
+/**
+ * Where a promoted attribute's column lands in the projection. Prefixed so it
+ * cannot collide with a store field of the same name (`name`, `image`, …).
+ */
+const promotedKey = (attribute: string): string => `promoted:${attribute}`;
+
+/**
+ * The projection a user read selects: the mapped store fields, plus one entry
+ * per promoted attribute column.
+ *
+ * The cast widens the selection to the row type the store reads back; the
+ * promoted entries ride along under {@link promotedKey}s the row type does not
+ * name, and {@link makeToUser} reads them back out.
+ */
+const selection = (users: UserSchema): UserColumns => {
+  const fields: Record<string, unknown> = { ...users.columns };
+  for (const [attribute, column] of Object.entries(users.promoted)) {
+    fields[promotedKey(attribute)] = column;
+  }
+  return fields as UserColumns;
+};
+
+/**
+ * Row → `Auth.User`. A promoted column is the sole authority for its attribute:
+ * it replaces any value the `jsonb` bag holds under the same key, and a `NULL`
+ * column leaves the key absent.
+ */
+const makeToUser =
+  (users: UserSchema) =>
+  (row: UserRow): Auth.User => {
+    const attributes: Record<string, unknown> = { ...row.attributes };
+    const promoted = row as unknown as Readonly<Record<string, unknown>>;
+    for (const attribute of Object.keys(users.promoted)) {
+      const value = promoted[promotedKey(attribute)];
+      if (value === null || value === undefined) delete attributes[attribute];
+      else attributes[attribute] = value;
+    }
+    return {
+      id: row.id,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      attributes,
+      ...(row.name !== null ? { name: row.name } : {}),
+      ...(row.image !== null ? { image: row.image } : {}),
+    };
+  };
 
 // ---------------------------------------------------------------------------
 // Store
@@ -53,10 +91,12 @@ export const make = (
     const users: UserSchema = resolveSchema(schema).users;
     const column = users.columns;
     const table = users.table;
+    const projection = selection(users);
+    const toUser = makeToUser(users);
 
     const byId = (userId: string, label: string): Effect.Effect<UserRow | null, Auth.AuthError> =>
       query(label, (db) =>
-        db.select(column).from(table).where(eq(column.id, userId)).limit(1).execute(),
+        db.select(projection).from(table).where(eq(column.id, userId)).limit(1).execute(),
       ).pipe(Effect.map((rows) => rows[0] ?? null));
 
     return {
@@ -106,12 +146,14 @@ export const makeResolver = (
     const users: UserSchema = resolveSchema(schema).users;
     const column = users.columns;
     const table = users.table;
+    const projection = selection(users);
+    const toUser = makeToUser(users);
 
     return RequestResolver.make<UserRequest>((entries) =>
       Effect.gen(function* () {
         const ids = Array.from(new Set(entries.map((entry) => entry.request.id)));
         const rows = yield* query("user.getMany", (db) =>
-          db.select(column).from(table).where(inArray(column.id, ids)).execute(),
+          db.select(projection).from(table).where(inArray(column.id, ids)).execute(),
         );
 
         const byId = new Map(rows.map((row) => [row.id, row]));

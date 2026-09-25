@@ -34,8 +34,21 @@
  *   `jsonb().$type<Record<string, unknown>>()`.
  * - **Extra required columns** — a `role text NOT NULL` the stores know nothing
  *   about — must have a database-level default, since the stores insert only the
- *   columns they were given. Promoting an attribute to a real typed column the
- *   stores write is separate work (#182).
+ *   columns they were given.
+ *
+ * ### Promoted attributes
+ *
+ * An attribute the application keeps as a **real column** — `users.role`, with
+ * its own type, `CHECK`, default and index — is declared under the users
+ * entry's `promoted`, keyed by attribute name. The user store selects each
+ * promoted column and presents it in `user.attributes` under that name, so
+ * `Admin.isAdmin`, `SessionContext.withRole` and every other reader of
+ * `attributes.role` see the column. The column is the sole authority for its
+ * key: a value under the same key in the `jsonb` bag is ignored, and a `NULL`
+ * column leaves the key absent. A users table with promoted attributes may omit
+ * the `attributes` bag entirely — the applications' `users` tables have none.
+ * (`ladderCheck` in this package derives a role column's `CHECK` from the
+ * application's `Ladder`.)
  * - **Uniqueness on `(type, value)`** in the identifiers table is still what
  *   makes `Auth.claimIdentifier` correct. The mapping cannot check that; the
  *   application's migration has to carry it.
@@ -130,7 +143,11 @@ export interface UserColumnNames<TTable extends Table> {
   readonly id: ColumnKey<TTable, string>;
   readonly name: ColumnKey<TTable, string | null>;
   readonly image: ColumnKey<TTable, string | null>;
-  readonly attributes: ColumnKey<TTable, Record<string, unknown> | null>;
+  /**
+   * The `jsonb` attribute bag. Optional: a table that keeps every attribute it
+   * has as a promoted column (see the module docs) needs none.
+   */
+  readonly attributes?: ColumnKey<TTable, Record<string, unknown> | null>;
   readonly createdAt: ColumnKey<TTable, Date>;
   readonly updatedAt: ColumnKey<TTable, Date>;
 }
@@ -166,7 +183,7 @@ export type UserColumns = {
   readonly id: StoreColumn<string>;
   readonly name: NullableColumn<string>;
   readonly image: NullableColumn<string>;
-  readonly attributes: NullableColumn<Record<string, unknown>>;
+  readonly attributes?: NullableColumn<Record<string, unknown>>;
   readonly createdAt: StoreColumn<Date>;
   readonly updatedAt: StoreColumn<Date>;
 };
@@ -203,8 +220,14 @@ export interface TableSchema<TColumns> {
 
 /** Everything the session store addresses. */
 export type SessionSchema = TableSchema<SessionColumns>;
+/** A value a promoted attribute column may read back as. */
+export type PromotedValue = string | number | boolean | null;
+
 /** Everything the user store addresses. */
-export type UserSchema = TableSchema<UserColumns>;
+export type UserSchema = TableSchema<UserColumns> & {
+  /** Attribute name → the real column that holds it (see the module docs). */
+  readonly promoted: Readonly<Record<string, Column>>;
+};
 /** Everything the identifier store addresses. */
 export type IdentifierSchema = TableSchema<IdentifierColumns>;
 
@@ -238,7 +261,13 @@ export interface AuthSchemaSpec<
   TIdentifiers extends Table,
 > {
   readonly sessions: TableSpec<TSessions, SessionColumnNames<TSessions>>;
-  readonly users: TableSpec<TUsers, UserColumnNames<TUsers>>;
+  readonly users: TableSpec<TUsers, UserColumnNames<TUsers>> & {
+    /**
+     * Attributes kept as real columns, keyed by attribute name: `{ role: "role" }`.
+     * Each column must read back as a string, number, boolean or `null`.
+     */
+    readonly promoted?: Readonly<Record<string, ColumnKey<TUsers, PromotedValue>>>;
+  };
   readonly identifiers: TableSpec<TIdentifiers, IdentifierColumnNames<TIdentifiers>>;
 }
 
@@ -255,6 +284,8 @@ const resolveTable = <TColumns>(spec: TableSpec<Table, object>): TableSchema<TCo
   const names = spec.columns as Readonly<Record<string, string>>;
   const columns: Record<string, Column> = {};
   for (const [field, key] of Object.entries(names)) {
+    // An optional field left unmapped (`users.attributes`) is simply absent.
+    if (key === undefined) continue;
     columns[field] = source[key] as Column;
   }
   return {
@@ -280,7 +311,15 @@ export const defineSchema = <
 ): AuthSchema => ({
   _tag: "AuthSchema",
   sessions: resolveTable<SessionColumns>(spec.sessions),
-  users: resolveTable<UserColumns>(spec.users),
+  users: {
+    ...resolveTable<UserColumns>(spec.users),
+    promoted: Object.fromEntries(
+      Object.entries(spec.users.promoted ?? {}).map(([attribute, key]) => [
+        attribute,
+        (spec.users.table as unknown as Readonly<Record<string, Column>>)[key] as Column,
+      ]),
+    ),
+  },
   identifiers: resolveTable<IdentifierColumns>(spec.identifiers),
 });
 
