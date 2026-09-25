@@ -125,6 +125,14 @@ export class AdminUserStore extends Context.Service<
 export interface AdminConfig {
   /** `attributes.role` values that grant admin status (default: ["admin"]) */
   readonly adminRoles?: ReadonlyArray<string>;
+  /**
+   * The role values `setRole` and `createUser` accept — typically the app's
+   * `Ladder` (`Ladder.make([...])` satisfies this). Unset, any string is
+   * accepted, as before. Set, a role off the ladder is refused with
+   * `AdminError` and nothing is written, so a typo cannot create a principal
+   * that fails every gate.
+   */
+  readonly roles?: { readonly isRung: (role: unknown) => boolean };
   /** User ids that are always admins, regardless of role (default: []) */
   readonly adminUserIds?: ReadonlyArray<string>;
   /** Ban reason used when none is provided (default: "No reason") */
@@ -324,6 +332,13 @@ export const make = (
         ? Effect.void
         : Effect.fail(new AdminError({ message: "Forbidden: administrator privileges required" }));
 
+    const requireRole = (role: string): Effect.Effect<void, AdminError> =>
+      config?.roles === undefined || config.roles.isRung(role)
+        ? Effect.void
+        : Effect.fail(
+            new AdminError({ message: `"${role}" is not a role this deployment defines` }),
+          );
+
     const adminStore = yield* AdminUserStore;
     const userStore = yield* UserServiceStore;
     const sessionManager = yield* SessionService;
@@ -353,6 +368,7 @@ export const make = (
         role: string,
       ) {
         yield* requireAdmin(actor);
+        yield* requireRole(role);
 
         const user = yield* userStore.get(userId);
         if (user === null) {
@@ -484,6 +500,15 @@ export const make = (
         const attributes: Record<string, unknown> = { ...input.attributes };
         if (input.role !== undefined) {
           attributes["role"] = input.role;
+        }
+        // Whichever door the role came in by — `input.role` or a raw
+        // `attributes.role` — it is checked against the configured roles.
+        const role = attributes["role"];
+        if (role !== undefined) {
+          if (typeof role !== "string") {
+            return yield* new AdminError({ message: "role must be a string" });
+          }
+          yield* requireRole(role);
         }
 
         const createInput: {

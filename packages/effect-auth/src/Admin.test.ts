@@ -11,6 +11,7 @@ import {
   type ListUsersQuery,
 } from "./Admin.ts";
 import * as Admin from "./Admin.ts";
+import * as Ladder from "./Ladder.ts";
 import { Hooks } from "./Hooks.ts";
 import {
   IdentifierStore,
@@ -290,6 +291,41 @@ describe("AdminService", () => {
     expect(updated.attributes["role"]).toBe("admin");
     expect(updated.attributes["theme"]).toBe("dark");
     expect(isAdmin(users.get("user-1")!)).toBe(true);
+  });
+
+  it("refuses a role off the configured ladder, writing nothing (#193)", async () => {
+    const testContext = await makeTestContext();
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    seedUser("user-1", "user@example.com", { role: "user" });
+    const roles = Ladder.make(["user", "moderator", "admin"]);
+
+    const refused = await runService(testContext, { roles }, (service) =>
+      Effect.flip(service.setRole(admin, "user-1", "superadmin")),
+    );
+    expect(refused._tag).toBe("AdminError");
+    expect(users.get("user-1")!.attributes["role"]).toBe("user");
+
+    const promoted = await runService(testContext, { roles }, (service) =>
+      service.setRole(admin, "user-1", "moderator"),
+    );
+    expect(promoted.attributes["role"]).toBe("moderator");
+  });
+
+  it("checks createUser's role whichever door it comes in by (#193)", async () => {
+    const testContext = await makeTestContext();
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    const roles = Ladder.make(["user", "admin"]);
+
+    for (const input of [
+      { email: "a@example.com", role: "root" },
+      { email: "b@example.com", attributes: { role: "root" } },
+      { email: "c@example.com", attributes: { role: 7 } },
+    ]) {
+      const refused = await runService(testContext, { roles }, (service) =>
+        Effect.flip(service.createUser(admin, input)),
+      );
+      expect(refused._tag, JSON.stringify(input)).toBe("AdminError");
+    }
   });
 
   it("bans a user, revokes their sessions, and blocks re-banning edge cases", async () => {

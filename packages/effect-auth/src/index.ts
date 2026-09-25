@@ -353,6 +353,8 @@ export * as Rbac from "./Rbac.ts";
  * and also published on its own `./ladder` subpath for browser UX gates.
  */
 export * as Ladder from "./Ladder.ts";
+/** The ladder's rungs as a `Schema` (`Auth.LadderSchema.rung(Roles)`). */
+export * as LadderSchema from "./LadderSchema.ts";
 /** The `"resource:action"` permission vocabulary the RBAC sugar is authored in. */
 export {
   type PermissionRef,
