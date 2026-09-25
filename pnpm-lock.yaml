@@ -118,8 +118,8 @@ catalogs:
       specifier: ^3.3.11
       version: 3.3.11
     xml-crypto:
-      specifier: ^6.1.2
-      version: 6.1.2
+      specifier: ^6.3.1
+      version: 6.3.1
 
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.3.0
@@ -323,7 +323,7 @@ importers:
         version: 4.0.0-rc.112
       xml-crypto:
         specifier: 'catalog:'
-        version: 6.1.2
+        version: 6.3.1
 
   packages/solid:
     dependencies:
@@ -4583,8 +4583,8 @@ packages:
       utf-8-validate:
         optional: true
 
-  xml-crypto@6.1.2:
-    resolution: {integrity: sha512-leBOVQdVi8FvPJrMYoum7Ici9qyxfE4kVi+AkpUoYCSXaQF4IlBm1cneTK9oAxR61LpYxTx7lNcsnBIeRpGW2w==}
+  xml-crypto@6.3.1:
+    resolution: {integrity: sha512-uSE509H/5pePltq6DEsdGRz0iJQG9Thgisq6jAxSnWaR6t4fPZWjSVRVywOoR8cEsDJtnEpepUhCbgyQr7Nwtg==}
     engines: {node: '>=16'}
 
   xml-encryption@3.1.0:
@@ -5642,7 +5642,7 @@ snapshots:
       '@xmldom/is-dom-node': 1.0.1
       '@xmldom/xmldom': 0.8.15
       debug: 4.4.3
-      xml-crypto: 6.1.2
+      xml-crypto: 6.3.1
       xml-encryption: 3.1.0
       xml2js: 0.6.2
       xmlbuilder: 15.1.1
@@ -8476,7 +8476,7 @@ snapshots:
 
   ws@8.21.3: {}
 
-  xml-crypto@6.1.2:
+  xml-crypto@6.3.1:
     dependencies:
       '@xmldom/is-dom-node': 1.0.1
       '@xmldom/xmldom': 0.8.15
