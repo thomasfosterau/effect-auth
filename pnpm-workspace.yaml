@@ -32,15 +32,15 @@ catalog:
   "@node-saml/node-saml": ^5.1.0
   "@solidjs/testing-library": ^0.8.10
   "@sveltejs/package": ^2.5.8
-  "@sveltejs/vite-plugin-svelte": ^7.3.0
+  "@sveltejs/vite-plugin-svelte": ^7.3.1
   "@testing-library/react": ^16.1.0
   "@testing-library/svelte": ^5.4.2
   "@types/better-sqlite3": ^7.6.12
   "@types/node": ^26.1.0
   "@types/pg": ^8.15.0
-  "@types/react": ^19.0.0
-  "@types/react-dom": ^19.0.0
-  "@vitejs/plugin-vue": ^6.0.8
+  "@types/react": ^19.3.0
+  "@types/react-dom": ^19.3.0
+  "@vitejs/plugin-vue": ^6.0.9
   "@vue/test-utils": ^2.5.0
   alchemy: 2.0.0-beta.76
   better-sqlite3: ^11.7.0
@@ -57,10 +57,10 @@ catalog:
   effect-solutions: ^0.5.3
   hash-wasm: ^4.12.0
   jsdom: ^25.0.1
-  react: ^19.0.0
-  react-dom: ^19.0.0
+  react: ^19.3.0
+  react-dom: ^19.3.0
   solid-js: ^1.9.15
-  svelte: ^5.16.0
+  svelte: ^5.57.1
   svelte-check: ^4.7.6
   tsx: ^4.19.0
   typescript: ^6.0.3
@@ -72,7 +72,7 @@ catalog:
   vite-plus: 0.3.0
   vite: npm:@voidzero-dev/vite-plus-core@0.3.0
   vitest: 4.1.11
-  vue: ^3.5.13
+  vue: ^3.5.43
   vue-tsc: ^3.3.11
   xml-crypto: ^6.1.2
 
