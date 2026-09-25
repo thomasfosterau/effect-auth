@@ -29,6 +29,7 @@
 import { Data, Effect, Schema } from "effect";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
+import type * as Ladder from "./Ladder.ts";
 import { type PermissionRef } from "./Permission.ts";
 
 // ---------------------------------------------------------------------------
@@ -237,6 +238,68 @@ export const action = (
     ...(options?.when !== undefined ? { when: options.when } : {}),
     ...(options?.description !== undefined ? { description: options.description } : {}),
   });
+
+/**
+ * The declarative condition "the principal holds `min` or a more privileged
+ * rung of `ladder`": `principal.<roleAttribute>` is one of
+ * `ladder.atOrAbove(min)`.
+ *
+ * Written as array membership over the rungs rather than as a numeric
+ * comparison on a rank, so the condition needs no rank attribute on the
+ * principal and inherits the ladder's fail-closed posture from the kernel's
+ * own: a role string off the ladder is simply not a member, and a principal
+ * with no role attribute (anonymous, or an entity the resolver did not know)
+ * is an evaluation error, which the decision treats fail-closed.
+ *
+ * @since 1.0.0
+ * @category conditions
+ */
+export const roleAtLeastCondition = <Rung extends string>(
+  ladder: Ladder.Ladder<Rung>,
+  min: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
+  options?: { readonly roleAttribute?: string },
+): Condition.Condition =>
+  Condition.contains(
+    Condition.lit([...ladder.atOrAbove(min)]),
+    Condition.attr("principal", options?.roleAttribute ?? "role"),
+  );
+
+/**
+ * The ordered-ladder bridge into the kernel: a permit for every principal
+ * holding `min` (a rung, or a named axis) or a more privileged rung,
+ * optionally narrowed to an action/resource scope.
+ *
+ * Because it is an ordinary declarative policy, a ladder comparison is
+ * storable in a `PolicyStore` and validated against an `AuthorizationModel`
+ * like any other — declare the principal type's `role` attribute in the model
+ * and scope the policy to that type (`principal: Policy.isType("User")`) for
+ * the attribute to be checked. The zero-IO gates in `Guard.ts` decide the
+ * same question from the same `ladder.atOrAbove(min)` set without a slice.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
+export const roleAtLeast = <Rung extends string>(
+  ladder: Ladder.Ladder<Rung>,
+  min: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
+  options?: Omit<MakeOptions, "id"> & {
+    readonly id?: string;
+    /** The principal attribute holding the rung. Defaults to `"role"`. */
+    readonly roleAttribute?: string;
+  },
+): DeclarativePolicy => {
+  const ladderCondition = roleAtLeastCondition(ladder, min, options);
+  const name = typeof min === "string" ? min : min.name;
+  return permit({
+    id: options?.id ?? `ladder:${name}`,
+    ...(options?.principal !== undefined ? { principal: options.principal } : {}),
+    ...(options?.action !== undefined ? { action: options.action } : {}),
+    ...(options?.resource !== undefined ? { resource: options.resource } : {}),
+    when:
+      options?.when === undefined ? ladderCondition : Condition.and(ladderCondition, options.when),
+    ...(options?.description !== undefined ? { description: options.description } : {}),
+  });
+};
 
 /** Add (AND) a condition onto a declarative policy's `when` clause. */
 export const when = (

@@ -347,6 +347,12 @@ export * as OrganizationEntities from "./OrganizationEntities.ts";
  * generic. There is no second evaluation path behind it — see ADR 0018.
  */
 export * as Rbac from "./Rbac.ts";
+/**
+ * The ordered role ladder (`Auth.Ladder.make([...rungs])`): rank, the one
+ * "at least this rung" comparison, and named capability axes. Import-free,
+ * and also published on its own `./ladder` subpath for browser UX gates.
+ */
+export * as Ladder from "./Ladder.ts";
 /** The `"resource:action"` permission vocabulary the RBAC sugar is authored in. */
 export {
   type PermissionRef,

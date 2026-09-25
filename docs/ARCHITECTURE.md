@@ -126,7 +126,10 @@ directories, each with its own `index.ts` barrel and matching
   the `Authorizer.ts` shell, `Protected.ts` (schema-embedded field guards),
   `OrganizationEntities.ts` (the organization → entity-graph bridge), and
   `Rbac.ts` + `Permission.ts` (RBAC authoring sugar and the
-  `"resource:action"` vocabulary it is written in). Route-level gating lives in
+  `"resource:action"` vocabulary it is written in), and `Ladder.ts` (an ordered
+  role ladder with named capability axes — import-free, also published as the
+  `./ladder` subpath for browser UX gates; `Policy.roleAtLeast` compiles an
+  axis into a declarative policy). Route-level gating lives in
   `http/AuthorizationMiddleware.ts`.
 
   **There is one authorization model** ([ADR 0018](adr/0018-one-authorization-kernel.md)).
@@ -135,7 +138,9 @@ directories, each with its own `index.ts` barrel and matching
   scope is its set-shaped projection, and `Rbac.ts` compiles a flat
   role/permission configuration into `DeclarativePolicy` values plus the
   principal → role entity fragment. No module evaluates authorization
-  independently of `Policy.decide`.
+  independently of `Policy.decide`. (`Ladder.hasAtLeast` is the comparison a
+  ladder condition is compiled from, exported for UX gates and per-viewer
+  `meta`; a test pins it to the kernel's answer, and it is never the gate.)
 
 - **`oauth/` cluster**: `OAuth.ts` (providers + PKCE), `Scope.ts`.
 - **`plugins/` cluster**: `AccountLockout.ts`, `Audit.ts`, `Captcha.ts`,
