@@ -1,12 +1,136 @@
+# pnpm workspace — the thirteen published packages under packages/*.
+#
+# The `catalog:` protocol pins versions that MUST be singletons across the
+# workspace. Effect especially: two copies of `effect` break Context / Layer /
+# Schema identity at runtime, so every package references `catalog:`.
+#
+# EVERY external dependency version lives here — package.json files reference
+# only `catalog:` / `catalog:peers` (or `workspace:*` for internal packages).
+# `catalogMode: strict` makes `pnpm add` enforce this at add time and
+# `pnpm install` reject non-catalog specifiers. After editing this catalog,
+# ALWAYS run `pnpm install` and commit the regenerated pnpm-lock.yaml — a stale
+# lockfile fails CI at once with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
+#
+# Shape copied from effect-drizzle-ext (the library reference). Versions are
+# kept in lockstep with the consuming applications (website / gardeneria /
+# preferenceflow) wherever the two overlap — effect, drizzle-orm, vite-plus —
+# so the library builds against exactly what they run.
 packages:
   - "packages/*"
+
+catalogMode: strict
+
+catalog:
+  # Changesets CLI v3 pairs with `changesets/action` v2 (release.yml).
+  "@changesets/cli": ^3.0.3
+  # Compiles AND executes every JSDoc `@example` in packages/effect-auth.
+  "@effect/docgen": ^0.5.2
+  "@effect/language-service": ^0.87.2
+  "@effect/sql-pg": 4.0.0-rc.112
+  "@effect/sql-pglite": 4.0.0-rc.112
+  "@electric-sql/pglite": ^0.5.8
+  "@node-saml/node-saml": ^5.1.0
+  "@solidjs/testing-library": ^0.8.10
+  "@sveltejs/package": ^2.5.8
+  "@sveltejs/vite-plugin-svelte": ^7.3.0
+  "@testing-library/react": ^16.1.0
+  "@testing-library/svelte": ^5.4.2
+  "@types/better-sqlite3": ^7.6.12
+  "@types/node": ^26.1.0
+  "@types/pg": ^8.15.0
+  "@types/react": ^19.0.0
+  "@types/react-dom": ^19.0.0
+  "@vitejs/plugin-vue": ^6.0.8
+  "@vue/test-utils": ^2.5.0
+  alchemy: 2.0.0-beta.76
+  better-sqlite3: ^11.7.0
+  # The classic drizzle line is what `packages/drizzle` tests its Promise
+  # drivers against; `drizzle-orm-effect` is the commit-suffixed 1.0 prerelease
+  # that ships `drizzle-orm/effect-postgres` (the same pin as the three
+  # applications and effect-drizzle-ext), installed side by side under an
+  # alias so one test suite exercises both driver shapes.
+  drizzle-orm: ^0.45.0
+  drizzle-orm-effect: npm:drizzle-orm@1.0.0-rc.5-ab785fc
+  effect: 4.0.0-rc.112
+  # `vp exec effect-solutions …` — the Effect pattern guides AGENTS.md requires
+  # consulting before writing Effect code.
+  effect-solutions: ^0.5.3
+  hash-wasm: ^4.12.0
+  jsdom: ^25.0.1
+  react: ^19.0.0
+  react-dom: ^19.0.0
+  solid-js: ^1.9.15
+  svelte: ^5.16.0
+  svelte-check: ^4.7.6
+  tsx: ^4.19.0
+  typescript: ^6.0.3
+  vite-plugin-solid: ^2.11.14
+  # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions; `vite` is
+  # the same release under its aliased core package, and `vitest` must match
+  # vite-plus's exact pin because the `vitest: "catalog:"` override forces
+  # every resolution to the catalog singleton.
+  vite-plus: 0.3.0
+  vite: npm:@voidzero-dev/vite-plus-core@0.3.0
+  vitest: 4.1.11
+  vue: ^3.5.13
+  vue-tsc: ^3.3.11
+  xml-crypto: ^6.1.2
+
+# Peer ranges the PUBLISHED packages declare. Kept as a named catalog so the
+# strict catalog mode still governs them while they stay ranges (an exact
+# `4.0.0-rc.112` peer would reject a consumer on rc.115). `pnpm publish`
+# replaces `catalog:peers` with these ranges in the published manifest — which
+# is why the release publishes with pnpm, not npm.
+catalogs:
+  peers:
+    "@types/pg": ^8.15.0
+    alchemy: ">=2.0.0-beta.75"
+    drizzle-orm: ">=0.44.0"
+    effect: ">=4.0.0-rc.112"
+    react: ">=18"
+    solid-js: ">=1.8"
+    svelte: ^5.20.0
+    vue: ">=3"
+
+overrides:
+  vite: "catalog:"
+  vitest: "catalog:"
+  # `effect` MUST be a singleton (see the header): force every resolution to
+  # the catalog version so a hoisting reshuffle cannot introduce a second copy.
+  effect: "catalog:"
+  # Advisory floors for transitive dependencies of the dev toolchain, which
+  # `pnpm audit --audit-level high` (CI's last step) gates. None is reached by
+  # a published package: brace-expansion and js-yaml 3.x arrive via
+  # @effect/docgen (glob > minimatch; markdown-toc > gray-matter) and
+  # effect-solutions; postcss / nanoid via vite-plus-core; hono,
+  # @hono/node-server and lodash via alchemy's @prisma/dev (packages/alchemy's
+  # dev dependency). Scoped to the affected major so a consumer of another
+  # major keeps its own range. Drop each once its dependent ships the fix in
+  # range.
+  "brace-expansion@2": ">=2.1.4"
+  "js-yaml@3": ">=3.15.2"
+  "nanoid@3": ">=3.3.18"
+  "postcss@8": ">=8.5.18"
+  "hono@4": ">=4.12.25"
+  "@hono/node-server@1": ">=1.19.10"
+  "lodash@4": ">=4.17.24"
+
 allowBuilds:
   better-sqlite3: true
   esbuild: true
   msgpackr-extract: true
   workerd: false
+peerDependencyRules:
+  allowAny:
+    - vite
+    - vitest
+  allowedVersions:
+    vite: "*"
+    vitest: "*"
 minimumReleaseAgeExclude:
   - "@alchemy.run/cloudflare-runtime@2.0.0-beta.76"
   - "@alchemy.run/floci@2.0.0-beta.76"
   - "@alchemy.run/node-utils@2.0.0-beta.76"
   - alchemy@2.0.0-beta.76
+  # @thomasfosterau/* is first-party — exempt so our own releases install immediately.
+  - "@thomasfosterau/*"

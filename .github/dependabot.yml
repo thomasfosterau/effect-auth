@@ -1,0 +1,91 @@
+# Dependabot version-update configuration (the library standard's, via
+# effect-jsonapi / effect-drizzle-ext).
+#
+# `groups` collect dependencies that MUST move together: the Effect 4 release
+# line is a lockstep-versioned singleton set (effect plus the @effect/sql-*
+# drivers pinned to the same exact version); the vitest toolchain is pinned to
+# vite-plus's exact versions, so its *version* updates are ignored while
+# SECURITY updates stay enabled (the ignore is scoped to the
+# `version-update:semver-*` update types; a bare `dependency-name` ignore would
+# block security updates too) — bump vite-plus, vite and vitest together by
+# hand in pnpm-workspace.yaml.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+    cooldown:
+      default-days: 1
+      exclude:
+        - "@thomasfosterau/*"
+    groups:
+      effect:
+        patterns:
+          - "effect"
+          - "@effect/*"
+      frameworks:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+          - "svelte"
+          - "svelte-check"
+          - "@sveltejs/*"
+          - "vue"
+          - "vue-tsc"
+          - "@vitejs/plugin-vue"
+          - "solid-js"
+          - "vite-plugin-solid"
+    ignore:
+      - dependency-name: "vite"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+      - dependency-name: "vitest"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+      - dependency-name: "vite-plus"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+      # The commit-suffixed drizzle 1.0 prerelease is pinned to what the
+      # applications run; it moves with them, not with npm's `latest`.
+      - dependency-name: "drizzle-orm-effect"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "ci"
+      include: "scope"

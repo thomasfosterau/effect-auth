@@ -1,0 +1,59 @@
+# Composite setup shared by every workflow that needs the toolchain: pnpm +
+# Node.js, the pnpm store cache (keyed on pnpm-lock.yaml by setup-node), a
+# frozen-lockfile install and the repository's own `prepare` script. `vp` and
+# the dev bins land in node_modules/.bin, which this adds to PATH so later
+# steps invoke them directly. Copied in shape from effect-jsonapi (the library
+# reference).
+#
+# Install scripts: pnpm 11 runs a dependency's lifecycle scripts only when
+# pnpm-workspace.yaml's `allowBuilds` names it (better-sqlite3, the native
+# driver the storage adapters test against; esbuild; msgpackr-extract), so the
+# test job installs normally. The privileged release job passes
+# `ignore-scripts: "true"` so no dependency script at all runs where a publish
+# credential exists — it only builds, and the build needs no native module. In
+# both, the repository's OWN `prepare` script (the Effect-patched TypeScript
+# every gate runs on) is first-party and runs explicitly as its own step.
+#
+# Callers must run `actions/checkout` BEFORE this (a local composite action
+# needs the repo on disk first).
+name: Setup toolchain
+description: Set up Node.js and pnpm, restore the package cache, install dependencies and patch the toolchain.
+inputs:
+  node-version:
+    description: The Node.js version to set up.
+    required: false
+    default: 22.x
+  ignore-scripts:
+    description: Skip every dependency lifecycle script (the release job sets this).
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    # pnpm before Node so setup-node's `cache: pnpm` can resolve the store path.
+    # The pnpm version comes from the `packageManager` field in package.json.
+    - name: Setup pnpm
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+
+    - name: Install dependencies
+      shell: bash
+      env:
+        IGNORE_SCRIPTS: ${{ inputs.ignore-scripts }}
+      run: |
+        if [ "$IGNORE_SCRIPTS" = "true" ]; then
+          pnpm install --frozen-lockfile --ignore-scripts
+          # The one lifecycle script that does run: ours. See the header.
+          pnpm run prepare
+        else
+          pnpm install --frozen-lockfile
+        fi
+
+    - name: Expose the local bins
+      shell: bash
+      run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"

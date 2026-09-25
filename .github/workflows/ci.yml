@@ -1,46 +1,50 @@
 name: CI
 
+# ONE job: the pipeline's task graph lives in vite.config.ts / vite.tasks.ts
+# (each package's `build`, `check` and `test:unit`, each depending on the
+# builds of the workspace packages it imports), not in GitHub Actions `needs:`.
+# Shape copied from effect-jsonapi (the library reference).
+
 on:
   push:
-    branches:
-      - trunk
+    branches: [trunk]
   pull_request:
-    branches:
-      - trunk
+    branches: [trunk]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
+
+# No permissions by default; the job grants only read access.
+permissions: {}
 
 jobs:
   test:
     name: Test & Typecheck
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: "22"
-          cache: pnpm
+          persist-credentials: false
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # Dependent packages type-check against the core's built dist
-      # (workspace exports point at dist/), so build before checking.
-      - name: Build packages
-        run: pnpm run build
+      - name: Setup toolchain
+        uses: ./.github/actions/setup
 
       - name: Format & lint
-        run: pnpm run check
+        run: vp check
 
-      - name: Run tests
-        run: pnpm run test
+      - name: Build packages
+        run: vp run build
 
       - name: Type check
-        run: pnpm run typecheck
+        run: vp run check
+
+      - name: Unit tests
+        run: vp run -r test:unit
+
+      - name: Audit
+        run: pnpm audit --audit-level high

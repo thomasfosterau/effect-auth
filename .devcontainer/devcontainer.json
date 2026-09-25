@@ -10,5 +10,5 @@
       "extensions": ["Anthropic.claude-code"]
     }
   },
-  "postCreateCommand": "corepack enable && corepack install"
+  "postCreateCommand": "bash .claude/hooks/session-start.sh"
 }

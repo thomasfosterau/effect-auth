@@ -82,11 +82,10 @@ const makeTx =
     sql
       .withTransaction(effect)
       .pipe(
-        Effect.mapError(
-          (e): Auth.AuthError =>
-            e instanceof Auth.AuthError
-              ? e
-              : new Auth.AuthError({ message: `sql ${label} failed`, cause: e }),
+        Effect.mapError((e): Auth.AuthError =>
+          e instanceof Auth.AuthError
+            ? e
+            : new Auth.AuthError({ message: `sql ${label} failed`, cause: e }),
         ),
       );
 
@@ -130,11 +129,10 @@ const userQueries = (sql: SqlClient.SqlClient) => {
 
   const requireById = (userId: string, label: string) =>
     getById(userId, label).pipe(
-      Effect.flatMap(
-        (row): Effect.Effect<Auth.User, Auth.AuthError | Auth.UserNotFoundError> =>
-          row
-            ? rowToUser(row, label)
-            : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
+      Effect.flatMap((row): Effect.Effect<Auth.User, Auth.AuthError | Auth.UserNotFoundError> =>
+        row
+          ? rowToUser(row, label)
+          : Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
       ),
     );
 

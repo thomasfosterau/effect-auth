@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vite-plus";
+import { packageTasks } from "../../vite.tasks.ts";
 import solid from "vite-plugin-solid";
 
 /**
@@ -9,6 +10,11 @@ import solid from "vite-plugin-solid";
  * to do only what Vite cannot: emit the declarations.
  */
 export default defineConfig({
+  run: packageTasks({
+    build:
+      "vp build && tsc --emitDeclarationOnly --incremental false && tsc --outDir dist/source --declaration false --declarationMap false --incremental false",
+    check: "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run",
+  }),
   plugins: [solid()],
   resolve: { conditions: ["browser"] },
   build: {

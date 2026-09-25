@@ -342,7 +342,7 @@ program emits through drizzle's own `logger` hook to prove the batching claims
 above, and `MySqlSchema.test.ts` pins the MySQL SQL through the proxy driver.
 
 ```sh
-pnpm run test
+vp run test:unit
 ```
 
 ## License

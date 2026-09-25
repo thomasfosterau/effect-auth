@@ -41,30 +41,25 @@
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {
-    "build": "tsc",
-    "test": "vp test run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run"
-  },
   "dependencies": {
     "@thomasfosterau/effect-auth": "workspace:*"
   },
   "devDependencies": {
-    "@effect/sql-pg": "4.0.0-rc.112",
-    "@effect/sql-pglite": "4.0.0-rc.112",
-    "@electric-sql/pglite": "^0.5.8",
-    "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^26.1.0",
-    "@types/pg": "^8.15.0",
-    "better-sqlite3": "^11.7.0",
-    "drizzle-orm": "^0.45.0",
-    "drizzle-orm-effect": "npm:drizzle-orm@1.0.0-rc.5-ab785fc",
-    "effect": "4.0.0-rc.112"
+    "@effect/sql-pg": "catalog:",
+    "@effect/sql-pglite": "catalog:",
+    "@electric-sql/pglite": "catalog:",
+    "@types/better-sqlite3": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "better-sqlite3": "catalog:",
+    "drizzle-orm": "catalog:",
+    "drizzle-orm-effect": "catalog:",
+    "effect": "catalog:"
   },
   "peerDependencies": {
-    "@types/pg": "^8.15.0",
-    "drizzle-orm": ">=0.44.0",
-    "effect": ">=4.0.0-rc.112"
+    "@types/pg": "catalog:peers",
+    "drizzle-orm": "catalog:peers",
+    "effect": "catalog:peers"
   },
   "peerDependenciesMeta": {
     "@types/pg": {

@@ -25,7 +25,7 @@ Before contributing, please:
    - [README.md](./README.md) - Project overview and usage
    - [ARCHITECTURE.md](./ARCHITECTURE.md) - Architectural design
    - [DESIGN.md](./DESIGN.md) - Settled API conventions and decision record
-   - [AGENTS.md](./AGENTS.md) - Tooling and Effect-pattern guidelines
+   - [AGENTS.md](../AGENTS.md) - Tooling and Effect-pattern guidelines
    - [SECURITY.md](./SECURITY.md) - Security requirements
 
 2. **Understand the project**:
@@ -59,13 +59,13 @@ Before contributing, please:
 3. **Install dependencies**:
 
    ```bash
-   pnpm install
+   vp install
    ```
 
 4. **Verify setup**:
    ```bash
-   pnpm run build  # Should compile successfully
-   pnpm run test   # Should pass all tests
+   vp run check          # Builds what each package needs, then every type gate
+   vp run -r test:unit   # Every package's unit tests
    ```
 
 ### Project Structure
@@ -121,7 +121,7 @@ effect-auth/                       # pnpm workspaces monorepo (Vite+ toolchain)
 
 1. **Create an issue** if one doesn't exist
 2. **Discuss the approach** with maintainers
-3. **Review [DESIGN.md](./DESIGN.md) and [AGENTS.md](./AGENTS.md)** for:
+3. **Review [DESIGN.md](./DESIGN.md) and [AGENTS.md](../AGENTS.md)** for:
    - The settled API conventions (naming, layers, stores, errors)
    - Security requirements
    - Effect patterns and tooling
@@ -151,8 +151,9 @@ effect-auth/                       # pnpm workspaces monorepo (Vite+ toolchain)
 
 4. **Test your changes**:
    ```bash
-   pnpm run build  # Ensure it compiles
-   pnpm run test   # Ensure tests pass
+   vp check              # Format + lint
+   vp run check          # Type gates
+   vp run -r test:unit   # Unit tests
    ```
 
 ### Code Style
@@ -199,11 +200,11 @@ Example: Adding a new password algorithm
 ### Running Tests
 
 ```bash
-# Run all tests
-pnpm run test
+# Run every package's unit tests (dependencies are built first)
+vp run -r test:unit
 
-# Run tests in watch mode
-pnpm run test:watch
+# One package, in watch mode
+cd packages/effect-auth && vp test
 ```
 
 ### Writing Tests
@@ -266,9 +267,10 @@ All changes should include:
 3. **Ensure quality**:
 
    ```bash
-   pnpm run build  # Must compile successfully
-   pnpm run test   # All tests must pass
-   pnpm audit      # Check for vulnerabilities
+   vp check              # Format + lint must pass
+   vp run check          # Every type gate must pass
+   vp run -r test:unit   # All tests must pass
+   pnpm audit            # Check for vulnerabilities
    ```
 
 4. **Push to your fork**:
@@ -329,12 +331,13 @@ Fixes #123
 
 Releases are automated using [Changesets](https://github.com/changesets/changesets):
 
-1. **Changesets are merged**: When PRs with changesets are merged to `main`
+1. **Changesets are merged**: When PRs with changesets are merged to `trunk`
 2. **Release PR is created**: The Release workflow automatically creates a "Version Packages" PR
 3. **Release PR is merged**: When the maintainer merges this PR:
    - Package versions are bumped based on changesets
    - CHANGELOG.md is updated
-   - Changes are published to npm
+   - Changes are published to npm via OIDC trusted publishing, with provenance
+     (see [PUBLISHING.md](../PUBLISHING.md))
    - Git tags are created
 
 Contributors don't need to worry about versioning - just create changesets for your changes!

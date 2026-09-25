@@ -1,7 +1,12 @@
 import { resolve } from "path";
 import { defineConfig } from "vite-plus";
+import { packageTasks } from "../../vite.tasks.ts";
 
 export default defineConfig({
+  run: packageTasks({
+    build: "tsc",
+    check: "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run",
+  }),
   resolve: {
     alias: {
       // packages/*/dist/ is gitignored; resolve the SQL stores this package
