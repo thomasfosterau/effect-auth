@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { HttpApiSchema } from "effect/unstable/httpapi";
+import { Forbidden, Unauthorized } from "../Guard.ts";
 import * as Identifier from "../Identifier.ts";
 import type * as Types from "../Types.ts";
 
@@ -1117,17 +1118,13 @@ export type ScimPatchPayload = typeof ScimPatchPayload.Type;
 // Error schemas (mapped to HTTP status codes via HttpApiSchema.status)
 // -----------------------------------------------------------------------------
 
-/** 401 — missing/invalid credentials or session. */
-export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthorized", {
-  message: Schema.String,
-  code: Schema.optional(Schema.String),
-}) {}
-
-/** 403 — authenticated but not allowed (e.g. email not verified, account locked, banned). */
-export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
-  message: Schema.String,
-  code: Schema.optional(Schema.String),
-}) {}
+/**
+ * 401 — missing/invalid credentials or session; 403 — authenticated but not
+ * allowed (e.g. email not verified, account locked, banned). Defined in the
+ * core (`Guard.ts`), where the zero-IO guards fail with them, and re-exported
+ * here so a guard's failure is the very class these endpoints encode.
+ */
+export { Forbidden, Unauthorized };
 
 /** 409 — conflict (e.g. user already exists). */
 export class Conflict extends Schema.TaggedError<Conflict>()("Conflict", {

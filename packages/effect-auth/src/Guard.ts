@@ -1,0 +1,375 @@
+/**
+ * Zero-IO guards over an already-resolved viewer: the gates (`requireUser`,
+ * `requireRoleAtLeast`, `requireOwnerOrRole`), their never-failing predicate
+ * counterparts, and the per-viewer capability hooks that restate a write gate
+ * as `meta.canEdit` / `canDelete`.
+ *
+ * ### The kernel's fast path, not a second engine
+ *
+ * Every rung and ownership decision here is made by `Policy.decidePure` over a
+ * slice built from facts the caller already holds — the viewer's id and rung,
+ * and (for ownership) the owner id the caller loaded with the row. No
+ * `EntityResolver`, no `Authorizer`, no IO. The policies decided are the ones
+ * {@link Guards.policies} returns, which are ordinary `DeclarativePolicy`
+ * values: a gate and a stored declarative policy built from the same axis
+ * cannot disagree, because they are the same value (ADR-0018: there is one
+ * authorization model).
+ *
+ * ### Gates and predicates
+ *
+ * - **Gates** fail: anonymous → {@link Unauthorized}, signed in but not
+ *   entitled → {@link Forbidden}. They yield the viewer on success, so a gate
+ *   is the first line of an operation: `const user = yield* guards.requireUser`.
+ * - **Predicates** never fail and treat anonymous as an ordinary answer
+ *   (`false`). Most of a read path, and all per-viewer response shaping, is
+ *   predicates.
+ *
+ * Gates are Effect **values** where they take no argument (`requireUser`), so
+ * call sites yield them bare; the axis-taking ones are functions, and an app
+ * binds its named gates once: `const requireModerator =
+ * guards.requireRoleAtLeast(Axes.moderate)`.
+ *
+ * ### 401, 403 — and 404
+ *
+ * | Outcome                                   | Status | Error                   |
+ * | ----------------------------------------- | ------ | ----------------------- |
+ * | no viewer, on a gated **write**           | 401    | {@link Unauthorized}    |
+ * | a viewer below the gate, on a **write**   | 403    | {@link Forbidden}       |
+ * | a **read** predicate answers `false`      | **404**| the app's `NotFound`    |
+ *
+ * The last row is the one to get right. A read the viewer may not see must be
+ * indistinguishable from a read of a row that does not exist: answering 403
+ * confirms the row exists, which is an enumeration oracle. So read paths ask a
+ * predicate (`canViewOwned`, `hasRoleAtLeast`) and turn `false` into the same
+ * not-found they return for a missing id — never into `Forbidden`.
+ *
+ * ### "Signed in" is not a rung
+ *
+ * `requireUser` asks whether a viewer exists and compares no rung. It is
+ * deliberately not `requireRoleAtLeast(lowestRung)`: the two diverge the
+ * instant the ladder gains a rung below the lowest one.
+ *
+ * @example
+ * ```ts
+ * import { Context, Effect, Option } from "effect"
+ * import * as Auth from "@thomasfosterau/effect-auth"
+ *
+ * interface AppUser { readonly id: string; readonly role: string; readonly name: string }
+ * class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser>>()(
+ *   "@app/CurrentViewer",
+ * ) {}
+ *
+ * const Roles = Auth.Ladder.make(["user", "contributor", "moderator", "admin"])
+ * const Axes = Roles.axes({ corpusWrite: "contributor", moderate: "moderator" })
+ * const guards = Auth.Guard.make({ ladder: Roles, viewer: CurrentViewer })
+ *
+ * const requireContributor = guards.requireRoleAtLeast(Axes.corpusWrite)
+ *
+ * const renameTaxon = (id: string, name: string) =>
+ *   Effect.gen(function* () {
+ *     const user = yield* requireContributor // Unauthorized | Forbidden
+ *     return { id, name, editedBy: user.id }
+ *   })
+ * ```
+ *
+ * @module guard
+ */
+import { Context, Effect, Option, Schema } from "effect";
+import * as Condition from "./Condition.ts";
+import * as Entity from "./Entity.ts";
+import type * as Ladder from "./Ladder.ts";
+import * as Policy from "./Policy.ts";
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/**
+ * 401 — the operation needs a viewer and there is none.
+ *
+ * The same class the HTTP tier's error schemas carry (`Http` re-exports it),
+ * so a guard's failure encodes at the edge with no translation.
+ *
+ * @since 1.0.0
+ * @category errors
+ */
+export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthorized", {
+  message: Schema.String,
+  code: Schema.optional(Schema.String),
+}) {}
+
+/**
+ * 403 — there is a viewer, and the gate refuses them. Never the answer to a
+ * **read** the viewer may not see (that is a 404; see the module docs).
+ *
+ * @since 1.0.0
+ * @category errors
+ */
+export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
+  message: Schema.String,
+  code: Schema.optional(Schema.String),
+}) {}
+
+// ---------------------------------------------------------------------------
+// The viewer
+// ---------------------------------------------------------------------------
+
+/**
+ * What the guards need of a viewer: an id and one rung. The application's own
+ * user type is kept intact through every gate — `requireUser` yields `User`,
+ * not this shape.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface ViewerShape {
+  readonly id: string;
+  readonly role: string;
+}
+
+/**
+ * The capability `meta` a per-viewer hook computes: whether the viewer may
+ * edit and delete the resource. Advisory — it drives whether a client renders
+ * a control; the write path still runs its gate.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface Capabilities {
+  readonly canEdit: boolean;
+  readonly canDelete: boolean;
+}
+
+/**
+ * The guard kit for one viewer service and one ladder. Build it with
+ * {@link make}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface Guards<Id, User extends ViewerShape, Rung extends string> {
+  /** The ladder the kit compares against. */
+  readonly ladder: Ladder.Ladder<Rung>;
+  /** The resolved viewer, `Option.none()` when anonymous. Never fails. */
+  readonly viewer: Effect.Effect<Option.Option<User>, never, Id>;
+
+  // -- gates ---------------------------------------------------------------
+
+  /** The viewer, failing `Unauthorized` when anonymous. Compares no rung. */
+  readonly requireUser: Effect.Effect<User, Unauthorized, Id>;
+  /** The viewer when they hold `min` or above; `Unauthorized` / `Forbidden` otherwise. */
+  readonly requireRoleAtLeast: (
+    min: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
+  ) => Effect.Effect<User, Unauthorized | Forbidden, Id>;
+  /**
+   * The owned-material write gate: the viewer when they own the row
+   * (`user.id === ownerId`) or hold `min` or above. `ownerId` is the one fact
+   * the caller already loaded with the row; nothing else is fetched.
+   */
+  readonly requireOwnerOrRole: (
+    ownerId: string,
+    min: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
+  ) => Effect.Effect<User, Unauthorized | Forbidden, Id>;
+
+  // -- predicates ----------------------------------------------------------
+
+  /** Whether a viewer is present. */
+  readonly isSignedIn: Effect.Effect<boolean, never, Id>;
+  /** Whether the viewer holds `min` or above; `false` when anonymous. */
+  readonly hasRoleAtLeast: (
+    min: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
+  ) => Effect.Effect<boolean, never, Id>;
+  /** Whether the viewer owns the row or holds `min` or above; `false` when anonymous. */
+  readonly isOwnerOrRole: (
+    ownerId: string,
+    min: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
+  ) => Effect.Effect<boolean, never, Id>;
+
+  // -- pure decisions (the kit's kernel calls, for a viewer already in hand) --
+
+  /** {@link Guards.hasRoleAtLeast} for a viewer the caller already holds. */
+  readonly decideRole: (
+    viewer: User | null | undefined,
+    min: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
+  ) => boolean;
+  /** {@link Guards.isOwnerOrRole} for a viewer the caller already holds. */
+  readonly decideOwnerOrRole: (
+    viewer: User | null | undefined,
+    ownerId: string | undefined,
+    min: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
+  ) => boolean;
+
+  // -- capability hooks ----------------------------------------------------
+
+  /**
+   * The capability hook for a family whose write gate is a rung and nothing
+   * else: `canEdit` / `canDelete` both answer {@link Guards.decideRole}.
+   * Take `min` from the same axis the operation's gate names, so moving the
+   * capability moves the `meta` with it.
+   */
+  readonly roleCapabilities: (
+    min: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
+  ) => (viewer: User | null | undefined) => Capabilities;
+  /**
+   * The capability hook for owned material: the owner, or `min` and above —
+   * exactly {@link Guards.requireOwnerOrRole}, restated as `meta`. `ownerOf`
+   * reads the owner id off the representation; a resource with no owner
+   * advertises nothing a non-privileged viewer could act on.
+   */
+  readonly ownedCapabilities: <Resource>(
+    min: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
+    ownerOf: (resource: Resource) => string | undefined,
+  ) => (resource: Resource, viewer: User | null | undefined) => Capabilities;
+
+  // -- the policies the kit decides ----------------------------------------
+
+  /**
+   * The declarative policies behind the gates — store them, validate them
+   * against an `AuthorizationModel`, or hand them to an `Authorizer`; they are
+   * the values the gates decide, not copies.
+   */
+  readonly policies: {
+    readonly roleAtLeast: (
+      min: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
+    ) => ReadonlyArray<Policy.DeclarativePolicy>;
+    readonly ownerOrRole: (
+      min: NoInfer<Rung> | Ladder.Axis<NoInfer<Rung>>,
+    ) => ReadonlyArray<Policy.DeclarativePolicy>;
+  };
+}
+
+/**
+ * Options for {@link make}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface GuardOptions<Id, User extends ViewerShape, Rung extends string> {
+  readonly ladder: Ladder.Ladder<Rung>;
+  /**
+   * The application's viewer service: `Option<User>`, `none` when anonymous.
+   * Provide it with `SessionContext.viewerLayer` /
+   * `SessionContext.viewerFromSession`.
+   */
+  readonly viewer: Context.Key<Id, Option.Option<User>>;
+  /** The principal's entity type in the decision slice. Defaults to `"User"`. */
+  readonly principalType?: string;
+  /**
+   * The resource entity type an ownership decision is made against. Defaults
+   * to `"Owned"`. Only its `owner` attribute is read.
+   */
+  readonly ownedType?: string;
+}
+
+const axisName = (min: string | Ladder.Axis): string => (typeof min === "string" ? min : min.name);
+
+/**
+ * Build the guard kit for one viewer service and one ladder.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
+export const make = <Id, User extends ViewerShape, Rung extends string>(
+  options: GuardOptions<Id, User, Rung>,
+): Guards<Id, User, Rung> => {
+  const { ladder } = options;
+  const principalType = options.principalType ?? "User";
+  const ownedType = options.ownedType ?? "Owned";
+  type Min = Rung | Ladder.Axis<Rung>;
+
+  const roleAtLeast = (min: Min): ReadonlyArray<Policy.DeclarativePolicy> => [
+    Policy.roleAtLeast(ladder, min, { id: `guard:role:${axisName(min)}` }),
+  ];
+
+  const ownerOrRole = (min: Min): ReadonlyArray<Policy.DeclarativePolicy> => [
+    Policy.permit({
+      id: "guard:owner",
+      resource: Policy.isType(ownedType),
+      when: Condition.eq(Condition.principal, Condition.attr("resource", "owner")),
+    }),
+    Policy.roleAtLeast(ladder, min, { id: `guard:owner-or-role:${axisName(min)}` }),
+  ];
+
+  const principalOf = (viewer: User): Entity.Entity =>
+    Entity.entity(Entity.ref(principalType, viewer.id), { attributes: { role: viewer.role } });
+
+  const decide = (
+    policies: ReadonlyArray<Policy.DeclarativePolicy>,
+    viewer: User,
+    action: string,
+    resource: Entity.Entity,
+  ): boolean => {
+    const principal = principalOf(viewer);
+    return Policy.decidePure(
+      policies,
+      Policy.request({
+        principal: principal.ref,
+        action: Entity.ref("Action", action),
+        resource: resource.ref,
+      }),
+      Entity.slice([principal, resource]),
+    ).allowed;
+  };
+
+  const noResource = Entity.entity(Entity.ref("Guard", "none"));
+
+  const decideRole = (viewer: User | null | undefined, min: Min): boolean =>
+    viewer !== null &&
+    viewer !== undefined &&
+    decide(roleAtLeast(min), viewer, `role:${axisName(min)}`, noResource);
+
+  const decideOwnerOrRole = (
+    viewer: User | null | undefined,
+    ownerId: string | undefined,
+    min: Min,
+  ): boolean => {
+    if (viewer === null || viewer === undefined) return false;
+    const owned = Entity.entity(
+      Entity.ref(ownedType, ""),
+      ownerId === undefined
+        ? {}
+        : { attributes: { owner: Entity.entityValue(Entity.ref(principalType, ownerId)) } },
+    );
+    return decide(ownerOrRole(min), viewer, `owner-or-role:${axisName(min)}`, owned);
+  };
+
+  const viewer: Effect.Effect<Option.Option<User>, never, Id> = options.viewer;
+
+  const requireUser: Effect.Effect<User, Unauthorized, Id> = Effect.flatMap(viewer, (maybe) =>
+    Option.isSome(maybe)
+      ? Effect.succeed(maybe.value)
+      : Effect.fail(new Unauthorized({ message: "Unauthorized" })),
+  );
+
+  const gate = (
+    allowed: (user: User) => boolean,
+  ): Effect.Effect<User, Unauthorized | Forbidden, Id> =>
+    Effect.flatMap(requireUser, (user) =>
+      allowed(user) ? Effect.succeed(user) : Effect.fail(new Forbidden({ message: "Forbidden" })),
+    );
+
+  const predicate = (allowed: (user: User) => boolean): Effect.Effect<boolean, never, Id> =>
+    Effect.map(viewer, (maybe) => Option.isSome(maybe) && allowed(maybe.value));
+
+  return {
+    ladder,
+    viewer,
+    requireUser,
+    requireRoleAtLeast: (min) => gate((user) => decideRole(user, min)),
+    requireOwnerOrRole: (ownerId, min) => gate((user) => decideOwnerOrRole(user, ownerId, min)),
+    isSignedIn: Effect.map(viewer, Option.isSome),
+    hasRoleAtLeast: (min) => predicate((user) => decideRole(user, min)),
+    isOwnerOrRole: (ownerId, min) => predicate((user) => decideOwnerOrRole(user, ownerId, min)),
+    decideRole,
+    decideOwnerOrRole,
+    roleCapabilities: (min) => (user) => {
+      const canWrite = decideRole(user, min);
+      return { canEdit: canWrite, canDelete: canWrite };
+    },
+    ownedCapabilities: (min, ownerOf) => (resource, user) => {
+      const canWrite = decideOwnerOrRole(user, ownerOf(resource), min);
+      return { canEdit: canWrite, canDelete: canWrite };
+    },
+    policies: { roleAtLeast, ownerOrRole },
+  };
+};

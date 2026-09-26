@@ -129,7 +129,10 @@ directories, each with its own `index.ts` barrel and matching
   `"resource:action"` vocabulary it is written in), and `Ladder.ts` (an ordered
   role ladder with named capability axes — import-free, also published as the
   `./ladder` subpath for browser UX gates; `Policy.roleAtLeast` compiles an
-  axis into a declarative policy). Route-level gating lives in
+  axis into a declarative policy), and `Guard.ts` (the zero-IO gates,
+  predicates and capability hooks over an application-declared viewer — the
+  kernel's fast path over a slice built from facts the caller holds; defines
+  `Unauthorized` / `Forbidden`). Route-level gating lives in
   `http/AuthorizationMiddleware.ts`.
 
   **There is one authorization model** ([ADR 0018](adr/0018-one-authorization-kernel.md)).
