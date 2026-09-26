@@ -70,8 +70,8 @@ catalogs:
       specifier: ^11.7.0
       version: 11.10.0
     drizzle-orm:
-      specifier: ^0.45.0
-      version: 0.45.2
+      specifier: ^0.45.3
+      version: 0.45.3
     drizzle-orm-effect:
       specifier: npm:drizzle-orm@1.0.0-rc.5-ab785fc
       version: 1.0.0-rc.5-ab785fc
@@ -251,7 +251,7 @@ importers:
         version: 11.10.0
       drizzle-orm:
         specifier: 'catalog:'
-        version: 0.45.2(@cloudflare/workers-types@5.20260829.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(mysql2@3.24.2(@types/node@26.1.1))(pg@8.23.0)
+        version: 0.45.3(@cloudflare/workers-types@5.20260829.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(mysql2@3.24.2(@types/node@26.1.1))(pg@8.23.0)
       drizzle-orm-effect:
         specifier: 'catalog:'
         version: drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260829.1)(@effect/sql-d1@4.0.0-rc.112(effect@4.0.0-rc.112))(@effect/sql-pg@4.0.0-rc.112(effect@4.0.0-rc.112))(@effect/sql-pglite@4.0.0-rc.112(effect@4.0.0-rc.112))(@effect/sql-sqlite-do@4.0.0-rc.112(effect@4.0.0-rc.112))(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(effect@4.0.0-rc.112)(mysql2@3.24.2(@types/node@26.1.1))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3))
@@ -2762,8 +2762,8 @@ packages:
   dom-accessibility-api@0.5.16:
     resolution: {integrity: sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg==}
 
-  drizzle-orm@0.45.2:
-    resolution: {integrity: sha512-kY0BSaTNYWnoDMVoyY8uxmyHjpJW1geOmBMdSSicKo9CIIWkSxMIj2rkeSR51b8KAPB7m+qysjuHme5nKP+E5Q==}
+  drizzle-orm@0.45.3:
+    resolution: {integrity: sha512-CAloER21cDdcgZ1OmjrZX82EeRNsdP+y0onX/eyoYDaYzki/adrAa91lzM5jWh7zZPK4qUbw/6LGv9J+A+uizA==}
     peerDependencies:
       '@aws-sdk/client-rds-data': '>=3'
       '@cloudflare/workers-types': '>=4'
@@ -2771,6 +2771,7 @@ packages:
       '@libsql/client': '>=0.10.0'
       '@libsql/client-wasm': '>=0.10.0'
       '@neondatabase/serverless': '>=0.10.0'
+      '@netlify/db': '>=0.4.0'
       '@op-engineering/op-sqlite': '>=2'
       '@opentelemetry/api': ^1.4.1
       '@planetscale/database': '>=1.13'
@@ -2806,6 +2807,8 @@ packages:
       '@libsql/client-wasm':
         optional: true
       '@neondatabase/serverless':
+        optional: true
+      '@netlify/db':
         optional: true
       '@op-engineering/op-sqlite':
         optional: true
@@ -6803,7 +6806,7 @@ snapshots:
 
   dom-accessibility-api@0.5.16: {}
 
-  drizzle-orm@0.45.2(@cloudflare/workers-types@5.20260829.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(mysql2@3.24.2(@types/node@26.1.1))(pg@8.23.0):
+  drizzle-orm@0.45.3(@cloudflare/workers-types@5.20260829.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(mysql2@3.24.2(@types/node@26.1.1))(pg@8.23.0):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20260829.1
       '@electric-sql/pglite': 0.5.8
