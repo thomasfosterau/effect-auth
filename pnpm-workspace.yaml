@@ -26,8 +26,8 @@ catalog:
   # Compiles AND executes every JSDoc `@example` in packages/effect-auth.
   "@effect/docgen": ^0.5.2
   "@effect/language-service": ^0.87.2
-  "@effect/sql-pg": 4.0.0-rc.112
-  "@effect/sql-pglite": 4.0.0-rc.112
+  "@effect/sql-pg": 4.0.0-rc.117
+  "@effect/sql-pglite": 4.0.0-rc.117
   "@electric-sql/pglite": ^0.5.8
   "@node-saml/node-saml": ^5.1.0
   "@solidjs/testing-library": ^0.8.10
@@ -51,7 +51,7 @@ catalog:
   # alias so one test suite exercises both driver shapes.
   drizzle-orm: ^0.45.3
   drizzle-orm-effect: npm:drizzle-orm@1.0.0-rc.5-ab785fc
-  effect: 4.0.0-rc.112
+  effect: 4.0.0-rc.117
   # `vp exec effect-solutions …` — the Effect pattern guides AGENTS.md requires
   # consulting before writing Effect code.
   effect-solutions: ^0.5.3
