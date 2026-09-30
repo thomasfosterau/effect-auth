@@ -171,8 +171,8 @@ export class TrustedDeviceService extends Context.Service<
  * Optional: `TRUSTED_DEVICE_MAX_AGE_MS` (default: 30 days in milliseconds).
  */
 export const trustedDeviceConfig: Config.Config<TrustedDeviceConfig> = Config.all({
-  secret: Config.redacted("TRUSTED_DEVICE_SECRET"),
-  maxAge: Config.int("TRUSTED_DEVICE_MAX_AGE_MS").pipe(
+  secret: Config.Redacted("TRUSTED_DEVICE_SECRET"),
+  maxAge: Config.Int("TRUSTED_DEVICE_MAX_AGE_MS").pipe(
     Config.withDefault(30 * 24 * 60 * 60 * 1000),
   ),
 });

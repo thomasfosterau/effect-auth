@@ -38,7 +38,7 @@ A new package picks an archetype, gets a `vite.config.ts` that declares its task
 
 ## Dependencies: strict catalog
 
-Every external version lives in [pnpm-workspace.yaml](pnpm-workspace.yaml). `package.json` files reference only `catalog:` (dev and runtime dependencies), `catalog:peers` (published peer ranges) or `workspace:*`. `catalogMode: strict` makes pnpm reject anything else. Add a dependency by adding it to the catalog first, then `vp install`, and commit the regenerated `pnpm-lock.yaml`. `effect` is a singleton pinned exactly (with an `overrides` entry); its published peer range is `>=4.0.0-rc.112`.
+Every external version lives in [pnpm-workspace.yaml](pnpm-workspace.yaml). `package.json` files reference only `catalog:` (dev and runtime dependencies), `catalog:peers` (published peer ranges) or `workspace:*`. `catalogMode: strict` makes pnpm reject anything else. Add a dependency by adding it to the catalog first, then `vp install`, and commit the regenerated `pnpm-lock.yaml`. `effect` is a singleton pinned exactly (with an `overrides` entry); its published peer range is `>=4.0.0-rc.113` (the programme floor), proven at dist level by `vp run check:dist`, which installs the packed packages beside the floor version and imports every entry point.
 
 ## Changesets and releases
 

@@ -26,8 +26,8 @@ import { layer as twilioLayer } from "@thomasfosterau/effect-auth-twilio";
 // Resolve secrets through Config, then build the layer from the resolved config.
 const SmsLayer = Layer.unwrapEffect(
   Effect.gen(function* () {
-    const accountSid = yield* Config.string("TWILIO_ACCOUNT_SID");
-    const authToken = yield* Config.redacted("TWILIO_AUTH_TOKEN");
+    const accountSid = yield* Config.String("TWILIO_ACCOUNT_SID");
+    const authToken = yield* Config.Redacted("TWILIO_AUTH_TOKEN");
     return twilioLayer({ accountSid, authToken, from: "+15551234567" });
   }),
 );

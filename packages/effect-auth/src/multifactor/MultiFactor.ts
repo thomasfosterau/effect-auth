@@ -292,8 +292,8 @@ export class MultiFactorService extends Context.Service<
  * Optional: `TWO_FACTOR_ENCRYPT_SECRET`.
  */
 export const multiFactorConfig = Config.all({
-  issuer: Config.string("TWO_FACTOR_ISSUER"),
-  encryptSecret: Config.redacted("TWO_FACTOR_ENCRYPT_SECRET").pipe(
+  issuer: Config.String("TWO_FACTOR_ISSUER"),
+  encryptSecret: Config.Redacted("TWO_FACTOR_ENCRYPT_SECRET").pipe(
     Config.map((secret) => ({ secret }) as const),
     Config.orElse(() => Config.succeed(undefined)),
   ),

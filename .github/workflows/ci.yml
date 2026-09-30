@@ -40,6 +40,12 @@ jobs:
       - name: Build packages
         run: vp run build
 
+      - name: Dist import smoke (effect peer floor)
+        run: vp run check:dist
+
+      - name: Dist import smoke (catalog effect)
+        run: vp run check:dist -- --effect catalog
+
       - name: Type check
         run: vp run check
 

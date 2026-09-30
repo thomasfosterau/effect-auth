@@ -28,7 +28,7 @@ export interface SessionCacheConfig {
   readonly enabled: boolean;
   /** Cache lifetime in ms. Default 5 minutes. */
   readonly maxAge?: number;
-  /** HMAC secret. Use `Redacted.make(...)` / `Config.redacted`. */
+  /** HMAC secret. Use `Redacted.make(...)` / `Config.Redacted`. */
   readonly secret: Redacted.Redacted<string>;
 }
 

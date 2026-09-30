@@ -8,7 +8,7 @@ import { apply } from "alchemy/Apply";
 import { provideFreshArtifactStore } from "alchemy/Artifacts";
 import { AuthProviders } from "alchemy/Auth/AuthProvider";
 import { CredentialsStoreLive } from "alchemy/Auth/Credentials";
-import { ProfileLive } from "alchemy/Auth/Profile";
+import { ProfileStoreLive } from "alchemy/Auth/Profile";
 import { LoggingCli } from "alchemy/Cli/LoggingCli";
 import * as Plan from "alchemy/Plan";
 import { Stack } from "alchemy/Stack";
@@ -47,6 +47,7 @@ const platform = Layer.mergeAll(
     readFile: (path: string) => Effect.fail(notFound(path)),
     exists: () => Effect.succeed(false),
     makeDirectory: () => Effect.void,
+    chmod: () => Effect.void,
     writeFileString: () => Effect.void,
   } as never),
   Path.layer,
@@ -82,7 +83,7 @@ const makeEngine = (
         // provide.
         // @effect-diagnostics-next-line effect/multipleEffectProvide:off
         Effect.provide(Layer.mergeAll(LoggingCli, AlchemyContextLive)),
-        Effect.provide(Layer.provide(ProfileLive, platform)),
+        Effect.provide(Layer.provide(ProfileStoreLive, platform)),
         Effect.provide(Layer.provide(CredentialsStoreLive, platform)),
         Effect.provide(platform),
         Effect.scoped,

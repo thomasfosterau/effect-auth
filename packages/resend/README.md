@@ -26,7 +26,7 @@ import { layer as resendLayer } from "@thomasfosterau/effect-auth-resend";
 // Resolve the secret through Config, then build the layer from the resolved config.
 const EmailLayer = Layer.unwrapEffect(
   Effect.gen(function* () {
-    const apiKey = yield* Config.redacted("RESEND_API_KEY");
+    const apiKey = yield* Config.Redacted("RESEND_API_KEY");
     return resendLayer({ apiKey, from: "App <noreply@example.com>" });
   }),
 );
@@ -79,7 +79,7 @@ templates:
 
 ```ts
 resendLayer({
-  apiKey: Config.redacted("RESEND_API_KEY"),
+  apiKey: Config.Redacted("RESEND_API_KEY"),
   from: "App <noreply@example.com>",
   render: (message) => {
     switch (message.purpose) {

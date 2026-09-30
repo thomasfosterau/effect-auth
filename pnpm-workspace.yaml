@@ -26,8 +26,8 @@ catalog:
   # Compiles AND executes every JSDoc `@example` in packages/effect-auth.
   "@effect/docgen": ^0.5.2
   "@effect/language-service": ^0.87.2
-  "@effect/sql-pg": 4.0.0-rc.112
-  "@effect/sql-pglite": 4.0.0-rc.112
+  "@effect/sql-pg": 4.0.0-rc.117
+  "@effect/sql-pglite": 4.0.0-rc.117
   "@electric-sql/pglite": ^0.5.8
   "@node-saml/node-saml": ^5.1.0
   "@solidjs/testing-library": ^0.8.10
@@ -42,7 +42,7 @@ catalog:
   "@types/react-dom": ^19.3.0
   "@vitejs/plugin-vue": ^6.0.9
   "@vue/test-utils": ^2.5.1
-  alchemy: 2.0.0-beta.76
+  alchemy: 2.0.0-beta.79
   better-sqlite3: ^11.7.0
   # The classic drizzle line is what `packages/drizzle` tests its Promise
   # drivers against; `drizzle-orm-effect` is the commit-suffixed 1.0 prerelease
@@ -51,7 +51,7 @@ catalog:
   # alias so one test suite exercises both driver shapes.
   drizzle-orm: ^0.45.3
   drizzle-orm-effect: npm:drizzle-orm@1.0.0-rc.5-ab785fc
-  effect: 4.0.0-rc.112
+  effect: 4.0.0-rc.117
   # `vp exec effect-solutions …` — the Effect pattern guides AGENTS.md requires
   # consulting before writing Effect code.
   effect-solutions: ^0.5.3
@@ -78,15 +78,15 @@ catalog:
 
 # Peer ranges the PUBLISHED packages declare. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges (an exact
-# `4.0.0-rc.112` peer would reject a consumer on rc.115). `pnpm publish`
+# `4.0.0-rc.117` peer would reject a consumer on rc.115). `pnpm publish`
 # replaces `catalog:peers` with these ranges in the published manifest — which
 # is why the release publishes with pnpm, not npm.
 catalogs:
   peers:
     "@types/pg": ^8.15.0
-    alchemy: ">=2.0.0-beta.75"
+    alchemy: ">=2.0.0-beta.78"
     drizzle-orm: ">=0.44.0"
-    effect: ">=4.0.0-rc.112"
+    effect: ">=4.0.0-rc.113"
     react: ">=18"
     solid-js: ">=1.8"
     svelte: ^5.20.0
@@ -107,7 +107,7 @@ overrides:
   # dev dependency). Scoped to the affected major so a consumer of another
   # major keeps its own range. Drop each once its dependent ships the fix in
   # range.
-  "brace-expansion@2": ">=2.1.4"
+  "brace-expansion@2": ">=5.0.11"
   "js-yaml@3": ">=3.15.2"
   "nanoid@3": ">=3.3.18"
   "postcss@8": ">=8.5.18"
@@ -128,9 +128,9 @@ peerDependencyRules:
     vite: "*"
     vitest: "*"
 minimumReleaseAgeExclude:
-  - "@alchemy.run/cloudflare-runtime@2.0.0-beta.76"
-  - "@alchemy.run/floci@2.0.0-beta.76"
-  - "@alchemy.run/node-utils@2.0.0-beta.76"
-  - alchemy@2.0.0-beta.76
+  - "@alchemy.run/cloudflare-runtime@2.0.0-beta.79"
+  - "@alchemy.run/floci@2.0.0-beta.79"
+  - "@alchemy.run/node-utils@2.0.0-beta.79"
+  - alchemy@2.0.0-beta.79
   # @thomasfosterau/* is first-party — exempt so our own releases install immediately.
   - "@thomasfosterau/*"

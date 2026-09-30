@@ -69,7 +69,7 @@ export const defaultRender = (message: EmailMessage): RenderedEmail => {
 
 /** Configuration for {@link resendEmailSender}. */
 export interface ResendEmailSenderConfig {
-  /** Resend API key. Wrap with `Redacted.make(...)` or read via `Config.redacted(...)`. */
+  /** Resend API key. Wrap with `Redacted.make(...)` or read via `Config.Redacted(...)`. */
   readonly apiKey: Redacted.Redacted<string>;
   /** The `from` address (and optional display name, e.g. `"App <noreply@example.com>"`). */
   readonly from: string;
