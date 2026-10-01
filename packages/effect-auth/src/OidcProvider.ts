@@ -245,6 +245,7 @@ export const OIDC_TOKEN_ENDPOINT_AUTH_METHODS = [
   "client_secret_post",
   "none",
 ] as const;
+/** How a client authenticates at the token endpoint: one of `OIDC_TOKEN_ENDPOINT_AUTH_METHODS`. */
 export type OidcTokenEndpointAuthMethod = (typeof OIDC_TOKEN_ENDPOINT_AUTH_METHODS)[number];
 
 /** Grant types a dynamically registered client may ask for. */
@@ -486,6 +487,11 @@ export interface OidcProviderConfig {
   readonly dynamicRegistration?: OidcDynamicRegistrationConfig;
 }
 
+/**
+ * Acts as an OpenID Connect identity provider: client registration (including RFC 7591 dynamic registration), the authorization-code flow with PKCE and consent, the token and userinfo endpoints, and discovery metadata.
+ *
+ * Requires `OidcClientStore`, `OidcCodeStore`, `OidcConsentStore`, `OidcTokenStore`, `JwtService`, `UserStore` and `IdentifierStore`.
+ */
 export class OidcProviderService extends Context.Service<
   OidcProviderService,
   {
@@ -644,6 +650,7 @@ const buildRedirect = (base: string, params: Record<string, string | undefined>)
 const parseScopes = (scope: string | undefined): readonly string[] =>
   (scope ?? "").split(" ").filter((s) => s.length > 0);
 
+/** Scopes clients may request when `allowedScopes` isn't configured. */
 export const DEFAULT_OIDC_SCOPES = ["openid", "profile", "email", "offline_access"] as const;
 
 /**

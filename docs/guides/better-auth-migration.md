@@ -234,4 +234,4 @@ Be honest with yourself about these before committing:
 - [DESIGN.md](../DESIGN.md) — why the API looks the way it does
 - [byo-stores.md](./byo-stores.md) — implementing store contracts over your own database
 - [client.md](./client.md) — the browser client and framework bindings
-- [better-auth-parity.md](../better-auth-parity.md) — the feature-by-feature parity tracker
+- [better-auth-parity.md](../better-auth-parity.md) — the target architecture and its deliberate deferrals

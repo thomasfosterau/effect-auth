@@ -20,8 +20,6 @@ lifetime (#181).
   pinned to the request that opened them. No `AsyncLocalStorage`: the request scope is the
   Effect context.
 
-Passing a plain handle still pins it for the life of the layer, and every existing
-`databaseLayer(db)` call keeps working unchanged. The one breaking type change is the
-`DrizzleDatabase` service shape, which is now `{ database: Effect<AuthDatabase> }` rather
-than `AuthDatabase` — only code that built the layer by hand with
-`Layer.succeed(DrizzleDatabase, db)` is affected.
+Passing a plain handle pins it for the life of the layer. The `DrizzleDatabase` service shape
+is `{ database: Effect<AuthDatabase> }`, so code that builds the layer by hand provides
+`{ database: Effect.succeed(db) }`.

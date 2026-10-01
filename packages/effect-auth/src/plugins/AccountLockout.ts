@@ -138,6 +138,7 @@ export const memoryAccountLockoutStore = (
   delete: (key) => Effect.sync(() => void records.delete(key)),
 });
 
+/** Configuration for {@link AccountLockoutPlugin}. */
 export interface AccountLockoutConfig {
   /** Consecutive failures before locking. Default 5. */
   readonly maxAttempts?: number;

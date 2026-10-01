@@ -29,6 +29,15 @@ Every store, statement and DDL comes from
 storage interfaces against `SqlClient` and is shared with every other SQL
 deployment. D1 is SQLite, so the same tables and the same queries apply.
 
+## Install
+
+```sh
+pnpm add @thomasfosterau/effect-auth-alchemy @thomasfosterau/effect-auth effect alchemy
+```
+
+`alchemy` and `effect` are required peer dependencies;
+`@thomasfosterau/effect-auth-sql` comes along as a dependency.
+
 ## Storage layers
 
 ```ts
@@ -169,15 +178,6 @@ await Effect.runPromise(migrate(db));
 > lifecycle types all come from `alchemy` itself; there is no vendored or
 > structural copy of them here.
 
-## Installation
-
-```sh
-bun add @thomasfosterau/effect-auth-alchemy @thomasfosterau/effect-auth effect alchemy
-```
-
-`alchemy` and `effect` are required peer dependencies;
-`@thomasfosterau/effect-auth-sql` comes along as a dependency.
-
 ## Usage in a Worker
 
 ```ts
@@ -217,3 +217,7 @@ export default Cloudflare.Worker(
   database never sees a raw bearer token.
 - effect-auth uses `node:crypto`, so run your Worker with the `nodejs_compat`
   flag.
+
+## License
+
+MIT

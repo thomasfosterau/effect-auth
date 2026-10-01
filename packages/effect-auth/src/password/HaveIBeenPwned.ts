@@ -18,6 +18,7 @@ import type { SignUpInput } from "../email/EmailPassword.ts";
 import { makePlugin, type ResetPasswordArgs } from "../Hooks.ts";
 import { AuthError, PwnedPasswordError } from "../Errors.ts";
 
+/** Configuration for {@link HaveIBeenPwnedPlugin}. */
 export interface HibpConfig {
   /** Reject when the breach count is at least this. Default 1. */
   readonly threshold?: number;

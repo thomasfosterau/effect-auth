@@ -1,64 +1,82 @@
 # AGENTS.md
 
-Project conventions for agents and humans working in this repository. `CLAUDE.md` is a symlink to this file.
+`CLAUDE.md` is a symlink to this file. effect-auth is a library monorepo: authentication and authorization for [Effect](https://effect.website/) v4, as thirteen `@thomasfosterau/effect-auth*` packages under `packages/*`. Twelve are publishable; `effect-auth-alchemy` is `"private": true` until #250. It has no application, no deployment and no secrets.
 
-effect-auth is a **library monorepo**: authentication and authorization for [Effect](https://effect.website/) v4, published as thirteen `@thomasfosterau/effect-auth*` packages. It has no application, no deployment and no secrets — every gate runs offline against the lockfile.
+Every package publishes `dist/`. Every package except the four framework bindings peers `effect` through `catalog:peers`; a binding peers only its framework. The archetype decides what a package may import:
 
-## Read first
-
-- **[docs/BOUNDARY.md](docs/BOUNDARY.md)** — what effect-auth is relative to effect-jsonapi and legation, and the dependency rules between the three. effect-auth may depend on effect-jsonapi; it may **never** depend on legation (not even as a dev dependency); importing the core package root must not pull the HTTP tier into a consumer's module graph (`ModuleGraph.test.ts` pins that).
-- **[docs/adr/README.md](docs/adr/README.md)** — the ADR index. ADRs are historical records that predate the July 2026 restructure; superseded ones are marked there. For what the library is today read [ADR-0017](docs/adr/0017-batteries-included-auth-framework.md) (batteries-included, not headless) and [ADR-0018](docs/adr/0018-one-authorization-kernel.md) (one authorization kernel; RBAC is authoring sugar over it) before anything else in that directory. A new settled decision gets the next ADR number and a row in the index.
-- **[docs/DESIGN.md](docs/DESIGN.md)** — the settled API conventions (naming, `Context.Service` classes, `make` / `layer` exports, store contracts, error taxonomy). **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the module map as it stands. **[docs/CONTEXT.md](docs/CONTEXT.md)** — the domain vocabulary (credential vs verification vs auth state).
-- **[docs/SECURITY.md](docs/SECURITY.md)** — the security requirements every change is held to.
-
-## Package archetypes
-
-Every package lives under `packages/*`, publishes `dist/` (built by `tsc`, or Vite for the JSX / SFC bindings), and peers `effect` through `catalog:peers`. They fall into five archetypes, and the archetype decides what a package may import:
-
-| Archetype              | Packages                                        | Rule                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Core**               | `effect-auth` (`@thomasfosterau/effect-auth`)   | Depends on `effect` only. Flat root modules for the spine (sessions, users, the authorization kernel: `Policy`, `Condition`, `Entity`, `Authorizer`, `Rbac`, …) plus lowercase cluster directories (`email/`, `http/`, `oauth/`, `password/`, `plugins/`, `multifactor/`), each with a subpath export. The HTTP tier (`http/`) is opt-in and must stay unreachable from the root barrel. |
-| **Storage adapters**   | `sql`, `drizzle`, `alchemy`                     | Implement the core's store contracts (`SessionStore`, `UserStore`, `ApiKeyStore`, …) over a database. The database library is a **peer**, never bundled.                                                                                                                                                                                                                                 |
-| **Vendor adapters**    | `argon2`, `resend`, `twilio`, `saml`            | Implement one core seam (`PasswordHasher`, `EmailSender`, `SmsSender`, `SamlVerifier`) over one vendor. Plain `fetch` against the vendor's REST API rather than an SDK where possible; Workers-safe.                                                                                                                                                                                     |
-| **Client**             | `client` (`@thomasfosterau/effect-auth-client`) | The typed browser client over the HTTP contract plus the observable session store; `./testing` publishes the in-memory server fixture.                                                                                                                                                                                                                                                   |
-| **Framework bindings** | `react`, `svelte`, `solid`, `vue`               | Thin bindings over `client`. The framework is a peer.                                                                                                                                                                                                                                                                                                                                    |
+| Archetype              | Packages                                        | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Core**               | `effect-auth` (`@thomasfosterau/effect-auth`)   | Depends on `effect` only. Flat root modules for the spine (sessions, users, the authorization kernel: `Policy`, `Condition`, `Entity`, `Authorizer`, `Rbac`, …) plus lowercase cluster directories (`email/`, `http/`, `oauth/`, `password/`, `plugins/`, `multifactor/`), each with a subpath export. `./ladder` (`src/Ladder.ts`) imports nothing, not even `effect`, because browser bundles load it; `ModuleGraph.test.ts` enforces this. |
+| **Storage adapters**   | `sql`, `drizzle`, `alchemy`                     | Implement the core's store contracts (`SessionStore`, `UserStore`, `ApiKeyStore`, …) over a database. The database library is a **peer**, never bundled.                                                                                                                                                                                                                                                                                      |
+| **Vendor adapters**    | `argon2`, `resend`, `twilio`, `saml`            | Implement one core seam (`PasswordHasher`, `EmailSender`, `SmsSender`, `SamlVerifier`) over one vendor. Plain `fetch` against the vendor's REST API rather than an SDK where possible; Workers-safe.                                                                                                                                                                                                                                          |
+| **Client**             | `client` (`@thomasfosterau/effect-auth-client`) | The typed browser client over the HTTP contract plus the observable session store; `./testing` publishes the in-memory server fixture.                                                                                                                                                                                                                                                                                                        |
+| **Framework bindings** | `react`, `svelte`, `solid`, `vue`               | Thin bindings over `client`. The framework is a peer.                                                                                                                                                                                                                                                                                                                                                                                         |
 
 A new package picks an archetype, gets a `vite.config.ts` that declares its tasks through `packageTasks` ([vite.tasks.ts](vite.tasks.ts)), and gets a changeset.
 
-## Gates
+## Common pitfalls
 
-`vp install` once (it also installs the Vite+ git hooks: pre-commit runs `vp staged`, i.e. format + lint on staged files). Then:
+- **Never depend on legation**, in any package and in any dependency field, dev dependencies included. effect-auth may depend on effect-jsonapi. [docs/BOUNDARY.md](docs/BOUNDARY.md) holds the reason and the full rules.
+- **Importing the core package root is meant not to pull the HTTP tier** (`http/`, and through it `effect/http-api` and effect-jsonapi) into a consumer's module graph. **Today it does:** the root barrel re-exports `Http` (`src/index.ts`), and the guard in `ModuleGraph.test.ts` is skipped until #205 lands. Don't add any other root-reachable import of `effect/http-api`.
+- **Every external version lives in the catalog** in [pnpm-workspace.yaml](pnpm-workspace.yaml) (`catalogMode: strict` rejects anything else). After editing it, run `pnpm install` and commit `pnpm-lock.yaml`, or CI fails with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`. `effect` is a singleton (`overrides`); its published floor lives in `catalogs.peers`.
+- **`effect-auth-alchemy` is held private until #250** (alchemy beta.79 imports the removed `effect/unstable/*`). Its `build`, `check` and `test:unit` run; `AuthSchema.test.ts` needs the alchemy runtime, so it lives in `test:alchemy`, which runs in its own non-required CI job and is expected to fail until #250. Don't skip that test or move it into `test:unit`.
 
-- `vp check` — format + lint (the built-in pass, oxfmt + oxlint).
-- `vp run check` — every package's type gates: `tsc` over sources and tests (`vue-tsc` / `svelte-check` where relevant) plus `vp test --typecheck`. Each package's `build`, `check` and `test:unit` tasks first build the workspace packages it depends on (their `exports` point at the gitignored `dist/`), so this works on a fresh checkout with no manual build.
+## Conventions
+
+- **Optional properties are `?: T | undefined`.** `exactOptionalPropertyTypes` is on (`tsconfig.base.json`), so a bare `?: T` rejects a caller that forwards its own optional value.
+- **Relative imports carry the `.ts` extension** (`rewriteRelativeImportExtensions`).
+- **Tests import from `vite-plus/test`**, never `vitest`; lint (`vite-plus/prefer-vite-plus-imports`) rejects the direct import.
+- **Services are `Context.Service` classes with a static `layer`**, and dependencies are resolved at layer construction so service methods carry `R = never`.
+- **Errors follow [DESIGN.md](docs/DESIGN.md) D4:** domain errors are `Data.TaggedError`; HTTP-boundary errors in `http/HttpApiSchema.ts` are `Schema.TaggedError` classes with a status. HTTP is `effect/http-api`.
+- **Secrets are compared with `constantTimeHashEqual` / `timingSafeEqualBytes`** (`src/TokenHash.ts`) and randomness comes from the `Crypto.Crypto` service (default `PlatformCrypto.layer`); direct `node:crypto` use stays corralled in `password/Password.ts`, `TokenHash.ts` and `Cipher.ts`.
+
+## Commands
+
+- `vp install` — dependencies, plus the Vite+ git hooks (pre-commit runs `vp staged`: format + lint on staged files). There is no pre-push hook.
+- `vp check` — format + lint (Oxfmt + Oxlint). `vp run check` — the type gate: every package's `tsc` over sources and tests (`vue-tsc` / `svelte-check` where relevant) plus `vp test --typecheck`. They are different commands.
 - `vp run -r test:unit` — every package's unit tests.
-- `vp run build` — every package's `dist/`.
-- `vp run check:dist` — the dist-level import smoke test: packs the built packages, installs them beside one exact `effect` (default the peer floor; `-- --effect catalog` for the version the workspace builds against; `effect-auth-alchemy` is excluded until alchemy ships an rc.118 build, see #250) and imports every entry point. **Run `vp run build` first**; CI runs it twice, after the build step.
+- `vp run build` — every package's `dist/`. Each package's `build`, `check` and `test:unit` first build the workspace packages it depends on (their `exports` point at the gitignored `dist/`), so a fresh checkout needs no manual build.
+- `vp run check:dist` (network) — packs the built packages, installs them from the registry beside one exact `effect` (default the peer floor; `-- --effect catalog` for the version the workspace builds against) and imports every entry point. Run `vp run build` first.
+- `vp run docs` — docgen for `packages/effect-auth`: writes the API reference and compiles and runs every JSDoc `@example`. It currently fails before reaching the examples (undocumented barrel re-exports), so it isn't a gate yet (#257).
+- `pnpm changeset` — add a changeset.
 
-`@thomasfosterau/effect-auth-alchemy` is `"private": true` until #250 (alchemy beta.79 imports the removed `effect/unstable/*`). Its `build`, `check` and `test:unit` run; `AuthSchema.test.ts` needs the alchemy runtime, so it lives in `test:alchemy`, which has its own non-required CI job and is expected to fail until #250.
+## Verification
 
-`vp check` is the built-in; `vp run check` is this repo's task. They are different commands. CI runs all four on every PR ([.github/workflows/ci.yml](.github/workflows/ci.yml)); run them yourself before pushing — there is no pre-push hook.
+Before you report work as done, run the gates below in order and quote each command with its final pass/fail. If a gate can't run here, say which and why in the PR body; never imply it ran. This is CI's order ([ci.yml](.github/workflows/ci.yml), job `test`):
 
-## Dependencies: strict catalog
+1. `vp check`
+2. `vp run build`
+3. `vp run check:dist`
+4. `vp run check:dist -- --effect catalog`
+5. `vp run check`
+6. `vp run -r test:unit`
+7. `pnpm audit --audit-level high` (network)
 
-Every external version lives in [pnpm-workspace.yaml](pnpm-workspace.yaml). `package.json` files reference only `catalog:` (dev and runtime dependencies), `catalog:peers` (published peer ranges) or `workspace:*`. `catalogMode: strict` makes pnpm reject anything else. Add a dependency by adding it to the catalog first, then `vp install`, and commit the regenerated `pnpm-lock.yaml`. `effect` is a singleton pinned exactly (with an `overrides` entry); its published peer range is `>=4.0.0-rc.118` (the programme floor), proven at dist level by `vp run check:dist`, which installs the packed packages beside the floor version and imports every entry point.
+CI's second job, `alchemy`, runs `vp run --filter @thomasfosterau/effect-auth-alchemy test:alchemy`; it is not required and fails until #250. CI doesn't run `vp run docs` until #257 lands.
 
-## Changesets and releases
+## Branches and pull requests
 
-- **Every change to a published package carries a changeset** (`vp run changeset`, or write `.changeset/<slug>.md` by hand) naming each package it touches. Docs, CI and tooling-only changes need none.
-- The default branch is **`trunk`**. Merging to `trunk` makes the Release workflow open or update the "Version Packages" PR; merging that PR publishes to npm via OIDC trusted publishing from the protected `release` environment. There is no `NPM_TOKEN`. See [PUBLISHING.md](PUBLISHING.md).
-- **Agents never publish** and never merge the Version Packages PR — the owner does.
+- Branch off `trunk` as `issue-<n>-<slug>`; PR against `trunk`; squash-merge. One issue per PR.
+- Rebase onto `origin/trunk` before opening or updating a PR; never merge `trunk` into your branch (GitHub's Update-branch button merges).
+- Once a branch has a pushed commit, open the PR without being asked, watch it to merge or close (CI failures, review comments), and keep the body current: what changed and why, which gates ran with their result, the changesets added.
+- Every change to a published package's behaviour carries a changeset (`pnpm changeset`) naming each package it touches. Changes to doc comments that reach the emitted `.d.ts` (TSDoc) take a `patch` changeset; other docs-only changes (READMEs, guidance), CI and tooling need none. Never publish or version by hand: the Release workflow opens the version PR (`chore: version packages`) and the owner merges it. [PUBLISHING.md](PUBLISHING.md) has the pipeline.
+- GitHub writes go to `thomasfosterau/effect-auth` only; pass `-R thomasfosterau/effect-auth` whenever the cwd might be another checkout. Use the `gh` CLI for GitHub operations, even when GitHub MCP tools are available.
 
-## Branches and PRs
+## Work tracker
 
-Branch off `trunk`, open the PR against `trunk`, one issue per PR. Fill the PR body with what changed and why, which gates ran and their result, and the changesets added; keep it current as the branch moves. GitHub writes are scoped to this repository.
+Issues are the backlog: when you find work you can't do now, file an issue rather than leaving a TODO; a TODO in code cites its issue (`TODO(#205)`). The issue is the spec — read its comments (`gh issue view <n> --comments`); later comments override the body, and its code claims need re-checking against current `trunk`. Record decisions and findings as issue comments. Stop-and-report is a valid outcome: on a blocker outside the issue's scope, comment the evidence on the issue and stop. Scope cut mid-PR becomes a linked issue before merge.
 
 ## Effect
 
-**Consult effect-solutions before writing Effect code** — `vp exec effect-solutions list`, then `vp exec effect-solutions show <topic>…` (topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli). When the guides run out, read the Effect source itself in `node_modules/effect/src`. Never guess at an Effect pattern.
+Consult effect-solutions before writing Effect code (`vp exec effect-solutions list`, then `vp exec effect-solutions show <topic>…`); never guess at an Effect pattern. If it isn't available, read `node_modules/effect/dist/*.d.ts`, or the source in `node_modules/effect/src`. The pinned version is the `effect` entry in `pnpm-workspace.yaml`'s catalog.
 
-House style, enforced by review rather than lint: services are `Context.Service` classes with a static `layer`; errors are `Schema.TaggedError` classes (older modules still use `Data.TaggedError`); dependencies are resolved at layer construction so service methods carry `R = never`; HTTP is `effect/http-api`.
+## Agent sessions
 
-## Claude Code sessions
+The SessionStart hook ([.claude/hooks/session-start.sh](.claude/hooks/session-start.sh), also the devcontainer's `postCreateCommand`) installs dependencies against the lockfile and links `vp` and `tsx` onto PATH for non-interactive shells. It hydrates no secrets; none are needed. A PostToolUse hook (`.claude/settings.json`) runs `vp fmt --write` on every file you edit, so edits get reformatted after you write them. `vp run check:dist` and `pnpm audit` need registry access.
 
-[.claude/hooks/session-start.sh](.claude/hooks/session-start.sh) runs on every session start (and is what the devcontainer's `postCreateCommand` runs): it installs dependencies against the lockfile and links `vp` and `tsx` onto `PATH` for non-interactive shells. It hydrates no secrets; none are needed.
+## Documentation surfaces
+
+- Domain vocabulary: [docs/CONTEXT.md](docs/CONTEXT.md) · API conventions: [docs/DESIGN.md](docs/DESIGN.md) · module map and security model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · decisions: [docs/adr/](docs/adr/README.md) (read [ADR-0017](docs/adr/0017-batteries-included-auth-framework.md) and [ADR-0018](docs/adr/0018-one-authorization-kernel.md) first) · library boundary: [docs/BOUNDARY.md](docs/BOUNDARY.md).
+- Each package `README.md` is the API reference consumers read on npm; the root README is a landing page.
+- [CONTRIBUTING.md](CONTRIBUTING.md) holds human procedures; [PUBLISHING.md](PUBLISHING.md) the release pipeline and owner setup; [SECURITY.md](SECURITY.md) vulnerability reporting.
+- A new settled design decision gets the next ADR number and a row in the ADR index; other decisions and findings go in issue comments.

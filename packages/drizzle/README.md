@@ -23,10 +23,10 @@ pipeline.
 ## Install
 
 ```sh
-npm install @thomasfosterau/effect-auth-drizzle drizzle-orm
+pnpm add @thomasfosterau/effect-auth-drizzle drizzle-orm effect
 ```
 
-`drizzle-orm` is a peer dependency, as is your driver of choice (`pg`,
+`drizzle-orm` and `effect` are peer dependencies, as is your driver of choice (`pg`,
 `postgres`, `@neondatabase/serverless`, `@electric-sql/pglite`,
 `better-sqlite3`, `@libsql/client`, `mysql2`, ...).
 
@@ -356,21 +356,6 @@ The stores implement effect-auth's contracts exactly:
 
 Stores beyond these three — OAuth accounts, WebAuthn credentials, rate limits,
 and the rest — are not covered here yet.
-
-## Tests
-
-The PostgreSQL suites run against
-[PGlite](https://github.com/electric-sql/pglite) (PostgreSQL compiled to
-WebAssembly, in-process, no server), so `jsonb`, `timestamptz` and unique-index
-violations behave exactly as they do in production. The SQLite suite runs the
-same assertions against `better-sqlite3` — which also puts drizzle's
-_synchronous_ result kind through the seam. `Requests.test.ts` counts the SQL a
-program emits through drizzle's own `logger` hook to prove the batching claims
-above, and `MySqlSchema.test.ts` pins the MySQL SQL through the proxy driver.
-
-```sh
-vp run test:unit
-```
 
 ## License
 

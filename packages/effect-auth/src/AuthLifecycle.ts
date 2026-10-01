@@ -18,6 +18,9 @@ import { SessionService } from "./SessionService.ts";
 import { UserService } from "./User.ts";
 import type * as Types from "./Types.ts";
 
+/**
+ * Configuration for {@link AuthLifecycleService}.
+ */
 export interface AuthLifecycleConfig {
   readonly requireEmailVerification?: boolean;
   readonly sendOnSignUp?: boolean;
@@ -25,6 +28,9 @@ export interface AuthLifecycleConfig {
   readonly autoSignInAfterVerification?: boolean;
 }
 
+/**
+ * Outcome of a sign-up or sign-in through {@link AuthLifecycleService}.
+ */
 export interface AuthLifecycleResult {
   readonly user: Types.User;
   readonly session?: Types.Session;
@@ -38,11 +44,19 @@ export interface AuthLifecycleResult {
   readonly rememberMe?: boolean;
 }
 
+/**
+ * Input to {@link AuthLifecycleService.verifyEmail}: the verification token and the attributes for the session it may issue.
+ */
 export interface VerifyEmailInput {
   readonly token: string;
   readonly sessionAttributes?: Record<string, unknown>;
 }
 
+/**
+ * Email-and-password sign-up and sign-in orchestrated with email verification: sends verification emails, gates sign-in on a verified address when configured, and can sign the user in on verification.
+ *
+ * Requires `EmailPasswordService`, `EmailVerificationService`, `SessionService`, `UserService`, `UserStore`, `IdentifierStore` and `Hooks`.
+ */
 export class AuthLifecycleService extends Context.Service<
   AuthLifecycleService,
   {

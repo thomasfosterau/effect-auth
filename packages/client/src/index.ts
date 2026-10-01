@@ -1,9 +1,7 @@
 /**
- * @thomasfosterau/effect-auth-client
- *
- * The front-end half of effect-auth: a small, dependency-free vanilla client
- * (`createAuthClient`) with typed methods over the auth HTTP contract and an
- * observable session store.
+ * The front-end half of effect-auth (`@thomasfosterau/effect-auth-client`): a
+ * small, dependency-free vanilla client (`createAuthClient`) with typed methods
+ * over the auth HTTP contract and an observable session store.
  *
  * Framework bindings live in their own packages —
  * `@thomasfosterau/effect-auth-react`, `@thomasfosterau/effect-auth-svelte`,

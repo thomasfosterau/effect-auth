@@ -32,6 +32,9 @@ import type * as Types from "../Types.ts";
 // Error
 // ---------------------------------------------------------------------------
 
+/**
+ * Failure of the OTP second factor: an expired, unknown or exhausted challenge, a wrong code, or a failed send.
+ */
 export class OtpSecondFactorError extends Data.TaggedError("OtpSecondFactorError")<{
   readonly message: string;
   readonly cause?: unknown;
@@ -57,6 +60,7 @@ export interface OtpSecondFactorRecord {
   readonly expiresAt: number;
 }
 
+/** The store {@link OtpSecondFactorService} keeps pending OTP challenges in (codes hashed). */
 export class OtpSecondFactorStore extends Context.Service<
   OtpSecondFactorStore,
   {
@@ -77,6 +81,9 @@ export class OtpSecondFactorStore extends Context.Service<
 // Config + Service
 // ---------------------------------------------------------------------------
 
+/**
+ * Configuration for {@link OtpSecondFactorService}.
+ */
 export interface OtpSecondFactorConfig {
   /** OTP digit length. Default: 6. */
   readonly otpLength?: number;
@@ -93,15 +100,22 @@ export interface OtpSecondFactorConfig {
   readonly sendOtp: (user: Types.User, otp: string) => Effect.Effect<void, Errors.AuthError>;
 }
 
+/** Options for {@link OtpSecondFactorService.verify}: attributes for the session it issues. */
 export interface OtpSecondFactorVerifyOptions {
   readonly sessionAttributes?: Record<string, unknown>;
 }
 
+/** The user id and session issued when the OTP second factor succeeds. */
 export interface OtpSecondFactorVerifyResult {
   readonly userId: string;
   readonly session: Types.Session;
 }
 
+/**
+ * An email or SMS one-time code as the second factor: issues a challenge after the password step and completes sign-in when the code matches.
+ *
+ * Requires `OtpSecondFactorStore` and `SessionService`.
+ */
 export class OtpSecondFactorService extends Context.Service<
   OtpSecondFactorService,
   {

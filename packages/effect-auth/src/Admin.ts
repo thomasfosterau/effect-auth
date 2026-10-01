@@ -99,6 +99,9 @@ export interface AdminCreateUserInput {
   }>;
 }
 
+/**
+ * The user-store contract {@link AdminService} lists, creates, updates and deletes users through.
+ */
 export class AdminUserStore extends Context.Service<
   AdminUserStore,
   {

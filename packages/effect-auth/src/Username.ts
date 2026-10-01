@@ -35,6 +35,7 @@ export class UsernameError extends Data.TaggedError("UsernameError")<{
   readonly message: string;
 }> {}
 
+/** Configuration for {@link UsernameService}. */
 export interface UsernameConfig {
   /** Minimum username length. Default 3. */
   readonly minUsernameLength?: number;
@@ -52,6 +53,7 @@ export interface UsernameConfig {
   readonly requireEmailVerification?: boolean;
 }
 
+/** Input to {@link UsernameService.signUp}. */
 export interface UsernameSignUpInput {
   readonly username: string;
   readonly email: string;
@@ -61,6 +63,7 @@ export interface UsernameSignUpInput {
   readonly sessionAttributes?: Record<string, unknown>;
 }
 
+/** Input to {@link UsernameService.signIn}. */
 export interface UsernameSignInInput {
   readonly username: string;
   readonly password: string;
@@ -72,6 +75,11 @@ export interface UsernameSignInInput {
   readonly rememberMe?: boolean;
 }
 
+/**
+ * Sign-up and sign-in by username and password. Usernames are unique case-insensitively, and sign-in honours the multi-factor gate.
+ *
+ * Requires `EmailPasswordService`, `EmailPasswordStore`, `PasswordHasher`, `UserStore`, `IdentifierStore`, `SessionService` and `Hooks`.
+ */
 export class UsernameService extends Context.Service<
   UsernameService,
   {

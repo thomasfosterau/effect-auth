@@ -83,6 +83,9 @@ export class PhoneOtpUserStore extends Context.Service<
   }
 >()("@effect-auth/PhoneOtpUserStore") {}
 
+/**
+ * Configuration for {@link PhoneOtpService}.
+ */
 export interface PhoneOtpConfig {
   readonly otpLength?: number; // Default: 6 digits
   readonly expiresIn?: number; // Default: 5 minutes
@@ -108,15 +111,22 @@ export interface PhoneOtpConfig {
   readonly normalizePhoneNumber?: (raw: string) => Effect.Effect<string, Errors.AuthError>;
 }
 
+/** Options for {@link PhoneOtpService.signIn}. */
 export interface PhoneOtpSignInOptions {
   readonly sessionAttributes?: Record<string, unknown>;
 }
 
+/** The user and session issued by a phone OTP sign-in. */
 export interface PhoneOtpAuthResult {
   readonly user: Types.User;
   readonly session: Types.Session;
 }
 
+/**
+ * Sign-in and phone-number verification by SMS one-time code. Codes are stored hashed, with an attempt limit.
+ *
+ * Requires `PhoneOtpStore`, `PhoneOtpUserStore`, `UserStore`, `IdentifierStore` and `SessionService`.
+ */
 export class PhoneOtpService extends Context.Service<
   PhoneOtpService,
   {

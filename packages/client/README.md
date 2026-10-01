@@ -5,7 +5,7 @@ The browser half of [effect-auth](https://github.com/thomasfosterau/effect-auth)
 ## Install
 
 ```sh
-pnpm add @thomasfosterau/effect-auth-client
+pnpm add @thomasfosterau/effect-auth-client effect
 ```
 
 ## Usage
@@ -37,8 +37,9 @@ Each framework has its own package built on this client:
 | React     | `@thomasfosterau/effect-auth-react`  |
 | Svelte    | `@thomasfosterau/effect-auth-svelte` |
 | Vue       | `@thomasfosterau/effect-auth-vue`    |
+| Solid     | `@thomasfosterau/effect-auth-solid`  |
 
-See [the client guide](https://github.com/thomasfosterau/effect-auth/blob/main/docs/guides/client.md) for the full endpoint coverage, background-refresh options and the plugin API.
+See [the client guide](../../docs/guides/client.md) for the full endpoint coverage, background-refresh options and the plugin API.
 
 ## License
 

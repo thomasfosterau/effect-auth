@@ -10,7 +10,7 @@ and `effect`.
 ## Install
 
 ```sh
-npm install @thomasfosterau/effect-auth-twilio
+pnpm add @thomasfosterau/effect-auth-twilio @thomasfosterau/effect-auth effect
 ```
 
 ## Usage

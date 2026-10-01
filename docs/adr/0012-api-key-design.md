@@ -1,5 +1,9 @@
 # ApiKey design
 
+> **Revised in code.** API keys keep the `{ resource: actions[] }` map, but organization roles now
+> use `"resource:action"` strings, so the two are checked separately (`ApiKey.ts`, `Permission.ts`).
+> The text below is left as written.
+
 `ApiKey` is a Primary Credential (ADR-0006), with the dual-ownership semantics of ADR-0010 — a
 mandatory `userId` plus an optional `ownedByOrganizationId`. Six decisions shape it.
 

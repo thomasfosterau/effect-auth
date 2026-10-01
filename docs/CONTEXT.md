@@ -92,18 +92,19 @@ by a secure random id.
 **JWT**: stateless auth state — issued to a holder, verified by signature against JWKS, no
 server-side row.
 
-### Feature-local state entities — _opt-in entities augmenting a canonical entity with feature state_
+### Feature state — _opt-in state carried in a canonical entity's `attributes`_
 
-Per ADR-0015, opt-in feature state lives in its own entity with its own store rather than as a
-column on the canonical entity. Don't provide the store → don't get the feature.
+ADR-0015 proposed a feature-local entity per opt-in feature; the code keeps that state in the
+`attributes` bag of the User or Session instead.
 
-**AnonymousMarker**: marks a User as anonymous (signed up without a Credential). Presence of a row
-means "this User is anonymous"; conversion to a real user is its deletion plus addition of a
-Credential.
+**Anonymous user**: a User with `attributes.isAnonymous === true` and no identifiers
+(`isAnonymousUser` detects it). Conversion to a real user adds an identifier and a Credential.
 
-**LastLoginRecord**: tracks which method (`"credential"`, `"google"`, `"passkey"`, …) was used for
-this User's most recent successful sign-in. Updated best-effort and asynchronously on sign-in.
-One row per User.
+**Last login method**: the last-login-method plugin (`plugins/LastLoginMethod.ts`) records the
+sign-in method on the issued session's `attributes.method`; the HTTP layer can also set a
+non-httpOnly `<cookie>_last_method` hint for login pages.
+
+**Ban**: see the Admin language below.
 
 ### Supporting terms
 
@@ -130,8 +131,8 @@ _Avoid_: Workspace, Tenant. "Team" is _not_ a synonym — a Team is a sub-groupi
 Organization (see below).
 
 **Member**:
-The User-to-Organization relationship, carrying a `role: string` that names one of the configured
-RoleDefinitions. The same User may hold Memberships in many Organizations; at most one Membership
+The User-to-Organization relationship, carrying a `role: string` that names an Organization role
+(below). The same User may hold Memberships in many Organizations; at most one Membership
 per (User, Organization) pair.
 _Avoid_: saying "the org's users" when you mean Member records — a Member is the relationship,
 not a User. Also avoid "the user's org" — a User may have many Memberships.
@@ -144,10 +145,9 @@ creates the `Member` row.
 _Avoid_: treating Invitation as separate machinery from other Verifications — same shape, same
 hashing rule.
 
-**ActiveOrgSelection**:
-A pointer from a Session to the Organization the user is currently working in. Independent
-entity by default; configurable to live on `Session.attributes` (see ADR-0009).
-_Avoid_: putting active-org state on Session by default.
+**Active organization**:
+The Organization the user is currently working in: `session.attributes.activeOrganizationId`,
+set at `createSession` or by updating the session's attributes. Not a separate entity.
 
 **Team**:
 A sub-grouping of Members **within** an Organization, supporting a single-parent tree
@@ -164,16 +164,18 @@ _Avoid_: implying that parent-team membership cascades to children.
 
 ### Role and permission terms
 
-**RoleDefinition**:
-A configured name + a PermissionStatement. Defined globally per `OrganizationService` at config
-time; not stored per-Org. The reserved name `"owner"` always exists with default wildcard
-permissions.
-_Avoid_: per-org role storage (deferred feature; ADR-0009).
+**Organization role**:
+A role name resolved against `OrganizationConfig.roles` (a role → `"resource:action"` permission
+map), optionally replaced for one organization by an `OrgRole` managed at runtime
+(`upsertOrgRole` / `deleteOrgRole`). The two never merge: a tenant's `OrgRole` grants exactly
+what it lists. The protected creator role (`OrganizationConfig.creatorRole`, default `"owner"`)
+always exists and can't be redefined.
 
-**PermissionStatement**:
-`Record<resource, readonly action[]>` describing which actions on which resources a role permits.
-Permission checks intersect a _required_ statement against the role's statement.
-_Avoid_: free-form permission strings; the resource/action structure is required.
+**Permission**:
+A resource paired with an action (`PermissionRef { resource, action }` in `Permission.ts`), with
+`"*"` wildcards on the granted side (`permissionMatches`). Organization roles write it as a
+`"resource:action"` string (`parsePermission` / `formatPermission`); `Rbac` takes `PermissionRef`
+values; an API key stores a `{ resource: actions[] }` map.
 
 ### Ownership
 
@@ -194,34 +196,31 @@ credential but not over the User. Does not imply Membership.
 ## Admin language
 
 A separate bounded context: system-wide administrative operations on Users, Sessions, and
-Accounts. Lives in its own subdirectory under the `effect-auth` package (ADR-0014). Out of the
+Accounts. Lives in `src/Admin.ts` in the core package (ADR-0014 placed it in a subdirectory; see
+its header). Out of the
 authentication credential/verification typology — same as Organization.
 
-**Ban**:
-A feature-local entity marking a User as banned. `{ userId, reason, expiresAt? }`. Presence
-prevents sign-in; deletion (or `expiresAt` passing) restores it. Per ADR-0015, not a column on
-User.
-_Avoid_: putting `bannedAt` / `banReason` on the User row.
+**Admin**:
+A user whose `attributes.role` is in `AdminConfig.adminRoles` (default `["admin"]`) or whose id is
+in `AdminConfig.adminUserIds`.
 
-**System-admin role**:
-The reserved role string `"system-admin"`, anchoring `AdminAccessControl.requireSystemAdmin`. The
-role-to-user resolution flows through the policy kernel — `Role::"system-admin"` as a parent of the
-principal entity, resolved by whatever `EntityResolver` the deployment provides; the library
-doesn't dictate how membership in the role is stored.
-_Avoid_: hardcoding a single admin User; the role is a check, not an identity.
+**Ban**:
+`attributes.banned: true` on the User, with optional `banReason` and `banExpires` (epoch ms;
+absent means permanent, a past value means the ban has lapsed). `isBanned` reads it;
+`BannedUserPlugin` blocks a banned user's sessions.
 
 **Impersonation**:
-The state where a system-admin is signed in _as_ a target User for support purposes. Carried as
-`Session.impersonatedBy: string` (the admin's userId). A security-critical signal that lives on
-Session by exception to ADR-0015 — see ADR-0014.
+The state where an admin is signed in _as_ a target User for support purposes. Carried on the
+session as `attributes.impersonatedBy` (the admin's userId) and `attributes.impersonationExpiresAt`
+(advisory; the application enforces it).
 
 ## Out of typology
 
 Things that look like they belong in the typology but don't. Don't add them.
 
-- **Foundational User fields** (`email`, `emailVerified`, `createdAt`, `image`, `name`) —
-  properties of the User, not entities. Feature flags like "is anonymous" or "is banned" do _not_
-  live here per ADR-0015 — they get their own entities (`AnonymousMarker`, `Ban`).
+- **Foundational User fields** (`name`, `image`, `createdAt`, `updatedAt`) — properties of the
+  User, not entities. Email, username and phone are `Identifier`s, not User fields. Feature flags
+  like "is anonymous" or "is banned" live in `attributes` (above).
 - **Organization domain entities** are _authorization_ — a separate bounded context with its own
   glossary section above. They are explicitly out of the _credential/verification typology_: when
   someone asks "which of the three categories does Organization go in?" the answer is "none, it's

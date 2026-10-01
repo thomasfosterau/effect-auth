@@ -1,5 +1,12 @@
 # Organization data model and Statement-based permissions
 
+> **Revised in code.** Roles are no longer global-only: an organization can replace a configured
+> role with its own `OrgRole` at runtime, and organization permissions are `"resource:action"`
+> strings rather than a `PermissionStatement`. The active organization is
+> `session.attributes.activeOrganizationId`, not an `ActiveOrgSelection` entity. Teams shipped
+> ([ADR-0016](0016-hierarchical-teams.md)). See `Organization.ts` and
+> [docs/CONTEXT.md](../CONTEXT.md). The text below is left as written.
+
 Three entities ship initially: `Organization`, `Member` (the User-to-Organization relationship
 with a `role: string`), and `Invitation`. Teams are deferred. A separate
 `ActiveOrgSelection { sessionId, organizationId }` entity tracks the currently-active org per

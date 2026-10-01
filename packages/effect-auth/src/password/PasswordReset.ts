@@ -9,6 +9,7 @@ import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService } from "../SessionService.ts";
 import { normalizeEmail } from "../utils.ts";
 
+/** A pending password reset, keyed by the SHA-256 digest of its token. */
 export interface PasswordResetToken {
   readonly token: string;
   readonly userId: string;
@@ -17,6 +18,7 @@ export interface PasswordResetToken {
   readonly expiresAt: number;
 }
 
+/** The store {@link PasswordResetService} keeps pending resets in. */
 export class PasswordResetStore extends Context.Service<
   PasswordResetStore,
   {
@@ -29,6 +31,7 @@ export class PasswordResetStore extends Context.Service<
   }
 >()("@effect-auth/PasswordResetStore") {}
 
+/** The store {@link PasswordResetService} writes the new password hash through. */
 export class PasswordResetUserStore extends Context.Service<
   PasswordResetUserStore,
   {
@@ -39,6 +42,9 @@ export class PasswordResetUserStore extends Context.Service<
   }
 >()("@effect-auth/PasswordResetUserStore") {}
 
+/**
+ * Configuration for {@link PasswordResetService}.
+ */
 export interface PasswordResetConfig {
   readonly expiresIn?: number;
   readonly minPasswordLength?: number;
@@ -50,12 +56,18 @@ export interface PasswordResetConfig {
   ) => Effect.Effect<void, Errors.PasswordResetError>;
 }
 
+/** Outcome of a completed password reset. */
 export interface PasswordResetResult {
   readonly userId: string;
   readonly email: string;
   readonly reset: true;
 }
 
+/**
+ * Password reset by emailed single-use token. Requests for unknown addresses succeed silently (anti-enumeration), and a reset can revoke the user's sessions.
+ *
+ * Requires `PasswordResetStore`, `PasswordResetUserStore`, `PasswordHasher`, `UserStore`, `IdentifierStore`, `SessionService` and `Hooks`.
+ */
 export class PasswordResetService extends Context.Service<
   PasswordResetService,
   {
@@ -98,6 +110,9 @@ const validatePasswordLength = (
     }
   });
 
+/**
+ * Build a {@link PasswordResetService} from its config, for embedding in a custom layer. Note: through the `password` barrel this is `Password.make` (#259).
+ */
 export const make = (
   config: PasswordResetConfig,
 ): Effect.Effect<

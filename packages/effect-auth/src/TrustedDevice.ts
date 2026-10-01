@@ -97,6 +97,9 @@ export const TrustedDeviceCookieRef: Context.Reference<string | undefined> = Con
 // Config + Service
 // ---------------------------------------------------------------------------
 
+/**
+ * Configuration for {@link TrustedDeviceService}.
+ */
 export interface TrustedDeviceConfig {
   /**
    * Max age for trusted-device tokens in milliseconds.
@@ -110,12 +113,18 @@ export interface TrustedDeviceConfig {
   readonly secret: Redacted.Redacted<string>;
 }
 
+/** The cookie value and expiry of a newly trusted device. */
 export interface TrustedDeviceIssueResult {
   /** Raw cookie value to set (`rawToken.hmac`). */
   readonly cookieValue: string;
   readonly expiresAt: number;
 }
 
+/**
+ * Remembers a device that completed a second factor, so later sign-ins from it can skip the factor until the HMAC-signed cookie expires or is revoked. Never use it to satisfy step-up authentication.
+ *
+ * Requires `TrustedDeviceStore`.
+ */
 export class TrustedDeviceService extends Context.Service<
   TrustedDeviceService,
   {
@@ -200,6 +209,9 @@ const parseCookie = (cookieValue: string): { rawToken: string; hmac: string } | 
   return { rawToken, hmac };
 };
 
+/**
+ * Build a {@link TrustedDeviceService} from its config; requires `TrustedDeviceStore` and `Crypto.Crypto`.
+ */
 export const make = (
   config: TrustedDeviceConfig,
 ): Effect.Effect<typeof TrustedDeviceService.Service, never, TrustedDeviceStore | Crypto.Crypto> =>

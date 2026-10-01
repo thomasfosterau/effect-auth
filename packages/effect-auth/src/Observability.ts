@@ -156,6 +156,7 @@ export const deliverySends = Metric.counter("effect-auth.delivery_sends.total", 
 // Span names (OpenTelemetry)
 // ---------------------------------------------------------------------------
 
+/** The OpenTelemetry span names effect-auth emits, as constants. */
 export const spanNames = {
   oauthAuthorize: "effect-auth.oauth.authorize",
   oauthCallback: "effect-auth.oauth.callback",
@@ -185,63 +186,87 @@ export const spanNames = {
 // Record helpers — each returns Effect<void, never, never>
 // ---------------------------------------------------------------------------
 
+/** Count a sign-in attempt on `effect_auth_sign_in_total`, by method and outcome. */
 export const recordSignIn = (method: string, outcome: "success" | "failure"): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(signInTotal, { method, outcome }), 1);
 
+/** Count a sign-up attempt on `effect_auth_sign_up_total`, by method and outcome. */
 export const recordSignUp = (method: string, outcome: "success" | "failure"): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(signUpTotal, { method, outcome }), 1);
 
+/** Count a created session on `effect_auth_sessions_created_total`. */
 export const recordSessionCreated = (): Effect.Effect<void> => Metric.update(sessionsCreated, 1);
 
+/** Count a session validation on `effect_auth_sessions_validated_total`, by outcome. */
 export const recordSessionValidated = (
   outcome: "success" | "not_found" | "expired",
 ): Effect.Effect<void> => Metric.update(Metric.withAttributes(sessionsValidated, { outcome }), 1);
 
+/** Count an invalidated session on `effect_auth_sessions_invalidated_total`. */
 export const recordSessionInvalidated = (): Effect.Effect<void> =>
   Metric.update(sessionsInvalidated, 1);
 
+/**
+ * Count an app-edge session resolution on `effect_auth_session_resolutions_total`, by outcome (`degraded` is kept apart from `anonymous`).
+ */
 export const recordSessionResolution = (outcome: AuthOutcome): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(sessionResolutions, { outcome }), 1);
 
+/**
+ * Count a token verification on `effect_auth_token_verifications_total`, by token type and outcome.
+ */
 export const recordTokenVerification = (
   type: string,
   outcome: "success" | "failure",
 ): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(tokenVerifications, { type, outcome }), 1);
 
+/** Count a rate-limit rejection on `effect_auth_rate_limit_hits_total`, by operation. */
 export const recordRateLimitHit = (operation: string): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(rateLimitHits, { operation }), 1);
 
+/** Count an issued second-factor challenge on `effect_auth_multi_factor_challenges_total`. */
 export const recordMultiFactorChallenge = (): Effect.Effect<void> =>
   Metric.update(multiFactorChallenges, 1);
 
+/**
+ * Count a second-factor verification on `effect_auth_multi_factor_verifications_total`, by factor type and outcome.
+ */
 export const recordMultiFactorVerification = (
   type: "totp" | "backup-code",
   outcome: "success" | "failure",
 ): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(multiFactorVerifications, { type, outcome }), 1);
 
+/** Count an OAuth callback on `effect_auth_oauth_callbacks_total`, by outcome. */
 export const recordOAuthCallback = (outcome: "success" | "failure"): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(oauthCallbacks, { outcome }), 1);
 
+/** Count an OAuth token refresh on `effect_auth_oauth_refreshes_total`, by provider and outcome. */
 export const recordOAuthRefresh = (
   provider: string,
   outcome: "success" | "failure",
 ): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(oauthRefreshes, { provider, outcome }), 1);
 
+/** Count a passkey registration on `effect_auth_webauthn_registrations_total`, by outcome. */
 export const recordWebAuthnRegistration = (outcome: "success" | "failure"): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(webauthnRegistrations, { outcome }), 1);
 
+/** Count a passkey authentication on `effect_auth_webauthn_authentications_total`, by outcome. */
 export const recordWebAuthnAuthentication = (outcome: "success" | "failure"): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(webauthnAuthentications, { outcome }), 1);
 
+/**
+ * Count an OIDC token-endpoint request on `effect_auth_oidc_token_requests_total`, by grant and outcome.
+ */
 export const recordOidcTokenRequest = (
   grant: string,
   outcome: "success" | "failure",
 ): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(oidcTokenRequests, { grant, outcome }), 1);
 
+/** Count a delivery sent off the response path on `effect-auth.delivery_sends.total`, by purpose and outcome. */
 export const recordDeliverySend = (
   purpose: string,
   outcome: "success" | "failure",

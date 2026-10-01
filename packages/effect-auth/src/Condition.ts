@@ -52,6 +52,7 @@ export const SlotRef = Schema.TaggedStruct("SlotRef", {
 });
 export type SlotRef = typeof SlotRef.Type;
 
+/** A value a condition compares: a literal, an attribute read, or a request slot reference. */
 export const Operand = Schema.Union([Lit, Attr, SlotRef]);
 export type Operand = typeof Operand.Type;
 
@@ -59,14 +60,17 @@ export type Operand = typeof Operand.Type;
 // Condition AST: expressions that produce a boolean
 // ---------------------------------------------------------------------------
 
+/** Holds when every condition in `conditions` holds. */
 export interface And {
   readonly _tag: "And";
   readonly conditions: ReadonlyArray<Condition>;
 }
+/** Holds when at least one condition in `conditions` holds. */
 export interface Or {
   readonly _tag: "Or";
   readonly conditions: ReadonlyArray<Condition>;
 }
+/** Holds when `condition` does not. */
 export interface Not {
   readonly _tag: "Not";
   readonly condition: Condition;
@@ -107,6 +111,9 @@ export interface Has {
   readonly path: ReadonlyArray<string>;
 }
 
+/**
+ * A serializable boolean expression over the request: the condition language of declarative policies, evaluated purely and totally.
+ */
 export type Condition = And | Or | Not | Eq | Compare | Contains | In | Has;
 
 export const Condition: Schema.Codec<Condition> = Schema.Union([
@@ -160,38 +167,52 @@ export const action: SlotRef = { _tag: "SlotRef", of: "action" };
 /** The request's resource reference, as an operand. */
 export const resource: SlotRef = { _tag: "SlotRef", of: "resource" };
 
+/** Condition that holds when every operand condition holds. */
 export const and = (...conditions: ReadonlyArray<Condition>): And => ({
   _tag: "And",
   conditions,
 });
+/** Condition that holds when at least one operand condition holds. */
 export const or = (...conditions: ReadonlyArray<Condition>): Or => ({ _tag: "Or", conditions });
+/** Condition that holds when `condition` does not. */
 export const not = (condition: Condition): Not => ({ _tag: "Not", condition });
+/** Condition that holds when the two operands are deeply equal. */
 export const eq = (left: Operand, right: Operand): Eq => ({ _tag: "Eq", left, right });
+/** Condition that holds when the two operands are not deeply equal. */
 export const ne = (left: Operand, right: Operand): Not => not(eq(left, right));
+/** Condition that holds when `left` is less than `right`; both must evaluate to numbers. */
 export const lt = (left: Operand, right: Operand): Compare => ({
   _tag: "Compare",
   op: "lt",
   left,
   right,
 });
+/**
+ * Condition that holds when `left` is less than or equal to `right`; both must evaluate to numbers.
+ */
 export const lte = (left: Operand, right: Operand): Compare => ({
   _tag: "Compare",
   op: "lte",
   left,
   right,
 });
+/** Condition that holds when `left` is greater than `right`; both must evaluate to numbers. */
 export const gt = (left: Operand, right: Operand): Compare => ({
   _tag: "Compare",
   op: "gt",
   left,
   right,
 });
+/**
+ * Condition that holds when `left` is greater than or equal to `right`; both must evaluate to numbers.
+ */
 export const gte = (left: Operand, right: Operand): Compare => ({
   _tag: "Compare",
   op: "gte",
   left,
   right,
 });
+/** Condition that holds when the array `collection` contains `value`. */
 export const contains = (collection: Operand, value: Operand): Contains => ({
   _tag: "Contains",
   collection,
@@ -199,6 +220,7 @@ export const contains = (collection: Operand, value: Operand): Contains => ({
 });
 /** Hierarchy membership condition (see {@link In}). */
 export const isIn = (left: Operand, right: Operand): In => ({ _tag: "In", left, right });
+/** Condition that holds when the request slot has the attribute at `path`; never errors. */
 export const has = (of: RequestSlot, ...path: readonly [string, ...string[]]): Has => ({
   _tag: "Has",
   of,

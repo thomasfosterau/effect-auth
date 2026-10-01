@@ -6,8 +6,8 @@
 # devcontainer's `postCreateCommand` (which invokes this file directly) — so a
 # container shell and an agent session are provisioned identically. Shape
 # copied from effect-jsonapi / effect-drizzle-ext (the library reference); the
-# `gardeneria #NNN` citations name the issues in that application's tracker
-# that are the evidence behind a decision, not tickets in this one.
+# `website#NNN` citations name the issues in that application's tracker that
+# are the evidence behind a decision, not tickets in this one.
 #
 # ## The problem it solves
 #
@@ -35,8 +35,9 @@
 #
 # ## Secrets
 #
-# This hook hydrates NO secrets, and this repository needs none: every gate
-# runs offline against the lockfile. Publishing is the release workflow's job
+# This hook hydrates NO secrets, and this repository needs none: no gate needs
+# a credential. `vp run check:dist` and `pnpm audit` need registry access; the
+# rest run offline against the lockfile. Publishing is the release workflow's job
 # and uses npm OIDC trusted publishing (PUBLISHING.md), so there is no token to
 # hydrate anywhere.
 #
@@ -80,9 +81,11 @@ link_tool() {
 # while the worktree's test modules resolve the worktree's own copy. Two
 # physical instances of the same vitest version corrupt its module-level
 # suite-collector state, and every describe() in the worktree throws `Cannot
-# read properties of undefined (reading 'config')` (gardeneria #1663). The shim
+# read properties of undefined (reading 'config')` (website#1663). The shim
 # instead walks up from $PWD for the nearest project-local vite-plus and
 # re-execs that, falling back to the primary checkout's when none is found.
+# The marker keeps its original text (the issue is website#1663): shims written
+# by earlier runs are recognised, and so replaced, by an exact match on it.
 VP_SHIM_MARKER="# generated-by: .claude/hooks/session-start.sh (vp re-exec shim, gardeneria issue #1663)"
 write_vp_shim() {
   dest="$LOCAL_BIN/vp"

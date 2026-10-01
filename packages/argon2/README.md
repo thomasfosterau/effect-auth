@@ -2,14 +2,14 @@
 
 Argon2id `PasswordHasher` for [`@thomasfosterau/effect-auth`](../effect-auth) — OWASP's first-choice password hashing algorithm, as an Effect `Layer`.
 
-Core effect-auth ships only dependency-free hashers (PBKDF2, scrypt) because neither Node nor the Web Crypto API implements Argon2. This package fills that gap with a pure WebAssembly backend ([`hash-wasm`](https://github.com/Daninet/hash-wasm), MIT): no native module, no post-install step, and no `node:` imports, so it runs unchanged on Node, Bun, Deno, Cloudflare Workers, and browsers.
+Core effect-auth ships only dependency-free hashers (PBKDF2, scrypt) because Web Crypto has no Argon2 and Node's `crypto.argon2` (24.7+, experimental) is Node-only. This package fills that gap with a pure WebAssembly backend ([`hash-wasm`](https://github.com/Daninet/hash-wasm), MIT): no native module, no post-install step, and no `node:` imports, so it runs unchanged on Node, Bun, Deno, Cloudflare Workers, and browsers.
 
 Hashes are standard PHC strings (`$argon2id$v=19$m=...,t=...,p=...$salt$hash`), so they're interchangeable with older configurations of this package and with any other Argon2 implementation.
 
 ## Install
 
 ```sh
-npm install @thomasfosterau/effect-auth-argon2
+pnpm add @thomasfosterau/effect-auth-argon2 @thomasfosterau/effect-auth effect
 ```
 
 ## Usage

@@ -1,11 +1,11 @@
 # @thomasfosterau/effect-auth-solid
 
-Solid bindings for [`@thomasfosterau/effect-auth-client`](https://github.com/thomasfosterau/effect-auth/tree/main/packages/client): reactive primitives over the client's observable session store, plus unstyled form components for the usual authentication screens.
+Solid bindings for [`@thomasfosterau/effect-auth-client`](../client): reactive primitives over the client's observable session store, plus unstyled form components for the usual authentication screens.
 
 ## Install
 
 ```sh
-pnpm add @thomasfosterau/effect-auth-solid @thomasfosterau/effect-auth-client
+pnpm add @thomasfosterau/effect-auth-solid @thomasfosterau/effect-auth-client effect
 ```
 
 `solid-js` (>= 1.8) is a peer dependency.
@@ -104,7 +104,7 @@ The components ship no CSS. Each element carries a stable class — `ea-form` pl
 
 A `class` prop is appended to the root `<form>`, and the `classes` prop replaces individual defaults (`classes={{ submit: "btn btn-primary" }}`) when a design system would rather not see the `ea-*` names at all.
 
-See [the client guide](https://github.com/thomasfosterau/effect-auth/blob/main/docs/guides/client.md) for the rest of the client API.
+See [the client guide](../../docs/guides/client.md) for the rest of the client API.
 
 ## License
 

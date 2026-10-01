@@ -536,9 +536,11 @@ export const FullOrganizationView = Schema.Struct({
 });
 export type FullOrganizationView = typeof FullOrganizationView.Type;
 
+/** Wire schema for a list of organizations. */
 export const OrganizationListView = Schema.Array(OrganizationView);
 export type OrganizationListView = typeof OrganizationListView.Type;
 
+/** Wire schema for a list of invitations. */
 export const InvitationListView = Schema.Array(InvitationView);
 export type InvitationListView = typeof InvitationListView.Type;
 
@@ -606,9 +608,11 @@ export const TeamMemberView = Schema.Struct({
 });
 export type TeamMemberView = typeof TeamMemberView.Type;
 
+/** Wire schema for a list of teams. */
 export const TeamListView = Schema.Array(TeamView);
 export type TeamListView = typeof TeamListView.Type;
 
+/** Wire schema for a list of team members. */
 export const TeamMemberListView = Schema.Array(TeamMemberView);
 export type TeamMemberListView = typeof TeamMemberListView.Type;
 
@@ -640,6 +644,7 @@ export const OrgRoleView = Schema.Struct({
 });
 export type OrgRoleView = typeof OrgRoleView.Type;
 
+/** Wire schema for a list of an organization's custom roles. */
 export const OrgRoleListView = Schema.Array(OrgRoleView);
 export type OrgRoleListView = typeof OrgRoleListView.Type;
 
@@ -666,6 +671,7 @@ export const OrganizationDomainView = Schema.Struct({
 });
 export type OrganizationDomainView = typeof OrganizationDomainView.Type;
 
+/** Wire schema for a list of an organization's claimed domains. */
 export const OrganizationDomainListView = Schema.Array(OrganizationDomainView);
 export type OrganizationDomainListView = typeof OrganizationDomainListView.Type;
 
@@ -758,6 +764,7 @@ export const ApiKeyCreatedView = Schema.Struct({
 });
 export type ApiKeyCreatedView = typeof ApiKeyCreatedView.Type;
 
+/** Wire schema for a list of API keys (without secrets). */
 export const ApiKeyListView = Schema.Array(ApiKeyView);
 export type ApiKeyListView = typeof ApiKeyListView.Type;
 
@@ -833,6 +840,7 @@ export const OidcClientCreatedView = Schema.Struct({
 });
 export type OidcClientCreatedView = typeof OidcClientCreatedView.Type;
 
+/** Wire schema for a list of OIDC clients (without secrets). */
 export const OidcClientListView = Schema.Array(OidcClientView);
 export type OidcClientListView = typeof OidcClientListView.Type;
 
@@ -1224,20 +1232,30 @@ export class ScimInternalError extends Schema.Error<ScimInternalError>("ScimInte
 
 /** Each error class paired with its HTTP status for use in endpoint `error` fields. */
 export const UnauthorizedError = Unauthorized.pipe(HttpApiSchema.status(401));
+/** `Forbidden` with HTTP status 403. */
 export const ForbiddenError = Forbidden.pipe(HttpApiSchema.status(403));
+/** `Conflict` with HTTP status 409. */
 export const ConflictError = Conflict.pipe(HttpApiSchema.status(409));
+/** `BadRequest` with HTTP status 400. */
 export const BadRequestError = BadRequest.pipe(HttpApiSchema.status(400));
+/** `NotFound` with HTTP status 404. */
 export const NotFoundError = NotFound.pipe(HttpApiSchema.status(404));
+/** `TooManyRequests` with HTTP status 429. */
 export const TooManyRequestsError = TooManyRequests.pipe(HttpApiSchema.status(429));
+/** `InternalServerError` with HTTP status 500. */
 export const InternalError = InternalServerError.pipe(HttpApiSchema.status(500));
 /** 400 with an RFC 7591 §3.2.2 `{ error, error_description }` body. */
 export const OAuthBadRequestError = OAuthError.pipe(HttpApiSchema.status(400));
 
 /** The SCIM error bodies, each carrying its status and the SCIM media type. */
 export const ScimBadRequestError = ScimBadRequest.pipe(HttpApiSchema.status(400), asScimJson);
+/** SCIM 401 error body (`application/scim+json`). */
 export const ScimUnauthorizedError = ScimUnauthorized.pipe(HttpApiSchema.status(401), asScimJson);
+/** SCIM 404 error body (`application/scim+json`). */
 export const ScimNotFoundError = ScimNotFound.pipe(HttpApiSchema.status(404), asScimJson);
+/** SCIM 409 error body (`application/scim+json`). */
 export const ScimConflictError = ScimConflict.pipe(HttpApiSchema.status(409), asScimJson);
+/** SCIM 500 error body (`application/scim+json`). */
 export const ScimInternalServerError = ScimInternalError.pipe(
   HttpApiSchema.status(500),
   asScimJson,
@@ -1293,6 +1311,7 @@ export const encodeIdentifier = (identifier: Identifier.Identifier): IdentifierV
   createdAt: identifier.createdAt.getTime(),
 });
 
+/** Encode a session for the wire (timestamps to epoch milliseconds). */
 export const encodeSession = (session: Types.Session): SessionView => ({
   id: session.id,
   userId: session.userId,
@@ -1302,6 +1321,9 @@ export const encodeSession = (session: Types.Session): SessionView => ({
   attributes: session.attributes,
 });
 
+/**
+ * Encode a session and its user for the wire; pass the user's identifiers to populate the derived `email` fields.
+ */
 export const encodeSessionWithUser = (
   value: Types.SessionWithUser,
   identifiers?: ReadonlyArray<Identifier.Identifier>,

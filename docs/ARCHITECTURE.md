@@ -108,7 +108,9 @@ directories, each with its own `index.ts` barrel and matching
   `Observability.ts`.
 - **Session management** (root, flat — the spine nearly every feature module
   depends on, so it is not a cluster): `SessionService.ts`, `SessionStore.ts`,
-  `UserStore.ts`, `TrustedDevice.ts`. Exported flat from the package root
+  `UserStore.ts`, `TrustedDevice.ts`, plus `SessionContext.ts`,
+  `SessionResolution.ts` and `SessionCookies.ts` (namespaced at the root:
+  app-edge session resolution and cookie naming). Exported flat from the package root
   (`Auth.SessionService`, `Auth.SessionStore`, `Auth.UserStore`,
   `Auth.TrustedDeviceStore`, …); `TrustedDevice.ts` is additionally namespaced
   as `Auth.TrustedDevice` so its generic `make`/`gate` stay qualified. There is
@@ -117,8 +119,8 @@ directories, each with its own `index.ts` barrel and matching
 - **`email/` cluster**: `EmailAddress.ts`, `EmailOtp.ts`, `EmailPassword.ts`,
   `EmailVerification.ts`.
 - **`password/` cluster**: `Password.ts` (PBKDF2/scrypt hashers,
-  multi-algorithm verifier), `Argon2.ts`, `PasswordReset.ts`,
-  `HaveIBeenPwned.ts`.
+  multi-algorithm verifier), `PasswordReset.ts`, `HaveIBeenPwned.ts`. Argon2id
+  lives in the separate `effect-auth-argon2` package.
 - **Authorization** (root, flat — a first-class feature, not a cluster): the
   policy kernel `Entity.ts` / `Condition.ts` / `Policy.ts` /
   `AuthorizationModel.ts` / `PolicyStore.ts` (namespaced at the root as
@@ -176,7 +178,10 @@ directories, each with its own `index.ts` barrel and matching
 - **Platform features** (root): `Organization.ts`, `Admin.ts`, `ApiKey.ts`,
   `Jwt.ts` (ES256/EdDSA + JWKS), `OidcProvider.ts` (act as an OIDC identity
   provider), `RateLimit.ts`/`RateLimitPersistence.ts`, `ClientIP.ts`,
-  `OneTimeToken.ts`.
+  `OneTimeToken.ts`, `Scim.ts` (SCIM 2.0, see
+  [guides/scim.md](guides/scim.md)), `Saml.ts` (the `SamlVerifier` seam that
+  `effect-auth-saml` implements), `Delivery.ts` (the `EmailSender` /
+  `SmsSender` seams the delivery adapters implement).
 - **Storage helpers** (root): `KeyValueStores.ts` — layers implementing the
   ephemeral stores (OAuth state, WebAuthn challenges, rate limits,
   tokens/OTPs, pending multi-factor) over `effect/persistence`
@@ -202,7 +207,7 @@ Users persist state by implementing plain store interfaces (DESIGN.md D3):
 Two mechanisms, by boundary (DESIGN.md D4):
 
 - **Domain errors** are `Data.TaggedError` classes — shared ones in `Errors.ts` (`AuthError`, `InvalidCredentialsError`, `SessionExpiredError`, …), module-local ones (`MultiFactorError`, `OrganizationError`, …) where only one module raises them. `AuthError` means _infrastructure/unexpected_ failure; flow outcomes get specific tags. Nothing subclasses `AuthError` — errors compose in unions, keeping method signatures honest.
-- **HTTP boundary errors** are `Schema.TaggedErrorClass` classes in `HttpApiSchema.ts` with fixed status codes (400/401/403/404/409/429/500). Handlers in `HttpServer.ts` map domain errors to these per endpoint; `RateLimitError` is always 429, `AuthError` is always 500, and typed flow errors carry the specific statuses (e.g. `EmailInUseError` → 409).
+- **HTTP boundary errors** are `Schema.TaggedError` classes in `HttpApiSchema.ts` with fixed status codes (400/401/403/404/409/429/500). Handlers in `HttpServer.ts` map domain errors to these per endpoint; `RateLimitError` is always 429, `AuthError` is always 500, and typed flow errors carry the specific statuses (e.g. `EmailInUseError` → 409).
 
 ## HTTP protocol
 
@@ -216,7 +221,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 ### Password Security
 
-- PBKDF2-SHA256 with 210,000 iterations (OWASP) by default; scrypt also in core; Argon2id via `@thomasfosterau/effect-auth-argon2` (WASM by default, optional native fast-path); a multi-algorithm verifier supports migration between algorithms.
+- PBKDF2-SHA256 with 600,000 iterations (OWASP) by default; scrypt also in core; Argon2id via `@thomasfosterau/effect-auth-argon2` (WASM by default, optional native fast-path); a multi-algorithm verifier supports migration between algorithms.
 - Random salt per password; timing-safe comparison; plaintext never stored.
 
 ### Session Security
@@ -234,17 +239,72 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 - Explicit permission checks, role-based access control (RBAC) with hierarchy, OAuth-style scopes; policies fail closed.
 
+### Timing and enumeration
+
+- Password verification is timing-safe inside the hasher. Sign-in does constant work: a decoy hash is computed from the active `PasswordHasher` on the first sign-in and cached, and every attempt verifies against either the stored hash or the decoy, so response time doesn't reveal whether an account exists.
+- Session ids are stored as SHA-256 digests and looked up by digest, so the raw id never reaches the store; OTP and OIDC secrets are compared with `constantTimeHashEqual`.
+
+### What the library provides, and what the application must
+
+If you mount the included HTTP API, cookie flags (`HttpOnly`, `Secure`, `SameSite`), trusted-origin CSRF checks, rate limiting (`RateLimiter`) and account lockout (`AccountLockoutPlugin`) are provided. If you use only the headless core, they are yours to implement. Either way the application provides secure store implementations (parameterised queries, encrypted connections) and serves over HTTPS.
+
+Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in: leave `JWT_ENCRYPT_PRIVATE_KEY_SECRET`, `OAUTH_ENCRYPT_TOKENS_SECRET` or `TWO_FACTOR_ENCRYPT_SECRET` unset to keep it off. A variable that is set but empty fails `jwtServiceConfig` / `oauthServiceOptionsConfig` / `multiFactorConfig` at startup with a `ConfigError`, rather than silently storing the data unencrypted. A whitespace-only value counts as empty. Known limitation: an empty secret set together with a sibling variable sharing its prefix (for example `TWO_FACTOR_ENCRYPT_SECRET=""` plus `TWO_FACTOR_ENCRYPT_SECRET_FILE=...`) reads as unset.
+
+### Fail-open vs fail-closed session resolution
+
+An app that resolves the session at its own edge — a SvelteKit `hooks.server.ts`, a Worker
+calling an auth service binding — has to decide what a **fault** means. Not "no session": a
+fault. The store is down, the binding is unreachable, the call threw.
+
+effect-auth ships both directions and defaults to neither, because the right answer depends on
+a property of _your_ app that the library cannot see:
+
+| Helper                              | Fault becomes                                | Use when                                         |
+| ----------------------------------- | -------------------------------------------- | ------------------------------------------------ |
+| `SessionResolution.resolve`         | a failure in the error channel               | anonymous is **not** the lower-privilege outcome |
+| `SessionResolution.resolveFailOpen` | an anonymous request, reported as `degraded` | anonymous **is** the lower-privilege outcome     |
+
+**The precondition for fail-open.** Degrading to anonymous is safe only if anonymous is
+strictly less privileged than any signed-in viewer — reads are public, and every write is
+separately gated server-side on the resolved viewer. Then a session-service fault costs
+signed-in users their personalisation and nothing else.
+
+It is **unsafe**, and an escalation, whenever anonymous is privileged in your app:
+
+- A read path that is public by default and gated _down_ for some viewers (a "shadow-banned
+  user sees less than a stranger" rule degrades into the stranger's view).
+- A deployment where a missing session means "trusted internal caller" rather than "nobody".
+- Any surface where authorization is expressed as "deny if the viewer is X" rather than
+  "allow if the viewer is Y" — an absent viewer matches no deny rule.
+
+Fail-closed is not free either: with a `SessionStore` behind a database, _any_ store fault
+becomes a site-wide 500, including on routes that never touch auth. Choose deliberately.
+
+**Fail-open must be loud.** Its failure mode is silence — an unreachable session service looks
+exactly like a site where nobody happens to be signed in, and stays that way until someone
+notices the sign-in rate. `resolveFailOpen` therefore takes a mandatory `onDegraded` callback,
+and there is no overload that omits it. Log it, count it, alert on it. The `degraded` outcome
+is also emitted on the `effect_auth_session_resolutions_total` counter and as an `auth.outcome`
+span attribute, distinct from `anonymous`, precisely so a fault is distinguishable from a quiet
+day.
+
+**The cookieless skip is not a fault path.** `SessionResolution.hasSessionCredential` answers
+"could this request resolve at all?" from the credential names alone; a request with no
+credential is reported as `skipped` and never reaches either resolver. Keep the predicate and
+the middleware's cookie name derived from one config (`SessionCookies.cookieNames`) — a
+predicate that disagrees with the middleware silently signs users out.
+
 Any design change that would weaken timing-safety, entropy, cookie flags, CSRF/trusted-origin checks, or replay protection is rejected by policy (DESIGN.md ground rules).
 
 ## Testing
 
-- 490+ core tests plus package suites (SQL storage, client adapters, hashers) run with `vp test`. Each package's `tsconfig.json` excludes `*.test.ts` (it drives the declaration build), so test files are type-checked by a sibling `tsconfig.test.json` — the same config with the test exclusion dropped — which every package's `typecheck` script runs as a second `tsc --noEmit -p tsconfig.test.json` pass.
+- Each package's tests run with `vp test` (`vp run -r test:unit` runs them all). Each package's `tsconfig.json` excludes `*.test.ts` (it drives the declaration build), so test files are type-checked by a sibling `tsconfig.test.json` — the same config with the test exclusion dropped — which every package's `check` task runs as a second `tsc --noEmit -p tsconfig.test.json` pass.
 - The Effect language service enforces idioms at typecheck time (yieldable errors, single-provide layering, requirement leakage).
 
 ## Dependencies
 
 - **Core**: `effect`, and nothing else — the effect-only dependency rule now holds with zero exceptions. The WebAuthn wire formats (CBOR, `clientDataJSON`, authenticator data, attestation objects, COSE public keys) are parsed in-repo by `multifactor/WebAuthnCodec.ts`. Most randomness/digest needs go through the `Crypto.Crypto` service (default implementation: `PlatformCrypto.layer`, backed by the platform Web Crypto API); direct `node:crypto` usage is corralled into exactly three modules — `password/Password.ts` (scrypt), `TokenHash.ts` (`timingSafeEqual`), and `Cipher.ts` (AES-256-GCM, HMAC, SHA-256). Native dependencies never enter core: Argon2id hashing lives in `@thomasfosterau/effect-auth-argon2`.
-- **Packages** isolate framework/storage-driver/native peer deps (e.g. `@thomasfosterau/effect-auth-client`, `-sql`, `-alchemy`, `-argon2`) so core stays lean.
+- **Packages** isolate framework/storage-driver/native peer deps (`-client`, `-sql`, `-drizzle`, `-alchemy`, `-argon2`, `-resend`, `-twilio`, `-saml`, and the four framework bindings) so core stays lean.
 
 ## References
 

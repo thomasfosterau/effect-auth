@@ -81,8 +81,11 @@ export type Scope = typeof Scope.Type;
 
 /** Scope constructors. */
 export const any: Scope = { _tag: "any" };
+/** Scope matching exactly the referenced entity. */
 export const eq = (ref: Entity.EntityRef): Scope => ({ _tag: "eq", ref });
+/** Scope matching the referenced entity or any of its descendants in the entity slice. */
 export const inScope = (ref: Entity.EntityRef): Scope => ({ _tag: "in", ref });
+/** Scope matching any entity of the given type. */
 export const isType = (entityType: string): Scope => ({ _tag: "is", entityType });
 
 const scopeMatches = (slice: Entity.EntitySlice, scope: Scope, ref: Entity.EntityRef): boolean => {

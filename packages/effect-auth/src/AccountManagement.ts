@@ -56,6 +56,9 @@ export class AccountTokenError extends Data.TaggedError("AccountTokenError")<{
   readonly message: string;
 }> {}
 
+/**
+ * Configuration for {@link AccountManagementService}.
+ */
 export interface AccountManagementConfig {
   /** Lifetime of a change-email token in ms. Default 1 hour. */
   readonly changeEmailExpiresIn?: number;
@@ -101,6 +104,11 @@ export interface EmailChangeResult {
   readonly user: Types.User;
 }
 
+/**
+ * Self-service account changes: a verification-gated email change and account deletion, each confirmed by a single-use token.
+ *
+ * Requires `AccountManagementStore`, `UserServiceStore`, `IdentifierStore` and `SessionService`.
+ */
 export class AccountManagementService extends Context.Service<
   AccountManagementService,
   {

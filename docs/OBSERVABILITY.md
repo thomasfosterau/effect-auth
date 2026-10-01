@@ -111,7 +111,7 @@ distinct on purpose:
 `anonymous` is deliberately not folded into `skipped`: it still paid the round trip, and
 merging them corrupts the duration bucket. `degraded` is deliberately not folded into
 `anonymous`: the caller is signed out because something broke, which is the state worth
-alerting on. See `docs/SECURITY.md` for the fail-open posture that produces it.
+alerting on. See [ARCHITECTURE.md → Fail-open vs fail-closed session resolution](./ARCHITECTURE.md#fail-open-vs-fail-closed-session-resolution) for the fail-open posture that produces it.
 
 ---
 

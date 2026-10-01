@@ -118,6 +118,9 @@ export const BEARER_TOKEN_HEADER = "set-auth-token" as const;
 // Cookie configuration
 // -----------------------------------------------------------------------------
 
+/**
+ * Session cookie settings for the HTTP API.
+ */
 export interface CookieConfig {
   /** Cookie name. Default `conduit_session`. */
   readonly name?: string;
@@ -194,7 +197,11 @@ export interface MultiSessionConfig {
   readonly maximumSessions?: number;
 }
 
-/** @internal */
+/**
+ * A {@link CookieConfig} with every default applied, as the handlers use it.
+ *
+ * @internal
+ */
 export interface ResolvedCookieConfig {
   readonly name: string;
   readonly secure: boolean;
@@ -205,7 +212,11 @@ export interface ResolvedCookieConfig {
   readonly bearerMode: "always" | "opt-in" | false;
 }
 
-/** @internal */
+/**
+ * Apply the defaults to a {@link CookieConfig} (and the multi-session settings).
+ *
+ * @internal
+ */
 export const resolveCookieConfig = (
   config?: CookieConfig,
   multiSession?: MultiSessionConfig,
@@ -264,7 +275,11 @@ const readDeviceSessionIds = (
   return raw.split(".").filter((id) => id.length > 0);
 };
 
-/** @internal Name of the companion cache cookie. */
+/**
+ * Name of the companion session-data cache cookie (`<name>_data`).
+ *
+ * @internal
+ */
 export const dataCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_data`;
 
 const dataCookieOptions = (cfg: ResolvedCookieConfig, cache: ResolvedSessionCache) =>
@@ -307,7 +322,11 @@ const clearCookieOptions = (cfg: ResolvedCookieConfig) =>
 // Session resolution (Authorization header, then cookie)
 // -----------------------------------------------------------------------------
 
-/** @internal */
+/**
+ * Read the raw session token from a request's `Authorization: Bearer` (or `Token`) header or session cookie.
+ *
+ * @internal
+ */
 export const sessionIdFromRequest = (
   request: HttpServerRequest.HttpServerRequest,
   cfg: ResolvedCookieConfig,
@@ -4034,6 +4053,9 @@ const findEndpointRule = (
   method: string,
 ): EndpointRateLimitRule | undefined => rules.find((r) => matchesEndpointRule(r, pathname, method));
 
+/**
+ * Options for the mountable auth Web handler.
+ */
 export interface AuthWebHandlerOptions {
   /** Your service layer (SessionService, AuthLifecycle, stores, ...). */
   readonly services: Layer.Layer<AuthServices>;

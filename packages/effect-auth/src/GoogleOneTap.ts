@@ -104,6 +104,11 @@ export interface GoogleOneTapSignInResult {
   readonly claims: Record<string, unknown>;
 }
 
+/**
+ * Google One Tap sign-in: issues a nonce, verifies the One Tap credential against Google's JWKS, and signs in by the verified email.
+ *
+ * Requires `GoogleOneTapNonceStore`, `OAuthUserStore`, `UserStore`, `IdentifierStore` and `SessionService`.
+ */
 export class GoogleOneTapService extends Context.Service<
   GoogleOneTapService,
   {
