@@ -40,9 +40,10 @@ jobs:
           ignore-scripts: "true"
 
       # Trusted publishing needs npm >= 11.5.1 on the runner, whichever client
-      # performs the publish.
+      # performs the publish. Pinned to a major rather than `@latest`, so a new
+      # npm major can't arrive unreviewed in the job holding `id-token: write`.
       - name: Update npm
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       - name: Build
         run: vp run build
