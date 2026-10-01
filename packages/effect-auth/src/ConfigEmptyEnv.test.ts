@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Cause, Config, ConfigProvider, Effect, type Exit, Redacted } from "effect";
+import { Cause, Config, Schema, ConfigProvider, Effect, type Exit, Redacted } from "effect";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
 import { jwtServiceConfig } from "./Jwt.ts";
 import { trustedDeviceConfig } from "./TrustedDevice.ts";
@@ -124,6 +124,19 @@ describe("empty environment variables", () => {
       expect(none._tag === "Success" && none.value.encryptSecret).toBeUndefined();
       const bad = await run(mf, env({ APP_TWO_FACTOR_ISSUER: "Acme", [`APP_${N}`]: "" }));
       expect(bad._tag).toBe("Failure");
+    });
+
+    it("guards the assumption: Config.schema runs the Record key filter for every key, empty leaves included", async () => {
+      const seen = new Set<string>();
+      const key = Schema.String.check(
+        Schema.makeFilter((k: string) => {
+          seen.add(k);
+          return true;
+        }),
+      );
+      const probe = Config.schema(Schema.Record(key, Schema.UndefinedOr(Schema.String)), ["P"]);
+      await Effect.runPromise(probe.parse(env({ P_A: "1", P_B: "", P_C_D: "2" })));
+      expect([...seen].sort()).toEqual(["A", "B", "C"]);
     });
 
     it("preserveEmptyStrings: an empty value is a failure", async () => {
