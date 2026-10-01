@@ -9,7 +9,7 @@
  * @module client-ip
  */
 import { Context, Effect, Layer, Option } from "effect";
-import { HttpServerRequest } from "effect/unstable/http";
+import { HttpServerRequest } from "effect/http";
 
 // ---------------------------------------------------------------------------
 // Configuration

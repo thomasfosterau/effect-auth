@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, FileSystem, Layer, Path, PlatformError } from "effect";
-import { SqlClient } from "effect/unstable/sql";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import { SqlClient } from "effect/sql";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { AdoptPolicy } from "alchemy/AdoptPolicy";
 import { AlchemyContextLive } from "alchemy/AlchemyContext";
 import { apply } from "alchemy/Apply";
@@ -81,7 +81,9 @@ const makeEngine = (
         // requirements of the layers provided before it, mirroring alchemy's
         // own runtime layering — so they cannot collapse into a single merged
         // provide.
-        // @effect-diagnostics-next-line effect/multipleEffectProvide:off
+        // layerMergeAllWithDependencies: this layering predates the rc.118 move and
+        // is only newly flagged by @effect/language-service 0.87.3; left as is.
+        // @effect-diagnostics-next-line effect/multipleEffectProvide:off effect/layerMergeAllWithDependencies:off
         Effect.provide(Layer.mergeAll(LoggingCli, AlchemyContextLive)),
         Effect.provide(Layer.provide(ProfileStoreLive, platform)),
         Effect.provide(Layer.provide(CredentialsStoreLive, platform)),

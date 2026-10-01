@@ -40,12 +40,16 @@
  */
 
 import { Clock, Data, Effect } from "effect";
-import { SqlClient, SqlError } from "effect/unstable/sql";
+import { SqlClient, SqlError } from "effect/sql";
 import * as Sql from "@thomasfosterau/effect-auth-sql";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
+import { authTableNames } from "./AuthTables.ts";
 import * as D1Client from "./D1Client.ts";
 import { migrate } from "./Storage.ts";
+
+/** Every table the effect-auth schema creates (defined alchemy-free in `AuthTables.ts`). */
+export { authTableNames };
 
 /**
  * The name a single-database {@link AuthSchemaProvider} registers its binding
@@ -105,17 +109,6 @@ export class UnknownDatabaseError extends Data.TaggedError("UnknownDatabaseError
   /** The names the provider was built with. */
   readonly registered: readonly string[];
 }> {}
-
-const CREATE_TABLE = /create\s+table\s+if\s+not\s+exists\s+(\w+)/i;
-
-/**
- * Every table the effect-auth schema creates, parsed from the shared
- * `schemaStatements` so it cannot drift from the DDL that is actually applied.
- */
-export const authTableNames: readonly string[] = Sql.schemaStatements.flatMap((sql) => {
-  const match = CREATE_TABLE.exec(sql);
-  return match ? [match[1] as string] : [];
-});
 
 /**
  * The auth tables that currently exist, sorted. `_` is escaped so the `LIKE`

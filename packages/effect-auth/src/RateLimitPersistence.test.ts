@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { RateLimiter as PersistenceRateLimiter } from "effect/unstable/persistence";
+import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
 import * as RateLimitPersistence from "./RateLimitPersistence.ts";
 import { RateLimiter, RateLimitStore, RateLimitPresets } from "./RateLimit.ts";
 import { RateLimitError } from "./Errors.ts";

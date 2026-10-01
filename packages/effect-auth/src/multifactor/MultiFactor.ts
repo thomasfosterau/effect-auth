@@ -13,6 +13,7 @@
  */
 
 import { Config, Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
+import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
 import type { TokenCipher } from "../Cipher.ts";
 import * as Errors from "../Errors.ts";
@@ -293,9 +294,8 @@ export class MultiFactorService extends Context.Service<
  */
 export const multiFactorConfig = Config.all({
   issuer: Config.String("TWO_FACTOR_ISSUER"),
-  encryptSecret: Config.Redacted("TWO_FACTOR_ENCRYPT_SECRET").pipe(
-    Config.map((secret) => ({ secret }) as const),
-    Config.orElse(() => Config.succeed(undefined)),
+  encryptSecret: optionalSecret("TWO_FACTOR_ENCRYPT_SECRET").pipe(
+    Config.map((secret) => (secret === undefined ? undefined : ({ secret } as const))),
   ),
 });
 

@@ -1,7 +1,7 @@
 {
   "name": "@thomasfosterau/effect-auth-sql",
   "version": "0.1.0",
-  "description": "Driver-agnostic SQL storage layers for effect-auth, built on effect/unstable/sql.",
+  "description": "Driver-agnostic SQL storage layers for effect-auth, built on effect/sql.",
   "keywords": [
     "auth",
     "effect",

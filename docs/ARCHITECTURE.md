@@ -13,7 +13,7 @@ The settled API conventions — naming, export shapes, store contracts, error ta
 2. **Type-Safe**: schema'd domain models and precise tagged-error unions.
 3. **Composable**: features are independent layers; provide only what you use.
 4. **Storage-Agnostic**: bring your own store implementations (or use
-   `@thomasfosterau/effect-auth-sql`, `@thomasfosterau/effect-auth-alchemy`, or the built-in KeyValueStore
+   `@thomasfosterau/effect-auth-sql`, `@thomasfosterau/effect-auth-alchemy` (held private until alchemy ships an rc.118 build, #250), or the built-in KeyValueStore
    layers).
 5. **Secure by Default**: timing-safe comparisons, high-entropy tokens,
    HttpOnly/Secure cookies, trusted-origin CSRF checks, anti-enumeration
@@ -179,7 +179,7 @@ directories, each with its own `index.ts` barrel and matching
   `OneTimeToken.ts`.
 - **Storage helpers** (root): `KeyValueStores.ts` — layers implementing the
   ephemeral stores (OAuth state, WebAuthn challenges, rate limits,
-  tokens/OTPs, pending multi-factor) over `effect/unstable/persistence`
+  tokens/OTPs, pending multi-factor) over `effect/persistence`
   `KeyValueStore` (in-memory, file system, Redis, …).
 
 Every cluster namespace is also re-exported from the package root (`Auth.Email`,
@@ -206,7 +206,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 ## HTTP protocol
 
-- `HttpApi.ts` defines the full contract with `effect/unstable/httpapi` — one `auth` group, kebab-case paths (`/sign-in/email-otp`, `/multi-factor/enable`), camelCase operationIds. OpenAPI 3.1 (`Http.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`Http.make({ docs: true })`).
+- `HttpApi.ts` defines the full contract with `effect/http-api` — one `auth` group, kebab-case paths (`/sign-in/email-otp`, `/multi-factor/enable`), camelCase operationIds. OpenAPI 3.1 (`Http.getOpenApiSpec()`) and a Scalar reference UI can be served from the same contract (`Http.make({ docs: true })`).
 - **404-until-configured**: optional features resolve their service with `Effect.serviceOption`; when the layer isn't provided the endpoint fails `NotFound` — a server only exposes what it configures.
 - **Cookies**: HttpOnly, SameSite, `Secure` by default; optional HMAC-signed session-data cache cookie to skip store reads; multi-session and last-login-method helper cookies.
 - **CSRF**: a trusted-origin gate runs before any handler — requests with an `Origin` header must match the request origin or the configured `trustedOrigins`; requests without one (curl, server-to-server) pass.

@@ -53,7 +53,7 @@
  * @module remote-session
  */
 import { Data, Effect, Layer, Option, Schema } from "effect";
-import { FetchHttpClient, HttpClient } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient } from "effect/http";
 import { spanNames } from "../Observability.ts";
 import * as SessionResolution from "../SessionResolution.ts";
 import type * as Types from "../Types.ts";

@@ -1,6 +1,5 @@
 ---
 "@thomasfosterau/effect-auth": patch
-"@thomasfosterau/effect-auth-alchemy": patch
 "@thomasfosterau/effect-auth-argon2": patch
 "@thomasfosterau/effect-auth-client": patch
 "@thomasfosterau/effect-auth-drizzle": patch

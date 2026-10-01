@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Exit, Layer } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as Entity from "../Entity.ts";
 import * as Condition from "../Condition.ts";
 import * as Errors from "../Errors.ts";

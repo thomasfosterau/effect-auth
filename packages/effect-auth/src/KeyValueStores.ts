@@ -7,7 +7,7 @@
  * key-value backend such as Redis, Cloudflare KV, or an in-memory map.
  *
  * Each layer requires the `KeyValueStore` service from
- * `effect/unstable/persistence`; provide any of its backends (e.g.
+ * `effect/persistence`; provide any of its backends (e.g.
  * `KeyValueStore.layerMemory`, `KeyValueStore.layerFileSystem`,
  * `KeyValueStore.layerSql`) underneath.
  *
@@ -41,7 +41,7 @@
  * use a backend with atomic counters when strict enforcement is required.
  */
 import { Effect, Layer } from "effect";
-import { KeyValueStore } from "effect/unstable/persistence";
+import { KeyValueStore } from "effect/persistence";
 import * as Errors from "./Errors.ts";
 import { type EmailOtpPurpose, type EmailOtpRecord, EmailOtpStore } from "./email/EmailOtp.ts";
 import { type Identifier, IdentifierStore, type IdentifierType } from "./Identifier.ts";

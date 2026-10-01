@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/http";
 import { BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
 import * as HttpClient from "./HttpClient.ts";

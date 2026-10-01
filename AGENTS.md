@@ -33,13 +33,15 @@ A new package picks an archetype, gets a `vite.config.ts` that declares its task
 - `vp run check` — every package's type gates: `tsc` over sources and tests (`vue-tsc` / `svelte-check` where relevant) plus `vp test --typecheck`. Each package's `build`, `check` and `test:unit` tasks first build the workspace packages it depends on (their `exports` point at the gitignored `dist/`), so this works on a fresh checkout with no manual build.
 - `vp run -r test:unit` — every package's unit tests.
 - `vp run build` — every package's `dist/`.
-- `vp run check:dist` — the dist-level import smoke test: packs the built packages, installs them beside one exact `effect` (default the peer floor; `-- --effect catalog` for the version the workspace builds against, which also covers `alchemy`) and imports every entry point. **Run `vp run build` first**; CI runs it twice, after the build step.
+- `vp run check:dist` — the dist-level import smoke test: packs the built packages, installs them beside one exact `effect` (default the peer floor; `-- --effect catalog` for the version the workspace builds against; `effect-auth-alchemy` is excluded until alchemy ships an rc.118 build, see #250) and imports every entry point. **Run `vp run build` first**; CI runs it twice, after the build step.
+
+`@thomasfosterau/effect-auth-alchemy` is `"private": true` until #250 (alchemy beta.79 imports the removed `effect/unstable/*`). Its `build`, `check` and `test:unit` run; `AuthSchema.test.ts` needs the alchemy runtime, so it lives in `test:alchemy`, which has its own non-required CI job and is expected to fail until #250.
 
 `vp check` is the built-in; `vp run check` is this repo's task. They are different commands. CI runs all four on every PR ([.github/workflows/ci.yml](.github/workflows/ci.yml)); run them yourself before pushing — there is no pre-push hook.
 
 ## Dependencies: strict catalog
 
-Every external version lives in [pnpm-workspace.yaml](pnpm-workspace.yaml). `package.json` files reference only `catalog:` (dev and runtime dependencies), `catalog:peers` (published peer ranges) or `workspace:*`. `catalogMode: strict` makes pnpm reject anything else. Add a dependency by adding it to the catalog first, then `vp install`, and commit the regenerated `pnpm-lock.yaml`. `effect` is a singleton pinned exactly (with an `overrides` entry); its published peer range is `>=4.0.0-rc.113` (the programme floor), proven at dist level by `vp run check:dist`, which installs the packed packages beside the floor version and imports every entry point.
+Every external version lives in [pnpm-workspace.yaml](pnpm-workspace.yaml). `package.json` files reference only `catalog:` (dev and runtime dependencies), `catalog:peers` (published peer ranges) or `workspace:*`. `catalogMode: strict` makes pnpm reject anything else. Add a dependency by adding it to the catalog first, then `vp install`, and commit the regenerated `pnpm-lock.yaml`. `effect` is a singleton pinned exactly (with an `overrides` entry); its published peer range is `>=4.0.0-rc.118` (the programme floor), proven at dist level by `vp run check:dist`, which installs the packed packages beside the floor version and imports every entry point.
 
 ## Changesets and releases
 
@@ -55,7 +57,7 @@ Branch off `trunk`, open the PR against `trunk`, one issue per PR. Fill the PR b
 
 **Consult effect-solutions before writing Effect code** — `vp exec effect-solutions list`, then `vp exec effect-solutions show <topic>…` (topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-modeling, error-handling, config, testing, cli). When the guides run out, read the Effect source itself in `node_modules/effect/src`. Never guess at an Effect pattern.
 
-House style, enforced by review rather than lint: services are `Context.Service` classes with a static `layer`; errors are `Schema.TaggedError` classes (older modules still use `Data.TaggedError`); dependencies are resolved at layer construction so service methods carry `R = never`; HTTP is `effect/unstable/httpapi`.
+House style, enforced by review rather than lint: services are `Context.Service` classes with a static `layer`; errors are `Schema.TaggedError` classes (older modules still use `Data.TaggedError`); dependencies are resolved at layer construction so service methods carry `R = never`; HTTP is `effect/http-api`.
 
 ## Claude Code sessions
 

@@ -10,7 +10,7 @@
  *   ...) has persistence.
  *
  * The queries are not this package's: every store comes from
- * `@thomasfosterau/effect-auth-sql`, written against `effect/unstable/sql`'s
+ * `@thomasfosterau/effect-auth-sql`, written against `effect/sql`'s
  * `SqlClient`. All this package adds is the D1 driver for that client
  * ({@link D1Client}) and the Alchemy resource.
  */

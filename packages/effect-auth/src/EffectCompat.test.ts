@@ -6,7 +6,7 @@ import { multiFactorConfig } from "./multifactor/MultiFactor.ts";
 import { oauthServiceOptionsConfig } from "./oauth/OAuth.ts";
 
 /**
- * Guards the Effect floor this package publishes (`effect >=4.0.0-rc.113`).
+ * Guards the Effect floor this package publishes (`effect >=4.0.0-rc.118`).
  *
  * rc.113 renamed the `Config` constructors (`Config.string` -> `Config.String`,
  * and likewise `redacted` / `int` / `boolean`). The env-backed `Config`s are
