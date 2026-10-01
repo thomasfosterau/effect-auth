@@ -24,7 +24,7 @@ behind it cannot disagree about what a credential is.
 `resolveFailOpen` takes a _mandatory_ `onDegraded` callback — fail-open's failure mode is
 silence, and there is deliberately no overload that omits it. It catches defects as well as
 typed failures, since an unreachable binding usually arrives as a thrown `TypeError`.
-`docs/SECURITY.md` states the precondition that makes fail-open safe (anonymous must be the
+`docs/ARCHITECTURE.md` ("Fail-open vs fail-closed session resolution") states the precondition that makes fail-open safe (anonymous must be the
 lower-privilege outcome) and the shapes where it is an escalation instead.
 
 **What just happened?** One `AuthOutcome` — `skipped` | `resolved` | `anonymous` | `degraded` —
