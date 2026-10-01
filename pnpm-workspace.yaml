@@ -65,7 +65,7 @@ catalog:
   svelte: ^5.57.1
   svelte-check: ^4.7.6
   tsx: ^4.23.15
-  typescript: ^6.0.3
+  typescript: ^7.0.2
   vite-plugin-solid: ^2.11.14
   # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions; `vite` is
   # the same release under its aliased core package, and `vitest` must match
