@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Cause, Config, ConfigProvider, Effect, type Exit, Redacted } from "effect";
+import { optionalSecret } from "./OptionalSecretConfig.ts";
 import { jwtServiceConfig } from "./Jwt.ts";
 import { trustedDeviceConfig } from "./TrustedDevice.ts";
 import { multiFactorConfig } from "./multifactor/MultiFactor.ts";
@@ -78,6 +79,58 @@ describe("empty environment variables", () => {
       expect(Redacted.value(oauth.value.encryptTokens!.secret)).toBe("o");
     if (mf._tag === "Success")
       expect(Redacted.value(mf.value.encryptSecret!.secret)).toBe("s3cret");
+  });
+
+  describe("optionalSecret probe", () => {
+    const N = "TWO_FACTOR_ENCRYPT_SECRET";
+    const run = <A>(config: Config.Config<A>, provider: ConfigProvider.ConfigProvider) =>
+      Effect.runPromiseExit(config.parse(provider));
+    const env = (e: Record<string, string>, opts?: { preserveEmptyStrings?: boolean }) =>
+      ConfigProvider.fromEnv({ env: e, ...opts });
+    const value = (exit: Exit.Exit<Redacted.Redacted | undefined, unknown>) =>
+      exit._tag === "Success" ? (exit.value ? Redacted.value(exit.value) : undefined) : "FAILED";
+
+    it.each([
+      [{ [`${N}_FILE`]: "/run/secrets/x" }],
+      [{ [`${N}_FILE`]: "" }],
+      [{ [`${N}_V2_X`]: "1" }],
+    ])("sibling variables sharing the prefix do not count as set-but-empty: %j", async (e) => {
+      expect(value(await run(optionalSecret(N), env(e)))).toBeUndefined();
+      const mf = await resolve(multiFactorConfig, { ...mfEnv, ...e });
+      expect(mf._tag).toBe("Success");
+    });
+
+    it("honours .parse(provider)", async () => {
+      expect(value(await run(optionalSecret(N), env({ [N]: "x" })))).toBe("x");
+      expect((await run(optionalSecret(N), env({ [N]: "" })))._tag).toBe("Failure");
+      expect(value(await run(optionalSecret(N), env({})))).toBeUndefined();
+    });
+
+    it("honours Config.nested for the exported config and the helper", async () => {
+      const nested = optionalSecret(N).pipe(Config.nested("APP"));
+      expect(value(await run(nested, env({ [`APP_${N}`]: "x" })))).toBe("x");
+      expect(value(await run(nested, env({ [N]: "x" })))).toBeUndefined();
+      expect(value(await run(nested, env({})))).toBeUndefined();
+      const empty = await run(nested, env({ [`APP_${N}`]: "" }));
+      expect(empty._tag).toBe("Failure");
+      expect(failureMessage(empty)).toContain(N);
+
+      const mf = multiFactorConfig.pipe(Config.nested("APP"));
+      const ok = await run(mf, env({ APP_TWO_FACTOR_ISSUER: "Acme", [`APP_${N}`]: "s3cret" }));
+      expect(ok._tag === "Success" && Redacted.value(ok.value.encryptSecret!.secret)).toBe(
+        "s3cret",
+      );
+      const none = await run(mf, env({ APP_TWO_FACTOR_ISSUER: "Acme" }));
+      expect(none._tag === "Success" && none.value.encryptSecret).toBeUndefined();
+      const bad = await run(mf, env({ APP_TWO_FACTOR_ISSUER: "Acme", [`APP_${N}`]: "" }));
+      expect(bad._tag).toBe("Failure");
+    });
+
+    it("preserveEmptyStrings: an empty value is a failure", async () => {
+      const exit = await run(optionalSecret(N), env({ [N]: "" }, { preserveEmptyStrings: true }));
+      expect(exit._tag).toBe("Failure");
+      expect(failureMessage(exit)).toContain(N);
+    });
   });
 
   it("TRUSTED_DEVICE_SECRET='' is missing, so the config fails", async () => {
