@@ -33,7 +33,9 @@ A new package picks an archetype, gets a `vite.config.ts` that declares its task
 - `vp run check` — every package's type gates: `tsc` over sources and tests (`vue-tsc` / `svelte-check` where relevant) plus `vp test --typecheck`. Each package's `build`, `check` and `test:unit` tasks first build the workspace packages it depends on (their `exports` point at the gitignored `dist/`), so this works on a fresh checkout with no manual build.
 - `vp run -r test:unit` — every package's unit tests.
 - `vp run build` — every package's `dist/`.
-- `vp run check:dist` — the dist-level import smoke test: packs the built packages, installs them beside one exact `effect` (default the peer floor; `-- --effect catalog` for the version the workspace builds against; `alchemy` is excluded until it ships an rc.118 build, see #250) and imports every entry point. **Run `vp run build` first**; CI runs it twice, after the build step.
+- `vp run check:dist` — the dist-level import smoke test: packs the built packages, installs them beside one exact `effect` (default the peer floor; `-- --effect catalog` for the version the workspace builds against; `effect-auth-alchemy` is excluded until alchemy ships an rc.118 build, see #250) and imports every entry point. **Run `vp run build` first**; CI runs it twice, after the build step.
+
+`@thomasfosterau/effect-auth-alchemy` is `"private": true` until #250 (alchemy beta.79 imports the removed `effect/unstable/*`). Its `build`, `check` and `test:unit` run; `AuthSchema.test.ts` needs the alchemy runtime, so it lives in `test:alchemy`, which has its own non-required CI job and is expected to fail until #250.
 
 `vp check` is the built-in; `vp run check` is this repo's task. They are different commands. CI runs all four on every PR ([.github/workflows/ci.yml](.github/workflows/ci.yml)); run them yourself before pushing — there is no pre-push hook.
 

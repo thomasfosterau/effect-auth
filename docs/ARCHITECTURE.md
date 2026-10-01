@@ -13,7 +13,7 @@ The settled API conventions — naming, export shapes, store contracts, error ta
 2. **Type-Safe**: schema'd domain models and precise tagged-error unions.
 3. **Composable**: features are independent layers; provide only what you use.
 4. **Storage-Agnostic**: bring your own store implementations (or use
-   `@thomasfosterau/effect-auth-sql`, `@thomasfosterau/effect-auth-alchemy`, or the built-in KeyValueStore
+   `@thomasfosterau/effect-auth-sql`, `@thomasfosterau/effect-auth-alchemy` (held private until alchemy ships an rc.118 build, #250), or the built-in KeyValueStore
    layers).
 5. **Secure by Default**: timing-safe comparisons, high-entropy tokens,
    HttpOnly/Secure cookies, trusted-origin CSRF checks, anti-enumeration

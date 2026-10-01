@@ -1,22 +1,31 @@
 import { resolve } from "path";
 import { defineConfig } from "vite-plus";
+import { packageTasks } from "../../vite.tasks.ts";
 
-// NOT MIGRATED TO EFFECT rc.118 (effect-auth#249, follow-up #250).
+// HELD PRIVATE UNTIL alchemy SHIPS AN EFFECT rc.118 BUILD (effect-auth#249, #250).
 //
 // The workspace builds against `effect` rc.118, but alchemy 2.0.0-beta.79 (the
-// newest release) imports the removed `effect/unstable/*` paths, so this
-// package cannot be built, type-checked or tested against that catalog. It
-// therefore declares no `build` / `check` / `test:unit` tasks: `vp run -r ...`
-// and `vp run check` skip it, and `vp run check:dist` does not pack it. It
-// keeps its `effect >=4.0.0-rc.115` peer floor (the `peers-alchemy` catalog)
-// and ships no changeset. Restore `packageTasks` as below once alchemy ships
-// an rc.118 build:
+// newest release) imports the removed `effect/unstable/*` paths, so anything
+// that loads the alchemy runtime fails with ERR_MODULE_NOT_FOUND. `package.json`
+// is therefore `"private": true` (changesets and pnpm neither version nor
+// publish it) and it stays out of the `check:dist` smoke test. Everything that
+// does not need the alchemy runtime still runs:
 //
-//   run: packageTasks({
-//     build: "tsc",
-//     check: "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run",
-//   }),
+// - `build` and `check` (tsc over sources and tests) run as for any package;
+// - `test:unit` runs every test except `AuthSchema.test.ts` (`Storage.test.ts`
+//   only needs `AuthTables.ts`, which is alchemy-free);
+// - `test:alchemy` runs `AuthSchema.test.ts`, the one suite that needs the
+//   alchemy runtime. It is expected to FAIL until #250 lands, in its own,
+//   non-required CI job. It is not skipped and not in `test:unit`.
+const alchemyRuntimeSuite = "src/AuthSchema.test.ts";
+
 export default defineConfig({
+  run: packageTasks({
+    build: "tsc",
+    check: `tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run --exclude ${alchemyRuntimeSuite}`,
+    test: `vp test run --exclude ${alchemyRuntimeSuite}`,
+    extra: { "test:alchemy": `vp test run ${alchemyRuntimeSuite}` },
+  }),
   resolve: {
     alias: {
       // packages/*/dist/ is gitignored; resolve the SQL stores this package

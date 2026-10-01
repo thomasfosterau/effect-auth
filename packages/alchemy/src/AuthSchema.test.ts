@@ -81,7 +81,9 @@ const makeEngine = (
         // requirements of the layers provided before it, mirroring alchemy's
         // own runtime layering — so they cannot collapse into a single merged
         // provide.
-        // @effect-diagnostics-next-line effect/multipleEffectProvide:off
+        // layerMergeAllWithDependencies: this layering predates the rc.118 move and
+        // is only newly flagged by @effect/language-service 0.87.3; left as is.
+        // @effect-diagnostics-next-line effect/multipleEffectProvide:off effect/layerMergeAllWithDependencies:off
         Effect.provide(Layer.mergeAll(LoggingCli, AlchemyContextLive)),
         Effect.provide(Layer.provide(ProfileStoreLive, platform)),
         Effect.provide(Layer.provide(CredentialsStoreLive, platform)),

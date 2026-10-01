@@ -1,6 +1,5 @@
 ---
 "@thomasfosterau/effect-auth": minor
-"@thomasfosterau/effect-auth-alchemy": minor
 "@thomasfosterau/effect-auth-argon2": minor
 "@thomasfosterau/effect-auth-client": minor
 "@thomasfosterau/effect-auth-drizzle": minor
