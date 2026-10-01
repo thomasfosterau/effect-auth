@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Exit, Option } from "effect";
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient } from "effect/http";
 import * as RemoteSession from "./RemoteSession.ts";
 import * as SessionResolution from "../SessionResolution.ts";
 import * as SessionContext from "../SessionContext.ts";

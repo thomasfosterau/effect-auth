@@ -13,7 +13,7 @@
  * @module plugins/captcha
  */
 import { Effect, Redacted } from "effect";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
 import { makePlugin, type PluginImpls } from "../Hooks.ts";
 import { CaptchaError } from "../Errors.ts";

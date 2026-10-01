@@ -13,7 +13,7 @@
  * @module plugins/hibp
  */
 import { Crypto, Effect } from "effect";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 import type { SignUpInput } from "../email/EmailPassword.ts";
 import { makePlugin, type ResetPasswordArgs } from "../Hooks.ts";
 import { AuthError, PwnedPasswordError } from "../Errors.ts";

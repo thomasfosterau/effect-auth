@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Cause, Effect, Exit, Option } from "effect";
-import { HttpServerRequest } from "effect/unstable/http";
+import { HttpServerRequest } from "effect/http";
 import type * as Types from "./Types.ts";
 import * as SessionResolution from "./SessionResolution.ts";
 import * as SessionCookies from "./SessionCookies.ts";

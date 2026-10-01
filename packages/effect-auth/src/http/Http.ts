@@ -1,5 +1,5 @@
 /**
- * HTTP protocol for effect-auth (optional; requires `effect/unstable/httpapi`).
+ * HTTP protocol for effect-auth (optional; requires `effect/http-api`).
  *
  * Re-exported from the package root under the `Http` namespace, e.g.
  * `Auth.Http.AuthApi`, `Auth.Http.make`, `Auth.Http.client`.

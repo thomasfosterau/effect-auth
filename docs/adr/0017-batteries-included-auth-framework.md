@@ -10,7 +10,7 @@ protocol-server tier — OIDC Provider, OAuth 2.1 Provider, SSO, SCIM, MCP Provi
 Authorization — on the grounds that an endpoint-shaped plugin delivers about a tenth of its value as
 headless logic. Both are written in the present tense as live decisions, and the tree has since
 contradicted them. `packages/effect-auth/src/http/` serves the whole surface as a typed
-`effect/unstable/httpapi` contract with session cookies and trusted-origin CSRF checks;
+`effect/http-api` contract with session cookies and trusted-origin CSRF checks;
 `@thomasfosterau/effect-auth-client` is a shipped typed client; the React, Svelte, Vue and Solid
 packages are framework integrations; and `OidcProvider.ts`, `Sso.ts`, `Scim.ts`,
 `DeviceAuthorization.ts` and `@thomasfosterau/effect-auth-saml` are the protocol-server tier,
@@ -27,7 +27,7 @@ Services and Layers, and a consumer who assembles their own app. What ADR-0001 g
 core's shape but the inference drawn from it — that owning an HTTP edge, a client or a protocol
 server would compromise that shape. It does not, as long as each tier is entered deliberately. The
 rule that keeps this true is mechanical: importing the package root for `SessionService` must not
-require `effect/unstable/httpapi` or anything else the edge depends on. Where the barrel does drag
+require `effect/http-api` or anything else the edge depends on. Where the barrel does drag
 the edge in, that is a defect against this ADR, not an exception to it.
 
 Two consequences for how "parity" is read. ADR-0001's closing line — "match functionality" means

@@ -15,11 +15,12 @@
  *
  *   vp run check:dist [-- --effect <version> | catalog] [--keep]
  *
- * `--effect catalog` uses the version the workspace builds against; only that
- * run also installs `@thomasfosterau/effect-auth-alchemy` (with `alchemy` at
- * the catalog version), because alchemy needs effect >=rc.115 and cannot be
- * installed on the floor. `--keep` leaves the scratch project on disk (its
- * path is printed) instead of deleting it, for debugging a failure.
+ * `--effect catalog` uses the version the workspace builds against (the same
+ * as the floor while the floor is the catalog version). `@thomasfosterau/
+ * effect-auth-alchemy` is not covered: alchemy beta.79 imports the removed
+ * `effect/unstable/*` paths (effect-auth#250). `--keep` leaves the scratch
+ * project on disk (its path is printed) instead of deleting it, for debugging
+ * a failure.
  *
  * Importing is not enough: the Effect API also moved *inside* the supported
  * range in places that only bite when a function is called (rc.116 replaced
@@ -36,15 +37,13 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const DEFAULT_FLOOR = "4.0.0-rc.113";
+const DEFAULT_FLOOR = "4.0.0-rc.118";
 
 /** Workspace directories smoke-tested here, with any peer to install beside them. */
 interface Target {
   readonly dir: string;
   /** Peers to install beside it, at the version the workspace catalog pins. */
   readonly peers?: ReadonlyArray<string>;
-  /** Only installable on a catalog-version run (see the header). */
-  readonly catalogOnly?: true;
 }
 
 const allTargets: ReadonlyArray<Target> = [
@@ -56,7 +55,11 @@ const allTargets: ReadonlyArray<Target> = [
   { dir: "twilio" },
   { dir: "saml" },
   { dir: "drizzle", peers: ["drizzle-orm"] },
-  { dir: "alchemy", peers: ["alchemy"], catalogOnly: true },
+  // `alchemy` is deliberately absent: alchemy 2.0.0-beta.79 (the newest release)
+  // imports `effect/unstable/*`, which rc.118 removed, so
+  // `@thomasfosterau/effect-auth-alchemy` cannot be installed or imported beside
+  // rc.118. Re-add `{ dir: "alchemy", peers: ["alchemy"] }` when alchemy ships
+  // an rc.118 build (effect-auth#250).
 ];
 
 const arg = (flag: string): string | undefined => {
@@ -76,7 +79,7 @@ const catalogEntry = (name: string): string => {
 const requested = arg("--effect") ?? DEFAULT_FLOOR;
 const onCatalog = requested === "catalog";
 const effectVersion = onCatalog ? catalogEntry("effect") : requested;
-const packages = allTargets.filter((target) => onCatalog || target.catalogOnly !== true);
+const packages = allTargets;
 const keep = process.argv.includes("--keep");
 
 const run = (cmd: string, args: ReadonlyArray<string>, cwd: string): string =>
@@ -129,7 +132,7 @@ check(
   Redacted.value(jwt.encryptPrivateKey.secret) === "s3cret",
 );
 
-// protectedField (rc.113-rc.115 have SchemaGetter.onSome; rc.116+ have transformOptionalEffect).
+// protectedField (built on SchemaGetter.transformOptionalEffect).
 const alice = Auth.Entity.ref("User", "alice");
 const bob = Auth.Entity.ref("User", "bob");
 const resolver = Layer.succeed(

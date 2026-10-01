@@ -1,6 +1,6 @@
 /**
  * A {@link RateLimiter} implementation backed by
- * `effect/unstable/persistence`'s `RateLimiter`, so consumers keep the existing
+ * `effect/persistence`'s `RateLimiter`, so consumers keep the existing
  * `consumeToken`/`checkLimit` facade but gain the library's tested fixed-window
  * algorithm and pluggable storage backends (in-memory or Redis for
  * multi-instance deployments).
@@ -9,7 +9,7 @@
  *
  * ```ts
  * import { Layer } from "effect";
- * import { RateLimiter as PersistenceRateLimiter } from "effect/unstable/persistence";
+ * import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
  * import { rateLimiterPersistenceLayer } from "@thomasfosterau/effect-auth";
  *
  * const RateLimiterLive = rateLimiterPersistenceLayer.pipe(
@@ -23,7 +23,7 @@
  *
  * ```ts
  * import { Layer } from "effect";
- * import { Redis, RateLimiter as PersistenceRateLimiter } from "effect/unstable/persistence";
+ * import { Redis, RateLimiter as PersistenceRateLimiter } from "effect/persistence";
  *
  * const RateLimiterRedis = rateLimiterPersistenceLayer.pipe(
  *   Layer.provide(PersistenceRateLimiter.layer),
@@ -40,7 +40,7 @@
  * @module rate-limit-persistence
  */
 import { Duration, Effect, Layer } from "effect";
-import { RateLimiter as PersistenceRateLimiter } from "effect/unstable/persistence";
+import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
 import { AuthError, RateLimitError } from "./Errors.ts";
 import { RateLimiter, type RateLimitConfig } from "./RateLimit.ts";
 

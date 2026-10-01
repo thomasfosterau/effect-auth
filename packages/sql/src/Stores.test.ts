@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer, Stream } from "effect";
-import { SqlClient, SqlConnection, SqlError, Statement } from "effect/unstable/sql";
-import { Reactivity } from "effect/unstable/reactivity";
+import { SqlClient, SqlConnection, SqlError, Statement } from "effect/sql";
+import { Reactivity } from "effect/reactivity";
 import Database from "better-sqlite3";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { migrate, schemaStatements } from "./Schema.ts";
@@ -12,7 +12,7 @@ import { layer } from "./Stores.ts";
 // Minimal test-only SqlClient over better-sqlite3.
 //
 // This is a real `SqlClient` built with `SqlClient.make` from
-// effect/unstable/sql — the same construction path a production driver uses —
+// effect/sql — the same construction path a production driver uses —
 // backed by an in-memory SQLite database, so the stores are exercised through
 // the genuine tagged-template/compiler pipeline.
 // ---------------------------------------------------------------------------

@@ -50,7 +50,7 @@ package that implements a core service contract.
 | ---------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | `packages/effect-auth`             | The monolithic core: every service, store contract, plugin, and the HTTP projection | `effect` v4 only (+ possibly `@effect/platform-browser` — see §2.2) |
 | `packages/client`                  | Vanilla typed client + React/Svelte/Vue bindings                                    | core types; frameworks as optional peers                            |
-| `packages/sql`                     | Store layers over `effect/unstable/sql` (driver-agnostic)                           | core; SQL drivers as peers                                          |
+| `packages/sql`                     | Store layers over `effect/sql` (driver-agnostic)                                    | core; SQL drivers as peers                                          |
 | `packages/alchemy` _(reinstated)_  | Alchemy v2 infra resources + Cloudflare D1 storage layers                           | core; `alchemy` as optional peer                                    |
 | `packages/argon2` _(new, extract)_ | `PasswordHasher` layer over `@node-rs/argon2` (native dep moves out of core)        | core; `@node-rs/argon2`                                             |
 | `packages/drizzle` _(M6, #171)_    | `SessionStore`/`UserStore` (+ rest) via Drizzle                                     | core; `drizzle-orm` as peer                                         |
@@ -104,7 +104,7 @@ as a design rule:
    fully usable in-process with no HTTP anywhere — errors in the typed error channel,
    storage/delivery as service contracts, config via `Config`/`Redacted`, tracing via
    spans. This is already true and must stay true.
-2. **HTTP is a projection, not the foundation.** The `effect/unstable/httpapi`
+2. **HTTP is a projection, not the foundation.** The `effect/http-api`
    contract (`http/HttpApi.ts`) is derived _from_ the services; handlers only decode,
    delegate, and encode. Guardrail: no business logic in `HttpServer.ts` handlers —
    every endpoint must correspond to a service method callable directly.

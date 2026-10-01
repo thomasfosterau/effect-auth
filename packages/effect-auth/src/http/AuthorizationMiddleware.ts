@@ -66,8 +66,8 @@
  *
  * @example Gate one endpoint on a per-request resource
  * ```ts
- * import { HttpApiEndpoint, HttpApiGroup, HttpApiBuilder } from "effect/unstable/httpapi"
- * import { HttpRouter } from "effect/unstable/http"
+ * import { HttpApiEndpoint, HttpApiGroup, HttpApiBuilder } from "effect/http-api"
+ * import { HttpRouter } from "effect/http"
  * import { Effect, Layer } from "effect"
  * import { AuthMiddleware, CurrentUser } from "@thomasfosterau/effect-auth/Http"
  * import { makeAuthorizationMiddleware } from "@thomasfosterau/effect-auth/Http"
@@ -101,8 +101,8 @@
  */
 
 import { Effect, Layer } from "effect";
-import { HttpApiMiddleware } from "effect/unstable/httpapi";
-import { HttpServerRequest } from "effect/unstable/http";
+import { HttpApiMiddleware } from "effect/http-api";
+import { HttpServerRequest } from "effect/http";
 import { Authorizer, CurrentPrincipal, type AuthorizeInput } from "../Authorizer.ts";
 import * as S from "./HttpApiSchema.ts";
 

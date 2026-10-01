@@ -156,34 +156,15 @@ const decide = <E>(
  * An effectful getter that runs `f` on a present value and passes an absent
  * one through untouched.
  *
- * This package supports `effect >=4.0.0-rc.113`, and the getter API changed
- * inside that range: rc.113 to rc.115 have `SchemaGetter.onSome` (which only
- * sees present values), while rc.116 removed it in favour of
- * `SchemaGetter.transformOptionalEffect` (which sees the `Option`). Neither
- * exists on the other side, so the one that does is picked when the getter is
- * built — never at import, so a missing name cannot crash module load.
+ * Built on `SchemaGetter.transformOptionalEffect`, which sees the `Option`
+ * (rc.116 removed the older `SchemaGetter.onSome`).
  */
 const someEffect = <A, R>(
   f: (value: A) => Effect.Effect<Option.Option<A>, SchemaIssue.Issue, R>,
-): SchemaGetter.Getter<A, A, R> => {
-  const getters = SchemaGetter as unknown as {
-    readonly transformOptionalEffect?: (
-      f: (input: Option.Option<A>) => Effect.Effect<Option.Option<A>, SchemaIssue.Issue, R>,
-    ) => SchemaGetter.Getter<A, A, R>;
-    readonly onSome?: (
-      f: (value: A) => Effect.Effect<Option.Option<A>, SchemaIssue.Issue, R>,
-    ) => SchemaGetter.Getter<A, A, R>;
-  };
-  if (getters.transformOptionalEffect !== undefined) {
-    return getters.transformOptionalEffect((input) =>
-      Option.isNone(input) ? Effect.succeed(Option.none<A>()) : f(input.value),
-    );
-  }
-  if (getters.onSome !== undefined) return getters.onSome(f);
-  throw new Error(
-    "effect-auth: this version of effect has neither SchemaGetter.transformOptionalEffect nor SchemaGetter.onSome",
+): SchemaGetter.Getter<A, A, R> =>
+  SchemaGetter.transformOptionalEffect((input: Option.Option<A>) =>
+    Option.isNone(input) ? Effect.succeed(Option.none<A>()) : f(input.value),
   );
-};
 
 /**
  * The guard both directions share: absent values pass through untouched (see

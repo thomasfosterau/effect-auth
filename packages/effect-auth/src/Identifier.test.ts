@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { KeyValueStore } from "effect/unstable/persistence";
+import { KeyValueStore } from "effect/persistence";
 import { IdentifierStore, type Identifier, primaryEmail, primaryEmailValue } from "./Identifier.ts";
 import { IdentifierStoreKV } from "./KeyValueStores.ts";
 

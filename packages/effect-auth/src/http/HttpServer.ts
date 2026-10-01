@@ -1,13 +1,7 @@
 import { Context, Effect, FileSystem, Layer, Option, Path } from "effect";
 import { resolveMessage } from "../Messages.ts";
-import { HttpApiBuilder } from "effect/unstable/httpapi";
-import {
-  Etag,
-  HttpPlatform,
-  HttpRouter,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "effect/unstable/http";
+import { HttpApiBuilder } from "effect/http-api";
+import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { AuthApi, getOpenApiSpec } from "./HttpApi.ts";
 import * as SessionCookies from "../SessionCookies.ts";
 import { ClientIP, resolveClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
