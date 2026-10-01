@@ -51,7 +51,7 @@ jobs:
       # (via `pnpm run version`). Once that PR is merged (no changesets remain),
       # it runs `pnpm run release`, which publishes every package under
       # packages/ with `pnpm publish` — npm OIDC trusted publishing (there is no
-      # NPM_TOKEN to steal; provenance is attached) — and then `changeset tag`.
+      # NPM_TOKEN to steal; provenance is left to npm) — and then `changeset tag`.
       # The action parses the "New tag:" output, pushes the tags and creates the
       # GitHub releases.
       #
@@ -72,4 +72,5 @@ jobs:
           pr-title: "chore: version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
+          # Don't force provenance; npm attaches it itself when allowed, and an
+          # explicit request fails from a private repository.

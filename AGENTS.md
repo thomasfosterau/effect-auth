@@ -44,7 +44,7 @@ Every external version lives in [pnpm-workspace.yaml](pnpm-workspace.yaml). `pac
 ## Changesets and releases
 
 - **Every change to a published package carries a changeset** (`vp run changeset`, or write `.changeset/<slug>.md` by hand) naming each package it touches. Docs, CI and tooling-only changes need none.
-- The default branch is **`trunk`**. Merging to `trunk` makes the Release workflow open or update the "Version Packages" PR; merging that PR publishes to npm via OIDC trusted publishing, with provenance, from the protected `release` environment. There is no `NPM_TOKEN`. See [PUBLISHING.md](PUBLISHING.md).
+- The default branch is **`trunk`**. Merging to `trunk` makes the Release workflow open or update the "Version Packages" PR; merging that PR publishes to npm via OIDC trusted publishing from the protected `release` environment. There is no `NPM_TOKEN`. See [PUBLISHING.md](PUBLISHING.md).
 - **Agents never publish** and never merge the Version Packages PR — the owner does.
 
 ## Branches and PRs

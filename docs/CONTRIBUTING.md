@@ -336,7 +336,7 @@ Releases are automated using [Changesets](https://github.com/changesets/changese
 3. **Release PR is merged**: When the maintainer merges this PR:
    - Package versions are bumped based on changesets
    - CHANGELOG.md is updated
-   - Changes are published to npm via OIDC trusted publishing, with provenance
+   - Changes are published to npm via OIDC trusted publishing
      (see [PUBLISHING.md](../PUBLISHING.md))
    - Git tags are created
 
