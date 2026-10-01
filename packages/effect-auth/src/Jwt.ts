@@ -27,6 +27,7 @@
  */
 
 import { Config, Context, Crypto, Data, Deferred, Effect, Layer, Redacted, Ref } from "effect";
+import { optionalSecret } from "./OptionalSecretConfig.ts";
 import * as Cipher from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import type * as Errors from "./Errors.ts";
@@ -218,9 +219,8 @@ export const jwtServiceConfig = Config.all({
   clockSkewLeeway: Config.Int("JWT_CLOCK_SKEW_LEEWAY_MS").pipe(
     Config.orElse(() => Config.succeed(undefined)),
   ),
-  encryptPrivateKey: Config.Redacted("JWT_ENCRYPT_PRIVATE_KEY_SECRET").pipe(
-    Config.map((secret) => ({ secret }) as const),
-    Config.orElse(() => Config.succeed(undefined)),
+  encryptPrivateKey: optionalSecret("JWT_ENCRYPT_PRIVATE_KEY_SECRET").pipe(
+    Config.map((secret) => (secret === undefined ? undefined : ({ secret } as const))),
   ),
 });
 

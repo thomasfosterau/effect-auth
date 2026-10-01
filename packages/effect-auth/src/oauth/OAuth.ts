@@ -6,6 +6,7 @@
  */
 
 import { Config, Context, Crypto, Effect, Layer, Redacted } from "effect";
+import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
 import * as Obs from "../Observability.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -760,9 +761,8 @@ export const oauthServiceOptionsConfig = Config.all({
   autoLinkByVerifiedEmail: Config.Boolean("OAUTH_AUTO_LINK_BY_VERIFIED_EMAIL").pipe(
     Config.withDefault(true),
   ),
-  encryptTokens: Config.Redacted("OAUTH_ENCRYPT_TOKENS_SECRET").pipe(
-    Config.map((secret) => ({ secret }) as const),
-    Config.orElse(() => Config.succeed(undefined)),
+  encryptTokens: optionalSecret("OAUTH_ENCRYPT_TOKENS_SECRET").pipe(
+    Config.map((secret) => (secret === undefined ? undefined : ({ secret } as const))),
   ),
 });
 
