@@ -23,7 +23,9 @@ catalogMode: strict
 catalog:
   # Changesets CLI v3 pairs with `changesets/action` v2 (release.yml).
   "@changesets/cli": ^3.0.3
-  # Compiles AND executes every JSDoc `@example` in packages/effect-auth.
+  # `vp run docs`: the API reference for packages/effect-auth, compiling and
+  # executing every JSDoc `@example`. Not a gate yet; it fails on undocumented
+  # barrel re-exports (#257).
   "@effect/docgen": ^0.5.2
   "@effect/language-service": ^0.87.3
   "@effect/sql-pg": 4.0.0-rc.118
