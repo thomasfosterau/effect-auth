@@ -26,7 +26,7 @@ vp install
    import { describe, expect, it } from "vite-plus/test";
    ```
 
-   Cover the error cases and the security properties (timing, entropy, expiry, replay), not only the happy path.
+   Cover the error cases and the security properties (timing, entropy, expiry, replay), not only the happy path. Storage adapters test against real engines in-process: `packages/drizzle`'s PostgreSQL suites run on [PGlite](https://github.com/electric-sql/pglite) (so `jsonb`, `timestamptz` and unique-index violations behave as in production) and its SQLite suite on `better-sqlite3`; `Requests.test.ts` counts the SQL a program emits through drizzle's `logger` hook to prove the batching claims, and `MySqlSchema.test.ts` pins the MySQL SQL through the proxy driver.
 
 4. Document the change in the affected package's `README.md`, and update [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) if the module map changes.
 5. Add a changeset with `pnpm changeset` when the change affects a published package ([AGENTS.md](AGENTS.md#branches-and-pull-requests) says which changes need one).

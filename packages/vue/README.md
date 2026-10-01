@@ -1,11 +1,11 @@
 # @thomasfosterau/effect-auth-vue
 
-Vue bindings for [`@thomasfosterau/effect-auth-client`](https://github.com/thomasfosterau/effect-auth/tree/main/packages/client): composables over the client's observable session store, plus headless single-file form components for the flows every app has to build anyway.
+Vue bindings for [`@thomasfosterau/effect-auth-client`](../client): composables over the client's observable session store, plus headless single-file form components for the flows every app has to build anyway.
 
 ## Install
 
 ```sh
-pnpm add @thomasfosterau/effect-auth-vue @thomasfosterau/effect-auth-client
+pnpm add @thomasfosterau/effect-auth-vue @thomasfosterau/effect-auth-client effect
 ```
 
 `vue` (>= 3) is a peer dependency.
@@ -155,7 +155,7 @@ When the server sends a message with a failure, that message is what the `role="
 
 Each form is a real `<form>` with labels wired to inputs by `for`/`id`, correct `type` and `autocomplete` on every input (`email`, `current-password`, `new-password`, `one-time-code`, `username`), `aria-busy` on the form while a request is in flight, `aria-invalid` on the fields a failure implicates, and the error message in a `role="alert"` element.
 
-See [the client guide](https://github.com/thomasfosterau/effect-auth/blob/main/docs/guides/client.md) for the rest of the client API.
+See [the client guide](../../docs/guides/client.md) for the rest of the client API.
 
 ## License
 

@@ -17,7 +17,7 @@ Only the XML job lives here.
 ## Install
 
 ```sh
-npm install @thomasfosterau/effect-auth-saml
+pnpm add @thomasfosterau/effect-auth-saml @thomasfosterau/effect-auth effect
 ```
 
 ## Usage
@@ -104,3 +104,7 @@ than a clear refusal.
 5.1.0 is the release that fixed the July 2025 signature-scope vulnerabilities
 (CVE-2025-54419, CVE-2025-54369), where a crafted document could get profile
 data read from bytes the signature did not cover.
+
+## License
+
+MIT

@@ -1,11 +1,11 @@
 # @thomasfosterau/effect-auth-svelte
 
-Svelte bindings for [`@thomasfosterau/effect-auth-client`](https://github.com/thomasfosterau/effect-auth/tree/main/packages/client): readable stores over the client's observable session store, plus unstyled form components for the usual authentication screens.
+Svelte bindings for [`@thomasfosterau/effect-auth-client`](../client): readable stores over the client's observable session store, plus unstyled form components for the usual authentication screens.
 
 ## Install
 
 ```sh
-pnpm add @thomasfosterau/effect-auth-svelte @thomasfosterau/effect-auth-client
+pnpm add @thomasfosterau/effect-auth-svelte @thomasfosterau/effect-auth-client effect
 ```
 
 `svelte` (>= 5.20) is a peer dependency. The components are authored with runes, and the package is built with `svelte-package`, so it resolves through the `svelte` export condition like any other Svelte component library.
@@ -34,7 +34,7 @@ The stores implement Svelte's readable-store contract directly, so the `$store` 
 
 Subscribing to `sessionStore` triggers the initial `/session` fetch; every auth mutation on the client refreshes it.
 
-See [the client guide](https://github.com/thomasfosterau/effect-auth/blob/main/docs/guides/client.md) for the rest of the client API.
+See [the client guide](../../docs/guides/client.md) for the rest of the client API.
 
 ## Forms
 

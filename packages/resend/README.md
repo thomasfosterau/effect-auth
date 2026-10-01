@@ -9,7 +9,7 @@
 ## Install
 
 ```sh
-npm install @thomasfosterau/effect-auth-resend
+pnpm add @thomasfosterau/effect-auth-resend @thomasfosterau/effect-auth effect
 ```
 
 ## Usage
