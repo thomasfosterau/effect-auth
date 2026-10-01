@@ -931,7 +931,13 @@ Following Oslo guidelines:
 > `jwtServiceConfig` / `oauthServiceOptionsConfig` / `multiFactorConfig` at
 > startup with a `ConfigError` naming the variable, because Effect rc.118 reads an
 > empty value as absent and would otherwise silently store the data unencrypted.
-> The check reads the active `ConfigProvider`, so it also applies to map providers.
+> A value that is only whitespace (for example `"   "` or a lone newline) counts
+> as empty and fails the same way; a secret with surrounding spaces but other
+> content is accepted unchanged. The check reads the active `ConfigProvider`, so
+> it also applies to map providers. Known limitation: an empty secret set
+> together with a sibling variable sharing its prefix (for example
+> `TWO_FACTOR_ENCRYPT_SECRET=""` plus `TWO_FACTOR_ENCRYPT_SECRET_FILE=...`) is
+> not detected and reads as unset.
 
 Security is our top priority. See our [Security Policy](./docs/SECURITY.md) for:
 

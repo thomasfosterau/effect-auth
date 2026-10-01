@@ -94,10 +94,36 @@ describe("empty environment variables", () => {
       [{ [`${N}_FILE`]: "/run/secrets/x" }],
       [{ [`${N}_FILE`]: "" }],
       [{ [`${N}_V2_X`]: "1" }],
+      [{ [`${N}_0`]: "k" }],
+      [{ [`${N}_1`]: "k" }],
+      [{ [`${N}_0`]: "a", [`${N}_1`]: "b" }],
     ])("sibling variables sharing the prefix do not count as set-but-empty: %j", async (e) => {
       expect(value(await run(optionalSecret(N), env(e)))).toBeUndefined();
       const mf = await resolve(multiFactorConfig, { ...mfEnv, ...e });
       expect(mf._tag).toBe("Success");
+    });
+
+    it.each([[""], ["   "], ["\n"], ["\t \n"]])(
+      "a present value that is empty after trimming (%j) is a configuration error",
+      async (v) => {
+        const exit = await run(optionalSecret(N), env({ [N]: v }));
+        expect(exit._tag).toBe("Failure");
+        expect(failureMessage(exit)).toContain(N);
+        expect(failureMessage(exit)).toContain("set but empty");
+        const mf = await resolve(multiFactorConfig, { ...mfEnv, [N]: v });
+        expect(mf._tag).toBe("Failure");
+      },
+    );
+
+    it("a secret with surrounding spaces but non-space content is accepted untrimmed", async () => {
+      expect(value(await run(optionalSecret(N), env({ [N]: " x " })))).toBe(" x ");
+    });
+
+    it("ACCEPTED BLIND SPOT (owner, #252): N='' together with N_FILE reads as unset", async () => {
+      // A future fix must flip this expectation deliberately.
+      expect(
+        value(await run(optionalSecret(N), env({ [N]: "", [`${N}_FILE`]: "/x" }))),
+      ).toBeUndefined();
     });
 
     it("honours .parse(provider)", async () => {
