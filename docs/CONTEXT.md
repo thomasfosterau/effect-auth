@@ -196,7 +196,8 @@ credential but not over the User. Does not imply Membership.
 ## Admin language
 
 A separate bounded context: system-wide administrative operations on Users, Sessions, and
-Accounts. Lives in its own subdirectory under the `effect-auth` package (ADR-0014). Out of the
+Accounts. Lives in `src/Admin.ts` in the core package (ADR-0014 placed it in a subdirectory; see
+its header). Out of the
 authentication credential/verification typology — same as Organization.
 
 **Admin**:

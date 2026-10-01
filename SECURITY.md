@@ -12,7 +12,7 @@ Include what an attacker can do, the affected packages and versions, and steps o
 
 ## Supply chain
 
-- Every package publishes from CI through npm trusted publishing (OIDC) in the protected `release` environment; there is no `NPM_TOKEN` ([PUBLISHING.md](PUBLISHING.md)).
+- Every published package is published from CI through npm trusted publishing (OIDC) in the protected `release` environment; there is no `NPM_TOKEN` ([PUBLISHING.md](PUBLISHING.md)).
 - The core package depends on `effect` only. Native and vendor dependencies live in separate packages (for example Argon2 in `effect-auth-argon2`, the SAML XML stack in `effect-auth-saml`), as peers where a consumer supplies them.
 - CI runs `pnpm audit --audit-level high` on every pull request, and Dependabot keeps the catalog and the pinned actions current.
 

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`CLAUDE.md` is a symlink to this file. effect-auth is a library monorepo: authentication and authorization for [Effect](https://effect.website/) v4, as thirteen `@thomasfosterau/effect-auth*` packages under `packages/*`. Twelve are published; `effect-auth-alchemy` is `"private": true` until #250. It has no application, no deployment and no secrets.
+`CLAUDE.md` is a symlink to this file. effect-auth is a library monorepo: authentication and authorization for [Effect](https://effect.website/) v4, as thirteen `@thomasfosterau/effect-auth*` packages under `packages/*`. Twelve are publishable; `effect-auth-alchemy` is `"private": true` until #250. It has no application, no deployment and no secrets.
 
 Every package publishes `dist/`. Every package except the four framework bindings peers `effect` through `catalog:peers`; a binding peers only its framework. The archetype decides what a package may import:
 
@@ -72,7 +72,7 @@ Consult effect-solutions before writing Effect code (`vp exec effect-solutions l
 
 ## Agent sessions
 
-The SessionStart hook ([.claude/hooks/session-start.sh](.claude/hooks/session-start.sh), also the devcontainer's `postCreateCommand`) installs dependencies against the lockfile and links `vp` and `tsx` onto PATH for non-interactive shells. It hydrates no secrets; none are needed. A PostToolUse hook (`.claude/settings.json`) runs `vp fmt --write` on every file you edit, so edits get reformatted after you write them. `vp run check:dist` and `pnpm audit` need registry access; the other gates run offline against the lockfile. If one can't run here, say so in the PR body.
+The SessionStart hook ([.claude/hooks/session-start.sh](.claude/hooks/session-start.sh), also the devcontainer's `postCreateCommand`) installs dependencies against the lockfile and links `vp` and `tsx` onto PATH for non-interactive shells. It hydrates no secrets; none are needed. A PostToolUse hook (`.claude/settings.json`) runs `vp fmt --write` on every file you edit, so edits get reformatted after you write them. `vp run check:dist` and `pnpm audit` need registry access.
 
 ## Documentation surfaces
 

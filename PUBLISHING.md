@@ -10,11 +10,11 @@ Releases are automated with [Changesets](https://github.com/changesets/changeset
 
 The publish step uses `pnpm publish`, not `npm publish`: pnpm 11 supports npm OIDC trusted publishing (it mints the short-lived token itself; provenance is left to npm, which attaches it only when allowed, and is never forced because an explicit request fails from a private repository), and it is what rewrites the `catalog:`, `catalog:peers` and `workspace:*` specifiers in each `package.json` into the ranges consumers actually see; npm would publish the literal protocols. `changeset tag` then emits the `New tag:` lines the Changesets action uses to push the tags and create the GitHub releases.
 
-Agents never run the release, and never merge the Version Packages PR.
+Who may release, and how: [AGENTS.md → Branches and pull requests](AGENTS.md#branches-and-pull-requests).
 
 ## Maintainer setup (one-time)
 
-None of the twelve published packages is on npm yet. Trusted publishing can only be configured on a package that exists on npm, so the first release needs one bootstrap step:
+None of the twelve publishable packages is on npm yet. Trusted publishing can only be configured on a package that exists on npm, so the first release needs one bootstrap step:
 
 1. **Allow Actions to open the Version Packages PR.** In the repo: **Settings → Actions → General → Workflow permissions** → enable **"Allow GitHub Actions to create and approve pull requests"**. Without this the built-in `GITHUB_TOKEN` is forbidden from opening pull requests and the workflow fails at the PR-creation step — even though the job already grants `pull-requests: write`.
 2. **Create and protect the `release` environment.** **Settings → Environments → New environment → `release`** → enable **Required reviewers** (yourself) and restrict deployment to the `trunk` branch, so publishing pauses for manual approval.

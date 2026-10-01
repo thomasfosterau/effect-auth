@@ -1,6 +1,6 @@
 # effect-auth
 
-Authentication and authorization for [Effect](https://effect.website/) v4: a headless core of services and layers, plus an optional HTTP API, a typed browser client, framework bindings and storage and vendor adapters, each opt-in. How it relates to effect-jsonapi and legation is stated once in [the three-library boundary](docs/BOUNDARY.md).
+Batteries-included authentication and authorization for [Effect](https://effect.website/) v4: a headless core of services and layers, plus an optional HTTP API, a typed browser client, framework bindings and storage and vendor adapters, each opt-in. How it relates to effect-jsonapi and legation is stated once in [the three-library boundary](docs/BOUNDARY.md).
 
 ## Packages
 
