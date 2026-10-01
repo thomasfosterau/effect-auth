@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { HttpApiSchema } from "effect/unstable/httpapi";
+import { HttpApiSchema } from "effect/http-api";
 import { Forbidden, Unauthorized } from "../Guard.ts";
 import * as Identifier from "../Identifier.ts";
 import type * as Types from "../Types.ts";

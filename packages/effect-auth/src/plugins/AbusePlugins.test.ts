@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Crypto, Effect, Layer, Redacted, Result } from "effect";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { Hooks } from "../Hooks.ts";
 import { HaveIBeenPwnedPlugin } from "../password/HaveIBeenPwned.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";

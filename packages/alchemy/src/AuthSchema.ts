@@ -40,7 +40,7 @@
  */
 
 import { Clock, Data, Effect } from "effect";
-import { SqlClient, SqlError } from "effect/unstable/sql";
+import { SqlClient, SqlError } from "effect/sql";
 import * as Sql from "@thomasfosterau/effect-auth-sql";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";

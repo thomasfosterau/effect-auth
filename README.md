@@ -21,12 +21,12 @@ effect-auth is batteries-included: a headless core, plus an optional HTTP API, a
 - 📺 **Device Authorization Grant**: RFC 8628 `device_code`/`user_code` flow for CLIs and TVs (`POST /device/code` → approve → `POST /device/token`)
 - 👤 **Anonymous Auth**: Guest sessions (`POST /sign-in/anonymous`) with account linking on sign-up (`isAnonymousUser` helper, `linkAccount` migration callback)
 - 🪪 **Username Auth**: Sign in with a username + password (`POST /sign-in/username`), case-insensitive uniqueness, honouring the multi-factor gate
-- 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets, an optional `effect/unstable/persistence` backend (in-memory or Redis) via `rateLimiterPersistenceLayer`, and an `AccountLockoutPlugin` (OWASP-style lockout after N failed sign-ins)
+- 🛡️ **Rate Limiting**: Built-in rate limiting with configurable presets, an optional `effect/persistence` backend (in-memory or Redis) via `rateLimiterPersistenceLayer`, and an `AccountLockoutPlugin` (OWASP-style lockout after N failed sign-ins)
 - 🚫 **Abuse Protection**: Captcha verification (Turnstile/reCAPTCHA/hCaptcha) and Have-I-Been-Pwned compromised-password checks as composable hooks plugins
 - 🔓 **WebAuthn / Passkeys**: Passwordless authentication with FIDO2 compliance
 - 🏢 **Organizations & Admin**: Multi-tenant organizations (members with deactivation, invitations, roles, per-org default role, verified email domains with opt-in JIT provisioning) and admin tooling (ban, impersonate)
 - 🗝️ **API Keys & JWT**: Hashed API keys with permissions/quotas; ES256/EdDSA JWTs with JWKS
-- 🌍 **HTTP Protocol**: A typed `effect/unstable/httpapi` contract serving the whole surface as a mountable Web handler with a derived typed client, session cookies, and trusted-origin CSRF protection
+- 🌍 **HTTP Protocol**: A typed `effect/http-api` contract serving the whole surface as a mountable Web handler with a derived typed client, session cookies, and trusted-origin CSRF protection
 - 📖 **OpenAPI Document + Reference UI**: Derive an OpenAPI 3.1 spec from the HTTP contract (`Http.getOpenApiSpec()`) and optionally serve it plus a Scalar reference page via `Http.make({ docs: true })`
 - 🍪 **Session Cookie Cache**: Optional HMAC-signed session-data cookie (`cookie.cache`) that serves authenticated requests without a session-store read for a short window
 - 🏛️ **Enterprise SSO**: OIDC relying party with per-organization connections, email-domain routing, first-login provisioning, and just-in-time membership from verified organization domains
@@ -46,7 +46,7 @@ effect-auth is batteries-included: a headless core, plus an optional HTTP API, a
 | `@thomasfosterau/effect-auth-svelte`  | Svelte stores and form components over the browser client      |
 | `@thomasfosterau/effect-auth-vue`     | Vue composables and form components over the browser client    |
 | `@thomasfosterau/effect-auth-solid`   | Solid primitives and form components over the browser client   |
-| `@thomasfosterau/effect-auth-sql`     | Driver-agnostic SQL storage layers (`effect/unstable/sql`)     |
+| `@thomasfosterau/effect-auth-sql`     | Driver-agnostic SQL storage layers (`effect/sql`)              |
 | `@thomasfosterau/effect-auth-alchemy` | Alchemy v2 `AuthSchema` resource + D1-backed storage layers    |
 | `@thomasfosterau/effect-auth-argon2`  | Argon2id `PasswordHasher` on WASM (`hash-wasm`)                |
 
@@ -752,12 +752,12 @@ await Effect.runPromise(
 ## Abuse Protection (captcha + Have I Been Pwned)
 
 `CaptchaPlugin` and `HaveIBeenPwnedPlugin` are hooks plugins (`before*`
-transforms) composed with `composePlugins`. Both use `effect/unstable/http`'s
+transforms) composed with `composePlugins`. Both use `effect/http`'s
 `HttpClient`, so provide `FetchHttpClient.layer` (or a stub in tests).
 
 ```typescript
 import { Effect, Layer, Redacted } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/http";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // Reject compromised passwords (k-anonymity range query) and require a captcha

@@ -3,7 +3,7 @@
  *
  * There are no D1-flavoured store implementations in this package. The stores
  * come from `@thomasfosterau/effect-auth-sql`, which implements every
- * effect-auth storage interface against `effect/unstable/sql`'s `SqlClient`
+ * effect-auth storage interface against `effect/sql`'s `SqlClient`
  * with DDL that is valid on SQLite (and therefore D1), Postgres and MySQL.
  * All this module does is build the client with {@link D1Client.layer} and
  * provide it to those stores.

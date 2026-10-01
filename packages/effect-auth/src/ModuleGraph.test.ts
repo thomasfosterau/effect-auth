@@ -60,12 +60,12 @@ const reachesModule = (externalSpecifiers: ReadonlySet<string>, moduleName: stri
 describe("module graph", () => {
   // TODO(#205): Http.ts — reached from src/index.ts:385's
   // `export * as Http from "./http/index.ts"` — imports from
-  // `effect/unstable/httpapi`, which is exactly the coupling #205's HTTP-tier
+  // `effect/http-api`, which is exactly the coupling #205's HTTP-tier
   // restructure exists to remove. Un-skip once that lands.
-  it.skip("root barrel does not reach effect/unstable/httpapi or effect-jsonapi", () => {
+  it.skip("root barrel does not reach effect/http-api or effect-jsonapi", () => {
     const { externalSpecifiers } = walkModuleGraph(entryFile);
 
-    expect(reachesModule(externalSpecifiers, "effect/unstable/httpapi")).toBe(false);
+    expect(reachesModule(externalSpecifiers, "effect/http-api")).toBe(false);
     expect(reachesModule(externalSpecifiers, "effect-jsonapi")).toBe(false);
   });
 });

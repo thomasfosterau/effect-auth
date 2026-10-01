@@ -2,7 +2,7 @@
  * `@thomasfosterau/effect-auth-sql` — driver-agnostic SQL storage layers for
  * effect-auth.
  *
- * Built on `effect/unstable/sql`'s `SqlClient`, so it works with any
+ * Built on `effect/sql`'s `SqlClient`, so it works with any
  * `SqlClient` layer (pg, mysql, sqlite, Cloudflare D1, ...).
  *
  * @example

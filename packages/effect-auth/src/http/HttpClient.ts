@@ -1,4 +1,4 @@
-import { HttpApiClient } from "effect/unstable/httpapi";
+import { HttpApiClient } from "effect/http-api";
 import { AuthApi } from "./HttpApi.ts";
 
 /**

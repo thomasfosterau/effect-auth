@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, FileSystem, Layer, Path, PlatformError } from "effect";
-import { SqlClient } from "effect/unstable/sql";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import { SqlClient } from "effect/sql";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { AdoptPolicy } from "alchemy/AdoptPolicy";
 import { AlchemyContextLive } from "alchemy/AlchemyContext";
 import { apply } from "alchemy/Apply";

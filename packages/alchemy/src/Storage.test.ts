@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { authTableNames } from "./AuthSchema.ts";
 import * as D1Client from "./D1Client.ts";

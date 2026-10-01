@@ -2,7 +2,7 @@
  * A `SqlClient` for Cloudflare D1.
  *
  * This is the only D1-specific code in the package: it turns a D1 binding into
- * an `effect/unstable/sql` {@link SqlClient.SqlClient} and stops there. Every
+ * an `effect/sql` {@link SqlClient.SqlClient} and stops there. Every
  * auth query lives in `@thomasfosterau/effect-auth-sql`, which is written
  * against `SqlClient` and shared with every other SQL deployment, so nothing
  * here knows what a session or a credential is.
@@ -33,8 +33,8 @@
  */
 
 import { Effect, Layer, Stream } from "effect";
-import { Reactivity } from "effect/unstable/reactivity";
-import { SqlClient, SqlConnection, SqlError, Statement } from "effect/unstable/sql";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient, SqlConnection, SqlError, Statement } from "effect/sql";
 
 /**
  * The part of a Cloudflare D1 binding this client uses.

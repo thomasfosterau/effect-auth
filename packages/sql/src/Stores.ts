@@ -2,7 +2,7 @@
  * Driver-agnostic SQL implementations of effect-auth's storage interfaces.
  *
  * Each `make*Store` is an Effect that reads the `SqlClient` service from
- * `effect/unstable/sql` out of the context and builds a plain store object,
+ * `effect/sql` out of the context and builds a plain store object,
  * and each `*StoreLayer` lifts it into an Effect `Layer` keyed by the
  * matching effect-auth `Context.Service` tag. {@link layer} bundles all of
  * them so a single `Layer.provide` wires up the entire auth stack on top of
@@ -27,7 +27,7 @@
  */
 
 import { Effect, Layer } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 import { randomUUID } from "node:crypto";
 import * as Auth from "@thomasfosterau/effect-auth";
 

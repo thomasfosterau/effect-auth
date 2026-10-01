@@ -14,7 +14,7 @@ own:
 
 | Module       | What it is                                                            |
 | ------------ | --------------------------------------------------------------------- |
-| `D1Client`   | A `SqlClient` (from `effect/unstable/sql`) over a D1 binding.         |
+| `D1Client`   | A `SqlClient` (from `effect/sql`) over a D1 binding.                  |
 | `Storage`    | `layer(db)` / `migrate(db)` — the client wired to the SQL stores.     |
 | `AuthSchema` | The Alchemy resource + provider that reconciles the schema on deploy. |
 
@@ -177,7 +177,7 @@ bun add @thomasfosterau/effect-auth-alchemy @thomasfosterau/effect-auth effect a
 ```ts
 import * as Cloudflare from "alchemy/Cloudflare";
 import { Effect } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as AuthD1 from "@thomasfosterau/effect-auth-alchemy";
 
 const AuthD1Database = Cloudflare.D1.Database("auth");

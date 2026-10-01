@@ -29,7 +29,7 @@
  *
  * @example Attaching required auth to a group
  * ```ts
- * import { HttpApiGroup, HttpApiEndpoint, HttpApiBuilder } from "effect/unstable/httpapi"
+ * import { HttpApiGroup, HttpApiEndpoint, HttpApiBuilder } from "effect/http-api"
  * import { Effect, Layer } from "effect"
  * import {
  *   AuthMiddleware,
@@ -67,8 +67,8 @@
  */
 
 import { Effect, Layer, Option, Redacted } from "effect";
-import { HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi";
-import { HttpServerRequest } from "effect/unstable/http";
+import { HttpApiMiddleware, HttpApiSecurity } from "effect/http-api";
+import { HttpServerRequest } from "effect/http";
 import { Hooks } from "../Hooks.ts";
 import { SessionService } from "../SessionService.ts";
 import { CurrentPrincipal, CurrentCredential } from "../Authorizer.ts";
