@@ -19,7 +19,7 @@
  * races. Multi-step upserts (challenge, oauthState, emailOtp.upsert) run
  * inside `sql.withTransaction`. `ON CONFLICT` targets a declared primary key
  * or unique index, which SQLite and Postgres share; MySQL deployments need an
- * `ON DUPLICATE KEY UPDATE` dialect tweak (tracked for a dialect layer).
+ * `ON DUPLICATE KEY UPDATE` dialect tweak (#260).
  *
  * Token columns store SHA-256 hashes computed by the service layer (the
  * `auth_sessions.id` primary key included) — the database never sees a raw
@@ -202,6 +202,7 @@ const rowToSession = (
     })),
   );
 
+/** `Auth.SessionStore` over the `auth_sessions` table; requires `SqlClient`. */
 export const makeSessionStore: Effect.Effect<
   typeof Auth.SessionStore.Service,
   never,
@@ -243,6 +244,7 @@ export const makeSessionStore: Effect.Effect<
   } satisfies typeof Auth.SessionStore.Service;
 });
 
+/** `Auth.UserStore` over the `auth_users` table; requires `SqlClient`. */
 export const makeUserStore: Effect.Effect<
   typeof Auth.UserStore.Service,
   never,
@@ -259,6 +261,7 @@ export const makeUserStore: Effect.Effect<
 // UserServiceStore
 // ---------------------------------------------------------------------------
 
+/** `Auth.UserServiceStore` over the `auth_users` table; requires `SqlClient`. */
 export const makeUserServiceStore: Effect.Effect<
   typeof Auth.UserServiceStore.Service,
   never,
@@ -282,6 +285,7 @@ export const makeUserServiceStore: Effect.Effect<
 // EmailPasswordStore + PasswordResetUserStore (auth_users)
 // ---------------------------------------------------------------------------
 
+/** `Auth.Email.EmailPasswordStore` over the `auth_users` table; requires `SqlClient`. */
 export const makeEmailPasswordStore: Effect.Effect<
   typeof Auth.Email.EmailPasswordStore.Service,
   never,
@@ -300,6 +304,7 @@ export const makeEmailPasswordStore: Effect.Effect<
   } satisfies typeof Auth.Email.EmailPasswordStore.Service;
 });
 
+/** `Auth.Password.PasswordResetUserStore` over the `auth_users` table; requires `SqlClient`. */
 export const makePasswordResetUserStore: Effect.Effect<
   typeof Auth.Password.PasswordResetUserStore.Service,
   never,
@@ -414,6 +419,7 @@ const rowToRateLimit = (row: RateLimitRow): Auth.RateLimitEntry =>
     ? { key: row.key, count: row.count, resetAt: row.reset_at }
     : { key: row.key, count: row.count, resetAt: row.reset_at, blockedUntil: row.blocked_until };
 
+/** `Auth.RateLimitStore` over the `auth_rate_limits` table; requires `SqlClient`. */
 export const makeRateLimitStore: Effect.Effect<
   typeof Auth.RateLimitStore.Service,
   never,
@@ -484,6 +490,7 @@ const rowToEmailVerification = (row: EmailVerificationRow): Auth.Email.EmailVeri
   expiresAt: row.expires_at,
 });
 
+/** `Auth.Email.EmailVerificationStore` over the `auth_email_verifications` table; requires `SqlClient`. */
 export const makeEmailVerificationStore: Effect.Effect<
   typeof Auth.Email.EmailVerificationStore.Service,
   never,
@@ -530,6 +537,7 @@ const rowToChallenge = (row: ChallengeRow): Auth.MultiFactor.WebAuthnChallenge =
     ? { challenge: fromBase64(row.challenge), expiresAt: row.expires_at }
     : { challenge: fromBase64(row.challenge), expiresAt: row.expires_at, userId: row.user_id };
 
+/** `Auth.MultiFactor.ChallengeStore` over the `auth_webauthn_challenges` table; requires `SqlClient`. */
 export const makeChallengeStore: Effect.Effect<
   typeof Auth.MultiFactor.ChallengeStore.Service,
   never,
@@ -598,6 +606,7 @@ const rowToCredential = (
     catch: (cause) => new Auth.AuthError({ message: "credential decode failed", cause }),
   });
 
+/** `Auth.MultiFactor.CredentialStore` over the `auth_webauthn_credentials` table; requires `SqlClient`. */
 export const makeCredentialStore: Effect.Effect<
   typeof Auth.MultiFactor.CredentialStore.Service,
   never,
@@ -666,6 +675,7 @@ const rowToOAuthState = (row: OAuthStateRow): Auth.OAuth.OAuthState => ({
   ...(row.return_to != null ? { returnTo: row.return_to } : {}),
 });
 
+/** `Auth.OAuth.OAuthStateStore` over the `auth_oauth_states` table; requires `SqlClient`. */
 export const makeOAuthStateStore: Effect.Effect<
   typeof Auth.OAuth.OAuthStateStore.Service,
   never,
@@ -730,6 +740,7 @@ const rowToOAuthAccount = (row: OAuthAccountRow): Auth.OAuth.OAuthAccount => ({
   ...(row.expires_at != null ? { expiresAt: row.expires_at } : {}),
 });
 
+/** `Auth.OAuth.OAuthAccountStore` over the `auth_oauth_accounts` table; requires `SqlClient`. */
 export const makeOAuthAccountStore: Effect.Effect<
   typeof Auth.OAuth.OAuthAccountStore.Service,
   never,
@@ -793,6 +804,7 @@ export const makeOAuthAccountStore: Effect.Effect<
   } satisfies typeof Auth.OAuth.OAuthAccountStore.Service;
 });
 
+/** `Auth.OAuth.OAuthUserStore` over the `auth_users` table; requires `SqlClient`. */
 export const makeOAuthUserStore: Effect.Effect<
   typeof Auth.OAuth.OAuthUserStore.Service,
   never,
@@ -845,6 +857,7 @@ const rowToPasswordReset = (row: PasswordResetRow): Auth.Password.PasswordResetT
   expiresAt: row.expires_at,
 });
 
+/** `Auth.Password.PasswordResetStore` over the `auth_password_resets` table; requires `SqlClient`. */
 export const makePasswordResetStore: Effect.Effect<
   typeof Auth.Password.PasswordResetStore.Service,
   never,
@@ -891,6 +904,7 @@ const rowToMagicLink = (row: MagicLinkRow): Auth.MagicLinkToken => ({
   expiresAt: row.expires_at,
 });
 
+/** `Auth.MagicLinkStore` over the `auth_magic_links` table; requires `SqlClient`. */
 export const makeMagicLinkStore: Effect.Effect<
   typeof Auth.MagicLinkStore.Service,
   never,
@@ -921,6 +935,7 @@ export const makeMagicLinkStore: Effect.Effect<
   } satisfies typeof Auth.MagicLinkStore.Service;
 });
 
+/** `Auth.MagicLinkUserStore` over the `auth_users` table; requires `SqlClient`. */
 export const makeMagicLinkUserStore: Effect.Effect<
   typeof Auth.MagicLinkUserStore.Service,
   never,
@@ -955,6 +970,7 @@ const rowToEmailOtp = (row: EmailOtpRow): Auth.Email.EmailOtpRecord => ({
   expiresAt: row.expires_at,
 });
 
+/** `Auth.Email.EmailOtpStore` over the `auth_email_otps` table; requires `SqlClient`. */
 export const makeEmailOtpStore: Effect.Effect<
   typeof Auth.Email.EmailOtpStore.Service,
   never,
@@ -1015,6 +1031,7 @@ export const makeEmailOtpStore: Effect.Effect<
   } satisfies typeof Auth.Email.EmailOtpStore.Service;
 });
 
+/** `Auth.Email.EmailOtpUserStore` over the `auth_users` table; requires `SqlClient`. */
 export const makeEmailOtpUserStore: Effect.Effect<
   typeof Auth.Email.EmailOtpUserStore.Service,
   never,
@@ -1055,6 +1072,7 @@ const rowToMultiFactor = (
     catch: (cause) => new Auth.AuthError({ message: "multiFactor decode failed", cause }),
   });
 
+/** `Auth.MultiFactor.MultiFactorStore` over the `auth_multi_factor` table; requires `SqlClient`. */
 export const makeMultiFactorStore: Effect.Effect<
   typeof Auth.MultiFactor.MultiFactorStore.Service,
   never,
@@ -1104,6 +1122,7 @@ const rowToPendingMultiFactor = (
   createdAt: row.created_at,
 });
 
+/** `Auth.MultiFactor.PendingMultiFactorStore` over the `auth_pending_multi_factor` table; requires `SqlClient`. */
 export const makePendingMultiFactorStore: Effect.Effect<
   typeof Auth.MultiFactor.PendingMultiFactorStore.Service,
   never,
@@ -1154,6 +1173,7 @@ const rowToIdentifier = (row: IdentifierRow): Auth.Identifier => ({
   createdAt: msToDate(row.created_at),
 });
 
+/** `Auth.IdentifierStore` over the `auth_identifiers` table; requires `SqlClient`. */
 export const makeIdentifierStore: Effect.Effect<
   typeof Auth.IdentifierStore.Service,
   never,
@@ -1217,6 +1237,7 @@ const rowToLockout = (row: AccountLockoutRow): Auth.Plugins.AccountLockoutRecord
     ? { failures: row.failures }
     : { failures: row.failures, lockedUntil: row.locked_until };
 
+/** `Auth.Plugins.AccountLockoutStore` over the `auth_account_lockouts` table; requires `SqlClient`. */
 export const makeAccountLockoutStore: Effect.Effect<
   typeof Auth.Plugins.AccountLockoutStore.Service,
   never,
@@ -1329,6 +1350,7 @@ const rowToApiKey = (row: ApiKeyRow): Effect.Effect<Auth.ApiKey, Auth.AuthError>
     catch: (cause) => new Auth.AuthError({ message: "api key decode failed", cause }),
   });
 
+/** `Auth.ApiKeyStore` over the `auth_api_keys` table; requires `SqlClient`. */
 export const makeApiKeyStore: Effect.Effect<
   typeof Auth.ApiKeyStore.Service,
   never,
@@ -1395,6 +1417,7 @@ interface UserRowWithEmail extends UserRow {
   readonly primary_email: string | null;
 }
 
+/** `Auth.AdminUserStore` over the `auth_users` and `auth_identifiers` tables; requires `SqlClient`. */
 export const makeAdminUserStore: Effect.Effect<
   typeof Auth.AdminUserStore.Service,
   never,
@@ -1448,19 +1471,24 @@ export const makeAdminUserStore: Effect.Effect<
 // Layers
 // ---------------------------------------------------------------------------
 
+/** Provides `Auth.SessionStore` from {@link makeSessionStore}; requires `SqlClient`. */
 export const SessionStoreLayer: Layer.Layer<Auth.SessionStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.SessionStore, makeSessionStore);
+/** Provides `Auth.UserStore` from {@link makeUserStore}; requires `SqlClient`. */
 export const UserStoreLayer: Layer.Layer<Auth.UserStore, never, SqlClient.SqlClient> = Layer.effect(
   Auth.UserStore,
   makeUserStore,
 );
+/** Provides `Auth.UserServiceStore` from {@link makeUserServiceStore}; requires `SqlClient`. */
 export const UserServiceStoreLayer: Layer.Layer<Auth.UserServiceStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.UserServiceStore, makeUserServiceStore);
+/** Provides `Auth.Email.EmailPasswordStore` from {@link makeEmailPasswordStore}; requires `SqlClient`. */
 export const EmailPasswordStoreLayer: Layer.Layer<
   Auth.Email.EmailPasswordStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.Email.EmailPasswordStore, makeEmailPasswordStore);
+/** Provides `Auth.Password.PasswordResetUserStore` from {@link makePasswordResetUserStore}; requires `SqlClient`. */
 export const PasswordResetUserStoreLayer: Layer.Layer<
   Auth.Password.PasswordResetUserStore,
   never,
@@ -1475,76 +1503,94 @@ export const PasswordResetUserStoreLayer: Layer.Layer<
  */
 export const RbacEntityResolverLayer: Layer.Layer<Auth.EntityResolver, never, SqlClient.SqlClient> =
   Layer.effect(Auth.EntityResolver, makeRbacEntityResolver);
+/** Provides `Auth.RateLimitStore` from {@link makeRateLimitStore}; requires `SqlClient`. */
 export const RateLimitStoreLayer: Layer.Layer<Auth.RateLimitStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.RateLimitStore, makeRateLimitStore);
+/** Provides `Auth.Email.EmailVerificationStore` from {@link makeEmailVerificationStore}; requires `SqlClient`. */
 export const EmailVerificationStoreLayer: Layer.Layer<
   Auth.Email.EmailVerificationStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.Email.EmailVerificationStore, makeEmailVerificationStore);
+/** Provides `Auth.MultiFactor.ChallengeStore` from {@link makeChallengeStore}; requires `SqlClient`. */
 export const ChallengeStoreLayer: Layer.Layer<
   Auth.MultiFactor.ChallengeStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.MultiFactor.ChallengeStore, makeChallengeStore);
+/** Provides `Auth.MultiFactor.CredentialStore` from {@link makeCredentialStore}; requires `SqlClient`. */
 export const CredentialStoreLayer: Layer.Layer<
   Auth.MultiFactor.CredentialStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.MultiFactor.CredentialStore, makeCredentialStore);
+/** Provides `Auth.OAuth.OAuthStateStore` from {@link makeOAuthStateStore}; requires `SqlClient`. */
 export const OAuthStateStoreLayer: Layer.Layer<
   Auth.OAuth.OAuthStateStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.OAuth.OAuthStateStore, makeOAuthStateStore);
+/** Provides `Auth.OAuth.OAuthAccountStore` from {@link makeOAuthAccountStore}; requires `SqlClient`. */
 export const OAuthAccountStoreLayer: Layer.Layer<
   Auth.OAuth.OAuthAccountStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.OAuth.OAuthAccountStore, makeOAuthAccountStore);
+/** Provides `Auth.OAuth.OAuthUserStore` from {@link makeOAuthUserStore}; requires `SqlClient`. */
 export const OAuthUserStoreLayer: Layer.Layer<
   Auth.OAuth.OAuthUserStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.OAuth.OAuthUserStore, makeOAuthUserStore);
+/** Provides `Auth.Password.PasswordResetStore` from {@link makePasswordResetStore}; requires `SqlClient`. */
 export const PasswordResetStoreLayer: Layer.Layer<
   Auth.Password.PasswordResetStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.Password.PasswordResetStore, makePasswordResetStore);
+/** Provides `Auth.MagicLinkStore` from {@link makeMagicLinkStore}; requires `SqlClient`. */
 export const MagicLinkStoreLayer: Layer.Layer<Auth.MagicLinkStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.MagicLinkStore, makeMagicLinkStore);
+/** Provides `Auth.MagicLinkUserStore` from {@link makeMagicLinkUserStore}; requires `SqlClient`. */
 export const MagicLinkUserStoreLayer: Layer.Layer<
   Auth.MagicLinkUserStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.MagicLinkUserStore, makeMagicLinkUserStore);
+/** Provides `Auth.Email.EmailOtpStore` from {@link makeEmailOtpStore}; requires `SqlClient`. */
 export const EmailOtpStoreLayer: Layer.Layer<Auth.Email.EmailOtpStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.Email.EmailOtpStore, makeEmailOtpStore);
+/** Provides `Auth.Email.EmailOtpUserStore` from {@link makeEmailOtpUserStore}; requires `SqlClient`. */
 export const EmailOtpUserStoreLayer: Layer.Layer<
   Auth.Email.EmailOtpUserStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.Email.EmailOtpUserStore, makeEmailOtpUserStore);
+/** Provides `Auth.MultiFactor.MultiFactorStore` from {@link makeMultiFactorStore}; requires `SqlClient`. */
 export const MultiFactorStoreLayer: Layer.Layer<
   Auth.MultiFactor.MultiFactorStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.MultiFactor.MultiFactorStore, makeMultiFactorStore);
+/** Provides `Auth.MultiFactor.PendingMultiFactorStore` from {@link makePendingMultiFactorStore}; requires `SqlClient`. */
 export const PendingMultiFactorStoreLayer: Layer.Layer<
   Auth.MultiFactor.PendingMultiFactorStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.MultiFactor.PendingMultiFactorStore, makePendingMultiFactorStore);
+/** Provides `Auth.IdentifierStore` from {@link makeIdentifierStore}; requires `SqlClient`. */
 export const IdentifierStoreLayer: Layer.Layer<Auth.IdentifierStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.IdentifierStore, makeIdentifierStore);
+/** Provides `Auth.Plugins.AccountLockoutStore` from {@link makeAccountLockoutStore}; requires `SqlClient`. */
 export const AccountLockoutStoreLayer: Layer.Layer<
   Auth.Plugins.AccountLockoutStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.Plugins.AccountLockoutStore, makeAccountLockoutStore);
+/** Provides `Auth.ApiKeyStore` from {@link makeApiKeyStore}; requires `SqlClient`. */
 export const ApiKeyStoreLayer: Layer.Layer<Auth.ApiKeyStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.ApiKeyStore, makeApiKeyStore);
+/** Provides `Auth.AdminUserStore` from {@link makeAdminUserStore}; requires `SqlClient`. */
 export const AdminUserStoreLayer: Layer.Layer<Auth.AdminUserStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.AdminUserStore, makeAdminUserStore);
 

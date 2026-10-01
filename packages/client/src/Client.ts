@@ -113,6 +113,7 @@ export interface RefreshOptions {
   readonly crossTab?: boolean | string;
 }
 
+/** Options for {@link createAuthClient}: the base URL, a `fetch` override, extra headers and background refresh. */
 export interface AuthClientOptions {
   /**
    * Base URL the auth handler is mounted at, e.g.

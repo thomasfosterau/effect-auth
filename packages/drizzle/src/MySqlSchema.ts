@@ -122,7 +122,9 @@ export const identifiersTable = tables.identifiers;
 
 /** Row shapes selected from each MySQL table. */
 export type SessionRow = Tables["sessions"]["$inferSelect"];
+/** The row `select()` returns from this dialect's users table. */
 export type UserRow = Tables["users"]["$inferSelect"];
+/** The row `select()` returns from this dialect's identifiers table. */
 export type IdentifierRow = Tables["identifiers"]["$inferSelect"];
 
 // ---------------------------------------------------------------------------

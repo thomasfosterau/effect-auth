@@ -75,5 +75,7 @@ export type Tables = Pg.Tables | Sqlite.Tables | MySql.Tables;
 
 /** Row shapes selected from each table, whichever dialect produced them. */
 export type SessionRow = Tables["sessions"]["$inferSelect"];
+/** The row `select()` returns from any dialect's users table. */
 export type UserRow = Tables["users"]["$inferSelect"];
+/** The row `select()` returns from any dialect's identifiers table. */
 export type IdentifierRow = Tables["identifiers"]["$inferSelect"];

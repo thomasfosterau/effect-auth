@@ -312,6 +312,10 @@ export function databaseLayer<
     | PgDatabase<TQueryResult, TFullSchema, TSchema>
     | Effect.Effect<PgDatabase<TQueryResult, TFullSchema, TSchema>>,
 ): Layer.Layer<DrizzleDatabase>;
+/**
+ * Provide a Promise-shaped SQLite drizzle handle (or an `Effect` yielding one, run per
+ * query) as {@link DrizzleDatabase}. The PostgreSQL overload documents the details.
+ */
 export function databaseLayer<
   TResultKind extends "sync" | "async",
   TRunResult,
@@ -322,6 +326,10 @@ export function databaseLayer<
     | BaseSQLiteDatabase<TResultKind, TRunResult, TFullSchema, TSchema>
     | Effect.Effect<BaseSQLiteDatabase<TResultKind, TRunResult, TFullSchema, TSchema>>,
 ): Layer.Layer<DrizzleDatabase>;
+/**
+ * Provide a Promise-shaped MySQL drizzle handle (or an `Effect` yielding one, run per
+ * query) as {@link DrizzleDatabase}. The PostgreSQL overload documents the details.
+ */
 export function databaseLayer<
   TQueryResult extends MySqlQueryResultHKT,
   TPreparedQueryHKT extends PreparedQueryHKTBase,
