@@ -1,21 +1,19 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Config, ConfigProvider, Effect, Redacted } from "effect";
+import { Cause, Config, ConfigProvider, Effect, type Exit, Redacted } from "effect";
 import { jwtServiceConfig } from "./Jwt.ts";
 import { trustedDeviceConfig } from "./TrustedDevice.ts";
 import { multiFactorConfig } from "./multifactor/MultiFactor.ts";
 import { oauthServiceOptionsConfig } from "./oauth/OAuth.ts";
 
 /**
- * Pins how the env-backed `Config`s treat an EMPTY variable (`NAME=`) on
- * Effect rc.118: it is read as absent, exactly like an unset one.
+ * How the env-backed `Config`s treat an EMPTY variable (`NAME=`) on Effect
+ * rc.118, where the stock providers read it as absent.
  *
- * That matters for the three optional encryption secrets. An operator who
- * writes `JWT_ENCRYPT_PRIVATE_KEY_SECRET=""` (or `OAUTH_ENCRYPT_TOKENS_SECRET`,
- * `TWO_FACTOR_ENCRYPT_SECRET`) gets NO error: the config resolves with the
- * option undefined and the data is stored UNENCRYPTED. These tests pin that
- * behaviour so a change in either direction is deliberate; whether an empty or
- * unset encryption secret should instead fail loudly is an open owner decision
- * (see the follow-up issue linked from effect-auth#249).
+ * For the three optional encryption secrets that would silently turn
+ * encryption off, so a variable that is PRESENT BUT EMPTY is a configuration
+ * error (owner decision on #252), while an UNSET one stays an opt-out. The
+ * required values (`JWT_ISSUER`, `TRUSTED_DEVICE_SECRET`) fail as missing and
+ * `TRUSTED_DEVICE_MAX_AGE_MS` falls back to its default.
  */
 
 const resolve = <A, E>(config: Config.Config<A>, env: Record<string, string>) =>
@@ -26,39 +24,60 @@ const resolve = <A, E>(config: Config.Config<A>, env: Record<string, string>) =>
   );
 
 describe("empty environment variables", () => {
-  it("JWT_ENCRYPT_PRIVATE_KEY_SECRET='' silently disables private-key encryption", async () => {
-    const exit = await resolve(jwtServiceConfig, {
-      JWT_ISSUER: "https://issuer.test",
-      JWT_ENCRYPT_PRIVATE_KEY_SECRET: "",
-    });
-    expect(exit._tag).toBe("Success");
-    if (exit._tag === "Success") expect(exit.value.encryptPrivateKey).toBeUndefined();
+  const failureMessage = (exit: Exit.Exit<unknown, unknown>) =>
+    exit._tag === "Failure" ? String(Cause.squash(exit.cause)) : "";
+
+  const jwtEnv = { JWT_ISSUER: "https://issuer.test" };
+  const mfEnv = { TWO_FACTOR_ISSUER: "Acme" };
+
+  it.each([
+    ["JWT_ENCRYPT_PRIVATE_KEY_SECRET", jwtServiceConfig, jwtEnv],
+    ["OAUTH_ENCRYPT_TOKENS_SECRET", oauthServiceOptionsConfig, {}],
+    ["TWO_FACTOR_ENCRYPT_SECRET", multiFactorConfig, mfEnv],
+  ] as const)("%s='' is a configuration error naming the variable", async (name, config, base) => {
+    const exit = await resolve(config as Config.Config<unknown>, { ...base, [name]: "" });
+    expect(exit._tag).toBe("Failure");
+    expect(failureMessage(exit)).toContain(name);
+    expect(failureMessage(exit)).toContain("set but empty");
   });
 
-  it("OAUTH_ENCRYPT_TOKENS_SECRET='' silently stores OAuth tokens unencrypted", async () => {
-    const exit = await resolve(oauthServiceOptionsConfig, { OAUTH_ENCRYPT_TOKENS_SECRET: "" });
-    expect(exit._tag).toBe("Success");
-    if (exit._tag === "Success") expect(exit.value.encryptTokens).toBeUndefined();
+  it("present-but-empty is also an error under a map provider", async () => {
+    const exit = await Effect.runPromiseExit(
+      multiFactorConfig.pipe(
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromUnknown({ ...mfEnv, TWO_FACTOR_ENCRYPT_SECRET: "" }),
+          ),
+        ),
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(failureMessage(exit)).toContain("TWO_FACTOR_ENCRYPT_SECRET");
   });
 
-  it("TWO_FACTOR_ENCRYPT_SECRET='' silently stores TOTP secrets unencrypted", async () => {
-    const exit = await resolve(multiFactorConfig, {
-      TWO_FACTOR_ISSUER: "Acme",
-      TWO_FACTOR_ENCRYPT_SECRET: "",
-    });
-    expect(exit._tag).toBe("Success");
-    if (exit._tag === "Success") expect(exit.value.encryptSecret).toBeUndefined();
+  it("an UNSET encryption secret leaves encryption off", async () => {
+    const jwt = await resolve(jwtServiceConfig, jwtEnv);
+    const oauth = await resolve(oauthServiceOptionsConfig, {});
+    const mf = await resolve(multiFactorConfig, mfEnv);
+    for (const exit of [jwt, oauth, mf]) expect(exit._tag).toBe("Success");
+    if (jwt._tag === "Success") expect(jwt.value.encryptPrivateKey).toBeUndefined();
+    if (oauth._tag === "Success") expect(oauth.value.encryptTokens).toBeUndefined();
+    if (mf._tag === "Success") expect(mf.value.encryptSecret).toBeUndefined();
   });
 
-  it("a non-empty secret still enables encryption (control)", async () => {
-    const exit = await resolve(multiFactorConfig, {
-      TWO_FACTOR_ISSUER: "Acme",
-      TWO_FACTOR_ENCRYPT_SECRET: "s3cret",
-    });
-    expect(exit._tag).toBe("Success");
-    if (exit._tag === "Success") {
-      expect(Redacted.value(exit.value.encryptSecret!.secret)).toBe("s3cret");
-    }
+  it("a non-empty secret enables encryption", async () => {
+    const jwt = await resolve(jwtServiceConfig, { ...jwtEnv, JWT_ENCRYPT_PRIVATE_KEY_SECRET: "j" });
+    const oauth = await resolve(oauthServiceOptionsConfig, { OAUTH_ENCRYPT_TOKENS_SECRET: "o" });
+    const mf = await resolve(multiFactorConfig, { ...mfEnv, TWO_FACTOR_ENCRYPT_SECRET: "s3cret" });
+    expect(jwt._tag).toBe("Success");
+    expect(oauth._tag).toBe("Success");
+    expect(mf._tag).toBe("Success");
+    if (jwt._tag === "Success")
+      expect(Redacted.value(jwt.value.encryptPrivateKey!.secret)).toBe("j");
+    if (oauth._tag === "Success")
+      expect(Redacted.value(oauth.value.encryptTokens!.secret)).toBe("o");
+    if (mf._tag === "Success")
+      expect(Redacted.value(mf.value.encryptSecret!.secret)).toBe("s3cret");
   });
 
   it("TRUSTED_DEVICE_SECRET='' is missing, so the config fails", async () => {

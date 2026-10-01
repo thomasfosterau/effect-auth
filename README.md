@@ -924,13 +924,14 @@ Following Oslo guidelines:
 
 ## Security
 
-> **Empty encryption secrets disable encryption.** Since Effect rc.118 an empty
-> environment variable is read as absent. `JWT_ENCRYPT_PRIVATE_KEY_SECRET=""`,
-> `OAUTH_ENCRYPT_TOKENS_SECRET=""` and `TWO_FACTOR_ENCRYPT_SECRET=""` therefore
-> resolve to "no secret": the private keys, OAuth tokens and TOTP secrets are
-> stored **unencrypted**, with no error. Make sure these variables are either
-> unset on purpose or non-empty. Whether this should fail loudly is tracked in
-> #252.
+> **An empty encryption secret is a configuration error.** Encryption at rest is
+> opt-in: leave `JWT_ENCRYPT_PRIVATE_KEY_SECRET`, `OAUTH_ENCRYPT_TOKENS_SECRET`
+> or `TWO_FACTOR_ENCRYPT_SECRET` **unset** to keep it off. A variable that is set
+> but empty (for example `JWT_ENCRYPT_PRIVATE_KEY_SECRET=""`) fails
+> `jwtServiceConfig` / `oauthServiceOptionsConfig` / `multiFactorConfig` at
+> startup with a `ConfigError` naming the variable, because Effect rc.118 reads an
+> empty value as absent and would otherwise silently store the data unencrypted.
+> The check reads the active `ConfigProvider`, so it also applies to map providers.
 
 Security is our top priority. See our [Security Policy](./docs/SECURITY.md) for:
 
