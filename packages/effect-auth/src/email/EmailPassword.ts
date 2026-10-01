@@ -44,7 +44,7 @@ export class EmailPasswordStore extends Context.Service<
 >()("@effect-auth/EmailPasswordStore") {}
 
 /**
- * Configuration for {@link EmailPasswordService}: whether sign-up is open, verification and password-length rules, and auto sign-in.
+ * Configuration for {@link EmailPasswordService}.
  */
 export interface EmailPasswordConfig {
   readonly disableSignUp?: boolean;
@@ -124,7 +124,7 @@ export class SecondFactorGate extends Context.Service<
 >()("@effect-auth/SecondFactorGate") {}
 
 /**
- * Outcome of a sign-in or sign-up: the user, the login handle used, the session when one was issued, the method, and a pending second-factor challenge when one is required.
+ * Outcome of a sign-in or sign-up.
  */
 export interface AuthResult {
   readonly user: Types.User;

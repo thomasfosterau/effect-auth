@@ -98,7 +98,7 @@ export const TrustedDeviceCookieRef: Context.Reference<string | undefined> = Con
 // ---------------------------------------------------------------------------
 
 /**
- * Configuration for {@link TrustedDeviceService}: token lifetime and the HMAC secret that signs the cookie.
+ * Configuration for {@link TrustedDeviceService}.
  */
 export interface TrustedDeviceConfig {
   /**

@@ -57,7 +57,7 @@ export class AccountTokenError extends Data.TaggedError("AccountTokenError")<{
 }> {}
 
 /**
- * Configuration for {@link AccountManagementService}: token lifetimes and the callbacks that deliver the change-email and delete-account confirmations.
+ * Configuration for {@link AccountManagementService}.
  */
 export interface AccountManagementConfig {
   /** Lifetime of a change-email token in ms. Default 1 hour. */

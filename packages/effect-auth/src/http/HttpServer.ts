@@ -119,7 +119,7 @@ export const BEARER_TOKEN_HEADER = "set-auth-token" as const;
 // -----------------------------------------------------------------------------
 
 /**
- * Session cookie settings for the HTTP API: name, `Secure`, path, the `__Host-` prefix, the optional signed session-data cache and the last-login-method hint.
+ * Session cookie settings for the HTTP API.
  */
 export interface CookieConfig {
   /** Cookie name. Default `conduit_session`. */
@@ -323,7 +323,7 @@ const clearCookieOptions = (cfg: ResolvedCookieConfig) =>
 // -----------------------------------------------------------------------------
 
 /**
- * Read the raw session token from a request's `Authorization: Bearer` header or session cookie.
+ * Read the raw session token from a request's `Authorization: Bearer` (or `Token`) header or session cookie.
  *
  * @internal
  */
@@ -4054,7 +4054,7 @@ const findEndpointRule = (
 ): EndpointRateLimitRule | undefined => rules.find((r) => matchesEndpointRule(r, pathname, method));
 
 /**
- * Options for the mountable auth Web handler: the service layer, cookie and multi-session settings, the path prefix and the trusted origins.
+ * Options for the mountable auth Web handler.
  */
 export interface AuthWebHandlerOptions {
   /** Your service layer (SessionService, AuthLifecycle, stores, ...). */

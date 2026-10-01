@@ -5,7 +5,7 @@ import { Data } from "effect";
 // ---------------------------------------------------------------------------
 
 /**
- * The stable `code` every domain error carries. Append-only: a code is never renamed or removed, so clients and the {@link Messages} catalogue can rely on it.
+ * The stable `code` every domain error carries. Append-only: a code is never renamed or removed, so clients and the `Messages` catalogue can rely on it.
  */
 export const ErrorCode = {
   // Infrastructure

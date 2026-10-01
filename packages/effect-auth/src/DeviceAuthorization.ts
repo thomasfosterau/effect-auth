@@ -88,7 +88,7 @@ export interface DeviceAuthorizationConfig {
 }
 
 /**
- * What a device shows and polls with after {@link DeviceAuthorizationService.begin}: the device and user codes, the verification URI, the lifetime in seconds and the polling interval in seconds.
+ * What a device shows and polls with after {@link DeviceAuthorizationService.begin}. `expiresIn` and `interval` are in seconds.
  */
 export interface DeviceBeginResult {
   readonly deviceCode: string;

@@ -355,7 +355,7 @@ export interface ScimGroupInput {
 // ---------------------------------------------------------------------------
 
 /**
- * Configuration for {@link ScimService}: the role granted to provisioned users, the base URL for `meta.location`, and the page-size cap.
+ * Configuration for {@link ScimService}.
  */
 export interface ScimConfig {
   /**

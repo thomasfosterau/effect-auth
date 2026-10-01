@@ -156,7 +156,7 @@ export const deliverySends = Metric.counter("effect-auth.delivery_sends.total", 
 // Span names (OpenTelemetry)
 // ---------------------------------------------------------------------------
 
-/** The OpenTelemetry span names effect-auth emits, as constants (dotted notation). */
+/** The OpenTelemetry span names effect-auth emits, as constants. */
 export const spanNames = {
   oauthAuthorize: "effect-auth.oauth.authorize",
   oauthCallback: "effect-auth.oauth.callback",

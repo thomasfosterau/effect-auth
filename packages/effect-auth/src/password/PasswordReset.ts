@@ -43,7 +43,7 @@ export class PasswordResetUserStore extends Context.Service<
 >()("@effect-auth/PasswordResetUserStore") {}
 
 /**
- * Configuration for {@link PasswordResetService}: token lifetime, password-length rules, session revocation and delivery of the reset link.
+ * Configuration for {@link PasswordResetService}.
  */
 export interface PasswordResetConfig {
   readonly expiresIn?: number;

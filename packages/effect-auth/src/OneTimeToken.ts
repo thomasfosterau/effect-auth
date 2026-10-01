@@ -3,8 +3,8 @@
  *
  * Tokens are cryptographically random (32 bytes of base64url entropy), stored
  * as SHA-256 digests so a database breach cannot replay them, expire on a
- * configurable TTL, and are consumed (deleted) on first successful
- * {@link OneTimeTokenService.verify} call.
+ * configurable TTL, and are consumed (deleted) by the first
+ * {@link OneTimeTokenService.verify} call that finds them, even an expired one.
  *
  * Typical use-cases: email-action confirmation links, passwordless sign-in
  * codes, invite tokens, account-deletion confirmation, or any flow that needs
@@ -90,7 +90,7 @@ export interface OneTimeTokenVerifyResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Single-use, expiring tokens bound to a subject (confirmation links, invite tokens, any one-shot secret), stored as SHA-256 digests and consumed by the first successful `verify`.
+ * Single-use, expiring tokens bound to a subject (confirmation links, invite tokens, any one-shot secret), stored as SHA-256 digests and consumed by the first `verify` that finds them, even an expired one.
  *
  * Requires `OneTimeTokenStore`.
  */

@@ -19,7 +19,7 @@ import { UserService } from "./User.ts";
 import type * as Types from "./Types.ts";
 
 /**
- * Configuration for {@link AuthLifecycleService}: whether sign-in requires a verified email, when verification emails are sent, and whether verifying signs the user in.
+ * Configuration for {@link AuthLifecycleService}.
  */
 export interface AuthLifecycleConfig {
   readonly requireEmailVerification?: boolean;
@@ -29,7 +29,7 @@ export interface AuthLifecycleConfig {
 }
 
 /**
- * Outcome of a sign-up or sign-in through {@link AuthLifecycleService}: the user, the session when one was issued, and whether email verification or a second factor is still pending.
+ * Outcome of a sign-up or sign-in through {@link AuthLifecycleService}.
  */
 export interface AuthLifecycleResult {
   readonly user: Types.User;

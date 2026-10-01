@@ -35,7 +35,7 @@ export class UsernameError extends Data.TaggedError("UsernameError")<{
   readonly message: string;
 }> {}
 
-/** Configuration for {@link UsernameService}: length limits, a custom username validator, and whether sign-in requires a verified email. */
+/** Configuration for {@link UsernameService}. */
 export interface UsernameConfig {
   /** Minimum username length. Default 3. */
   readonly minUsernameLength?: number;

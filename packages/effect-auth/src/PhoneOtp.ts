@@ -84,7 +84,7 @@ export class PhoneOtpUserStore extends Context.Service<
 >()("@effect-auth/PhoneOtpUserStore") {}
 
 /**
- * Configuration for {@link PhoneOtpService}: code length, lifetime, attempt limit, whether sign-in may create users, and SMS delivery.
+ * Configuration for {@link PhoneOtpService}.
  */
 export interface PhoneOtpConfig {
   readonly otpLength?: number; // Default: 6 digits

@@ -33,7 +33,7 @@ import type * as Types from "../Types.ts";
 // ---------------------------------------------------------------------------
 
 /**
- * Failure of the OTP second factor (an expired, unknown or exhausted challenge, or a wrong code).
+ * Failure of the OTP second factor: an expired, unknown or exhausted challenge, a wrong code, or a failed send.
  */
 export class OtpSecondFactorError extends Data.TaggedError("OtpSecondFactorError")<{
   readonly message: string;
@@ -82,7 +82,7 @@ export class OtpSecondFactorStore extends Context.Service<
 // ---------------------------------------------------------------------------
 
 /**
- * Configuration for {@link OtpSecondFactorService}: code length, lifetime, attempt limit and delivery.
+ * Configuration for {@link OtpSecondFactorService}.
  */
 export interface OtpSecondFactorConfig {
   /** OTP digit length. Default: 6. */

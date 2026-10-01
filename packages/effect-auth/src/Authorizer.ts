@@ -196,7 +196,7 @@ const toActionRef = (action: Entity.EntityRef | string): Entity.EntityRef =>
   typeof action === "string" ? Entity.ref("Action", action) : action;
 
 /**
- * Configuration for {@link Authorizer.layer}: the static policy set, an optional declared model the declarative policies are validated against, and whether to join a `PolicyStore`'s policies.
+ * Configuration for {@link Authorizer.layer}.
  */
 export interface AuthorizerConfig<E = unknown> {
   /** The static policy set every decision is made against. */
