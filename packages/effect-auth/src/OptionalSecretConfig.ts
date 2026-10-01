@@ -18,16 +18,36 @@
  * The probe relies on the documented `ConfigProvider.load` contract and the
  * `Node` shapes (`Record.keys`), observed through the key schema of
  * `Config.schema(Schema.Record(...))`. A name is "present but empty" when its
- * parent `Record` lists the final segment AND the node at the full path is not
- * itself a `Record` (a `Record` there means other variables merely share the
+ * parent `Record` lists the final segment AND the node at the full path has no
+ * children (a `Record` there, or an `Array` when the siblings are all numeric
+ * suffixes such as `NAME_0` / `NAME_1`, means other variables merely share the
  * prefix, e.g. `NAME_FILE=...`, so the secret is unset).
+ *
+ * A value that is present but whitespace-only (`"   "`, a lone newline) counts
+ * as empty (owner decision on #252); a secret with surrounding spaces but
+ * non-space content is accepted unchanged and is not trimmed. No error message
+ * ever contains a secret value.
  *
  * The root `[[], name]` candidate only matters for map-style providers
  * (`fromUnknown({ NAME: "" })`); `fromEnv` is covered by the `_`-segmented one.
  *
  * Residual blind spot: `NAME=""` set together with `NAME_FILE=...` (or any
  * other `NAME_*` variable) reads as unset, because the provider then reports a
- * `Record` node at `NAME`.
+ * `Record` or `Array` node at `NAME`. The owner accepted this on #252;
+ * `ConfigEmptyEnv.test.ts` pins it so a future fix flips it deliberately.
+ *
+ * Further blind spots and misclassifications (documented, not fixed):
+ *
+ * - A composite `ConfigProvider.orElse` whose primary provider has a
+ *   `NAME`-prefix sibling can hide an empty value in the fallback provider,
+ *   because the probe sees the primary's `Record` / `Array` node first.
+ * - Non-env `fromUnknown` shapes can be misclassified, because the
+ *   `_`-segmented candidate is also probed there: a nested object at the
+ *   segmented path (`{ A: { B: "" } }` for `A_B`) or an object at `NAME` itself
+ *   is read as "prefix shared", i.e. unset.
+ * - `fromUnknown({ NAME: ["a"] })` (an array value) is not a string: the
+ *   `Array` node counts as "prefix shared", so it reads as unset (encryption
+ *   off), not as "set but empty". Only string-valued secrets are supported.
  *
  * @module optional-secret-config
  * @internal
@@ -63,6 +83,17 @@ const recordKeys = (path: ConfigProvider.Path): Config.Config<ReadonlySet<string
   });
 
 /**
+ * True when the node at `path` is an `Array` node. The `fromEnv` trie yields an
+ * `Array` (not a `Record`) when every child segment is a canonical index, e.g.
+ * `NAME_0` / `NAME_1`, so those siblings are invisible to `recordKeys`.
+ */
+const hasArrayChildren = (path: ConfigProvider.Path): Config.Config<boolean> =>
+  Config.schema(Schema.Array(Schema.UndefinedOr(Schema.String)), path).pipe(
+    Config.map(() => true),
+    Config.withDefault(false),
+  );
+
+/**
  * True when `name` exists in the provider's source even though its value reads
  * as missing. Probes the flat key (map providers) and the `_`-segmented trie
  * that `fromEnv` builds.
@@ -75,8 +106,14 @@ const isPresentButEmpty = (name: string): Config.Config<boolean> => {
   ];
   return Config.all(
     candidates.map(([parent, key]) =>
-      Config.all([recordKeys(parent), recordKeys([...parent, key])]).pipe(
-        Config.map(([siblings, below]) => siblings.has(key) && below.size === 0),
+      Config.all([
+        recordKeys(parent),
+        recordKeys([...parent, key]),
+        hasArrayChildren([...parent, key]),
+      ]).pipe(
+        Config.map(
+          ([siblings, below, belowArray]) => siblings.has(key) && below.size === 0 && !belowArray,
+        ),
       ),
     ),
   ).pipe(Config.map((found) => found.some(Boolean)));
@@ -91,7 +128,9 @@ export const optionalSecret = (name: string): Config.Config<Redacted.Redacted | 
   Config.option(Config.Redacted(name)).pipe(
     Config.flatMap((value): Config.Config<Redacted.Redacted | undefined> => {
       if (Option.isSome(value)) {
-        return Redacted.value(value.value) === "" ? setButEmpty(name) : Config.succeed(value.value);
+        return Redacted.value(value.value).trim() === ""
+          ? setButEmpty(name)
+          : Config.succeed(value.value);
       }
       return isPresentButEmpty(name).pipe(
         Config.flatMap((empty): Config.Config<Redacted.Redacted | undefined> =>
