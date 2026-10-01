@@ -1,5 +1,11 @@
 # @thomasfosterau/effect-auth-alchemy
 
+> **Held private until alchemy ships an Effect rc.118 build ([#250](https://github.com/thomasfosterau/effect-auth/issues/250)).**
+> The rest of effect-auth requires `effect >=4.0.0-rc.118`, but alchemy
+> 2.0.0-beta.79 still imports the removed `effect/unstable/*` paths. This
+> package is `"private": true`, so it is neither versioned nor published, and
+> its peer range stays at `effect >=4.0.0-rc.115`.
+
 Cloudflare **D1** support for [`@thomasfosterau/effect-auth`](../effect-auth) on
 [Alchemy v2](https://v2.alchemy.run) — the TypeScript-native, Effect-based
 Infrastructure-as-Code toolkit — covering both sides of the deploy:

@@ -18,10 +18,18 @@ export const packageTasks = (commands: {
   readonly build: string;
   readonly check: string;
   readonly test?: string;
+  /** Extra tasks, each built behind the same `build` dependencies. */
+  readonly extra?: Readonly<Record<string, string>>;
 }) => ({
   tasks: {
     build: { command: commands.build, dependsOn: [builtDependencies] },
     check: { command: commands.check, dependsOn: [builtDependencies] },
     "test:unit": { command: commands.test ?? "vp test run", dependsOn: [builtDependencies] },
+    ...Object.fromEntries(
+      Object.entries(commands.extra ?? {}).map(([name, command]) => [
+        name,
+        { command, dependsOn: [builtDependencies] },
+      ]),
+    ),
   },
 });

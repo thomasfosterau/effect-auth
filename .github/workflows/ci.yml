@@ -1,6 +1,6 @@
 name: CI
 
-# ONE job: the pipeline's task graph lives in vite.config.ts / vite.tasks.ts
+# ONE required job (plus the non-required `alchemy` job below): the pipeline's task graph lives in vite.config.ts / vite.tasks.ts
 # (each package's `build`, `check` and `test:unit`, each depending on the
 # builds of the workspace packages it imports), not in GitHub Actions `needs:`.
 # Shape copied from effect-jsonapi (the library reference).
@@ -54,3 +54,26 @@ jobs:
 
       - name: Audit
         run: pnpm audit --audit-level high
+
+  # The one suite that needs the alchemy runtime. alchemy 2.0.0-beta.79 imports
+  # `effect/unstable/*`, which rc.118 removed, so this job is RED until alchemy
+  # ships an rc.118 build (effect-auth#250). It is deliberately not required
+  # and not `continue-on-error`: the failure stays visible. Do not skip the
+  # test and do not add it to `test:unit`.
+  alchemy:
+    name: Alchemy runtime (blocked on #250)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup
+
+      - name: AuthSchema tests against the alchemy runtime
+        run: vp run --filter @thomasfosterau/effect-auth-alchemy test:alchemy

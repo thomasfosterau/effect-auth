@@ -38,17 +38,17 @@ effect-auth is batteries-included: a headless core, plus an optional HTTP API, a
 
 ## Packages
 
-| Package                               | Purpose                                                        |
-| ------------------------------------- | -------------------------------------------------------------- |
-| `@thomasfosterau/effect-auth`         | The core library: every module above, `effect` as the only dep |
-| `@thomasfosterau/effect-auth-client`  | Typed browser client + observable session store                |
-| `@thomasfosterau/effect-auth-react`   | React hooks and form components over the browser client        |
-| `@thomasfosterau/effect-auth-svelte`  | Svelte stores and form components over the browser client      |
-| `@thomasfosterau/effect-auth-vue`     | Vue composables and form components over the browser client    |
-| `@thomasfosterau/effect-auth-solid`   | Solid primitives and form components over the browser client   |
-| `@thomasfosterau/effect-auth-sql`     | Driver-agnostic SQL storage layers (`effect/sql`)              |
-| `@thomasfosterau/effect-auth-alchemy` | Alchemy v2 `AuthSchema` resource + D1-backed storage layers    |
-| `@thomasfosterau/effect-auth-argon2`  | Argon2id `PasswordHasher` on WASM (`hash-wasm`)                |
+| Package                               | Purpose                                                                                                              |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `@thomasfosterau/effect-auth`         | The core library: every module above, `effect` as the only dep                                                       |
+| `@thomasfosterau/effect-auth-client`  | Typed browser client + observable session store                                                                      |
+| `@thomasfosterau/effect-auth-react`   | React hooks and form components over the browser client                                                              |
+| `@thomasfosterau/effect-auth-svelte`  | Svelte stores and form components over the browser client                                                            |
+| `@thomasfosterau/effect-auth-vue`     | Vue composables and form components over the browser client                                                          |
+| `@thomasfosterau/effect-auth-solid`   | Solid primitives and form components over the browser client                                                         |
+| `@thomasfosterau/effect-auth-sql`     | Driver-agnostic SQL storage layers (`effect/sql`)                                                                    |
+| `@thomasfosterau/effect-auth-alchemy` | Alchemy v2 `AuthSchema` resource + D1-backed storage layers (held private until alchemy ships an rc.118 build, #250) |
+| `@thomasfosterau/effect-auth-argon2`  | Argon2id `PasswordHasher` on WASM (`hash-wasm`)                                                                      |
 
 ## Installation
 
@@ -923,6 +923,14 @@ Following Oslo guidelines:
 4. Log authorization failures
 
 ## Security
+
+> **Empty encryption secrets disable encryption.** Since Effect rc.118 an empty
+> environment variable is read as absent. `JWT_ENCRYPT_PRIVATE_KEY_SECRET=""`,
+> `OAUTH_ENCRYPT_TOKENS_SECRET=""` and `TWO_FACTOR_ENCRYPT_SECRET=""` therefore
+> resolve to "no secret": the private keys, OAuth tokens and TOTP secrets are
+> stored **unencrypted**, with no error. Make sure these variables are either
+> unset on purpose or non-empty. Whether this should fail loudly is tracked in
+> #252.
 
 Security is our top priority. See our [Security Policy](./docs/SECURITY.md) for:
 

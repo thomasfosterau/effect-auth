@@ -55,7 +55,7 @@ const allTargets: ReadonlyArray<Target> = [
   { dir: "twilio" },
   { dir: "saml" },
   { dir: "drizzle", peers: ["drizzle-orm"] },
-  // `alchemy` is deliberately absent: alchemy 2.0.0-beta.79 (the newest release)
+  // TODO(#250): `alchemy` is deliberately absent: alchemy 2.0.0-beta.79 (the newest release)
   // imports `effect/unstable/*`, which rc.118 removed, so
   // `@thomasfosterau/effect-auth-alchemy` cannot be installed or imported beside
   // rc.118. Re-add `{ dir: "alchemy", peers: ["alchemy"] }` when alchemy ships
