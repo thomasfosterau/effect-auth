@@ -1477,6 +1477,7 @@ export const GoogleProvider = (config: {
     true, // Use PKCE
   );
 
+/** GitHub OAuth 2.0 provider preset. */
 export const GitHubProvider = (config: {
   clientId: string;
   clientSecret: Redacted.Redacted<string>;
@@ -1494,6 +1495,7 @@ export const GitHubProvider = (config: {
     false, // GitHub doesn't support PKCE yet
   );
 
+/** Discord OAuth 2.0 provider preset. */
 export const DiscordProvider = (config: {
   clientId: string;
   clientSecret: Redacted.Redacted<string>;
@@ -1511,6 +1513,7 @@ export const DiscordProvider = (config: {
     true, // Use PKCE
   );
 
+/** Microsoft (Entra ID) provider preset; `tenant` selects the directory. */
 export const MicrosoftProvider = (config: {
   clientId: string;
   clientSecret: Redacted.Redacted<string>;

@@ -195,6 +195,9 @@ export interface AuthorizeInput {
 const toActionRef = (action: Entity.EntityRef | string): Entity.EntityRef =>
   typeof action === "string" ? Entity.ref("Action", action) : action;
 
+/**
+ * Configuration for {@link Authorizer.layer}: the static policy set, an optional declared model the declarative policies are validated against, and whether to join a `PolicyStore`'s policies.
+ */
 export interface AuthorizerConfig<E = unknown> {
   /** The static policy set every decision is made against. */
   readonly policies: ReadonlyArray<Policy.Policy<E, never>>;
@@ -220,6 +223,11 @@ export interface AuthorizerConfig<E = unknown> {
 /** Raised by `Authorizer.layer` when policies do not validate against the model. */
 export class PolicyValidationError extends Errors.AuthError {}
 
+/**
+ * The authorization service: decides, checks and enforces requests against the configured policies (plus a `PolicyStore`'s, when one is in context).
+ *
+ * `check` returns a boolean; `authorize` fails with `AuthorizationDeniedError` carrying the decision trace. Build it with {@link Authorizer.layer}, or `Rbac.layer` for role-based policies.
+ */
 export class Authorizer extends Context.Service<
   Authorizer,
   {

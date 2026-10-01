@@ -73,6 +73,7 @@ export class DeviceCodeError extends Data.TaggedError("DeviceCodeError")<{
   readonly message: string;
 }> {}
 
+/** Configuration for {@link DeviceAuthorizationService}. */
 export interface DeviceAuthorizationConfig {
   /** URL where the user enters their code. Shown to the device. */
   readonly verificationUri: string;
@@ -86,6 +87,9 @@ export interface DeviceAuthorizationConfig {
   readonly userCodeAlphabet?: string;
 }
 
+/**
+ * What a device shows and polls with after {@link DeviceAuthorizationService.begin}: the device and user codes, the verification URI, the lifetime in seconds and the polling interval in seconds.
+ */
 export interface DeviceBeginResult {
   readonly deviceCode: string;
   readonly userCode: string;
@@ -94,11 +98,17 @@ export interface DeviceBeginResult {
   readonly interval: number;
 }
 
+/** The user and session a device receives once its request is approved. */
 export interface DevicePollResult {
   readonly user: Types.User;
   readonly session: Types.Session;
 }
 
+/**
+ * The RFC 8628 device authorization grant: a device begins a request, the user approves or denies its code in a browser, and the device polls for the session.
+ *
+ * Requires `DeviceAuthorizationStore` and `SessionService`.
+ */
 export class DeviceAuthorizationService extends Context.Service<
   DeviceAuthorizationService,
   {

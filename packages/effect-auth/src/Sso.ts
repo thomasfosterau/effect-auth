@@ -214,6 +214,11 @@ export interface SsoSignInSelector {
   readonly domain?: string;
 }
 
+/**
+ * Enterprise single sign-on as a relying party: registers per-organization OIDC and SAML connections, routes an email to its connection by domain, and completes the callback.
+ *
+ * Requires `SsoProviderStore`.
+ */
 export class SsoService extends Context.Service<
   SsoService,
   {

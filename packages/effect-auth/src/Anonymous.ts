@@ -34,6 +34,7 @@ export class AnonymousUserStore extends Context.Service<
   }
 >()("@effect-auth/AnonymousUserStore") {}
 
+/** Configuration for {@link AnonymousService}. */
 export interface AnonymousConfig {
   /**
    * Migrate data from the anonymous user to the newly-created real user during
@@ -46,11 +47,19 @@ export interface AnonymousConfig {
   }) => Effect.Effect<void, Errors.AuthError>;
 }
 
+/**
+ * The anonymous user and the session issued for them by {@link AnonymousService.signInAnonymous}.
+ */
 export interface AnonymousResult {
   readonly user: Types.User;
   readonly session: Types.Session;
 }
 
+/**
+ * Guest sign-in: creates users marked `attributes.isAnonymous` and upgrades them to real accounts with {@link AnonymousService.linkAccount}.
+ *
+ * Requires `AnonymousUserStore` and `SessionService`.
+ */
 export class AnonymousService extends Context.Service<
   AnonymousService,
   {

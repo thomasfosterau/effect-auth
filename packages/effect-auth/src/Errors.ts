@@ -4,6 +4,9 @@ import { Data } from "effect";
 // Stable error codes – append-only; never rename or remove.
 // ---------------------------------------------------------------------------
 
+/**
+ * The stable `code` every domain error carries. Append-only: a code is never renamed or removed, so clients and the {@link Messages} catalogue can rely on it.
+ */
 export const ErrorCode = {
   // Infrastructure
   AUTH_ERROR: "AUTH_ERROR",

@@ -58,7 +58,7 @@ const reachesModule = (externalSpecifiers: ReadonlySet<string>, moduleName: stri
   );
 
 describe("module graph", () => {
-  // TODO(#205): Http.ts — reached from src/index.ts:385's
+  // TODO(#205): Http.ts — reached from src/index.ts's
   // `export * as Http from "./http/index.ts"` — imports from
   // `effect/http-api`, which is exactly the coupling #205's HTTP-tier
   // restructure exists to remove. Un-skip once that lands.

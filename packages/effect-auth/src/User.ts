@@ -2,6 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
 
+/** The user-store contract {@link UserService} reads, updates and deletes users through. */
 export class UserServiceStore extends Context.Service<
   UserServiceStore,
   {
@@ -38,6 +39,11 @@ export interface UpdateUserInput {
   readonly image?: string;
 }
 
+/**
+ * Reads and updates users: profile fields and the attribute bag, refusing writes to {@link UserServiceConfig.serverOnlyAttributes}.
+ *
+ * Requires `UserServiceStore`.
+ */
 export class UserService extends Context.Service<
   UserService,
   {

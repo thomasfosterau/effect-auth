@@ -18,6 +18,7 @@ import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
 import { makePlugin, type PluginImpls } from "../Hooks.ts";
 import { CaptchaError } from "../Errors.ts";
 
+/** The captcha services {@link CaptchaPlugin} can verify tokens with. */
 export type CaptchaProvider = "cloudflare-turnstile" | "google-recaptcha" | "hcaptcha";
 
 /** Which auth endpoints the captcha guards. */
@@ -29,6 +30,7 @@ const VERIFY_URLS: Record<CaptchaProvider, string> = {
   hcaptcha: "https://hcaptcha.com/siteverify",
 };
 
+/** Configuration for {@link CaptchaPlugin}. */
 export interface CaptchaConfig {
   readonly provider: CaptchaProvider;
   readonly secretKey: Redacted.Redacted<string>;

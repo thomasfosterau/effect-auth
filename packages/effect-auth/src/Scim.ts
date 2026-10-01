@@ -354,6 +354,9 @@ export interface ScimGroupInput {
 // Config
 // ---------------------------------------------------------------------------
 
+/**
+ * Configuration for {@link ScimService}: the role granted to provisioned users, the base URL for `meta.location`, and the page-size cap.
+ */
 export interface ScimConfig {
   /**
    * Organization role granted to users provisioned through SCIM, for every
@@ -380,6 +383,11 @@ export interface ScimConfig {
 // Service
 // ---------------------------------------------------------------------------
 
+/**
+ * SCIM 2.0 provisioning: per-organization bearer connections, and Users and Groups mapped onto users, identifiers and organization teams.
+ *
+ * Requires `ScimConnectionStore`, `ScimUserStore`, `OrganizationStore`, `IdentifierStore` and `SessionService`.
+ */
 export class ScimService extends Context.Service<
   ScimService,
   {

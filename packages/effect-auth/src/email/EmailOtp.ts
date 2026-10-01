@@ -187,7 +187,11 @@ export class EmailOtpService extends Context.Service<
     Layer.effect(EmailOtpService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
-/** @deprecated Use {@link hashToken} from `"effect-auth"` instead. */
+/**
+ * SHA-256 hex digest of an OTP; an alias of {@link hashToken}.
+ *
+ * @deprecated Use {@link hashToken} from `@thomasfosterau/effect-auth` instead.
+ */
 export const hashOtp = hashToken;
 
 /**

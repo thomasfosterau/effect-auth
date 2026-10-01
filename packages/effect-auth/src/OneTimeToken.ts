@@ -61,6 +61,7 @@ export class OneTimeTokenStore extends Context.Service<
 // Config
 // ---------------------------------------------------------------------------
 
+/** Configuration for {@link OneTimeTokenService}. */
 export interface OneTimeTokenConfig {
   /** Default TTL in milliseconds for generated tokens. Defaults to 15 minutes. */
   readonly expiresIn?: number;
@@ -70,6 +71,7 @@ export interface OneTimeTokenConfig {
 // Service types
 // ---------------------------------------------------------------------------
 
+/** Per-token options for {@link OneTimeTokenService.generate}. */
 export interface OneTimeTokenGenerateOptions {
   /** Per-token TTL override in milliseconds. Falls back to `OneTimeTokenConfig.expiresIn`. */
   readonly expiresIn?: number;
@@ -77,6 +79,7 @@ export interface OneTimeTokenGenerateOptions {
   readonly metadata?: Record<string, unknown>;
 }
 
+/** The subject and metadata a verified one-time token was issued for. */
 export interface OneTimeTokenVerifyResult {
   readonly subject: string;
   readonly metadata?: Record<string, unknown>;
@@ -86,6 +89,11 @@ export interface OneTimeTokenVerifyResult {
 // Service class + Layer
 // ---------------------------------------------------------------------------
 
+/**
+ * Single-use, expiring tokens bound to a subject (confirmation links, invite tokens, any one-shot secret), stored as SHA-256 digests and consumed by the first successful `verify`.
+ *
+ * Requires `OneTimeTokenStore`.
+ */
 export class OneTimeTokenService extends Context.Service<
   OneTimeTokenService,
   {

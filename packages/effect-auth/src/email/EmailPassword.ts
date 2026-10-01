@@ -26,6 +26,9 @@ export interface CreateUserInput {
   readonly attributes?: Record<string, unknown>;
 }
 
+/**
+ * The store {@link EmailPasswordService} creates users and reads and writes password hashes through.
+ */
 export class EmailPasswordStore extends Context.Service<
   EmailPasswordStore,
   {
@@ -40,6 +43,9 @@ export class EmailPasswordStore extends Context.Service<
   }
 >()("@effect-auth/EmailPasswordStore") {}
 
+/**
+ * Configuration for {@link EmailPasswordService}: whether sign-up is open, verification and password-length rules, and auto sign-in.
+ */
 export interface EmailPasswordConfig {
   readonly disableSignUp?: boolean;
   readonly requireEmailVerification?: boolean;
@@ -65,6 +71,7 @@ export interface EmailPasswordConfig {
   readonly antiEnumeration?: boolean;
 }
 
+/** Input to {@link EmailPasswordService.signUp}. */
 export interface SignUpInput {
   readonly email: string;
   readonly password: string;
@@ -75,6 +82,7 @@ export interface SignUpInput {
   readonly captchaToken?: string;
 }
 
+/** Input to {@link EmailPasswordService.signIn}. */
 export interface SignInInput {
   readonly email: string;
   readonly password: string;
@@ -115,6 +123,9 @@ export class SecondFactorGate extends Context.Service<
   }
 >()("@effect-auth/SecondFactorGate") {}
 
+/**
+ * Outcome of a sign-in or sign-up: the user, the login handle used, the session when one was issued, the method, and a pending second-factor challenge when one is required.
+ */
 export interface AuthResult {
   readonly user: Types.User;
   /**
@@ -138,6 +149,7 @@ export interface AuthResult {
   readonly rememberMe?: boolean;
 }
 
+/** Input to {@link EmailPasswordService.changePassword}. */
 export interface ChangePasswordInput {
   readonly userId: string;
   readonly currentPassword: string;
@@ -148,6 +160,11 @@ export interface ChangePasswordInput {
   readonly currentSessionId?: string;
 }
 
+/**
+ * Email-and-password sign-up, sign-in and password changes. Sign-in does constant work whether or not the account exists, and honours the multi-factor gate.
+ *
+ * Requires `EmailPasswordStore`, `PasswordHasher`, `UserStore`, `IdentifierStore`, `SessionService` and `Hooks`.
+ */
 export class EmailPasswordService extends Context.Service<
   EmailPasswordService,
   {

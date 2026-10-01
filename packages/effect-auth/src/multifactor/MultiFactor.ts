@@ -164,6 +164,7 @@ export interface MultiFactorVerifyResult {
   readonly session: Types.Session;
 }
 
+/** Options for completing a second-factor challenge: attributes for the session it issues. */
 export interface MultiFactorVerifyOptions {
   readonly sessionAttributes?: Record<string, unknown>;
 }

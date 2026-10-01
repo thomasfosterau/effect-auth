@@ -39,6 +39,9 @@ import { ErrorCode } from "./Errors.ts";
 // Service class
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolves an error `code` (with optional locale and parameters) to a human-readable message. `Messages.Default` is the English catalogue; provide your own layer to localise.
+ */
 export class Messages extends Context.Service<
   Messages,
   {
