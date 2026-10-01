@@ -495,7 +495,7 @@ export const resolveAtEdge = (
  * This is the posture the split-service topology usually wants — a session read
  * sits on the hot path of *every* request, so a fault would otherwise 500 the
  * whole site, including routes that never touch auth. It is only safe when
- * anonymous is the lower-privilege outcome; `docs/SECURITY.md` states the
+ * anonymous is the lower-privilege outcome; `docs/ARCHITECTURE.md` states the
  * precondition, and `onDegraded` is mandatory so the degrade is never silent.
  *
  * @example A Worker front door

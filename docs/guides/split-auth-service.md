@@ -102,7 +102,7 @@ cannot drift from what the middleware reads. Do not restate the name in your app
 `resolveAtEdgeFailOpen` degrades an unreachable service to anonymous rather than failing
 the request. That is usually right here — the read sits on _every_ request, so failing
 closed turns one binding fault into a site-wide 500 — but it is only **safe** when
-anonymous is the lower-privilege outcome for your app. `docs/SECURITY.md` states the
+anonymous is the lower-privilege outcome for your app. [ARCHITECTURE.md](../ARCHITECTURE.md#fail-open-vs-fail-closed-session-resolution) states the
 precondition and the shapes where fail-open is an escalation instead. `resolveAtEdge`
 fails closed for those.
 

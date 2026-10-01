@@ -1,5 +1,10 @@
 # Feature modules are opt-in; feature-local entities for opt-in state
 
+> **Partly revised in code.** Features are still opt-in by import, but their state was not given
+> feature-local entities: anonymous, ban and last-login-method state live in the `attributes` of
+> the User or Session (`Anonymous.ts`, `Admin.ts`, `plugins/LastLoginMethod.ts`). See
+> [docs/CONTEXT.md](../CONTEXT.md). The text below is left as written.
+
 The library's features are individually opt-in by import. Some features need to attach state to a
 User (or another canonical entity) — "is this user anonymous," "is this user banned," "what
 method did they last sign in with." The default placement for such state is a **feature-local

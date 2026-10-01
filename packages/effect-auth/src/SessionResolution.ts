@@ -457,7 +457,7 @@ export interface ResolveFailOpenOptions<E, R> extends ResolveOptions<E, R> {
  * The check is worth making explicitly rather than inheriting: with a store
  * behind a database, failing closed turns *any* store fault into a site-wide
  * 500, including on routes that never touch auth. Neither direction is free.
- * See `docs/SECURITY.md`.
+ * See `docs/ARCHITECTURE.md`, "Fail-open vs fail-closed session resolution".
  *
  * @example
  * ```ts
