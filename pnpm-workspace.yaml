@@ -43,7 +43,7 @@ catalog:
   "@vitejs/plugin-vue": ^6.0.9
   "@vue/test-utils": ^2.5.1
   alchemy: 2.0.0-beta.79
-  better-sqlite3: ^11.7.0
+  better-sqlite3: ^13.0.3
   # The classic drizzle line is what `packages/drizzle` tests its Promise
   # drivers against; `drizzle-orm-effect` is the commit-suffixed 1.0 prerelease
   # that ships `drizzle-orm/effect-postgres` (the same pin as the three

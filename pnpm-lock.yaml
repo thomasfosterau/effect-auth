@@ -67,8 +67,8 @@ catalogs:
       specifier: 2.0.0-beta.79
       version: 2.0.0-beta.79
     better-sqlite3:
-      specifier: ^11.7.0
-      version: 11.10.0
+      specifier: ^13.0.3
+      version: 13.0.3
     drizzle-orm:
       specifier: ^0.45.3
       version: 0.45.3
@@ -189,10 +189,10 @@ importers:
         version: 26.6.3
       alchemy:
         specifier: 'catalog:'
-        version: 2.0.0-beta.79(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@types/node@26.6.3)(@types/react@19.3.0)(@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.6.3)(esbuild@0.28.1)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))(drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pglite@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-sqlite-do@4.0.0-rc.118(effect@4.0.0-rc.118))(@electric-sql/pglite@0.3.15)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3)))(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(typescript@6.0.3)(vitest@4.1.11)(ws@8.21.3)
+        version: 2.0.0-beta.79(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@types/node@26.6.3)(@types/react@19.3.0)(@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.6.3)(esbuild@0.28.1)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))(drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pglite@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-sqlite-do@4.0.0-rc.118(effect@4.0.0-rc.118))(@electric-sql/pglite@0.3.15)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3)))(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(typescript@6.0.3)(vitest@4.1.11)(ws@8.21.3)
       better-sqlite3:
         specifier: 'catalog:'
-        version: 11.10.0
+        version: 13.0.3
       effect:
         specifier: 4.0.0-rc.118
         version: 4.0.0-rc.118
@@ -249,13 +249,13 @@ importers:
         version: 8.23.1
       better-sqlite3:
         specifier: 'catalog:'
-        version: 11.10.0
+        version: 13.0.3
       drizzle-orm:
         specifier: 'catalog:'
-        version: 0.45.3(@cloudflare/workers-types@5.20260929.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)
+        version: 0.45.3(@cloudflare/workers-types@5.20260929.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)
       drizzle-orm-effect:
         specifier: 'catalog:'
-        version: drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pglite@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-sqlite-do@4.0.0-rc.118(effect@4.0.0-rc.118))(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3))
+        version: drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pglite@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-sqlite-do@4.0.0-rc.118(effect@4.0.0-rc.118))(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3))
       effect:
         specifier: 4.0.0-rc.118
         version: 4.0.0-rc.118
@@ -359,7 +359,7 @@ importers:
         version: 26.6.3
       better-sqlite3:
         specifier: 'catalog:'
-        version: 11.10.0
+        version: 13.0.3
       effect:
         specifier: 4.0.0-rc.118
         version: 4.0.0-rc.118
@@ -2508,9 +2508,6 @@ packages:
     resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
     engines: {node: 18 || 20 || >=22}
 
-  base64-js@1.5.1:
-    resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
-
   baseline-browser-mapping@2.11.20:
     resolution: {integrity: sha512-H0ulySigv6icDJ1F7SjtdCD6PrhTpdYCmP0CactWy1+ekh0AFd0o1Wn5T8b+hnTmdBx19u9yhL6wvCylXMY7zw==}
     engines: {node: '>=6.0.0'}
@@ -2519,17 +2516,12 @@ packages:
   before-after-hook@4.0.0:
     resolution: {integrity: sha512-q6tR3RPqIB1pMiTRMFcZwuG5T8vwp+vUvEG0vuI6B+Rikh5BfPp2fQ82c925FOs+b0lcFQ8CFrL+KbilfZFhOQ==}
 
-  better-sqlite3@11.10.0:
-    resolution: {integrity: sha512-EwhOpyXiOEL/lKzHz9AW1msWFNzGc/z+LzeB3/jnFJpxu+th2yqvzsSWas1v9jgs9+xiXJcD5A8CJxAG2TaghQ==}
+  better-sqlite3@13.0.3:
+    resolution: {integrity: sha512-RbOBxmLBG8uvFUc15X9+9SFemKcQ0WBuISBVkpuiaUB2qblC8UWlHEjdWVoZ8AdhSwmoEgsiXKfopX0CQxaACQ==}
+    engines: {node: '>=22'}
 
   bidi-js@1.1.0:
     resolution: {integrity: sha512-fX1Onk0tdVPC7obPWB5EbJ1z7NVhLq4m2xZLq2YXBkxzMXIGRpNMU88n0EPgWseKl12J7zXs7qrDxPK4sRs2fg==}
-
-  bindings@1.5.0:
-    resolution: {integrity: sha512-p2q/t/mhvuOj/UeLlV6566GD/guowlr0hHxClI0W9m7MWYkL1F0hLo+0Aexs9HSPCtR1SXQ0TD3MMKrXZajbiQ==}
-
-  bl@4.1.0:
-    resolution: {integrity: sha512-1W07cM9gS6DcLperZfFSj+bWLtaPGSOHWhPiGzXmvVJbRLdG82sH/Kn8EtW1VqWVA54AKf2h5k5BbnIbwF3h6w==}
 
   bowser@2.14.1:
     resolution: {integrity: sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg==}
@@ -2548,9 +2540,6 @@ packages:
 
   buffer-from@1.1.2:
     resolution: {integrity: sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==}
-
-  buffer@5.7.1:
-    resolution: {integrity: sha512-EHcyIPBQ4BSGlvjB16k5KgAJ27CIsHY/2JBmCRReo48y9rQ3MaUzWX3KVlBa4U7MyX02HdVj0K7C3WaB3ju7FQ==}
 
   cac@7.0.0:
     resolution: {integrity: sha512-tixWYgm5ZoOD+3g6UTea91eow5z6AAHaho3g0V9CNSNb45gM8SmflpAc+GRd1InC4AqN/07Unrgp56Y94N9hJQ==}
@@ -2585,9 +2574,6 @@ packages:
   chokidar@5.0.0:
     resolution: {integrity: sha512-TQMmc3w+5AxjpL8iIiwebF73dRDF4fBIieAqGn9RGCWaEVwQ6Fb2cGe31Yns0RRIzii5goJ1Y7xbMwo1TxMplw==}
     engines: {node: '>= 20.19.0'}
-
-  chownr@1.1.4:
-    resolution: {integrity: sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==}
 
   cliui@9.0.1:
     resolution: {integrity: sha512-k7ndgKhwoQveBL+/1tqGJYNz097I7WOvwbmmU2AR5+magtbjPWQTS1C5vzGkBC8Ym8UWRzfKUzUUqFLypY4Q+w==}
@@ -2655,16 +2641,8 @@ packages:
   decimal.js@10.6.0:
     resolution: {integrity: sha512-YpgQiITW3JXGntzdUmyUR1V812Hn8T1YVXhCu+wO3OpS4eU9l4YdD3qjyiKdV6mvV29zapkMeD390UVEf2lkUg==}
 
-  decompress-response@6.0.0:
-    resolution: {integrity: sha512-aW35yZM6Bb/4oJlZncMH2LCoZtJXTRxES17vE3hoRiowU2kWHaJKFkSBDnDR+cm9J+9QhXmREyIfv0pji9ejCQ==}
-    engines: {node: '>=10'}
-
   dedent-js@1.0.1:
     resolution: {integrity: sha512-OUepMozQULMLUmhxS95Vudo0jb0UchLimi3+pQ2plj61Fcy8axbP9hbiD4Sz6DPqn6XG3kfmziVfQ1rSys5AJQ==}
-
-  deep-extend@0.6.0:
-    resolution: {integrity: sha512-LOHxIOaPYdHlJRtCQfDIVZtfw/ufM8+rVj649RIHzcm/vGwQRXFt6OPqIFWsm2XEMrNIEtWR64sY1LEKD2vAOA==}
-    engines: {node: '>=4.0.0'}
 
   deepmerge@4.3.1:
     resolution: {integrity: sha512-3sUqbMEc77XqpdNO7FRyRog+eW3ph+GYCbj+rK+uYyRMuwsVy0rMiVtPn+QJlKFvWP/1PYpapqYn0Me2knFn+A==}
@@ -2968,9 +2946,6 @@ packages:
   emoji-regex@9.2.2:
     resolution: {integrity: sha512-L18DaJsXSUk2+42pv8mLs5jJT2hqFkFE4j21wOmgbUqsZ2hL72NsUU785g9RXgo3s0ZNgVl42TiHp3ZtOv/Vyg==}
 
-  end-of-stream@1.4.5:
-    resolution: {integrity: sha512-ooEGc6HP26xXq/N+GCGOT0JKCLDGrq2bQUZrQ7gyrJiZANJ/8YDTxTpQBXGMn+WbIQXNVpyWymm7KYVICQnyOg==}
-
   entities@6.0.1:
     resolution: {integrity: sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g==}
     engines: {node: '>=0.12'}
@@ -3023,10 +2998,6 @@ packages:
     resolution: {integrity: sha512-AFASGfIlnIbkKPQwX1yHaDjFvh/1gyKJODme52V6IORh69uEYgZp0o9C+qsIGNVEiuuhQU0CSSl++Rlegg1qvA==}
     engines: {node: '>=0.10.0'}
 
-  expand-template@2.0.3:
-    resolution: {integrity: sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg==}
-    engines: {node: '>=6'}
-
   expect-type@1.4.0:
     resolution: {integrity: sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==}
     engines: {node: '>=12.0.0'}
@@ -3063,9 +3034,6 @@ packages:
   fflate@0.8.3:
     resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
 
-  file-uri-to-path@1.0.0:
-    resolution: {integrity: sha512-0Zt+s3L7Vf1biwWZ29aARiVYLx7iMGnEUl9x33fbB/j3jR81u/O2LbqK+Bm1CDSNDKVtJ/YjwY7TUd5SkeLQLw==}
-
   fill-range@2.2.4:
     resolution: {integrity: sha512-cnrcCbj01+j2gTG921VZPnHbjmdAf8oQV/iGeV2kZxGSyfYjjTyY79ErsK1WJWMpw6DaApEX72binqJE+/d+5Q==}
     engines: {node: '>=0.10.0'}
@@ -3077,9 +3045,6 @@ packages:
   foreground-child@3.3.1:
     resolution: {integrity: sha512-gIXjKqtFuWEgzFRJA9WCQeSJLZDjgJUOMCMzxtvFq/37KojM1BFGufqsCy0r4qSQmYLsZYMeyRqzIWOMup03sw==}
     engines: {node: '>=14'}
-
-  fs-constants@1.0.0:
-    resolution: {integrity: sha512-y6OAwoSIf7FyjMIv94u+b5rdheZEjzR63GTyZJm5qh4Bi+2YgwLCcI/fPFZkL5PSixOt6ZNKm+w+Hfp/Bciwow==}
 
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
@@ -3103,9 +3068,6 @@ packages:
 
   get-port-please@3.2.0:
     resolution: {integrity: sha512-I9QVvBw5U/hw3RmWpYKRumUeaDgxTPd401x364rLmWBJcOQ753eov1eTgzDqRG9bqFIfDc7gfzcQEWrUri3o1A==}
-
-  github-from-package@0.0.0:
-    resolution: {integrity: sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==}
 
   glob@10.5.0:
     resolution: {integrity: sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg==}
@@ -3165,9 +3127,6 @@ packages:
   iconv-lite@0.7.3:
     resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
     engines: {node: '>=0.10.0'}
-
-  ieee754@1.2.1:
-    resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
 
   import-meta-resolve@4.2.0:
     resolution: {integrity: sha512-Iqv2fzaTQN28s/FwZAoFq0ZSs/7hMAHJVX+w8PZl3cY19Pxk6jFFalxQoIfW2826i/fDLXv8IiEZRIT0lDuWcg==}
@@ -3466,10 +3425,6 @@ packages:
     engines: {node: '>=16'}
     hasBin: true
 
-  mimic-response@3.1.0:
-    resolution: {integrity: sha512-z0yWI+4FDrrweS8Zmt4Ej5HdJmky15+L2e6Wgn3+iK5fWzb6T3fhNFq2+MeTRb064c6Wr4N/wv0DzQTjNzHNGQ==}
-    engines: {node: '>=10'}
-
   minimatch@10.2.6:
     resolution: {integrity: sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==}
     engines: {node: 18 || 20 || >=22}
@@ -3488,9 +3443,6 @@ packages:
   mixin-deep@1.3.2:
     resolution: {integrity: sha512-WRoDn//mXBiJ1H40rqa3vH0toePwSsGb45iInWlTySa+Uu4k3tYUSxa2v1KqAiLtvlrSzaExqS1gtk96A9zvEA==}
     engines: {node: '>=0.10.0'}
-
-  mkdirp-classic@0.5.3:
-    resolution: {integrity: sha512-gKLcREMhtuZRwRAfqP3RFW+TK4JqApVBtOIftVgjuABpAtpxhPGaDcfvbhNvD0B8iD1oUr/txX35NjcaY6Ns/A==}
 
   modern-tar@0.8.4:
     resolution: {integrity: sha512-gN54ddmyzEg10orwZ2u4OOv+bjpMWdIl5jIkodK97bMq8QBSL5c0D7YX0lT1Ooz+99S7+PvFbnxzdjgHo1r41g==}
@@ -3525,12 +3477,9 @@ packages:
     engines: {node: ^22 || ^24 || >=26}
     hasBin: true
 
-  napi-build-utils@2.0.0:
-    resolution: {integrity: sha512-GEbrYkbfF7MoNaoh2iGG84Mnf/WZfB0GdGEsM8wz7Expx/LlWf5U8t9nvJKXSp3qr5IsEbK04cBGhol/KwOsWA==}
-
-  node-abi@3.96.0:
-    resolution: {integrity: sha512-rebQ/lz7i0EkoLzUVSrKRzA69zMkwLp95kKMWoMDkkM00Suxz0D7zEQPwRml5fQum24mj7bPvmlgLAmu2JCiYg==}
-    engines: {node: '>=10'}
+  node-addon-api@8.9.2:
+    resolution: {integrity: sha512-VijLXbi3UACN69I0JVXJsX4tjACjNoQDgv2gTF6sx2wWEi8tkSg2eX8p5gSIFi8z2+DL3oHmY6OyKce38SDolg==}
+    engines: {node: ^18 || ^20 || >= 21}
 
   node-releases@2.0.54:
     resolution: {integrity: sha512-YHs7BmmcsdAI5Ozuf8JZo6PT0mv2GIWC9vMfvUC3dp65M8hn7Ux8CPL+2oBI7juNuj9d0ndhTcznq2ODBps9cQ==}
@@ -3548,9 +3497,6 @@ packages:
   obug@2.1.3:
     resolution: {integrity: sha512-9miFgM2OFba7hB+pRgvtV84pYTBaoTHohvmIgiRt6dRIzbwEOIaNaP+dIlGs2fNFoB0SeISs0Jz5WFVRid6Xyg==}
     engines: {node: '>=12.20.0'}
-
-  once@1.4.0:
-    resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
 
   oxfmt@0.64.0:
     resolution: {integrity: sha512-XZ4GFBN/PLbXKq+0zrgpQfPKYuJlUuj+nzZJY7UpIbFMNyefNLCdN9EwViycNqnYcv0wrn0jXcQLlqJp8RCKBg==}
@@ -3688,12 +3634,6 @@ packages:
     resolution: {integrity: sha512-9ZhXKM/rw350N1ovuWHbGxnGh/SNJ4cnxHiM0rxE4VN41wsg8P8zWn9hv/buK00RP4WvlOyr/RBDiptyxVbkZQ==}
     engines: {node: '>=0.10.0'}
 
-  prebuild-install@7.1.3:
-    resolution: {integrity: sha512-8Mf2cbV7x1cXPUILADGI3wuhfqWvtiLA1iclTDbFRZkgRQS0NqsPZphna9V+HyTEadheuPmjaJMsbzKQFOzLug==}
-    engines: {node: '>=10'}
-    deprecated: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
-    hasBin: true
-
   prettier@3.9.4:
     resolution: {integrity: sha512-yWG/o/4oJfo036EKAfK6ACAoDOfHeRHx4tuxkfBZiauURiaSmYwlpOr5LQqKtIkRD2z1PLteme2WoxEnj4tHTg==}
     engines: {node: '>=14'}
@@ -3715,9 +3655,6 @@ packages:
   proto-list@1.2.4:
     resolution: {integrity: sha512-vtK/94akxsTMhe0/cbfpR+syPuszcuwhqVjJq26CuNDgFGj682oRBXOP5MJpv2r7JtE8MsiepGIqvvOTBwn2vA==}
 
-  pump@3.0.4:
-    resolution: {integrity: sha512-VS7sjc6KR7e1ukRFhQSY5LM2uBWAUPiOPa/A3mkKmiMwSmRFUITt0xuj+/lesgnCv+dPIEYlkzrcyXgquIHMcA==}
-
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
@@ -3725,10 +3662,6 @@ packages:
   randomatic@3.1.1:
     resolution: {integrity: sha512-TuDE5KxZ0J461RVjrJZCJc+J+zCkTb1MbH9AQUq68sMhOMcy9jLcb3BrZKgp9q9Ncltdg4QVqWrH02W2EFFVYw==}
     engines: {node: '>= 0.10.0'}
-
-  rc@1.2.8:
-    resolution: {integrity: sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw==}
-    hasBin: true
 
   react-dom@19.3.0:
     resolution: {integrity: sha512-JDk8dgif51OjFoDE70+OT9ICyYr+69HlmihNwp1+Nsfbna3t5sIiCa9ZJktDmQ4/1b/rn26hIAR2uYXDMr5r0Q==}
@@ -3750,10 +3683,6 @@ packages:
 
   readable-stream@2.3.8:
     resolution: {integrity: sha512-8p0AUk4XODgIewSi0l8Epjs+EVnWiK7NoDIEGU0HhE7+ZyY8D1IMY7odu5lRrFXGg71L15KG8QrPmum45RTtdA==}
-
-  readable-stream@3.6.2:
-    resolution: {integrity: sha512-9u/sniCrY3D5WdsERHzHE4G2YCXqoG5FTHUiCC4SIbr6XcLZBY05ya9EKjYek9O5xOAwjGq+1JdGBAS7Q9ScoA==}
-    engines: {node: '>= 6'}
 
   readdirp@4.1.2:
     resolution: {integrity: sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg==}
@@ -3877,12 +3806,6 @@ packages:
     resolution: {integrity: sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw==}
     engines: {node: '>=14'}
 
-  simple-concat@1.0.1:
-    resolution: {integrity: sha512-cSFtAPtRhljv69IK0hTVZQ+OfE9nePi/rtJmw5UjHeVyVroEqJXP1sFztKUy1qU+xvz3u/sfYJLa947b7nAN2Q==}
-
-  simple-get@4.0.1:
-    resolution: {integrity: sha512-brv7p5WgH0jmQJr1ZDDfKDOSeWWg+OVypG99A/5vYGPqJ6pxiaHLy8nxtFjBA7oMa01ebA9gfh1uMCFqOuXxvA==}
-
   sirv@3.0.2:
     resolution: {integrity: sha512-2wcC/oGxHis/BoHkkPwldgiPSYcpZK3JU28WoMVv55yHJgcZ8rlXvuG9iZggz+sU1d4bRgIGASwyWqjxu3FM0g==}
     engines: {node: '>=18'}
@@ -3961,10 +3884,6 @@ packages:
     resolution: {integrity: sha512-p9LsUieSjWNNAxVCXLeilaDlmuUOrDS5/dF9znM1nZc7EGX5+zEFC0bEevsNIaldjlks+2jns5Siz6F9iK6jwA==}
     engines: {node: '>=0.10.0'}
 
-  strip-json-comments@2.0.1:
-    resolution: {integrity: sha512-4gB8na07fecVVkOI6Rs4e7T6NOTki5EmL7TUduTs6bu3EdnSycntVJ4re8kgZA+wx9IueI2Y11bfbgwtzuE0KQ==}
-    engines: {node: '>=0.10.0'}
-
   strnum@2.4.2:
     resolution: {integrity: sha512-rDG3Ah4TV0k1hWvLSzkZtMmLN9+eS+h3knq4MP6A42Y3Yh5qGNnOUs1jJkoSr8FG5dsL28c7KgkIBzSEykqtuw==}
 
@@ -3985,13 +3904,6 @@ packages:
   svelte@5.57.1:
     resolution: {integrity: sha512-Uqj49lWKB+iSSnneuwiYYJ7MZgkB+eXr0LXBhv4uDuAkXqnWmq65Sxflfvp0Lc6MdKjMUxGaeOKWJqz5SNiVIA==}
     engines: {node: '>=18'}
-
-  tar-fs@2.1.5:
-    resolution: {integrity: sha512-OboTd8mmMhZDNPV+UjQcK9yKAatXu2aJ+r1w4im1Otd4M4fl2hwvdoXUxIYHFTHWK/3y3FarBP70v3vwmGlOxw==}
-
-  tar-stream@2.2.0:
-    resolution: {integrity: sha512-ujeqbceABgwMZxEJnk2HDY2DlnUZ+9oEcb1KzTVfYHio0UE6dG71n60d8D2I4qNvleWrrXpmjpt7vZeF1LnMZQ==}
-    engines: {node: '>=6'}
 
   through2@2.0.5:
     resolution: {integrity: sha512-/mrRod8xqpA+IHSLyGCQ2s8SPHiCDEeQJSep1jqLYeEUClOFG2Qsh+4FU6G9VeqpZnGW/Su8LQGc4YKni5rYSQ==}
@@ -4049,9 +3961,6 @@ packages:
     resolution: {integrity: sha512-Yiex1Ovn8z2xPpOWckIiysV1SSyRMY9BkLF++q0yKiDxCqRhosKfMg3janKkiLBwZ5c/YryloKwGZcrEmtwxKw==}
     engines: {node: '>=18.0.0'}
     hasBin: true
-
-  tunnel-agent@0.6.0:
-    resolution: {integrity: sha512-McnNiV1l8RYeY8tBgEpuodCC1mLUdbSN+CYBL7kJsJNInOP8UjDDEwdk6Mw60vdLLrr5NHKZhMAOSrR2NZuQ+w==}
 
   typedarray@0.0.6:
     resolution: {integrity: sha512-/aCDEGatGvZ2BIk+HmLf4ifCJFwvKFNb9/JeZPMulfgFracn9QFcAf5GO8B/mweUjSoblS5In0cWhqpfs/5PQA==}
@@ -4233,9 +4142,6 @@ packages:
   wrap-ansi@9.0.2:
     resolution: {integrity: sha512-42AtmgqjV+X1VpdOfyTGOYRi0/zsoLqtXQckTmqTeybT+BDIbM/Guxo7x3pE2vtpr1ok6xRqM9OpBe+Jyoqyww==}
     engines: {node: '>=18'}
-
-  wrappy@1.0.2:
-    resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
   ws@8.21.3:
     resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
@@ -6107,7 +6013,7 @@ snapshots:
 
   acorn@8.18.0: {}
 
-  alchemy@2.0.0-beta.79(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@types/node@26.6.3)(@types/react@19.3.0)(@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.6.3)(esbuild@0.28.1)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))(drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pglite@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-sqlite-do@4.0.0-rc.118(effect@4.0.0-rc.118))(@electric-sql/pglite@0.3.15)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3)))(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(typescript@6.0.3)(vitest@4.1.11)(ws@8.21.3):
+  alchemy@2.0.0-beta.79(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@types/node@26.6.3)(@types/react@19.3.0)(@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.6.3)(esbuild@0.28.1)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))(drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pglite@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-sqlite-do@4.0.0-rc.118(effect@4.0.0-rc.118))(@electric-sql/pglite@0.3.15)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3)))(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(typescript@6.0.3)(vitest@4.1.11)(ws@8.21.3):
     dependencies:
       '@alchemy.run/cloudflare-runtime': 2.0.0-beta.79(@distilled.cloud/cloudflare@1.0.0-rc.12(effect@4.0.0-rc.118))(@types/node@26.6.3)(@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.6.3)(esbuild@0.28.1)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))(effect@4.0.0-rc.118)(rolldown@1.2.5)(typescript@6.0.3)
       '@alchemy.run/floci': 2.0.0-beta.79(effect@4.0.0-rc.118)
@@ -6146,7 +6052,7 @@ snapshots:
       yaml: 2.9.0
     optionalDependencies:
       '@effect/sql-pg': 4.0.0-rc.118(effect@4.0.0-rc.118)
-      drizzle-orm: 1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pglite@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-sqlite-do@4.0.0-rc.118(effect@4.0.0-rc.118))(@electric-sql/pglite@0.3.15)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3))
+      drizzle-orm: 1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pglite@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-sqlite-do@4.0.0-rc.118(effect@4.0.0-rc.118))(@electric-sql/pglite@0.3.15)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3))
       mysql2: 3.24.2(@types/node@26.6.3)
       pg: 8.23.0
       vite: '@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.6.3)(esbuild@0.28.1)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)'
@@ -6222,30 +6128,17 @@ snapshots:
 
   balanced-match@4.0.4: {}
 
-  base64-js@1.5.1: {}
-
   baseline-browser-mapping@2.11.20: {}
 
   before-after-hook@4.0.0: {}
 
-  better-sqlite3@11.10.0:
+  better-sqlite3@13.0.3:
     dependencies:
-      bindings: 1.5.0
-      prebuild-install: 7.1.3
+      node-addon-api: 8.9.2
 
   bidi-js@1.1.0:
     dependencies:
       require-from-string: 2.0.2
-
-  bindings@1.5.0:
-    dependencies:
-      file-uri-to-path: 1.0.0
-
-  bl@4.1.0:
-    dependencies:
-      buffer: 5.7.1
-      inherits: 2.0.4
-      readable-stream: 3.6.2
 
   bowser@2.14.1: {}
 
@@ -6266,11 +6159,6 @@ snapshots:
       update-browserslist-db: 1.3.2(browserslist@4.28.8)
 
   buffer-from@1.1.2: {}
-
-  buffer@5.7.1:
-    dependencies:
-      base64-js: 1.5.1
-      ieee754: 1.2.1
 
   cac@7.0.0: {}
 
@@ -6300,8 +6188,6 @@ snapshots:
   chokidar@5.0.0:
     dependencies:
       readdirp: 5.1.1
-
-  chownr@1.1.4: {}
 
   cliui@9.0.1:
     dependencies:
@@ -6367,13 +6253,7 @@ snapshots:
 
   decimal.js@10.6.0: {}
 
-  decompress-response@6.0.0:
-    dependencies:
-      mimic-response: 3.1.0
-
   dedent-js@1.0.1: {}
-
-  deep-extend@0.6.0: {}
 
   deepmerge@4.3.1: {}
 
@@ -6393,18 +6273,18 @@ snapshots:
 
   dom-accessibility-api@0.5.16: {}
 
-  drizzle-orm@0.45.3(@cloudflare/workers-types@5.20260929.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0):
+  drizzle-orm@0.45.3(@cloudflare/workers-types@5.20260929.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20260929.1
       '@electric-sql/pglite': 0.5.8
       '@libsql/client': 0.17.4
       '@types/better-sqlite3': 7.6.13
       '@types/pg': 8.23.1
-      better-sqlite3: 11.10.0
+      better-sqlite3: 13.0.3
       mysql2: 3.24.2(@types/node@26.6.3)
       pg: 8.23.0
 
-  drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pglite@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-sqlite-do@4.0.0-rc.118(effect@4.0.0-rc.118))(@electric-sql/pglite@0.3.15)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3)):
+  drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pglite@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-sqlite-do@4.0.0-rc.118(effect@4.0.0-rc.118))(@electric-sql/pglite@0.3.15)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3)):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20260929.1
       '@effect/sql-d1': 4.0.0-rc.118(effect@4.0.0-rc.118)
@@ -6415,14 +6295,14 @@ snapshots:
       '@libsql/client': 0.17.4
       '@types/better-sqlite3': 7.6.13
       '@types/pg': 8.23.1
-      better-sqlite3: 11.10.0
+      better-sqlite3: 13.0.3
       effect: 4.0.0-rc.118
       mysql2: 3.24.2(@types/node@26.6.3)
       pg: 8.23.0
       valibot: 1.2.0(typescript@6.0.3)
     optional: true
 
-  drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pglite@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-sqlite-do@4.0.0-rc.118(effect@4.0.0-rc.118))(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@11.10.0)(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3)):
+  drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pg@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-pglite@4.0.0-rc.118(effect@4.0.0-rc.118))(@effect/sql-sqlite-do@4.0.0-rc.118(effect@4.0.0-rc.118))(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@7.6.13)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.0.0-rc.118)(mysql2@3.24.2(@types/node@26.6.3))(pg@8.23.0)(valibot@1.2.0(typescript@6.0.3)):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20260929.1
       '@effect/sql-d1': 4.0.0-rc.118(effect@4.0.0-rc.118)
@@ -6433,7 +6313,7 @@ snapshots:
       '@libsql/client': 0.17.4
       '@types/better-sqlite3': 7.6.13
       '@types/pg': 8.23.1
-      better-sqlite3: 11.10.0
+      better-sqlite3: 13.0.3
       effect: 4.0.0-rc.118
       mysql2: 3.24.2(@types/node@26.6.3)
       pg: 8.23.0
@@ -6467,10 +6347,6 @@ snapshots:
   emoji-regex@8.0.0: {}
 
   emoji-regex@9.2.2: {}
-
-  end-of-stream@1.4.5:
-    dependencies:
-      once: 1.4.0
 
   entities@6.0.1: {}
 
@@ -6531,8 +6407,6 @@ snapshots:
     dependencies:
       fill-range: 2.2.4
 
-  expand-template@2.0.3: {}
-
   expect-type@1.4.0: {}
 
   extend-shallow@2.0.1:
@@ -6569,8 +6443,6 @@ snapshots:
 
   fflate@0.8.3: {}
 
-  file-uri-to-path@1.0.0: {}
-
   fill-range@2.2.4:
     dependencies:
       is-number: 2.1.0
@@ -6585,8 +6457,6 @@ snapshots:
     dependencies:
       cross-spawn: 7.0.6
       signal-exit: 4.1.0
-
-  fs-constants@1.0.0: {}
 
   fsevents@2.3.3:
     optional: true
@@ -6603,8 +6473,6 @@ snapshots:
   get-east-asian-width@1.6.0: {}
 
   get-port-please@3.2.0: {}
-
-  github-from-package@0.0.0: {}
 
   glob@10.5.0:
     dependencies:
@@ -6669,8 +6537,6 @@ snapshots:
     dependencies:
       safer-buffer: 2.1.2
     optional: true
-
-  ieee754@1.2.1: {}
 
   import-meta-resolve@4.2.0: {}
 
@@ -6931,8 +6797,6 @@ snapshots:
 
   mime@4.1.0: {}
 
-  mimic-response@3.1.0: {}
-
   minimatch@10.2.6:
     dependencies:
       brace-expansion: 5.0.12
@@ -6949,8 +6813,6 @@ snapshots:
     dependencies:
       for-in: 1.0.2
       is-extendable: 1.0.1
-
-  mkdirp-classic@0.5.3: {}
 
   modern-tar@0.8.4: {}
 
@@ -6981,11 +6843,7 @@ snapshots:
 
   nanoid@6.0.1: {}
 
-  napi-build-utils@2.0.0: {}
-
-  node-abi@3.96.0:
-    dependencies:
-      semver: 7.8.5
+  node-addon-api@8.9.2: {}
 
   node-releases@2.0.54: {}
 
@@ -6998,10 +6856,6 @@ snapshots:
       isobject: 3.0.1
 
   obug@2.1.3: {}
-
-  once@1.4.0:
-    dependencies:
-      wrappy: 1.0.2
 
   oxfmt@0.64.0(svelte@5.57.1)(vite-plus@0.3.0(@types/node@26.6.3)(@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.6.3)(esbuild@0.28.1)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))(esbuild@0.28.1)(jsdom@30.1.1)(svelte@5.57.1)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)):
     dependencies:
@@ -7157,21 +7011,6 @@ snapshots:
     dependencies:
       xtend: 4.0.2
 
-  prebuild-install@7.1.3:
-    dependencies:
-      detect-libc: 2.1.2
-      expand-template: 2.0.3
-      github-from-package: 0.0.0
-      minimist: 1.2.8
-      mkdirp-classic: 0.5.3
-      napi-build-utils: 2.0.0
-      node-abi: 3.96.0
-      pump: 3.0.4
-      rc: 1.2.8
-      simple-get: 4.0.1
-      tar-fs: 2.1.5
-      tunnel-agent: 0.6.0
-
   prettier@3.9.4: {}
 
   pretty-format@27.5.1:
@@ -7192,11 +7031,6 @@ snapshots:
 
   proto-list@1.2.4: {}
 
-  pump@3.0.4:
-    dependencies:
-      end-of-stream: 1.4.5
-      once: 1.4.0
-
   punycode@2.3.1: {}
 
   randomatic@3.1.1:
@@ -7204,13 +7038,6 @@ snapshots:
       is-number: 4.0.0
       kind-of: 6.0.3
       math-random: 1.0.4
-
-  rc@1.2.8:
-    dependencies:
-      deep-extend: 0.6.0
-      ini: 1.3.8
-      minimist: 1.2.8
-      strip-json-comments: 2.0.1
 
   react-dom@19.3.0(react@19.3.0):
     dependencies:
@@ -7233,12 +7060,6 @@ snapshots:
       isarray: 1.0.0
       process-nextick-args: 2.0.1
       safe-buffer: 5.1.2
-      string_decoder: 1.1.1
-      util-deprecate: 1.0.2
-
-  readable-stream@3.6.2:
-    dependencies:
-      inherits: 2.0.4
       string_decoder: 1.1.1
       util-deprecate: 1.0.2
 
@@ -7369,14 +7190,6 @@ snapshots:
 
   signal-exit@4.1.0: {}
 
-  simple-concat@1.0.1: {}
-
-  simple-get@4.0.1:
-    dependencies:
-      decompress-response: 6.0.0
-      once: 1.4.0
-      simple-concat: 1.0.1
-
   sirv@3.0.2:
     dependencies:
       '@polka/url': 1.0.0-next.29
@@ -7457,8 +7270,6 @@ snapshots:
 
   strip-color@0.1.0: {}
 
-  strip-json-comments@2.0.1: {}
-
   strnum@2.4.2:
     dependencies:
       anynum: 1.0.1
@@ -7502,21 +7313,6 @@ snapshots:
       zimmerframe: 1.1.4
     transitivePeerDependencies:
       - '@typescript-eslint/types'
-
-  tar-fs@2.1.5:
-    dependencies:
-      chownr: 1.1.4
-      mkdirp-classic: 0.5.3
-      pump: 3.0.4
-      tar-stream: 2.2.0
-
-  tar-stream@2.2.0:
-    dependencies:
-      bl: 4.1.0
-      end-of-stream: 1.4.5
-      fs-constants: 1.0.0
-      inherits: 2.0.4
-      readable-stream: 3.6.2
 
   through2@2.0.5:
     dependencies:
@@ -7565,10 +7361,6 @@ snapshots:
       esbuild: 0.28.1
     optionalDependencies:
       fsevents: 2.3.3
-
-  tunnel-agent@0.6.0:
-    dependencies:
-      safe-buffer: 5.1.2
 
   typedarray@0.0.6: {}
 
@@ -7780,8 +7572,6 @@ snapshots:
       ansi-styles: 6.2.3
       string-width: 7.2.0
       strip-ansi: 7.2.0
-
-  wrappy@1.0.2: {}
 
   ws@8.21.3: {}
 
