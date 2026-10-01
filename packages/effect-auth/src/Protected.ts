@@ -153,8 +153,41 @@ const decide = <E>(
 // ---------------------------------------------------------------------------
 
 /**
- * The guard both directions share: absent values pass through untouched (that
- * is `onSome`'s contract), a present value is authorized, and a denial either
+ * An effectful getter that runs `f` on a present value and passes an absent
+ * one through untouched.
+ *
+ * This package supports `effect >=4.0.0-rc.113`, and the getter API changed
+ * inside that range: rc.113 to rc.115 have `SchemaGetter.onSome` (which only
+ * sees present values), while rc.116 removed it in favour of
+ * `SchemaGetter.transformOptionalEffect` (which sees the `Option`). Neither
+ * exists on the other side, so the one that does is picked when the getter is
+ * built — never at import, so a missing name cannot crash module load.
+ */
+const someEffect = <A, R>(
+  f: (value: A) => Effect.Effect<Option.Option<A>, SchemaIssue.Issue, R>,
+): SchemaGetter.Getter<A, A, R> => {
+  const getters = SchemaGetter as unknown as {
+    readonly transformOptionalEffect?: (
+      f: (input: Option.Option<A>) => Effect.Effect<Option.Option<A>, SchemaIssue.Issue, R>,
+    ) => SchemaGetter.Getter<A, A, R>;
+    readonly onSome?: (
+      f: (value: A) => Effect.Effect<Option.Option<A>, SchemaIssue.Issue, R>,
+    ) => SchemaGetter.Getter<A, A, R>;
+  };
+  if (getters.transformOptionalEffect !== undefined) {
+    return getters.transformOptionalEffect((input) =>
+      Option.isNone(input) ? Effect.succeed(Option.none<A>()) : f(input.value),
+    );
+  }
+  if (getters.onSome !== undefined) return getters.onSome(f);
+  throw new Error(
+    "effect-auth: this version of effect has neither SchemaGetter.transformOptionalEffect nor SchemaGetter.onSome",
+  );
+};
+
+/**
+ * The guard both directions share: absent values pass through untouched (see
+ * {@link someEffect}), a present value is authorized, and a denial either
  * omits the key or fails the parse.
  */
 const guard = <A, E>(
@@ -162,7 +195,7 @@ const guard = <A, E>(
   options: ProtectedFieldOptions<E>,
 ): SchemaGetter.Getter<A, A, CurrentPrincipal> => {
   const policies = toPolicies(options.policies);
-  return SchemaGetter.onSome<A, A, CurrentPrincipal>((value) =>
+  return someEffect<A, CurrentPrincipal>((value) =>
     Effect.gen(function* () {
       const request = yield* requestFor(options);
       const allowed = yield* decide(policies, request);

@@ -33,12 +33,13 @@ A new package picks an archetype, gets a `vite.config.ts` that declares its task
 - `vp run check` — every package's type gates: `tsc` over sources and tests (`vue-tsc` / `svelte-check` where relevant) plus `vp test --typecheck`. Each package's `build`, `check` and `test:unit` tasks first build the workspace packages it depends on (their `exports` point at the gitignored `dist/`), so this works on a fresh checkout with no manual build.
 - `vp run -r test:unit` — every package's unit tests.
 - `vp run build` — every package's `dist/`.
+- `vp run check:dist` — the dist-level import smoke test: packs the built packages, installs them beside one exact `effect` (default the peer floor; `-- --effect catalog` for the version the workspace builds against, which also covers `alchemy`) and imports every entry point. **Run `vp run build` first**; CI runs it twice, after the build step.
 
 `vp check` is the built-in; `vp run check` is this repo's task. They are different commands. CI runs all four on every PR ([.github/workflows/ci.yml](.github/workflows/ci.yml)); run them yourself before pushing — there is no pre-push hook.
 
 ## Dependencies: strict catalog
 
-Every external version lives in [pnpm-workspace.yaml](pnpm-workspace.yaml). `package.json` files reference only `catalog:` (dev and runtime dependencies), `catalog:peers` (published peer ranges) or `workspace:*`. `catalogMode: strict` makes pnpm reject anything else. Add a dependency by adding it to the catalog first, then `vp install`, and commit the regenerated `pnpm-lock.yaml`. `effect` is a singleton pinned exactly (with an `overrides` entry); its published peer range is `>=4.0.0-rc.112`.
+Every external version lives in [pnpm-workspace.yaml](pnpm-workspace.yaml). `package.json` files reference only `catalog:` (dev and runtime dependencies), `catalog:peers` (published peer ranges) or `workspace:*`. `catalogMode: strict` makes pnpm reject anything else. Add a dependency by adding it to the catalog first, then `vp install`, and commit the regenerated `pnpm-lock.yaml`. `effect` is a singleton pinned exactly (with an `overrides` entry); its published peer range is `>=4.0.0-rc.113` (the programme floor), proven at dist level by `vp run check:dist`, which installs the packed packages beside the floor version and imports every entry point.
 
 ## Changesets and releases
 

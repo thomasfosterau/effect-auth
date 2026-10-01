@@ -26,7 +26,7 @@ import { layer as resendLayer } from "@thomasfosterau/effect-auth-resend";
 // Resolve the secret through Config, then build the layer from the resolved config.
 const EmailLayer = Layer.unwrapEffect(
   Effect.gen(function* () {
-    const apiKey = yield* Config.redacted("RESEND_API_KEY");
+    const apiKey = yield* Config.Redacted("RESEND_API_KEY");
     return resendLayer({ apiKey, from: "App <noreply@example.com>" });
   }),
 );
@@ -78,8 +78,10 @@ applications should supply their own `render`** for branded, localized email
 templates:
 
 ```ts
+// `apiKey` is a `Redacted<string>`: resolve it with `yield* Config.Redacted(...)`
+// as above (or build one with `Redacted.make`), not the `Config` itself.
 resendLayer({
-  apiKey: Config.redacted("RESEND_API_KEY"),
+  apiKey,
   from: "App <noreply@example.com>",
   render: (message) => {
     switch (message.purpose) {

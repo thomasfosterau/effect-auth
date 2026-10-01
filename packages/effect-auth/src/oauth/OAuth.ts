@@ -757,10 +757,10 @@ export class OAuthService extends Context.Service<
  * Optional env vars: `OAUTH_AUTO_LINK_BY_VERIFIED_EMAIL`, `OAUTH_ENCRYPT_TOKENS_SECRET`.
  */
 export const oauthServiceOptionsConfig = Config.all({
-  autoLinkByVerifiedEmail: Config.boolean("OAUTH_AUTO_LINK_BY_VERIFIED_EMAIL").pipe(
+  autoLinkByVerifiedEmail: Config.Boolean("OAUTH_AUTO_LINK_BY_VERIFIED_EMAIL").pipe(
     Config.withDefault(true),
   ),
-  encryptTokens: Config.redacted("OAUTH_ENCRYPT_TOKENS_SECRET").pipe(
+  encryptTokens: Config.Redacted("OAUTH_ENCRYPT_TOKENS_SECRET").pipe(
     Config.map((secret) => ({ secret }) as const),
     Config.orElse(() => Config.succeed(undefined)),
   ),

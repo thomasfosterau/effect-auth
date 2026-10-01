@@ -208,17 +208,17 @@ export class JwtService extends Context.Service<
  * `JWT_CLOCK_SKEW_LEEWAY_MS`, `JWT_ENCRYPT_PRIVATE_KEY_SECRET`.
  */
 export const jwtServiceConfig = Config.all({
-  issuer: Config.string("JWT_ISSUER"),
-  audience: Config.string("JWT_AUDIENCE").pipe(Config.orElse(() => Config.succeed(undefined))),
-  expiresIn: Config.int("JWT_EXPIRES_IN_MS").pipe(Config.orElse(() => Config.succeed(undefined))),
-  algorithm: Config.string("JWT_ALGORITHM").pipe(
+  issuer: Config.String("JWT_ISSUER"),
+  audience: Config.String("JWT_AUDIENCE").pipe(Config.orElse(() => Config.succeed(undefined))),
+  expiresIn: Config.Int("JWT_EXPIRES_IN_MS").pipe(Config.orElse(() => Config.succeed(undefined))),
+  algorithm: Config.String("JWT_ALGORITHM").pipe(
     Config.map((s) => s as JwtAlgorithm),
     Config.orElse(() => Config.succeed(undefined)),
   ),
-  clockSkewLeeway: Config.int("JWT_CLOCK_SKEW_LEEWAY_MS").pipe(
+  clockSkewLeeway: Config.Int("JWT_CLOCK_SKEW_LEEWAY_MS").pipe(
     Config.orElse(() => Config.succeed(undefined)),
   ),
-  encryptPrivateKey: Config.redacted("JWT_ENCRYPT_PRIVATE_KEY_SECRET").pipe(
+  encryptPrivateKey: Config.Redacted("JWT_ENCRYPT_PRIVATE_KEY_SECRET").pipe(
     Config.map((secret) => ({ secret }) as const),
     Config.orElse(() => Config.succeed(undefined)),
   ),

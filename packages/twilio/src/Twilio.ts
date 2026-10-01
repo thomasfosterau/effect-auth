@@ -49,7 +49,7 @@ export const defaultRender = (message: SmsMessage): string => {
 export interface TwilioSmsSenderConfig {
   /** Twilio Account SID (starts with `AC`). */
   readonly accountSid: string;
-  /** Twilio Auth Token. Wrap with `Redacted.make(...)` or read via `Config.redacted(...)`. */
+  /** Twilio Auth Token. Wrap with `Redacted.make(...)` or read via `Config.Redacted(...)`. */
   readonly authToken: Redacted.Redacted<string>;
   /** The sending phone number (E.164) or Messaging Service SID. */
   readonly from: string;
