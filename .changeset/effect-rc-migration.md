@@ -12,7 +12,7 @@
 
 Move to effect `4.0.0-rc.112`.
 
-Every package now requires `effect >=4.0.0-rc.112`; the previous floor was `>=4.0.0-beta.93`. Consumers must upgrade effect alongside this release, because the rc line renamed API this library's public surface is built on.
+Every package now requires `effect >=4.0.0-rc.112` (raised to `>=4.0.0-rc.113` by the next entry, which fixes the import crash on rc.113 and later); the previous floor was `>=4.0.0-beta.93`. Consumers must upgrade effect alongside this release, because the rc line renamed API this library's public surface is built on.
 
 What the upgrade touched here:
 

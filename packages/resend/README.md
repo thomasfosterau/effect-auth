@@ -78,8 +78,10 @@ applications should supply their own `render`** for branded, localized email
 templates:
 
 ```ts
+// `apiKey` is a `Redacted<string>`: resolve it with `yield* Config.Redacted(...)`
+// as above (or build one with `Redacted.make`), not the `Config` itself.
 resendLayer({
-  apiKey: Config.Redacted("RESEND_API_KEY"),
+  apiKey,
   from: "App <noreply@example.com>",
   render: (message) => {
     switch (message.purpose) {

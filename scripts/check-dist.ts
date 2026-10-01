@@ -4,15 +4,22 @@
  * Packs every package that imports Effect at module load, installs the
  * tarballs into a scratch project next to ONE exact `effect` version (by
  * default the published peer floor), and imports every `exports` entry from
- * the packed `dist/`, then runs `behaviour.mjs` against it. A stale `dist/`, or source that calls an API the floor
- * does not have, fails here instead of in a consumer. rc.113 renamed the
- * `Config` constructors, and the published range once claimed rc.112 while the
- * code crashed at import on every later rc: the unit suite only ever runs the
- * catalog version, so this is the check that proves the lower bound.
+ * the packed `dist/`. It then runs a behaviour phase against the same install.
+ * A stale `dist/`, or source that calls an API the floor does not have, fails
+ * here instead of in a consumer. rc.113 renamed the `Config` constructors, and
+ * the published range once claimed rc.112 while the code crashed at import on
+ * every later rc: the unit suite only ever runs the catalog version, so this
+ * is the check that proves the lower bound.
  *
  * Run `vp run build` first (the packed tarballs contain `dist/`), then:
  *
- *   vp run check:dist [-- --effect <version> | catalog]
+ *   vp run check:dist [-- --effect <version> | catalog] [--keep]
+ *
+ * `--effect catalog` uses the version the workspace builds against; only that
+ * run also installs `@thomasfosterau/effect-auth-alchemy` (with `alchemy` at
+ * the catalog version), because alchemy needs effect >=rc.115 and cannot be
+ * installed on the floor. `--keep` leaves the scratch project on disk (its
+ * path is printed) instead of deleting it, for debugging a failure.
  *
  * Importing is not enough: the Effect API also moved *inside* the supported
  * range in places that only bite when a function is called (rc.116 replaced
@@ -20,21 +27,27 @@
  * phase builds the env-backed layers and exercises `protectedField` on the
  * packed dist.
  *
- * Not covered: `@thomasfosterau/effect-auth-alchemy` (its `alchemy` peer needs
- * effect >=rc.115, so it cannot be installed on the floor; its unit suite
- * covers it against the catalog version) and the react / solid / svelte / vue
- * bindings, which import Effect only through `effect-auth-client`.
+ * Not covered: the react / solid / svelte / vue bindings, which import Effect
+ * only through `effect-auth-client`.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const DEFAULT_FLOOR = "4.0.0-rc.113";
 
 /** Workspace directories smoke-tested here, with any peer to install beside them. */
-const packages: ReadonlyArray<{ readonly dir: string; readonly peers?: ReadonlyArray<string> }> = [
+interface Target {
+  readonly dir: string;
+  /** Peers to install beside it, at the version the workspace catalog pins. */
+  readonly peers?: ReadonlyArray<string>;
+  /** Only installable on a catalog-version run (see the header). */
+  readonly catalogOnly?: true;
+}
+
+const allTargets: ReadonlyArray<Target> = [
   { dir: "effect-auth" },
   { dir: "client" },
   { dir: "sql" },
@@ -43,6 +56,7 @@ const packages: ReadonlyArray<{ readonly dir: string; readonly peers?: ReadonlyA
   { dir: "twilio" },
   { dir: "saml" },
   { dir: "drizzle", peers: ["drizzle-orm"] },
+  { dir: "alchemy", peers: ["alchemy"], catalogOnly: true },
 ];
 
 const arg = (flag: string): string | undefined => {
@@ -50,20 +64,38 @@ const arg = (flag: string): string | undefined => {
   return index === -1 ? undefined : process.argv[index + 1];
 };
 
-/** `--effect catalog` tests the version the workspace itself builds against. */
-const catalogEffect = (): string => {
+/** The version the default `catalog:` of pnpm-workspace.yaml pins for `name`. */
+const catalogEntry = (name: string): string => {
   const workspace = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
-  const match = /^ {2}effect: (\S+)$/m.exec(workspace);
-  if (!match?.[1]) throw new Error("no `effect` entry in the pnpm-workspace.yaml catalog");
+  const escaped = name.replace(/[.*+?^${}()|[\]\\/@]/g, "\\$&");
+  const match = new RegExp(`^ {2}"?${escaped}"?: (\\S+)$`, "m").exec(workspace);
+  if (!match?.[1]) throw new Error(`no \`${name}\` entry in the pnpm-workspace.yaml catalog`);
   return match[1];
 };
 
 const requested = arg("--effect") ?? DEFAULT_FLOOR;
-const effectVersion = requested === "catalog" ? catalogEffect() : requested;
+const onCatalog = requested === "catalog";
+const effectVersion = onCatalog ? catalogEntry("effect") : requested;
+const packages = allTargets.filter((target) => onCatalog || target.catalogOnly !== true);
 const keep = process.argv.includes("--keep");
 
 const run = (cmd: string, args: ReadonlyArray<string>, cwd: string): string =>
   execFileSync(cmd, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
+
+/**
+ * Every installed copy of `effect`. `npm ls` exits non-zero for any unmet
+ * peer in the tree (a transitive dependency wanting a newer rc, say), which is
+ * not what is being asked here, so only its output is used.
+ */
+const listEffectCopies = (cwd: string): ReadonlyArray<string> => {
+  let out: string;
+  try {
+    out = run("npm", ["ls", "effect", "--all", "--parseable"], cwd);
+  } catch (error) {
+    out = String((error as { stdout?: unknown }).stdout ?? "");
+  }
+  return out.split("\n").filter((line) => line.endsWith("/node_modules/effect"));
+};
 
 interface Manifest {
   readonly name: string;
@@ -140,11 +172,17 @@ try {
       throw new Error(`${manifest.name}: dist/ is empty; run \`vp run build\` first`);
     }
     // `pnpm pack` rewrites `catalog:` / `workspace:*` exactly as publishing does.
-    run("pnpm", ["pack", "--pack-destination", scratch], join(root, "packages", dir));
-    const file = readdirSync(scratch).find(
-      (f) => f.endsWith(".tgz") && f.startsWith(manifest.name.replace("@", "").replace("/", "-")),
-    );
-    if (!file) throw new Error(`${manifest.name}: pnpm pack produced no tarball`);
+    // pnpm prints the tarball path last, so there is no filename to guess at.
+    const printed = run(
+      "pnpm",
+      ["pack", "--pack-destination", scratch],
+      join(root, "packages", dir),
+    )
+      .trim()
+      .split("\n")
+      .pop();
+    const file = printed ? basename(printed.trim()) : undefined;
+    if (!file?.endsWith(".tgz")) throw new Error(`${manifest.name}: pnpm pack printed no tarball`);
     tarballs.set(manifest.name, `file:./${file}`);
   }
 
@@ -160,7 +198,7 @@ try {
         type: "module",
         dependencies: {
           effect: effectVersion,
-          ...Object.fromEntries([...peers].map((peer) => [peer, "*"])),
+          ...Object.fromEntries([...peers].map((peer) => [peer, catalogEntry(peer)])),
           ...Object.fromEntries(
             [...tarballs].map(([name, spec]) => [name, `file:../${spec.slice(7)}`]),
           ),
@@ -196,9 +234,7 @@ try {
   if (installed !== effectVersion) {
     throw new Error(`expected effect ${effectVersion}, installed ${installed}`);
   }
-  const copies = run("npm", ["ls", "effect", "--all", "--parseable"], project)
-    .split("\n")
-    .filter((line) => line.endsWith("/node_modules/effect"));
+  const copies = listEffectCopies(project);
   if (new Set(copies).size !== 1) {
     throw new Error(`expected one copy of effect, found:\n${copies.join("\n")}`);
   }
