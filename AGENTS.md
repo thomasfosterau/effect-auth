@@ -40,7 +40,7 @@ A new package picks an archetype, gets a `vite.config.ts` that declares its task
 - `vp run -r test:unit` — every package's unit tests.
 - `vp run build` — every package's `dist/`. Each package's `build`, `check` and `test:unit` first build the workspace packages it depends on (their `exports` point at the gitignored `dist/`), so a fresh checkout needs no manual build.
 - `vp run check:dist` (network) — packs the built packages, installs them from the registry beside one exact `effect` (default the peer floor; `-- --effect catalog` for the version the workspace builds against) and imports every entry point. Run `vp run build` first.
-- `vp run docs` — docgen for `packages/effect-auth`: writes the API reference and compiles and runs every JSDoc `@example`. It currently fails before reaching the examples (undocumented barrel re-exports), so it isn't a gate yet (#257).
+- `vp run docs` — docgen for `packages/effect-auth`: writes the API reference and compiles and runs every JSDoc `@example`. It currently fails type-checking two `@example` blocks that hold pseudo-code, so it isn't a gate yet (#257).
 - `pnpm changeset` — add a changeset.
 
 ## Verification

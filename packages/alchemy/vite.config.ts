@@ -4,7 +4,7 @@ import { packageTasks } from "../../vite.tasks.ts";
 
 // HELD PRIVATE UNTIL alchemy SHIPS AN EFFECT rc.118 BUILD (effect-auth#249, #250).
 //
-// The workspace builds against `effect` rc.118, but alchemy 2.0.0-beta.79 (the
+// The workspace builds against `effect` 4.0.0, but alchemy 2.0.0-beta.79 (the
 // newest release) imports the removed `effect/unstable/*` paths, so anything
 // that loads the alchemy runtime fails with ERR_MODULE_NOT_FOUND. `package.json`
 // is therefore `"private": true` (changesets and pnpm neither version nor
