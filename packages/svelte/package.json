@@ -50,7 +50,8 @@
     "@testing-library/svelte": "catalog:",
     "jsdom": "catalog:",
     "svelte": "catalog:",
-    "svelte-check": "catalog:"
+    "svelte-check": "catalog:",
+    "typescript": "catalog:"
   },
   "peerDependencies": {
     "svelte": "catalog:peers"

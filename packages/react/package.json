@@ -46,7 +46,8 @@
     "@types/react-dom": "catalog:",
     "jsdom": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "typescript": "catalog:"
   },
   "peerDependencies": {
     "react": "catalog:peers"

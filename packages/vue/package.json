@@ -44,6 +44,7 @@
     "@vitejs/plugin-vue": "catalog:",
     "@vue/test-utils": "catalog:",
     "jsdom": "catalog:",
+    "typescript": "catalog:",
     "vue": "catalog:",
     "vue-tsc": "catalog:"
   },

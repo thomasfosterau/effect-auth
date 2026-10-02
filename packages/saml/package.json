@@ -44,6 +44,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "effect": "catalog:",
+    "typescript": "catalog:",
     "xml-crypto": "catalog:"
   },
   "peerDependencies": {

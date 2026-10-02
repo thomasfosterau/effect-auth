@@ -44,7 +44,8 @@
     "@thomasfosterau/effect-auth": "workspace:*"
   },
   "devDependencies": {
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "typescript": "catalog:"
   },
   "peerDependencies": {
     "effect": "catalog:peers"

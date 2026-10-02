@@ -49,6 +49,7 @@
     "@solidjs/testing-library": "catalog:",
     "jsdom": "catalog:",
     "solid-js": "catalog:",
+    "typescript": "catalog:",
     "vite-plugin-solid": "catalog:"
   },
   "peerDependencies": {

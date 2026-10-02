@@ -45,7 +45,8 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "typescript": "catalog:"
   },
   "peerDependencies": {
     "effect": "catalog:peers"
