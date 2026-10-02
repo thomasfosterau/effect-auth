@@ -15,7 +15,7 @@
   },
   "type": "module",
   "scripts": {
-    "prepare": "vp config --no-agent && pnpm exec effect-language-service patch",
+    "prepare": "vp config --no-agent && effect-tsgo patch --typescript",
     "build": "vp run -r build",
     "check": "vp run -r check",
     "docs": "vp run --filter @thomasfosterau/effect-auth docs",
@@ -28,7 +28,9 @@
     "@changesets/cli": "catalog:",
     "@effect/docgen": "catalog:",
     "@effect/language-service": "catalog:",
+    "@effect/tsgo": "catalog:",
     "@types/node": "catalog:",
+    "@typescript/native": "catalog:",
     "effect": "catalog:",
     "effect-solutions": "catalog:",
     "tsx": "catalog:",
