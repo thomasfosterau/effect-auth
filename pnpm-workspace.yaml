@@ -30,6 +30,19 @@ catalog:
   "@effect/language-service": ^0.87.3
   "@effect/sql-pg": 4.0.0-rc.118
   "@effect/sql-pglite": 4.0.0-rc.118
+  # Effect Language Service as a native (TypeScript-Go) binary: the TS7 side of
+  # the 6/7 split (see `typescript` below). `effect-tsgo patch --typescript`
+  # (the root `prepare` script) overwrites the native `tsc` binary with an
+  # Effect-patched build matched by gitHead, so this pins in lockstep with
+  # `@typescript/native`. Each @effect/tsgo release ships artifacts for an
+  # explicit set of TypeScript versions and hard-errors
+  # (UnsupportedTargetPackageVersionError) on anything else, failing
+  # `pnpm install` itself: 0.46.1 supports typescript 7.0.2. Only the
+  # TypeScript patch is applied (not `--oxlint`), because lint here is not
+  # type-aware, so `vite-plus` / oxlint are not coupled to this pin. Read the
+  # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
+  # before bumping either.
+  "@effect/tsgo": 0.46.1
   "@electric-sql/pglite": ^0.5.8
   "@node-saml/node-saml": ^5.1.0
   "@solidjs/testing-library": ^0.8.10
@@ -65,7 +78,14 @@ catalog:
   svelte: ^5.57.1
   svelte-check: ^4.7.6
   tsx: ^4.23.15
-  typescript: ^6.0.3
+  # TypeScript 6/7 side by side. TS7 is the native Go compiler and ships no JS
+  # compiler API until 7.1, so everything that `require("typescript")` stays on
+  # TS6 (svelte-check, vue-tsc, @effect/language-service, @effect/docgen, the
+  # editor): `typescript` is an alias for the TS6 JS compiler (bin `tsc6`).
+  # `@typescript/native` is TS7 (bin `tsc`) and type-checks and emits every
+  # package. Pinned exact: its gitHead must match @effect/tsgo's bundled binary.
+  typescript: "npm:@typescript/typescript6@6.0.2"
+  "@typescript/native": "npm:typescript@7.0.2"
   vite-plugin-solid: ^2.11.14
   # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions; `vite` is
   # the same release under its aliased core package, and `vitest` must match

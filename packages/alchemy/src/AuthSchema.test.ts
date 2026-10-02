@@ -83,7 +83,7 @@ const makeEngine = (
         // provide.
         // layerMergeAllWithDependencies: this layering predates the rc.118 move and
         // is only newly flagged by @effect/language-service 0.87.3; left as is.
-        // @effect-diagnostics-next-line effect/multipleEffectProvide:off effect/layerMergeAllWithDependencies:off
+        // @effect-diagnostics-next-line multipleEffectProvide:off layerMergeAllWithDependencies:off
         Effect.provide(Layer.mergeAll(LoggingCli, AlchemyContextLive)),
         Effect.provide(Layer.provide(ProfileStoreLive, platform)),
         Effect.provide(Layer.provide(CredentialsStoreLive, platform)),
@@ -123,7 +123,7 @@ const makeEngine = (
           Effect.asVoid,
           // Ordered provides again: `providers` and the `Stack` layer are
           // resolved against the state layer provided first.
-          // @effect-diagnostics-next-line effect/multipleEffectProvide:off
+          // @effect-diagnostics-next-line multipleEffectProvide:off
           Effect.provide(state),
           Effect.provide(providers as Layer.Layer<never>),
           Effect.provide(

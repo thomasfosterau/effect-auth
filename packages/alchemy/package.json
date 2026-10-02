@@ -53,7 +53,8 @@
     "@types/node": "catalog:",
     "alchemy": "catalog:",
     "better-sqlite3": "catalog:",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "typescript": "catalog:"
   },
   "peerDependencies": {
     "alchemy": "catalog:peers",

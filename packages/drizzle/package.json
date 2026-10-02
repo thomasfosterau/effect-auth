@@ -54,7 +54,8 @@
     "better-sqlite3": "catalog:",
     "drizzle-orm": "catalog:",
     "drizzle-orm-effect": "catalog:",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "typescript": "catalog:"
   },
   "peerDependencies": {
     "@types/pg": "catalog:peers",
