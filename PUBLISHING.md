@@ -1,6 +1,6 @@
 # Publishing & releases
 
-Releases are automated with [Changesets](https://github.com/changesets/changesets). Publishing is npm trusted publishing (OIDC) from the protected `release` environment; there is no `NPM_TOKEN`. Every non-private package under `packages/` is published from one workflow, [release.yml](./.github/workflows/release.yml); `effect-auth-alchemy` is `"private": true` until #250, so it is neither versioned nor published. Shape copied from effect-jsonapi (the library reference).
+Releases are automated with [Changesets](https://github.com/changesets/changesets). Publishing is npm trusted publishing (OIDC) from the protected `release` environment; there is no `NPM_TOKEN`. Every non-private package under `packages/` is published from one workflow, [release.yml](./.github/workflows/release.yml). Shape copied from effect-jsonapi (the library reference).
 
 ## The release flow
 

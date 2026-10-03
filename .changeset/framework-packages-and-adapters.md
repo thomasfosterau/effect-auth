@@ -5,6 +5,7 @@
 "@thomasfosterau/effect-auth-vue": minor
 "@thomasfosterau/effect-auth-solid": minor
 "@thomasfosterau/effect-auth-drizzle": minor
+"@thomasfosterau/effect-auth-alchemy": minor
 ---
 
 Framework packages, form components, and adapter reworks.

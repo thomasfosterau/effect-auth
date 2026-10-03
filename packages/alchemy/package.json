@@ -1,7 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-alchemy",
   "version": "0.1.0",
-  "private": true,
   "description": "Alchemy v2 AuthSchema resource and Cloudflare D1 storage wiring for effect-auth.",
   "keywords": [
     "alchemy",
@@ -58,7 +57,7 @@
   },
   "peerDependencies": {
     "alchemy": "catalog:peers",
-    "effect": "catalog:peers-alchemy"
+    "effect": "catalog:peers"
   },
   "engines": {
     "node": "^20.19.0 || ^22.18.0 || >=24.11.0"

@@ -2,21 +2,18 @@ import { resolve } from "path";
 import { defineConfig } from "vite-plus";
 import { packageTasks } from "../../vite.tasks.ts";
 
-// HELD PRIVATE UNTIL alchemy SHIPS AN EFFECT rc.118 BUILD (effect-auth#249, #250).
-//
-// The workspace builds against `effect` 4.0.0, but alchemy 2.0.0-beta.79 (the
-// newest release) imports the removed `effect/unstable/*` paths, so anything
-// that loads the alchemy runtime fails with ERR_MODULE_NOT_FOUND. `package.json`
-// is therefore `"private": true` (changesets and pnpm neither version nor
-// publish it) and it stays out of the `check:dist` smoke test. Everything that
-// does not need the alchemy runtime still runs:
+// `AuthSchema.test.ts` is the one suite that loads the alchemy runtime (the
+// engine, its providers and their transitive `@distilled.cloud/*` clients), so
+// it runs as its own `test:alchemy` task in CI's separate `alchemy` job
+// ("Alchemy runtime"); the rest of the package is ordinary:
 //
 // - `build` and `check` (tsc over sources and tests) run as for any package;
 // - `test:unit` runs every test except `AuthSchema.test.ts` (`Storage.test.ts`
 //   only needs `AuthTables.ts`, which is alchemy-free);
-// - `test:alchemy` runs `AuthSchema.test.ts`, the one suite that needs the
-//   alchemy runtime. It is expected to FAIL until #250 lands, in its own,
-//   non-required CI job. It is not skipped and not in `test:unit`.
+// - `test:alchemy` runs `AuthSchema.test.ts`. It is not skipped.
+//
+// alchemy 2.0.0-beta.80 is the first release that imports only `effect/*`
+// paths (beta.79 still imported the removed `effect/unstable/*`; #250).
 const alchemyRuntimeSuite = "src/AuthSchema.test.ts";
 
 export default defineConfig({
