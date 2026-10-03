@@ -22,7 +22,7 @@ inputs:
   node-version:
     description: The Node.js version to set up.
     required: false
-    default: 22.x
+    default: latest
   ignore-scripts:
     description: Skip every dependency lifecycle script (the release job sets this).
     required: false
