@@ -61,7 +61,7 @@ jobs:
   # and not `continue-on-error`: the failure stays visible. Do not skip the
   # test and do not add it to `test:unit`.
   alchemy:
-    name: Alchemy runtime (blocked on #250)
+    name: "Alchemy runtime (blocked on #250)"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
