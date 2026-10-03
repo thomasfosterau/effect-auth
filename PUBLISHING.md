@@ -14,11 +14,12 @@ Who may release, and how: [AGENTS.md → Branches and pull requests](AGENTS.md#b
 
 ## Maintainer setup (one-time)
 
-None of the twelve publishable packages is on npm yet. Trusted publishing can only be configured on a package that exists on npm, so the first release needs one bootstrap step:
+None of the thirteen publishable packages is on npm yet. Trusted publishing can only be configured on a package that exists on npm, so the first release needs one bootstrap step:
 
 1. **Allow Actions to open the Version Packages PR.** In the repo: **Settings → Actions → General → Workflow permissions** → enable **"Allow GitHub Actions to create and approve pull requests"**. Without this the built-in `GITHUB_TOKEN` is forbidden from opening pull requests and the workflow fails at the PR-creation step — even though the job already grants `pull-requests: write`.
 2. **Create and protect the `release` environment.** **Settings → Environments → New environment → `release`** → enable **Required reviewers** (yourself) and restrict deployment to the `trunk` branch, so publishing pauses for manual approval.
-3. **Bootstrap each package name on npm.** For each non-private package under `packages/`, publish a placeholder once from a trusted machine (`pnpm publish --access public` of a `0.0.0` build, or npm's own placeholder flow), so the name exists and its settings page is reachable.
+3. **Bootstrap each package name on npm.** For each of the thirteen non-private packages under `packages/`, publish a placeholder once from a trusted machine (`pnpm publish --access public` of a `0.0.0` build, or npm's own placeholder flow), so the name exists and its settings page is reachable. That includes `@thomasfosterau/effect-auth-alchemy`, which was held private until #250 and so is the easiest one to miss.
+
 4. **Configure the trusted publisher** for each package. On npmjs.com, open the package → **Settings → Trusted Publisher** and add:
    - Provider: **GitHub Actions**
    - Repository: `thomasfosterau/effect-auth`
@@ -28,3 +29,5 @@ None of the twelve publishable packages is on npm yet. Trusted publishing can on
    Then remove any classic automation tokens for the package, and delete the repository's `NPM_TOKEN` secret if one exists.
 
 5. **Protect `trunk`.** Require pull requests and passing CI before merge, and disallow direct pushes, so a release can only be triggered by merging the reviewed "Version Packages" PR.
+
+Finish steps 3 and 4 for every name before merging the "Version Packages" PR. `pnpm run release` is `pnpm -r publish` followed by `changeset tag`, and `pnpm -r` stops at the first failed publish. If one name isn't bootstrapped (or has no trusted publisher), the release fails partway: the packages published before it are on npm, the rest aren't, and because `changeset tag` never runs, no tags or GitHub releases are created. To recover, bootstrap and configure the missing name, then re-run the failed Release run (**Actions → Release → Re-run jobs**; the workflow has no manual trigger). `pnpm publish -r` skips versions already on npm, so the re-run publishes only what's left and then tags.
