@@ -39,12 +39,16 @@ catalog:
   # `@typescript/native`. Each @effect/tsgo release ships artifacts for an
   # explicit set of TypeScript versions and hard-errors
   # (UnsupportedTargetPackageVersionError) on anything else, failing
-  # `pnpm install` itself: 0.46.1 supports typescript 7.0.2. Only the
-  # TypeScript patch is applied (not `--oxlint`), because lint here is not
-  # type-aware, so `vite-plus` / oxlint are not coupled to this pin. Read the
-  # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
-  # before bumping either.
-  "@effect/tsgo": 0.46.1
+  # `pnpm install` itself: 0.47.2 supports typescript 7.0.2, oxlint
+  # 1.82.0-1.86.0 and oxlint-tsgolint 7.0.2001 / 7.0.2003. Only the TypeScript
+  # patch is applied (not `--oxlint`), because lint here is not type-aware, but
+  # `@effect/tsgo`, `@typescript/native` and `vite-plus` still move as one set,
+  # kept inside that table (vite-plus 0.3.3 ships oxlint 1.83.0). 0.47 is the
+  # first release with the `unstableApiUsage` rule that `tsconfig.base.json`
+  # configures; older releases reject the key with an `unknownRuleName`
+  # warning, which fails `tsc`. Read the `components` table in
+  # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping any of them.
+  "@effect/tsgo": 0.47.2
   "@electric-sql/pglite": ^0.5.8
   "@node-saml/node-saml": ^5.1.0
   "@solidjs/testing-library": ^0.8.10
@@ -93,8 +97,8 @@ catalog:
   # the same release under its aliased core package, and `vitest` must match
   # vite-plus's exact pin because the `vitest: "catalog:"` override forces
   # every resolution to the catalog singleton.
-  vite-plus: 0.3.0
-  vite: npm:@voidzero-dev/vite-plus-core@0.3.0
+  vite-plus: 0.3.3
+  vite: npm:@voidzero-dev/vite-plus-core@0.3.3
   vitest: 4.1.11
   vue: ^3.5.43
   vue-tsc: ^3.3.11
