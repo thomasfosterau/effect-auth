@@ -16,9 +16,7 @@
  *   vp run check:dist [-- --effect <version> | catalog] [--keep]
  *
  * `--effect catalog` uses the version the workspace builds against (the same
- * as the floor while the floor is the catalog version). `@thomasfosterau/
- * effect-auth-alchemy` is not covered: alchemy beta.79 imports the removed
- * `effect/unstable/*` paths (effect-auth#250). `--keep` leaves the scratch
+ * as the floor while the floor is the catalog version). `--keep` leaves the scratch
  * project on disk (its path is printed) instead of deleting it, for debugging
  * a failure.
  *
@@ -55,11 +53,7 @@ const allTargets: ReadonlyArray<Target> = [
   { dir: "twilio" },
   { dir: "saml" },
   { dir: "drizzle", peers: ["drizzle-orm"] },
-  // TODO(#250): `alchemy` is deliberately absent: alchemy 2.0.0-beta.79 (the newest release)
-  // imports `effect/unstable/*`, which rc.118 removed, so
-  // `@thomasfosterau/effect-auth-alchemy` cannot be installed or imported beside
-  // rc.118. Re-add `{ dir: "alchemy", peers: ["alchemy"] }` when alchemy ships
-  // an rc.118 build (effect-auth#250).
+  { dir: "alchemy", peers: ["alchemy"] },
 ];
 
 const arg = (flag: string): string | undefined => {

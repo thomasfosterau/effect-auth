@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`CLAUDE.md` is a symlink to this file. effect-auth is a library monorepo: authentication and authorization for [Effect](https://effect.website/) v4, as thirteen `@thomasfosterau/effect-auth*` packages under `packages/*`. Twelve are publishable; `effect-auth-alchemy` is `"private": true` until #250. It has no application, no deployment and no secrets.
+`CLAUDE.md` is a symlink to this file. effect-auth is a library monorepo: authentication and authorization for [Effect](https://effect.website/) v4, as thirteen publishable `@thomasfosterau/effect-auth*` packages under `packages/*`. It has no application, no deployment and no secrets.
 
 Every package publishes `dist/`. Every package except the four framework bindings peers `effect` through `catalog:peers`; a binding peers only its framework. The archetype decides what a package may import:
 
@@ -19,7 +19,7 @@ A new package picks an archetype, gets a `vite.config.ts` that declares its task
 - **Never depend on legation**, in any package and in any dependency field, dev dependencies included. effect-auth may depend on effect-jsonapi. [docs/BOUNDARY.md](docs/BOUNDARY.md) holds the reason and the full rules.
 - **Importing the core package root is meant not to pull the HTTP tier** (`http/`, and through it `effect/http-api` and effect-jsonapi) into a consumer's module graph. **Today it does:** the root barrel re-exports `Http` (`src/index.ts`), and the guard in `ModuleGraph.test.ts` is skipped until #205 lands. Don't add any other root-reachable import of `effect/http-api`.
 - **Every external version lives in the catalog** in [pnpm-workspace.yaml](pnpm-workspace.yaml) (`catalogMode: strict` rejects anything else). After editing it, run `pnpm install` and commit `pnpm-lock.yaml`, or CI fails with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`. `effect` is a singleton (`overrides`); its published floor lives in `catalogs.peers`.
-- **`effect-auth-alchemy` is held private until #250** (alchemy beta.79 imports the removed `effect/unstable/*`). Its `build`, `check` and `test:unit` run; `AuthSchema.test.ts` needs the alchemy runtime, so it lives in `test:alchemy`, which runs in its own non-required CI job and is expected to fail until #250. Don't skip that test or move it into `test:unit`.
+- **`effect-auth-alchemy`'s `AuthSchema.test.ts` is its own task.** It is the one suite that loads the alchemy runtime, so it lives in `test:alchemy`, run by CI's separate `alchemy` job ("Alchemy runtime"), not in `test:unit`. Don't skip it. alchemy 2.0.0-beta.80 is the first release that imports only `effect/*` paths (beta.79 and earlier import the removed `effect/unstable/*`, #250), so `catalogs.peers` floors `alchemy` there.
 - **TypeScript is split 6/7.** `typescript` in the catalog is an alias for TS6 (the JS compiler API, bin `tsc6`) because `vue-tsc`, `svelte-check`, `@effect/docgen` and the editor language service all `require("typescript")` and TS7 ships no JS API. `@typescript/native` is TS7 (bin `tsc`), which every package's `build` and `check` script runs; the root `prepare` script patches it with `@effect/tsgo` (`effect-tsgo patch --typescript`). `@effect/tsgo`, `@typescript/native` and `vite-plus` move as a set of three, kept inside the `components` table in `node_modules/@effect/tsgo/dist/effect-tsgo.cjs`: that table lists the TypeScript and oxlint versions each `@effect/tsgo` release supports, and `vite-plus` pins the oxlint. Read it before bumping any of them, since the patch hard-errors at install on a TypeScript it has no artifact for. Never bump `typescript` itself to 7 (Dependabot proposes exactly that, and it breaks every JS-API consumer).
 - **`@effect-diagnostics` directives are read by the patched `tsc`, and only in the unprefixed form:** the rule name, then the severity, as in `// @effect-diagnostics-next-line multipleEffectProvide:off` (`packages/alchemy/src/AuthSchema.test.ts`). The `effect/<rule>:off` form that `@effect/language-service`'s README shows is silently ignored by the `@effect/tsgo`-patched TS7 `tsc` (checked against `@effect/tsgo` 0.46.1).
 - **`vue-tsc` type-checks `packages/vue` without the Effect plugin.** It runs on the TS6 JS API, not the tsgo-patched `tsc`, so no Effect diagnostics (or `@effect-diagnostics` directives) apply there. That is fine while `packages/vue/src` imports nothing from `effect`; check the first `effect` import there deliberately.
@@ -55,7 +55,7 @@ Before you report work as done, run the gates below in order and quote each comm
 6. `vp run -r test:unit`
 7. `pnpm audit --audit-level high` (network)
 
-CI's second job, `alchemy`, runs `vp run --filter @thomasfosterau/effect-auth-alchemy test:alchemy`; it is not required and fails until #250. CI doesn't run `vp run docs` until #257 lands.
+CI's second job, `alchemy` ("Alchemy runtime"), runs `vp run --filter @thomasfosterau/effect-auth-alchemy test:alchemy`. CI doesn't run `vp run docs` until #257 lands.
 
 ## Branches and pull requests
 

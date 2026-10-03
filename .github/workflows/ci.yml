@@ -55,13 +55,12 @@ jobs:
       - name: Audit
         run: pnpm audit --audit-level high
 
-  # The one suite that needs the alchemy runtime. alchemy 2.0.0-beta.79 imports
-  # `effect/unstable/*`, which rc.118 removed, so this job is RED until alchemy
-  # ships an rc.118 build (effect-auth#250). It is deliberately not required
-  # and not `continue-on-error`: the failure stays visible. Do not skip the
-  # test and do not add it to `test:unit`.
+  # The one suite that needs the alchemy runtime (`AuthSchema.test.ts`, the
+  # package's `test:alchemy` task), kept in its own job so an alchemy break
+  # shows up on its own line. alchemy 2.0.0-beta.80 is the first release that
+  # imports only `effect/*` paths (effect-auth#250). Do not skip the test.
   alchemy:
-    name: "Alchemy runtime (blocked on #250)"
+    name: "Alchemy runtime"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
