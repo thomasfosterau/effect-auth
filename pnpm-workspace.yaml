@@ -5,7 +5,8 @@
 # Schema identity at runtime, so every package references `catalog:`.
 #
 # EVERY external dependency version lives here — package.json files reference
-# only `catalog:` / `catalog:peers` (or `workspace:*` for internal packages).
+# only `catalog:` or a named catalog (`catalog:peers`, `catalog:alchemy-peers`),
+# or `workspace:*` for internal packages.
 # `catalogMode: strict` makes `pnpm add` enforce this at add time and
 # `pnpm install` reject non-catalog specifiers. After editing this catalog,
 # ALWAYS run `pnpm install` and commit the regenerated pnpm-lock.yaml — a stale
