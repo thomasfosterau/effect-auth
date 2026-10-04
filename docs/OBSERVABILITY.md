@@ -66,34 +66,36 @@ Effect pipelines as the spans.
 
 ### Counter names
 
-| Counter                                        | Description                                      |
-| ---------------------------------------------- | ------------------------------------------------ |
-| `effect-auth.sign_in.total`                    | Sign-in attempts (by `method`, `outcome`)        |
-| `effect-auth.sign_up.total`                    | Sign-up attempts (by `method`, `outcome`)        |
-| `effect-auth.sessions_created.total`           | Sessions successfully created                    |
-| `effect-auth.sessions_validated.total`         | Session validations (by `outcome`)               |
-| `effect-auth.sessions_invalidated.total`       | Sessions invalidated                             |
-| `effect_auth_session_resolutions_total`        | Edge resolution attempts (by `outcome`)          |
-| `effect-auth.token_verifications.total`        | Token verifications (by `type`, `outcome`)       |
-| `effect-auth.rate_limit_hits.total`            | Rate-limit threshold breaches (by `operation`)   |
-| `effect-auth.multi_factor_challenges.total`    | 2FA challenges started                           |
-| `effect-auth.multi_factor_verifications.total` | 2FA verifications (by `type`, `outcome`)         |
-| `effect-auth.oauth_callbacks.total`            | OAuth callback completions (by `outcome`)        |
-| `effect-auth.oauth_refreshes.total`            | OAuth token refreshes (by `provider`, `outcome`) |
-| `effect-auth.webauthn_registrations.total`     | WebAuthn registrations (by `outcome`)            |
-| `effect-auth.webauthn_authentications.total`   | WebAuthn authentications (by `outcome`)          |
-| `effect-auth.oidc_token_requests.total`        | OIDC token requests (by `grant`, `outcome`)      |
+| Counter                                        | Description                                                |
+| ---------------------------------------------- | ---------------------------------------------------------- |
+| `effect_auth_sign_in_total`                    | Sign-in attempts (by `method`, `outcome`)                  |
+| `effect_auth_sign_up_total`                    | Sign-up attempts (by `method`, `outcome`)                  |
+| `effect_auth_sessions_created_total`           | Sessions successfully created                              |
+| `effect_auth_sessions_validated_total`         | Session validations (by `outcome`)                         |
+| `effect_auth_sessions_invalidated_total`       | Sessions invalidated                                       |
+| `effect_auth_session_resolutions_total`        | Edge resolution attempts (by `outcome`)                    |
+| `effect_auth_token_verifications_total`        | Token verifications (by `type`, `outcome`)                 |
+| `effect_auth_rate_limit_hits_total`            | Rate-limit threshold breaches (by `operation`)             |
+| `effect_auth_multi_factor_challenges_total`    | 2FA challenges started                                     |
+| `effect_auth_multi_factor_verifications_total` | 2FA verifications (by `type`, `outcome`)                   |
+| `effect_auth_oauth_callbacks_total`            | OAuth callback completions (by `outcome`)                  |
+| `effect_auth_oauth_refreshes_total`            | OAuth token refreshes (by `provider`, `outcome`)           |
+| `effect_auth_webauthn_registrations_total`     | WebAuthn registrations (by `outcome`)                      |
+| `effect_auth_webauthn_authentications_total`   | WebAuthn authentications (by `outcome`)                    |
+| `effect_auth_oidc_token_requests_total`        | OIDC token requests (by `grant`, `outcome`)                |
+| `effect_auth_delivery_sends_total`             | Off-response-path delivery sends (by `purpose`, `outcome`) |
 
 ### Attribute values
 
-| Attribute              | Values                                                           |
-| ---------------------- | ---------------------------------------------------------------- |
-| `outcome`              | `"success"` \| `"failure"` \| `"not_found"` \| `"expired"`       |
-| `outcome` (resolution) | `"skipped"` \| `"resolved"` \| `"anonymous"` \| `"degraded"`     |
-| `method`               | `"email-password"`, `"oauth"`, …                                 |
-| `type`                 | `"jwt"`, `"totp"`, `"backup-code"`                               |
-| `grant`                | `"authorization_code"`, `"refresh_token"`                        |
-| `operation`            | First segment of the rate-limit key (e.g. `"login"`, `"signup"`) |
+| Attribute              | Values                                                                                        |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| `outcome`              | `"success"` \| `"failure"` \| `"not_found"` \| `"expired"`                                    |
+| `outcome` (resolution) | `"skipped"` \| `"resolved"` \| `"anonymous"` \| `"degraded"`                                  |
+| `method`               | `"email-password"`, `"oauth"`, …                                                              |
+| `type`                 | `"jwt"`, `"totp"`, `"backup-code"`                                                            |
+| `grant`                | `"authorization_code"`, `"refresh_token"`                                                     |
+| `operation`            | First segment of the rate-limit key (e.g. `"login"`, `"signup"`)                              |
+| `purpose`              | The delivery purpose (e.g. `"email-verification"`, `"password-reset"`, `"email-otp:sign-in"`) |
 
 ### Session-resolution outcomes
 
