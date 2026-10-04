@@ -29,9 +29,10 @@ deployment. D1 is SQLite, so the same tables and the same queries apply.
 pnpm add @thomasfosterau/effect-auth-alchemy @thomasfosterau/effect-auth effect alchemy
 ```
 
-`alchemy` (`>=2.0.0-beta.80`) and `effect` (`>=4.0.0-rc.118`) are required
-peer dependencies; alchemy beta.80 itself peers on `effect ^4.0.0`, so in
-practice install `effect` 4.0.0 or later.
+`alchemy` (`>=2.0.0-beta.80`) and `effect` (`>=4.0.0`) are required peer
+dependencies. The `effect` floor is 4.0.0 because alchemy beta.80 itself peers
+on `effect ^4.0.0`; the other effect-auth packages accept `effect`
+`>=4.0.0-rc.118`.
 `@thomasfosterau/effect-auth-sql` comes along as a dependency.
 
 ## Storage layers

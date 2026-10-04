@@ -5,7 +5,8 @@
 # Schema identity at runtime, so every package references `catalog:`.
 #
 # EVERY external dependency version lives here — package.json files reference
-# only `catalog:` / `catalog:peers` (or `workspace:*` for internal packages).
+# only `catalog:` or a named catalog (`catalog:peers`, `catalog:alchemy-peers`),
+# or `workspace:*` for internal packages.
 # `catalogMode: strict` makes `pnpm add` enforce this at add time and
 # `pnpm install` reject non-catalog specifiers. After editing this catalog,
 # ALWAYS run `pnpm install` and commit the regenerated pnpm-lock.yaml — a stale
@@ -123,6 +124,11 @@ catalogs:
     solid-js: ">=1.8"
     svelte: ^5.20.0
     vue: ">=3"
+  # effect-auth-alchemy's own `effect` floor, above the programme floor in
+  # `peers`: its `alchemy` peer (beta.80, the floor above) itself peers on
+  # `effect ^4.0.0`, so no `effect` below 4.0.0 can satisfy both.
+  alchemy-peers:
+    effect: ">=4.0.0"
 
 overrides:
   vite: "catalog:"
