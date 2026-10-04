@@ -6,16 +6,25 @@ import { Password } from "@thomasfosterau/effect-auth";
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
 
+/**
+ * Cheap explicit costs (256 KiB, one pass) for the tests that check behaviour
+ * rather than cost, so they don't depend on how fast the machine is (#270).
+ * The profiles stay pinned: by their values below, by the PHC header a
+ * default hash carries, and by CostProfiles.test.ts, which checks the costs
+ * the hasher hands the KDF without running a derivation.
+ */
+const cheap = { memoryCost: 256, timeCost: 1, parallelism: 1 } as const;
+
 describe("Argon2.argon2Hasher", () => {
   it("hashes and verifies a password (roundtrip)", async () => {
-    const hasher = Argon2.argon2Hasher();
+    const hasher = Argon2.argon2Hasher(cheap);
     const { hash, algorithm } = await run(hasher.hash("correct horse battery staple"));
     expect(algorithm).toBe(ARGON2ID);
     expect(await run(hasher.verify("correct horse battery staple", hash))).toBe(true);
   });
 
   it("rejects a wrong password", async () => {
-    const hasher = Argon2.argon2Hasher();
+    const hasher = Argon2.argon2Hasher(cheap);
     const { hash } = await run(hasher.hash("the-real-password"));
     expect(await run(hasher.verify("not-the-password", hash))).toBe(false);
   });
@@ -26,7 +35,7 @@ describe("Argon2.argon2Hasher", () => {
   });
 
   it("uses a fresh salt for every hash", async () => {
-    const hasher = Argon2.argon2Hasher();
+    const hasher = Argon2.argon2Hasher(cheap);
     const first = await run(hasher.hash("same-password"));
     const second = await run(hasher.hash("same-password"));
     expect(first.hash).not.toBe(second.hash);
@@ -75,7 +84,7 @@ describe("PHC parameter parsing on verify", () => {
   });
 
   it("tolerates a non-canonical parameter order", async () => {
-    const { hash } = await run(Argon2.argon2Hasher().hash("reordered"));
+    const { hash } = await run(Argon2.argon2Hasher(cheap).hash("reordered"));
     const reordered = hash.replace(/\$m=(\d+),t=(\d+),p=(\d+)\$/, "$t=$2,p=$3,m=$1$");
     expect(await run(Argon2.argon2Hasher().verify("reordered", reordered))).toBe(true);
   });
@@ -120,13 +129,6 @@ describe("cost profiles", () => {
       parallelism: 1,
     });
   });
-
-  it("hashes under the server profile and round-trips", async () => {
-    const hasher = Argon2.argon2Hasher(Argon2.serverProfile);
-    const { hash } = await run(hasher.hash("server-profile"));
-    expect(hash).toContain("$m=65536,t=3,p=1$");
-    expect(await run(hasher.verify("server-profile", hash))).toBe(true);
-  });
 });
 
 describe("layer", () => {
@@ -137,19 +139,42 @@ describe("layer", () => {
       return { algorithm, verified: yield* hasher.verify("through-the-layer", hash) };
     });
 
-    const result = await run(Effect.provide(program, Argon2.argon2HasherLayer()));
+    const result = await run(Effect.provide(program, Argon2.argon2HasherLayer(cheap)));
     expect(result).toEqual({ algorithm: ARGON2ID, verified: true });
   });
 });
 
+/** A `pbkdf2-sha256$iterations$salt$key` hash in core effect-auth's format, via Web Crypto. */
+const legacyPbkdf2Hash = async (password: string, iterations: number): Promise<string> => {
+  const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  const key = await globalThis.crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await globalThis.crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+    key,
+    32 * 8,
+  );
+  const hex = (bytes: Uint8Array) =>
+    Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `pbkdf2-sha256$${iterations}$${hex(salt)}$${hex(new Uint8Array(bits))}`;
+};
+
 describe("multi-algorithm migration", () => {
   it("routes Argon2id and PBKDF2 hashes to the right hasher", async () => {
-    const argon2 = Argon2.argon2Hasher();
+    const argon2 = Argon2.argon2Hasher(cheap);
     const pbkdf2 = Password.pbkdf2Hasher();
     const verifier = Password.multiAlgorithmVerifier([argon2, pbkdf2]);
 
     const argonHash = (await run(argon2.hash("shared-secret"))).hash;
-    const pbkdf2Hash = (await run(pbkdf2.hash("shared-secret"))).hash;
+    // A stored PBKDF2 hash at a low iteration count: `pbkdf2Hasher` takes no
+    // cost option and hashes at 600,000 iterations, but `verify` reads the
+    // count from the hash, so this exercises the same routing cheaply (#270).
+    const pbkdf2Hash = await legacyPbkdf2Hash("shared-secret", 1000);
 
     // Each hash verifies through the combined verifier by algorithm detection.
     expect(await run(verifier.verify("shared-secret", argonHash))).toBe(true);
