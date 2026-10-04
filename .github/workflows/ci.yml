@@ -40,7 +40,7 @@ jobs:
       - name: Build packages
         run: vp run build
 
-      - name: Dist import smoke (effect peer floor)
+      - name: Dist import smoke (each package's effect peer floor)
         run: vp run check:dist
 
       - name: Dist import smoke (catalog effect)

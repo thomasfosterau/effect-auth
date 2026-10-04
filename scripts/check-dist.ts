@@ -1,24 +1,38 @@
 /**
- * Dist-level import smoke test for the published Effect floor.
+ * Dist-level import smoke test for each package's published Effect floor.
  *
- * Packs every package that imports Effect at module load, installs the
- * tarballs into a scratch project next to ONE exact `effect` version (by
- * default the published peer floor), and imports every `exports` entry from
- * the packed `dist/`. It then runs a behaviour phase against the same install.
+ * Packs every package that imports Effect at module load and reads the
+ * `effect` peer range from each packed manifest. By default each package is
+ * installed beside exactly the lowest `effect` its own range admits (its
+ * floor): packages that share a floor share one scratch project, and a
+ * package with a higher floor (effect-auth-alchemy's `>=4.0.0`, above the
+ * programme's `>=4.0.0-rc.118`) gets a project of its own. Each project
+ * imports every `exports` entry of its packages from the packed `dist/`, and
+ * the project holding `@thomasfosterau/effect-auth` runs a behaviour phase.
  * A stale `dist/`, or source that calls an API the floor does not have, fails
  * here instead of in a consumer. rc.113 renamed the `Config` constructors, and
  * the published range once claimed rc.112 while the code crashed at import on
  * every later rc: the unit suite only ever runs the catalog version, so this
- * is the check that proves the lower bound.
+ * is the check that proves each lower bound.
  *
  * Run `vp run build` first (the packed tarballs contain `dist/`), then:
  *
  *   vp run check:dist [-- --effect <version> | catalog] [--keep]
  *
- * `--effect catalog` uses the version the workspace builds against (the same
- * as the floor while the floor is the catalog version). `--keep` leaves the scratch
- * project on disk (its path is printed) instead of deleting it, for debugging
- * a failure.
+ * `--effect catalog` installs every package beside the version the workspace
+ * builds against, and fails if that version is outside any package's peer
+ * range (the workspace would be building a package against an `effect` it
+ * does not support). `--effect <version>` installs every package whose peer
+ * range admits that version beside it, and skips (and names) each package
+ * whose range does not: a version below a package's floor is a combination
+ * that package does not support. `--keep` leaves the scratch projects on disk
+ * (the path is printed) instead of deleting them, for debugging a failure.
+ *
+ * The install uses `--legacy-peer-deps`, which installs an `effect` that a
+ * peer range rejects without complaint, so after each install the check reads
+ * the `effect` range every one of our packages and every peer installed
+ * beside them (such as `alchemy`) declares, and fails if the installed
+ * `effect` misses one.
  *
  * Importing is not enough: the Effect API also moved *inside* the supported
  * range in places that only bite when a function is called (rc.116 replaced
@@ -30,12 +44,20 @@
  * only through `effect-auth-client`.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import semver from "semver";
 
 const root = resolve(import.meta.dirname, "..");
-const DEFAULT_FLOOR = "4.0.0-rc.118";
 
 /** Workspace directories smoke-tested here, with any peer to install beside them. */
 interface Target {
@@ -70,10 +92,11 @@ const catalogEntry = (name: string): string => {
   return match[1];
 };
 
-const requested = arg("--effect") ?? DEFAULT_FLOOR;
-const onCatalog = requested === "catalog";
-const effectVersion = onCatalog ? catalogEntry("effect") : requested;
-const packages = allTargets;
+/**
+ * `undefined`: each package at its own floor. `"catalog"`: every package at
+ * the catalog version. Anything else: every package whose range admits it.
+ */
+const requested = arg("--effect");
 const keep = process.argv.includes("--keep");
 
 const run = (cmd: string, args: ReadonlyArray<string>, cwd: string): string =>
@@ -81,8 +104,8 @@ const run = (cmd: string, args: ReadonlyArray<string>, cwd: string): string =>
 
 /**
  * Every installed copy of `effect`. `npm ls` exits non-zero for any unmet
- * peer in the tree (a transitive dependency wanting a newer rc, say), which is
- * not what is being asked here, so only its output is used.
+ * peer in the tree (a transitive dependency wanting a newer `effect`, say),
+ * which is not what is being asked here, so only its output is used.
  */
 const listEffectCopies = (cwd: string): ReadonlyArray<string> => {
   let out: string;
@@ -94,14 +117,64 @@ const listEffectCopies = (cwd: string): ReadonlyArray<string> => {
   return out.split("\n").filter((line) => line.endsWith("/node_modules/effect"));
 };
 
+/**
+ * Each `effect` range that one of `names` (our packages, and the peers
+ * installed beside them) declares and the installed `effect` misses, read from
+ * the installed manifests. Ranges stated deeper in the tree are not checked:
+ * they belong to a third party's own dependency choices, not to a floor this
+ * repo claims (on 2026-10-04 alchemy's `@effect/sql-d1 ^4.0.0` resolved to
+ * 4.0.1, which peers `effect ^4.0.1`, before any `effect` 4.0.1 existed).
+ */
+const unmetEffectRanges = (
+  project: string,
+  installed: string,
+  names: ReadonlyArray<string>,
+): ReadonlyArray<string> =>
+  names.flatMap((name) => {
+    const path = join(project, "node_modules", name, "package.json");
+    if (!existsSync(path)) return [];
+    const manifest = JSON.parse(readFileSync(path, "utf8")) as Manifest;
+    return [manifest.peerDependencies?.effect, manifest.dependencies?.effect]
+      .filter((range): range is string => range !== undefined)
+      .filter((range) => !semver.satisfies(installed, range))
+      .map((range) => `${name} wants effect ${range}`);
+  });
+
 interface Manifest {
   readonly name: string;
   readonly exports?: Record<string, { readonly import?: string } | string>;
+  readonly dependencies?: Record<string, string>;
   readonly peerDependencies?: Record<string, string>;
 }
 
-const readManifest = (dir: string): Manifest =>
-  JSON.parse(readFileSync(join(root, "packages", dir, "package.json"), "utf8")) as Manifest;
+/** A target after `pnpm pack`, with the manifest exactly as it will publish. */
+interface Packed {
+  readonly target: Target;
+  readonly manifest: Manifest;
+  /** The tarball's file name inside the scratch directory. */
+  readonly file: string;
+  /** The packed `peerDependencies.effect` (`catalog:*` already replaced). */
+  readonly range: string;
+}
+
+/**
+ * The `effect` version to install `packed` beside, or `undefined` to skip it
+ * (an explicit `--effect` outside its range).
+ */
+const effectFor = ({ manifest: { name }, range }: Packed): string | undefined => {
+  if (requested === undefined) {
+    const floor = semver.minVersion(range)?.version;
+    if (!floor) throw new Error(`${name}: effect peer range ${range} has no lowest version`);
+    return floor;
+  }
+  const version = requested === "catalog" ? catalogEntry("effect") : requested;
+  if (semver.satisfies(version, range)) return version;
+  if (requested === "catalog") {
+    throw new Error(`${name} peers effect ${range}, which the catalog's effect ${version} misses`);
+  }
+  console.log(`skip ${name}: effect ${version} is outside its peer range ${range}`);
+  return undefined;
+};
 
 /** Runs inside the scratch project, against the packed `dist/` only. */
 const behaviour = `
@@ -161,90 +234,108 @@ check("protectedField rejects a non-admin write", Result.isFailure(await decode(
 
 const scratch = mkdtempSync(join(tmpdir(), "effect-auth-dist-"));
 try {
-  const tarballs = new Map<string, string>();
-  for (const { dir } of packages) {
-    const manifest = readManifest(dir);
-    const dist = join(root, "packages", dir, "dist");
+  const packed: Array<Packed> = [];
+  for (const target of allTargets) {
+    const cwd = join(root, "packages", target.dir);
+    const dist = join(cwd, "dist");
     if (!readdirSync(dist, { withFileTypes: true }).length) {
-      throw new Error(`${manifest.name}: dist/ is empty; run \`vp run build\` first`);
+      throw new Error(`${target.dir}: dist/ is empty; run \`vp run build\` first`);
     }
     // `pnpm pack` rewrites `catalog:` / `workspace:*` exactly as publishing does.
     // pnpm prints the tarball path last, so there is no filename to guess at.
-    const printed = run(
-      "pnpm",
-      ["pack", "--pack-destination", scratch],
-      join(root, "packages", dir),
-    )
+    const printed = run("pnpm", ["pack", "--pack-destination", scratch], cwd)
       .trim()
       .split("\n")
       .pop();
     const file = printed ? basename(printed.trim()) : undefined;
-    if (!file?.endsWith(".tgz")) throw new Error(`${manifest.name}: pnpm pack printed no tarball`);
-    tarballs.set(manifest.name, `file:./${file}`);
+    if (!file?.endsWith(".tgz")) throw new Error(`${target.dir}: pnpm pack printed no tarball`);
+    // The floor comes from the manifest a consumer will see, not a constant
+    // here, so a peer range and the version it is checked at cannot drift.
+    const manifest = JSON.parse(
+      run("tar", ["-xzOf", file, "package/package.json"], scratch),
+    ) as Manifest;
+    const range = manifest.peerDependencies?.effect;
+    if (!range) throw new Error(`${manifest.name}: the packed manifest has no effect peer`);
+    packed.push({ target, manifest, file, range });
   }
 
-  const peers = new Set(packages.flatMap((p) => p.peers ?? []));
-  const project = join(scratch, "project");
-  mkdirSync(project);
-  writeFileSync(
-    join(project, "package.json"),
-    JSON.stringify(
-      {
-        name: "effect-auth-dist-smoke",
-        private: true,
-        type: "module",
-        dependencies: {
-          effect: effectVersion,
-          ...Object.fromEntries([...peers].map((peer) => [peer, catalogEntry(peer)])),
-          ...Object.fromEntries(
-            [...tarballs].map(([name, spec]) => [name, `file:../${spec.slice(7)}`]),
-          ),
+  // The packed manifests depend on siblings by their real version, which is
+  // not on npm yet; resolve every sibling to its tarball in every project.
+  const siblings = Object.fromEntries(
+    packed.map(({ manifest, file }) => [manifest.name, `file:../${file}`]),
+  );
+
+  const groups = new Map<string, Array<Packed>>();
+  for (const p of packed) {
+    const version = effectFor(p);
+    if (version !== undefined) groups.set(version, [...(groups.get(version) ?? []), p]);
+  }
+  if (groups.size === 0) throw new Error(`no package's effect peer range admits ${requested}`);
+
+  for (const [effectVersion, group] of [...groups].sort(([a], [b]) => semver.compare(a, b))) {
+    const names = group.map(({ manifest }) => manifest.name);
+    console.log(`effect ${effectVersion}: ${names.join(", ")}`);
+    const project = join(scratch, `project-${effectVersion}`);
+    mkdirSync(project);
+    const peers = new Set(group.flatMap(({ target }) => target.peers ?? []));
+    writeFileSync(
+      join(project, "package.json"),
+      JSON.stringify(
+        {
+          name: "effect-auth-dist-smoke",
+          private: true,
+          type: "module",
+          dependencies: {
+            effect: effectVersion,
+            ...Object.fromEntries([...peers].map((peer) => [peer, catalogEntry(peer)])),
+            ...Object.fromEntries(names.map((name) => [name, siblings[name]])),
+          },
+          overrides: siblings,
         },
-        // The packed manifests depend on siblings by their real version, which
-        // is not on npm yet; resolve them to the tarballs instead.
-        overrides: Object.fromEntries(
-          [...tarballs].map(([name, spec]) => [name, `file:../${spec.slice(7)}`]),
-        ),
-      },
-      null,
-      2,
-    ),
-  );
-  run(
-    "npm",
-    [
-      "install",
-      "--no-audit",
-      "--no-fund",
-      "--ignore-scripts",
-      "--legacy-peer-deps",
-      "--loglevel=error",
-    ],
-    project,
-  );
-
-  const installed = (
-    JSON.parse(readFileSync(join(project, "node_modules", "effect", "package.json"), "utf8")) as {
-      version: string;
-    }
-  ).version;
-  if (installed !== effectVersion) {
-    throw new Error(`expected effect ${effectVersion}, installed ${installed}`);
-  }
-  const copies = listEffectCopies(project);
-  if (new Set(copies).size !== 1) {
-    throw new Error(`expected one copy of effect, found:\n${copies.join("\n")}`);
-  }
-
-  const specifiers = packages.flatMap(({ dir }) => {
-    const manifest = readManifest(dir);
-    return Object.keys(manifest.exports ?? {}).map((key) =>
-      key === "." ? manifest.name : `${manifest.name}/${key.slice(2)}`,
+        null,
+        2,
+      ),
     );
-  });
-  writeFileSync(
-    join(project, "smoke.mjs"),
-    `const specifiers = ${JSON.stringify(specifiers)};
+    run(
+      "npm",
+      [
+        "install",
+        "--no-audit",
+        "--no-fund",
+        "--ignore-scripts",
+        "--legacy-peer-deps",
+        "--loglevel=error",
+      ],
+      project,
+    );
+
+    const installed = (
+      JSON.parse(readFileSync(join(project, "node_modules", "effect", "package.json"), "utf8")) as {
+        version: string;
+      }
+    ).version;
+    if (installed !== effectVersion) {
+      throw new Error(`expected effect ${effectVersion}, installed ${installed}`);
+    }
+    const copies = listEffectCopies(project);
+    if (new Set(copies).size !== 1) {
+      throw new Error(`expected one copy of effect, found:\n${copies.join("\n")}`);
+    }
+    // `--legacy-peer-deps` installed whatever `effect` was asked for, in
+    // range or not, so prove the installed one is in every range that counts.
+    const unmet = unmetEffectRanges(project, installed, [...Object.keys(siblings), ...peers]);
+    if (unmet.length > 0) {
+      throw new Error(`effect ${installed} is outside a declared range:\n${unmet.join("\n")}`);
+    }
+
+    const specifiers = group.flatMap(({ manifest }) =>
+      Object.keys(manifest.exports ?? {}).map((key) =>
+        key === "." ? manifest.name : `${manifest.name}/${key.slice(2)}`,
+      ),
+    );
+    writeFileSync(
+      join(project, "smoke.mjs"),
+      `const specifiers = ${JSON.stringify(specifiers)};
 let failed = 0;
 for (const specifier of specifiers) {
   try {
@@ -258,12 +349,17 @@ for (const specifier of specifiers) {
 }
 process.exit(failed === 0 ? 0 : 1);
 `,
-  );
-  writeFileSync(join(project, "behaviour.mjs"), behaviour);
-  console.log(`effect ${installed}: importing ${specifiers.length} entry points from packed dist`);
-  console.log(run("node", ["smoke.mjs"], project));
-  console.log(`effect ${installed}: exercising config layers and protectedField`);
-  console.log(run("node", ["behaviour.mjs"], project));
+    );
+    console.log(
+      `effect ${installed}: importing ${specifiers.length} entry points from packed dist`,
+    );
+    console.log(run("node", ["smoke.mjs"], project));
+    if (names.includes("@thomasfosterau/effect-auth")) {
+      writeFileSync(join(project, "behaviour.mjs"), behaviour);
+      console.log(`effect ${installed}: exercising config layers and protectedField`);
+      console.log(run("node", ["behaviour.mjs"], project));
+    }
+  }
 } finally {
   if (keep) console.log(`kept ${scratch}`);
   else rmSync(scratch, { recursive: true, force: true });

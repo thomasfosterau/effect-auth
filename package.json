@@ -33,6 +33,7 @@
     "@typescript/native": "catalog:",
     "effect": "catalog:",
     "effect-solutions": "catalog:",
+    "semver": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",

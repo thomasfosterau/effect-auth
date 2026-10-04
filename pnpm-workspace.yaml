@@ -81,6 +81,10 @@ catalog:
   jsdom: ^30.1.1
   react: ^19.3.0
   react-dom: ^19.3.0
+  # `scripts/check-dist.ts`: derives each packed package's `effect` floor from
+  # its peer range and checks a requested version against that range, with the
+  # same semantics npm and pnpm apply to peers.
+  semver: ^7.8.5
   solid-js: ^1.9.15
   svelte: ^5.57.1
   svelte-check: ^4.7.6
@@ -127,6 +131,8 @@ catalogs:
   # effect-auth-alchemy's own `effect` floor, above the programme floor in
   # `peers`: its `alchemy` peer (beta.80, the floor above) itself peers on
   # `effect ^4.0.0`, so no `effect` below 4.0.0 can satisfy both.
+  # `vp run check:dist` reads each packed range, so it checks effect-auth-alchemy
+  # at this floor and the other packages at `peers.effect`.
   alchemy-peers:
     effect: ">=4.0.0"
 
