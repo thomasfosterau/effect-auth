@@ -167,7 +167,10 @@ describe("PasswordHasher", () => {
 describe("ScryptHasher", () => {
   it("should hash and verify a password", async () => {
     const { scryptHasher } = await import("./Password.ts");
-    const scrypt = scryptHasher();
+    // A cheap explicit cost: this test is about the round trip, not the cost,
+    // and the default N = 2^17 (128 MiB per derivation) times out on a loaded
+    // machine (#270). ScryptDefaults.test.ts pins the defaults structurally.
+    const scrypt = scryptHasher({ cost: 1024 });
 
     const hashed = await Effect.runPromise(scrypt.hash("mySecurePassword123"));
     expect(hashed.algorithm).toBe("scrypt");
