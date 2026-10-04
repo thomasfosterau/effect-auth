@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect, expectTypeOf } from "vite-plus/test";
 import * as Auth from "../index.ts";
 import * as PasswordCluster from "./index.ts";
 import * as PasswordReset from "./PasswordReset.ts";
@@ -30,5 +30,13 @@ describe("password barrel", () => {
       );
     }
     expect(Auth.Password.PasswordResetService).toBe(PasswordReset.PasswordResetService);
+  });
+
+  it("re-exports every PasswordReset type", () => {
+    // Types vanish at runtime, so the type gate (`tsc -p tsconfig.test.json`)
+    // is what pins these: dropping one from the barrel fails to compile here.
+    expectTypeOf<PasswordCluster.PasswordResetToken>().toEqualTypeOf<PasswordReset.PasswordResetToken>();
+    expectTypeOf<PasswordCluster.PasswordResetConfig>().toEqualTypeOf<PasswordReset.PasswordResetConfig>();
+    expectTypeOf<PasswordCluster.PasswordResetResult>().toEqualTypeOf<PasswordReset.PasswordResetResult>();
   });
 });
