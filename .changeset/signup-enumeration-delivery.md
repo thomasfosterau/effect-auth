@@ -17,5 +17,5 @@ Close the sign-up enumeration oracle and move delivery sends off the response pa
   it inline, so a flow that sends mail/SMS on only one of its branches (like
   sign-up's fresh-registration branch) no longer leaks that branch through
   response timing. A failed send never fails the flow that triggered it; it
-  is logged and counted via a new `effect-auth.delivery_sends.total` metric
+  is logged and counted via a new `effect_auth_delivery_sends_total` metric
   instead.

@@ -147,7 +147,7 @@ export const oidcTokenRequests = Metric.counter("effect_auth_oidc_token_requests
  * their caller, this counter — together with the error log emitted
  * alongside it — is the only way a failed send is observed.
  */
-export const deliverySends = Metric.counter("effect-auth.delivery_sends.total", {
+export const deliverySends = Metric.counter("effect_auth_delivery_sends_total", {
   description: "Delivery sends dispatched off the response path — tagged by purpose and outcome",
   incremental: true,
 });
@@ -266,7 +266,7 @@ export const recordOidcTokenRequest = (
 ): Effect.Effect<void> =>
   Metric.update(Metric.withAttributes(oidcTokenRequests, { grant, outcome }), 1);
 
-/** Count a delivery sent off the response path on `effect-auth.delivery_sends.total`, by purpose and outcome. */
+/** Count a delivery sent off the response path on `effect_auth_delivery_sends_total`, by purpose and outcome. */
 export const recordDeliverySend = (
   purpose: string,
   outcome: "success" | "failure",
