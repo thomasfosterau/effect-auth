@@ -111,7 +111,7 @@ const validatePasswordLength = (
   });
 
 /**
- * Build a {@link PasswordResetService} from its config, for embedding in a custom layer. Note: through the `password` barrel this is `Password.make` (#259).
+ * Build a {@link PasswordResetService} from its config, for embedding in a custom layer inside the package. The `password` barrel doesn't re-export it, so it never reads as `Password.make` (#259); use {@link PasswordResetService.layer} from the public API.
  */
 export const make = (
   config: PasswordResetConfig,

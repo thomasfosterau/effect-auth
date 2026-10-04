@@ -1,0 +1,34 @@
+import { describe, it, expect } from "vite-plus/test";
+import * as Auth from "../index.ts";
+import * as PasswordCluster from "./index.ts";
+import * as PasswordReset from "./PasswordReset.ts";
+
+// The `password` barrel's surface (#259): `PasswordReset.make` builds a
+// `PasswordResetService`, so re-exporting it would make `Auth.Password.make`
+// read as the cluster's hasher constructor.
+describe("password barrel", () => {
+  it("does not export PasswordReset's make as Password.make", () => {
+    expect("make" in PasswordCluster).toBe(false);
+    expect("make" in Auth.Password).toBe(false);
+    // @ts-expect-error -- `make` is not part of the password barrel.
+    expect(PasswordCluster.make).toBeUndefined();
+  });
+
+  it("re-exports every other PasswordReset value", () => {
+    const expected = Object.keys(PasswordReset)
+      .filter((name) => name !== "make")
+      .sort();
+    expect(expected).toEqual([
+      "PasswordResetService",
+      "PasswordResetStore",
+      "PasswordResetUserStore",
+    ]);
+    for (const name of expected) {
+      expect(PasswordCluster).toHaveProperty(
+        name,
+        PasswordReset[name as keyof typeof PasswordReset],
+      );
+    }
+    expect(Auth.Password.PasswordResetService).toBe(PasswordReset.PasswordResetService);
+  });
+});
