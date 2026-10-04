@@ -1,4 +1,3 @@
-import { resolve } from "path";
 import { defineConfig } from "vite-plus";
 
 export default defineConfig({
@@ -14,14 +13,6 @@ export default defineConfig({
     // Keeping it out of lint avoids one cross-package program mis-resolving
     // per-package types (e.g. @types/node globals).
     options: { typeAware: false, typeCheck: false },
-  },
-  resolve: {
-    alias: {
-      // Resolves the core package to source for runs under this root config.
-      // Each package's tasks already build their workspace dependencies first
-      // (vite.tasks.ts), so whether anything still needs this is #258.
-      "@thomasfosterau/effect-auth": resolve(__dirname, "packages/effect-auth/src/index.ts"),
-    },
   },
   test: {
     globals: true,
