@@ -150,7 +150,7 @@ export interface CookieConfig {
    * whenever a sign-in endpoint issues a session, so login pages can
    * highlight the user's previous method (`"email-password"`,
    * `"magic-link"`, `"sso"`, ...). Pass `true` for a 30-day cookie or an
-   * object to tune the lifetime. Pair with `LastLoginMethod.make` to
+   * object to tune the lifetime. Pair with `LastLoginMethodPlugin` to
    * also record the method into `session.attributes.method` server-side.
    */
   readonly lastLoginMethod?: boolean | { readonly maxAge?: number };
