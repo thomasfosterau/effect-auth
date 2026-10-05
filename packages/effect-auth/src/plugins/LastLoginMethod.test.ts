@@ -68,7 +68,7 @@ const makeFixture = () => {
   }).pipe(Layer.provide(Layer.mergeAll(stores, Hooks.Default)));
 
   // Hooks stack: the last-login-method plugin over the no-op base.
-  const hooks = composePlugins([LastLoginMethod.make()]).pipe(
+  const hooks = composePlugins([LastLoginMethod.LastLoginMethodPlugin]).pipe(
     Layer.provide(Hooks.Default),
     Layer.provide(sessionManager),
   );
@@ -113,7 +113,7 @@ describe("LastLoginMethodPlugin", () => {
     // Drive the hook directly with a session-less result (e.g. a pending
     // second factor): the plugin must not attempt to record anything.
     const probe = Layer.mergeAll(
-      composePlugins([LastLoginMethod.make()]).pipe(
+      composePlugins([LastLoginMethod.LastLoginMethodPlugin]).pipe(
         Layer.provide(Hooks.Default),
         Layer.provide(
           Layer.succeed(SessionService)({

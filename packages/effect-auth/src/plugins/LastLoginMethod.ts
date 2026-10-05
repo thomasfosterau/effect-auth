@@ -20,24 +20,27 @@ import { SessionService } from "../SessionService.ts";
 import { Hooks, makePlugin } from "../Hooks.ts";
 
 /**
- * Build the plugin. `Layer<Hooks, never, Hooks | SessionManagerTag>` —
- * provide your `SessionService` layer. Tap failures are isolated: recording
- * the method never breaks the sign-in itself.
+ * Records the sign-in method into the issued session's `attributes.method` on
+ * `afterSignIn` and `afterSignUp`.
+ *
+ * `Layer<Hooks, never, Hooks | SessionService>` — provide your
+ * `SessionService` layer; it is acquired when the layer is built. Configured
+ * with `isolateTaps: true`, so recording the method never breaks the sign-in
+ * itself.
  */
-export const make = () =>
-  makePlugin(
-    Effect.gen(function* () {
-      const sessionManager = yield* SessionService;
-      const record = (result: AuthResult) =>
-        result.session !== undefined && result.method !== undefined
-          ? sessionManager
-              .setSessionAttributes(result.session.id, { method: result.method })
-              .pipe(Effect.ignore)
-          : Effect.void;
-      return {
-        afterSignIn: Hooks.tap(record),
-        afterSignUp: Hooks.tap(record),
-      };
-    }),
-    { isolateTaps: true },
-  );
+export const LastLoginMethodPlugin = makePlugin(
+  Effect.gen(function* () {
+    const sessionManager = yield* SessionService;
+    const record = (result: AuthResult) =>
+      result.session !== undefined && result.method !== undefined
+        ? sessionManager
+            .setSessionAttributes(result.session.id, { method: result.method })
+            .pipe(Effect.ignore)
+        : Effect.void;
+    return {
+      afterSignIn: Hooks.tap(record),
+      afterSignUp: Hooks.tap(record),
+    };
+  }),
+  { isolateTaps: true },
+);

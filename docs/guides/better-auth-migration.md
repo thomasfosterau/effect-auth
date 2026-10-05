@@ -69,7 +69,7 @@ The set of services `Auth.Http.make` requires is `AuthServices` in `http/HttpSer
 
 ### Plugins vs hooks
 
-Better Auth's `plugins` array does two different jobs: it adds features, and it adds cross-cutting behaviour (`hooks.before` / `hooks.after`). In effect-auth those are separate mechanisms. Features are layers. Cross-cutting behaviour is the `Hooks` service (`src/Hooks.ts`) with first-party plugins under `src/plugins/` — `AccountLockoutPlugin`, `AuditPlugin`, `CaptchaPlugin`, `IPRateLimitPlugin`, `NormalizeEmailPlugin`, `RateLimitPlugin` and the last-login-method plugin (`make()` in `plugins/LastLoginMethod.ts`), plus `BannedUserPlugin` from `Admin.ts` and `ScimDeactivatedPlugin` from `Scim.ts`. Register them where you would have provided `Auth.Hooks.Default`.
+Better Auth's `plugins` array does two different jobs: it adds features, and it adds cross-cutting behaviour (`hooks.before` / `hooks.after`). In effect-auth those are separate mechanisms. Features are layers. Cross-cutting behaviour is the `Hooks` service (`src/Hooks.ts`) with first-party plugins under `src/plugins/` — `AccountLockoutPlugin`, `AuditPlugin`, `CaptchaPlugin`, `IPRateLimitPlugin`, `LastLoginMethodPlugin`, `NormalizeEmailPlugin` and `RateLimitPlugin`, plus `BannedUserPlugin` from `Admin.ts` and `ScimDeactivatedPlugin` from `Scim.ts`. Register them where you would have provided `Auth.Hooks.Default`.
 
 ## 3. Storage: adapters → store contracts
 
