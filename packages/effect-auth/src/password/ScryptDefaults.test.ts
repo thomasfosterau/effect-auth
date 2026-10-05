@@ -5,7 +5,11 @@ import { PasswordHasher, scryptHasher } from "./Password.ts";
 
 // Pins scrypt's production defaults (N = 2^17, r = 8, p = 1) without running
 // a 128 MiB key derivation: `crypto.scrypt` is replaced by a stub that records
-// the parameters it was asked for and returns a zero key at once. The
+// the parameters it was asked for and returns a zero key at once. Because the
+// stub skips Node's parameter validation, it also checks `maxmem` covers what
+// OpenSSL's scrypt allocates, 128 * r * (N + p + 2) bytes: Node's 32 MiB
+// default is far below that at these parameters, and the real call fails with
+// ERR_CRYPTO_INVALID_SCRYPT_PARAMS when `maxmem` is too small. The
 // round-trip tests in `Password.test.ts` run the real KDF at a cheap explicit
 // cost, so neither file depends on how fast the machine is (#270).
 vi.mock("node:crypto", async (importOriginal) => {
@@ -41,7 +45,9 @@ const expectDefaultHash = (hash: string) => {
   expect(salt).toMatch(/^[0-9a-f]{32}$/);
   expect(key).toMatch(/^[0-9a-f]{128}$/);
   expect(scrypt).toHaveBeenCalledOnce();
-  expect(scrypt.mock.calls[0]![3]).toMatchObject({ N: 131072, r: 8, p: 1 });
+  const options = scrypt.mock.calls[0]![3];
+  expect(options).toMatchObject({ N: 131072, r: 8, p: 1 });
+  expect(options.maxmem).toBeGreaterThanOrEqual(128 * 8 * (131072 + 1 + 2));
 };
 
 describe("scrypt defaults", () => {
