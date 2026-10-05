@@ -1,4 +1,3 @@
-import { resolve } from "path";
 import { defineConfig } from "vite-plus";
 import { packageTasks } from "../../vite.tasks.ts";
 
@@ -23,13 +22,6 @@ export default defineConfig({
     test: `vp test run --exclude ${alchemyRuntimeSuite}`,
     extra: { "test:alchemy": `vp test run ${alchemyRuntimeSuite}` },
   }),
-  resolve: {
-    alias: {
-      // packages/*/dist/ is gitignored; resolve the SQL stores this package
-      // wires up to source so the suite runs without a separate build step.
-      "@thomasfosterau/effect-auth-sql": resolve(__dirname, "../sql/src/index.ts"),
-    },
-  },
   test: {
     globals: true,
     environment: "node",
