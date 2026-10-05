@@ -8,14 +8,14 @@
  * before the program under test, so the counts below are the program's alone.
  */
 
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import type { Logger } from "drizzle-orm";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import type * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
-import { migrationStatements, tables } from "./PgSchema.ts";
+import { tables } from "./PgSchema.ts";
 import {
   AuthRequests,
   getIdentifierByValue,
@@ -24,6 +24,7 @@ import {
   layer as requestsLayer,
   listIdentifiersByUser,
 } from "./Requests.ts";
+import { migratedPglite, truncateTables } from "./testing/PgliteTemplate.ts";
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -53,22 +54,29 @@ const makeQueryLog = (): QueryLog => {
 };
 
 /**
- * Fresh in-memory Postgres + exported DDL + a query-counting drizzle handle,
- * torn down afterwards.
+ * The file's one in-memory Postgres, opened once from the run's migrated
+ * template (#291) and shared by the tests.
+ */
+let client: PGlite;
+
+beforeAll(async () => {
+  client = await migratedPglite();
+});
+
+afterAll(async () => {
+  await client?.close();
+});
+
+/**
+ * Empty tables + a fresh query-counting drizzle handle over the shared
+ * database, so each test seeds and counts against nothing but its own rows.
  */
 const withDatabase = async <A>(
   use: (db: PgliteDatabase, log: QueryLog) => Promise<A>,
 ): Promise<A> => {
-  const client = await PGlite.create();
-  try {
-    for (const statement of migrationStatements()) {
-      await client.exec(statement);
-    }
-    const log = makeQueryLog();
-    return await use(drizzle(client, { logger: log.logger }), log);
-  } finally {
-    await client.close();
-  }
+  await truncateTables(client);
+  const log = makeQueryLog();
+  return await use(drizzle(client, { logger: log.logger }), log);
 };
 
 /**

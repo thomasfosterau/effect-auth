@@ -18,17 +18,18 @@
  * `Symbol.for`, so one table definition serves both handles.
  */
 
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
 import type { EffectPgDatabase } from "drizzle-orm-effect/effect-postgres";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import * as EffectPglite from "drizzle-orm-effect/effect-pglite";
 import { Context, Effect, Latch, Layer } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer, effectDatabaseLayer, type EffectDrizzleDatabase } from "./Database.ts";
 import { layer as storesLayer } from "./Layers.ts";
-import { migrationStatements, tables } from "./PgSchema.ts";
+import { tables } from "./PgSchema.ts";
+import { migratedPglite, truncateTables } from "./testing/PgliteTemplate.ts";
 
 type StoreServices = Auth.SessionStore | Auth.UserStore | Auth.IdentifierStore;
 
@@ -67,17 +68,31 @@ const doorAccepts = (
 // Fixtures
 // ---------------------------------------------------------------------------
 
-/** A fresh in-memory Postgres with this package's tables already applied. */
-const freshPromiseDatabase = async (): Promise<{
-  readonly client: PGlite;
-  readonly db: PgliteDatabase;
-}> => {
-  const client = await PGlite.create();
-  for (const statement of migrationStatements()) {
-    await client.exec(statement);
-  }
-  return { client, db: drizzle(client) };
-};
+/**
+ * The file's three in-memory Postgres instances, opened once for the file and
+ * emptied before each test. Each is a separate PGlite instance with its own
+ * Postgres backend, started from the run's migrated template (#291) rather
+ * than from `initdb`.
+ */
+let primary: PGlite;
+let first: PGlite;
+let second: PGlite;
+
+beforeAll(async () => {
+  [primary, first, second] = await Promise.all([
+    migratedPglite(),
+    migratedPglite(),
+    migratedPglite(),
+  ]);
+});
+
+afterAll(async () => {
+  await Promise.all([primary?.close(), first?.close(), second?.close()]);
+});
+
+beforeEach(async () => {
+  await Promise.all([primary, first, second].map(truncateTables));
+});
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -95,10 +110,6 @@ describe("databaseLayer doors", () => {
      * than run it, and none of the assertions below would be reachable.
      */
     const program = Effect.gen(function* () {
-      const sql = yield* PgliteClient.PgliteClient;
-      for (const statement of migrationStatements()) {
-        yield* sql.unsafe(statement);
-      }
       const db = yield* EffectPglite.make();
 
       const work: Effect.Effect<
@@ -127,7 +138,9 @@ describe("databaseLayer doors", () => {
         Effect.provide(
           Layer.mergeAll(
             EffectPglite.DefaultServices,
-            PgliteClient.layer({ dataDir: "memory://" }),
+            // The file's migrated instance, which the client borrows and leaves
+            // open.
+            PgliteClient.layer({ liveClient: primary }),
           ),
         ),
       ) as Effect.Effect<
@@ -149,74 +162,70 @@ describe("databaseLayer doors", () => {
     // Three databases: one per "request", plus the default the reference falls
     // back to. The default holds no rows at all, so a handle that leaked out of
     // its request would read `null` and fail the assertions loudly.
-    const fallback = await freshPromiseDatabase();
-    const first = await freshPromiseDatabase();
-    const second = await freshPromiseDatabase();
+    const fallbackDb = drizzle(primary);
+    const firstDb = drizzle(first);
+    const secondDb = drizzle(second);
 
-    try {
-      const RequestDatabase: Context.Reference<PgliteDatabase> = Context.Reference<PgliteDatabase>(
-        "test/RequestDatabase",
-        {
-          defaultValue: () => fallback.db,
-        },
+    const RequestDatabase: Context.Reference<PgliteDatabase> = Context.Reference<PgliteDatabase>(
+      "test/RequestDatabase",
+      {
+        defaultValue: () => fallbackDb,
+      },
+    );
+
+    // One store layer, built once, shared by both requests: the handle is not
+    // in it.
+    const stores = storesLayer(tables).pipe(Layer.provide(databaseLayer(RequestDatabase)));
+
+    const seed = async (db: PgliteDatabase, userId: string): Promise<void> => {
+      await db.insert(tables.sessions).values(makeSession("shared", userId)).execute();
+    };
+    await seed(firstDb, "first-request");
+    await seed(secondDb, "second-request");
+
+    const program = Effect.gen(function* () {
+      // Each request reads, waits for the other to have read too, then reads
+      // again — so the two are provably in flight at the same time.
+      const firstHasRead = yield* Latch.make(false);
+      const secondHasRead = yield* Latch.make(false);
+
+      const request = (
+        db: PgliteDatabase,
+        arrived: Latch.Latch,
+        other: Latch.Latch,
+      ): Effect.Effect<ReadonlyArray<Auth.Session | null>, Auth.AuthError, StoreServices> =>
+        Effect.gen(function* () {
+          const sessions = yield* Auth.SessionStore;
+          const before = yield* sessions.get("shared");
+          yield* Latch.open(arrived);
+          yield* other.await;
+          const after = yield* sessions.get("shared");
+          return [before, after];
+        }).pipe(Effect.provide(Context.make(RequestDatabase, db)));
+
+      return yield* Effect.all(
+        [
+          request(firstDb, firstHasRead, secondHasRead),
+          request(secondDb, secondHasRead, firstHasRead),
+        ],
+        { concurrency: "unbounded" },
       );
+    });
 
-      // One store layer, built once, shared by both requests: the handle is not
-      // in it.
-      const stores = storesLayer(tables).pipe(Layer.provide(databaseLayer(RequestDatabase)));
+    const [firstReads, secondReads] = await Effect.runPromise(
+      program.pipe(Effect.provide(stores)) as Effect.Effect<
+        readonly [ReadonlyArray<Auth.Session | null>, ReadonlyArray<Auth.Session | null>],
+        unknown
+      >,
+    );
 
-      const seed = async (db: PgliteDatabase, userId: string): Promise<void> => {
-        await db.insert(tables.sessions).values(makeSession("shared", userId)).execute();
-      };
-      await seed(first.db, "first-request");
-      await seed(second.db, "second-request");
-
-      const program = Effect.gen(function* () {
-        // Each request reads, waits for the other to have read too, then reads
-        // again — so the two are provably in flight at the same time.
-        const firstHasRead = yield* Latch.make(false);
-        const secondHasRead = yield* Latch.make(false);
-
-        const request = (
-          db: PgliteDatabase,
-          arrived: Latch.Latch,
-          other: Latch.Latch,
-        ): Effect.Effect<ReadonlyArray<Auth.Session | null>, Auth.AuthError, StoreServices> =>
-          Effect.gen(function* () {
-            const sessions = yield* Auth.SessionStore;
-            const before = yield* sessions.get("shared");
-            yield* Latch.open(arrived);
-            yield* other.await;
-            const after = yield* sessions.get("shared");
-            return [before, after];
-          }).pipe(Effect.provide(Context.make(RequestDatabase, db)));
-
-        return yield* Effect.all(
-          [
-            request(first.db, firstHasRead, secondHasRead),
-            request(second.db, secondHasRead, firstHasRead),
-          ],
-          { concurrency: "unbounded" },
-        );
-      });
-
-      const [firstReads, secondReads] = await Effect.runPromise(
-        program.pipe(Effect.provide(stores)) as Effect.Effect<
-          readonly [ReadonlyArray<Auth.Session | null>, ReadonlyArray<Auth.Session | null>],
-          unknown
-        >,
-      );
-
-      expect(firstReads.map((session) => session?.userId)).toEqual([
-        "first-request",
-        "first-request",
-      ]);
-      expect(secondReads.map((session) => session?.userId)).toEqual([
-        "second-request",
-        "second-request",
-      ]);
-    } finally {
-      await Promise.all([fallback.client.close(), first.client.close(), second.client.close()]);
-    }
+    expect(firstReads.map((session) => session?.userId)).toEqual([
+      "first-request",
+      "first-request",
+    ]);
+    expect(secondReads.map((session) => session?.userId)).toEqual([
+      "second-request",
+      "second-request",
+    ]);
   });
 });
