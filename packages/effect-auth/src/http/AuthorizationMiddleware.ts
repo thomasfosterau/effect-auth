@@ -66,35 +66,16 @@
  *
  * @example Gate one endpoint on a per-request resource
  * ```ts
- * import { HttpApiEndpoint, HttpApiGroup, HttpApiBuilder } from "effect/http-api"
- * import { HttpRouter } from "effect/http"
- * import { Effect, Layer } from "effect"
- * import { AuthMiddleware, CurrentUser } from "@thomasfosterau/effect-auth/Http"
- * import { makeAuthorizationMiddleware } from "@thomasfosterau/effect-auth/Http"
  * import { Entity } from "@thomasfosterau/effect-auth"
+ * import { makeAuthorizationMiddleware } from "@thomasfosterau/effect-auth/http"
  *
- * const RequireDocRead = makeAuthorizationMiddleware((_request) =>
- *   Effect.gen(function* () {
- *     const params = yield* HttpRouter.params
- *     return { action: "doc:read", resource: Entity.ref("Document", params["docId"]!) }
- *   }),
- * )
- *
- * const DocsGroup = HttpApiGroup.make("docs").pipe(
- *   HttpApiGroup.add(
- *     HttpApiEndpoint.get("getDoc", "/docs/:docId").pipe(
- *       HttpApiEndpoint.middleware(AuthMiddleware),
- *       HttpApiEndpoint.middleware(RequireDocRead),
- *     ),
- *   ),
- * )
- *
- * const AppLayer = HttpApiBuilder.layer(MyApi).pipe(
- *   Layer.provide(docsGroupLayer),
- *   Layer.provide(RequireDocRead.layer),
- *   Layer.provide(layer()), // AuthMiddleware's layer
- *   Layer.provide(authorizerLayer), // Authorizer.layer(...)
- * )
+ * // A route-level gate: AuthMiddleware answers "who is calling", this answers
+ * // "may they do this". The resource is fixed here; pass a function of the
+ * // request instead when the resource comes from the request.
+ * const RequireDocRead = makeAuthorizationMiddleware({
+ *   action: "doc:read",
+ *   resource: Entity.ref("Document", "doc-1"),
+ * })
  * ```
  *
  * @module http/authorization-middleware

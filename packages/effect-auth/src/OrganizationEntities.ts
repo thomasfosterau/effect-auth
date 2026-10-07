@@ -8,6 +8,10 @@
  * {@link Entity} values so application policies can talk about them directly:
  *
  * ```ts
+ * import { OrganizationEntities, Policy } from "@thomasfosterau/effect-auth"
+ *
+ * declare const orgId: string
+ *
  * // "org admins may update anything scoped to their organization"
  * Policy.role(OrganizationEntities.orgRoleId(orgId, "admin"), {
  *   resource: Policy.inScope(OrganizationEntities.organizationRef(orgId)),

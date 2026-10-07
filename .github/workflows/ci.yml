@@ -40,6 +40,9 @@ jobs:
       - name: Build packages
         run: vp run build
 
+      - name: API docs (docgen type-checks every JSDoc example)
+        run: vp run docs
+
       - name: Dist import smoke (each package's effect peer floor)
         run: vp run check:dist
 

@@ -29,38 +29,38 @@
  *
  * @example Attaching required auth to a group
  * ```ts
- * import { HttpApiGroup, HttpApiEndpoint, HttpApiBuilder } from "effect/http-api"
- * import { Effect, Layer } from "effect"
- * import {
- *   AuthMiddleware,
- *   CurrentUser,
- *   layer,
- * } from "@thomasfosterau/effect-auth/Http"
+ * import { Effect, Layer, Schema } from "effect"
+ * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
+ * import { AuthMiddleware, CurrentUser, layer as authLayer } from "@thomasfosterau/effect-auth/http"
+ *
+ * const ProfileSchema = Schema.Struct({ id: Schema.String })
+ *
+ * // Stands in for the services the app provides (SessionService, Hooks, ...).
+ * declare const myServiceLayer: Layer.Layer<never>
  *
  * // 1. Define API group – mark endpoints that need auth
- * const ProfileGroup = HttpApiGroup.make("profile").pipe(
- *   HttpApiGroup.add(
- *     HttpApiEndpoint.get("getProfile", "/profile").pipe(
- *       HttpApiEndpoint.setSuccess(ProfileSchema),
- *       HttpApiEndpoint.middleware(AuthMiddleware),
- *     )
- *   )
+ * const ProfileGroup = HttpApiGroup.make("profile").add(
+ *   HttpApiEndpoint.get("getProfile", "/profile", { success: ProfileSchema }).middleware(
+ *     AuthMiddleware,
+ *   ),
  * )
+ *
+ * const MyApi = HttpApi.make("MyApi").add(ProfileGroup)
  *
  * // 2. Implement the handler – CurrentUser is available in context
  * const ProfileGroupLayer = HttpApiBuilder.group(MyApi, "profile", (handlers) =>
  *   handlers.handle("getProfile", () =>
  *     Effect.gen(function* () {
  *       const user = yield* CurrentUser
- *       return { id: user.id, email: user.email }
- *     })
- *   )
+ *       return { id: user.id }
+ *     }),
+ *   ),
  * )
  *
  * // 3. Wire up the middleware layer alongside your service layer
  * const AppLayer = HttpApiBuilder.layer(MyApi).pipe(
  *   Layer.provide(ProfileGroupLayer),
- *   Layer.provide(layer()),
+ *   Layer.provide(authLayer()),
  *   Layer.provide(myServiceLayer), // must provide SessionService, Hooks, …
  * )
  * ```
@@ -333,6 +333,16 @@ const validateToken = (
  *
  * @example
  * ```ts
+ * import { Layer } from "effect"
+ * import { HttpApi, HttpApiBuilder } from "effect/http-api"
+ * import { layer } from "@thomasfosterau/effect-auth/http"
+ *
+ * const MyApi = HttpApi.make("MyApi")
+ *
+ * // Stand-ins for the group handlers and the app's services.
+ * declare const myGroupLayer: Layer.Layer<never>
+ * declare const myServiceLayer: Layer.Layer<never>
+ *
  * const AppLayer = HttpApiBuilder.layer(MyApi).pipe(
  *   Layer.provide(myGroupLayer),
  *   Layer.provide(layer()),
@@ -406,6 +416,16 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  *
  * @example
  * ```ts
+ * import { Layer } from "effect"
+ * import { HttpApi, HttpApiBuilder } from "effect/http-api"
+ * import { optionalLayer } from "@thomasfosterau/effect-auth/http"
+ *
+ * const MyApi = HttpApi.make("MyApi")
+ *
+ * // Stand-ins for the feed group handlers and the app's services.
+ * declare const myFeedGroupLayer: Layer.Layer<never>
+ * declare const myServiceLayer: Layer.Layer<never>
+ *
  * const AppLayer = HttpApiBuilder.layer(MyApi).pipe(
  *   Layer.provide(myFeedGroupLayer),
  *   Layer.provide(optionalLayer()),

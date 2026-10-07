@@ -24,11 +24,11 @@ catalogMode: strict
 catalog:
   # Changesets CLI v3 pairs with `changesets/action` v2 (release.yml).
   "@changesets/cli": ^3.0.3
-  # `vp run docs`: the API reference for packages/effect-auth, compiling and
-  # executing every JSDoc `@example`. The 4.x line is the Effect-monorepo
-  # docgen (runs on `effect` and `@effect/platform-node`, which the `effect`
-  # override keeps on the singleton); it reads the existing docgen.json. Not a
-  # gate yet: it fails type-checking two pseudo-code `@example` blocks (#257).
+  # `vp run docs`: the API reference for packages/effect-auth, type-checking
+  # every JSDoc `@example` (the examples are compiled, not run). The 4.x line is
+  # the Effect-monorepo docgen (runs on `effect` and `@effect/platform-node`,
+  # which the `effect` override keeps on the singleton); it reads the existing
+  # docgen.json.
   "@effect/docgen": ^4.0.0
   "@effect/language-service": ^0.87.3
   "@effect/sql-pg": 4.0.0

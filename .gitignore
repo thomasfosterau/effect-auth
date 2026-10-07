@@ -87,6 +87,9 @@ vite.config.ts.timestamp-*
 # Build outputs (monorepo packages and examples)
 packages/*/dist/
 packages/*/node_modules/
+
+# docgen output (`vp run docs`, packages/effect-auth)
+packages/effect-auth/docs/
 examples/*/dist/
 examples/*/node_modules/
 examples/*/.output/

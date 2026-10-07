@@ -15,11 +15,26 @@
  * template selection is keyed off `purpose`.
  *
  * ```ts
- * const sender = yield* EmailSender; // provided by an adapter package
- * const send = emailCallbacks(sender, yield* IdentifierStore);
+ * import { Effect } from "effect"
+ * import {
+ *   EmailSender,
+ *   IdentifierStore,
+ *   MagicLinkService,
+ *   emailCallbacks,
+ * } from "@thomasfosterau/effect-auth"
+ * import { EmailVerificationService } from "@thomasfosterau/effect-auth/email"
  *
- * MagicLinkService.layer({ sendMagicLink: send.sendMagicLink, ... })
- * EmailVerificationService.layer({ sendEmail: send.sendVerificationEmail, ... })
+ * // An adapter (Resend, SES, ...) implements EmailSender once; the per-feature
+ * // callbacks are derived from it.
+ * const wiring = Effect.gen(function* () {
+ *   const sender = yield* EmailSender // provided by an adapter package
+ *   const send = emailCallbacks(sender, yield* IdentifierStore)
+ *
+ *   return [
+ *     MagicLinkService.layer({ sendMagicLink: send.sendMagicLink }),
+ *     EmailVerificationService.layer({ sendEmail: send.sendVerificationEmail }),
+ *   ] as const
+ * })
  * ```
  *
  * @module delivery

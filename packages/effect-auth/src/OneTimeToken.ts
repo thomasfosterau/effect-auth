@@ -210,8 +210,19 @@ export const make = (
  *
  * @example
  * ```ts
- * const { session, subject } = yield* redeemOneTimeTokenForSession(rawToken);
- * setCookie(response, "session", session.id);
+ * import { Effect } from "effect"
+ * import { redeemOneTimeTokenForSession } from "@thomasfosterau/effect-auth"
+ *
+ * declare const rawToken: string
+ * // Stands in for the framework's cookie API.
+ * declare function setCookie(response: unknown, name: string, value: string): void
+ * declare const response: unknown
+ *
+ * const redeem = Effect.gen(function* () {
+ *   const { session, subject } = yield* redeemOneTimeTokenForSession(rawToken)
+ *   setCookie(response, "session", session.id)
+ *   return subject
+ * })
  * ```
  *
  * Requires `OneTimeTokenService`, `OneTimeTokenStore`, and `SessionService`

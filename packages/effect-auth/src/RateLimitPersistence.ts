@@ -22,19 +22,18 @@
  * the KV-backed stores):
  *
  * ```ts
- * import { Layer } from "effect";
- * import { Redis, RateLimiter as PersistenceRateLimiter } from "effect/persistence";
+ * import { Layer } from "effect"
+ * import { RateLimiter as PersistenceRateLimiter, Redis } from "effect/persistence"
+ * import { rateLimiterPersistenceLayer } from "@thomasfosterau/effect-auth"
+ *
+ * // Stand-in for the app's Redis client layer.
+ * declare const redisLayer: Layer.Layer<Redis.Redis>
  *
  * const RateLimiterRedis = rateLimiterPersistenceLayer.pipe(
  *   Layer.provide(PersistenceRateLimiter.layer),
- *   Layer.provide(
- *     Layer.effect(
- *       PersistenceRateLimiter.RateLimiterStore,
- *       PersistenceRateLimiter.makeStoreRedis(),
- *     ),
- *   ),
- *   Layer.provide(Redis.layer({ url: process.env.REDIS_URL! })),
- * );
+ *   Layer.provide(PersistenceRateLimiter.layerStoreRedis()),
+ *   Layer.provide(redisLayer),
+ * )
  * ```
  *
  * @module rate-limit-persistence

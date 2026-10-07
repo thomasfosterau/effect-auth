@@ -44,6 +44,8 @@
  *
  * // `resolved` came from the app's own edge — `event.locals`, a service
  * // binding, a test fixture. No `HttpServerRequest` is involved.
+ * declare const resolved: Parameters<typeof Auth.SessionContext.layer>[0]
+ *
  * const run = <A, E>(effect: Effect.Effect<A, E, Auth.MaybeCurrentSession>) =>
  *   effect.pipe(Effect.provide(Auth.SessionContext.layer(resolved)))
  * ```
@@ -209,7 +211,13 @@ export const anonymousLayer: Layer.Layer<MaybeCurrentSession> = Layer.succeed(
  *
  * @example
  * ```ts
+ * import { SessionContext } from "@thomasfosterau/effect-auth"
+ *
  * // SvelteKit: `event.locals.session` is `SessionWithUser | null`
+ * declare const event: {
+ *   readonly locals: { readonly session: Parameters<typeof SessionContext.layer>[0] }
+ * }
+ *
  * const context = SessionContext.layer(event.locals.session)
  * ```
  *

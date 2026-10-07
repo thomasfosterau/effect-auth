@@ -8,20 +8,28 @@
  *
  * Usage:
  * ```ts
- * import { Auth } from "@thomasfosterau/effect-auth"
+ * import { Effect, Layer } from "effect"
+ * import * as Auth from "@thomasfosterau/effect-auth"
+ *
+ * // Stand-ins for the app's own effect and its French catalog.
+ * type Params = Record<string, unknown> | undefined
+ * declare const myEffect: Effect.Effect<void, never, Auth.Messages>
+ * declare const frCatalog: Record<string, ((params: Params) => string) | undefined>
+ * declare function englishFallback(code: string, params: Params): string
  *
  * // Default English – no configuration needed.
- * const app = myEffect.pipe(
- *   Effect.provide(Auth.Messages.Default),
- * )
+ * const app = myEffect.pipe(Effect.provide(Auth.Messages.Default))
  *
  * // Custom locale:
  * const frenchMessages = Auth.Messages.Default.pipe(
- *   Layer.merge(Layer.succeed(Auth.Messages, {
- *     resolve: (code, locale, params) =>
- *       locale === "fr" ? frCatalog[code]?.(params) ?? englishFallback(code, params)
- *                       : englishFallback(code, params),
- *   })),
+ *   Layer.merge(
+ *     Layer.succeed(Auth.Messages, {
+ *       resolve: (code, locale, params) =>
+ *         locale === "fr"
+ *           ? (frCatalog[code]?.(params) ?? englishFallback(code, params))
+ *           : englishFallback(code, params),
+ *     }),
+ *   ),
  * )
  * ```
  *

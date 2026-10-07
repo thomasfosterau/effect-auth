@@ -39,6 +39,14 @@ export interface TokenCipher {
  *
  * @example
  * ```ts
+ * import { Redacted } from "effect"
+ * import { aes256GcmCipher, JwtService } from "@thomasfosterau/effect-auth"
+ * import { MultiFactorService } from "@thomasfosterau/effect-auth/multifactor"
+ * import { OAuthService } from "@thomasfosterau/effect-auth/oauth"
+ *
+ * // The app's OAuth provider list (see OAuthService.layer).
+ * declare const providers: Parameters<typeof OAuthService.layer>[0]
+ *
  * const cipher = aes256GcmCipher(process.env.ENCRYPTION_SECRET!)
  * // JWT private key at rest
  * const jwtLayer = JwtService.layer({ issuer: "...", encryptPrivateKey: { cipher } })
@@ -47,9 +55,9 @@ export interface TokenCipher {
  * // OAuth tokens at rest
  * const oauthLayer = OAuthService.layer(providers, { encryptTokens: { cipher } })
  * // or use the shorthand (each option accepts { secret } instead of { cipher }):
- * const jwtLayer = JwtService.layer({
+ * const jwtShorthandLayer = JwtService.layer({
  *   issuer: "...",
- *   encryptPrivateKey: { secret: process.env.ENCRYPTION_SECRET! },
+ *   encryptPrivateKey: { secret: Redacted.make(process.env.ENCRYPTION_SECRET!) },
  * })
  * ```
  */
