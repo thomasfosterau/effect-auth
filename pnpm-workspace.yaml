@@ -53,7 +53,7 @@ catalog:
   "@electric-sql/pglite": ^0.5.8
   "@node-saml/node-saml": ^5.1.0
   "@solidjs/testing-library": ^0.8.10
-  "@sveltejs/package": ^2.5.8
+  "@sveltejs/package": ^3.0.0
   "@sveltejs/vite-plugin-svelte": ^7.3.1
   "@testing-library/react": ^16.3.3
   "@testing-library/svelte": ^5.4.2
@@ -85,8 +85,8 @@ catalog:
   # its peer range and checks a requested version against that range, with the
   # same semantics npm and pnpm apply to peers.
   semver: ^7.8.5
-  solid-js: ^1.9.15
-  svelte: ^5.57.1
+  solid-js: ^1.9.16
+  svelte: ^5.57.2
   svelte-check: ^4.7.6
   tsx: ^4.23.15
   # TypeScript 6/7 side by side. TS7 is the native Go compiler and ships no JS
@@ -106,7 +106,7 @@ catalog:
   vite: npm:@voidzero-dev/vite-plus-core@0.3.3
   vitest: 4.1.11
   vue: ^3.5.43
-  vue-tsc: ^3.3.11
+  vue-tsc: ^3.3.12
   xml-crypto: ^6.3.2
 
 # Peer ranges the PUBLISHED packages declare. Kept as a named catalog so the
