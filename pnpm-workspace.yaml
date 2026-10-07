@@ -143,14 +143,20 @@ overrides:
   # the catalog version so a hoisting reshuffle cannot introduce a second copy.
   effect: "catalog:"
   # Advisory floors for transitive dependencies of the dev toolchain, which
-  # `pnpm audit --audit-level high` (CI's last step) gates. None is reached by
-  # a published package: brace-expansion 5.x and js-yaml 3.x arrive via
-  # @effect/docgen (glob / ts-morph > minimatch; @effect/markdown-toc >
-  # gray-matter) and effect-solutions; postcss / nanoid via vite-plus-core; hono,
-  # @hono/node-server and lodash via alchemy's @prisma/dev (packages/alchemy's
-  # dev dependency). Scoped to the affected major so a consumer of another
-  # major keeps its own range. Drop each once its dependent ships the fix in
-  # range.
+  # `pnpm audit --audit-level high` (CI's last step) gates. No published
+  # package's `dependencies` reach them: brace-expansion 5.x and js-yaml 3.x
+  # arrive via @effect/docgen (glob / ts-morph > minimatch; @effect/markdown-toc
+  # > gray-matter) and effect-solutions; postcss / nanoid / source-map-js via
+  # vite-plus-core; hono, @hono/node-server and lodash via alchemy's @prisma/dev;
+  # sharp via alchemy's @alchemy.run/cloudflare-runtime; seroval via solid-js;
+  # shell-quote via @changesets/cli's launch-editor. alchemy and solid-js are
+  # also peers of effect-auth-alchemy / effect-auth-solid, so consumers resolve
+  # their own sharp / seroval: overrides never publish, and these floors only
+  # change what this workspace installs. Scoped to the affected major (minor
+  # for 0.x sharp) so a dependent on another major keeps its own range. Drop
+  # each once its dependent ships the fix in range (seroval: solid-js 1.9.17
+  # declares ~1.6.8; this one pushes solid-js 1.9.15 outside its declared
+  # ~1.5.4 until the catalog moves to it).
   "brace-expansion@5": ">=5.0.11"
   "js-yaml@3": ">=3.15.2"
   "nanoid@3": ">=3.3.18"
@@ -158,6 +164,10 @@ overrides:
   "hono@4": ">=4.12.25"
   "@hono/node-server@1": ">=1.19.10"
   "lodash@4": ">=4.17.24"
+  "seroval@1": ">=1.6.3"
+  "shell-quote@1": ">=1.11.0"
+  "source-map-js@1": ">=1.2.2"
+  "sharp@0.35": ">=0.35.5"
 
 allowBuilds:
   better-sqlite3: true
