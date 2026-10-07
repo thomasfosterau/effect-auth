@@ -14,9 +14,4 @@ export default defineConfig({
     // per-package types (e.g. @types/node globals).
     options: { typeAware: false, typeCheck: false },
   },
-  test: {
-    globals: true,
-    environment: "node",
-    exclude: ["**/node_modules/**", "**/dist/**", "**/.reference/**"],
-  },
 });
