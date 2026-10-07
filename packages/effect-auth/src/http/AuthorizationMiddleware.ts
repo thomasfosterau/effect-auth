@@ -66,16 +66,20 @@
  *
  * @example Gate one endpoint on a per-request resource
  * ```ts
+ * import { Effect } from "effect"
+ * import { HttpRouter } from "effect/http"
  * import { Entity } from "@thomasfosterau/effect-auth"
  * import { makeAuthorizationMiddleware } from "@thomasfosterau/effect-auth/http"
  *
  * // A route-level gate: AuthMiddleware answers "who is calling", this answers
- * // "may they do this". The resource is fixed here; pass a function of the
- * // request instead when the resource comes from the request.
- * const RequireDocRead = makeAuthorizationMiddleware({
- *   action: "doc:read",
- *   resource: Entity.ref("Document", "doc-1"),
- * })
+ * // "may they do this". The resource comes from the request's `:docId` path
+ * // param; pass a plain `{ action, resource }` instead when it is fixed.
+ * const RequireDocRead = makeAuthorizationMiddleware((_request) =>
+ *   Effect.gen(function* () {
+ *     const params = yield* HttpRouter.params
+ *     return { action: "doc:read", resource: Entity.ref("Document", params["docId"]!) }
+ *   }),
+ * )
  * ```
  *
  * @module http/authorization-middleware

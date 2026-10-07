@@ -87,15 +87,15 @@ vite.config.ts.timestamp-*
 # Build outputs (monorepo packages and examples)
 packages/*/dist/
 packages/*/node_modules/
-
-# docgen output (`vp run docs`, packages/effect-auth)
-packages/effect-auth/docs/
 examples/*/dist/
 examples/*/node_modules/
 examples/*/.output/
 examples/*/.nuxt/
 examples/*/.svelte-kit/
 examples/*/.react-router/
+
+# docgen output (`vp run docs`, packages/effect-auth)
+packages/effect-auth/docs/
 
 # Removed workspace directories (still present on disk)
 site/
