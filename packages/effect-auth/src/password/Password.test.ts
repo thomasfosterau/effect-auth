@@ -203,6 +203,19 @@ describe("ScryptHasher", () => {
     expect(valid).toBe(true);
   });
 
+  it("should hash and verify when p + 2 exceeds N (maxmem covers 128 * r * (N + p + 2))", async () => {
+    const { scryptHasher } = await import("./Password.ts");
+    // N = 4, r = 8, p = 8 needs 14336 bytes of scrypt memory; the former
+    // 256 * N * r formula allowed 8192, so both hashing and verifying failed.
+    const scrypt = scryptHasher({ cost: 4, blockSize: 8, parallelization: 8 });
+
+    const hashed = await Effect.runPromise(scrypt.hash("small-n-large-p"));
+    expect(hashed.hash.startsWith("scrypt$4$8$8$")).toBe(true);
+
+    expect(await Effect.runPromise(scrypt.verify("small-n-large-p", hashed.hash))).toBe(true);
+    expect(await Effect.runPromise(scrypt.verify("wrong-password", hashed.hash))).toBe(false);
+  });
+
   it("should interop with the multi-algorithm verifier", async () => {
     const { scryptHasher, pbkdf2Hasher, multiAlgorithmVerifier } = await import("./Password.ts");
     const verifier = multiAlgorithmVerifier([pbkdf2Hasher(), scryptHasher({ cost: 16384 })]);

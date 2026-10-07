@@ -350,8 +350,10 @@ export const scryptHasher = (options?: {
         password,
         salt,
         KEY_LENGTH,
-        // maxmem must exceed 128 * N * r
-        { N, r, p, maxmem: 128 * N * r * 2 },
+        // OpenSSL's scrypt allocates 128 * r * (N + p + 2) bytes and rejects
+        // a smaller maxmem (ERR_CRYPTO_INVALID_SCRYPT_PARAMS). The old
+        // 256 * N * r fell short whenever p + 2 > N.
+        { N, r, p, maxmem: 128 * r * (N + p + 2) },
         (error, derivedKey) => {
           if (error) {
             resume(
