@@ -15,6 +15,13 @@
  * every later rc: the unit suite only ever runs the catalog version, so this
  * is the check that proves each lower bound.
  *
+ * Every package under `packages/*` is packed, the framework bindings included,
+ * and each packed manifest must set `repository.url` and `repository.directory`
+ * to `packages/<dir>`. npm resolves a README's relative links against that
+ * directory, so a missing or wrong value breaks them on the npm page. Every
+ * offender is reported together. The bindings are packed for this check only:
+ * nothing imports them here.
+ *
  * Run `vp run build` first (the packed tarballs contain `dist/`), then:
  *
  *   vp run check:dist [-- --effect <version> | catalog] [--keep]
@@ -142,6 +149,7 @@ const unmetEffectRanges = (
 
 interface Manifest {
   readonly name: string;
+  readonly repository?: { readonly url?: string; readonly directory?: string };
   readonly exports?: Record<string, { readonly import?: string } | string>;
   readonly dependencies?: Record<string, string>;
   readonly peerDependencies?: Record<string, string>;
@@ -234,12 +242,19 @@ check("protectedField rejects a non-admin write", Result.isFailure(await decode(
 
 const scratch = mkdtempSync(join(tmpdir(), "effect-auth-dist-"));
 try {
+  // Every package, the bindings too: their manifests are checked below even
+  // though nothing imports them.
+  const dirs = readdirSync(join(root, "packages"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  const directoryErrors: Array<string> = [];
   const packed: Array<Packed> = [];
-  for (const target of allTargets) {
-    const cwd = join(root, "packages", target.dir);
+  for (const dir of dirs) {
+    const cwd = join(root, "packages", dir);
     const dist = join(cwd, "dist");
     if (!readdirSync(dist, { withFileTypes: true }).length) {
-      throw new Error(`${target.dir}: dist/ is empty; run \`vp run build\` first`);
+      throw new Error(`${dir}: dist/ is empty; run \`vp run build\` first`);
     }
     // `pnpm pack` rewrites `catalog:` / `workspace:*` exactly as publishing does.
     // pnpm prints the tarball path last, so there is no filename to guess at.
@@ -248,15 +263,32 @@ try {
       .split("\n")
       .pop();
     const file = printed ? basename(printed.trim()) : undefined;
-    if (!file?.endsWith(".tgz")) throw new Error(`${target.dir}: pnpm pack printed no tarball`);
+    if (!file?.endsWith(".tgz")) throw new Error(`${dir}: pnpm pack printed no tarball`);
     // The floor comes from the manifest a consumer will see, not a constant
     // here, so a peer range and the version it is checked at cannot drift.
     const manifest = JSON.parse(
       run("tar", ["-xzOf", file, "package/package.json"], scratch),
     ) as Manifest;
+    const expectedDirectory = `packages/${dir}`;
+    if (!manifest.repository?.url) {
+      directoryErrors.push(`${manifest.name}: repository.url is missing`);
+    }
+    if (manifest.repository?.directory !== expectedDirectory) {
+      const found = manifest.repository?.directory;
+      directoryErrors.push(
+        `${manifest.name}: repository.directory is ${found === undefined ? "missing" : JSON.stringify(found)}, expected "${expectedDirectory}"`,
+      );
+    }
+    const target = allTargets.find((candidate) => candidate.dir === dir);
+    if (!target) continue;
     const range = manifest.peerDependencies?.effect;
     if (!range) throw new Error(`${manifest.name}: the packed manifest has no effect peer`);
     packed.push({ target, manifest, file, range });
+  }
+  if (directoryErrors.length > 0) {
+    throw new Error(
+      `packed manifests must set repository.directory to their own packages/<dir>:\n${directoryErrors.join("\n")}`,
+    );
   }
 
   // The packed manifests depend on siblings by their real version, which is
