@@ -1,8 +1,9 @@
 /**
  * Dist-level import smoke test for each package's published Effect floor.
  *
- * Packs every package that imports Effect at module load and reads the
- * `effect` peer range from each packed manifest. By default each package is
+ * Packs every package under `packages/*`, checks each packed manifest's
+ * `repository` (below), and reads the `effect` peer range from each package
+ * that imports Effect at module load. By default each package is
  * installed beside exactly the lowest `effect` its own range admits (its
  * floor): packages that share a floor share one scratch project, and a
  * package with a higher floor (effect-auth-alchemy's `>=4.0.0`, above the
@@ -253,8 +254,8 @@ try {
   for (const dir of dirs) {
     const cwd = join(root, "packages", dir);
     const dist = join(cwd, "dist");
-    if (!readdirSync(dist, { withFileTypes: true }).length) {
-      throw new Error(`${dir}: dist/ is empty; run \`vp run build\` first`);
+    if (!existsSync(dist) || !readdirSync(dist, { withFileTypes: true }).length) {
+      throw new Error(`${dir}: dist/ is missing or empty; run \`vp run build\` first`);
     }
     // `pnpm pack` rewrites `catalog:` / `workspace:*` exactly as publishing does.
     // pnpm prints the tarball path last, so there is no filename to guess at.
@@ -287,7 +288,7 @@ try {
   }
   if (directoryErrors.length > 0) {
     throw new Error(
-      `packed manifests must set repository.directory to their own packages/<dir>:\n${directoryErrors.join("\n")}`,
+      `packed manifests must set repository.url and repository.directory (their own packages/<dir>):\n${directoryErrors.join("\n")}`,
     );
   }
 
