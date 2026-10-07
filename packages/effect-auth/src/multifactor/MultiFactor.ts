@@ -692,10 +692,24 @@ export const make = (
  * only requires `MultiFactorService` itself:
  *
  * ```ts
+ * import { Layer } from "effect"
+ * import { EmailPasswordService } from "@thomasfosterau/effect-auth/email"
+ * import {
+ *   MultiFactorGateLayer,
+ *   MultiFactorService,
+ *   type MultiFactorStore,
+ *   type PendingMultiFactorStore,
+ * } from "@thomasfosterau/effect-auth/multifactor"
+ *
+ * // Stand-in for the app's MultiFactorStore / PendingMultiFactorStore adapters.
+ * declare const multiFactorStores: Layer.Layer<MultiFactorStore | PendingMultiFactorStore>
+ *
  * const services = Layer.mergeAll(
  *   EmailPasswordService.layer(),
  *   MultiFactorGateLayer.pipe(
- *     Layer.provide(MultiFactorService.layer({ issuer: "MyApp" }).pipe(Layer.provide(multiFactorStores))),
+ *     Layer.provide(
+ *       MultiFactorService.layer({ issuer: "MyApp" }).pipe(Layer.provide(multiFactorStores)),
+ *     ),
  *   ),
  * )
  * ```

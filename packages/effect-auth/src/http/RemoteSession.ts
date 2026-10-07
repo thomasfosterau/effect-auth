@@ -97,6 +97,10 @@ const asFetch =
  * import { Effect } from "effect"
  * import { Http } from "@thomasfosterau/effect-auth"
  *
+ * // The service binding for the auth worker (for example `env.AUTH` on Cloudflare).
+ * declare const env: { readonly AUTH: Parameters<typeof Http.RemoteSession.layerFetcher>[0] }
+ * declare const payload: { readonly email: string; readonly password: string }
+ *
  * const program = Effect.gen(function* () {
  *   const client = yield* Http.client("https://auth.internal")
  *   return yield* client.auth.signIn({ payload })
@@ -312,6 +316,13 @@ export interface RemoteSessionClient {
  *
  * @example
  * ```ts
+ * import { Http } from "@thomasfosterau/effect-auth"
+ *
+ * // The service binding for the auth worker (for example `env.AUTH` on Cloudflare).
+ * declare const env: {
+ *   readonly AUTH: Parameters<typeof Http.RemoteSession.make>[0]["fetcher"]
+ * }
+ *
  * const auth = Http.RemoteSession.make({ fetcher: env.AUTH })
  * ```
  *
@@ -500,12 +511,22 @@ export const resolveAtEdge = (
  *
  * @example A Worker front door
  * ```ts
- * const { session, outcome, setCookie } = yield* Http.RemoteSession.resolveAtEdgeFailOpen({
- *   client: auth,
- *   request,
- *   onDegraded: (cause) => Effect.logError("auth binding unreachable", cause),
+ * import { Effect } from "effect"
+ * import { Http } from "@thomasfosterau/effect-auth"
+ *
+ * // The remote-session client from `RemoteSession.make`, and the incoming request.
+ * declare const auth: ReturnType<typeof Http.RemoteSession.make>
+ * declare const request: Request
+ *
+ * const handle = Effect.gen(function* () {
+ *   const { session, outcome, setCookie } = yield* Http.RemoteSession.resolveAtEdgeFailOpen({
+ *     client: auth,
+ *     request,
+ *     onDegraded: (cause) => Effect.logError("auth binding unreachable", cause),
+ *   })
+ *   // `session` feeds `SessionContext.layer`; `setCookie` is replayed on the response.
+ *   return { session, outcome, setCookie }
  * })
- * // `session` feeds `SessionContext.layer`; `setCookie` is replayed on the response.
  * ```
  *
  * @since 1.0.0

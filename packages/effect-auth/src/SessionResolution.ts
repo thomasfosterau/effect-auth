@@ -282,6 +282,8 @@ export const extractSessionToken = (
  * ```ts
  * import { SessionResolution } from "@thomasfosterau/effect-auth"
  *
+ * declare const request: Parameters<typeof SessionResolution.fromRequest>[0]
+ *
  * const credential = SessionResolution.detectCredential(
  *   SessionResolution.fromRequest(request),
  *   { name: "app_session" },
@@ -461,11 +463,25 @@ export interface ResolveFailOpenOptions<E, R> extends ResolveOptions<E, R> {
  *
  * @example
  * ```ts
- * const { session, outcome } = yield* SessionResolution.resolveFailOpen({
- *   credential,
- *   resolve: remote.resolve(request),
- *   onDegraded: (cause) =>
- *     Effect.logError("session resolution degraded to anonymous", cause),
+ * import { Effect } from "effect"
+ * import { SessionResolution } from "@thomasfosterau/effect-auth"
+ *
+ * declare const request: Request
+ * declare const credential: ReturnType<typeof SessionResolution.detectCredential>
+ * // The app's remote session lookup (for example, a call to an auth service).
+ * declare const remote: {
+ *   readonly resolve: (
+ *     request: Request,
+ *   ) => Parameters<typeof SessionResolution.resolveFailOpen>[0]["resolve"]
+ * }
+ *
+ * const program = Effect.gen(function* () {
+ *   const { session, outcome } = yield* SessionResolution.resolveFailOpen({
+ *     credential,
+ *     resolve: remote.resolve(request),
+ *     onDegraded: (cause) => Effect.logError("session resolution degraded to anonymous", cause),
+ *   })
+ *   return { session, outcome }
  * })
  * ```
  *

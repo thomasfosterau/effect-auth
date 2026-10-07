@@ -297,6 +297,12 @@ export const resolveClientIP = (
  *
  * @example
  * ```ts
+ * import { Layer } from "effect"
+ * import { clientIPLayer } from "@thomasfosterau/effect-auth"
+ *
+ * // The services the app already provides.
+ * declare const services: Layer.Layer<never>
+ *
  * // In HttpServer.make the trustedProxy option wires this up automatically.
  * // For custom usage:
  * const myLayer = Layer.mergeAll(services, clientIPLayer({ hopCount: 1 }))

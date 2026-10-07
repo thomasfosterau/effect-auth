@@ -21,11 +21,12 @@
  * @example
  * ```ts
  * import { Layer } from "effect"
- * import { AuditPlugin, composePlugins, Hooks, NormalizeEmailPlugin } from "@thomasfosterau/effect-auth"
+ * import { composePlugins, Hooks } from "@thomasfosterau/effect-auth"
+ * import { AuditPlugin, NormalizeEmailPlugin } from "@thomasfosterau/effect-auth/plugins"
  *
  * const layer = composePlugins([
  *   NormalizeEmailPlugin, // beforeSignUp/beforeSignIn: lowercases email
- *   AuditPlugin,          // afterSignIn/afterSignUp/afterSignOut: logs
+ *   AuditPlugin, // afterSignIn/afterSignUp/afterSignOut: logs
  * ]).pipe(Layer.provide(Hooks.Default))
  * ```
  *
@@ -179,7 +180,8 @@ export class Hooks extends Context.Service<
    * @example
    * ```ts
    * import { Effect } from "effect"
-   * import { Hooks, type AuthResult } from "@thomasfosterau/effect-auth"
+   * import { Hooks } from "@thomasfosterau/effect-auth"
+   * import type { AuthResult } from "@thomasfosterau/effect-auth/email"
    *
    * const afterSignIn = Hooks.tap((result: AuthResult) =>
    *   Effect.logInfo("signed in", { userId: result.user.id }),
@@ -308,7 +310,8 @@ const wrapHooks = (
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { makePlugin, type PluginImpls, type SignInInput } from "@thomasfosterau/effect-auth"
+ * import { makePlugin, type PluginImpls } from "@thomasfosterau/effect-auth"
+ * import type { SignInInput } from "@thomasfosterau/effect-auth/email"
  *
  * // Zero-dependency: pass the hook implementations directly.
  * const NormalizeEmail = makePlugin({
@@ -363,7 +366,8 @@ export function makePlugin(
  * @example
  * ```ts
  * import { Layer } from "effect"
- * import { AuditPlugin, composePlugins, Hooks, NormalizeEmailPlugin } from "@thomasfosterau/effect-auth"
+ * import { composePlugins, Hooks } from "@thomasfosterau/effect-auth"
+ * import { AuditPlugin, NormalizeEmailPlugin } from "@thomasfosterau/effect-auth/plugins"
  *
  * const layer = composePlugins([NormalizeEmailPlugin, AuditPlugin]).pipe(
  *   Layer.provide(Hooks.Default),

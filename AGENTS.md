@@ -40,7 +40,7 @@ A new package picks an archetype, gets a `vite.config.ts` that declares its task
 - `vp run -r test:unit` — every package's unit tests.
 - `vp run build` — every package's `dist/`. Each package's `build`, `check` and `test:unit` first build the workspace packages it depends on (their `exports` point at the gitignored `dist/`), so a fresh checkout needs no manual build.
 - `vp run check:dist` (network) — packs the built packages, installs them from the registry beside an exact `effect` and imports every entry point. By default each package gets the floor of its own packed `effect` peer range (`catalogs.alchemy-peers` floors effect-auth-alchemy above the rest, so it installs in its own project); `-- --effect catalog` installs all of them at the version the workspace builds against; `-- --effect <version>` skips each package whose range excludes that version. Each run fails if the installed `effect` misses the range one of our packages or an installed peer (such as `alchemy`) declares. Run `vp run build` first.
-- `vp run docs` — docgen for `packages/effect-auth`: writes the API reference and compiles and runs every JSDoc `@example`. It currently fails type-checking two `@example` blocks that hold pseudo-code, so it isn't a gate yet (#257).
+- `vp run docs` — docgen for `packages/effect-auth`: writes the API reference to `packages/effect-auth/docs/` (gitignored) and type-checks every JSDoc `@example`. The examples are compiled, not run (`runExamples` is off in `docgen.json`), and they import the package by its own name, so run `vp run build` first.
 - `pnpm changeset` — add a changeset.
 
 ## Verification
@@ -49,13 +49,14 @@ Before you report work as done, run the gates below in order and quote each comm
 
 1. `vp check`
 2. `vp run build`
-3. `vp run check:dist`
-4. `vp run check:dist -- --effect catalog`
-5. `vp run check`
-6. `vp run -r test:unit`
-7. `pnpm audit --audit-level high` (network)
+3. `vp run docs`
+4. `vp run check:dist`
+5. `vp run check:dist -- --effect catalog`
+6. `vp run check`
+7. `vp run -r test:unit`
+8. `pnpm audit --audit-level high` (network)
 
-CI's second job, `alchemy` ("Alchemy runtime"), runs `vp run --filter @thomasfosterau/effect-auth-alchemy test:alchemy`. CI doesn't run `vp run docs` until #257 lands.
+CI's second job, `alchemy` ("Alchemy runtime"), runs `vp run --filter @thomasfosterau/effect-auth-alchemy test:alchemy`.
 
 ## Branches and pull requests
 

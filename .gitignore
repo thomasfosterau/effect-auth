@@ -94,5 +94,8 @@ examples/*/.nuxt/
 examples/*/.svelte-kit/
 examples/*/.react-router/
 
+# docgen output (`vp run docs`, packages/effect-auth)
+packages/effect-auth/docs/
+
 # Removed workspace directories (still present on disk)
 site/

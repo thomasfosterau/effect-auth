@@ -697,7 +697,12 @@ const isAllowedDynamicRedirectUri = (uri: string, extraSchemes: readonly string[
  * endpoints available so a client can maintain its own registration.
  *
  * ```ts
- * OidcProviderService.layer(
+ * import { Redacted } from "effect"
+ * import { mcpProviderPreset, OidcProviderService } from "@thomasfosterau/effect-auth"
+ *
+ * declare const token: string
+ *
+ * const oidcLayer = OidcProviderService.layer(
  *   mcpProviderPreset({
  *     issuer: "https://mcp.example.com/api/auth",
  *     loginPage: "https://mcp.example.com/login",

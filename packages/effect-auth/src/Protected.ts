@@ -223,6 +223,9 @@ export interface ProtectedField<S extends Schema.Constraint> extends Schema.opti
  *
  * @example Redact rather than reject on the write side
  * ```ts
+ * import { Schema } from "effect"
+ * import { Policy, protectedField } from "@thomasfosterau/effect-auth"
+ *
  * protectedField(Schema.Boolean, {
  *   policies: Policy.role("admin"),
  *   action: "user:set-banned",

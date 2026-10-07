@@ -24,7 +24,15 @@
  * HTTP request boundary before running sign-in:
  *
  * ```ts
- * Effect.provide(Context.make(TrustedDeviceCookieRef, request.cookie("device")))
+ * import { Context, Effect } from "effect"
+ * import { TrustedDeviceCookieRef } from "@thomasfosterau/effect-auth"
+ *
+ * // The incoming request, with its cookie reader.
+ * declare const request: { readonly cookie: (name: string) => string | undefined }
+ *
+ * const withDeviceCookie = Effect.provide(
+ *   Context.make(TrustedDeviceCookieRef, request.cookie("device")),
+ * )
  * ```
  *
  * @module trusted-device
@@ -83,7 +91,15 @@ export class TrustedDeviceStore extends Context.Service<
  * Override it at the request boundary before running sign-in:
  *
  * ```ts
- * Effect.provide(Context.make(TrustedDeviceCookieRef, req.cookie("device-token")))
+ * import { Context, Effect } from "effect"
+ * import { TrustedDeviceCookieRef } from "@thomasfosterau/effect-auth"
+ *
+ * // The incoming request, with its cookie reader.
+ * declare const req: { readonly cookie: (name: string) => string | undefined }
+ *
+ * const withDeviceCookie = Effect.provide(
+ *   Context.make(TrustedDeviceCookieRef, req.cookie("device-token")),
+ * )
  * ```
  *
  * Because `Context.Reference` carries a `defaultValue`, yielding it has
@@ -321,11 +337,30 @@ export const gate = (
  * a TOTP challenge is started via `MultiFactorService`.
  *
  * ```ts
+ * import { Layer, Redacted } from "effect"
+ * import { TrustedDeviceService, type TrustedDeviceStore, TrustedDeviceWithMultiFactorGateLayer } from "@thomasfosterau/effect-auth"
+ * import { EmailPasswordService } from "@thomasfosterau/effect-auth/email"
+ * import {
+ *   MultiFactorService,
+ *   type MultiFactorStore,
+ *   type PendingMultiFactorStore,
+ * } from "@thomasfosterau/effect-auth/multifactor"
+ *
+ * // Stand-ins for the app's storage adapters.
+ * declare const trustedDeviceStore: Layer.Layer<TrustedDeviceStore>
+ * declare const multiFactorStores: Layer.Layer<MultiFactorStore | PendingMultiFactorStore>
+ *
  * const services = Layer.mergeAll(
  *   EmailPasswordService.layer(),
  *   TrustedDeviceWithMultiFactorGateLayer.pipe(
- *     Layer.provide(TrustedDeviceService.layer({ secret: Redacted.make("...") }).pipe(Layer.provide(trustedDeviceStore))),
- *     Layer.provide(MultiFactorService.layer({ issuer: "MyApp" }).pipe(Layer.provide(multiFactorStores))),
+ *     Layer.provide(
+ *       TrustedDeviceService.layer({ secret: Redacted.make("...") }).pipe(
+ *         Layer.provide(trustedDeviceStore),
+ *       ),
+ *     ),
+ *     Layer.provide(
+ *       MultiFactorService.layer({ issuer: "MyApp" }).pipe(Layer.provide(multiFactorStores)),
+ *     ),
  *   ),
  * )
  * ```
