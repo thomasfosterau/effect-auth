@@ -4,36 +4,44 @@
  * `timestamptz` behave exactly as they do in production.
  */
 
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
-import { migrationStatements, type Tables, tables } from "./PgSchema.ts";
+import { type Tables, tables } from "./PgSchema.ts";
 import { layer as userStoreLayer } from "./UserStore.ts";
+import { migratedPglite, truncateTables } from "./testing/PgliteTemplate.ts";
 
 /**
- * Spin up a fresh in-memory Postgres, apply the exported DDL, run `build`'s
- * program against the user store, then tear the database down.
+ * The file's one in-memory Postgres, opened from the run's migrated template
+ * (#291) and emptied before each test.
  */
-const runFresh = async <A, E>(
+let client: PGlite;
+
+beforeAll(async () => {
+  client = await migratedPglite();
+});
+
+afterAll(async () => {
+  await client?.close();
+});
+
+beforeEach(async () => {
+  await truncateTables(client);
+});
+
+/** Run `build`'s program against the user store on the file's database. */
+const runWithDatabase = <A, E>(
   build: (db: PgliteDatabase) => Effect.Effect<A, E, Auth.UserStore>,
 ): Promise<A> => {
-  const client = await PGlite.create();
-  try {
-    for (const statement of migrationStatements()) {
-      await client.exec(statement);
-    }
-    const db = drizzle(client);
-    return await Effect.runPromise(
-      build(db).pipe(
-        Effect.provide(userStoreLayer(tables).pipe(Layer.provide(databaseLayer(db)))),
-      ) as Effect.Effect<A, E>,
-    );
-  } finally {
-    await client.close();
-  }
+  const db = drizzle(client);
+  return Effect.runPromise(
+    build(db).pipe(
+      Effect.provide(userStoreLayer(tables).pipe(Layer.provide(databaseLayer(db)))),
+    ) as Effect.Effect<A, E>,
+  );
 };
 
 const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
@@ -63,7 +71,7 @@ const seedUser = (
 
 describe("UserStore", () => {
   it("maps rows to users, omitting absent optional fields", async () => {
-    const result = await runFresh((db) =>
+    const result = await runWithDatabase((db) =>
       Effect.gen(function* () {
         yield* seedUser(db, {
           id: "full",

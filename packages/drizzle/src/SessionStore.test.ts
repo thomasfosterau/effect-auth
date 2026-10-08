@@ -7,35 +7,41 @@
  * would paper over.
  */
 
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
-import { migrationStatements, tables } from "./PgSchema.ts";
+import { tables } from "./PgSchema.ts";
 import { layer as sessionStoreLayer } from "./SessionStore.ts";
+import { migratedPglite, truncateTables } from "./testing/PgliteTemplate.ts";
 
 /**
- * Spin up a fresh in-memory Postgres, apply the exported DDL, run `build`'s
- * program against the session store, then tear the database down.
+ * The file's one in-memory Postgres, opened from the run's migrated template
+ * (#291) and emptied before each test.
  */
-const runFresh = async <A, E>(build: () => Effect.Effect<A, E, Auth.SessionStore>): Promise<A> => {
-  const client = await PGlite.create();
-  try {
-    for (const statement of migrationStatements()) {
-      await client.exec(statement);
-    }
-    const db = drizzle(client);
-    return await Effect.runPromise(
-      build().pipe(
-        Effect.provide(sessionStoreLayer(tables).pipe(Layer.provide(databaseLayer(db)))),
-      ) as Effect.Effect<A, E>,
-    );
-  } finally {
-    await client.close();
-  }
-};
+let client: PGlite;
+
+beforeAll(async () => {
+  client = await migratedPglite();
+});
+
+afterAll(async () => {
+  await client?.close();
+});
+
+beforeEach(async () => {
+  await truncateTables(client);
+});
+
+/** Run `build`'s program against the session store on the file's database. */
+const runWithDatabase = <A, E>(build: () => Effect.Effect<A, E, Auth.SessionStore>): Promise<A> =>
+  Effect.runPromise(
+    build().pipe(
+      Effect.provide(sessionStoreLayer(tables).pipe(Layer.provide(databaseLayer(drizzle(client))))),
+    ) as Effect.Effect<A, E>,
+  );
 
 const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
 
@@ -51,7 +57,7 @@ const makeSession = (overrides: Partial<Auth.Session> = {}): Auth.Session => ({
 
 describe("SessionStore", () => {
   it("round-trips a session through create/get/update/delete", async () => {
-    const result = await runFresh(() =>
+    const result = await runWithDatabase(() =>
       Effect.gen(function* () {
         const store = yield* Auth.SessionStore;
         const session = makeSession({ attributes: { device: "laptop" } });
@@ -86,7 +92,7 @@ describe("SessionStore", () => {
   });
 
   it("returns null on a miss and no-ops on deletes of absent rows", async () => {
-    const result = await runFresh(() =>
+    const result = await runWithDatabase(() =>
       Effect.gen(function* () {
         const store = yield* Auth.SessionStore;
         const missing = yield* store.get("nope");
@@ -104,7 +110,7 @@ describe("SessionStore", () => {
   it("stores expiry as timestamptz without interpreting it", async () => {
     // Expiry is the service layer's decision; the store persists and returns
     // whatever instant it was given, including one already in the past.
-    const result = await runFresh(() =>
+    const result = await runWithDatabase(() =>
       Effect.gen(function* () {
         const store = yield* Auth.SessionStore;
         const expired = makeSession({ id: "expired", expiresAt: at(-60_000) });
@@ -134,7 +140,7 @@ describe("SessionStore", () => {
       nested: { ip: "10.0.0.1", tags: [1, 2, 3] },
     };
 
-    const result = await runFresh(() =>
+    const result = await runWithDatabase(() =>
       Effect.gen(function* () {
         const store = yield* Auth.SessionStore;
         yield* store.create(makeSession({ attributes }));
@@ -152,7 +158,7 @@ describe("SessionStore", () => {
   });
 
   it("lists a user's sessions by createdAt and scopes deleteByUserId", async () => {
-    const result = await runFresh(() =>
+    const result = await runWithDatabase(() =>
       Effect.gen(function* () {
         const store = yield* Auth.SessionStore;
         yield* store.create(makeSession({ id: "b", createdAt: at(2000) }));

@@ -12,16 +12,17 @@
  * `timestamptz` behave as they do in production.
  */
 
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
-import { eq } from "drizzle-orm";
+import { eq, getTableName } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { type AuthSchema, defineSchema } from "./Columns.ts";
 import { databaseLayer } from "./Database.ts";
 import { layer as storesLayer } from "./Layers.ts";
+import { migratedPglite, truncate } from "./testing/PgliteTemplate.ts";
 
 type StoreServices = Auth.SessionStore | Auth.UserStore | Auth.IdentifierStore;
 
@@ -145,35 +146,52 @@ const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs)
 const userId = "3f1c0e8a-8b1a-4a5e-9c0e-0a1b2c3d4e5f";
 const identifierId = "7a2d4b6c-1e3f-4058-9a7b-2c4d6e8f0a1b";
 
-const runFresh = async <A, E>(
+/**
+ * The file's one in-memory Postgres, opened from the run's migrated template
+ * (#291), with the application's own tables applied on top, and emptied before
+ * each test. Each test starts with the one `account` row the others read.
+ */
+let client: PGlite;
+
+beforeAll(async () => {
+  client = await migratedPglite();
+  for (const statement of appMigration) {
+    await client.exec(statement);
+  }
+});
+
+afterAll(async () => {
+  await client?.close();
+});
+
+beforeEach(async () => {
+  await truncate(
+    client,
+    [appIdentifiers, appSessions, appUsers].map((table) => getTableName(table)),
+  );
+  await drizzle(client)
+    .insert(appUsers)
+    .values({
+      key: userId,
+      displayName: "Ada",
+      avatar: "https://example.com/ada.png",
+      meta: { plan: "pro" },
+      born: at(0),
+      touched: at(5_000),
+    })
+    .execute();
+});
+
+/** Run `build`'s program against the stores, bound to the application's tables. */
+const runWithDatabase = <A, E>(
   build: (db: PgliteDatabase) => Effect.Effect<A, E, StoreServices>,
 ): Promise<A> => {
-  const client = await PGlite.create();
-  try {
-    for (const statement of appMigration) {
-      await client.exec(statement);
-    }
-    const db = drizzle(client);
-    await db
-      .insert(appUsers)
-      .values({
-        key: userId,
-        displayName: "Ada",
-        avatar: "https://example.com/ada.png",
-        meta: { plan: "pro" },
-        born: at(0),
-        touched: at(5_000),
-      })
-      .execute();
-
-    return await Effect.runPromise(
-      build(db).pipe(
-        Effect.provide(storesLayer(appSchema).pipe(Layer.provide(databaseLayer(db)))),
-      ) as Effect.Effect<A, E>,
-    );
-  } finally {
-    await client.close();
-  }
+  const db = drizzle(client);
+  return Effect.runPromise(
+    build(db).pipe(
+      Effect.provide(storesLayer(appSchema).pipe(Layer.provide(databaseLayer(db)))),
+    ) as Effect.Effect<A, E>,
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -233,7 +251,9 @@ describe("stores over an application's own schema", () => {
   });
 
   it("reads a user out of uuid-keyed columns under the application's names", async () => {
-    const user = await runFresh(() => Effect.flatMap(Auth.UserStore, (store) => store.get(userId)));
+    const user = await runWithDatabase(() =>
+      Effect.flatMap(Auth.UserStore, (store) => store.get(userId)),
+    );
 
     expect(user).toEqual({
       id: userId,
@@ -255,7 +275,7 @@ describe("stores over an application's own schema", () => {
       attributes: { device: "laptop" },
     };
 
-    const result = await runFresh((db) =>
+    const result = await runWithDatabase((db) =>
       Effect.gen(function* () {
         const store = yield* Auth.SessionStore;
         yield* store.create(session);
@@ -290,7 +310,7 @@ describe("stores over an application's own schema", () => {
       createdAt: at(0),
     };
 
-    const result = await runFresh(() =>
+    const result = await runWithDatabase(() =>
       Effect.gen(function* () {
         const store = yield* Auth.IdentifierStore;
         yield* store.create(identifier);
@@ -313,7 +333,7 @@ describe("stores over an application's own schema", () => {
   });
 
   it("surfaces the application's own unique index as the claim mechanism", async () => {
-    const exit = await runFresh(() =>
+    const exit = await runWithDatabase(() =>
       Effect.gen(function* () {
         const store = yield* Auth.IdentifierStore;
         yield* store.create({

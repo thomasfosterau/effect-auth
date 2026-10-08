@@ -12,17 +12,23 @@ import { inject } from "vite-plus/test";
 import { tables } from "../PgSchema.ts";
 
 /**
- * A new in-memory Postgres with this package's tables already applied, started
- * from the run's template rather than from `initdb`.
- *
- * Each call is its own PGlite instance — its own WASM module and Postgres
- * backend — so nothing written through one is visible through another.
+ * A new in-memory Postgres started from the run's template rather than from
+ * `initdb`. Each call is its own PGlite instance (its own WASM module and
+ * Postgres backend), so nothing written through one is visible through
+ * another. The package's tables are already applied; a file that needs other
+ * tables applies its own DDL on top.
  */
 export const migratedPglite = async (): Promise<PGlite> =>
   PGlite.create({ loadDataDir: new Blob([await readFile(inject("pgliteTemplate"))]) });
 
-/** Empty every table {@link migratedPglite} created, keeping the schema. */
-export const truncateTables = async (client: PGlite): Promise<void> => {
-  const names = Object.values(tables).map((table) => `"${getTableName(table)}"`);
-  await client.exec(`TRUNCATE ${names.join(", ")}`);
+/** Empty the named tables, keeping their schema. */
+export const truncate = async (client: PGlite, names: ReadonlyArray<string>): Promise<void> => {
+  await client.exec(`TRUNCATE ${names.map((name) => `"${name}"`).join(", ")}`);
 };
+
+/** Empty every package table {@link migratedPglite} created, keeping the schema. */
+export const truncateTables = (client: PGlite): Promise<void> =>
+  truncate(
+    client,
+    Object.values(tables).map((table) => getTableName(table)),
+  );

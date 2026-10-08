@@ -23,15 +23,17 @@
  * query, whether the fiber resolving it carries a `TransactionConnection`.
  */
 
+import type { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
 import * as EffectPglite from "drizzle-orm-effect/effect-pglite";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { effectDatabaseLayer, type EffectDrizzleDatabase } from "./Database.ts";
 import { layer as storesLayer } from "./Layers.ts";
-import { migrationStatements, tables } from "./PgSchema.ts";
+import { tables } from "./PgSchema.ts";
 import * as Requests from "./Requests.ts";
+import { migratedPglite, truncateTables } from "./testing/PgliteTemplate.ts";
 
 const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
 
@@ -60,10 +62,28 @@ interface Observed {
   readonly fibers: ReadonlyArray<{ readonly phase: string; readonly inTransaction: boolean }>;
 }
 
+/**
+ * The file's one in-memory Postgres, opened from the run's migrated template
+ * (#291) and emptied before each test. The stores run on it through
+ * `PgliteClient.layer({ liveClient })`, which borrows the instance and leaves
+ * closing it to `afterAll`.
+ */
+let client: PGlite;
+
+beforeAll(async () => {
+  client = await migratedPglite();
+});
+
+afterAll(async () => {
+  await client?.close();
+});
+
+beforeEach(async () => {
+  await truncateTables(client);
+});
+
 const run = (): Promise<Observed> => {
   const program = Effect.gen(function* () {
-    const sql = yield* PgliteClient.PgliteClient;
-    for (const statement of migrationStatements()) yield* sql.unsafe(statement);
     const db = yield* EffectPglite.make();
 
     let phase = "outside";
@@ -122,7 +142,7 @@ const run = (): Promise<Observed> => {
   return Effect.runPromise(
     program.pipe(
       Effect.provide(
-        Layer.mergeAll(EffectPglite.DefaultServices, PgliteClient.layer({ dataDir: "memory://" })),
+        Layer.mergeAll(EffectPglite.DefaultServices, PgliteClient.layer({ liveClient: client })),
       ),
     ) as Effect.Effect<Observed, unknown>,
   );

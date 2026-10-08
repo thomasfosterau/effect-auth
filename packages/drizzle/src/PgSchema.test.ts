@@ -4,11 +4,11 @@
  * (PGlite — Postgres compiled to WASM, in-process, no server).
  */
 
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { getTableName } from "drizzle-orm";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
 import { layer } from "./Layers.ts";
@@ -23,33 +23,60 @@ import {
   usersTable,
 } from "./PgSchema.ts";
 import type { TableNames } from "./Schema.ts";
+import { migratedPglite, truncate } from "./testing/PgliteTemplate.ts";
 
 type StoreServices = Auth.SessionStore | Auth.UserStore | Auth.IdentifierStore;
 
-/**
- * Spin up a fresh in-memory Postgres, apply the exported DDL, run `build`'s
- * program against all three stores, then tear the database down.
- */
-const runFresh = async <A, E>(
-  build: (db: PgliteDatabase, tables: Tables) => Effect.Effect<A, E, StoreServices>,
-  names?: Partial<TableNames>,
-): Promise<A> => {
-  const client = await PGlite.create();
-  try {
-    for (const statement of migrationStatements(names)) {
-      await client.exec(statement);
-    }
-    const db = drizzle(client);
-    const tables = names === undefined ? defaultTables : defineTables(names);
-    return await Effect.runPromise(
-      build(db, tables).pipe(
-        Effect.provide(layer(tables).pipe(Layer.provide(databaseLayer(db)))),
-      ) as Effect.Effect<A, E>,
-    );
-  } finally {
-    await client.close();
-  }
+/** The custom names the first test binds every store to. */
+const names: TableNames = {
+  sessions: "app_sessions",
+  users: "app_users",
+  identifiers: "app_identifiers",
 };
+const customTables = defineTables(names);
+
+/**
+ * The file's one in-memory Postgres, opened from the run's migrated template
+ * (#291). The template holds this package's default `effect_auth_*` tables,
+ * and the stores here are bound to the custom names, so the file drops the
+ * defaults and applies its own DDL on top. Emptied before each test.
+ */
+let client: PGlite;
+let db: PgliteDatabase;
+
+beforeAll(async () => {
+  client = await migratedPglite();
+  await client.exec(
+    `DROP TABLE ${Object.values(defaultTables)
+      .map((table) => getTableName(table))
+      .join(", ")}`,
+  );
+  for (const statement of migrationStatements(names)) {
+    await client.exec(statement);
+  }
+  db = drizzle(client);
+});
+
+afterAll(async () => {
+  await client?.close();
+});
+
+beforeEach(async () => {
+  await truncate(
+    client,
+    Object.values(customTables).map((table) => getTableName(table)),
+  );
+});
+
+/** Run `build`'s program against all three stores under the custom names. */
+const runWithCustomNames = <A, E>(
+  build: (db: PgliteDatabase, tables: Tables) => Effect.Effect<A, E, StoreServices>,
+): Promise<A> =>
+  Effect.runPromise(
+    build(db, customTables).pipe(
+      Effect.provide(layer(customTables).pipe(Layer.provide(databaseLayer(db)))),
+    ) as Effect.Effect<A, E>,
+  );
 
 const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
 
@@ -99,41 +126,33 @@ const seedUser = (
 
 describe("Schema", () => {
   it("drives every store from custom table names", async () => {
-    const names: TableNames = {
-      sessions: "app_sessions",
-      users: "app_users",
-      identifiers: "app_identifiers",
-    };
+    const result = await runWithCustomNames((db, tables) =>
+      Effect.gen(function* () {
+        yield* seedUser(db, tables, { id: "user-1" });
 
-    const result = await runFresh(
-      (db, tables) =>
-        Effect.gen(function* () {
-          yield* seedUser(db, tables, { id: "user-1" });
+        const sessions = yield* Auth.SessionStore;
+        const users = yield* Auth.UserStore;
+        const identifiers = yield* Auth.IdentifierStore;
 
-          const sessions = yield* Auth.SessionStore;
-          const users = yield* Auth.UserStore;
-          const identifiers = yield* Auth.IdentifierStore;
+        yield* sessions.create(makeSession({ attributes: { via: "custom" } }));
+        yield* identifiers.create(identifier());
 
-          yield* sessions.create(makeSession({ attributes: { via: "custom" } }));
-          yield* identifiers.create(identifier());
-
-          const present = yield* Effect.promise(async () => {
-            const rows = await db.execute(
-              `SELECT table_name FROM information_schema.tables
+        const present = yield* Effect.promise(async () => {
+          const rows = await db.execute(
+            `SELECT table_name FROM information_schema.tables
                  WHERE table_schema = 'public' ORDER BY table_name`,
-            );
-            const list = Array.isArray(rows) ? rows : (rows as { rows: unknown[] }).rows;
-            return list.map((row) => (row as { table_name: string }).table_name);
-          });
+          );
+          const list = Array.isArray(rows) ? rows : (rows as { rows: unknown[] }).rows;
+          return list.map((row) => (row as { table_name: string }).table_name);
+        });
 
-          return {
-            present,
-            session: yield* sessions.get("session-1"),
-            user: yield* users.get("user-1"),
-            identifier: yield* identifiers.getByValue("email", "ada@example.com"),
-          };
-        }),
-      names,
+        return {
+          present,
+          session: yield* sessions.get("session-1"),
+          user: yield* users.get("user-1"),
+          identifier: yield* identifiers.getByValue("email", "ada@example.com"),
+        };
+      }),
     );
 
     expect(result.present).toEqual(["app_identifiers", "app_sessions", "app_users"]);

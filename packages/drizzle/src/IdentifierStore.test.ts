@@ -5,37 +5,45 @@
  * production.
  */
 
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
 import { layer as identifierStoreLayer } from "./IdentifierStore.ts";
-import { migrationStatements, tables } from "./PgSchema.ts";
+import { tables } from "./PgSchema.ts";
+import { migratedPglite, truncateTables } from "./testing/PgliteTemplate.ts";
 
 /**
- * Spin up a fresh in-memory Postgres, apply the exported DDL, run `build`'s
- * program against the identifier store, then tear the database down.
+ * The file's one in-memory Postgres, opened from the run's migrated template
+ * (#291) and emptied before each test.
  */
-const runFresh = async <A, E>(
+let client: PGlite;
+
+beforeAll(async () => {
+  client = await migratedPglite();
+});
+
+afterAll(async () => {
+  await client?.close();
+});
+
+beforeEach(async () => {
+  await truncateTables(client);
+});
+
+/** Run `build`'s program against the identifier store on the file's database. */
+const runWithDatabase = <A, E>(
   build: () => Effect.Effect<A, E, Auth.IdentifierStore>,
-): Promise<A> => {
-  const client = await PGlite.create();
-  try {
-    for (const statement of migrationStatements()) {
-      await client.exec(statement);
-    }
-    const db = drizzle(client);
-    return await Effect.runPromise(
-      build().pipe(
-        Effect.provide(identifierStoreLayer(tables).pipe(Layer.provide(databaseLayer(db)))),
-      ) as Effect.Effect<A, E>,
-    );
-  } finally {
-    await client.close();
-  }
-};
+): Promise<A> =>
+  Effect.runPromise(
+    build().pipe(
+      Effect.provide(
+        identifierStoreLayer(tables).pipe(Layer.provide(databaseLayer(drizzle(client)))),
+      ),
+    ) as Effect.Effect<A, E>,
+  );
 
 const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
 
@@ -51,7 +59,7 @@ const identifier = (overrides: Partial<Auth.Identifier> = {}): Auth.Identifier =
 
 describe("IdentifierStore", () => {
   it("creates and resolves identifiers by (type, value)", async () => {
-    const result = await runFresh(() =>
+    const result = await runWithDatabase(() =>
       Effect.gen(function* () {
         const store = yield* Auth.IdentifierStore;
         const created = yield* store.create(identifier());
@@ -79,7 +87,7 @@ describe("IdentifierStore", () => {
   });
 
   it("rejects a duplicate (type, value) with AuthError, which claimIdentifier reads as taken", async () => {
-    const result = await runFresh(() =>
+    const result = await runWithDatabase(() =>
       Effect.gen(function* () {
         const store = yield* Auth.IdentifierStore;
         yield* store.create(identifier());
@@ -121,7 +129,7 @@ describe("IdentifierStore", () => {
   });
 
   it("lists a user's identifiers by createdAt ascending", async () => {
-    const result = await runFresh(() =>
+    const result = await runWithDatabase(() =>
       Effect.gen(function* () {
         const store = yield* Auth.IdentifierStore;
         yield* store.create(
@@ -147,7 +155,7 @@ describe("IdentifierStore", () => {
   });
 
   it("setVerified stamps the timestamp and returns null for an unknown id", async () => {
-    const result = await runFresh(() =>
+    const result = await runWithDatabase(() =>
       Effect.gen(function* () {
         const store = yield* Auth.IdentifierStore;
         yield* store.create(identifier());
@@ -168,7 +176,7 @@ describe("IdentifierStore", () => {
   });
 
   it("deletes one identifier or every identifier of a user, no-op when absent", async () => {
-    const result = await runFresh(() =>
+    const result = await runWithDatabase(() =>
       Effect.gen(function* () {
         const store = yield* Auth.IdentifierStore;
         yield* store.create(identifier({ id: "email-1" }));

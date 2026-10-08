@@ -15,7 +15,7 @@
  * as hard as the negative ones), and website `apps/api/tests/
  * list-visibility-filters.test.ts` (the rendered SQL is pinned as text).
  */
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { eq } from "drizzle-orm";
 import { boolean, pgTable, text } from "drizzle-orm/pg-core";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
@@ -24,6 +24,7 @@ import { Context, Effect, Option } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { isFollowerLayer, ownedListFilter } from "./OwnedListFilter.ts";
+import { migratedPglite } from "./testing/PgliteTemplate.ts";
 
 const posts = pgTable("posts", {
   id: text("id").primaryKey(),
@@ -75,11 +76,16 @@ const VIEWERS: ReadonlyArray<AppUser | null> = [
   { id: "odd", role: "superadmin" },
 ];
 
+/**
+ * The file's one in-memory Postgres, opened from the run's migrated template
+ * (#291). The tables below are this file's own, applied on top; the rows are
+ * only read, so nothing needs emptying between tests.
+ */
 let client: PGlite;
 let db: PgliteDatabase;
 
 beforeAll(async () => {
-  client = await PGlite.create();
+  client = await migratedPglite();
   await client.exec(`
     create table posts (id text primary key, owner_id text not null, visibility text not null, draft boolean not null);
     create table gardens (id text primary key, owner_id text not null, visibility text not null);
