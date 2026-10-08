@@ -20,6 +20,7 @@
     "check": "vp run -r check",
     "docs": "vp run --filter @thomasfosterau/effect-auth docs",
     "check:dist": "tsx scripts/check-dist.ts",
+    "check:scripts": "tsc -p tsconfig.scripts.json",
     "changeset": "changeset",
     "version": "changeset version && pnpm install --lockfile-only",
     "release": "pnpm -r --filter \"./packages/*\" publish --access public --no-git-checks && changeset tag"
@@ -30,6 +31,7 @@
     "@effect/language-service": "catalog:",
     "@effect/tsgo": "catalog:",
     "@types/node": "catalog:",
+    "@types/semver": "catalog:",
     "@typescript/native": "catalog:",
     "effect": "catalog:",
     "effect-solutions": "catalog:",
