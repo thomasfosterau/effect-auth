@@ -27,20 +27,34 @@
  *
  *   vp run check:dist [-- --effect <version> | catalog] [--keep]
  *
+ * Third-party peers are installed the same way. `alchemy` (beside
+ * effect-auth-alchemy) and `drizzle-orm` (beside effect-auth-drizzle) go in at
+ * `semver.minVersion` of the range the packed manifest declares for them, so a
+ * default run proves each peer floor the way it proves `effect`. The floor must
+ * be a version npm publishes: a strict bound such as `>X` can name one that was
+ * never released, and the check fails then, naming the package, peer, range
+ * and computed version, rather than letting npm fail with an unclear error. When
+ * several packages in one project declare the same peer, the highest floor is
+ * installed, and the post-install check proves every declared range holds.
+ * The log prints each peer version it installs and why.
+ *
  * `--effect catalog` installs every package beside the version the workspace
- * builds against, and fails if that version is outside any package's peer
- * range (the workspace would be building a package against an `effect` it
- * does not support). `--effect <version>` installs every package whose peer
- * range admits that version beside it, and skips (and names) each package
- * whose range does not: a version below a package's floor is a combination
- * that package does not support. `--keep` leaves the scratch projects on disk
- * (the path is printed) instead of deleting them, for debugging a failure.
+ * builds against, and every peer at its catalog version (the newest leg). It
+ * fails if that `effect` is outside any package's peer range (the workspace
+ * would be building a package against an `effect` it does not support).
+ * `--effect <version>` installs every package whose peer range admits that
+ * version beside it, skips (and names) each package whose range does not: a
+ * version below a package's floor is a combination that package does not
+ * support. Its peers are installed at their floors, as in a default run.
+ * `--keep` leaves the scratch projects on disk (the path is printed) instead of
+ * deleting them, for debugging a failure.
  *
  * The install uses `--legacy-peer-deps`, which installs an `effect` that a
  * peer range rejects without complaint, so after each install the check reads
  * the `effect` range every one of our packages and every peer installed
  * beside them (such as `alchemy`) declares, and fails if the installed
- * `effect` misses one.
+ * `effect` misses one. It also checks each installed peer against the range
+ * our packed manifests declare for it.
  *
  * Importing is not enough: the Effect API also moved *inside* the supported
  * range in places that only bite when a function is called (rc.116 replaced
@@ -70,7 +84,10 @@ const root = resolve(import.meta.dirname, "..");
 /** Workspace directories smoke-tested here, with any peer to install beside them. */
 interface Target {
   readonly dir: string;
-  /** Peers to install beside it, at the version the workspace catalog pins. */
+  /**
+   * Third-party peers to install beside it: at the floor of the range the
+   * packed manifest declares (the catalog version under `--effect catalog`).
+   */
   readonly peers?: ReadonlyArray<string>;
 }
 
@@ -109,6 +126,37 @@ const keep = process.argv.includes("--keep");
 
 const run = (cmd: string, args: ReadonlyArray<string>, cwd: string): string =>
   execFileSync(cmd, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
+
+const publishedCache = new Map<string, ReadonlyArray<string>>();
+
+/** Every version of `name` npm publishes, read once per package. */
+const publishedVersions = (name: string): ReadonlyArray<string> => {
+  let versions = publishedCache.get(name);
+  if (!versions) {
+    const parsed: unknown = JSON.parse(run("npm", ["view", name, "versions", "--json"], root));
+    versions = ([] as ReadonlyArray<unknown>).concat(parsed).map(String);
+    publishedCache.set(name, versions);
+  }
+  return versions;
+};
+
+/**
+ * The lowest version `range` admits, which must be one npm publishes. A strict
+ * lower bound such as `>X` can name a version that was never released
+ * (`>2.0.0-beta.79` gives `2.0.0-beta.79.0`), and an install at that version
+ * fails with an unclear error, so it is refused here, naming the package, the
+ * peer, the range and the computed version.
+ */
+const floorOf = (owner: string, peer: string, range: string): string => {
+  const version = semver.minVersion(range)?.version;
+  if (!version) throw new Error(`${owner}: ${peer} peer range ${range} has no lowest version`);
+  if (!publishedVersions(peer).includes(version)) {
+    throw new Error(
+      `${owner}: ${peer} peer range ${range} has the lowest version ${version}, which npm does not publish (a strict lower bound such as \`>X\` can name a version that was never released; use \`>=\`)`,
+    );
+  }
+  return version;
+};
 
 /**
  * Every installed copy of `effect`. `npm ls` exits non-zero for any unmet
@@ -171,11 +219,7 @@ interface Packed {
  * (an explicit `--effect` outside its range).
  */
 const effectFor = ({ manifest: { name }, range }: Packed): string | undefined => {
-  if (requested === undefined) {
-    const floor = semver.minVersion(range)?.version;
-    if (!floor) throw new Error(`${name}: effect peer range ${range} has no lowest version`);
-    return floor;
-  }
+  if (requested === undefined) return floorOf(name, "effect", range);
   const version = requested === "catalog" ? catalogEntry("effect") : requested;
   if (semver.satisfies(version, range)) return version;
   if (requested === "catalog") {
@@ -184,6 +228,49 @@ const effectFor = ({ manifest: { name }, range }: Packed): string | undefined =>
   console.log(`skip ${name}: effect ${version} is outside its peer range ${range}`);
   return undefined;
 };
+
+/**
+ * The version of third-party `peer` to install beside `group`, and why. By
+ * default the highest floor among the ranges the group's packed manifests
+ * declare for it, so one install satisfies every declared range; under
+ * `--effect catalog` the catalog version, as for `effect`.
+ */
+const peerVersionFor = (
+  group: ReadonlyArray<Packed>,
+  peer: string,
+): { readonly version: string; readonly why: string } => {
+  if (requested === "catalog") return { version: catalogEntry(peer), why: "catalog" };
+  const floors = group.flatMap(({ manifest }) => {
+    const range = manifest.peerDependencies?.[peer];
+    if (range === undefined) return [];
+    return [{ version: floorOf(manifest.name, peer, range), why: `floor of ${range}` }];
+  });
+  if (floors.length === 0) {
+    throw new Error(
+      `no package in ${group.map(({ manifest }) => manifest.name).join(", ")} declares a ${peer} peer`,
+    );
+  }
+  return floors.reduce((highest, next) =>
+    semver.gt(next.version, highest.version) ? next : highest,
+  );
+};
+
+/**
+ * Each range that one of `group`'s packed manifests declares for `peer` and the
+ * installed copy misses. The highest floor is installed, so this fails only
+ * when two packages in the group declare ranges no single version satisfies.
+ */
+const unmetPeerRanges = (
+  peer: string,
+  installed: string,
+  group: ReadonlyArray<Packed>,
+): ReadonlyArray<string> =>
+  group.flatMap(({ manifest }) => {
+    const range = manifest.peerDependencies?.[peer];
+    return range !== undefined && !semver.satisfies(installed, range)
+      ? [`${manifest.name} wants ${peer} ${range}, installed ${installed}`]
+      : [];
+  });
 
 /** Runs inside the scratch project, against the packed `dist/` only. */
 const behaviour = `
@@ -311,6 +398,10 @@ try {
     const project = join(scratch, `project-${effectVersion}`);
     mkdirSync(project);
     const peers = new Set(group.flatMap(({ target }) => target.peers ?? []));
+    const peerVersions = new Map([...peers].map((peer) => [peer, peerVersionFor(group, peer)]));
+    for (const [peer, { version, why }] of peerVersions) {
+      console.log(`  peer ${peer} ${version} (${why})`);
+    }
     writeFileSync(
       join(project, "package.json"),
       JSON.stringify(
@@ -320,7 +411,7 @@ try {
           type: "module",
           dependencies: {
             effect: effectVersion,
-            ...Object.fromEntries([...peers].map((peer) => [peer, catalogEntry(peer)])),
+            ...Object.fromEntries([...peerVersions].map(([peer, { version }]) => [peer, version])),
             ...Object.fromEntries(names.map((name) => [name, siblings[name]])),
           },
           overrides: siblings,
@@ -359,6 +450,22 @@ try {
     const unmet = unmetEffectRanges(project, installed, [...Object.keys(siblings), ...peers]);
     if (unmet.length > 0) {
       throw new Error(`effect ${installed} is outside a declared range:\n${unmet.join("\n")}`);
+    }
+    for (const [peer, { version }] of peerVersions) {
+      const peerManifest = JSON.parse(
+        readFileSync(join(project, "node_modules", peer, "package.json"), "utf8"),
+      ) as { version: string };
+      const installedPeer = peerManifest.version;
+      if (!semver.satisfies(installedPeer, version)) {
+        throw new Error(`expected ${peer} ${version}, installed ${installedPeer}`);
+      }
+      const unmetPeer = unmetPeerRanges(peer, installedPeer, group);
+      if (unmetPeer.length > 0) {
+        throw new Error(
+          `peer ${peer} ${installedPeer} is outside a declared range:\n${unmetPeer.join("\n")}`,
+        );
+      }
+      console.log(`  peer ${peer}: installed ${installedPeer}`);
     }
 
     const specifiers = group.flatMap(({ manifest }) =>
