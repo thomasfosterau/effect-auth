@@ -31,7 +31,10 @@ export default async function setup(project: TestProject): Promise<() => Promise
   const directory = await mkdtemp(join(tmpdir(), "effect-auth-drizzle-pglite-"));
   const template = join(directory, "migrated.tar");
 
-  const client = await PGlite.create();
+  // A 1 MB WAL segment (initdb's minimum) instead of the 16 MB default: the
+  // template is unpacked into every instance's filesystem, and the WAL file is
+  // a large part of its bytes. No test reads WAL, so nothing observable changes (#324).
+  const client = await PGlite.create({ initDbStartParams: ["--wal-segsize=1"] });
   try {
     for (const statement of migrationStatements()) {
       await client.exec(statement);
