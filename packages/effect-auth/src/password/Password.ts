@@ -50,9 +50,11 @@ export class PasswordHasher extends Context.Service<
 >()("@effect-auth/PasswordHasher") {
   /**
    * Layer providing the default hasher: PBKDF2-SHA256 with OWASP parameters
-   * (see {@link pbkdf2Hasher}).
+   * (see {@link pbkdf2Hasher}). `options.iterations` overrides the 600,000
+   * default, e.g. a cheap count in tests; production should keep the default.
    */
-  static readonly layer = () => Layer.succeed(PasswordHasher, pbkdf2Hasher());
+  static readonly layer = (options?: { readonly iterations?: number | undefined }) =>
+    Layer.succeed(PasswordHasher, pbkdf2Hasher(options));
 
   /**
    * Layer providing the scrypt hasher (memory-hard; PHC-format output, see
@@ -163,6 +165,8 @@ import * as crypto from "node:crypto";
 
 // Anti-DoS: reject inputs longer than this before running any KDF.
 // Legitimate passwords are always well below this threshold.
+/** Parses a stored decimal parameter. Anything else (sign, hex, exponent, empty) is NaN. */
+const parseStoredParam = (text: string): number => (/^[0-9]+$/.test(text) ? Number(text) : NaN);
 const MAX_PASSWORD_BYTES = 1024;
 
 const pbkdf2 = (
@@ -183,14 +187,34 @@ export type {
   HashedPassword,
 } from "../Types.ts";
 
+// Node's crypto.pbkdf2 takes the iteration count as an int32 from 1 to 2^31 - 1.
+const PBKDF2_MAX_ITERATIONS = 2 ** 31 - 1;
+
 /**
- * PBKDF2 Password Hasher implementing the PasswordHasher trait
- * Following OWASP guidelines for secure password hashing
+ * PBKDF2 Password Hasher implementing the PasswordHasher trait.
+ * Following OWASP guidelines for secure password hashing.
+ *
+ * Hashes are `pbkdf2-sha256$iterations$salt$hash`. `verify` reads the
+ * iteration count from the stored hash, so hashes made at any count still verify.
+ *
+ * `iterations` defaults to 600,000, the OWASP figure for PBKDF2-HMAC-SHA256.
+ * Lower it only where the cost is not the point (such as in tests); the default
+ * is the production setting. It must be an integer from 1 to 2147483647 (Node's
+ * limit for `crypto.pbkdf2`). `hash` refuses any other value with a
+ * `HashingError`, so a hasher never writes a hash its own `verify` would refuse.
+ *
+ * `needsRehash` returns true for a stored hash with fewer iterations than the
+ * configured count, so a hash made at a lower count is upgraded on the next
+ * successful sign-in.
  */
-export const pbkdf2Hasher = (): typeof PasswordHasher.Service => {
+export const pbkdf2Hasher = (options?: {
+  readonly iterations?: number | undefined;
+}): typeof PasswordHasher.Service => {
   const ALGORITHM = "pbkdf2-sha256";
   // OWASP recommended minimum for SHA-256: 600,000 iterations (2023)
-  const ITERATIONS = 600000;
+  const ITERATIONS = options?.iterations ?? 600000;
+  const iterationsUsable =
+    Number.isSafeInteger(ITERATIONS) && ITERATIONS >= 1 && ITERATIONS <= PBKDF2_MAX_ITERATIONS;
   // SHA-256 produces a 32-byte digest; using more bytes adds nothing and
   // reduces cost for the defender while an attacker can crack block-by-block.
   const KEY_LENGTH = 32;
@@ -204,7 +228,7 @@ export const pbkdf2Hasher = (): typeof PasswordHasher.Service => {
       if (parts.length !== 4) return true;
       const [algorithm, iterationsStr, , hashHex] = parts;
       if (algorithm !== ALGORITHM) return true;
-      const iters = parseInt(iterationsStr!, 10);
+      const iters = parseStoredParam(iterationsStr!);
       if (!Number.isFinite(iters) || iters < ITERATIONS) return true;
       // Stored key length must match current KEY_LENGTH.
       const storedKeyLen = Buffer.from(hashHex!, "hex").length;
@@ -230,6 +254,14 @@ export const pbkdf2Hasher = (): typeof PasswordHasher.Service => {
       if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
         return yield* new Errors.HashingError({
           message: "Password exceeds maximum length",
+        });
+      }
+
+      // Never write a hash this hasher's own verify would refuse (Node rejects
+      // an out-of-range count only when it derives the key).
+      if (!iterationsUsable) {
+        return yield* new Errors.HashingError({
+          message: `Invalid PBKDF2 configuration: iterations must be an integer from 1 to ${PBKDF2_MAX_ITERATIONS}`,
         });
       }
 
@@ -289,7 +321,9 @@ export const pbkdf2Hasher = (): typeof PasswordHasher.Service => {
         });
       }
 
-      const iterCount = parseInt(iterationsStr!, 10);
+      // Strict decimal parse, as for scrypt's N, r and p: `parseInt` would read
+      // "1e9" as 1 and "600000abc" as 600000.
+      const iterCount = parseStoredParam(iterationsStr!);
       if (!Number.isFinite(iterCount) || iterCount <= 0) {
         return yield* new Errors.HashingError({
           message: "Invalid hash parameters",
@@ -331,9 +365,6 @@ const SCRYPT_MAX_P_CAP = 16;
 
 /** Bytes OpenSSL's scrypt allocates for N, r and p; also the `maxmem` passed to Node. */
 const scryptMemory = (N: number, r: number, p: number): number => 128 * r * (N + p + 2);
-
-/** Parses a stored decimal parameter. Anything else (sign, hex, exponent, empty) is NaN. */
-const parseStoredParam = (text: string): number => (/^[0-9]+$/.test(text) ? Number(text) : NaN);
 
 /**
  * scrypt Password Hasher implementing the PasswordHasher trait.

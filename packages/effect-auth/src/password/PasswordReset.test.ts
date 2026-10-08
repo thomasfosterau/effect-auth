@@ -135,7 +135,7 @@ const makeTestContext = async () => {
           Context.merge(
             Context.merge(
               Context.make(PasswordResetUserStore, passwordResetUserStore),
-              Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+              Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
             ),
             Context.merge(
               Context.make(IdentifierStore, identifierStore),
@@ -212,7 +212,7 @@ describe("PasswordResetService", () => {
   it("should revoke sessions by default on password reset", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = Password.pbkdf2Hasher();
+    const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const oldHash = await Effect.runPromise(hasher.hash("old-password-123"));
 
     const user: User = {
@@ -270,7 +270,7 @@ describe("PasswordResetService", () => {
   it("should not revoke sessions when revokeSessionsOnPasswordReset is false", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = Password.pbkdf2Hasher();
+    const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const oldHash = await Effect.runPromise(hasher.hash("old-password-123"));
 
     const user: User = {

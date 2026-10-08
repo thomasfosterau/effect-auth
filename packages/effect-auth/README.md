@@ -162,7 +162,8 @@ const program = Effect.gen(function* () {
   return yield* hasher.verify("correct horse battery staple", hashed.hash);
 });
 
-// The default hasher is PBKDF2-SHA256 with 600,000 iterations.
+// The default hasher is PBKDF2-SHA256 with 600,000 iterations; pass
+// `{ iterations }` to `layer` to change the count.
 console.log(await Effect.runPromise(Effect.provide(program, Auth.Password.PasswordHasher.layer())));
 ```
 

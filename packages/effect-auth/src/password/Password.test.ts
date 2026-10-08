@@ -4,13 +4,13 @@ import { PasswordHasher, scryptHasher } from "./Password.ts";
 import * as Password from "./Password.ts";
 
 describe("PasswordHasher", () => {
-  const hasher = Password.pbkdf2Hasher();
+  const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
 
   it("should hash a password", async () => {
     const result = await Effect.runPromise(
       Effect.provide(
         hasher.hash("myPassword123"),
-        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
       ),
     );
 
@@ -24,14 +24,14 @@ describe("PasswordHasher", () => {
     const hashResult = await Effect.runPromise(
       Effect.provide(
         hasher.hash("myPassword123"),
-        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
       ),
     );
 
     const verifyResult = await Effect.runPromise(
       Effect.provide(
         hasher.verify("myPassword123", hashResult.hash),
-        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
       ),
     );
 
@@ -42,14 +42,14 @@ describe("PasswordHasher", () => {
     const hashResult = await Effect.runPromise(
       Effect.provide(
         hasher.hash("myPassword123"),
-        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
       ),
     );
 
     const verifyResult = await Effect.runPromise(
       Effect.provide(
         hasher.verify("wrongPassword", hashResult.hash),
-        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
       ),
     );
 
@@ -60,14 +60,14 @@ describe("PasswordHasher", () => {
     const hash1 = await Effect.runPromise(
       Effect.provide(
         hasher.hash("myPassword123"),
-        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
       ),
     );
 
     const hash2 = await Effect.runPromise(
       Effect.provide(
         hasher.hash("myPassword123"),
-        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
       ),
     );
 
@@ -78,13 +78,13 @@ describe("PasswordHasher", () => {
     const verify1 = await Effect.runPromise(
       Effect.provide(
         hasher.verify("myPassword123", hash1.hash),
-        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
       ),
     );
     const verify2 = await Effect.runPromise(
       Effect.provide(
         hasher.verify("myPassword123", hash2.hash),
-        Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+        Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
       ),
     );
 
@@ -97,7 +97,7 @@ describe("PasswordHasher", () => {
       Effect.result(
         Effect.provide(
           hasher.verify("password", "invalid-hash"),
-          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
         ),
       ),
     );
@@ -118,6 +118,23 @@ describe("PasswordHasher", () => {
     }
   });
 
+  it.each([
+    ["an exponent", "1e9"],
+    ["trailing junk", "600000abc"],
+    ["a leading plus", "+600000"],
+    ["hex", "0x927c0"],
+  ])("refuses a stored iteration count written with %s", async (_label, count) => {
+    // parseInt would read "1e9" as 1 and "600000abc" as 600000; the stored count
+    // is parsed strictly, as scrypt's N, r and p are.
+    const malformed = `pbkdf2-sha256$${count}$${"00".repeat(16)}$${"00".repeat(32)}`;
+    const result = await Effect.runPromise(Effect.result(hasher.verify("password", malformed)));
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("HashingError");
+    }
+    expect(hasher.needsRehash!(malformed)).toBe(true);
+  });
+
   it("should fail cleanly on negative iterations", async () => {
     const malformed = "pbkdf2-sha256$-1$aaaa$bbbb";
     const result = await Effect.runPromise(Effect.result(hasher.verify("password", malformed)));
@@ -136,6 +153,8 @@ describe("PasswordHasher", () => {
   });
 
   it("needsRehash returns false for a current hash and true for an old one", async () => {
+    // The default count on purpose: this test is about which hashes the
+    // production hasher flags for upgrade. Pinned structurally in Pbkdf2Defaults.test.ts.
     const h = Password.pbkdf2Hasher();
     const current = await Effect.runPromise(h.hash("pw"));
     expect(h.needsRehash!(current.hash)).toBe(false);
@@ -185,7 +204,7 @@ describe("ScryptHasher", () => {
 
   it("should produce different hashes for the same password (random salt)", async () => {
     const { scryptHasher } = await import("./Password.ts");
-    const scrypt = scryptHasher({ cost: 16384 });
+    const scrypt = scryptHasher({ cost: 1024 });
 
     const h1 = await Effect.runPromise(scrypt.hash("samePassword"));
     const h2 = await Effect.runPromise(scrypt.hash("samePassword"));
@@ -194,7 +213,7 @@ describe("ScryptHasher", () => {
 
   it("should verify hashes produced with non-default parameters", async () => {
     const { scryptHasher } = await import("./Password.ts");
-    const weak = scryptHasher({ cost: 16384, blockSize: 8, parallelization: 1 });
+    const weak = scryptHasher({ cost: 1024, blockSize: 8, parallelization: 1 });
     const strong = scryptHasher();
 
     // Parameters are stored in the hash, so a default-config hasher verifies them.
@@ -218,10 +237,13 @@ describe("ScryptHasher", () => {
 
   it("should interop with the multi-algorithm verifier", async () => {
     const { scryptHasher, pbkdf2Hasher, multiAlgorithmVerifier } = await import("./Password.ts");
-    const verifier = multiAlgorithmVerifier([pbkdf2Hasher(), scryptHasher({ cost: 16384 })]);
+    const verifier = multiAlgorithmVerifier([
+      pbkdf2Hasher({ iterations: 1000 }),
+      scryptHasher({ cost: 1024 }),
+    ]);
 
-    const scryptHash = await Effect.runPromise(scryptHasher({ cost: 16384 }).hash("pw-one"));
-    const pbkdf2Hash = await Effect.runPromise(pbkdf2Hasher().hash("pw-two"));
+    const scryptHash = await Effect.runPromise(scryptHasher({ cost: 1024 }).hash("pw-one"));
+    const pbkdf2Hash = await Effect.runPromise(pbkdf2Hasher({ iterations: 1000 }).hash("pw-two"));
 
     expect(await Effect.runPromise(verifier.verify("pw-one", scryptHash.hash))).toBe(true);
     expect(await Effect.runPromise(verifier.verify("pw-two", pbkdf2Hash.hash))).toBe(true);
@@ -342,5 +364,24 @@ describe("scrypt stored parameter limits", () => {
     for (const [, hash] of refused) {
       expect(hasher.needsRehash!(hash)).toBe(true);
     }
+  });
+});
+
+describe("PBKDF2 iterations option", () => {
+  it("round-trips at a configured count and verify reads the stored count", async () => {
+    // The real KDF at a cheap count: the round trip is the point, not the cost.
+    // Pbkdf2Defaults.test.ts pins the default (600,000) structurally.
+    const hashed = await Effect.runPromise(
+      Password.pbkdf2Hasher({ iterations: 1000 }).hash("pw-cheap"),
+    );
+    expect(hashed.hash.startsWith("pbkdf2-sha256$1000$")).toBe(true);
+
+    const same = Password.pbkdf2Hasher({ iterations: 1000 });
+    expect(await Effect.runPromise(same.verify("pw-cheap", hashed.hash))).toBe(true);
+    expect(await Effect.runPromise(same.verify("wrong", hashed.hash))).toBe(false);
+
+    // A hasher configured for a different count still verifies the stored count.
+    const other = Password.pbkdf2Hasher({ iterations: 2000 });
+    expect(await Effect.runPromise(other.verify("pw-cheap", hashed.hash))).toBe(true);
   });
 });

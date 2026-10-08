@@ -121,7 +121,7 @@ const makeTestContext = async () => {
         Context.merge(
           Context.merge(
             Context.make(EmailPasswordStore, emailPasswordStore),
-            Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+            Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
           ),
           Context.merge(
             Context.make(IdentifierStore, identifierStore),
@@ -176,7 +176,7 @@ describe("EmailPasswordService", () => {
   it("should sign in an existing user", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = Password.pbkdf2Hasher();
+    const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const hashResult = await Effect.runPromise(hasher.hash("sign-in-password"));
 
     const user: User = {
@@ -211,7 +211,7 @@ describe("EmailPasswordService", () => {
   it("should reject invalid credentials", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = Password.pbkdf2Hasher();
+    const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const hashResult = await Effect.runPromise(hasher.hash("correct-password"));
 
     const user: User = {
@@ -248,7 +248,7 @@ describe("EmailPasswordService", () => {
   it("should block sign-in for unverified email when required", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = Password.pbkdf2Hasher();
+    const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const hashResult = await Effect.runPromise(hasher.hash("password-123"));
 
     const user: User = {
@@ -295,7 +295,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
 
   it("calls passwordHasher.verify even when the email does not exist", async () => {
     let verifyCalls = 0;
-    const realHasher = Password.pbkdf2Hasher();
+    const realHasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const spyHasher: typeof PasswordHasher.Service = {
       algorithm: realHasher.algorithm,
       hash: (password) => realHasher.hash(password),
@@ -352,7 +352,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
 
   it("calls passwordHasher.verify even when the user has no password hash", async () => {
     let verifyCalls = 0;
-    const realHasher = Password.pbkdf2Hasher();
+    const realHasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const spyHasher: typeof PasswordHasher.Service = {
       algorithm: realHasher.algorithm,
       hash: (password) => realHasher.hash(password),
@@ -430,7 +430,7 @@ describe("EmailPasswordService second-factor gate", () => {
     const { SecondFactorGate } = await import("./EmailPassword.ts");
     const testContext = await makeTestContext();
 
-    const hasher = Password.pbkdf2Hasher();
+    const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const hashResult = await Effect.runPromise(hasher.hash("gate-password"));
 
     const user: User = {
@@ -473,7 +473,7 @@ describe("EmailPasswordService second-factor gate", () => {
     const { SecondFactorGate } = await import("./EmailPassword.ts");
     const testContext = await makeTestContext();
 
-    const hasher = Password.pbkdf2Hasher();
+    const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const hashResult = await Effect.runPromise(hasher.hash("no-gate-password"));
 
     const user: User = {
@@ -536,7 +536,12 @@ describe("EmailPasswordService — migration and security hardening", () => {
   };
 
   it("verifies an old PBKDF2 hash and rehashes it to current params on sign-in", async () => {
-    const testContext = await makeTestContext();
+    // The production default hasher, not the cheap one the other tests use:
+    // this test asserts the upgrade lands on the default count (600,000).
+    const testContext = Context.merge(
+      await makeTestContext(),
+      Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+    );
 
     // Seed user with an old-style hash (fewer iterations, larger key).
     const oldHash = await makeOldPbkdf2Hash("migration-password");
@@ -586,8 +591,11 @@ describe("EmailPasswordService — migration and security hardening", () => {
     seedEmailIdentifier(user.id, "switch@example.com", true);
     passwordHashes.set(user.id, oldHash);
 
-    const scryptHasher = Password.scryptHasher({ cost: 16384 });
-    const verifier = Password.multiAlgorithmVerifier([Password.pbkdf2Hasher(), scryptHasher]);
+    const scryptHasher = Password.scryptHasher({ cost: 1024 });
+    const verifier = Password.multiAlgorithmVerifier([
+      Password.pbkdf2Hasher({ iterations: 1000 }),
+      scryptHasher,
+    ]);
 
     const program = Effect.gen(function* () {
       const service = yield* EmailPassword.make();
@@ -646,7 +654,7 @@ describe("EmailPasswordService — migration and security hardening", () => {
 
   it("returns InvalidCredentialsError (not defect) for an excessively long password on sign-in", async () => {
     const testContext = await makeTestContext();
-    const hasher = Password.pbkdf2Hasher();
+    const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const hashResult = await Effect.runPromise(hasher.hash("real-password"));
 
     const user: User = {
@@ -761,7 +769,7 @@ describe("EmailPasswordService - dangling session protection", () => {
       Context.merge(
         Context.merge(
           Context.make(EmailPasswordStore, localEmailPasswordStore),
-          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
         ),
         Context.merge(
           Context.merge(
@@ -926,7 +934,7 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
 
   it("antiEnumeration mode: the duplicate branch still hashes the submitted password", async () => {
     let hashCalls = 0;
-    const realHasher = Password.pbkdf2Hasher();
+    const realHasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const spyHasher: typeof PasswordHasher.Service = {
       algorithm: realHasher.algorithm,
       hash: (password) => {

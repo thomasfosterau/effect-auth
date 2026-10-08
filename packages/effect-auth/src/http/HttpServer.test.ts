@@ -83,7 +83,7 @@ const PW2 = "new-password-456";
 
 // One shared (stateless) hasher; low scrypt cost keeps the suite fast while
 // still exercising real hashing end to end.
-const hasher = Password.scryptHasher({ cost: 16384 });
+const hasher = Password.scryptHasher({ cost: 1024 });
 
 interface Fixture {
   /** The base `AuthServices` layer (no optional features). */
