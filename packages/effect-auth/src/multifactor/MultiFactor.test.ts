@@ -155,7 +155,7 @@ const makeTestContext = async () => {
             Context.merge(
               Context.merge(
                 Context.make(PendingMultiFactorStore, pendingMultiFactorStore),
-                Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+                Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
               ),
               Context.make(Crypto.Crypto, PlatformCrypto.instance),
             ),
@@ -183,7 +183,7 @@ const seedUser = async (id: string, email: string, password: string): Promise<Us
   });
   identifiers.set(identifier.id, identifier);
 
-  const hasher = Password.pbkdf2Hasher();
+  const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
   const hashed = await Effect.runPromise(hasher.hash(password));
   passwordHashes.set(id, hashed.hash);
 

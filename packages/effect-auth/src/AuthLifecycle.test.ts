@@ -164,7 +164,7 @@ const sessionConfig: SessionConfig = {
 };
 
 const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) => {
-  const hasher = Password.pbkdf2Hasher();
+  const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
 
   const cryptoContext = Context.make(Crypto.Crypto, PlatformCrypto.instance);
 
@@ -291,7 +291,7 @@ describe("AuthLifecycleService", () => {
   it("should return verification-needed on sign-in and resend when enabled", async () => {
     const testContext = await makeTestContext({ requireEmailVerification: true });
 
-    const hasher = Password.pbkdf2Hasher();
+    const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const hashResult = await Effect.runPromise(hasher.hash("password-123"));
 
     const user: User = {
@@ -373,7 +373,7 @@ describe("AuthLifecycleService", () => {
   it("should sign in verified users normally", async () => {
     const testContext = await makeTestContext();
 
-    const hasher = Password.pbkdf2Hasher();
+    const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
     const hashResult = await Effect.runPromise(hasher.hash("verified-password-123"));
 
     const user: User = {

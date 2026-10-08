@@ -20,7 +20,7 @@ import { UserStore } from "./UserStore.ts";
 import { Hooks } from "./Hooks.ts";
 import type * as Types from "./Types.ts";
 
-const hasher = Password.scryptHasher({ cost: 16384 });
+const hasher = Password.scryptHasher({ cost: 1024 });
 const sessionConfig: Types.SessionConfig = {
   sessionExpiresIn: { activePeriod: 1000 * 60 * 60, idlePeriod: 1000 * 60 * 60 },
 };
@@ -247,7 +247,7 @@ describe("UsernameService", () => {
 
   it("calls passwordHasher.verify even for an unknown username (constant-work)", async () => {
     let verifyCalls = 0;
-    const realHasher = Password.scryptHasher({ cost: 16384 });
+    const realHasher = Password.scryptHasher({ cost: 1024 });
     const spyHasher: typeof PasswordHasher.Service = {
       algorithm: realHasher.algorithm,
       hash: (password) => realHasher.hash(password),

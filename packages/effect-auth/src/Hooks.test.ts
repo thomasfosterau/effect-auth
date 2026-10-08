@@ -405,7 +405,7 @@ describe("Hooks - integration with EmailPasswordService", () => {
       Context.merge(
         Context.merge(
           Context.make(EmailPasswordStore, emailPasswordStore),
-          Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+          Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
         ),
         Context.merge(
           Context.merge(

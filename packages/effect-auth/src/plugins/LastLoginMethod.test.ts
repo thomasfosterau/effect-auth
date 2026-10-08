@@ -13,7 +13,7 @@ import { UserStore } from "../UserStore.ts";
 import { hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 
-const hasher = Password.scryptHasher({ cost: 16384 });
+const hasher = Password.scryptHasher({ cost: 1024 });
 
 const makeFixture = () => {
   const usersById = new Map<string, Types.User>();
