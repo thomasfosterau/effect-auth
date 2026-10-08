@@ -371,12 +371,16 @@ export const scryptHasher = (options?: {
   const KEY_LENGTH = 64;
   const SALT_LENGTH = 16;
   // Caps on the parameters `verify` accepts from a stored hash (see scryptHasher).
-  const MAX_N = Math.max(SCRYPT_MAX_N_CAP, COST);
-  const MAX_R = Math.max(SCRYPT_MAX_R_CAP, BLOCK_SIZE);
-  const MAX_P = Math.max(SCRYPT_MAX_P_CAP, PARALLELIZATION);
+  // Only a usable configured value may raise a cap: a NaN, Infinity or
+  // fractional option (which `hash` refuses anyway) must not turn a cap into
+  // NaN or Infinity and so disable it.
+  const usable = (n: number): number => (Number.isSafeInteger(n) && n > 0 ? n : 0);
+  const MAX_N = Math.max(SCRYPT_MAX_N_CAP, usable(COST));
+  const MAX_R = Math.max(SCRYPT_MAX_R_CAP, usable(BLOCK_SIZE));
+  const MAX_P = Math.max(SCRYPT_MAX_P_CAP, usable(PARALLELIZATION));
   const MAX_MEMORY = Math.max(
     SCRYPT_MIN_MEMORY_CAP,
-    scryptMemory(COST, BLOCK_SIZE, PARALLELIZATION),
+    scryptMemory(usable(COST), usable(BLOCK_SIZE), usable(PARALLELIZATION)),
   );
 
   /**
@@ -386,17 +390,17 @@ export const scryptHasher = (options?: {
    */
   const refusedParams = (N: number, r: number, p: number): string | undefined => {
     if (!Number.isSafeInteger(N) || N < 2 || 2 ** Math.round(Math.log2(N)) !== N) {
-      return "Invalid hash parameters: N must be a power of two, at least 2";
+      return "N must be a power of two, at least 2";
     }
-    if (N > MAX_N) return `Invalid hash parameters: N exceeds ${MAX_N}`;
+    if (N > MAX_N) return `N exceeds ${MAX_N}`;
     if (!Number.isSafeInteger(r) || r < 1 || r > MAX_R) {
-      return `Invalid hash parameters: r must be an integer from 1 to ${MAX_R}`;
+      return `r must be an integer from 1 to ${MAX_R}`;
     }
     if (!Number.isSafeInteger(p) || p < 1 || p > MAX_P) {
-      return `Invalid hash parameters: p must be an integer from 1 to ${MAX_P}`;
+      return `p must be an integer from 1 to ${MAX_P}`;
     }
     if (scryptMemory(N, r, p) > MAX_MEMORY) {
-      return `Invalid hash parameters: scrypt would need more than ${MAX_MEMORY} bytes`;
+      return `scrypt would need more than ${MAX_MEMORY} bytes`;
     }
     return undefined;
   };
@@ -537,7 +541,7 @@ export const scryptHasher = (options?: {
       // to a HashingError too.
       const refused = refusedParams(N, r, p);
       if (refused !== undefined) {
-        return yield* new Errors.HashingError({ message: refused });
+        return yield* new Errors.HashingError({ message: `Invalid hash parameters: ${refused}` });
       }
 
       const salt = Buffer.from(saltHex!, "hex");

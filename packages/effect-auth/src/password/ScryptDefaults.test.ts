@@ -102,4 +102,22 @@ describe("scrypt defaults", () => {
     // about 1 GB (p = 1000000) or 4 GiB (N = 2^20, r = 32).
     expect(scrypt).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["cost", { cost: Number.NaN }],
+    ["blockSize", { blockSize: Number.POSITIVE_INFINITY }],
+    ["parallelization", { parallelization: Number.NaN }],
+  ])("a non-finite configured %s does not lift verify's caps", async (_label, options) => {
+    // Caps are max(floor, configured value); a NaN or Infinity option must
+    // not turn them into NaN/Infinity (every `>` comparison false).
+    const hasher = scryptHasher(options);
+    for (const stored of [
+      `scrypt$${2 ** 20}$32$1$${"00".repeat(16)}$${"00".repeat(64)}`,
+      `scrypt$1024$8$1000000$${"00".repeat(16)}$${"00".repeat(64)}`,
+    ]) {
+      const result = await Effect.runPromise(Effect.result(hasher.verify("pw", stored)));
+      expect(result._tag).toBe("Failure");
+    }
+    expect(scrypt).not.toHaveBeenCalled();
+  });
 });
