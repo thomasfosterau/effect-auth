@@ -350,10 +350,14 @@ const parseStoredParam = (text: string): number => (/^[0-9]+$/.test(text) ? Numb
  *
  * The defaults need about 128 MiB and pass. A hash written with valid
  * configured parameters always verifies, even above 256 MiB, but a crafted
- * stored hash cannot make verify allocate gigabytes.
+ * stored hash cannot make verify allocate gigabytes. `hash` applies the same
+ * checks to the configured parameters, so a hasher never writes a hash its own
+ * `verify` would refuse (e.g. `blockSize: 0`, which Node itself accepts).
  *
  * `needsRehash` returns true for a hash that `verify` would refuse, and for one
- * whose N, r or p is below the configured value. A stronger stored set is kept.
+ * whose N, r or p is below the configured value. A stored set that is at least
+ * as strong in every parameter is kept; one that is weaker in any parameter is
+ * replaced by the configured set, even where it was stronger in another.
  */
 export const scryptHasher = (options?: {
   readonly cost?: number;
@@ -377,7 +381,8 @@ export const scryptHasher = (options?: {
 
   /**
    * Why a parameter set is refused, or `undefined` when it is within the caps.
-   * It runs before any allocation, so a crafted hash never reaches Node.
+   * It runs before any allocation, so a crafted hash never makes Node allocate
+   * past the caps.
    */
   const refusedParams = (N: number, r: number, p: number): string | undefined => {
     if (!Number.isSafeInteger(N) || N < 2 || 2 ** Math.round(Math.log2(N)) !== N) {
@@ -469,6 +474,15 @@ export const scryptHasher = (options?: {
         });
       }
 
+      // Never write a hash this hasher's own verify would refuse: Node accepts
+      // some configurations (blockSize 0) that the stored-hash checks reject.
+      const misconfigured = refusedParams(COST, BLOCK_SIZE, PARALLELIZATION);
+      if (misconfigured !== undefined) {
+        return yield* new Errors.HashingError({
+          message: `Invalid scrypt configuration: ${misconfigured}`,
+        });
+      }
+
       const salt = crypto.randomBytes(SALT_LENGTH);
       const derivedKey = yield* scrypt(password, salt, COST, BLOCK_SIZE, PARALLELIZATION);
 
@@ -518,7 +532,9 @@ export const scryptHasher = (options?: {
       const N = parseStoredParam(costStr!);
       const r = parseStoredParam(blockSizeStr!);
       const p = parseStoredParam(parallelizationStr!);
-      // Refuse out-of-range parameters before the KDF, so Node never sees them.
+      // Refuse out-of-range parameters before the KDF. Node can still reject a
+      // set within the caps (OpenSSL's own limits); the scrypt helper maps that
+      // to a HashingError too.
       const refused = refusedParams(N, r, p);
       if (refused !== undefined) {
         return yield* new Errors.HashingError({ message: refused });

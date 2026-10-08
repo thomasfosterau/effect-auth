@@ -87,4 +87,19 @@ describe("scrypt defaults", () => {
     const hashed = await Effect.runPromise(hasher.hash("pw"));
     expect(await Effect.runPromise(hasher.verify("pw", hashed.hash))).toBe(true);
   });
+
+  it.each([
+    ["p = 1000000", "1024", "8", "1000000"],
+    ["N * r above the memory cap", String(2 ** 20), "32", "1"],
+  ])("refuses a stored hash with %s before running the KDF", async (_label, N, r, p) => {
+    const stored = `scrypt$${N}$${r}$${p}$${"00".repeat(16)}$${"00".repeat(64)}`;
+    const result = await Effect.runPromise(Effect.result(scryptHasher().verify("pw", stored)));
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("HashingError");
+    }
+    // Refused before any derivation: an unguarded verify would ask Node for
+    // about 1 GB (p = 1000000) or 4 GiB (N = 2^20, r = 32).
+    expect(scrypt).not.toHaveBeenCalled();
+  });
 });

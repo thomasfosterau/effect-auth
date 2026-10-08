@@ -258,6 +258,9 @@ describe("scrypt stored parameter limits", () => {
   const stored = (N: string, r: string, p: string) =>
     `scrypt$${N}$${r}$${p}$${"00".repeat(16)}$${"00".repeat(64)}`;
 
+  // Sets that would make an unguarded verify run a huge KDF (p = 1000000,
+  // N * r above the memory cap) are tested in ScryptDefaults.test.ts against a
+  // stubbed crypto.scrypt, so a regression fails on an assertion, not a timeout.
   const refused: ReadonlyArray<readonly [label: string, hash: string]> = [
     ["N not a power of two", stored("3", "8", "1")],
     ["N = 0", stored("0", "8", "1")],
@@ -266,9 +269,7 @@ describe("scrypt stored parameter limits", () => {
     ["r = 0", stored("1024", "0", "1")],
     ["p = 0", stored("1024", "8", "0")],
     ["N = 2^30", stored(String(2 ** 30), "8", "1")],
-    ["p = 1000000", stored("1024", "8", "1000000")],
     ["r above the cap", stored("1024", "1000", "1")],
-    ["N * r above the memory cap", stored(String(2 ** 20), "32", "1")],
   ];
 
   it.each(refused)(
@@ -285,14 +286,39 @@ describe("scrypt stored parameter limits", () => {
   );
 
   it("refuses a parameter set Node rejects at hash time as a HashingError, not a defect", async () => {
-    // hash() passes the configured cost to Node unchecked, and Node throws a
-    // RangeError synchronously for N = 3.
+    // N = 3 is not a power of two: hash() refuses the configuration before
+    // calling Node (which would otherwise throw a RangeError synchronously).
     const result = await Effect.runPromise(
       Effect.result(scryptHasher({ cost: 3 }).hash("password")),
     );
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
       expect(result.failure._tag).toBe("HashingError");
+    }
+  });
+
+  it("refuses to hash with a configuration its own verify would refuse", async () => {
+    // Node accepts blockSize 0, so without this check hash() would write
+    // `scrypt$1024$0$1$…`, which verify then refuses forever (a lockout).
+    const result = await Effect.runPromise(
+      Effect.result(scryptHasher({ cost: 1024, blockSize: 0 }).hash("password")),
+    );
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("HashingError");
+    }
+  });
+
+  it("verifies its own hashes across valid configurations", async () => {
+    for (const options of [
+      { cost: 1024 },
+      { cost: 1024, blockSize: 1 },
+      { cost: 2, blockSize: 8, parallelization: 8 },
+      { cost: 1024, blockSize: 4, parallelization: 3 },
+    ]) {
+      const hasher = scryptHasher(options);
+      const hashed = await Effect.runPromise(hasher.hash("round-trip"));
+      expect(await Effect.runPromise(hasher.verify("round-trip", hashed.hash))).toBe(true);
     }
   });
 
