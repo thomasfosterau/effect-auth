@@ -7,16 +7,17 @@
  * Exercised against PGlite, with the `CHECK` enforced by Postgres.
  */
 
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { defineSchema } from "./Columns.ts";
 import { databaseLayer } from "./Database.ts";
 import { layer as storesLayer } from "./Layers.ts";
 import * as Requests from "./Requests.ts";
+import { migratedPglite, truncate } from "./testing/PgliteTemplate.ts";
 
 // The applications' shape: uuid keys, `role` a real column, no attribute bag.
 const users = pgTable("users", {
@@ -160,17 +161,29 @@ const ids = {
   plain: "7a2d4b6c-1e3f-4058-9a7b-2c4d6e8f0a1b",
 };
 
+/**
+ * The file's one in-memory Postgres, opened from the run's migrated template
+ * (#291), with this file's applications tables applied on top, and emptied
+ * before each test. The template's `effect_auth_*` tables are not used here.
+ */
+let client: PGlite;
+
+beforeAll(async () => {
+  client = await migratedPglite();
+  await client.exec(migration);
+});
+
+afterAll(async () => {
+  await client?.close();
+});
+
+beforeEach(async () => {
+  await truncate(client, ["users", "users_with_bag", "sessions", "identifiers"]);
+});
+
 const withDatabase = async <A>(
   run: (client: PGlite, db: ReturnType<typeof drizzle>) => Promise<A>,
-): Promise<A> => {
-  const client = await PGlite.create();
-  try {
-    await client.exec(migration);
-    return await run(client, drizzle(client));
-  } finally {
-    await client.close();
-  }
-};
+): Promise<A> => run(client, drizzle(client));
 
 describe("promoted attributes", () => {
   it("rejects a promoted column that does not read back as an attribute value", () => {
