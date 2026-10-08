@@ -175,7 +175,7 @@ export type AuthorizationMiddlewareConfig<R = never> = {
  * shape a class-declared middleware such as `AuthMiddleware` has. The
  * `HttpApiMiddleware` machinery reads the requirements and error schema off
  * that instance, so an identifier typed as the class value (rather than its
- * instance) is rejected with a TS2345 at `.middleware(...)`.
+ * instance) is rejected with a type error at `.middleware(...)`.
  *
  * @since 1.0.0
  * @category models
