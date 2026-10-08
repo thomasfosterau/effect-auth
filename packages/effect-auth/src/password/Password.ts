@@ -316,6 +316,20 @@ export const pbkdf2Hasher = (): typeof PasswordHasher.Service => {
   };
 };
 
+// Floors of the caps `verify` enforces on the N, r and p read from a stored
+// hash. The effective caps are these or the hasher's own configured values,
+// whichever is higher, so a hash the hasher itself writes always verifies.
+const SCRYPT_MIN_MEMORY_CAP = 256 * 1024 * 1024; // 256 MiB
+const SCRYPT_MAX_N_CAP = 2 ** 20;
+const SCRYPT_MAX_R_CAP = 32;
+const SCRYPT_MAX_P_CAP = 16;
+
+/** Bytes OpenSSL's scrypt allocates for N, r and p; also the `maxmem` passed to Node. */
+const scryptMemory = (N: number, r: number, p: number): number => 128 * r * (N + p + 2);
+
+/** Parses a stored decimal parameter. Anything else (sign, hex, exponent, empty) is NaN. */
+const parseStoredParam = (text: string): number => (/^[0-9]+$/.test(text) ? Number(text) : NaN);
+
 /**
  * scrypt Password Hasher implementing the PasswordHasher trait.
  *
@@ -325,6 +339,25 @@ export const pbkdf2Hasher = (): typeof PasswordHasher.Service => {
  *
  * PHC-style format: `scrypt$N$r$p$salt$hash` (N/r/p are stored so parameters
  * can be tuned without breaking existing hashes).
+ *
+ * `verify` reads N, r and p from the stored hash and refuses, before running
+ * the KDF, any set outside these limits. The refusal is a `HashingError`:
+ * - N is a power of two with 2 ≤ N ≤ max(2^20, cost);
+ * - r is an integer with 1 ≤ r ≤ max(32, blockSize);
+ * - p is an integer with 1 ≤ p ≤ max(16, parallelization);
+ * - the memory a derivation needs, 128 * r * (N + p + 2) bytes, is at most
+ *   max(256 MiB, the memory the configured cost, blockSize and parallelization need).
+ *
+ * The defaults need about 128 MiB and pass. A hash written with valid
+ * configured parameters always verifies, even above 256 MiB, but a crafted
+ * stored hash cannot make verify allocate gigabytes. `hash` applies the same
+ * checks to the configured parameters, so a hasher never writes a hash its own
+ * `verify` would refuse (e.g. `blockSize: 0`, which Node itself accepts).
+ *
+ * `needsRehash` returns true for a hash that `verify` would refuse, and for one
+ * whose N, r or p is below the configured value. A stored set that is at least
+ * as strong in every parameter is kept; one that is weaker in any parameter is
+ * replaced by the configured set, even where it was stronger in another.
  */
 export const scryptHasher = (options?: {
   readonly cost?: number;
@@ -337,6 +370,40 @@ export const scryptHasher = (options?: {
   const PARALLELIZATION = options?.parallelization ?? 1;
   const KEY_LENGTH = 64;
   const SALT_LENGTH = 16;
+  // Caps on the parameters `verify` accepts from a stored hash (see scryptHasher).
+  // Only a usable configured value may raise a cap: a NaN, Infinity or
+  // fractional option (which `hash` refuses anyway) must not turn a cap into
+  // NaN or Infinity and so disable it.
+  const usable = (n: number): number => (Number.isSafeInteger(n) && n > 0 ? n : 0);
+  const MAX_N = Math.max(SCRYPT_MAX_N_CAP, usable(COST));
+  const MAX_R = Math.max(SCRYPT_MAX_R_CAP, usable(BLOCK_SIZE));
+  const MAX_P = Math.max(SCRYPT_MAX_P_CAP, usable(PARALLELIZATION));
+  const MAX_MEMORY = Math.max(
+    SCRYPT_MIN_MEMORY_CAP,
+    scryptMemory(usable(COST), usable(BLOCK_SIZE), usable(PARALLELIZATION)),
+  );
+
+  /**
+   * Why a parameter set is refused, or `undefined` when it is within the caps.
+   * It runs before any allocation, so a crafted hash never makes Node allocate
+   * past the caps.
+   */
+  const refusedParams = (N: number, r: number, p: number): string | undefined => {
+    if (!Number.isSafeInteger(N) || N < 2 || 2 ** Math.round(Math.log2(N)) !== N) {
+      return "N must be a power of two, at least 2";
+    }
+    if (N > MAX_N) return `N exceeds ${MAX_N}`;
+    if (!Number.isSafeInteger(r) || r < 1 || r > MAX_R) {
+      return `r must be an integer from 1 to ${MAX_R}`;
+    }
+    if (!Number.isSafeInteger(p) || p < 1 || p > MAX_P) {
+      return `p must be an integer from 1 to ${MAX_P}`;
+    }
+    if (scryptMemory(N, r, p) > MAX_MEMORY) {
+      return `scrypt would need more than ${MAX_MEMORY} bytes`;
+    }
+    return undefined;
+  };
 
   const scrypt = (
     password: string,
@@ -346,29 +413,37 @@ export const scryptHasher = (options?: {
     p: number,
   ): Effect.Effect<Buffer, Errors.HashingError> =>
     Effect.callback((resume) => {
-      crypto.scrypt(
-        password,
-        salt,
-        KEY_LENGTH,
-        // OpenSSL's scrypt allocates 128 * r * (N + p + 2) bytes and rejects
-        // a smaller maxmem (ERR_CRYPTO_INVALID_SCRYPT_PARAMS). The old
-        // 256 * N * r fell short whenever p + 2 > N.
-        { N, r, p, maxmem: 128 * r * (N + p + 2) },
-        (error, derivedKey) => {
-          if (error) {
-            resume(
-              Effect.fail(
-                new Errors.HashingError({
-                  message: "Failed to derive scrypt key",
-                  cause: error,
-                }),
-              ),
-            );
-          } else {
-            resume(Effect.succeed(derivedKey));
-          }
-        },
-      );
+      const fail = (cause: unknown) =>
+        resume(
+          Effect.fail(
+            new Errors.HashingError({
+              message: "Failed to derive scrypt key",
+              cause,
+            }),
+          ),
+        );
+      try {
+        crypto.scrypt(
+          password,
+          salt,
+          KEY_LENGTH,
+          // OpenSSL's scrypt allocates 128 * r * (N + p + 2) bytes and rejects
+          // a smaller maxmem (ERR_CRYPTO_INVALID_SCRYPT_PARAMS). The old
+          // 256 * N * r fell short whenever p + 2 > N.
+          { N, r, p, maxmem: scryptMemory(N, r, p) },
+          (error, derivedKey) => {
+            if (error) {
+              fail(error);
+            } else {
+              resume(Effect.succeed(derivedKey));
+            }
+          },
+        );
+      } catch (error) {
+        // Node rejects invalid parameters by throwing synchronously (a
+        // RangeError). That is a typed failure too, not a defect.
+        fail(error);
+      }
     });
 
   return {
@@ -377,11 +452,15 @@ export const scryptHasher = (options?: {
     needsRehash: (hash: string): boolean => {
       const parts = hash.split("$");
       if (parts.length !== 6) return true;
-      const [algorithm, costStr] = parts;
+      const [algorithm, costStr, blockSizeStr, parallelizationStr] = parts;
       if (algorithm !== ALGORITHM) return true;
-      const N = parseInt(costStr!, 10);
-      if (!Number.isFinite(N) || N < COST) return true;
-      return false;
+      const N = parseStoredParam(costStr!);
+      const r = parseStoredParam(blockSizeStr!);
+      const p = parseStoredParam(parallelizationStr!);
+      // verify refuses this hash, so it has to be replaced.
+      if (refusedParams(N, r, p) !== undefined) return true;
+      // Each parameter raises the cost, so only a weaker stored set is upgraded.
+      return N < COST || r < BLOCK_SIZE || p < PARALLELIZATION;
     },
 
     hash: Effect.fn("effect-auth.password.hash", {
@@ -396,6 +475,15 @@ export const scryptHasher = (options?: {
       if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
         return yield* new Errors.HashingError({
           message: "Password exceeds maximum length",
+        });
+      }
+
+      // Never write a hash this hasher's own verify would refuse: Node accepts
+      // some configurations (blockSize 0) that the stored-hash checks reject.
+      const misconfigured = refusedParams(COST, BLOCK_SIZE, PARALLELIZATION);
+      if (misconfigured !== undefined) {
+        return yield* new Errors.HashingError({
+          message: `Invalid scrypt configuration: ${misconfigured}`,
         });
       }
 
@@ -445,13 +533,15 @@ export const scryptHasher = (options?: {
         });
       }
 
-      const N = parseInt(costStr!, 10);
-      const r = parseInt(blockSizeStr!, 10);
-      const p = parseInt(parallelizationStr!, 10);
-      if (!Number.isFinite(N) || !Number.isFinite(r) || !Number.isFinite(p)) {
-        return yield* new Errors.HashingError({
-          message: "Invalid hash parameters",
-        });
+      const N = parseStoredParam(costStr!);
+      const r = parseStoredParam(blockSizeStr!);
+      const p = parseStoredParam(parallelizationStr!);
+      // Refuse out-of-range parameters before the KDF. Node can still reject a
+      // set within the caps (OpenSSL's own limits); the scrypt helper maps that
+      // to a HashingError too.
+      const refused = refusedParams(N, r, p);
+      if (refused !== undefined) {
+        return yield* new Errors.HashingError({ message: `Invalid hash parameters: ${refused}` });
       }
 
       const salt = Buffer.from(saltHex!, "hex");

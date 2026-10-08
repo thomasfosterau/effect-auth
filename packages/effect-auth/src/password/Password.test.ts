@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Context, Effect } from "effect";
-import { PasswordHasher } from "./Password.ts";
+import { PasswordHasher, scryptHasher } from "./Password.ts";
 import * as Password from "./Password.ts";
 
 describe("PasswordHasher", () => {
@@ -249,5 +249,98 @@ describe("ScryptHasher", () => {
     const phc = "$argon2id$v=19$m=1,t=1,p=1$abc$def";
     expect(await Effect.runPromise(verifier.verify("right", phc))).toBe(true);
     expect(await Effect.runPromise(verifier.verify("wrong", phc))).toBe(false);
+  });
+});
+
+describe("scrypt stored parameter limits", () => {
+  // A stored hash with the given N, r and p. The salt and key are placeholders:
+  // verify must refuse the parameters before it derives anything.
+  const stored = (N: string, r: string, p: string) =>
+    `scrypt$${N}$${r}$${p}$${"00".repeat(16)}$${"00".repeat(64)}`;
+
+  // Sets that would make an unguarded verify run a huge KDF (p = 1000000,
+  // N * r above the memory cap) are tested in ScryptDefaults.test.ts against a
+  // stubbed crypto.scrypt, so a regression fails on an assertion, not a timeout.
+  const refused: ReadonlyArray<readonly [label: string, hash: string]> = [
+    ["N not a power of two", stored("3", "8", "1")],
+    ["N = 0", stored("0", "8", "1")],
+    ["N = 1", stored("1", "8", "1")],
+    ["a non-numeric N", stored("1e3", "8", "1")],
+    ["r = 0", stored("1024", "0", "1")],
+    ["p = 0", stored("1024", "8", "0")],
+    ["N = 2^30", stored(String(2 ** 30), "8", "1")],
+    ["r above the cap", stored("1024", "1000", "1")],
+  ];
+
+  it.each(refused)(
+    "refuses a stored hash with %s as a HashingError, not a defect or a boolean",
+    async (_label, hash) => {
+      const result = await Effect.runPromise(
+        Effect.result(scryptHasher().verify("password", hash)),
+      );
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
+      }
+    },
+  );
+
+  it("refuses a parameter set Node rejects at hash time as a HashingError, not a defect", async () => {
+    // N = 3 is not a power of two: hash() refuses the configuration before
+    // calling Node (which would otherwise throw a RangeError synchronously).
+    const result = await Effect.runPromise(
+      Effect.result(scryptHasher({ cost: 3 }).hash("password")),
+    );
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("HashingError");
+    }
+  });
+
+  it("refuses to hash with a configuration its own verify would refuse", async () => {
+    // Node accepts blockSize 0, so without this check hash() would write
+    // `scrypt$1024$0$1$…`, which verify then refuses forever (a lockout).
+    const result = await Effect.runPromise(
+      Effect.result(scryptHasher({ cost: 1024, blockSize: 0 }).hash("password")),
+    );
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("HashingError");
+    }
+  });
+
+  it("verifies its own hashes across valid configurations", async () => {
+    for (const options of [
+      { cost: 1024 },
+      { cost: 1024, blockSize: 1 },
+      { cost: 2, blockSize: 8, parallelization: 8 },
+      { cost: 1024, blockSize: 4, parallelization: 3 },
+    ]) {
+      const hasher = scryptHasher(options);
+      const hashed = await Effect.runPromise(hasher.hash("round-trip"));
+      expect(await Effect.runPromise(hasher.verify("round-trip", hashed.hash))).toBe(true);
+    }
+  });
+
+  it("still verifies a stored hash with r and p at the caps", async () => {
+    const hasher = scryptHasher({ cost: 1024, blockSize: 32, parallelization: 16 });
+    const hashed = await Effect.runPromise(hasher.hash("at-the-caps"));
+    expect(hashed.hash.startsWith("scrypt$1024$32$16$")).toBe(true);
+    expect(await Effect.runPromise(scryptHasher().verify("at-the-caps", hashed.hash))).toBe(true);
+  });
+
+  it("needsRehash flags a stored r or p below the configured value and keeps a stronger one", () => {
+    const hasher = scryptHasher({ cost: 1024, blockSize: 8, parallelization: 2 });
+    expect(hasher.needsRehash!(stored("1024", "4", "2"))).toBe(true);
+    expect(hasher.needsRehash!(stored("1024", "8", "1"))).toBe(true);
+    expect(hasher.needsRehash!(stored("1024", "8", "2"))).toBe(false);
+    expect(hasher.needsRehash!(stored("1024", "16", "4"))).toBe(false);
+  });
+
+  it("needsRehash flags a stored hash that verify would refuse", () => {
+    const hasher = scryptHasher({ cost: 1024 });
+    for (const [, hash] of refused) {
+      expect(hasher.needsRehash!(hash)).toBe(true);
+    }
   });
 });
