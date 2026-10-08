@@ -118,6 +118,23 @@ describe("PasswordHasher", () => {
     }
   });
 
+  it.each([
+    ["an exponent", "1e9"],
+    ["trailing junk", "600000abc"],
+    ["a leading plus", "+600000"],
+    ["hex", "0x927c0"],
+  ])("refuses a stored iteration count written with %s", async (_label, count) => {
+    // parseInt would read "1e9" as 1 and "600000abc" as 600000; the stored count
+    // is parsed strictly, as scrypt's N, r and p are.
+    const malformed = `pbkdf2-sha256$${count}$${"00".repeat(16)}$${"00".repeat(32)}`;
+    const result = await Effect.runPromise(Effect.result(hasher.verify("password", malformed)));
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("HashingError");
+    }
+    expect(hasher.needsRehash!(malformed)).toBe(true);
+  });
+
   it("should fail cleanly on negative iterations", async () => {
     const malformed = "pbkdf2-sha256$-1$aaaa$bbbb";
     const result = await Effect.runPromise(Effect.result(hasher.verify("password", malformed)));

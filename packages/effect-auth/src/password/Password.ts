@@ -50,7 +50,8 @@ export class PasswordHasher extends Context.Service<
 >()("@effect-auth/PasswordHasher") {
   /**
    * Layer providing the default hasher: PBKDF2-SHA256 with OWASP parameters
-   * (see {@link pbkdf2Hasher}).
+   * (see {@link pbkdf2Hasher}). `options.iterations` overrides the 600,000
+   * default, e.g. a cheap count in tests; production should keep the default.
    */
   static readonly layer = (options?: { readonly iterations?: number | undefined }) =>
     Layer.succeed(PasswordHasher, pbkdf2Hasher(options));
@@ -159,6 +160,8 @@ import * as crypto from "node:crypto";
 
 // Anti-DoS: reject inputs longer than this before running any KDF.
 // Legitimate passwords are always well below this threshold.
+/** Parses a stored decimal parameter. Anything else (sign, hex, exponent, empty) is NaN. */
+const parseStoredParam = (text: string): number => (/^[0-9]+$/.test(text) ? Number(text) : NaN);
 const MAX_PASSWORD_BYTES = 1024;
 
 const pbkdf2 = (
@@ -220,7 +223,7 @@ export const pbkdf2Hasher = (options?: {
       if (parts.length !== 4) return true;
       const [algorithm, iterationsStr, , hashHex] = parts;
       if (algorithm !== ALGORITHM) return true;
-      const iters = parseInt(iterationsStr!, 10);
+      const iters = parseStoredParam(iterationsStr!);
       if (!Number.isFinite(iters) || iters < ITERATIONS) return true;
       // Stored key length must match current KEY_LENGTH.
       const storedKeyLen = Buffer.from(hashHex!, "hex").length;
@@ -313,7 +316,9 @@ export const pbkdf2Hasher = (options?: {
         });
       }
 
-      const iterCount = parseInt(iterationsStr!, 10);
+      // Strict decimal parse, as for scrypt's N, r and p: `parseInt` would read
+      // "1e9" as 1 and "600000abc" as 600000.
+      const iterCount = parseStoredParam(iterationsStr!);
       if (!Number.isFinite(iterCount) || iterCount <= 0) {
         return yield* new Errors.HashingError({
           message: "Invalid hash parameters",
@@ -355,9 +360,6 @@ const SCRYPT_MAX_P_CAP = 16;
 
 /** Bytes OpenSSL's scrypt allocates for N, r and p; also the `maxmem` passed to Node. */
 const scryptMemory = (N: number, r: number, p: number): number => 128 * r * (N + p + 2);
-
-/** Parses a stored decimal parameter. Anything else (sign, hex, exponent, empty) is NaN. */
-const parseStoredParam = (text: string): number => (/^[0-9]+$/.test(text) ? Number(text) : NaN);
 
 /**
  * scrypt Password Hasher implementing the PasswordHasher trait.
