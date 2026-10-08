@@ -29,14 +29,45 @@
  *
  * @example Attaching required auth to a group
  * ```ts
- * import { Effect, Layer, Schema } from "effect"
+ * import assert from "node:assert/strict"
+ * import { Effect, FileSystem, Layer, Path, Schema } from "effect"
+ * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
  * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
  * import { AuthMiddleware, CurrentUser, layer as authLayer } from "@thomasfosterau/effect-auth/http"
+ * import {
+ *   Hooks,
+ *   SessionService,
+ *   SessionStore,
+ *   UserStore,
+ *   type Session,
+ *   type User,
+ * } from "@thomasfosterau/effect-auth"
  *
  * const ProfileSchema = Schema.Struct({ id: Schema.String })
  *
+ * // In-memory stores for the session service. A real app backs these with its database.
+ * const sessions = new Map<string, Session>()
+ * const users = new Map<string, User>()
+ * const storeLayers = Layer.mergeAll(
+ *   Layer.succeed(SessionStore, {
+ *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
+ *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
+ *     deleteByUserId: (userId) =>
+ *       Effect.sync(() => {
+ *         for (const [id, session] of sessions) if (session.userId === userId) sessions.delete(id)
+ *       }),
+ *     listByUserId: (userId) =>
+ *       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+ *   }),
+ *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => users.get(id) ?? null) }),
+ * )
+ *
  * // Stands in for the services the app provides (SessionService, Hooks, ...).
- * declare const myServiceLayer: Layer.Layer<never>
+ * const myServiceLayer = SessionService.layer({
+ *   sessionExpiresIn: { activePeriod: 7 * 86_400_000, idlePeriod: 86_400_000 },
+ * }).pipe(Layer.provideMerge(Layer.mergeAll(storeLayers, Hooks.Default)))
  *
  * // 1. Define API group – mark endpoints that need auth
  * const ProfileGroup = HttpApiGroup.make("profile").add(
@@ -62,7 +93,39 @@
  *   Layer.provide(ProfileGroupLayer),
  *   Layer.provide(authLayer()),
  *   Layer.provide(myServiceLayer), // must provide SessionService, Hooks, …
+ *   Layer.provide(
+ *     Layer.mergeAll(
+ *       Path.layer,
+ *       Etag.layerWeak,
+ *       HttpPlatform.layer.pipe(Layer.provide(FileSystem.layerNoop({}))),
+ *       FileSystem.layerNoop({}),
+ *     ),
+ *   ),
  * )
+ *
+ * // Sign a user in and serve the app in-process.
+ * const program = Effect.gen(function* () {
+ *   const now = new Date()
+ *   users.set("u-1", { id: "u-1", name: "Ada", createdAt: now, updatedAt: now, attributes: {} })
+ *   const sessionService = yield* SessionService
+ *   // The raw token is the session id; the store keeps only its hash.
+ *   return (yield* sessionService.createSession("u-1")).id
+ * }).pipe(Effect.provide(myServiceLayer))
+ *
+ * const token = await Effect.runPromise(program)
+ * const { handler, dispose } = HttpRouter.toWebHandler(AppLayer)
+ * try {
+ *   const signedIn = await handler(
+ *     new Request("http://localhost/profile", { headers: { authorization: `Bearer ${token}` } }),
+ *   )
+ *   assert.equal(signedIn.status, 200)
+ *   assert.deepEqual(await signedIn.json(), { id: "u-1" })
+ *
+ *   const anonymous = await handler(new Request("http://localhost/profile"))
+ *   assert.equal(anonymous.status, 401)
+ * } finally {
+ *   await dispose()
+ * }
  * ```
  */
 
@@ -333,21 +396,96 @@ const validateToken = (
  *
  * @example
  * ```ts
- * import { Layer } from "effect"
- * import { HttpApi, HttpApiBuilder } from "effect/http-api"
- * import { layer } from "@thomasfosterau/effect-auth/http"
+ * import assert from "node:assert/strict"
+ * import { Effect, FileSystem, Layer, Path, Schema } from "effect"
+ * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
+ * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
+ * import { AuthMiddleware, CurrentUser, layer } from "@thomasfosterau/effect-auth/http"
+ * import {
+ *   Hooks,
+ *   SessionService,
+ *   SessionStore,
+ *   UserStore,
+ *   type Session,
+ *   type User,
+ * } from "@thomasfosterau/effect-auth"
  *
- * const MyApi = HttpApi.make("MyApi")
+ * // In-memory stores for the session service. A real app backs these with its database.
+ * const sessions = new Map<string, Session>()
+ * const users = new Map<string, User>()
+ * const storeLayers = Layer.mergeAll(
+ *   Layer.succeed(SessionStore, {
+ *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
+ *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
+ *     deleteByUserId: (userId) =>
+ *       Effect.sync(() => {
+ *         for (const [id, session] of sessions) if (session.userId === userId) sessions.delete(id)
+ *       }),
+ *     listByUserId: (userId) =>
+ *       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+ *   }),
+ *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => users.get(id) ?? null) }),
+ * )
  *
- * // Stand-ins for the group handlers and the app's services.
- * declare const myGroupLayer: Layer.Layer<never>
- * declare const myServiceLayer: Layer.Layer<never>
+ * // The app's services: SessionService and Hooks.
+ * const myServiceLayer = SessionService.layer({
+ *   sessionExpiresIn: { activePeriod: 7 * 86_400_000, idlePeriod: 86_400_000 },
+ * }).pipe(Layer.provideMerge(Layer.mergeAll(storeLayers, Hooks.Default)))
+ *
+ * const AccountSchema = Schema.Struct({ id: Schema.String })
+ * const MyApi = HttpApi.make("MyApi").add(
+ *   HttpApiGroup.make("account").add(
+ *     HttpApiEndpoint.get("getAccount", "/account", { success: AccountSchema }).middleware(
+ *       AuthMiddleware,
+ *     ),
+ *   ),
+ * )
+ *
+ * // Stand-in for the account group handlers: the signed-in user is `CurrentUser`.
+ * const myGroupLayer = HttpApiBuilder.group(MyApi, "account", (handlers) =>
+ *   handlers.handle("getAccount", () =>
+ *     Effect.gen(function* () {
+ *       const user = yield* CurrentUser
+ *       return { id: user.id }
+ *     }),
+ *   ),
+ * )
  *
  * const AppLayer = HttpApiBuilder.layer(MyApi).pipe(
  *   Layer.provide(myGroupLayer),
  *   Layer.provide(layer()),
  *   Layer.provide(myServiceLayer),
+ *   Layer.provide(
+ *     Layer.mergeAll(
+ *       Path.layer,
+ *       Etag.layerWeak,
+ *       HttpPlatform.layer.pipe(Layer.provide(FileSystem.layerNoop({}))),
+ *       FileSystem.layerNoop({}),
+ *     ),
+ *   ),
  * )
+ *
+ * const program = Effect.gen(function* () {
+ *   const now = new Date()
+ *   users.set("u-1", { id: "u-1", name: "Ada", createdAt: now, updatedAt: now, attributes: {} })
+ *   const sessionService = yield* SessionService
+ *   return (yield* sessionService.createSession("u-1")).id
+ * }).pipe(Effect.provide(myServiceLayer))
+ *
+ * const token = await Effect.runPromise(program)
+ * const { handler, dispose } = HttpRouter.toWebHandler(AppLayer)
+ * try {
+ *   const signedIn = await handler(
+ *     new Request("http://localhost/account", { headers: { authorization: `Bearer ${token}` } }),
+ *   )
+ *   assert.equal(signedIn.status, 200)
+ *   assert.deepEqual(await signedIn.json(), { id: "u-1" })
+ *   assert.equal((await handler(new Request("http://localhost/account"))).status, 401)
+ * } finally {
+ *   await dispose()
+ * }
  * ```
  *
  * @since 1.0.0
@@ -416,21 +554,100 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  *
  * @example
  * ```ts
- * import { Layer } from "effect"
- * import { HttpApi, HttpApiBuilder } from "effect/http-api"
- * import { optionalLayer } from "@thomasfosterau/effect-auth/http"
+ * import assert from "node:assert/strict"
+ * import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
+ * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
+ * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
+ * import { OptionalAuthMiddleware, optionalLayer } from "@thomasfosterau/effect-auth/http"
+ * import {
+ *   Hooks,
+ *   MaybeCurrentSession,
+ *   SessionService,
+ *   SessionStore,
+ *   UserStore,
+ *   type Session,
+ *   type User,
+ * } from "@thomasfosterau/effect-auth"
  *
- * const MyApi = HttpApi.make("MyApi")
+ * // In-memory stores for the session service. A real app backs these with its database.
+ * const sessions = new Map<string, Session>()
+ * const users = new Map<string, User>()
+ * const storeLayers = Layer.mergeAll(
+ *   Layer.succeed(SessionStore, {
+ *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
+ *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
+ *     deleteByUserId: (userId) =>
+ *       Effect.sync(() => {
+ *         for (const [id, session] of sessions) if (session.userId === userId) sessions.delete(id)
+ *       }),
+ *     listByUserId: (userId) =>
+ *       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+ *   }),
+ *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => users.get(id) ?? null) }),
+ * )
  *
  * // Stand-ins for the feed group handlers and the app's services.
- * declare const myFeedGroupLayer: Layer.Layer<never>
- * declare const myServiceLayer: Layer.Layer<never>
+ * const myServiceLayer = SessionService.layer({
+ *   sessionExpiresIn: { activePeriod: 7 * 86_400_000, idlePeriod: 86_400_000 },
+ * }).pipe(Layer.provideMerge(Layer.mergeAll(storeLayers, Hooks.Default)))
+ *
+ * // The feed is public, but a signed-in viewer sees their own name in it.
+ * const FeedSchema = Schema.Struct({ viewer: Schema.NullOr(Schema.String) })
+ * const MyApi = HttpApi.make("MyApi").add(
+ *   HttpApiGroup.make("feed").add(
+ *     HttpApiEndpoint.get("getFeed", "/feed", { success: FeedSchema }).middleware(
+ *       OptionalAuthMiddleware,
+ *     ),
+ *   ),
+ * )
+ *
+ * const myFeedGroupLayer = HttpApiBuilder.group(MyApi, "feed", (handlers) =>
+ *   handlers.handle("getFeed", () =>
+ *     Effect.gen(function* () {
+ *       const viewer = yield* MaybeCurrentSession
+ *       return { viewer: Option.isSome(viewer) ? viewer.value.user.id : null }
+ *     }),
+ *   ),
+ * )
  *
  * const AppLayer = HttpApiBuilder.layer(MyApi).pipe(
  *   Layer.provide(myFeedGroupLayer),
  *   Layer.provide(optionalLayer()),
  *   Layer.provide(myServiceLayer),
+ *   Layer.provide(
+ *     Layer.mergeAll(
+ *       Path.layer,
+ *       Etag.layerWeak,
+ *       HttpPlatform.layer.pipe(Layer.provide(FileSystem.layerNoop({}))),
+ *       FileSystem.layerNoop({}),
+ *     ),
+ *   ),
  * )
+ *
+ * const program = Effect.gen(function* () {
+ *   const now = new Date()
+ *   users.set("u-1", { id: "u-1", name: "Ada", createdAt: now, updatedAt: now, attributes: {} })
+ *   const sessionService = yield* SessionService
+ *   return (yield* sessionService.createSession("u-1")).id
+ * }).pipe(Effect.provide(myServiceLayer))
+ *
+ * const token = await Effect.runPromise(program)
+ * const { handler, dispose } = HttpRouter.toWebHandler(AppLayer)
+ * try {
+ *   const signedIn = await handler(
+ *     new Request("http://localhost/feed", { headers: { authorization: `Bearer ${token}` } }),
+ *   )
+ *   assert.deepEqual(await signedIn.json(), { viewer: "u-1" })
+ *
+ *   // Anonymous requests are served too, with no viewer.
+ *   const anonymous = await handler(new Request("http://localhost/feed"))
+ *   assert.equal(anonymous.status, 200)
+ *   assert.deepEqual(await anonymous.json(), { viewer: null })
+ * } finally {
+ *   await dispose()
+ * }
  * ```
  *
  * @since 1.0.0

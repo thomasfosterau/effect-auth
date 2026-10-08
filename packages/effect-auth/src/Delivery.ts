@@ -15,26 +15,48 @@
  * template selection is keyed off `purpose`.
  *
  * ```ts
- * import { Effect } from "effect"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer, Queue } from "effect"
  * import {
  *   EmailSender,
- *   IdentifierStore,
- *   MagicLinkService,
  *   emailCallbacks,
+ *   IdentifierStore,
+ *   memoryIdentifierStore,
+ *   type EmailMessage,
  * } from "@thomasfosterau/effect-auth"
- * import { EmailVerificationService } from "@thomasfosterau/effect-auth/email"
  *
- * // An adapter (Resend, SES, ...) implements EmailSender once; the per-feature
- * // callbacks are derived from it.
- * const wiring = Effect.gen(function* () {
+ * // An in-memory adapter: every message is put on an outbox the program reads.
+ * const outbox = Effect.runSync(Queue.unbounded<EmailMessage>())
+ * const adapter = Layer.succeed(EmailSender, {
+ *   send: (message) => Queue.offer(outbox, message).pipe(Effect.asVoid),
+ * })
+ *
+ * const program = Effect.gen(function* () {
+ *   // An adapter (Resend, SES, ...) implements EmailSender once; the per-feature
+ *   // callbacks are derived from it.
  *   const sender = yield* EmailSender // provided by an adapter package
  *   const send = emailCallbacks(sender, yield* IdentifierStore)
  *
- *   return [
- *     MagicLinkService.layer({ sendMagicLink: send.sendMagicLink }),
- *     EmailVerificationService.layer({ sendEmail: send.sendVerificationEmail }),
- *   ] as const
- * })
+ *   yield* send.sendMagicLink("ada@example.com", "magic-token")
+ *   yield* send.sendVerificationEmail("ada@example.com", "verify-token")
+ *
+ *   // Delivery is dispatched off the response path, so read the two messages back.
+ *   const messages = [yield* Queue.take(outbox), yield* Queue.take(outbox)]
+ *   assert.deepEqual(
+ *     messages.find((m) => m.purpose === "magic-link"),
+ *     { to: "ada@example.com", purpose: "magic-link", params: { token: "magic-token" } },
+ *   )
+ *   assert.deepEqual(
+ *     messages.find((m) => m.purpose === "email-verification"),
+ *     { to: "ada@example.com", purpose: "email-verification", params: { token: "verify-token" } },
+ *   )
+ * }).pipe(
+ *   Effect.provide(
+ *     Layer.mergeAll(adapter, Layer.succeed(IdentifierStore, memoryIdentifierStore())),
+ *   ),
+ * )
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * @module delivery

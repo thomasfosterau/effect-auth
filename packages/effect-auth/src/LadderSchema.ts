@@ -7,12 +7,17 @@
  *
  * @example
  * ```ts
+ * import assert from "node:assert/strict"
  * import { Schema } from "effect"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * const Roles = Auth.Ladder.make(["user", "contributor", "moderator", "admin"])
  * const AppUser = Schema.Struct({ id: Schema.String, role: Auth.LadderSchema.rung(Roles) })
- * Schema.decodeUnknownSync(AppUser)({ id: "u1", role: "superadmin" }) // throws
+ *
+ * // A rung on the ladder decodes.
+ * assert.equal(Schema.decodeUnknownSync(AppUser)({ id: "u1", role: "moderator" }).role, "moderator")
+ * // A value that is not a rung is refused.
+ * assert.throws(() => Schema.decodeUnknownSync(AppUser)({ id: "u1", role: "superadmin" }))
  * ```
  *
  * @module ladder-schema

@@ -21,6 +21,7 @@
  *
  * @example One-call RBAC setup
  * ```ts
+ * import assert from "node:assert/strict"
  * import { Effect } from "effect"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
@@ -34,13 +35,18 @@
  *   roleHierarchy: { editor: ["viewer"] }, // editor also gets viewer's grants
  * })
  *
+ * const post = Auth.Entity.ref("posts", "post-1")
+ *
  * const program = Effect.gen(function* () {
  *   const authorizer = yield* Auth.Authorizer
- *   return yield* authorizer.check({
- *     action: "read",
- *     resource: Auth.Entity.ref("posts", "post-1"),
- *   })
- * }).pipe(Auth.CurrentPrincipal.provide(Auth.Entity.ref("User", "user-1")))
+ *   // Inherited from viewer through the hierarchy.
+ *   assert.equal(yield* authorizer.check({ action: "read", resource: post }), true)
+ *   // The editor role grants update, and nothing grants delete to user-1.
+ *   assert.equal(yield* authorizer.check({ action: "update", resource: post }), true)
+ *   assert.equal(yield* authorizer.check({ action: "delete", resource: post }), false)
+ * }).pipe(Auth.CurrentPrincipal.provide(Auth.Entity.ref("User", "user-1")), Effect.provide(rbac))
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * @module rbac

@@ -119,17 +119,22 @@ const parseAlgorithm = (hash: string): Effect.Effect<string, Errors.HashingError
  *
  * @example
  * ```typescript
+ * import assert from "node:assert/strict"
  * import { Effect } from "effect"
+ * import { Password } from "@thomasfosterau/effect-auth"
  *
- * declare const verifier: { verify: (p: string, h: string) => Effect.Effect<boolean> }
- * declare const password: string
- * declare const storedHash: string
+ * // During a migration, one verifier accepts hashes from both algorithms.
+ * const verifier = Password.multiAlgorithmVerifier([Password.pbkdf2Hasher(), Password.scryptHasher()])
  *
  * const program = Effect.gen(function* () {
+ *   // A hash written by the old algorithm still verifies.
+ *   const legacy = yield* Password.pbkdf2Hasher().hash("correct horse battery")
  *   // Will automatically detect which algorithm was used.
- *   const isValid = yield* verifier.verify(password, storedHash)
- *   return isValid
+ *   assert.equal(yield* verifier.verify("correct horse battery", legacy.hash), true)
+ *   assert.equal(yield* verifier.verify("wrong password", legacy.hash), false)
  * })
+ *
+ * await Effect.runPromise(program)
  * ```
  */
 export const multiAlgorithmVerifier = (

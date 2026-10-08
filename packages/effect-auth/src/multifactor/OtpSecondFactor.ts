@@ -280,18 +280,21 @@ export const make = (
  *   type OtpSecondFactorStore,
  * } from "@thomasfosterau/effect-auth/multifactor"
  *
- * // Stand-ins for the app's store adapter and its OTP delivery callback.
- * declare const otpSecondFactorStore: Layer.Layer<OtpSecondFactorStore>
- * declare const sendOtp: OtpSecondFactorConfig["sendOtp"]
- *
- * const services = Layer.mergeAll(
- *   EmailPasswordService.layer(),
- *   OtpSecondFactorGateLayer.pipe(
- *     Layer.provide(
- *       OtpSecondFactorService.layer({ sendOtp }).pipe(Layer.provide(otpSecondFactorStore)),
+ * // The app's store adapter and OTP delivery callback, passed in. Building these
+ * // services connects them to the app's database and mailer, so this composes the
+ * // graph and does not build it.
+ * export const makeServices = (
+ *   otpSecondFactorStore: Layer.Layer<OtpSecondFactorStore>,
+ *   sendOtp: OtpSecondFactorConfig["sendOtp"],
+ * ) =>
+ *   Layer.mergeAll(
+ *     EmailPasswordService.layer(),
+ *     OtpSecondFactorGateLayer.pipe(
+ *       Layer.provide(
+ *         OtpSecondFactorService.layer({ sendOtp }).pipe(Layer.provide(otpSecondFactorStore)),
+ *       ),
  *     ),
- *   ),
- * )
+ *   )
  * ```
  */
 export const OtpSecondFactorGateLayer: Layer.Layer<
@@ -340,24 +343,27 @@ export const OtpSecondFactorGateLayer: Layer.Layer<
  *   type OtpSecondFactorStore,
  * } from "@thomasfosterau/effect-auth/multifactor"
  *
- * // Stand-ins for the app's storage adapters and OTP delivery callback.
- * declare const trustedDeviceStore: Layer.Layer<TrustedDeviceStore>
- * declare const otpSecondFactorStore: Layer.Layer<OtpSecondFactorStore>
- * declare const sendOtp: OtpSecondFactorConfig["sendOtp"]
- *
- * const services = Layer.mergeAll(
- *   EmailPasswordService.layer(),
- *   TrustedDeviceWithOtpSecondFactorGateLayer.pipe(
- *     Layer.provide(
- *       TrustedDeviceService.layer({ secret: Redacted.make("...") }).pipe(
- *         Layer.provide(trustedDeviceStore),
+ * // The app's storage adapters and OTP delivery callback, passed in. Building
+ * // these services connects them to the app's database and mailer, so this
+ * // composes the graph and does not build it.
+ * export const makeServices = (
+ *   trustedDeviceStore: Layer.Layer<TrustedDeviceStore>,
+ *   otpSecondFactorStore: Layer.Layer<OtpSecondFactorStore>,
+ *   sendOtp: OtpSecondFactorConfig["sendOtp"],
+ * ) =>
+ *   Layer.mergeAll(
+ *     EmailPasswordService.layer(),
+ *     TrustedDeviceWithOtpSecondFactorGateLayer.pipe(
+ *       Layer.provide(
+ *         TrustedDeviceService.layer({ secret: Redacted.make("example-trusted-device-secret") }).pipe(
+ *           Layer.provide(trustedDeviceStore),
+ *         ),
+ *       ),
+ *       Layer.provide(
+ *         OtpSecondFactorService.layer({ sendOtp }).pipe(Layer.provide(otpSecondFactorStore)),
  *       ),
  *     ),
- *     Layer.provide(
- *       OtpSecondFactorService.layer({ sendOtp }).pipe(Layer.provide(otpSecondFactorStore)),
- *     ),
- *   ),
- * )
+ *   )
  * ```
  */
 export const TrustedDeviceWithOtpSecondFactorGateLayer: Layer.Layer<

@@ -8,14 +8,28 @@
  * Usage (in-memory):
  *
  * ```ts
- * import { Layer } from "effect";
- * import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
- * import { rateLimiterPersistenceLayer } from "@thomasfosterau/effect-auth";
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer, Result } from "effect"
+ * import { RateLimiter as PersistenceRateLimiter } from "effect/persistence"
+ * import { RateLimiter, rateLimiterPersistenceLayer } from "@thomasfosterau/effect-auth"
  *
  * const RateLimiterLive = rateLimiterPersistenceLayer.pipe(
  *   Layer.provide(PersistenceRateLimiter.layer),
  *   Layer.provide(PersistenceRateLimiter.layerStoreMemory),
- * );
+ * )
+ *
+ * // The facade keeps the RateLimiter contract: two attempts pass, the third is refused.
+ * const limit = { maxRequests: 2, windowMs: 60_000 }
+ *
+ * const program = Effect.gen(function* () {
+ *   const limiter = yield* RateLimiter
+ *   yield* limiter.consumeToken("login:ada", limit)
+ *   yield* limiter.consumeToken("login:ada", limit)
+ *   const refused = yield* Effect.result(limiter.consumeToken("login:ada", limit))
+ *   assert.ok(Result.isFailure(refused))
+ * }).pipe(Effect.provide(RateLimiterLive))
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * Redis (multi-instance; atomic increments avoid the read-modify-write race of
@@ -26,14 +40,15 @@
  * import { RateLimiter as PersistenceRateLimiter, Redis } from "effect/persistence"
  * import { rateLimiterPersistenceLayer } from "@thomasfosterau/effect-auth"
  *
- * // Stand-in for the app's Redis client layer.
- * declare const redisLayer: Layer.Layer<Redis.Redis>
- *
- * const RateLimiterRedis = rateLimiterPersistenceLayer.pipe(
- *   Layer.provide(PersistenceRateLimiter.layer),
- *   Layer.provide(PersistenceRateLimiter.layerStoreRedis()),
- *   Layer.provide(redisLayer),
- * )
+ * // The app's Redis client layer (for example, a node-redis adapter) is supplied
+ * // by the app. Building this layer connects to Redis, so it is composed here and
+ * // not run.
+ * export const makeRateLimiterRedis = (redisLayer: Layer.Layer<Redis.Redis>) =>
+ *   rateLimiterPersistenceLayer.pipe(
+ *     Layer.provide(PersistenceRateLimiter.layer),
+ *     Layer.provide(PersistenceRateLimiter.layerStoreRedis()),
+ *     Layer.provide(redisLayer),
+ *   )
  * ```
  *
  * @module rate-limit-persistence

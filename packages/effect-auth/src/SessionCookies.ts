@@ -106,10 +106,11 @@ export interface SessionCookieNames {
  *
  * @example Deciding at a Worker edge whether a request can possibly resolve
  * ```ts
+ * import assert from "node:assert/strict"
  * import { SessionCookies } from "@thomasfosterau/effect-auth"
  *
  * const names = SessionCookies.cookieNames({ name: "app_session" })
- * // names.session === "__Host-app_session"
+ * assert.equal(names.session, "__Host-app_session")
  * ```
  *
  * @since 1.0.0

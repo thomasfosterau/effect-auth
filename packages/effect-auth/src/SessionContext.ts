@@ -39,15 +39,37 @@
  *
  * @example Running gated code in a runtime that never saw an HTTP request
  * ```ts
+ * import assert from "node:assert/strict"
  * import { Effect } from "effect"
- * import * as Auth from "@thomasfosterau/effect-auth"
+ * import { SessionContext, type SessionWithUser } from "@thomasfosterau/effect-auth"
  *
  * // `resolved` came from the app's own edge — `event.locals`, a service
  * // binding, a test fixture. No `HttpServerRequest` is involved.
- * declare const resolved: Parameters<typeof Auth.SessionContext.layer>[0]
+ * const now = new Date()
+ * const resolved: SessionWithUser = {
+ *   session: {
+ *     id: "session-token-hash",
+ *     userId: "u-1",
+ *     expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+ *     createdAt: now,
+ *     lastActivityAt: now,
+ *     attributes: {},
+ *   },
+ *   user: { id: "u-1", name: "Ada", createdAt: now, updatedAt: now, attributes: {} },
+ * }
  *
- * const run = <A, E>(effect: Effect.Effect<A, E, Auth.MaybeCurrentSession>) =>
- *   effect.pipe(Effect.provide(Auth.SessionContext.layer(resolved)))
+ * const run = <A, E>(effect: Effect.Effect<A, E, SessionContext.MaybeCurrentSession>) =>
+ *   effect.pipe(Effect.provide(SessionContext.layer(resolved)))
+ *
+ * const program = run(
+ *   Effect.gen(function* () {
+ *     assert.equal(yield* SessionContext.isAuthenticated, true)
+ *     const user = yield* SessionContext.requireCurrentUser
+ *     assert.equal(user.id, "u-1")
+ *   }),
+ * )
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * @module session-context
@@ -211,14 +233,41 @@ export const anonymousLayer: Layer.Layer<MaybeCurrentSession> = Layer.succeed(
  *
  * @example
  * ```ts
- * import { SessionContext } from "@thomasfosterau/effect-auth"
+ * import assert from "node:assert/strict"
+ * import { Effect } from "effect"
+ * import { SessionContext, type SessionWithUser } from "@thomasfosterau/effect-auth"
  *
- * // SvelteKit: `event.locals.session` is `SessionWithUser | null`
- * declare const event: {
- *   readonly locals: { readonly session: Parameters<typeof SessionContext.layer>[0] }
+ * // SvelteKit: `event.locals.session` is `SessionWithUser | null`, set by the
+ * // app's `handle` hook. The fixture below stands in for that hook's output.
+ * const now = new Date()
+ * const signedIn: SessionWithUser = {
+ *   session: {
+ *     id: "session-token-hash",
+ *     userId: "u-1",
+ *     expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+ *     createdAt: now,
+ *     lastActivityAt: now,
+ *     attributes: {},
+ *   },
+ *   user: { id: "u-1", createdAt: now, updatedAt: now, attributes: {} },
+ * }
+ * const event: { readonly locals: { readonly session: SessionWithUser | null } } = {
+ *   locals: { session: signedIn },
  * }
  *
  * const context = SessionContext.layer(event.locals.session)
+ * const anonymousContext = SessionContext.layer(null)
+ *
+ * await Effect.runPromise(
+ *   Effect.gen(function* () {
+ *     assert.equal(yield* SessionContext.isAuthenticated, true)
+ *   }).pipe(Effect.provide(context)),
+ * )
+ * await Effect.runPromise(
+ *   Effect.gen(function* () {
+ *     assert.equal(yield* SessionContext.isAuthenticated, false)
+ *   }).pipe(Effect.provide(anonymousContext)),
+ * )
  * ```
  *
  * @since 1.0.0
@@ -382,7 +431,8 @@ export const requireCurrentSession: Effect.Effect<
  *
  * @example
  * ```ts
- * import { Context, Option } from "effect"
+ * import assert from "node:assert/strict"
+ * import { Context, Effect, Option } from "effect"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * interface AppUser { readonly id: string; readonly role: string }
@@ -394,6 +444,20 @@ export const requireCurrentSession: Effect.Effect<
  * const asModerator = Auth.SessionContext.viewerLayer(CurrentViewer, { id: "u1", role: "moderator" })
  * // …and as nobody:
  * const asAnonymous = Auth.SessionContext.viewerLayer(CurrentViewer, null)
+ *
+ * const viewer = Effect.gen(function* () {
+ *   return yield* CurrentViewer
+ * })
+ *
+ * const program = Effect.gen(function* () {
+ *   const moderator = yield* viewer.pipe(Effect.provide(asModerator))
+ *   assert.deepEqual(moderator, Option.some({ id: "u1", role: "moderator" }))
+ *
+ *   const nobody = yield* viewer.pipe(Effect.provide(asAnonymous))
+ *   assert.ok(Option.isNone(nobody))
+ * })
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * @since 1.0.0

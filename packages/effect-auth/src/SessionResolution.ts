@@ -280,15 +280,27 @@ export const extractSessionToken = (
  *
  * @example The cookieless fast path, at a raw Worker `Request`
  * ```ts
- * import { SessionResolution } from "@thomasfosterau/effect-auth"
+ * import assert from "node:assert/strict"
+ * import { SessionCookies, SessionResolution } from "@thomasfosterau/effect-auth"
  *
- * declare const request: Parameters<typeof SessionResolution.fromRequest>[0]
+ * // The cookie the browser sends, named the way the app configures it.
+ * const names = SessionCookies.cookieNames({ name: "app_session" })
+ * const request = new Request("https://app.example.com/", {
+ *   headers: { cookie: `${names.session}=session-token` },
+ * })
  *
  * const credential = SessionResolution.detectCredential(
  *   SessionResolution.fromRequest(request),
  *   { name: "app_session" },
  * )
  * // `credential.present === false` → skip the binding call entirely.
+ * assert.equal(credential.present, true)
+ *
+ * const anonymous = SessionResolution.detectCredential(
+ *   SessionResolution.fromRequest(new Request("https://app.example.com/")),
+ *   { name: "app_session" },
+ * )
+ * assert.equal(anonymous.present, false)
  * ```
  *
  * @since 1.0.0
@@ -463,16 +475,38 @@ export interface ResolveFailOpenOptions<E, R> extends ResolveOptions<E, R> {
  *
  * @example
  * ```ts
- * import { Effect } from "effect"
- * import { SessionResolution } from "@thomasfosterau/effect-auth"
+ * import assert from "node:assert/strict"
+ * import { Effect, Option } from "effect"
+ * import { SessionCookies, SessionResolution, type SessionWithUser } from "@thomasfosterau/effect-auth"
  *
- * declare const request: Request
- * declare const credential: ReturnType<typeof SessionResolution.detectCredential>
+ * const now = new Date()
+ * const signedIn: SessionWithUser = {
+ *   session: {
+ *     id: "session-token-hash",
+ *     userId: "u-1",
+ *     expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+ *     createdAt: now,
+ *     lastActivityAt: now,
+ *     attributes: {},
+ *   },
+ *   user: { id: "u-1", createdAt: now, updatedAt: now, attributes: {} },
+ * }
+ *
+ * // The incoming request, carrying the session cookie.
+ * const names = SessionCookies.cookieNames({ name: "app_session" })
+ * const request = new Request("https://app.example.com/", {
+ *   headers: { cookie: `${names.session}=session-token` },
+ * })
+ *
+ * const credential = SessionResolution.detectCredential(
+ *   SessionResolution.fromRequest(request),
+ *   { name: "app_session" },
+ * )
+ *
  * // The app's remote session lookup (for example, a call to an auth service).
- * declare const remote: {
- *   readonly resolve: (
- *     request: Request,
- *   ) => Parameters<typeof SessionResolution.resolveFailOpen>[0]["resolve"]
+ * // It answers "nobody signed in" as Option.none(), and never fails here.
+ * const remote = {
+ *   resolve: (_request: Request) => Effect.succeed(Option.some(signedIn)),
  * }
  *
  * const program = Effect.gen(function* () {
@@ -483,6 +517,10 @@ export interface ResolveFailOpenOptions<E, R> extends ResolveOptions<E, R> {
  *   })
  *   return { session, outcome }
  * })
+ *
+ * const { session } = await Effect.runPromise(program)
+ * assert.ok(Option.isSome(session))
+ * assert.equal(session.value.user.id, "u-1")
  * ```
  *
  * @since 1.0.0

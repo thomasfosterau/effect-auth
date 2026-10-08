@@ -8,14 +8,54 @@
  * {@link Entity} values so application policies can talk about them directly:
  *
  * ```ts
- * import { OrganizationEntities, Policy } from "@thomasfosterau/effect-auth"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer } from "effect"
+ * import * as Auth from "@thomasfosterau/effect-auth"
  *
- * declare const orgId: string
+ * const orgId = "o1"
  *
  * // "org admins may update anything scoped to their organization"
- * Policy.role(OrganizationEntities.orgRoleId(orgId, "admin"), {
- *   resource: Policy.inScope(OrganizationEntities.organizationRef(orgId)),
+ * const orgAdminsUpdate = Auth.Policy.role(Auth.OrganizationEntities.orgRoleId(orgId, "admin"), {
+ *   resource: Auth.Policy.inScope(Auth.OrganizationEntities.organizationRef(orgId)),
  * })
+ *
+ * // The organization's projection: alice is an admin, bob a plain member, and
+ * // the document belongs to the organization.
+ * const alice = Auth.OrganizationEntities.userRef("alice")
+ * const bob = Auth.OrganizationEntities.userRef("bob")
+ * const doc = Auth.Entity.ref("Document", "doc-1")
+ * const graph = Auth.memoryEntityResolver([
+ *   Auth.Entity.entity(alice, {
+ *     parents: [
+ *       Auth.OrganizationEntities.organizationRef(orgId),
+ *       Auth.OrganizationEntities.roleRef(orgId, "admin"),
+ *     ],
+ *   }),
+ *   Auth.Entity.entity(bob, {
+ *     parents: [
+ *       Auth.OrganizationEntities.organizationRef(orgId),
+ *       Auth.OrganizationEntities.roleRef(orgId, "member"),
+ *     ],
+ *   }),
+ *   Auth.Entity.entity(doc, { parents: [Auth.OrganizationEntities.organizationRef(orgId)] }),
+ * ])
+ *
+ * const authorizer = Auth.Authorizer.layer({ policies: [orgAdminsUpdate] }).pipe(
+ *   Layer.provide(Layer.succeed(Auth.EntityResolver, graph)),
+ * )
+ *
+ * const mayUpdate = (principal: Auth.Entity.EntityRef) =>
+ *   Effect.gen(function* () {
+ *     const decide = yield* Auth.Authorizer
+ *     return yield* decide.check({ action: "document:update", resource: doc })
+ *   }).pipe(Auth.CurrentPrincipal.provide(principal), Effect.provide(authorizer))
+ *
+ * await Effect.runPromise(
+ *   Effect.gen(function* () {
+ *     assert.equal(yield* mayUpdate(alice), true)
+ *     assert.equal(yield* mayUpdate(bob), false)
+ *   }),
+ * )
  * ```
  *
  * The projection, for the reference types it recognizes:

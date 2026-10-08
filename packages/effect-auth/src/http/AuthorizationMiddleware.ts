@@ -70,11 +70,25 @@
  *
  * @example Gate one endpoint on a per-request resource
  * ```ts
- * import { Effect } from "effect"
- * import { HttpRouter } from "effect/http"
- * import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
- * import { Entity } from "@thomasfosterau/effect-auth"
- * import { AuthMiddleware, makeAuthorizationMiddleware } from "@thomasfosterau/effect-auth/http"
+ * import assert from "node:assert/strict"
+ * import { Effect, FileSystem, Layer, Path } from "effect"
+ * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
+ * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
+ * import { AuthMiddleware, layer as authLayer, makeAuthorizationMiddleware } from "@thomasfosterau/effect-auth/http"
+ * import {
+ *   Authorizer,
+ *   Condition,
+ *   Entity,
+ *   EntityResolver,
+ *   Hooks,
+ *   memoryEntityResolver,
+ *   Policy,
+ *   SessionService,
+ *   SessionStore,
+ *   UserStore,
+ *   type Session,
+ *   type User,
+ * } from "@thomasfosterau/effect-auth"
  *
  * // A route-level gate: AuthMiddleware answers "who is calling", this answers
  * // "may they do this". The name gives this guard its own type. The resource
@@ -87,12 +101,103 @@
  *   }),
  * )
  *
- * // Attach it after AuthMiddleware so the principal is resolved first.
- * const DocsGroup = HttpApiGroup.make("docs").add(
- *   HttpApiEndpoint.get("getDoc", "/docs/:docId", {})
- *     .middleware(AuthMiddleware)
- *     .middleware(RequireDocRead),
+ * // Attach it before AuthMiddleware: later `.middleware(...)` calls run first, so
+ * // AuthMiddleware resolves the principal before the gate reads it.
+ * const DocsApi = HttpApi.make("DocsApi").add(
+ *   HttpApiGroup.make("docs").add(
+ *     HttpApiEndpoint.get("getDoc", "/docs/:docId", {})
+ *       .middleware(RequireDocRead)
+ *       .middleware(AuthMiddleware),
+ *   ),
  * )
+ *
+ * const docsGroup = HttpApiBuilder.group(DocsApi, "docs", (handlers) =>
+ *   handlers.handle("getDoc", () => Effect.void),
+ * )
+ *
+ * // Policy: a document's owner may read it. `alice` owns doc-1, `bob` owns doc-2.
+ * const ownerCanRead = Policy.permit({
+ *   id: "owner-can-read",
+ *   action: Policy.eq(Entity.ref("Action", "doc:read")),
+ *   when: Condition.eq(Condition.attr("resource", "owner"), Condition.principal),
+ * })
+ * const alice = Entity.ref("User", "alice")
+ * const bob = Entity.ref("User", "bob")
+ * const authorizerLayer = Authorizer.layer({ policies: [ownerCanRead] }).pipe(
+ *   Layer.provide(
+ *     Layer.succeed(
+ *       EntityResolver,
+ *       memoryEntityResolver([
+ *         Entity.entity(Entity.ref("Document", "doc-1"), {
+ *           attributes: { owner: Entity.entityValue(alice) },
+ *         }),
+ *         Entity.entity(Entity.ref("Document", "doc-2"), {
+ *           attributes: { owner: Entity.entityValue(bob) },
+ *         }),
+ *       ]),
+ *     ),
+ *   ),
+ * )
+ *
+ * // In-memory stores for the session service. A real app backs these with its database.
+ * const sessions = new Map<string, Session>()
+ * const users = new Map<string, User>()
+ * const storeLayers = Layer.mergeAll(
+ *   Layer.succeed(SessionStore, {
+ *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
+ *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
+ *     deleteByUserId: (userId) =>
+ *       Effect.sync(() => {
+ *         for (const [id, session] of sessions) if (session.userId === userId) sessions.delete(id)
+ *       }),
+ *     listByUserId: (userId) =>
+ *       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+ *   }),
+ *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => users.get(id) ?? null) }),
+ * )
+ * const myServiceLayer = SessionService.layer({
+ *   sessionExpiresIn: { activePeriod: 7 * 86_400_000, idlePeriod: 86_400_000 },
+ * }).pipe(Layer.provideMerge(Layer.mergeAll(storeLayers, Hooks.Default)))
+ *
+ * const AppLayer = HttpApiBuilder.layer(DocsApi).pipe(
+ *   Layer.provide(docsGroup),
+ *   Layer.provide(Layer.mergeAll(RequireDocRead.layer, authLayer(), authorizerLayer)),
+ *   Layer.provide(myServiceLayer),
+ *   Layer.provide(
+ *     Layer.mergeAll(
+ *       Path.layer,
+ *       Etag.layerWeak,
+ *       HttpPlatform.layer.pipe(Layer.provide(FileSystem.layerNoop({}))),
+ *       FileSystem.layerNoop({}),
+ *     ),
+ *   ),
+ * )
+ *
+ * const signIn = (userId: string) =>
+ *   Effect.gen(function* () {
+ *     const now = new Date()
+ *     users.set(userId, { id: userId, name: userId, createdAt: now, updatedAt: now, attributes: {} })
+ *     const sessionService = yield* SessionService
+ *     return (yield* sessionService.createSession(userId)).id
+ *   }).pipe(Effect.provide(myServiceLayer))
+ *
+ * const aliceToken = await Effect.runPromise(signIn("alice"))
+ * const bobToken = await Effect.runPromise(signIn("bob"))
+ *
+ * const { handler, dispose } = HttpRouter.toWebHandler(AppLayer)
+ * const get = (path: string, token: string) =>
+ *   handler(new Request(`http://localhost${path}`, { headers: { authorization: `Bearer ${token}` } }))
+ * try {
+ *   // Owners are served the handler for their own doc (it returns no body: 204).
+ *   assert.equal((await get("/docs/doc-1", aliceToken)).status, 204)
+ *   // Anyone else is refused with 403.
+ *   assert.equal((await get("/docs/doc-2", aliceToken)).status, 403)
+ *   assert.equal((await get("/docs/doc-2", bobToken)).status, 204)
+ * } finally {
+ *   await dispose()
+ * }
  * ```
  *
  * @module http/authorization-middleware
@@ -275,11 +380,12 @@ export interface AuthorizationMiddlewareClass<
  * demand `CurrentPrincipal` in its context requirements. That check is
  * necessary but not sufficient — it catches a *missing* provider, not a
  * *wrongly ordered* one. At runtime `CurrentPrincipal` must actually be
- * resolved by the time this middleware's handler runs, which means
- * `AuthMiddleware` must be the one wrapping this middleware (applied so its
- * `Effect.provideService(CurrentPrincipal, ...)` is in effect before this
- * middleware's body executes) — not the other way around. Order it after
- * `AuthMiddleware` in the endpoint's `.middleware()` chain.
+ * resolved by the time this middleware's handler runs. In an endpoint's
+ * `.middleware()` chain a later entry runs first, so `AuthMiddleware` must be
+ * listed after this guard: it then provides `CurrentPrincipal` before the guard
+ * reads it. Listing the guard after `AuthMiddleware` runs the guard first, with
+ * no per-request principal, and it decides for whatever `CurrentPrincipal` the
+ * app layer happens to hold.
  *
  * On allow, the handler runs unchanged — no new services are provided
  * (`provides` is empty; the `Decision` is not exposed downstream, matching

@@ -697,19 +697,25 @@ const isAllowedDynamicRedirectUri = (uri: string, extraSchemes: readonly string[
  * endpoints available so a client can maintain its own registration.
  *
  * ```ts
+ * import assert from "node:assert/strict"
  * import { Redacted } from "effect"
  * import { mcpProviderPreset, OidcProviderService } from "@thomasfosterau/effect-auth"
  *
- * declare const token: string
+ * const config = mcpProviderPreset({
+ *   issuer: "https://mcp.example.com/api/auth",
+ *   loginPage: "https://mcp.example.com/login",
+ *   consentPage: "https://mcp.example.com/consent",
+ *   dynamicRegistration: { initialAccessToken: Redacted.make("example-initial-access-token") },
+ * })
  *
- * const oidcLayer = OidcProviderService.layer(
- *   mcpProviderPreset({
- *     issuer: "https://mcp.example.com/api/auth",
- *     loginPage: "https://mcp.example.com/login",
- *     consentPage: "https://mcp.example.com/consent",
- *     dynamicRegistration: { initialAccessToken: Redacted.make(token) },
- *   }),
- * )
+ * // The preset turns on PKCE and dynamic client management.
+ * assert.equal(config.requirePKCE, true)
+ * assert.equal(config.dynamicRegistration?.management, true)
+ *
+ * // The provider layer. Building it also needs the app's OIDC client, code,
+ * // token and consent stores, plus its user, identifier and JWT services, so the
+ * // layer is constructed here and not built.
+ * export const oidcLayer = OidcProviderService.layer(config)
  * ```
  *
  * Everything is overridable: the spread order keeps whatever the caller passes,
