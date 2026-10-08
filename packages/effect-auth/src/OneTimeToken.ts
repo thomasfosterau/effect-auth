@@ -210,19 +210,76 @@ export const make = (
  *
  * @example
  * ```ts
- * import { Effect } from "effect"
- * import { redeemOneTimeTokenForSession } from "@thomasfosterau/effect-auth"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer, Result } from "effect"
+ * import {
+ *   Hooks,
+ *   OneTimeTokenService,
+ *   OneTimeTokenStore,
+ *   redeemOneTimeTokenForSession,
+ *   SessionService,
+ *   SessionStore,
+ *   UserStore,
+ *   type OneTimeTokenRecord,
+ *   type Session,
+ *   type User,
+ * } from "@thomasfosterau/effect-auth"
  *
- * declare const rawToken: string
- * // Stands in for the framework's cookie API.
- * declare function setCookie(response: unknown, name: string, value: string): void
- * declare const response: unknown
+ * // In-memory stores. A real app backs these with its database.
+ * const tokens = new Map<string, OneTimeTokenRecord>()
+ * const sessions = new Map<string, Session>()
+ * const users = new Map<string, User>()
+ * const stores = Layer.mergeAll(
+ *   Layer.succeed(OneTimeTokenStore, {
+ *     create: (record) => Effect.sync(() => (tokens.set(record.token, record), record)),
+ *     get: (token) => Effect.sync(() => tokens.get(token) ?? null),
+ *     delete: (token) => Effect.sync(() => void tokens.delete(token)),
+ *   }),
+ *   Layer.succeed(SessionStore, {
+ *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
+ *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     delete: (id) => Effect.sync(() => void sessions.delete(id)),
+ *     deleteByUserId: (userId) =>
+ *       Effect.sync(() => {
+ *         for (const [id, session] of sessions) if (session.userId === userId) sessions.delete(id)
+ *       }),
+ *     listByUserId: (userId) =>
+ *       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
+ *   }),
+ *   Layer.succeed(UserStore, { get: (id) => Effect.sync(() => users.get(id) ?? null) }),
+ * )
+ * const services = Layer.mergeAll(
+ *   OneTimeTokenService.layer(),
+ *   SessionService.layer({ sessionExpiresIn: { activePeriod: 7 * 86_400_000, idlePeriod: 86_400_000 } }),
+ * ).pipe(Layer.provideMerge(Layer.mergeAll(stores, Hooks.Default)))
  *
- * const redeem = Effect.gen(function* () {
- *   const { session, subject } = yield* redeemOneTimeTokenForSession(rawToken)
- *   setCookie(response, "session", session.id)
- *   return subject
- * })
+ * // Redeem a token from a sign-in link: the session cookie is set on the response.
+ * const redeem = (rawToken: string, response: Headers) =>
+ *   Effect.gen(function* () {
+ *     const { session, subject } = yield* redeemOneTimeTokenForSession(rawToken)
+ *     response.append("set-cookie", `session=${session.id}; Path=/; HttpOnly; Secure`)
+ *     return subject
+ *   })
+ *
+ * const program = Effect.gen(function* () {
+ *   const now = new Date()
+ *   users.set("u-1", { id: "u-1", name: "Ada", createdAt: now, updatedAt: now, attributes: {} })
+ *
+ *   // The link emailed to the user carries the raw token; the store keeps only its hash.
+ *   const tokenService = yield* OneTimeTokenService
+ *   const rawToken = yield* tokenService.generate("u-1")
+ *
+ *   const response = new Headers()
+ *   assert.equal(yield* redeem(rawToken, response), "u-1")
+ *   assert.match(response.get("set-cookie") ?? "", /^session=/)
+ *
+ *   // Single use: the same link cannot be redeemed twice.
+ *   const again = yield* Effect.result(redeem(rawToken, new Headers()))
+ *   assert.ok(Result.isFailure(again))
+ * }).pipe(Effect.provide(services))
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * Requires `OneTimeTokenService`, `OneTimeTokenStore`, and `SessionService`

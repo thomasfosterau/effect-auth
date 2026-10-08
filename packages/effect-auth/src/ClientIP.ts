@@ -297,15 +297,30 @@ export const resolveClientIP = (
  *
  * @example
  * ```ts
- * import { Layer } from "effect"
- * import { clientIPLayer } from "@thomasfosterau/effect-auth"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer } from "effect"
+ * import { HttpServerRequest } from "effect/http"
+ * import { clientIPLayer, ClientIP } from "@thomasfosterau/effect-auth"
  *
  * // The services the app already provides.
- * declare const services: Layer.Layer<never>
+ * const services = Layer.empty
  *
  * // In HttpServer.make the trustedProxy option wires this up automatically.
  * // For custom usage:
  * const myLayer = Layer.mergeAll(services, clientIPLayer({ hopCount: 1 }))
+ *
+ * // One trusted proxy in front of the app: it appended the client address to
+ * // X-Forwarded-For, and its own address is the socket peer.
+ * const request = HttpServerRequest.fromWeb(
+ *   new Request("http://localhost/", { headers: { "x-forwarded-for": "203.0.113.7, 10.0.0.1" } }),
+ * )
+ *
+ * const program = Effect.gen(function* () {
+ *   const { ip } = yield* ClientIP
+ *   assert.equal(ip, "203.0.113.7")
+ * }).pipe(Effect.provide(myLayer), Effect.provideService(HttpServerRequest.HttpServerRequest, request))
+ *
+ * await Effect.runPromise(program)
  * ```
  */
 export const clientIPLayer = (

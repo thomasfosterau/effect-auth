@@ -20,7 +20,8 @@
  *
  * @example
  * ```ts
- * import { Layer } from "effect"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer } from "effect"
  * import { composePlugins, Hooks } from "@thomasfosterau/effect-auth"
  * import { AuditPlugin, NormalizeEmailPlugin } from "@thomasfosterau/effect-auth/plugins"
  *
@@ -28,6 +29,15 @@
  *   NormalizeEmailPlugin, // beforeSignUp/beforeSignIn: lowercases email
  *   AuditPlugin, // afterSignIn/afterSignUp/afterSignOut: logs
  * ]).pipe(Layer.provide(Hooks.Default))
+ *
+ * const program = Effect.gen(function* () {
+ *   const hooks = yield* Hooks
+ *   const input = yield* hooks.beforeSignIn({ email: "  Ada@Example.com ", password: "correct horse" })
+ *   assert.equal(input.email, "ada@example.com")
+ *   yield* hooks.afterSignIn({ user: { id: "u-1", createdAt: new Date(), updatedAt: new Date(), attributes: {} } })
+ * }).pipe(Effect.provide(layer))
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * @module hooks
@@ -309,8 +319,9 @@ const wrapHooks = (
  *
  * @example
  * ```ts
- * import { Effect } from "effect"
- * import { makePlugin, type PluginImpls } from "@thomasfosterau/effect-auth"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer } from "effect"
+ * import { composePlugins, Hooks, makePlugin, type PluginImpls } from "@thomasfosterau/effect-auth"
  * import type { SignInInput } from "@thomasfosterau/effect-auth/email"
  *
  * // Zero-dependency: pass the hook implementations directly.
@@ -328,6 +339,14 @@ const wrapHooks = (
  *     } satisfies PluginImpls
  *   }),
  * )
+ *
+ * const program = Effect.gen(function* () {
+ *   const hooks = yield* Hooks
+ *   const input = yield* hooks.beforeSignUp({ email: "Ada@Example.com", password: "correct horse" })
+ *   assert.equal(input.email, "ada@example.com")
+ * }).pipe(Effect.provide(composePlugins([NormalizeEmail, Logged]).pipe(Layer.provide(Hooks.Default))))
+ *
+ * await Effect.runPromise(program)
  * ```
  */
 export function makePlugin<R>(
@@ -365,13 +384,23 @@ export function makePlugin(
  *
  * @example
  * ```ts
- * import { Layer } from "effect"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer } from "effect"
  * import { composePlugins, Hooks } from "@thomasfosterau/effect-auth"
  * import { AuditPlugin, NormalizeEmailPlugin } from "@thomasfosterau/effect-auth/plugins"
  *
  * const layer = composePlugins([NormalizeEmailPlugin, AuditPlugin]).pipe(
  *   Layer.provide(Hooks.Default),
  * )
+ *
+ * // Transforms run in array order: the caller observes the last plugin's output.
+ * const program = Effect.gen(function* () {
+ *   const hooks = yield* Hooks
+ *   const input = yield* hooks.beforeSignUp({ email: " Ada@Example.com ", password: "correct horse" })
+ *   assert.equal(input.email, "ada@example.com")
+ * }).pipe(Effect.provide(layer))
+ *
+ * await Effect.runPromise(program)
  * ```
  */
 export const composePlugins = <RIn = never>(

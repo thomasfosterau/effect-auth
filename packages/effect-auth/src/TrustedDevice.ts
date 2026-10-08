@@ -24,15 +24,24 @@
  * HTTP request boundary before running sign-in:
  *
  * ```ts
+ * import assert from "node:assert/strict"
  * import { Context, Effect } from "effect"
  * import { TrustedDeviceCookieRef } from "@thomasfosterau/effect-auth"
  *
  * // The incoming request, with its cookie reader.
- * declare const request: { readonly cookie: (name: string) => string | undefined }
+ * const request = {
+ *   cookie: (name: string): string | undefined => (name === "device" ? "device-token-123" : undefined),
+ * }
  *
  * const withDeviceCookie = Effect.provide(
  *   Context.make(TrustedDeviceCookieRef, request.cookie("device")),
  * )
+ *
+ * const program = Effect.gen(function* () {
+ *   assert.equal(yield* TrustedDeviceCookieRef, "device-token-123")
+ * }).pipe(withDeviceCookie)
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * @module trusted-device
@@ -91,15 +100,25 @@ export class TrustedDeviceStore extends Context.Service<
  * Override it at the request boundary before running sign-in:
  *
  * ```ts
+ * import assert from "node:assert/strict"
  * import { Context, Effect } from "effect"
  * import { TrustedDeviceCookieRef } from "@thomasfosterau/effect-auth"
  *
  * // The incoming request, with its cookie reader.
- * declare const req: { readonly cookie: (name: string) => string | undefined }
+ * const req = {
+ *   cookie: (name: string): string | undefined =>
+ *     name === "device-token" ? "device-token-123" : undefined,
+ * }
  *
  * const withDeviceCookie = Effect.provide(
  *   Context.make(TrustedDeviceCookieRef, req.cookie("device-token")),
  * )
+ *
+ * const program = Effect.gen(function* () {
+ *   assert.equal(yield* TrustedDeviceCookieRef, "device-token-123")
+ * }).pipe(withDeviceCookie)
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * Because `Context.Reference` carries a `defaultValue`, yielding it has
@@ -346,23 +365,25 @@ export const gate = (
  *   type PendingMultiFactorStore,
  * } from "@thomasfosterau/effect-auth/multifactor"
  *
- * // Stand-ins for the app's storage adapters.
- * declare const trustedDeviceStore: Layer.Layer<TrustedDeviceStore>
- * declare const multiFactorStores: Layer.Layer<MultiFactorStore | PendingMultiFactorStore>
- *
- * const services = Layer.mergeAll(
- *   EmailPasswordService.layer(),
- *   TrustedDeviceWithMultiFactorGateLayer.pipe(
- *     Layer.provide(
- *       TrustedDeviceService.layer({ secret: Redacted.make("...") }).pipe(
- *         Layer.provide(trustedDeviceStore),
+ * // The app's storage adapters, passed in. Building these services connects them
+ * // to the app's database, so this composes the graph and does not build it.
+ * export const makeServices = (
+ *   trustedDeviceStore: Layer.Layer<TrustedDeviceStore>,
+ *   multiFactorStores: Layer.Layer<MultiFactorStore | PendingMultiFactorStore>,
+ * ) =>
+ *   Layer.mergeAll(
+ *     EmailPasswordService.layer(),
+ *     TrustedDeviceWithMultiFactorGateLayer.pipe(
+ *       Layer.provide(
+ *         TrustedDeviceService.layer({ secret: Redacted.make("example-trusted-device-secret") }).pipe(
+ *           Layer.provide(trustedDeviceStore),
+ *         ),
+ *       ),
+ *       Layer.provide(
+ *         MultiFactorService.layer({ issuer: "MyApp" }).pipe(Layer.provide(multiFactorStores)),
  *       ),
  *     ),
- *     Layer.provide(
- *       MultiFactorService.layer({ issuer: "MyApp" }).pipe(Layer.provide(multiFactorStores)),
- *     ),
- *   ),
- * )
+ *   )
  * ```
  *
  * Remember to call `TrustedDeviceService.revokeAll` whenever the user changes

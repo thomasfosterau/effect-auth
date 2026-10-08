@@ -28,19 +28,42 @@
  *
  * @example Viewer projection + write guard on one field
  * ```ts
- * import { Schema } from "effect"
- * import { protectedField, Policy } from "@thomasfosterau/effect-auth"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer, Result, Schema } from "effect"
+ * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * const UserView = Schema.Struct({
  *   id: Schema.String,
- *   email: protectedField(Schema.String, {
- *     policies: Policy.role("admin"),
+ *   email: Auth.protectedField(Schema.String, {
+ *     policies: Auth.Policy.role("admin"),
  *     action: "user:read-email",
  *   }),
  * })
  *
- * // Encoding drops `email` for a principal outside Role::"admin";
- * // decoding fails when such a principal supplies it.
+ * // The app's entity graph: alice holds the admin role, bob holds nothing.
+ * const alice = Auth.Entity.ref("User", "alice")
+ * const bob = Auth.Entity.ref("User", "bob")
+ * const graph = Layer.succeed(
+ *   Auth.EntityResolver,
+ *   Auth.memoryEntityResolver([Auth.Entity.entity(alice, { parents: [Auth.Entity.ref("Role", "admin")] })]),
+ * )
+ * const as = <A, E, R>(effect: Effect.Effect<A, E, R>, principal: Auth.Entity.EntityRef) =>
+ *   effect.pipe(Auth.CurrentPrincipal.provide(principal), Effect.provide(graph))
+ *
+ * const program = Effect.gen(function* () {
+ *   const value = { id: "u-1", email: "alice@example.com" }
+ *
+ *   // Encoding is the viewer projection: an admin keeps `email`, anyone else
+ *   // does not receive the key at all.
+ *   assert.deepEqual(yield* as(Schema.encodeEffect(UserView)(value), alice), value)
+ *   assert.deepEqual(yield* as(Schema.encodeEffect(UserView)(value), bob), { id: "u-1" })
+ *
+ *   // Decoding is the write-side guard: bob may not supply `email`, so the parse fails.
+ *   const refused = yield* Effect.result(as(Schema.decodeUnknownEffect(UserView)(value), bob))
+ *   assert.ok(Result.isFailure(refused))
+ * })
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * @module protected
@@ -223,14 +246,38 @@ export interface ProtectedField<S extends Schema.Constraint> extends Schema.opti
  *
  * @example Redact rather than reject on the write side
  * ```ts
- * import { Schema } from "effect"
- * import { Policy, protectedField } from "@thomasfosterau/effect-auth"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer, Schema } from "effect"
+ * import * as Auth from "@thomasfosterau/effect-auth"
  *
- * protectedField(Schema.Boolean, {
- *   policies: Policy.role("admin"),
- *   action: "user:set-banned",
- *   onDecodeDeny: "redact",
+ * const UserUpdate = Schema.Struct({
+ *   id: Schema.String,
+ *   banned: Auth.protectedField(Schema.Boolean, {
+ *     policies: Auth.Policy.role("admin"),
+ *     action: "user:set-banned",
+ *     onDecodeDeny: "redact",
+ *   }),
  * })
+ *
+ * const alice = Auth.Entity.ref("User", "alice") // in Role::"admin"
+ * const bob = Auth.Entity.ref("User", "bob") // no roles
+ * const graph = Layer.succeed(
+ *   Auth.EntityResolver,
+ *   Auth.memoryEntityResolver([Auth.Entity.entity(alice, { parents: [Auth.Entity.ref("Role", "admin")] })]),
+ * )
+ * const as = <A, E, R>(effect: Effect.Effect<A, E, R>, principal: Auth.Entity.EntityRef) =>
+ *   effect.pipe(Auth.CurrentPrincipal.provide(principal), Effect.provide(graph))
+ *
+ * const program = Effect.gen(function* () {
+ *   const input = { id: "u-1", banned: true }
+ *
+ *   // An admin's write is kept.
+ *   assert.deepEqual(yield* as(Schema.decodeUnknownEffect(UserUpdate)(input), alice), input)
+ *   // Bob may not set `banned`: with "redact" the key is dropped, not rejected.
+ *   assert.deepEqual(yield* as(Schema.decodeUnknownEffect(UserUpdate)(input), bob), { id: "u-1" })
+ * })
+ *
+ * await Effect.runPromise(program)
  * ```
  */
 export const protectedField = <S extends Schema.Top, E = unknown>(

@@ -4,6 +4,7 @@
   "enforceVersion": false,
   "enforceDescriptions": false,
   "enforceExamples": false,
+  "runExamples": true,
   "parseCompilerOptions": {
     "strict": true,
     "skipLibCheck": true,

@@ -701,17 +701,20 @@ export const make = (
  *   type PendingMultiFactorStore,
  * } from "@thomasfosterau/effect-auth/multifactor"
  *
- * // Stand-in for the app's MultiFactorStore / PendingMultiFactorStore adapters.
- * declare const multiFactorStores: Layer.Layer<MultiFactorStore | PendingMultiFactorStore>
- *
- * const services = Layer.mergeAll(
- *   EmailPasswordService.layer(),
- *   MultiFactorGateLayer.pipe(
- *     Layer.provide(
- *       MultiFactorService.layer({ issuer: "MyApp" }).pipe(Layer.provide(multiFactorStores)),
+ * // The app's MultiFactorStore / PendingMultiFactorStore adapters, passed in.
+ * // Building these services connects them to the app's database, so this
+ * // composes the graph and does not build it.
+ * export const makeServices = (
+ *   multiFactorStores: Layer.Layer<MultiFactorStore | PendingMultiFactorStore>,
+ * ) =>
+ *   Layer.mergeAll(
+ *     EmailPasswordService.layer(),
+ *     MultiFactorGateLayer.pipe(
+ *       Layer.provide(
+ *         MultiFactorService.layer({ issuer: "MyApp" }).pipe(Layer.provide(multiFactorStores)),
+ *       ),
  *     ),
- *   ),
- * )
+ *   )
  * ```
  */
 export const MultiFactorGateLayer: Layer.Layer<SecondFactorGate, never, MultiFactorService> =

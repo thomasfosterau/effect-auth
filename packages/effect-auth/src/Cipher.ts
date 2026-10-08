@@ -39,26 +39,44 @@ export interface TokenCipher {
  *
  * @example
  * ```ts
- * import { Redacted } from "effect"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer, Redacted } from "effect"
  * import { aes256GcmCipher, JwtService } from "@thomasfosterau/effect-auth"
  * import { MultiFactorService } from "@thomasfosterau/effect-auth/multifactor"
- * import { OAuthService } from "@thomasfosterau/effect-auth/oauth"
+ * import { GoogleProvider, OAuthService } from "@thomasfosterau/effect-auth/oauth"
  *
  * // The app's OAuth provider list (see OAuthService.layer).
- * declare const providers: Parameters<typeof OAuthService.layer>[0]
+ * const providers = {
+ *   google: GoogleProvider({
+ *     clientId: "example-client-id",
+ *     clientSecret: Redacted.make("example-client-secret"),
+ *     redirectUri: "https://app.example.com/callback/google",
+ *   }),
+ * }
  *
- * const cipher = aes256GcmCipher(process.env.ENCRYPTION_SECRET!)
+ * // One cipher, derived from the app's encryption secret.
+ * const cipher = aes256GcmCipher("example-encryption-secret")
+ *
  * // JWT private key at rest
- * const jwtLayer = JwtService.layer({ issuer: "...", encryptPrivateKey: { cipher } })
+ * const jwtLayer = JwtService.layer({ issuer: "https://app.example.com", encryptPrivateKey: { cipher } })
  * // TOTP secret at rest
- * const totpLayer = MultiFactorService.layer({ issuer: "...", encryptSecret: { cipher } })
+ * const totpLayer = MultiFactorService.layer({ issuer: "MyApp", encryptSecret: { cipher } })
  * // OAuth tokens at rest
  * const oauthLayer = OAuthService.layer(providers, { encryptTokens: { cipher } })
- * // or use the shorthand (each option accepts { secret } instead of { cipher }):
- * const jwtShorthandLayer = JwtService.layer({
- *   issuer: "...",
- *   encryptPrivateKey: { secret: Redacted.make(process.env.ENCRYPTION_SECRET!) },
+ *
+ * // The three services with the cipher wired in. Building them also needs the
+ * // app's persistence stores, which are not part of this example.
+ * export const services = Layer.mergeAll(jwtLayer, totpLayer, oauthLayer)
+ *
+ * // The cipher itself round-trips, and tampering is detected by the GCM tag.
+ * const program = Effect.gen(function* () {
+ *   const sealed = yield* cipher.encrypt("refresh-token-123")
+ *   assert.notEqual(sealed, "refresh-token-123")
+ *   assert.equal(yield* cipher.decrypt(sealed), "refresh-token-123")
+ *   assert.ok(yield* Effect.isFailure(cipher.decrypt(`${sealed.slice(0, -2)}AA`)))
  * })
+ *
+ * await Effect.runPromise(program)
  * ```
  */
 export const aes256GcmCipher = (secret: string): TokenCipher => {

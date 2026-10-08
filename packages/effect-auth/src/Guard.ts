@@ -51,7 +51,8 @@
  *
  * @example
  * ```ts
- * import { Context, Effect, Option } from "effect"
+ * import assert from "node:assert/strict"
+ * import { Context, Effect, Layer, Option, Result } from "effect"
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * interface AppUser { readonly id: string; readonly role: string; readonly name: string }
@@ -70,6 +71,22 @@
  *     const user = yield* requireContributor // Unauthorized | Forbidden
  *     return { id, name, editedBy: user.id }
  *   })
+ *
+ * const viewedBy = (user: AppUser) => Layer.succeed(CurrentViewer, Option.some(user))
+ *
+ * const program = Effect.gen(function* () {
+ *   const ada = { id: "u-1", role: "contributor", name: "Ada" }
+ *   const grace = { id: "u-2", role: "user", name: "Grace" }
+ *
+ *   const renamed = yield* renameTaxon("t-1", "Birds").pipe(Effect.provide(viewedBy(ada)))
+ *   assert.deepEqual(renamed, { id: "t-1", name: "Birds", editedBy: "u-1" })
+ *
+ *   // A signed-in user below the contributor rung is refused.
+ *   const refused = yield* Effect.result(renameTaxon("t-1", "Birds").pipe(Effect.provide(viewedBy(grace))))
+ *   assert.ok(Result.isFailure(refused))
+ * })
+ *
+ * await Effect.runPromise(program)
  * ```
  *
  * @module guard

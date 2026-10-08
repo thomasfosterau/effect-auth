@@ -41,12 +41,14 @@ export const make = (resource: string, action: string): PermissionRef => ({
  *
  * @example
  * ```ts
+ * import assert from "node:assert/strict"
  * import { parsePermission } from "@thomasfosterau/effect-auth"
  *
- * parsePermission("posts:read") // { resource: "posts", action: "read" }
- * parsePermission("posts:*")   // { resource: "posts", action: "*" }
- * parsePermission("*:*")       // { resource: "*", action: "*" }
- * parsePermission("posts")     // throws — no colon
+ * assert.deepEqual(parsePermission("posts:read"), { resource: "posts", action: "read" })
+ * assert.deepEqual(parsePermission("posts:*"), { resource: "posts", action: "*" })
+ * assert.deepEqual(parsePermission("*:*"), { resource: "*", action: "*" })
+ * // No colon: parsePermission throws.
+ * assert.throws(() => parsePermission("posts"))
  * ```
  */
 export const parsePermission = (input: string): PermissionRef => {
@@ -90,11 +92,12 @@ export const formatPermission = (permission: PermissionRef): string =>
  *
  * @example
  * ```ts
+ * import assert from "node:assert/strict"
  * import { permissionMatches } from "@thomasfosterau/effect-auth"
  *
- * permissionMatches({ resource: "posts", action: "*" }, { resource: "posts", action: "read" }) // true
- * permissionMatches({ resource: "*", action: "*" }, { resource: "users", action: "delete" }) // true
- * permissionMatches({ resource: "posts", action: "read" }, { resource: "posts", action: "delete" }) // false
+ * assert.equal(permissionMatches({ resource: "posts", action: "*" }, { resource: "posts", action: "read" }), true)
+ * assert.equal(permissionMatches({ resource: "*", action: "*" }, { resource: "users", action: "delete" }), true)
+ * assert.equal(permissionMatches({ resource: "posts", action: "read" }, { resource: "posts", action: "delete" }), false)
  * ```
  */
 export const permissionMatches = (granted: PermissionRef, requested: PermissionRef): boolean => {

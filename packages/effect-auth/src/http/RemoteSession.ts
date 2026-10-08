@@ -94,17 +94,37 @@ const asFetch =
  *
  * @example Talking to an internal auth Worker with the typed client
  * ```ts
+ * import assert from "node:assert/strict"
  * import { Effect } from "effect"
  * import { Http } from "@thomasfosterau/effect-auth"
  *
- * // The service binding for the auth worker (for example `env.AUTH` on Cloudflare).
- * declare const env: { readonly AUTH: Parameters<typeof Http.RemoteSession.layerFetcher>[0] }
- * declare const payload: { readonly email: string; readonly password: string }
+ * // A stand-in for the auth worker behind the service binding (`env.AUTH` on
+ * // Cloudflare), answering in-process: sign-in succeeds for any credentials.
+ * const authWorker = async (request: Request): Promise<Response> => {
+ *   const { pathname } = new URL(request.url)
+ *   if (request.method === "POST" && pathname.endsWith("/sign-in")) {
+ *     const user = {
+ *       id: "u-1",
+ *       email: "user@example.com",
+ *       emailVerified: true,
+ *       createdAt: 1_700_000_000_000,
+ *       updatedAt: 1_700_000_000_000,
+ *       attributes: {},
+ *     }
+ *     return Response.json({ user, needsEmailVerification: false })
+ *   }
+ *   return new Response(null, { status: 404 })
+ * }
+ * const env = { AUTH: authWorker }
+ * const payload = { email: "user@example.com", password: "password-123" }
  *
  * const program = Effect.gen(function* () {
  *   const client = yield* Http.client("https://auth.internal")
  *   return yield* client.auth.signIn({ payload })
  * }).pipe(Effect.provide(Http.RemoteSession.layerFetcher(env.AUTH)))
+ *
+ * const result = await Effect.runPromise(program)
+ * assert.equal(result.user.id, "u-1")
  * ```
  *
  * @since 1.0.0
@@ -316,14 +336,47 @@ export interface RemoteSessionClient {
  *
  * @example
  * ```ts
+ * import assert from "node:assert/strict"
+ * import { Effect, Option } from "effect"
  * import { Http } from "@thomasfosterau/effect-auth"
  *
- * // The service binding for the auth worker (for example `env.AUTH` on Cloudflare).
- * declare const env: {
- *   readonly AUTH: Parameters<typeof Http.RemoteSession.make>[0]["fetcher"]
+ * // A stand-in for the auth worker behind the service binding (`env.AUTH` on
+ * // Cloudflare): it answers the session read for any request carrying a cookie.
+ * const authWorker = async (request: Request): Promise<Response> => {
+ *   const { pathname } = new URL(request.url)
+ *   if (request.method === "GET" && pathname.endsWith("/session")) {
+ *     if (request.headers.get("cookie") === null) return new Response(null, { status: 401 })
+ *     const user = {
+ *       id: "u-1",
+ *       email: "user@example.com",
+ *       emailVerified: true,
+ *       createdAt: 1_700_000_000_000,
+ *       updatedAt: 1_700_000_000_000,
+ *       attributes: {},
+ *     }
+ *     const session = {
+ *       id: "session-1",
+ *       userId: "u-1",
+ *       expiresAt: 4_102_444_800_000,
+ *       createdAt: 1_700_000_000_000,
+ *       lastActivityAt: 1_700_000_000_000,
+ *       attributes: {},
+ *     }
+ *     return Response.json({ session, user })
+ *   }
+ *   return new Response(null, { status: 404 })
  * }
+ * const env = { AUTH: authWorker }
  *
  * const auth = Http.RemoteSession.make({ fetcher: env.AUTH })
+ *
+ * // The same client answers a signed-in read and a cookieless one.
+ * const signedIn = new Request("https://app.example.com/", {
+ *   headers: { cookie: "conduit_session=session-token" },
+ * })
+ * const result = await Effect.runPromise(auth.read(signedIn))
+ * assert.ok(Option.isSome(result.session))
+ * assert.equal(result.session.value.user.id, "u-1")
  * ```
  *
  * @since 1.0.0
@@ -511,12 +564,43 @@ export const resolveAtEdge = (
  *
  * @example A Worker front door
  * ```ts
- * import { Effect } from "effect"
- * import { Http } from "@thomasfosterau/effect-auth"
+ * import assert from "node:assert/strict"
+ * import { Effect, Option } from "effect"
+ * import { Http, SessionCookies } from "@thomasfosterau/effect-auth"
+ *
+ * // A stand-in for the auth worker behind the service binding: it answers the
+ * // session read for any request carrying a cookie.
+ * const authWorker = async (request: Request): Promise<Response> => {
+ *   const { pathname } = new URL(request.url)
+ *   if (request.method === "GET" && pathname.endsWith("/session")) {
+ *     if (request.headers.get("cookie") === null) return new Response(null, { status: 401 })
+ *     const user = {
+ *       id: "u-1",
+ *       email: "user@example.com",
+ *       emailVerified: true,
+ *       createdAt: 1_700_000_000_000,
+ *       updatedAt: 1_700_000_000_000,
+ *       attributes: {},
+ *     }
+ *     const session = {
+ *       id: "session-1",
+ *       userId: "u-1",
+ *       expiresAt: 4_102_444_800_000,
+ *       createdAt: 1_700_000_000_000,
+ *       lastActivityAt: 1_700_000_000_000,
+ *       attributes: {},
+ *     }
+ *     return Response.json({ session, user })
+ *   }
+ *   return new Response(null, { status: 404 })
+ * }
  *
  * // The remote-session client from `RemoteSession.make`, and the incoming request.
- * declare const auth: ReturnType<typeof Http.RemoteSession.make>
- * declare const request: Request
+ * const auth = Http.RemoteSession.make({ fetcher: authWorker })
+ * const names = SessionCookies.cookieNames()
+ * const request = new Request("https://app.example.com/dashboard", {
+ *   headers: { cookie: `${names.session}=session-token` },
+ * })
  *
  * const handle = Effect.gen(function* () {
  *   const { session, outcome, setCookie } = yield* Http.RemoteSession.resolveAtEdgeFailOpen({
@@ -527,6 +611,11 @@ export const resolveAtEdge = (
  *   // `session` feeds `SessionContext.layer`; `setCookie` is replayed on the response.
  *   return { session, outcome, setCookie }
  * })
+ *
+ * const edge = await Effect.runPromise(handle)
+ * assert.ok(Option.isSome(edge.session))
+ * assert.equal(edge.session.value.user.id, "u-1")
+ * assert.deepEqual(edge.setCookie, [])
  * ```
  *
  * @since 1.0.0
