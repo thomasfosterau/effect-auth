@@ -58,8 +58,8 @@ const makeWebRequest = (headers: Record<string, string> = {}) =>
  * request, optionally with a `CurrentPrincipal` already resolved (as
  * `AuthMiddleware` would have provided it) and a custom `Authorizer.layer`.
  */
-const runGate = (
-  Guard: AuthorizationMiddlewareClass,
+const runGate = <Id extends string>(
+  Guard: AuthorizationMiddlewareClass<never, Id>,
   options: {
     readonly principal?: Entity.EntityRef;
     readonly request?: HttpServerRequest.HttpServerRequest;
@@ -101,7 +101,7 @@ const runGate = (
 
 describe("makeAuthorizationMiddleware – allow path", () => {
   it("the resource owner is authorized and the handler runs unchanged", async () => {
-    const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
+    const Guard = makeAuthorizationMiddleware("Guard", { action: readDoc, resource: doc1 });
     const response = await Effect.runPromise(runGate(Guard, { principal: alice }));
     expect((response as HttpServerResponse.HttpServerResponse).status).toBe(200);
   });
@@ -113,14 +113,14 @@ describe("makeAuthorizationMiddleware – allow path", () => {
 
 describe("makeAuthorizationMiddleware – deny path", () => {
   it("a non-owner is refused with 403 Forbidden naming the decision reason (default-deny)", async () => {
-    const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
+    const Guard = makeAuthorizationMiddleware("Guard", { action: readDoc, resource: doc1 });
     const error = await Effect.runPromise(runGate(Guard, { principal: bob }).pipe(Effect.flip));
     expect(error._tag).toBe("Forbidden");
     expect(error.message).toContain("default-deny");
   });
 
   it("the wire error carries only message/code — never the policy trace (determining/outcomes)", async () => {
-    const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
+    const Guard = makeAuthorizationMiddleware("Guard", { action: readDoc, resource: doc1 });
     const error = await Effect.runPromise(runGate(Guard, { principal: bob }).pipe(Effect.flip));
     expect(error._tag).toBe("Forbidden");
     expect(typeof error.message).toBe("string");
@@ -137,7 +137,7 @@ describe("makeAuthorizationMiddleware – deny path", () => {
     const layer = Authorizer.layer({ policies: [ownerPolicy, forbidPolicy] }).pipe(
       Layer.provide(Layer.succeed(EntityResolver)(resolver)),
     );
-    const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
+    const Guard = makeAuthorizationMiddleware("Guard", { action: readDoc, resource: doc1 });
     const error = await Effect.runPromise(
       runGate(Guard, { principal: alice, overrideAuthorizerLayer: layer }).pipe(Effect.flip),
     );
@@ -153,7 +153,7 @@ describe("makeAuthorizationMiddleware – deny path", () => {
 
 describe("makeAuthorizationMiddleware – composition with AuthMiddleware", () => {
   it("without CurrentPrincipal in context (not composed after AuthMiddleware), the gate fails rather than silently allowing", async () => {
-    const Guard = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
+    const Guard = makeAuthorizationMiddleware("Guard", { action: readDoc, resource: doc1 });
     // No `CurrentPrincipal.provide(...)` anywhere in the pipeline — simulating
     // a route that attached this middleware without first resolving a
     // principal (e.g. forgot `AuthMiddleware`, or ran outside its scope).
@@ -174,7 +174,7 @@ describe("makeAuthorizationMiddleware – dynamic AuthorizeInput", () => {
   // real route would read via `HttpRouter.params`/`RouteContext`, which is
   // reachable the same way inside an effectful dynamic input (see the
   // "effectful" case below).
-  const byHeader = makeAuthorizationMiddleware((request) => ({
+  const byHeader = makeAuthorizationMiddleware("byHeader", (request) => ({
     action: readDoc,
     resource: Entity.ref("Document", request.headers["x-doc-id"] ?? "doc-1"),
   }));
@@ -200,7 +200,7 @@ describe("makeAuthorizationMiddleware – dynamic AuthorizeInput", () => {
   });
 
   it("effectful function-of-request (request) => Effect<AuthorizeInput>: allow and deny both resolve correctly", async () => {
-    const byHeaderEffectful = makeAuthorizationMiddleware((request) =>
+    const byHeaderEffectful = makeAuthorizationMiddleware("byHeaderEffectful", (request) =>
       Effect.succeed({
         action: readDoc,
         resource: Entity.ref("Document", request.headers["x-doc-id"] ?? "doc-1"),
@@ -231,8 +231,8 @@ describe("makeAuthorizationMiddleware – dynamic AuthorizeInput", () => {
 
 describe("makeAuthorizationMiddleware – instance isolation", () => {
   it("two instances guarding different resources are independent (no shared tag collision)", async () => {
-    const GuardDoc1 = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
-    const GuardDoc2 = makeAuthorizationMiddleware({ action: readDoc, resource: doc2 });
+    const GuardDoc1 = makeAuthorizationMiddleware("GuardDoc1", { action: readDoc, resource: doc1 });
+    const GuardDoc2 = makeAuthorizationMiddleware("GuardDoc2", { action: readDoc, resource: doc2 });
 
     const aliceOnDoc1 = await Effect.runPromiseExit(runGate(GuardDoc1, { principal: alice }));
     const aliceOnDoc2 = await Effect.runPromiseExit(runGate(GuardDoc2, { principal: alice }));
@@ -249,8 +249,11 @@ describe("makeAuthorizationMiddleware – instance isolation", () => {
 // Both forms must attach with `.middleware(...)`: a fixed input and a
 // per-request one that reads `HttpRouter.params`. Before the factory's return
 // type named the instance, `.middleware` rejected either with TS2345.
-const RequireDocRead = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
-const RequireDocReadByParam = makeAuthorizationMiddleware((_request) =>
+const RequireDocRead = makeAuthorizationMiddleware("RequireDocRead", {
+  action: readDoc,
+  resource: doc1,
+});
+const RequireDocReadByParam = makeAuthorizationMiddleware("RequireDocReadByParam", (_request) =>
   Effect.gen(function* () {
     const params = yield* HttpRouter.params;
     return { action: readDoc, resource: Entity.ref("Document", params["docId"] ?? "doc-1") };
@@ -289,6 +292,7 @@ describe("makeAuthorizationMiddleware – served through an HttpApi", () => {
       Path.layer,
       Etag.layerWeak,
       HttpPlatform.layer.pipe(Layer.provide(FileSystem.layerNoop({}))),
+      FileSystem.layerNoop({}),
     );
     const docsGroup = HttpApiBuilder.group(DocsApi, "docs", (handlers) =>
       handlers.handle("getDoc", () => Effect.succeed("ok")),
@@ -330,5 +334,75 @@ describe("makeAuthorizationMiddleware – served through an HttpApi", () => {
     } finally {
       await dispose();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Guard identity (#320): a guard's type is its name, so a wrong layer is caught
+// ---------------------------------------------------------------------------
+
+describe("makeAuthorizationMiddleware – guard identity", () => {
+  // Two guards with the same requirements `R` and the same shape. Only their
+  // names differ, and the names are their types.
+  const RequireDocWrite = makeAuthorizationMiddleware("RequireDocWrite", {
+    action: "doc:write",
+    resource: doc1,
+  });
+
+  const platform = Layer.mergeAll(
+    Path.layer,
+    Etag.layerWeak,
+    HttpPlatform.layer.pipe(Layer.provide(FileSystem.layerNoop({}))),
+    FileSystem.layerNoop({}),
+  );
+
+  // `GET /docs/:docId` attached to `RequireDocRead`. The handler is trivial:
+  // the test is about what the layer graph must provide.
+  const DocsApi = HttpApi.make("docs").add(
+    HttpApiGroup.make("docs").add(
+      HttpApiEndpoint.get("getDoc", "/docs/:docId", { success: Schema.String }).middleware(
+        RequireDocRead,
+      ),
+    ),
+  );
+  const docsImpl = HttpApiBuilder.group(DocsApi, "docs", (handlers) =>
+    handlers.handle("getDoc", () => Effect.succeed("ok")),
+  );
+
+  it("attaching RequireDocRead and providing its own layer type-checks and builds", async () => {
+    const app = HttpApiBuilder.layer(DocsApi).pipe(
+      Layer.provide(docsImpl),
+      Layer.provide(
+        Layer.mergeAll(
+          RequireDocRead.layer,
+          authorizerLayer,
+          Layer.succeed(CurrentPrincipal, alice),
+        ),
+      ),
+      Layer.provide(platform),
+      Layer.provide(HttpRouter.layer),
+    );
+    const exit = await Effect.runPromiseExit(Effect.scoped(Layer.build(app)));
+    expect(Exit.isSuccess(exit)).toBe(true);
+  });
+
+  it("attaching RequireDocRead and providing only RequireDocWrite's layer is a type error", async () => {
+    const app = HttpApiBuilder.layer(DocsApi).pipe(
+      Layer.provide(docsImpl),
+      Layer.provide(
+        Layer.mergeAll(
+          RequireDocWrite.layer,
+          authorizerLayer,
+          Layer.succeed(CurrentPrincipal, alice),
+        ),
+      ),
+      Layer.provide(platform),
+      Layer.provide(HttpRouter.layer),
+    );
+    // @effect-diagnostics missingEffectContext:off
+    // @ts-expect-error -- RequireDocRead's layer is missing: only RequireDocWrite.layer is provided.
+    const exit = await Effect.runPromiseExit(Effect.scoped(Layer.build(app)));
+    // @effect-diagnostics missingEffectContext:on
+    expect(Exit.isFailure(exit)).toBe(true);
   });
 });

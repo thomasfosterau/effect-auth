@@ -22,6 +22,10 @@
  * id and its own baked-in `Layer`) on every call, so each route attaches its
  * own instance carrying its own resource/action.
  *
+ * Each guard is named by its first argument, and that name is its TypeScript
+ * type: attaching one guard and providing another guard's `.layer` is a compile
+ * error, not a missing-service failure at runtime (#320).
+ *
  * ## Static vs. per-request input
  *
  * Most resources are per-request (a path param, a value read from
@@ -73,9 +77,10 @@
  * import { AuthMiddleware, makeAuthorizationMiddleware } from "@thomasfosterau/effect-auth/http"
  *
  * // A route-level gate: AuthMiddleware answers "who is calling", this answers
- * // "may they do this". The resource comes from the request's `:docId` path
- * // param; pass a plain `{ action, resource }` instead when it is fixed.
- * const RequireDocRead = makeAuthorizationMiddleware((_request) =>
+ * // "may they do this". The name gives this guard its own type. The resource
+ * // comes from the request's `:docId` path param; pass a plain
+ * // `{ action, resource }` instead when it is fixed.
+ * const RequireDocRead = makeAuthorizationMiddleware("RequireDocRead", (_request) =>
  *   Effect.gen(function* () {
  *     const params = yield* HttpRouter.params
  *     return { action: "doc:read", resource: Entity.ref("Document", params["docId"]!) }
@@ -93,9 +98,9 @@
  * @module http/authorization-middleware
  */
 
-import { Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { HttpApiMiddleware } from "effect/http-api";
-import { HttpServerRequest } from "effect/http";
+import { HttpRouter, HttpServerRequest } from "effect/http";
 import { Authorizer, CurrentPrincipal, type AuthorizeInput } from "../Authorizer.ts";
 import * as S from "./HttpApiSchema.ts";
 
@@ -149,6 +154,22 @@ const resolveAuthorizeInput = <R>(
 };
 
 /**
+ * What a guard requires from context: `Authorizer` and `CurrentPrincipal`, plus
+ * the factory's `R`. `HttpRouter.Provided` (the request, its scope, its
+ * search params and its route context) is left out, because the router supplies
+ * it to every middleware on each request. Leaving it in would make an endpoint
+ * that reads a path param require `RouteContext` from its layer, which no layer
+ * can provide.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type AuthorizationRequires<R = never> =
+  | Authorizer
+  | CurrentPrincipal
+  | Exclude<R, HttpRouter.Provided>;
+
+/**
  * The static `HttpApiMiddleware` configuration every
  * {@link makeAuthorizationMiddleware} instance shares: it requires
  * `Authorizer | CurrentPrincipal | R`, provides nothing, and fails with
@@ -158,7 +179,7 @@ const resolveAuthorizeInput = <R>(
  * @category models
  */
 export type AuthorizationMiddlewareConfig<R = never> = {
-  requires: Authorizer | CurrentPrincipal | R;
+  requires: AuthorizationRequires<R>;
   provides: never;
   error: typeof S.ForbiddenError;
   clientError: never;
@@ -177,30 +198,47 @@ export type AuthorizationMiddlewareConfig<R = never> = {
  * that instance, so an identifier typed as the class value (rather than its
  * instance) is rejected with a type error at `.middleware(...)`.
  *
+ * `Id` is the guard's name, carried as the instance's `key` literal. It is what
+ * makes two guards with the same `R` different types.
+ *
  * @since 1.0.0
  * @category models
  */
-export type AuthorizationMiddlewareInstance<R = never> = InstanceType<
-  HttpApiMiddleware.ServiceClass<unknown, string, AuthorizationMiddlewareConfig<R>>
->;
+export type AuthorizationMiddlewareInstance<
+  R = never,
+  Id extends string = string,
+> = Context.ServiceClass.Shape<
+  Id,
+  HttpApiMiddleware.HttpApiMiddleware<never, typeof S.ForbiddenError, AuthorizationRequires<R>>
+> & {
+  readonly "~effect/http-api/HttpApiMiddleware": {
+    readonly error: typeof S.ForbiddenError;
+    readonly requires: AuthorizationRequires<R>;
+    readonly provides: never;
+    readonly clientError: never;
+    readonly requiredForClient: false;
+  };
+};
 
 /**
  * The class type {@link makeAuthorizationMiddleware} returns: an
  * `HttpApiMiddleware.ServiceClass` requiring `Authorizer | CurrentPrincipal | R`
  * with its implementing {@link AuthorizationMiddlewareClass.layer | layer} attached.
  *
- * Every factory call gets its own runtime tag id, but all instances share
- * this TypeScript type — the type system cannot tell one instance's `layer`
- * from another's, while `Context` distinguishes them at runtime. Provide each
- * instance's own `.layer`; a mixed-up pairing surfaces as a missing-service
- * failure when the API layer is built, not as a compile error.
+ * `Id` is the name the guard was built with. Each name is its own type, so
+ * `.middleware(...)` and `.layer` pair up one-to-one with the guard that was
+ * built: providing another guard's `.layer` fails to type-check. The runtime
+ * tag is unique per factory call regardless of name.
  *
  * @since 1.0.0
  * @category models
  */
-export interface AuthorizationMiddlewareClass<R = never> extends HttpApiMiddleware.ServiceClass<
-  AuthorizationMiddlewareInstance<R>,
-  string,
+export interface AuthorizationMiddlewareClass<
+  R = never,
+  Id extends string = string,
+> extends HttpApiMiddleware.ServiceClass<
+  AuthorizationMiddlewareInstance<R, Id>,
+  Id,
   AuthorizationMiddlewareConfig<R>
 > {
   /**
@@ -208,7 +246,7 @@ export interface AuthorizationMiddlewareClass<R = never> extends HttpApiMiddlewa
    * the application layer, next to wherever `AuthMiddleware`'s `layer()` and
    * `Authorizer.layer(...)` are provided.
    */
-  readonly layer: Layer.Layer<AuthorizationMiddlewareInstance<R>>;
+  readonly layer: Layer.Layer<AuthorizationMiddlewareInstance<R, Id>>;
 }
 
 // =============================================================================
@@ -224,6 +262,11 @@ export interface AuthorizationMiddlewareClass<R = never> extends HttpApiMiddlewa
  * `HttpApiEndpoint`/`HttpApiGroup` the policy protects, and provide its
  * `.layer` alongside the application layer — mirroring how `AuthMiddleware`
  * and its `layer()` are attached (see the module doc's example).
+ *
+ * **Naming.** `name` is the guard's type identity, so give each guard its own
+ * name. Two guards built with the same name share a type again, and a wrong
+ * `.layer` between them type-checks and then fails at runtime. The name also
+ * labels the runtime tag, but the tag is unique per call either way.
  *
  * **Composition order.** `CurrentPrincipal` is declared in `requires`, so a
  * consumer who forgets to also attach `AuthMiddleware` (or otherwise put
@@ -256,14 +299,15 @@ export interface AuthorizationMiddlewareClass<R = never> extends HttpApiMiddlewa
  * @since 1.0.0
  * @category constructors
  */
-export const makeAuthorizationMiddleware = <R = never>(
+export const makeAuthorizationMiddleware = <const Id extends string, R = never>(
+  name: Id,
   input: AuthorizationMiddlewareInput<R>,
-): AuthorizationMiddlewareClass<R> => {
-  const id = `@effect-auth/AuthorizationMiddleware#${_nextMiddlewareId++}`;
+): AuthorizationMiddlewareClass<R, Id> => {
+  const id = `@effect-auth/AuthorizationMiddleware/${name}#${_nextMiddlewareId++}`;
 
   class AuthorizationMiddleware extends HttpApiMiddleware.Service<
     AuthorizationMiddleware,
-    { requires: Authorizer | CurrentPrincipal | R }
+    { requires: AuthorizationRequires<R> }
   >()(id, { error: S.ForbiddenError }) {
     /**
      * The `Layer` implementing this middleware instance. Provide it
@@ -276,7 +320,15 @@ export const makeAuthorizationMiddleware = <R = never>(
         Effect.gen(function* () {
           const authorizer = yield* Authorizer;
           const request = yield* HttpServerRequest.HttpServerRequest;
-          const authInput = yield* resolveAuthorizeInput(input, request);
+          // `R` may name a service the router provides per request (see
+          // `AuthorizationRequires`). Widening the requirement back to
+          // `AuthorizationRequires<R>` is sound: `R` is covered by that union
+          // plus the router's `Provided`, and TypeScript can't split a generic `R`.
+          const authInput = yield* resolveAuthorizeInput(input, request) as Effect.Effect<
+            AuthorizeInput,
+            never,
+            AuthorizationRequires<R>
+          >;
 
           yield* authorizer.authorize(authInput).pipe(
             Effect.catchTags({
@@ -312,6 +364,6 @@ export const makeAuthorizationMiddleware = <R = never>(
 
   // The local class's Self brand can never equal the shared interface's —
   // the cast erases only that brand. Runtime identity lives in the unique
-  // tag id, which the cast does not touch.
-  return AuthorizationMiddleware as unknown as AuthorizationMiddlewareClass<R>;
+  // tag id, which the cast does not touch; the type identity is `Id`.
+  return AuthorizationMiddleware as unknown as AuthorizationMiddlewareClass<R, Id>;
 };
