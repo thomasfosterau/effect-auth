@@ -72,4 +72,19 @@ describe("scrypt defaults", () => {
     expect(hasher.needsRehash!(`scrypt$131072$8$1$${salt}$${key}`)).toBe(false);
     expect(hasher.needsRehash!(`scrypt$65536$8$1$${salt}$${key}`)).toBe(true);
   });
+
+  it("verify accepts a stored hash at the default parameters", async () => {
+    // The stub derives a zero key, so a stored all-zero key verifies.
+    const stored = `scrypt$131072$8$1$${"00".repeat(16)}$${"00".repeat(64)}`;
+    expect(await Effect.runPromise(scryptHasher().verify("pw", stored))).toBe(true);
+    expect(scrypt.mock.calls[0]![3]).toMatchObject({ N: 131072, r: 8, p: 1 });
+  });
+
+  it("verify accepts a hash at a configured cost above the 256 MiB floor", async () => {
+    // N = 2^21 with r = 8 needs 2 GiB. The cap follows the configured cost, so
+    // the hasher's own hashes still verify; the 256 MiB floor alone would refuse them.
+    const hasher = scryptHasher({ cost: 2 ** 21 });
+    const hashed = await Effect.runPromise(hasher.hash("pw"));
+    expect(await Effect.runPromise(hasher.verify("pw", hashed.hash))).toBe(true);
+  });
 });
