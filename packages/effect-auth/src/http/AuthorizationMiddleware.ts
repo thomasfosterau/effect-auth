@@ -68,8 +68,9 @@
  * ```ts
  * import { Effect } from "effect"
  * import { HttpRouter } from "effect/http"
+ * import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
  * import { Entity } from "@thomasfosterau/effect-auth"
- * import { makeAuthorizationMiddleware } from "@thomasfosterau/effect-auth/http"
+ * import { AuthMiddleware, makeAuthorizationMiddleware } from "@thomasfosterau/effect-auth/http"
  *
  * // A route-level gate: AuthMiddleware answers "who is calling", this answers
  * // "may they do this". The resource comes from the request's `:docId` path
@@ -79,6 +80,13 @@
  *     const params = yield* HttpRouter.params
  *     return { action: "doc:read", resource: Entity.ref("Document", params["docId"]!) }
  *   }),
+ * )
+ *
+ * // Attach it after AuthMiddleware so the principal is resolved first.
+ * const DocsGroup = HttpApiGroup.make("docs").add(
+ *   HttpApiEndpoint.get("getDoc", "/docs/:docId", {})
+ *     .middleware(AuthMiddleware)
+ *     .middleware(RequireDocRead),
  * )
  * ```
  *
@@ -141,6 +149,42 @@ const resolveAuthorizeInput = <R>(
 };
 
 /**
+ * The static `HttpApiMiddleware` configuration every
+ * {@link makeAuthorizationMiddleware} instance shares: it requires
+ * `Authorizer | CurrentPrincipal | R`, provides nothing, and fails with
+ * `Forbidden` (403).
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type AuthorizationMiddlewareConfig<R = never> = {
+  requires: Authorizer | CurrentPrincipal | R;
+  provides: never;
+  error: typeof S.ForbiddenError;
+  clientError: never;
+  requiredForClient: false;
+  security: never;
+};
+
+/**
+ * The identifier of a middleware built by {@link makeAuthorizationMiddleware}:
+ * the instance type that `HttpApiEndpoint.middleware(...)` and
+ * `HttpApiGroup.middleware(...)` accept, and that `Layer`s and `Context` key on.
+ *
+ * It is the instance type of an `HttpApiMiddleware.ServiceClass`, the same
+ * shape a class-declared middleware such as `AuthMiddleware` has. The
+ * `HttpApiMiddleware` machinery reads the requirements and error schema off
+ * that instance, so an identifier typed as the class value (rather than its
+ * instance) is rejected with a type error at `.middleware(...)`.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type AuthorizationMiddlewareInstance<R = never> = InstanceType<
+  HttpApiMiddleware.ServiceClass<unknown, string, AuthorizationMiddlewareConfig<R>>
+>;
+
+/**
  * The class type {@link makeAuthorizationMiddleware} returns: an
  * `HttpApiMiddleware.ServiceClass` requiring `Authorizer | CurrentPrincipal | R`
  * with its implementing {@link AuthorizationMiddlewareClass.layer | layer} attached.
@@ -155,23 +199,16 @@ const resolveAuthorizeInput = <R>(
  * @category models
  */
 export interface AuthorizationMiddlewareClass<R = never> extends HttpApiMiddleware.ServiceClass<
-  AuthorizationMiddlewareClass<R>,
+  AuthorizationMiddlewareInstance<R>,
   string,
-  {
-    requires: Authorizer | CurrentPrincipal | R;
-    provides: never;
-    error: typeof S.ForbiddenError;
-    clientError: never;
-    requiredForClient: false;
-    security: never;
-  }
+  AuthorizationMiddlewareConfig<R>
 > {
   /**
    * The `Layer` implementing this middleware instance. Provide it alongside
    * the application layer, next to wherever `AuthMiddleware`'s `layer()` and
    * `Authorizer.layer(...)` are provided.
    */
-  readonly layer: Layer.Layer<AuthorizationMiddlewareClass<R>>;
+  readonly layer: Layer.Layer<AuthorizationMiddlewareInstance<R>>;
 }
 
 // =============================================================================

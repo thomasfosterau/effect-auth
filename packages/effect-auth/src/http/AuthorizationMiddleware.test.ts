@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Exit, Layer } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/http";
+import { Effect, Exit, FileSystem, Layer, Path, Schema } from "effect";
+import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Entity from "../Entity.ts";
 import * as Condition from "../Condition.ts";
 import * as Errors from "../Errors.ts";
@@ -16,6 +17,7 @@ import {
   type AuthorizationMiddlewareClass,
 } from "./AuthorizationMiddleware.ts";
 import * as S from "./HttpApiSchema.ts";
+import { AuthMiddleware } from "./HttpMiddleware.ts";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -237,5 +239,96 @@ describe("makeAuthorizationMiddleware – instance isolation", () => {
 
     expect(Exit.isSuccess(aliceOnDoc1)).toBe(true);
     expect(Exit.isFailure(aliceOnDoc2)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Attaching to an HttpApi (#313)
+// ---------------------------------------------------------------------------
+
+// Both forms must attach with `.middleware(...)`: a fixed input and a
+// per-request one that reads `HttpRouter.params`. Before the factory's return
+// type named the instance, `.middleware` rejected either with TS2345.
+const RequireDocRead = makeAuthorizationMiddleware({ action: readDoc, resource: doc1 });
+const RequireDocReadByParam = makeAuthorizationMiddleware((_request) =>
+  Effect.gen(function* () {
+    const params = yield* HttpRouter.params;
+    return { action: readDoc, resource: Entity.ref("Document", params["docId"] ?? "doc-1") };
+  }),
+);
+
+describe("makeAuthorizationMiddleware – attaching to an endpoint", () => {
+  it("the fixed and per-request forms attach to an endpoint and a group", () => {
+    const fixed = HttpApiEndpoint.get("getDoc", "/docs/:docId", {})
+      .middleware(AuthMiddleware)
+      .middleware(RequireDocRead);
+    const perRequest = HttpApiEndpoint.get("getDoc", "/docs/:docId", {})
+      .middleware(AuthMiddleware)
+      .middleware(RequireDocReadByParam);
+    const group = HttpApiGroup.make("docs").middleware(RequireDocRead).add(fixed);
+
+    expect(fixed.middlewares.has(RequireDocRead)).toBe(true);
+    expect(perRequest.middlewares.has(RequireDocReadByParam)).toBe(true);
+    expect(Object.keys(group.endpoints)).toEqual(["getDoc"]);
+  });
+});
+
+describe("makeAuthorizationMiddleware – served through an HttpApi", () => {
+  const DocsApi = HttpApi.make("docs").add(
+    HttpApiGroup.make("docs").add(
+      HttpApiEndpoint.get("getDoc", "/docs/:docId", { success: Schema.String }).middleware(
+        RequireDocReadByParam,
+      ),
+    ),
+  );
+
+  // The principal is fixed by the test layer and stands in for `AuthMiddleware`
+  // (its own composition is covered in `HttpMiddleware.test.ts`).
+  const serveDocs = (principal: Entity.EntityRef) => {
+    const platform = Layer.mergeAll(
+      Path.layer,
+      Etag.layerWeak,
+      HttpPlatform.layer.pipe(Layer.provide(FileSystem.layerNoop({}))),
+    );
+    const docsGroup = HttpApiBuilder.group(DocsApi, "docs", (handlers) =>
+      handlers.handle("getDoc", () => Effect.succeed("ok")),
+    );
+    const app = HttpApiBuilder.layer(DocsApi).pipe(
+      Layer.provide(docsGroup),
+      Layer.provide(
+        Layer.mergeAll(
+          RequireDocReadByParam.layer,
+          authorizerLayer,
+          Layer.succeed(CurrentPrincipal, principal),
+        ),
+      ),
+      Layer.provide(platform),
+    );
+    return HttpRouter.toWebHandler(app);
+  };
+
+  it("the owner is served the handler for their own doc and refused another's with 403", async () => {
+    const { handler, dispose } = serveDocs(alice);
+    try {
+      const own = await handler(new Request("http://localhost/docs/doc-1"));
+      expect(own.status).toBe(200);
+      const other = await handler(new Request("http://localhost/docs/doc-2"));
+      expect(other.status).toBe(403);
+      expect(await other.text()).toContain("default-deny");
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("the resource is read per request from the path: a different principal gets the reverse", async () => {
+    const { handler, dispose } = serveDocs(bob);
+    try {
+      const denied = await handler(new Request("http://localhost/docs/doc-1"));
+      expect(denied.status).toBe(403);
+      const allowed = await handler(new Request("http://localhost/docs/doc-2"));
+      expect(allowed.status).toBe(200);
+    } finally {
+      await dispose();
+    }
   });
 });
