@@ -62,6 +62,14 @@
  * phase builds the env-backed layers and exercises `protectedField` on the
  * packed dist.
  *
+ * The query operators are the same kind of gap: the drizzle stores run
+ * `eq`, `inArray`, `and`, `or` and `asc` only in the catalog-version tests. So
+ * the project holding effect-auth-drizzle also runs a drizzle query smoke
+ * (`drizzleSmoke`) against the drizzle-orm installed beside it, which builds
+ * queries over the packed tables and the package's identifier store and batched
+ * request read, and asserts the SQL and parameters they generate. No connection
+ * is opened.
+ *
  * Not covered: the react / solid / svelte / vue bindings, which import Effect
  * only through `effect-auth-client`.
  */
@@ -328,6 +336,116 @@ check("protectedField decodes for an admin", Result.isSuccess(await decode(alice
 check("protectedField rejects a non-admin write", Result.isFailure(await decode(bob, full)));
 `;
 
+/**
+ * Runs inside the project that holds effect-auth-drizzle, against the packed
+ * `dist/` and the drizzle-orm installed beside it (its floor by default, the
+ * catalog version under `--effect catalog`). Nothing here opens a connection:
+ * `drizzle-orm/pg-proxy` takes a callback in place of a driver, which records
+ * each statement and returns no rows, so `.toSQL()` and `.execute()` build the
+ * SQL a store sends. The direct query uses `eq`, `inArray` and
+ * `orderBy(asc(...))` over the package's own tables; the store and request
+ * reads are the package's code paths, asserted the same way. Every drizzle
+ * import is made inside the check, so a missing operator reports as a
+ * `FAIL drizzle query smoke` line naming the drizzle-orm version.
+ */
+const drizzleSmoke = `
+import { readFileSync } from "node:fs";
+
+const drizzleVersion = JSON.parse(
+  readFileSync(new URL("./node_modules/drizzle-orm/package.json", import.meta.url), "utf8"),
+).version;
+
+const failure = (message) =>
+  "FAIL drizzle query smoke: " + message + " (drizzle-orm " + drizzleVersion + ")";
+
+const expectSql = (name, actual, expected) => {
+  if (actual.sql !== expected.sql) {
+    throw new Error(name + " SQL is\\n  " + actual.sql + "\\nexpected\\n  " + expected.sql);
+  }
+  if (JSON.stringify(actual.params) !== JSON.stringify(expected.params)) {
+    throw new Error(
+      name + " params are " + JSON.stringify(actual.params) +
+        ", expected " + JSON.stringify(expected.params),
+    );
+  }
+  console.log("ok   " + name);
+};
+
+const main = async () => {
+  const { and, asc, eq, inArray } = await import("drizzle-orm");
+  const { drizzle } = await import("drizzle-orm/pg-proxy");
+  const { Effect, Layer } = await import("effect");
+  const Drizzle = await import("@thomasfosterau/effect-auth-drizzle");
+
+  const sent = [];
+  const db = drizzle(async (sql, params) => {
+    sent.push({ sql, params });
+    return { rows: [] };
+  });
+  const { identifiers } = Drizzle.Pg.tables;
+  const table = '"effect_auth_identifiers"';
+  const cols = ["id", "user_id", "type", "value", "verified", "verified_at", "created_at"];
+  const select = "select " + cols.map((name) => '"' + name + '"').join(", ") + " from " + table;
+
+  // The operators the stores use, built directly over the packed table.
+  const direct = db
+    .select()
+    .from(identifiers)
+    .where(
+      and(
+        eq(identifiers.type, "email"),
+        inArray(identifiers.value, ["a@example.test", "b@example.test"]),
+      ),
+    )
+    .orderBy(asc(identifiers.createdAt))
+    .toSQL();
+  expectSql("eq, inArray and orderBy(asc) build", direct, {
+    sql:
+      select +
+      " where (" + table + '."type" = $1 and ' + table + '."value" in ($2, $3)) order by ' +
+      table + '."created_at" asc',
+    params: ["email", "a@example.test", "b@example.test"],
+  });
+
+  // The identifier store's list read: eq + orderBy(asc), run through the store.
+  const store = await Effect.runPromise(
+    Drizzle.IdentifierStore.make().pipe(Effect.provide(Drizzle.databaseLayer(db))),
+  );
+  const listed = await Effect.runPromise(store.listByUser("user-1"));
+  if (listed.length !== 0) throw new Error("store read returned rows from an empty database");
+  expectSql("IdentifierStore.listByUser builds", sent.pop(), {
+    sql: select + " where " + table + '."user_id" = $1 order by ' + table + '."created_at" asc',
+    params: ["user-1"],
+  });
+
+  // The batched request read: two lookups, one WHERE ... IN (...) statement.
+  const requests = Drizzle.Requests.layer().pipe(Layer.provide(Drizzle.databaseLayer(db)));
+  const batched = await Effect.runPromise(
+    Effect.all(
+      [
+        Drizzle.Requests.listIdentifiersByUser("user-1"),
+        Drizzle.Requests.listIdentifiersByUser("user-2"),
+      ],
+      { concurrency: "unbounded" },
+    ).pipe(Effect.provide(requests)),
+  );
+  if (batched.length !== 2) throw new Error("the batched read did not resolve both lookups");
+  if (sent.length !== 1) {
+    throw new Error("two lookups sent " + sent.length + " statements, expected one batched query");
+  }
+  expectSql("Requests.listIdentifiersByUser batches", sent.pop(), {
+    sql:
+      select + " where " + table + '."user_id" in ($1, $2) order by ' + table + '."created_at" asc',
+    params: ["user-1", "user-2"],
+  });
+};
+
+main().catch((error) => {
+  console.error(failure(error instanceof Error ? error.message : String(error)));
+  process.exit(1);
+});
+`;
+
 const scratch = mkdtempSync(join(tmpdir(), "effect-auth-dist-"));
 try {
   // Every package, the bindings too: their manifests are checked below even
@@ -498,6 +616,11 @@ process.exit(failed === 0 ? 0 : 1);
       writeFileSync(join(project, "behaviour.mjs"), behaviour);
       console.log(`effect ${installed}: exercising config layers and protectedField`);
       console.log(run("node", ["behaviour.mjs"], project));
+    }
+    if (names.includes("@thomasfosterau/effect-auth-drizzle")) {
+      writeFileSync(join(project, "drizzle.mjs"), drizzleSmoke);
+      console.log(`effect ${installed}: drizzle query smoke over the installed drizzle-orm`);
+      console.log(run("node", ["drizzle.mjs"], project));
     }
   }
 } finally {
