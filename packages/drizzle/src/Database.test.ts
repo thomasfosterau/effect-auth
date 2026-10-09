@@ -69,29 +69,28 @@ const doorAccepts = (
 // ---------------------------------------------------------------------------
 
 /**
- * The file's three in-memory Postgres instances, opened once for the file and
- * emptied before each test. Each is a separate PGlite instance with its own
- * Postgres backend, started from the run's migrated template (#291) rather
- * than from `initdb`.
+ * The file's shared in-memory Postgres instance, emptied before each test: the
+ * Effect-driver test borrows it, and the overlapping-requests suite uses it as
+ * the empty default its reference falls back to. It is a separate PGlite
+ * instance with its own Postgres backend, started from the run's migrated
+ * template (#291) rather than from `initdb`.
+ *
+ * Each instance is opened in a hook of its own, never three in one hook: a
+ * PGlite boot is the costly part on a loaded machine, and three boots in one
+ * hook ran past Vitest's 10 s default hook timeout (#324).
  */
 let primary: PGlite;
-let first: PGlite;
-let second: PGlite;
 
 beforeAll(async () => {
-  [primary, first, second] = await Promise.all([
-    migratedPglite(),
-    migratedPglite(),
-    migratedPglite(),
-  ]);
+  primary = await migratedPglite();
 });
 
 afterAll(async () => {
-  await Promise.all([primary?.close(), first?.close(), second?.close()]);
+  await primary?.close();
 });
 
 beforeEach(async () => {
-  await Promise.all([primary, first, second].map(truncateTables));
+  await truncateTables(primary);
 });
 
 // ---------------------------------------------------------------------------
@@ -156,6 +155,31 @@ describe("databaseLayer doors", () => {
     expect(result.created.id).toBe("effect-driver");
     expect(result.read).toEqual(makeSession("effect-driver", "user-1"));
     expect(result.afterDelete).toBeNull();
+  });
+});
+
+describe("overlapping requests", () => {
+  /**
+   * One instance per "request", each opened in a hook of its own, so that a
+   * hook boots one database and the two requests stay independent (#324).
+   */
+  let first: PGlite;
+  let second: PGlite;
+
+  beforeAll(async () => {
+    first = await migratedPglite();
+  });
+
+  beforeAll(async () => {
+    second = await migratedPglite();
+  });
+
+  afterAll(async () => {
+    await Promise.all([first?.close(), second?.close()]);
+  });
+
+  beforeEach(async () => {
+    await Promise.all([first, second].map(truncateTables));
   });
 
   it("resolves an Effect-supplied handle per query, so overlapping requests stay on their own connection", async () => {
