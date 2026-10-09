@@ -37,24 +37,7 @@
  * so a browser bundle can read the ladder for UX gates without pulling in the
  * server stack. Keep it that way: `ModuleGraph.test.ts` pins it.
  *
- * @example
- * ```ts
- * import * as Ladder from "@thomasfosterau/effect-auth/ladder"
- *
- * export const Roles = Ladder.make(["user", "contributor", "moderator", "admin"])
- * export type Role = Ladder.RungOf<typeof Roles>
- *
- * export const Axes = Roles.axes({
- *   corpusWrite: "contributor",
- *   moderate: "moderator",
- *   viewPrivate: "moderator",
- *   viewDeleted: "moderator",
- * })
- *
- * Roles.hasAtLeast({ role: "moderator" }, Axes.corpusWrite) // true
- * Roles.hasAtLeast({ role: "superadmin" }, "user") // false — off the ladder
- * Roles.hasAtLeast(null, "user") // false — anonymous
- * ```
+ * A usage example is on {@link make}, the entry point.
  *
  * @module ladder
  */
@@ -157,6 +140,26 @@ export const minOf = <Rung extends string>(min: Rung | Axis<Rung>): Rung =>
  * errors in module-level code, not runtime conditions, and a ladder with two
  * positions for one rung would make `rank` ambiguous — a silent mis-grant.
  * An axis naming a rung that is not on the ladder throws for the same reason.
+ *
+ * @example
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import * as Ladder from "@thomasfosterau/effect-auth/ladder"
+ *
+ * export const Roles = Ladder.make(["user", "contributor", "moderator", "admin"])
+ * export type Role = Ladder.RungOf<typeof Roles>
+ *
+ * export const Axes = Roles.axes({
+ *   corpusWrite: "contributor",
+ *   moderate: "moderator",
+ *   viewPrivate: "moderator",
+ *   viewDeleted: "moderator",
+ * })
+ *
+ * assert.equal(Roles.hasAtLeast({ role: "moderator" }, Axes.corpusWrite), true)
+ * assert.equal(Roles.hasAtLeast({ role: "superadmin" }, "user"), false) // off the ladder
+ * assert.equal(Roles.hasAtLeast(null, "user"), false) // anonymous
+ * ```
  *
  * @since 1.0.0
  * @category constructors

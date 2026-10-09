@@ -156,6 +156,30 @@ const makeNoopHooks = (): typeof Hooks.Service => ({
  * `Hooks` from context, so the active plugin stack can be swapped per request.
  *
  * `Hooks.Default` provides the no-op base (identity for every hook).
+ *
+ * @example
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { Effect } from "effect"
+ * import { Hooks } from "@thomasfosterau/effect-auth"
+ * import type { AuthResult } from "@thomasfosterau/effect-auth/email"
+ *
+ * // `Hooks.tap` adapts a void-returning observer into an after* tap.
+ * const seen: Array<string> = []
+ * const afterSignIn = Hooks.tap((result: AuthResult) =>
+ *   Effect.sync(() => {
+ *     seen.push(result.user.id)
+ *   }),
+ * )
+ *
+ * const result: AuthResult = {
+ *   user: { id: "u-1", createdAt: new Date(), updatedAt: new Date(), attributes: {} },
+ * }
+ * // A tap observes the value and hands it on unchanged.
+ * const passedThrough = await Effect.runPromise(afterSignIn(result))
+ * assert.equal(passedThrough, result)
+ * assert.deepEqual(seen, ["u-1"])
+ * ```
  */
 export class Hooks extends Context.Service<
   Hooks,
@@ -186,17 +210,7 @@ export class Hooks extends Context.Service<
   /**
    * Adapt a `void`-returning observer into a canonical {@link Tap} that threads
    * the observed value through unchanged. Use this for `after*` hook points.
-   *
-   * @example
-   * ```ts
-   * import { Effect } from "effect"
-   * import { Hooks } from "@thomasfosterau/effect-auth"
-   * import type { AuthResult } from "@thomasfosterau/effect-auth/email"
-   *
-   * const afterSignIn = Hooks.tap((result: AuthResult) =>
-   *   Effect.logInfo("signed in", { userId: result.user.id }),
-   * )
-   * ```
+   * The example is on the {@link Hooks} class.
    */
   static readonly tap =
     <V>(fn: (value: V) => Effect.Effect<void, HookError, never>): Tap<V> =>
