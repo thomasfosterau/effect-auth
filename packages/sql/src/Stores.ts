@@ -6,8 +6,8 @@
  * and each `*StoreLayer` lifts it into an Effect `Layer` keyed by the
  * matching effect-auth `Context.Service` tag. {@link layer} bundles all of
  * them so a single `Layer.provide` wires up the entire auth stack on top of
- * a `SqlClient` layer for a supported dialect (SQLite and Cloudflare D1; see
- * the package README). MySQL is not supported (#260).
+ * a `SqlClient` layer for a supported dialect (SQLite, Cloudflare D1 and
+ * PostgreSQL; see the package README). MySQL is not supported (#260).
  *
  * Data codecs: dates as epoch milliseconds, booleans as `0`/`1`, attribute
  * bags and other structured values as JSON `TEXT`, binary values (WebAuthn
@@ -453,16 +453,18 @@ export const makeRateLimitStore: Effect.Effect<
         const resetAt = now + ttlSeconds * 1000;
         // Single atomic upsert+increment: if the row is new or the window has
         // expired, reset count to 1; otherwise increment by 1. RETURNING
-        // avoids a separate SELECT and prevents TOCTOU undercounting.
+        // avoids a separate SELECT and prevents TOCTOU undercounting. The
+        // right-hand side names the target table's columns explicitly:
+        // unqualified, PostgreSQL reports them as ambiguous (#348).
         const rows = yield* allRows(
           "rateLimit.increment",
           sql<{ count: number }>`
             INSERT INTO auth_rate_limits (key, count, reset_at, blocked_until)
               VALUES (${key}, 1, ${resetAt}, NULL)
               ON CONFLICT(key) DO UPDATE SET
-                count = CASE WHEN ${now} >= reset_at THEN 1 ELSE count + 1 END,
-                reset_at = CASE WHEN ${now} >= reset_at THEN ${resetAt} ELSE reset_at END,
-                blocked_until = CASE WHEN ${now} >= reset_at THEN NULL ELSE blocked_until END
+                count = CASE WHEN ${now} >= auth_rate_limits.reset_at THEN 1 ELSE auth_rate_limits.count + 1 END,
+                reset_at = CASE WHEN ${now} >= auth_rate_limits.reset_at THEN ${resetAt} ELSE auth_rate_limits.reset_at END,
+                blocked_until = CASE WHEN ${now} >= auth_rate_limits.reset_at THEN NULL ELSE auth_rate_limits.blocked_until END
               RETURNING count`,
         );
         return rows[0]?.count ?? 1;
@@ -1266,14 +1268,14 @@ export const makeAccountLockoutStore: Effect.Effect<
               VALUES (${key}, 1, ${1 >= maxAttempts ? lockedUntil : null})
               ON CONFLICT(key) DO UPDATE SET
                 failures = CASE
-                  WHEN locked_until IS NOT NULL AND locked_until > ${now} THEN failures
-                  WHEN locked_until IS NOT NULL AND locked_until <= ${now} THEN 1
-                  ELSE failures + 1 END,
+                  WHEN auth_account_lockouts.locked_until IS NOT NULL AND auth_account_lockouts.locked_until > ${now} THEN auth_account_lockouts.failures
+                  WHEN auth_account_lockouts.locked_until IS NOT NULL AND auth_account_lockouts.locked_until <= ${now} THEN 1
+                  ELSE auth_account_lockouts.failures + 1 END,
                 locked_until = CASE
-                  WHEN locked_until IS NOT NULL AND locked_until > ${now} THEN locked_until
+                  WHEN auth_account_lockouts.locked_until IS NOT NULL AND auth_account_lockouts.locked_until > ${now} THEN auth_account_lockouts.locked_until
                   WHEN (CASE
-                    WHEN locked_until IS NOT NULL AND locked_until <= ${now} THEN 1
-                    ELSE failures + 1 END) >= ${maxAttempts} THEN ${lockedUntil}
+                    WHEN auth_account_lockouts.locked_until IS NOT NULL AND auth_account_lockouts.locked_until <= ${now} THEN 1
+                    ELSE auth_account_lockouts.failures + 1 END) >= ${maxAttempts} THEN ${lockedUntil}
                   ELSE NULL END
               RETURNING key, failures, locked_until`,
         );
