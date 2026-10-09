@@ -361,18 +361,28 @@ export interface AuthorizationMiddlewareClass<
 // =============================================================================
 
 /**
- * The guard's name, when it is one string literal. A `string`, a template
- * pattern such as `` `${string}Guard` `` and a union each widen the guard's type
- * to other guards' types, so for those the name parameter is `never` and the
- * call does not compile.
+ * The message a rejected guard name resolves to. It is the parameter's type, so
+ * a call with a bad name fails with this text as the expected type.
+ */
+type GuardNameError =
+  "a guard name must be one non-empty string literal, not string, a template pattern or a union";
+
+/**
+ * The guard's name, when it is one non-empty string literal. A `string`, a
+ * template pattern such as `` `${string}Guard` ``, a union, and `""` each resolve
+ * to {@link GuardNameError} instead: the first three would widen the guard's
+ * type to other guards' types, and the last names no guard. The parameter's
+ * type then reads as that message, so the call-site error explains the rule.
  */
 type GuardName<Id extends string, All extends string = Id> = Id extends unknown
   ? [All] extends [Id]
     ? {} extends Record<Id, 1>
-      ? never
-      : Id
-    : never
-  : never;
+      ? GuardNameError
+      : Id extends ""
+        ? GuardNameError
+        : Id
+    : GuardNameError
+  : GuardNameError;
 
 /**
  * Build a route-level `HttpApiMiddleware` that gates the handler on
@@ -385,10 +395,11 @@ type GuardName<Id extends string, All extends string = Id> = Id extends unknown
  * and its `layer()` are attached (see the module doc's example).
  *
  * **Naming.** `name` is the guard's type identity, so give each guard its own
- * name. It must be a single string literal: a `string`, a template pattern or a
- * union is a compile error, because it would widen the guard's type. Two guards
- * built with the same literal still share a type, and a wrong `.layer` between
- * them type-checks and then fails at runtime. The runtime tag is
+ * name. It must be one non-empty string literal: a `string`, a template pattern,
+ * a union or `""` is a compile error, because a widened name would widen the
+ * guard's type and an empty one names no guard. Two guards built with the same
+ * literal still share a type, and a wrong `.layer` between them type-checks and
+ * then fails at runtime. The runtime tag is
  * `@effect-auth/AuthorizationMiddleware/<name>#<n>`, unique per call either way.
  *
  * **Composition order.** `CurrentPrincipal` is declared in `requires`, so a
