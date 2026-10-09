@@ -304,7 +304,9 @@ export type AuthorizationMiddlewareConfig<R = never> = {
  * instance) is rejected with a type error at `.middleware(...)`.
  *
  * `Id` is the guard's name, carried as the instance's `key` literal. It is what
- * makes two guards with the same `R` different types.
+ * makes two guards with the same `R` different types. The runtime key is not
+ * the bare name: it is `@effect-auth/AuthorizationMiddleware/<name>#<n>`, where
+ * `<n>` counts factory calls, so the type-level key and the runtime key differ.
  *
  * @since 1.0.0
  * @category models
@@ -359,6 +361,20 @@ export interface AuthorizationMiddlewareClass<
 // =============================================================================
 
 /**
+ * The guard's name, when it is one string literal. A `string`, a template
+ * pattern such as `` `${string}Guard` `` and a union each widen the guard's type
+ * to other guards' types, so for those the name parameter is `never` and the
+ * call does not compile.
+ */
+type GuardName<Id extends string, All extends string = Id> = Id extends unknown
+  ? [All] extends [Id]
+    ? {} extends Record<Id, 1>
+      ? never
+      : Id
+    : never
+  : never;
+
+/**
  * Build a route-level `HttpApiMiddleware` that gates the handler on
  * `Authorizer.authorize(input)` for the {@link CurrentPrincipal} already in
  * context.
@@ -369,9 +385,11 @@ export interface AuthorizationMiddlewareClass<
  * and its `layer()` are attached (see the module doc's example).
  *
  * **Naming.** `name` is the guard's type identity, so give each guard its own
- * name. Two guards built with the same name share a type again, and a wrong
- * `.layer` between them type-checks and then fails at runtime. The name also
- * labels the runtime tag, but the tag is unique per call either way.
+ * name. It must be a single string literal: a `string`, a template pattern or a
+ * union is a compile error, because it would widen the guard's type. Two guards
+ * built with the same literal still share a type, and a wrong `.layer` between
+ * them type-checks and then fails at runtime. The runtime tag is
+ * `@effect-auth/AuthorizationMiddleware/<name>#<n>`, unique per call either way.
  *
  * **Composition order.** `CurrentPrincipal` is declared in `requires`, so a
  * consumer who forgets to also attach `AuthMiddleware` (or otherwise put
@@ -406,7 +424,7 @@ export interface AuthorizationMiddlewareClass<
  * @category constructors
  */
 export const makeAuthorizationMiddleware = <const Id extends string, R = never>(
-  name: Id,
+  name: GuardName<Id>,
   input: AuthorizationMiddlewareInput<R>,
 ): AuthorizationMiddlewareClass<R, Id> => {
   const id = `@effect-auth/AuthorizationMiddleware/${name}#${_nextMiddlewareId++}`;

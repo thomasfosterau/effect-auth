@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Exit, FileSystem, Layer, Path, Schema } from "effect";
+import { Cause, Effect, Exit, FileSystem, Layer, Path, Schema } from "effect";
 import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Entity from "../Entity.ts";
@@ -369,7 +369,7 @@ describe("makeAuthorizationMiddleware – guard identity", () => {
     handlers.handle("getDoc", () => Effect.succeed("ok")),
   );
 
-  it("attaching RequireDocRead and providing its own layer type-checks and builds", async () => {
+  it("attaching RequireDocRead and providing its own layer type-checks, builds and serves a request", async () => {
     const app = HttpApiBuilder.layer(DocsApi).pipe(
       Layer.provide(docsImpl),
       Layer.provide(
@@ -380,13 +380,18 @@ describe("makeAuthorizationMiddleware – guard identity", () => {
         ),
       ),
       Layer.provide(platform),
-      Layer.provide(HttpRouter.layer),
     );
-    const exit = await Effect.runPromiseExit(Effect.scoped(Layer.build(app)));
-    expect(Exit.isSuccess(exit)).toBe(true);
+    const { handler, dispose } = HttpRouter.toWebHandler(app);
+    try {
+      // `alice` owns doc-1, the resource RequireDocRead guards, so the handler runs.
+      const response = await handler(new Request("http://localhost/docs/doc-1"));
+      expect(response.status).toBe(200);
+    } finally {
+      await dispose();
+    }
   });
 
-  it("attaching RequireDocRead and providing only RequireDocWrite's layer is a type error", async () => {
+  it("attaching RequireDocRead and providing only RequireDocWrite's layer is a type error, and the build names the missing guard", async () => {
     const app = HttpApiBuilder.layer(DocsApi).pipe(
       Layer.provide(docsImpl),
       Layer.provide(
@@ -399,10 +404,39 @@ describe("makeAuthorizationMiddleware – guard identity", () => {
       Layer.provide(platform),
       Layer.provide(HttpRouter.layer),
     );
-    // @effect-diagnostics missingEffectContext:off
     // @ts-expect-error -- RequireDocRead's layer is missing: only RequireDocWrite.layer is provided.
+    // @effect-diagnostics-next-line missingEffectContext:off
     const exit = await Effect.runPromiseExit(Effect.scoped(Layer.build(app)));
-    // @effect-diagnostics missingEffectContext:on
     expect(Exit.isFailure(exit)).toBe(true);
+    // The defect names the guard whose layer is missing (`#<n>` is the factory call count).
+    expect(Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "").toMatch(
+      /Service not found: @effect-auth\/AuthorizationMiddleware\/RequireDocRead#\d+/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Guard names: a literal, so each guard has its own type
+// ---------------------------------------------------------------------------
+
+describe("makeAuthorizationMiddleware – guard names", () => {
+  const input = { action: readDoc, resource: doc1 };
+
+  it("a literal name compiles, and the runtime key is the name plus the factory call count", () => {
+    const Guard = makeAuthorizationMiddleware("RequireA", input);
+    expect(Guard.key).toMatch(/^@effect-auth\/AuthorizationMiddleware\/RequireA#\d+$/);
+  });
+
+  it("a widened name is a compile error: string, a template pattern and a union each widen the guard's type", () => {
+    const dynamicName = "RequireA" as string;
+    const patternName = "RequireAGuard" as `${string}Guard`;
+    const unionName = "RequireA" as "RequireA" | "RequireB";
+    // The calls only need to type-check; each one is a valid runtime call too.
+    // @ts-expect-error -- `string` widens the guard's type.
+    void makeAuthorizationMiddleware(dynamicName, input);
+    // @ts-expect-error -- a template pattern widens it too.
+    void makeAuthorizationMiddleware(patternName, input);
+    // @ts-expect-error -- a union names several guards at once.
+    void makeAuthorizationMiddleware(unionName, input);
   });
 });
