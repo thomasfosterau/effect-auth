@@ -8,7 +8,7 @@ Solid bindings for [`@thomasfosterau/effect-auth-client`](../client): reactive p
 pnpm add @thomasfosterau/effect-auth-solid @thomasfosterau/effect-auth-client effect
 ```
 
-`solid-js` (>= 1.8) is a peer dependency.
+`solid-js` (>= 1.9.17) is a peer dependency.
 
 The package ships a `solid` export condition pointing at un-compiled JSX, so a Solid-aware bundler (`vite-plugin-solid`, SolidStart) compiles the components with your own app; bundlers without that condition fall back to a pre-compiled ESM build.
 
