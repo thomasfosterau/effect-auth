@@ -9,8 +9,8 @@
  * Column types use `TEXT`, `INTEGER`, and `BIGINT`:
  * - Epoch-millisecond timestamps are `BIGINT` — epoch-ms values (~1.75e12)
  *   overflow Postgres `INTEGER` (int4) and MySQL signed `INT`. `BIGINT` is
- *   safe on all three drivers; SQLite treats it identically to `INTEGER`
- *   (64-bit affinity).
+ *   safe on SQLite (D1 included), which treats it identically to `INTEGER`
+ *   (64-bit affinity), and on Postgres.
  * - Booleans and small counters remain `INTEGER`.
  * - Attribute bags and other structured values are JSON `TEXT`.
  *
