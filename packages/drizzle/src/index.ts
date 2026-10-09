@@ -12,6 +12,8 @@
  * Each store is a namespace with the same two entry points, `make` and `layer`:
  *
  * - `SessionStore` / `UserStore` / `IdentifierStore` — the store modules.
+ * - `SingleTableIdentifierStore` — the opt-in `IdentifierStore` whose email
+ *   identifier is the application's own `users` row (one per user).
  * - `Requests` — the batched read interface (`Requests.layer`, `Requests.getUser`, ...).
  * - `Pg` / `Sqlite` / `MySql` — one dialect's tables and DDL each
  *   (`defineTables`, `tables`, `sessionsTable`, `migrationStatements`, ...).
@@ -105,5 +107,6 @@ export * as MySql from "./MySqlSchema.ts";
 export * as Pg from "./PgSchema.ts";
 export * as Requests from "./Requests.ts";
 export * as SessionStore from "./SessionStore.ts";
+export * as SingleTableIdentifierStore from "./SingleTableIdentifierStore.ts";
 export * as Sqlite from "./SqliteSchema.ts";
 export * as UserStore from "./UserStore.ts";
