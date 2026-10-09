@@ -133,3 +133,74 @@ describe("pbkdf2 iterations option", () => {
     },
   );
 });
+
+describe("pbkdf2 stored iteration limit", () => {
+  // A stored hash with the given count. The key is a placeholder: the stub
+  // derives a zero key, so an all-zero stored key verifies at any count that
+  // is allowed to run.
+  const stored = (count: string) => `pbkdf2-sha256$${count}$${SALT}$${KEY}`;
+
+  it.each([
+    ["one past the 5,000,000 cap", "5000001"],
+    ["Node's largest count, 2^31 - 1", String(2 ** 31 - 1)],
+    ["a safe integer above Node's limit", "3000000000"],
+  ])(
+    "refuses a stored hash with %s as a HashingError before running the KDF",
+    async (_label, count) => {
+      const hash = stored(count);
+      const result = await Effect.runPromise(Effect.result(pbkdf2Hasher().verify("pw", hash)));
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure._tag).toBe("HashingError");
+      }
+      // Refused before any derivation: an unguarded verify would run PBKDF2 at
+      // this count, minutes of CPU at the top of the range.
+      expect(pbkdf2).not.toHaveBeenCalled();
+      expect(pbkdf2Hasher().needsRehash!(hash)).toBe(true);
+    },
+  );
+
+  it("verifies a stored count at the 5,000,000 cap", async () => {
+    expect(await Effect.runPromise(pbkdf2Hasher().verify("pw", stored("5000000")))).toBe(true);
+    expect(pbkdf2.mock.calls[0]![2]).toBe(5000000);
+  });
+
+  it("a configured count above the cap still verifies its own hashes", async () => {
+    // The cap follows the configured count, so the hasher's own hashes verify,
+    // as scrypt's cap follows its configured cost.
+    const hasher = pbkdf2Hasher({ iterations: 6000000 });
+    const hashed = await Effect.runPromise(hasher.hash("pw"));
+    expect(hashed.hash.startsWith("pbkdf2-sha256$6000000$")).toBe(true);
+    expect(await Effect.runPromise(hasher.verify("pw", hashed.hash))).toBe(true);
+    expect(pbkdf2.mock.calls[1]![2]).toBe(6000000);
+    // A hasher with the default cap still refuses that stored count.
+    const defaultCap = await Effect.runPromise(
+      Effect.result(pbkdf2Hasher().verify("pw", hashed.hash)),
+    );
+    expect(defaultCap._tag).toBe("Failure");
+    expect(pbkdf2).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["a fraction", 1.5],
+    ["a safe integer above Node's limit", 3e9],
+    ["2^31, one past Node's limit", 2 ** 31],
+  ])(
+    "a non-finite or unusable configured count (%s) does not lift the cap",
+    async (_label, iterations) => {
+      // The cap is max(5,000,000, the configured count) only for a usable
+      // configured count; for any other value it stays at 5,000,000.
+      const hasher = pbkdf2Hasher({ iterations });
+      for (const count of ["5000001", String(2 ** 31 - 1), "3000000000"]) {
+        const result = await Effect.runPromise(Effect.result(hasher.verify("pw", stored(count))));
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure") {
+          expect(result.failure._tag).toBe("HashingError");
+        }
+      }
+      expect(pbkdf2).not.toHaveBeenCalled();
+    },
+  );
+});

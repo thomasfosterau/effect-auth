@@ -189,13 +189,18 @@ export type {
 
 // Node's crypto.pbkdf2 takes the iteration count as an int32 from 1 to 2^31 - 1.
 const PBKDF2_MAX_ITERATIONS = 2 ** 31 - 1;
+// Floor of the cap `verify` enforces on the iteration count read from a stored
+// hash (about 8x the 600,000 default). The effective cap is this or the
+// hasher's configured count, whichever is higher (see pbkdf2Hasher).
+const PBKDF2_ITERATIONS_CAP = 5000000;
 
 /**
  * PBKDF2 Password Hasher implementing the PasswordHasher trait.
  * Following OWASP guidelines for secure password hashing.
  *
  * Hashes are `pbkdf2-sha256$iterations$salt$hash`. `verify` reads the
- * iteration count from the stored hash, so hashes made at any count still verify.
+ * iteration count from the stored hash, so hashes made at any count still verify,
+ * up to the cap described below.
  *
  * `iterations` defaults to 600,000, the OWASP figure for PBKDF2-HMAC-SHA256.
  * Lower it only where the cost is not the point (such as in tests); the default
@@ -203,9 +208,15 @@ const PBKDF2_MAX_ITERATIONS = 2 ** 31 - 1;
  * limit for `crypto.pbkdf2`). `hash` refuses any other value with a
  * `HashingError`, so a hasher never writes a hash its own `verify` would refuse.
  *
+ * `verify` refuses, with a `HashingError` and before running PBKDF2, a stored
+ * count above max(5,000,000, the configured count), so a crafted stored hash
+ * cannot make it burn minutes of CPU. The configured count itself always
+ * verifies, even above 5,000,000. A non-finite or otherwise unusable `iterations`
+ * option does not raise the cap.
+ *
  * `needsRehash` returns true for a stored hash with fewer iterations than the
  * configured count, so a hash made at a lower count is upgraded on the next
- * successful sign-in.
+ * successful sign-in, and for a hash `verify` would refuse.
  */
 export const pbkdf2Hasher = (options?: {
   readonly iterations?: number | undefined;
@@ -215,10 +226,26 @@ export const pbkdf2Hasher = (options?: {
   const ITERATIONS = options?.iterations ?? 600000;
   const iterationsUsable =
     Number.isSafeInteger(ITERATIONS) && ITERATIONS >= 1 && ITERATIONS <= PBKDF2_MAX_ITERATIONS;
+  // Only a usable configured count may raise the cap: a NaN, Infinity or
+  // out-of-range option (which `hash` refuses anyway) must not lift it.
+  const MAX_ITERATIONS = Math.max(PBKDF2_ITERATIONS_CAP, iterationsUsable ? ITERATIONS : 0);
   // SHA-256 produces a 32-byte digest; using more bytes adds nothing and
   // reduces cost for the defender while an attacker can crack block-by-block.
   const KEY_LENGTH = 32;
   const SALT_LENGTH = 16;
+
+  /**
+   * Why a stored iteration count is refused, or `undefined` when it is within
+   * the cap. It runs before the KDF, so a crafted hash never makes PBKDF2 run
+   * past the cap.
+   */
+  const refusedIterations = (iters: number): string | undefined => {
+    if (!Number.isSafeInteger(iters) || iters < 1) {
+      return "iterations must be a positive integer";
+    }
+    if (iters > MAX_ITERATIONS) return `iterations exceeds ${MAX_ITERATIONS}`;
+    return undefined;
+  };
 
   return {
     algorithm: ALGORITHM,
@@ -229,7 +256,8 @@ export const pbkdf2Hasher = (options?: {
       const [algorithm, iterationsStr, , hashHex] = parts;
       if (algorithm !== ALGORITHM) return true;
       const iters = parseStoredParam(iterationsStr!);
-      if (!Number.isFinite(iters) || iters < ITERATIONS) return true;
+      // verify refuses this hash, so it has to be replaced.
+      if (refusedIterations(iters) !== undefined || iters < ITERATIONS) return true;
       // Stored key length must match current KEY_LENGTH.
       const storedKeyLen = Buffer.from(hashHex!, "hex").length;
       if (storedKeyLen !== KEY_LENGTH) return true;
@@ -322,11 +350,12 @@ export const pbkdf2Hasher = (options?: {
       }
 
       // Strict decimal parse, as for scrypt's N, r and p: `parseInt` would read
-      // "1e9" as 1 and "600000abc" as 600000.
+      // "1e9" as 1 and "600000abc" as 600000. Refused before the KDF, above the cap.
       const iterCount = parseStoredParam(iterationsStr!);
-      if (!Number.isFinite(iterCount) || iterCount <= 0) {
+      const refused = refusedIterations(iterCount);
+      if (refused !== undefined) {
         return yield* new Errors.HashingError({
-          message: "Invalid hash parameters",
+          message: `Invalid hash parameters: ${refused}`,
         });
       }
 
