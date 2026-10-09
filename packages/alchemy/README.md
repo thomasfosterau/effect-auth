@@ -207,7 +207,7 @@ export default Cloudflare.Worker(
 
 - **Timestamps** are stored as epoch milliseconds in `BIGINT` columns (SQLite
   treats these as 64-bit `INTEGER`), so dates past 2038 survive the round trip
-  on D1, Postgres and MySQL alike.
+  on D1 and Postgres alike.
 - **`attributes`** and **`transports`** are JSON `TEXT`; **binary values**
   (WebAuthn challenges and public keys) are base64 `TEXT`.
 - Token columns store the SHA-256 hash computed by the service layer — the

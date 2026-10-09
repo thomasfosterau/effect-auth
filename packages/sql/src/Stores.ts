@@ -6,7 +6,8 @@
  * and each `*StoreLayer` lifts it into an Effect `Layer` keyed by the
  * matching effect-auth `Context.Service` tag. {@link layer} bundles all of
  * them so a single `Layer.provide` wires up the entire auth stack on top of
- * any `SqlClient` layer (pg, mysql, sqlite, D1, ...).
+ * a `SqlClient` layer for a supported dialect (SQLite and Cloudflare D1; see
+ * the package README). MySQL is not supported (#260).
  *
  * Data codecs: dates as epoch milliseconds, booleans as `0`/`1`, attribute
  * bags and other structured values as JSON `TEXT`, binary values (WebAuthn
@@ -18,8 +19,9 @@
  * `UPDATE … RETURNING` statement for true atomicity — no read-modify-write
  * races. Multi-step upserts (challenge, oauthState, emailOtp.upsert) run
  * inside `sql.withTransaction`. `ON CONFLICT` targets a declared primary key
- * or unique index, which SQLite and Postgres share; MySQL deployments need an
- * `ON DUPLICATE KEY UPDATE` dialect tweak (#260).
+ * or unique index. MySQL has no `ON CONFLICT` clause, so these statements fail
+ * there, and MySQL is not a supported dialect (#260). For MySQL, use
+ * `@thomasfosterau/effect-auth-drizzle`'s MySQL tables.
  *
  * Token columns store SHA-256 hashes computed by the service layer (the
  * `auth_sessions.id` primary key included) — the database never sees a raw

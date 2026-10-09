@@ -75,7 +75,7 @@ Better Auth's `plugins` array does two different jobs: it adds features, and it 
 
 Better Auth owns your tables through an adapter and generates the schema for you. effect-auth inverts this: it declares ~42 store contracts and never touches a driver. Three routes exist, and you can mix them:
 
-- **`@thomasfosterau/effect-auth-sql`** — driver-agnostic over `effect/sql` (Postgres, MySQL, SQLite, D1). `Sql.layer` provides the implemented stores; `Sql.migrate` runs `Sql.schemaStatements`, all of them `CREATE TABLE IF NOT EXISTS`, so it is safe on every deploy. This is the closest analogue to a Better Auth adapter and the fastest path off it.
+- **`@thomasfosterau/effect-auth-sql`** — driver-agnostic over `effect/sql` (SQLite and Cloudflare D1 today; PostgreSQL is pending #348; MySQL is not supported, see the drizzle route below). `Sql.layer` provides the implemented stores; `Sql.migrate` runs `Sql.schemaStatements`, all of them `CREATE TABLE IF NOT EXISTS`, so it is safe on every deploy. This is the closest analogue to a Better Auth adapter and the fastest path off it.
 - **`@thomasfosterau/effect-auth-drizzle`** — for apps that already model their schema in Drizzle and want the auth tables inside the existing migration pipeline. It covers the three stores every credential sign-in touches (`SessionStore`, `UserStore`, `IdentifierStore`) on PostgreSQL, SQLite, or MySQL; see that package's README for its exact tables.
 - **Bring your own** — implement `typeof Auth.XStore.Service` over whatever client you have. [`byo-stores.md`](./byo-stores.md) is the reference, including which methods **must** be atomic.
 

@@ -8,7 +8,7 @@ Driver-agnostic SQL storage layers for effect-auth, built on effect/sql.
 pnpm add @thomasfosterau/effect-auth-sql @thomasfosterau/effect-auth effect
 ```
 
-`effect` is a peer dependency (`>=4.0.0-rc.118`). Add the `SqlClient` driver for your database alongside it (for example `@effect/sql-pg` at the same version as `effect`).
+`effect` is a peer dependency (`>=4.0.0-rc.118`). Add a `SqlClient` driver for a supported dialect (see [Dialects](#dialects)) alongside it, at the same version as `effect`.
 
 ## Usage
 
@@ -18,7 +18,7 @@ import type { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as AuthSql from "@thomasfosterau/effect-auth-sql";
 
-// `SqlLive` is any layer providing `SqlClient` (pg, sqlite, D1, ...).
+// `SqlLive` is any layer providing `SqlClient` for a supported dialect (SQLite, D1).
 export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
   // Creates the `auth_*` tables; idempotent, so it is safe on every deploy.
   const migrate = AuthSql.migrate.pipe(Effect.provide(SqlLive));
@@ -34,6 +34,13 @@ export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
 };
 ```
 
+## Dialects
+
+- **SQLite:** supported. The package's test suite runs its stores over `better-sqlite3`.
+- **Cloudflare D1:** supported. D1 is SQLite. `@thomasfosterau/effect-auth-alchemy` wires it, and its suite runs these stores over a SQLite-backed D1 shim.
+- **PostgreSQL:** not supported yet. `rateLimit.increment` and `accountLockout.registerAttempt` fail there, because their `ON CONFLICT … DO UPDATE` statements use column names that PostgreSQL reports as ambiguous (#348).
+- **MySQL:** not supported (#260). MySQL has no `ON CONFLICT` clause, so the upserts and counters fail. For MySQL, use [`@thomasfosterau/effect-auth-drizzle`](../drizzle) with its MySQL tables (`Drizzle.MySql`). That package covers only `SessionStore`, `UserStore` and `IdentifierStore`, and its MySQL suite runs against `drizzle-orm/mysql-proxy`, not a MySQL server.
+
 ## API
 
 - `layer` provides every SQL-backed store at once on top of the ambient `SqlClient`: sessions, users, identifiers, email and password, password reset, email verification, email OTP, magic links, rate limits, WebAuthn challenges and credentials, OAuth state, accounts and users, multi-factor and pending multi-factor, account lockout, API keys and admin.
@@ -43,7 +50,7 @@ export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
 
 Stores added to the core later (one-time tokens, trusted devices, phone OTP, organizations, the OIDC provider, SSO, device authorization) aren't covered yet: use the `KeyValueStore`-backed layers from the core, or your own.
 
-Storage format: dates are epoch milliseconds (`BIGINT`), booleans `0`/`1`, attribute bags JSON `TEXT`, binary values base64 `TEXT`. Token columns hold the SHA-256 digest computed by the service layer; the database never sees a raw bearer token. Upserts and counters use single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, which PostgreSQL and SQLite support; MySQL isn't supported yet (#260).
+Storage format: dates are epoch milliseconds (`BIGINT`), booleans `0`/`1`, attribute bags JSON `TEXT`, binary values base64 `TEXT`. Token columns hold the SHA-256 digest computed by the service layer; the database never sees a raw bearer token. Upserts and counters use single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, which SQLite supports and PostgreSQL mostly does (see [Dialects](#dialects)); MySQL is not supported (#260).
 
 ## License
 

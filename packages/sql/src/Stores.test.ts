@@ -682,7 +682,7 @@ describe("@thomasfosterau/effect-auth-sql stores over a real SqlClient", () => {
 
   it("schema declares BIGINT for all epoch-ms timestamp columns", async () => {
     // Verifies the DDL uses BIGINT (not INTEGER) for every column that stores
-    // epoch-milliseconds, ensuring Postgres/MySQL adopters don't get int4
+    // epoch-milliseconds, ensuring Postgres adopters don't get int4
     // overflow on values like Date.now() (~1.75e12).
     const timestampColumns: Record<string, readonly string[]> = {
       auth_users: ["created_at", "updated_at"],

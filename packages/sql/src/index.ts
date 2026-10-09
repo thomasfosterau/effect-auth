@@ -2,8 +2,10 @@
  * `@thomasfosterau/effect-auth-sql` — driver-agnostic SQL storage layers for
  * effect-auth.
  *
- * Built on `effect/sql`'s `SqlClient`, so it works with any
- * `SqlClient` layer (pg, mysql, sqlite, Cloudflare D1, ...).
+ * Built on `effect/sql`'s `SqlClient`, so it works with any `SqlClient`
+ * layer for a supported dialect: SQLite and Cloudflare D1 today. PostgreSQL
+ * is pending #348, and MySQL is not supported (#260); the package README
+ * lists the dialects and the drizzle alternative for MySQL.
  *
  * @example
  * ```ts
