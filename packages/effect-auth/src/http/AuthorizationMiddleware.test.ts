@@ -439,4 +439,18 @@ describe("makeAuthorizationMiddleware – guard names", () => {
     // @ts-expect-error -- a union names several guards at once.
     void makeAuthorizationMiddleware(unionName, input);
   });
+
+  it("the empty string is a compile error: it names no guard", () => {
+    // @ts-expect-error -- `""` is not a guard name.
+    void makeAuthorizationMiddleware("", input);
+  });
+
+  it("tricky non-empty literals still compile: punctuation and non-ASCII names", () => {
+    const slashHash = makeAuthorizationMiddleware("a/b#c", input);
+    const dotColon = makeAuthorizationMiddleware("A.B:C", input);
+    const nonAscii = makeAuthorizationMiddleware("Lesen-Übersicht", input);
+    expect(slashHash.key).toMatch(/^@effect-auth\/AuthorizationMiddleware\/a\/b#c#\d+$/);
+    expect(dotColon.key).toMatch(/^@effect-auth\/AuthorizationMiddleware\/A\.B:C#\d+$/);
+    expect(nonAscii.key).toMatch(/^@effect-auth\/AuthorizationMiddleware\/Lesen-Übersicht#\d+$/);
+  });
 });
