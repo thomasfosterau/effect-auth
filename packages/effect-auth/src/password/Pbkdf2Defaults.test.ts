@@ -64,6 +64,11 @@ describe("pbkdf2 defaults", () => {
     expect(hasher.needsRehash!(`pbkdf2-sha256$600000$${SALT}$${KEY}`)).toBe(false);
     expect(hasher.needsRehash!(`pbkdf2-sha256$599999$${SALT}$${KEY}`)).toBe(true);
   });
+
+  it("needsRehash flags a stored key that is not 32 bytes, even at the current count", () => {
+    const hasher = pbkdf2Hasher();
+    expect(hasher.needsRehash!(`pbkdf2-sha256$600000$${SALT}$${"00".repeat(64)}`)).toBe(true);
+  });
 });
 
 describe("pbkdf2 iterations option", () => {

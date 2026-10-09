@@ -585,6 +585,8 @@ describe("EmailPasswordService — migration and security hardening", () => {
     const updatedHash = passwordHashes.get(user.id)!;
     expect(updatedHash).not.toBe(oldHash);
     expect(updatedHash.startsWith(`pbkdf2-sha256$${CURRENT_PBKDF2_ITERATIONS}$`)).toBe(true);
+    // ...including the current 32-byte key, not the seed's 64-byte one.
+    expect(Buffer.from(updatedHash.split("$")[3]!, "hex").length).toBe(32);
   });
 
   it("signs in with old PBKDF2 hash after switching default hasher to scrypt via MultiAlgorithmVerifier", async () => {
