@@ -31,6 +31,7 @@ export interface TrustedProxyHopCount {
    */
   readonly hopCount: number;
   readonly trustedProxyCidrs?: never;
+  readonly trustedHeader?: never;
 }
 
 /**
@@ -48,17 +49,55 @@ export interface TrustedProxyCidrs {
    */
   readonly trustedProxyCidrs: ReadonlyArray<string>;
   readonly hopCount?: never;
+  readonly trustedHeader?: never;
+}
+
+/**
+ * Trust exactly one header, set by an edge in front of the app, as the client
+ * IP. Build one with {@link ClientIP.trustedHeader}, or use the
+ * {@link ClientIP.cloudflare} preset.
+ *
+ * **Trust assumption**: this is only correct when the app is reachable solely
+ * through that edge. Cloudflare is the case in point: every request reaches the
+ * app through Cloudflare, so the socket address is a Cloudflare address and
+ * `CF-Connecting-IP` carries the visitor's. Anyone who can reach the app
+ * directly, bypassing the edge, can send that header with any value and so
+ * choose their own rate-limit key or audit address. Deploy only behind the edge
+ * (for example, a Worker route that is the sole public entry point).
+ *
+ * Resolution, when this form is configured:
+ * - Only the named header is read. `X-Forwarded-For` and every other header are
+ *   ignored.
+ * - The value is taken only when it is one IPv4 or IPv6 literal, with
+ *   surrounding whitespace ignored. A missing, empty, malformed, or
+ *   comma-separated value falls back to the socket address. The first entry of
+ *   a list is never taken, because a client can prepend anything to a list.
+ * - The accepted address is normalised like every other resolved address: an
+ *   IPv4-mapped IPv6 address (`::ffff:203.0.113.9`) becomes `203.0.113.9`, and
+ *   hex digits are lowercased.
+ * - When there is no socket address either, the result is `undefined`.
+ */
+export interface TrustedHeaderConfig {
+  /** Name of the single header to trust, for example `"cf-connecting-ip"`. Case-insensitive. */
+  readonly trustedHeader: string;
+  readonly header?: never;
+  readonly hopCount?: never;
+  readonly trustedProxyCidrs?: never;
 }
 
 /**
  * Configuration for trusted-proxy-aware client IP extraction.
- * Exactly one of `hopCount` or `trustedProxyCidrs` must be provided.
+ * Exactly one of the three forms is provided: `hopCount`, `trustedProxyCidrs`,
+ * or `trustedHeader`.
  */
-export type TrustedProxyConfig = TrustedProxyHopCount | TrustedProxyCidrs;
+export type TrustedProxyConfig = TrustedProxyHopCount | TrustedProxyCidrs | TrustedHeaderConfig;
 
 // ---------------------------------------------------------------------------
 // Context service
 // ---------------------------------------------------------------------------
+
+/** RFC 9110 `token`: the characters a header field name may contain. */
+const headerNameRe = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 /**
  * Per-request resolved client IP.
@@ -70,7 +109,49 @@ export type TrustedProxyConfig = TrustedProxyHopCount | TrustedProxyCidrs;
  */
 export class ClientIP extends Context.Service<ClientIP, { readonly ip: string | undefined }>()(
   "@effect-auth/ClientIP",
-) {}
+) {
+  /**
+   * Trust exactly one header as the client IP. See {@link TrustedHeaderConfig}
+   * for the trust assumption and the fallback rules.
+   *
+   * The name is lowercased, so `ClientIP.trustedHeader("CF-Connecting-IP")` and
+   * `ClientIP.trustedHeader("cf-connecting-ip")` are the same configuration.
+   *
+   * @example
+   * ```ts
+   * import assert from "node:assert/strict"
+   * import { ClientIP } from "@thomasfosterau/effect-auth"
+   *
+   * assert.deepEqual(ClientIP.trustedHeader("X-Real-IP"), { trustedHeader: "x-real-ip" })
+   * ```
+   *
+   * @throws {Error} when `name` is empty or contains characters that are not
+   * valid in an HTTP header name.
+   */
+  static trustedHeader(name: string): TrustedHeaderConfig {
+    if (!headerNameRe.test(name))
+      throw new Error(`ClientIP.trustedHeader: "${name}" is not a valid HTTP header name`);
+    return { trustedHeader: name.toLowerCase() };
+  }
+
+  /**
+   * Preset for a Cloudflare-fronted app: trust `CF-Connecting-IP` and ignore
+   * every other forwarded header. Pass it as `trustedProxy` on the HTTP
+   * handler, or to {@link clientIPLayer}.
+   *
+   * Use it only when the app is reachable solely through Cloudflare. A direct
+   * request can set `CF-Connecting-IP` to any value.
+   *
+   * @example
+   * ```ts
+   * import assert from "node:assert/strict"
+   * import { ClientIP } from "@thomasfosterau/effect-auth"
+   *
+   * assert.deepEqual(ClientIP.cloudflare, { trustedHeader: "cf-connecting-ip" })
+   * ```
+   */
+  static readonly cloudflare: TrustedHeaderConfig = { trustedHeader: "cf-connecting-ip" };
+}
 
 // ---------------------------------------------------------------------------
 // Internal: IP utilities
@@ -133,6 +214,59 @@ const expandIPv6 = (ip: string): string | undefined => {
 
   if (padded.some((g) => g === null)) return undefined;
   return (padded as string[]).join(":");
+};
+
+/** A dotted-quad IPv4 address with no leading zeros in any octet. */
+const strictIPv4Re =
+  /^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+
+/** One IPv6 group: one to four hex digits. */
+const hexGroupRe = /^[0-9a-fA-F]{1,4}$/;
+
+/**
+ * Whether `s` is one IPv6 address in colon-hex form (no embedded IPv4, zone ID
+ * or brackets). Unlike {@link expandIPv6}, this rejects a second `::` and a
+ * group count that does not fit.
+ */
+const isStrictIPv6 = (s: string): boolean => {
+  if (!/^[0-9a-fA-F:]+$/.test(s)) return false;
+  const halves = s.split("::");
+  if (halves.length > 2) return false;
+  const groupsOf = (part: string): ReadonlyArray<string> => (part === "" ? [] : part.split(":"));
+  const head = groupsOf(halves[0] ?? "");
+  const tail = halves.length === 2 ? groupsOf(halves[1] ?? "") : [];
+  const groups = [...head, ...tail];
+  if (!groups.every((g) => hexGroupRe.test(g))) return false;
+  // `::` stands for at least one zero group, so it needs room for one more.
+  return halves.length === 2 ? groups.length <= 7 : groups.length === 8;
+};
+
+/**
+ * Parse `raw` as exactly one IPv4 or IPv6 literal, or return `undefined`.
+ * Surrounding whitespace is ignored. Anything else is rejected, including a
+ * comma-separated list, a port, brackets, a zone ID and a CIDR suffix.
+ *
+ * Returns the normalised form (see {@link normalizeIp}).
+ */
+const parseIpLiteral = (raw: string): string | undefined => {
+  const s = raw.trim();
+  if (strictIPv4Re.test(s)) return s;
+  if (!s.includes(":")) return undefined;
+
+  // IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is the only dotted form accepted here.
+  const mapped = /^::ffff:(.+)$/i.exec(s);
+  if (mapped !== null) return strictIPv4Re.test(mapped[1]!) ? mapped[1] : undefined;
+
+  // Any other embedded IPv4 tail becomes two hex groups before the colon-hex check.
+  let body = s;
+  const lastColon = s.lastIndexOf(":");
+  const tail = s.slice(lastColon + 1);
+  if (tail.includes(".")) {
+    if (!strictIPv4Re.test(tail)) return undefined;
+    const n = ipv4ToUint32(tail)!;
+    body = `${s.slice(0, lastColon + 1)}${(n >>> 16).toString(16)}:${(n & 0xffff).toString(16)}`;
+  }
+  return isStrictIPv6(body) ? normalizeIp(body) : undefined;
 };
 
 const ipv6ToBigInt = (ip: string): bigint | undefined => {
@@ -239,6 +373,9 @@ export interface IPResolvableRequest {
  *   the extended `[...xffValues, remoteAddress]` chain.
  * - `trustedProxyCidrs` — walk right-to-left and skip IPs that fall in a
  *   trusted CIDR; return the first untrusted IP.
+ * - `trustedHeader` — read only that header, and take it only when it is a
+ *   single IP literal; otherwise return the socket address. See
+ *   {@link TrustedHeaderConfig}.
  *
  * The resolved IP is always IPv6-normalized (strips `::ffff:`, zone IDs, and
  * lowercases hex).
@@ -252,6 +389,14 @@ export const resolveClientIP = (
 
   // SECURE DEFAULT: ignore all forwarded headers
   if (config === undefined) return remoteIp;
+
+  if (config.trustedHeader !== undefined) {
+    // Exactly one header, read on its own. Only a single well-formed address is
+    // taken; anything else falls back to the socket address.
+    const raw: string | undefined = req.headers[config.trustedHeader.toLowerCase()];
+    const fromHeader = raw === undefined ? undefined : parseIpLiteral(raw);
+    return fromHeader ?? remoteIp;
+  }
 
   const headerName = (config.header ?? "x-forwarded-for").toLowerCase();
   const rawHeader: string | undefined = req.headers[headerName];
