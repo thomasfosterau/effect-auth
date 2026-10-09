@@ -3,9 +3,9 @@
  * effect-auth.
  *
  * Built on `effect/sql`'s `SqlClient`, so it works with any `SqlClient`
- * layer for a supported dialect: SQLite and Cloudflare D1 today. PostgreSQL
- * is pending #348, and MySQL is not supported (#260); the package README
- * lists the dialects and the drizzle alternative for MySQL.
+ * layer for a supported dialect: SQLite, Cloudflare D1 and PostgreSQL. MySQL
+ * is not supported (#260); the package README lists the dialects and the
+ * drizzle alternative for MySQL.
  *
  * @example
  * ```ts

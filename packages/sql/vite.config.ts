@@ -10,5 +10,8 @@ export default defineConfig({
     globals: true,
     environment: "node",
     exclude: ["**/node_modules/**", "**/dist/**", "**/.reference/**"],
+    // One migrated PGlite data directory per run, built outside any test or hook
+    // timeout; the PostgreSQL suite opens its database from it (src/testing).
+    globalSetup: ["./src/testing/PgliteTemplate.setup.ts"],
   },
 });

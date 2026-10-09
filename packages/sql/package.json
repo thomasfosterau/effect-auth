@@ -40,6 +40,8 @@
     "@thomasfosterau/effect-auth": "workspace:*"
   },
   "devDependencies": {
+    "@effect/sql-pglite": "catalog:",
+    "@electric-sql/pglite": "catalog:",
     "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",
     "better-sqlite3": "catalog:",

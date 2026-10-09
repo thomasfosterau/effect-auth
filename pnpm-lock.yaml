@@ -404,6 +404,12 @@ importers:
         specifier: workspace:*
         version: link:../effect-auth
     devDependencies:
+      '@effect/sql-pglite':
+        specifier: 'catalog:'
+        version: 4.0.0(effect@4.0.0)
+      '@electric-sql/pglite':
+        specifier: 'catalog:'
+        version: 0.5.8
       '@types/better-sqlite3':
         specifier: 'catalog:'
         version: 9.6.0
