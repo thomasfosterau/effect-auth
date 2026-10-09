@@ -212,7 +212,9 @@ const PBKDF2_ITERATIONS_CAP = 5000000;
  * count above max(5,000,000, the configured count), so a crafted stored hash
  * cannot make it burn minutes of CPU. The configured count itself always
  * verifies, even above 5,000,000. A non-finite or otherwise unusable `iterations`
- * option does not raise the cap.
+ * option does not raise the cap. A hash written at more than 5,000,000
+ * iterations verifies only on a hasher configured at that count or higher, so
+ * lowering `iterations` below such a count makes those hashes unverifiable.
  *
  * `needsRehash` returns true for a stored hash with fewer iterations than the
  * configured count, so a hash made at a lower count is upgraded on the next

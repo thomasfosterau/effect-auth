@@ -123,6 +123,7 @@ describe("PasswordHasher", () => {
     ["trailing junk", "600000abc"],
     ["a leading plus", "+600000"],
     ["hex", "0x927c0"],
+    ["nothing (an empty count)", ""],
   ])("refuses a stored iteration count written with %s", async (_label, count) => {
     // parseInt would read "1e9" as 1 and "600000abc" as 600000; the stored count
     // is parsed strictly, as scrypt's N, r and p are.
