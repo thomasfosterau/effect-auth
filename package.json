@@ -17,7 +17,7 @@
   "scripts": {
     "prepare": "vp config --no-agent && effect-tsgo patch --typescript",
     "build": "vp run -r build",
-    "check": "vp run -r check",
+    "check": "vp run -r check && vp run check:scripts",
     "docs": "vp run --filter @thomasfosterau/effect-auth docs",
     "check:dist": "tsx scripts/check-dist.ts",
     "check:scripts": "tsc -p tsconfig.scripts.json",
