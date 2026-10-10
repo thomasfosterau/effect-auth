@@ -516,7 +516,14 @@ describe("EmailPasswordService — migration and security hardening", () => {
     sessions.clear();
   });
 
-  /** Build an old-style PBKDF2 hash (210 000 iterations, 64-byte key). */
+  // Both counts are low on purpose: the test is about the rehash-on-sign-in
+  // path, not the KDF cost, and a real 600,000-iteration derivation made it
+  // race the 5 s test timeout under host load (#346). The production default
+  // is pinned, without running the KDF, in password/Pbkdf2Defaults.test.ts.
+  const OLD_PBKDF2_ITERATIONS = 1000;
+  const CURRENT_PBKDF2_ITERATIONS = 2000;
+
+  /** Build an old-style PBKDF2 hash (fewer iterations than the hasher under test, 64-byte key). */
   const makeOldPbkdf2Hash = async (password: string): Promise<string> => {
     const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
     const keyMaterial = await globalThis.crypto.subtle.importKey(
@@ -527,20 +534,23 @@ describe("EmailPasswordService — migration and security hardening", () => {
       ["deriveBits"],
     );
     const bits = await globalThis.crypto.subtle.deriveBits(
-      { name: "PBKDF2", salt, iterations: 210000, hash: "SHA-256" },
+      { name: "PBKDF2", salt, iterations: OLD_PBKDF2_ITERATIONS, hash: "SHA-256" },
       keyMaterial,
       64 * 8,
     );
     const key = Buffer.from(bits);
-    return `pbkdf2-sha256$210000$${Buffer.from(salt).toString("hex")}$${key.toString("hex")}`;
+    return `pbkdf2-sha256$${OLD_PBKDF2_ITERATIONS}$${Buffer.from(salt).toString("hex")}$${key.toString("hex")}`;
   };
 
   it("verifies an old PBKDF2 hash and rehashes it to current params on sign-in", async () => {
-    // The production default hasher, not the cheap one the other tests use:
-    // this test asserts the upgrade lands on the default count (600,000).
+    // A configured count above the old one, so the stored hash is outdated and
+    // the upgrade must land on this configured count, not on the old one.
     const testContext = Context.merge(
       await makeTestContext(),
-      Context.make(PasswordHasher, Password.pbkdf2Hasher()),
+      Context.make(
+        PasswordHasher,
+        Password.pbkdf2Hasher({ iterations: CURRENT_PBKDF2_ITERATIONS }),
+      ),
     );
 
     // Seed user with an old-style hash (fewer iterations, larger key).
@@ -574,7 +584,9 @@ describe("EmailPasswordService — migration and security hardening", () => {
     // The stored hash must have been silently upgraded to the current params.
     const updatedHash = passwordHashes.get(user.id)!;
     expect(updatedHash).not.toBe(oldHash);
-    expect(updatedHash.startsWith("pbkdf2-sha256$600000$")).toBe(true);
+    expect(updatedHash.startsWith(`pbkdf2-sha256$${CURRENT_PBKDF2_ITERATIONS}$`)).toBe(true);
+    // ...including the current 32-byte key, not the seed's 64-byte one.
+    expect(Buffer.from(updatedHash.split("$")[3]!, "hex").length).toBe(32);
   });
 
   it("signs in with old PBKDF2 hash after switching default hasher to scrypt via MultiAlgorithmVerifier", async () => {
