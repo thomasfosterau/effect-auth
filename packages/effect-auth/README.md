@@ -150,6 +150,68 @@ console.log(await Effect.runPromise(Effect.provide(program, AuthorizationLive)))
 
 Because the output is `DeclarativePolicy` data, a rule authored this way is storable, traceable, validatable against an `AuthorizationModel`, and enforceable at the data boundary with `Auth.protectedField`. Mix it with hand-written policies by composing `Auth.Rbac.policies(...)` into your own `Auth.Authorizer.layer({ policies })`. Migrating from the removed `RoleStore` / `AuthorizationPolicy` API? See [docs/guides/authorization-kernel-migration.md](../../docs/guides/authorization-kernel-migration.md).
 
+### System principals
+
+A background job, cron handler or pipeline step acts with no person behind it. It is a
+principal of its own, `System::"<name>"`, not a user and not an API key. It is denied everything
+by default and allowed exactly what an explicit grant names:
+
+```typescript
+import { Effect } from "effect";
+import * as Auth from "@thomasfosterau/effect-auth";
+
+const Model = Auth.AuthorizationModel.make({
+  entities: {
+    User: {},
+    System: Auth.System.declaration, // lets grants validate
+    Invoice: {},
+  },
+  actions: {
+    "invoice:charge": { appliesTo: { principal: ["System"], resource: ["Invoice"] } },
+  },
+});
+
+const AuthorizationLive = Auth.Authorizer.layer({
+  model: Model,
+  policies: [
+    // The billing job may charge invoices, and nothing else.
+    Auth.System.grant("billing-cron", {
+      id: "billing-cron:charge-invoices",
+      action: "invoice:charge",
+      resource: Auth.Policy.isType("Invoice"),
+    }),
+  ],
+});
+
+const chargeInvoices = Effect.gen(function* () {
+  const authorizer = yield* Auth.Authorizer;
+  yield* authorizer.authorize({
+    action: "invoice:charge",
+    resource: Auth.Entity.ref("Invoice", "inv-1"),
+  });
+}).pipe(Auth.System.provide("billing-cron"), Effect.provide(AuthorizationLive));
+
+await Effect.runPromise(chargeInvoices);
+```
+
+The rules a system principal follows:
+
+- **Denied by default.** Only a policy that names `System::"<name>"` can allow it anything. There is no
+  allow-all for system principals.
+- **Named by a grant.** `System.grant` takes one action and one resource scope, so a job is granted what it
+  needs and nothing wider. A wider grant is several grants, each with its own id.
+- **Not a user.** `System` is a reserved entity type. `Guard.make` refuses it as a viewer's
+  principal type, and a user policy (`Policy.isType("User")`, or `Policy.eq(User::"…")`) never
+  matches a system principal, nor does a system grant match a user with the same name.
+- **Named in the audit.** `Authorizer` logs every decision about a system principal with
+  `System::"<name>"` and the policies that decided it (allows at info, denials at warning), and a
+  denial's error message names it.
+
+A permit whose principal scope is `any` still reaches a system principal, so scope user policies
+to users. A forbid whose condition reads a user attribute errors for a system principal, and an
+erroring forbid denies, so scope forbids the same way. See
+[ADR 0019](../../docs/adr/0019-system-principals.md).
+
 ## Passwords
 
 ```typescript

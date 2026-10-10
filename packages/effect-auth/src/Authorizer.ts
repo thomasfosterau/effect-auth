@@ -24,7 +24,8 @@ import * as PolicyStore from "./PolicyStore.ts";
 /**
  * The authenticated principal for the current execution, as an entity
  * reference. Provided per-request (e.g. by the HTTP session middleware:
- * `User::"<userId>"`; an API key or service principal works the same way).
+ * `User::"<userId>"`; an API key works the same way). A background job names
+ * itself with `System.provide("<name>")`, which provides `System::"<name>"`.
  * `Authorizer.authorize`/`check` read it from context so call sites only
  * name the action and resource.
  */
@@ -196,6 +197,30 @@ const toActionRef = (action: Entity.EntityRef | string): Entity.EntityRef =>
   typeof action === "string" ? Entity.ref("Action", action) : action;
 
 /**
+ * The audit record of a system principal's decision. A background job has no
+ * request or session to log against, so its decisions are logged here, always,
+ * with the principal's name and the policies that determined the outcome:
+ * allows at info, denies at warning. Human decisions are not logged by this
+ * module; the HTTP authorization middleware logs its own.
+ */
+const auditSystemDecision = (
+  request: Policy.PolicyRequest,
+  decision: Policy.Decision,
+): Effect.Effect<void> => {
+  const fields = {
+    principal: Entity.formatRef(request.principal),
+    action: Entity.formatRef(request.action),
+    resource: Entity.formatRef(request.resource),
+    allowed: decision.allowed,
+    reason: decision.reason,
+    policies: decision.determining.map((outcome) => outcome.policyId),
+  };
+  return decision.allowed
+    ? Effect.logInfo("authorization.decision", fields)
+    : Effect.logWarning("authorization.decision", fields);
+};
+
+/**
  * Configuration for {@link Authorizer.layer}.
  */
 export interface AuthorizerConfig<E = unknown> {
@@ -315,7 +340,11 @@ export const make = <E = unknown>(
     ) {
       const policies = yield* allPolicies();
       const slice = yield* sliceFor(policies, request);
-      return yield* Policy.decide(policies, request, slice);
+      const decision = yield* Policy.decide(policies, request, slice);
+      if (request.principal.type === Entity.systemType) {
+        yield* auditSystemDecision(request, decision);
+      }
+      return decision;
     });
 
     const requestFrom = (

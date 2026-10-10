@@ -125,7 +125,9 @@ directories, each with its own `index.ts` barrel and matching
   policy kernel `Entity.ts` / `Condition.ts` / `Policy.ts` /
   `AuthorizationModel.ts` / `PolicyStore.ts` (namespaced at the root as
   `Auth.Entity`, `Auth.Policy`, … because their member names are generic),
-  the `Authorizer.ts` shell, `Protected.ts` (schema-embedded field guards),
+  the `Authorizer.ts` shell, `System.ts` (non-human principals: the reserved
+  `System` entity type, provided and granted explicitly, [ADR 0019](adr/0019-system-principals.md)),
+  `Protected.ts` (schema-embedded field guards),
   `OrganizationEntities.ts` (the organization → entity-graph bridge), and
   `Rbac.ts` + `Permission.ts` (RBAC authoring sugar and the
   `"resource:action"` vocabulary it is written in), and `Ladder.ts` (an ordered

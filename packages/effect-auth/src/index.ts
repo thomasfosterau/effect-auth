@@ -331,6 +331,12 @@ export * as Entity from "./Entity.ts";
 export * as Condition from "./Condition.ts";
 export * as Policy from "./Policy.ts";
 export * as AuthorizationModel from "./AuthorizationModel.ts";
+/**
+ * Non-human principals (`Auth.System.provide("billing-cron")`, `Auth.System.grant`):
+ * the reserved `System::"<name>"` entity type, denied by default and allowed
+ * only what an explicit policy grants.
+ */
+export * as System from "./System.ts";
 // Namespaced only: the module's service tag is also named `PolicyStore`
 // (`Auth.PolicyStore.PolicyStore`), so a top-level re-export would collide.
 export * as PolicyStore from "./PolicyStore.ts";

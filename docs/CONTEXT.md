@@ -177,6 +177,15 @@ A resource paired with an action (`PermissionRef { resource, action }` in `Permi
 `"resource:action"` string (`parsePermission` / `formatPermission`); `Rbac` takes `PermissionRef`
 values; an API key stores a `{ resource: actions[] }` map.
 
+### Principals
+
+**System principal**:
+A non-human principal: the background job, cron handler or pipeline step that acts with no
+person behind it. Entity `System::"<name>"`, provided with `System.provide(name)`. Denied
+everything by default; allowed exactly what an explicit `System.grant` names. Not a User and not
+an ApiKey (an ApiKey resolves to an account; a system principal has none). See ADR-0019.
+_Avoid_: service account, machine user, bot user, admin key.
+
 ### Ownership
 
 **Ownership**:

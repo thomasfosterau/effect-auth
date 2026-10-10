@@ -277,7 +277,11 @@ export interface GuardOptions<Id, User extends ViewerShape, Rung extends string>
    * `SessionContext.viewerFromSession`.
    */
   readonly viewer: Context.Key<Id, Option.Option<User>>;
-  /** The principal's entity type in the decision slice. Defaults to `"User"`. */
+  /**
+   * The principal's entity type in the decision slice. Defaults to `"User"`.
+   * `"System"` is refused: it names system principals, which are never viewers
+   * (see the `System` module).
+   */
   readonly principalType?: string;
   /**
    * The resource entity type an ownership decision is made against. Defaults
@@ -300,19 +304,34 @@ export const make = <Id, User extends ViewerShape, Rung extends string>(
   const { ladder } = options;
   const principalType = options.principalType ?? "User";
   const ownedType = options.ownedType ?? "Owned";
+  if (principalType === Entity.systemType) {
+    throw new Error(
+      `Guard.make: principalType "${principalType}" is reserved for system principals; a viewer is a user`,
+    );
+  }
   type Min = Rung | Ladder.Axis<Rung>;
 
+  // Scoped to the viewer's principal type, so a rung or owner grant written
+  // for users can never match a system principal (`System::"<name>"`), even one
+  // whose entity the resolver happens to give a `role` attribute.
   const roleAtLeast = (min: Min): ReadonlyArray<Policy.DeclarativePolicy> => [
-    Policy.roleAtLeast(ladder, min, { id: `guard:role:${axisName(min)}` }),
+    Policy.roleAtLeast(ladder, min, {
+      id: `guard:role:${axisName(min)}`,
+      principal: Policy.isType(principalType),
+    }),
   ];
 
   const ownerOrRole = (min: Min): ReadonlyArray<Policy.DeclarativePolicy> => [
     Policy.permit({
       id: "guard:owner",
+      principal: Policy.isType(principalType),
       resource: Policy.isType(ownedType),
       when: Condition.eq(Condition.principal, Condition.attr("resource", "owner")),
     }),
-    Policy.roleAtLeast(ladder, min, { id: `guard:owner-or-role:${axisName(min)}` }),
+    Policy.roleAtLeast(ladder, min, {
+      id: `guard:owner-or-role:${axisName(min)}`,
+      principal: Policy.isType(principalType),
+    }),
   ];
 
   const principalOf = (viewer: User): Entity.Entity =>
