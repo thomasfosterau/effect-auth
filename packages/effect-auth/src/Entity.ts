@@ -29,13 +29,22 @@ import { Schema } from "effect";
  * `User::"u1"`. Types are app-defined PascalCase names by convention;
  * `"Action"` and `"Role"` are the two types the library itself gives meaning
  * to (action entities name what can be done; role entities are principal
- * parents).
+ * parents). `"System"` is reserved for non-human principals (background jobs,
+ * cron handlers): construct one with `System.ref`, never by hand, and never
+ * name an application's own principal type `"System"` (`Guard.make` refuses it).
  */
 export const EntityRef = Schema.Struct({
   type: Schema.String,
   id: Schema.String,
 });
 export type EntityRef = typeof EntityRef.Type;
+
+/**
+ * The reserved entity type of a system principal (`System::"<name>"`). See
+ * the `System` module: a system principal is an entity like any other, decided
+ * only by the policies that name it.
+ */
+export const systemType = "System";
 
 /** Construct an {@link EntityRef}. */
 export const ref = (type: string, id: string): EntityRef => ({ type, id });
