@@ -247,7 +247,9 @@ several emails, a username and a phone number, or none at all (passkey-only,
 anonymous, or agent users).
 
 `effect_auth_identifiers` is unique on `(type, value)`. That index _is_ the
-claim mechanism behind `Auth.claimIdentifier`.
+claim mechanism behind `Auth.claimIdentifier`. For an application whose users
+table holds the email itself, see
+[Single-table identifiers](#single-table-identifiers-opt-in).
 
 ### Custom table names
 
@@ -335,6 +337,76 @@ CREATE TABLE IF NOT EXISTS effect_auth_identifiers (
   KEY effect_auth_identifiers_user_id_idx (user_id)
 );
 ```
+
+## Single-table identifiers (opt-in)
+
+The default `IdentifierStore` keeps identifiers in `effect_auth_identifiers`, so
+a user may hold several emails, a username and a phone number. An application
+whose `users` table already carries the login address, as `email` and
+`email_verified` columns on the row, can use `SingleTableIdentifierStore`
+instead. It reads and writes that row directly, so there is no identifiers table
+to migrate onto.
+
+The trade-off is that a user has **one identifier, and it is an email**. The
+store does not hold a second address, a username or a phone number, and refuses
+them with an `AuthError` rather than dropping the write.
+
+```ts
+import { Layer } from "effect";
+import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
+
+// The application's own table: a nullable, unique email.
+const users = Drizzle.SingleTableIdentifierStore.defineUsers({
+  table: appUsers,
+  columns: { id: "userId", email: "email", emailVerified: "emailVerified", createdAt: "createdAt" },
+});
+
+const identifiers = Drizzle.SingleTableIdentifierStore.layer(users).pipe(
+  Layer.provide(Drizzle.databaseLayer(db)),
+);
+```
+
+Column names are the table object's keys, as in `defineSchema`. The store is not
+part of `Drizzle.layer()`, so choosing it is an explicit provide.
+
+### What the table has to satisfy
+
+- `email` is **nullable** and carries a **unique index**. The index is the only
+  thing that stops two users holding one address; the store does not check it.
+  Deleting an address writes `NULL`, so a `NOT NULL` column makes delete fail.
+- `email_verified` is a non-null boolean.
+- The user row exists before its address is claimed. The store does not insert
+  users; your user writer does.
+
+Nothing else on the row is written, including `updated_at`.
+
+### How each field maps
+
+| `Identifier` field | Stored in                                                |
+| ------------------ | -------------------------------------------------------- |
+| `id`, `userId`     | the user's id; an email identifier's id is its user's id |
+| `type`             | always `"email"`                                         |
+| `value`            | `email`                                                  |
+| `verified`         | `email_verified`                                         |
+| `verifiedAt`       | not stored, so never reported                            |
+| `createdAt`        | the user row's creation time                             |
+
+A user whose `email` is `NULL` holds no identifier.
+
+### Method behaviour
+
+- `getByValue` looks up `email`. Any other type returns `null`.
+- `create` refuses a type other than `email`, a user with no row, and a user
+  that already holds an address. A duplicate address owned by another user
+  fails through the unique index as `AuthError`, which `claimIdentifier` reports
+  as `IdentifierTakenError`, as it does for the default store.
+- `delete` and `deleteByUser` clear `email` and `email_verified` and leave the
+  row in place.
+
+Core flows that need several identifiers at once fail on this store. SCIM's
+`userName` change adds the new address before removing the old one, so it is
+refused. Replacing an address by removing the old one first, as account email
+change does, works.
 
 ## Store semantics
 

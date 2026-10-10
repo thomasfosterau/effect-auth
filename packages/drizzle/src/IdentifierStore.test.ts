@@ -13,6 +13,7 @@ import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
 import { layer as identifierStoreLayer } from "./IdentifierStore.ts";
 import { tables } from "./PgSchema.ts";
+import { identifierStoreContract } from "./testing/IdentifierStoreContract.ts";
 import { migratedPglite, truncateTables } from "./testing/PgliteTemplate.ts";
 
 /**
@@ -202,4 +203,11 @@ describe("IdentifierStore", () => {
     expect(result.afterBulk).toEqual([]);
     expect(result.kept.map((row) => row.id)).toEqual(["kept"]);
   });
+});
+
+// The same contract the single-table store runs (#182): the multi-identifier
+// store is the reference the shared assertions were written against.
+identifierStoreContract("IdentifierStore (multi-identifier)", {
+  run: runWithDatabase,
+  seedUsers: async () => {},
 });

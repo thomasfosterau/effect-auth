@@ -118,10 +118,10 @@ export type ColumnKey<TTable extends Table, TValue> = {
  * and leaving the rest open, which is what lets one store serve `text`, `uuid`
  * and `varchar` keys alike: they differ in `columnType`, and agree on `data`.
  */
-type StoreColumn<TValue> = AnyColumn<{ data: TValue; notNull: true }>;
+export type StoreColumn<TValue> = AnyColumn<{ data: TValue; notNull: true }>;
 
 /** A resolved column the store tolerates `NULL` in. */
-type NullableColumn<TValue> = AnyColumn<{ data: TValue; notNull: false }>;
+export type NullableColumn<TValue> = AnyColumn<{ data: TValue; notNull: false }>;
 
 // ---------------------------------------------------------------------------
 // Per-store column sets
@@ -279,7 +279,7 @@ export interface AuthSchemaSpec<
  * the store needs; what it cannot do is carry that fact through a lookup on a
  * table whose shape is still generic. `TColumns` restates it, once, here.
  */
-const resolveTable = <TColumns>(spec: TableSpec<Table, object>): TableSchema<TColumns> => {
+export const resolveTable = <TColumns>(spec: TableSpec<Table, object>): TableSchema<TColumns> => {
   const source = spec.table as unknown as Readonly<Record<string, Column>>;
   const names = spec.columns as Readonly<Record<string, string>>;
   const columns: Record<string, Column> = {};
