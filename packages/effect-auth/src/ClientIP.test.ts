@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Option } from "effect";
+import { Effect, Option } from "effect";
+import { HttpServerRequest } from "effect/http";
 import {
+  ClientIP,
+  clientIPLayer,
   normalizeIp,
   cidrContains,
   resolveClientIP,
@@ -266,5 +269,155 @@ describe("resolveClientIP — IPv6", () => {
         trustedProxyCidrs: ["::1/128"],
       }),
     ).toBe("2001:db8::1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Single trusted header: ClientIP.cloudflare and ClientIP.trustedHeader
+// ---------------------------------------------------------------------------
+
+/** A request from a socket at `remote` carrying `headers`. */
+const edge = (
+  headers: Record<string, string>,
+  remote: string | null = "10.0.0.50",
+): IPResolvableRequest => ({
+  headers,
+  remoteAddress: remote !== null ? Option.some(remote) : Option.none(),
+});
+
+describe("ClientIP.cloudflare (opt-in single trusted header)", () => {
+  it("uses CF-Connecting-IP when it holds one IP", () => {
+    expect(resolveClientIP(edge({ "cf-connecting-ip": "203.0.113.7" }), ClientIP.cloudflare)).toBe(
+      "203.0.113.7",
+    );
+  });
+
+  it("ignores X-Forwarded-For and every other forwarded header", () => {
+    const spoofed = edge({
+      "x-forwarded-for": "6.6.6.6",
+      "x-real-ip": "7.7.7.7",
+      forwarded: "for=8.8.8.8",
+    });
+    expect(resolveClientIP(spoofed, ClientIP.cloudflare)).toBe("10.0.0.50");
+  });
+
+  it("is ignored when no trusted proxy is configured (secure default)", () => {
+    expect(resolveClientIP(edge({ "cf-connecting-ip": "203.0.113.7" }))).toBe("10.0.0.50");
+  });
+
+  it("falls back to the socket address when the header is absent", () => {
+    expect(resolveClientIP(edge({}), ClientIP.cloudflare)).toBe("10.0.0.50");
+  });
+
+  it("falls back to the socket address when the header is empty or blank", () => {
+    expect(resolveClientIP(edge({ "cf-connecting-ip": "" }), ClientIP.cloudflare)).toBe(
+      "10.0.0.50",
+    );
+    expect(resolveClientIP(edge({ "cf-connecting-ip": "   " }), ClientIP.cloudflare)).toBe(
+      "10.0.0.50",
+    );
+  });
+
+  it("refuses a comma-separated list whole, never taking its first entry", () => {
+    // A client can prepend anything to a list, so the first entry is attacker-chosen.
+    expect(
+      resolveClientIP(edge({ "cf-connecting-ip": "6.6.6.6, 203.0.113.7" }), ClientIP.cloudflare),
+    ).toBe("10.0.0.50");
+    expect(
+      resolveClientIP(edge({ "cf-connecting-ip": "6.6.6.6,203.0.113.7" }), ClientIP.cloudflare),
+    ).toBe("10.0.0.50");
+  });
+
+  it.each([
+    ["a word", "unknown"],
+    ["an IPv4 with a port", "203.0.113.7:443"],
+    ["a bracketed IPv6", "[2001:db8::1]"],
+    ["an IPv6 with a zone ID", "fe80::1%eth0"],
+    ["a mapped address with a zone ID", "::ffff:203.0.113.7%eth0"],
+    ["a CIDR", "203.0.113.0/24"],
+    ["an octet over 255", "256.1.1.1"],
+    ["an octet with a leading zero", "203.0.113.07"],
+    ["three IPv4 octets", "203.0.113"],
+    ["a doubled ::", "2001:db8::1::2"],
+    ["nine IPv6 groups", "1:2:3:4:5:6:7:8:9"],
+    ["a five-digit IPv6 group", "2001:db8:12345::1"],
+    ["a mapped prefix with a non-IPv4 tail", "::ffff:example"],
+    ["two addresses separated by a space", "203.0.113.7 6.6.6.6"],
+  ])("falls back to the socket address for %s", (_label, value) => {
+    expect(resolveClientIP(edge({ "cf-connecting-ip": value }), ClientIP.cloudflare)).toBe(
+      "10.0.0.50",
+    );
+  });
+
+  it("accepts IPv4, IPv6 and IPv4-mapped literals, normalised like other resolved addresses", () => {
+    const resolve = (value: string) =>
+      resolveClientIP(edge({ "cf-connecting-ip": value }), ClientIP.cloudflare);
+    expect(resolve("198.51.100.7")).toBe("198.51.100.7");
+    expect(resolve("  198.51.100.7  ")).toBe("198.51.100.7");
+    expect(resolve("2001:DB8::1")).toBe("2001:db8::1");
+    expect(resolve("::1")).toBe("::1");
+    expect(resolve("1:2:3:4:5:6:7::")).toBe("1:2:3:4:5:6:7::");
+    expect(resolve("::FFFF:203.0.113.7")).toBe("203.0.113.7");
+    expect(resolve("::ffff:203.0.113.7")).toBe("203.0.113.7");
+  });
+
+  it("accepts an IPv6 address with an embedded IPv4 tail, in hex-group form", () => {
+    expect(resolveClientIP(edge({ "cf-connecting-ip": "::1.2.3.4" }), ClientIP.cloudflare)).toBe(
+      "::102:304",
+    );
+  });
+
+  it("uses the header's address even when there is no socket address", () => {
+    expect(
+      resolveClientIP(edge({ "cf-connecting-ip": "203.0.113.7" }, null), ClientIP.cloudflare),
+    ).toBe("203.0.113.7");
+  });
+
+  it("returns undefined when the header is unusable and there is no socket address", () => {
+    expect(
+      resolveClientIP(edge({ "cf-connecting-ip": "6.6.6.6, 7.7.7.7" }, null), ClientIP.cloudflare),
+    ).toBeUndefined();
+  });
+});
+
+describe("ClientIP.trustedHeader", () => {
+  it("lowercases the header name", () => {
+    expect(ClientIP.trustedHeader("CF-Connecting-IP")).toEqual({
+      trustedHeader: "cf-connecting-ip",
+    });
+  });
+
+  it("reads only the named header", () => {
+    const realIp = ClientIP.trustedHeader("x-real-ip");
+    expect(resolveClientIP(edge({ "x-real-ip": "203.0.113.7" }), realIp)).toBe("203.0.113.7");
+    expect(resolveClientIP(edge({ "cf-connecting-ip": "203.0.113.7" }), realIp)).toBe("10.0.0.50");
+  });
+
+  it("is the same configuration as the cloudflare preset for that header", () => {
+    expect(ClientIP.trustedHeader("cf-connecting-ip")).toEqual(ClientIP.cloudflare);
+  });
+
+  it.each(["", "x y", "x:y", "x,y", "x/y"])("rejects %j as a header name", (name) => {
+    expect(() => ClientIP.trustedHeader(name)).toThrow(/not a valid HTTP header name/);
+  });
+});
+
+describe("clientIPLayer with a trusted header", () => {
+  it("provides the resolved address from the ambient request", async () => {
+    const request = HttpServerRequest.fromWeb(
+      new Request("http://localhost/", {
+        headers: { "cf-connecting-ip": "203.0.113.7", "x-forwarded-for": "6.6.6.6" },
+      }),
+    );
+    const ip = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { ip } = yield* ClientIP;
+        return ip;
+      }).pipe(
+        Effect.provide(clientIPLayer(ClientIP.cloudflare)),
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+      ),
+    );
+    expect(ip).toBe("203.0.113.7");
   });
 });

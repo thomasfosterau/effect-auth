@@ -4119,6 +4119,11 @@ export interface AuthWebHandlerOptions {
    * Provide this only when the app is deployed behind a known reverse proxy.
    * The resolved IP is available to all hooks and handlers via
    * `Effect.serviceOption(ClientIP)`.
+   *
+   * Behind Cloudflare, pass {@link ClientIP.cloudflare} (trusts `CF-Connecting-IP`
+   * alone). That is correct only when the app is reachable solely through
+   * Cloudflare; the `trustedHeader` form of `TrustedProxyConfig` documents the
+   * trust assumption in full.
    */
   readonly trustedProxy?: TrustedProxyConfig;
   /**

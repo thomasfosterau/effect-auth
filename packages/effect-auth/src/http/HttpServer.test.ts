@@ -73,6 +73,8 @@ import {
 } from "../DeviceAuthorization.ts";
 import { generateHotp, generateTotp } from "../multifactor/Otp.ts";
 import type * as Types from "../Types.ts";
+import { ClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
+import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
 
 const HOUR = 60 * 60 * 1000;
 const SESSION_CONFIG: Types.SessionConfig = {
@@ -2051,5 +2053,61 @@ describe("bearer mode", () => {
     expect(sessionRes.status).toBe(200);
     const body = (await sessionRes.json()) as { user: { email: string } };
     expect(body.user.email).toBe("ml@test.com");
+  });
+});
+
+describe("client IP at the HTTP boundary", () => {
+  // One sign-in attempt per window per resolved client address.
+  const signInOncePerHour = {
+    rules: [{ path: "/sign-in", methods: ["POST"], maxRequests: 1, windowMs: HOUR }],
+  };
+
+  const limitedHandler = (trustedProxy: TrustedProxyConfig | undefined): Handler => {
+    const entries = new Map<string, RateLimitEntry>();
+    const store = {
+      get: (key: string) => Effect.sync(() => entries.get(key) ?? null),
+      set: (key: string, entry: RateLimitEntry, _ttl: number) =>
+        Effect.sync(() => void entries.set(key, entry)),
+      increment: (key: string, _ttl: number) =>
+        Effect.sync(() => {
+          const entry = entries.get(key);
+          const count = (entry?.count ?? 0) + 1;
+          if (entry) entries.set(key, { ...entry, count });
+          return count;
+        }),
+      delete: (key: string) => Effect.sync(() => void entries.delete(key)),
+    };
+    const limiter = RateLimiter.layer().pipe(Layer.provide(Layer.succeed(RateLimitStore, store)));
+    const services = Layer.merge(makeFixture().services, limiter) as Layer.Layer<AuthServices>;
+    return HttpServer.make({
+      services,
+      cookie: { secure: false },
+      ipRateLimit: signInOncePerHour,
+      ...(trustedProxy !== undefined && { trustedProxy }),
+    }).handler;
+  };
+
+  // A sign-in for an unknown account: the limiter runs before the handler, so
+  // the response status only shows whether the attempt was refused.
+  const attempt = (handler: Handler, cfConnectingIp: string, xForwardedFor: string) =>
+    handler(
+      jsonRequest(
+        "/sign-in",
+        { email: "nobody@example.com", password: PW },
+        {
+          "cf-connecting-ip": cfConnectingIp,
+          "x-forwarded-for": xForwardedFor,
+        },
+      ),
+    );
+
+  it("keys the limit on CF-Connecting-IP and ignores X-Forwarded-For under ClientIP.cloudflare", async () => {
+    const handler = limitedHandler(ClientIP.cloudflare);
+
+    expect((await attempt(handler, "203.0.113.1", "6.6.6.6")).status).not.toBe(429);
+    // A different visitor behind the same edge has a bucket of their own.
+    expect((await attempt(handler, "203.0.113.2", "7.7.7.7")).status).not.toBe(429);
+    // The same visitor, with a different forged X-Forwarded-For, is still limited.
+    expect((await attempt(handler, "203.0.113.1", "8.8.8.8")).status).toBe(429);
   });
 });
