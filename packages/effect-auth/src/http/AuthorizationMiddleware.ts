@@ -24,7 +24,8 @@
  *
  * Each guard is named by its first argument, and that name is its TypeScript
  * type: attaching one guard and providing another guard's `.layer` is a compile
- * error, not a missing-service failure at runtime (#320).
+ * error, not a missing-service failure at runtime (#320), unless two guards
+ * share a name (see Naming on {@link makeAuthorizationMiddleware}).
  *
  * ## Static vs. per-request input
  *
@@ -373,16 +374,23 @@ type GuardNameError =
  * to {@link GuardNameError} instead: the first three would widen the guard's
  * type to other guards' types, and the last names no guard. The parameter's
  * type then reads as that message, so the call-site error explains the rule.
+ *
+ * `any` resolves to `never`, so no argument (not even `any`) is accepted. The
+ * `0 extends 1 & Id` test sits inside the distributive `Id extends string`
+ * branch on purpose: placed outside it, inference from an `any` argument falls
+ * back to a wide name and `any` type-checks again.
  */
-type GuardName<Id extends string, All extends string = Id> = Id extends unknown
-  ? [All] extends [Id]
-    ? {} extends Record<Id, 1>
-      ? GuardNameError
-      : Id extends ""
+type GuardName<Id extends string, All extends string = Id> = Id extends string
+  ? 0 extends 1 & Id
+    ? never
+    : [All] extends [Id]
+      ? {} extends Record<Id, 1>
         ? GuardNameError
-        : Id
-    : GuardNameError
-  : GuardNameError;
+        : Id extends ""
+          ? GuardNameError
+          : Id
+      : GuardNameError
+  : never;
 
 /**
  * Build a route-level `HttpApiMiddleware` that gates the handler on
@@ -395,11 +403,11 @@ type GuardName<Id extends string, All extends string = Id> = Id extends unknown
  * and its `layer()` are attached (see the module doc's example).
  *
  * **Naming.** `name` is the guard's type identity, so give each guard its own
- * name. It must be one non-empty string literal: a `string`, a template pattern,
- * a union or `""` is a compile error, because a widened name would widen the
- * guard's type and an empty one names no guard. Two guards built with the same
- * literal still share a type, and a wrong `.layer` between them type-checks and
- * then fails at runtime. The runtime tag is
+ * name. It must be one non-empty string literal: a `string`, `any`, a template
+ * pattern, a union or `""` is a compile error, because a widened name would
+ * widen the guard's type and an empty one names no guard. Two guards built with
+ * the same literal still share a type, and a wrong `.layer` between them
+ * type-checks and then fails at runtime. The runtime tag is
  * `@effect-auth/AuthorizationMiddleware/<name>#<n>`, unique per call either way.
  *
  * **Composition order.** `CurrentPrincipal` is declared in `requires`, so a

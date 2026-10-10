@@ -445,6 +445,21 @@ describe("makeAuthorizationMiddleware – guard names", () => {
     void makeAuthorizationMiddleware("", input);
   });
 
+  it("an any-typed name is a compile error, inferred or explicit: any would type the guard as any", () => {
+    const anyName: any = "RequireA";
+    // @ts-expect-error -- `any` is not a guard name.
+    void makeAuthorizationMiddleware(anyName, input);
+    // @ts-expect-error -- an explicit `any` type argument is not a guard name either.
+    void makeAuthorizationMiddleware<any>("RequireA", input);
+  });
+
+  it("a widened name's rejection message is the parameter's type, pinned to its exact text", () => {
+    // Fails to type-check if the message is replaced by `never` or any other text.
+    const message: Parameters<typeof makeAuthorizationMiddleware<string>>[0] =
+      "a guard name must be one non-empty string literal, not string, a template pattern or a union";
+    expect(message).toMatch(/non-empty string literal/);
+  });
+
   it("tricky non-empty literals still compile: punctuation and non-ASCII names", () => {
     const slashHash = makeAuthorizationMiddleware("a/b#c", input);
     const dotColon = makeAuthorizationMiddleware("A.B:C", input);
