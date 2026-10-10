@@ -2,7 +2,7 @@
 
 effect-auth's core (`@thomasfosterau/effect-auth`) depends on `effect` alone — no database driver, no ORM. Every place a feature needs to read or write something durable, it asks for a small `Context.Service` contract instead: `SessionStore`, `UserStore`, `OAuthAccountStore`, and so on. This is the library's answer to "do you support Prisma/Kysely/Mongo?" — you implement the contracts your app uses, over whatever client you already have, and every feature built on them lights up.
 
-If your database is SQLite or Cloudflare D1 (via `effect/sql`), or Postgres or MySQL (via Drizzle), a ready-made implementation already exists (§6) — reach for one of those before writing your own. This guide is for everyone else: Mongo, DynamoDB, Prisma, a REST backend, whatever `db` client you already have.
+If your database is SQLite, Cloudflare D1 or Postgres (via `effect/sql`), or Postgres or MySQL (via Drizzle, three stores), a ready-made implementation already exists (§6) — reach for one of those before writing your own. This guide is for everyone else: Mongo, DynamoDB, Prisma, a REST backend, whatever `db` client you already have.
 
 ## 1. Conventions every store follows
 

@@ -18,7 +18,7 @@ import type { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as AuthSql from "@thomasfosterau/effect-auth-sql";
 
-// `SqlLive` is any layer providing `SqlClient` for a supported dialect (SQLite, D1).
+// `SqlLive` is any layer providing `SqlClient` for a supported dialect (SQLite, D1, PostgreSQL).
 export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
   // Creates the `auth_*` tables; idempotent, so it is safe on every deploy.
   const migrate = AuthSql.migrate.pipe(Effect.provide(SqlLive));
