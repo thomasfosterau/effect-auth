@@ -154,13 +154,19 @@ describe("PasswordHasher", () => {
   });
 
   it("needsRehash returns false for a current hash and true for an old one", async () => {
-    // The default count on purpose: this test is about which hashes the
-    // production hasher flags for upgrade. Pinned structurally in Pbkdf2Defaults.test.ts.
-    const h = Password.pbkdf2Hasher();
+    // A cheap explicit count, relative to the configured count: this test is
+    // about which hashes the hasher flags for upgrade, not about KDF cost. The
+    // production default (600,000) and needsRehash at that count are pinned, with
+    // no KDF work, in Pbkdf2Defaults.test.ts ("needsRehash flags any hash below
+    // the default count").
+    const CURRENT_ITERATIONS = 2000;
+    const OLD_ITERATIONS = 1000;
+    const h = Password.pbkdf2Hasher({ iterations: CURRENT_ITERATIONS });
     const current = await Effect.runPromise(h.hash("pw"));
+    expect(current.hash.startsWith(`pbkdf2-sha256$${CURRENT_ITERATIONS}$`)).toBe(true);
     expect(h.needsRehash!(current.hash)).toBe(false);
 
-    // Simulate a hash produced with old params (210000 iterations, 64-byte key).
+    // Simulate a hash produced with old params (fewer iterations, 64-byte key).
     const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
     const keyMaterial = await globalThis.crypto.subtle.importKey(
       "raw",
@@ -170,12 +176,12 @@ describe("PasswordHasher", () => {
       ["deriveBits"],
     );
     const bits = await globalThis.crypto.subtle.deriveBits(
-      { name: "PBKDF2", salt, iterations: 210000, hash: "SHA-256" },
+      { name: "PBKDF2", salt, iterations: OLD_ITERATIONS, hash: "SHA-256" },
       keyMaterial,
       64 * 8,
     );
     const oldKey = Buffer.from(bits);
-    const oldHash = `pbkdf2-sha256$210000$${Buffer.from(salt).toString("hex")}$${oldKey.toString("hex")}`;
+    const oldHash = `pbkdf2-sha256$${OLD_ITERATIONS}$${Buffer.from(salt).toString("hex")}$${oldKey.toString("hex")}`;
     expect(h.needsRehash!(oldHash)).toBe(true);
 
     // Old hash must still verify correctly (uses stored key length).
