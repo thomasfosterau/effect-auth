@@ -545,7 +545,7 @@ export { strict };
 
 ### Client IP behind Cloudflare
 
-Per-IP limits and audit need the visitor's address. Behind Cloudflare the socket address is Cloudflare's, so tell the handler which single header carries the visitor's address:
+Per-IP rate limits (and any hook of your own that reads `ClientIP`) need the visitor's address. Behind Cloudflare the socket address is Cloudflare's, so tell the handler which single header carries the visitor's address:
 
 ```typescript
 import * as Auth from "@thomasfosterau/effect-auth";
@@ -560,7 +560,7 @@ const { handler } = Auth.Http.make({
 // Behind another edge, name its header instead: Auth.ClientIP.trustedHeader("x-real-ip").
 ```
 
-This is correct only when the app is reachable solely through Cloudflare. A request that bypasses the edge can set `CF-Connecting-IP` to any value and choose its own key. Only that one header is read; `X-Forwarded-For` and the rest are ignored. A value is taken only when it is exactly one IPv4 or IPv6 address. A missing, empty or malformed value, or a comma-separated list, falls back to the socket address. The first entry of a list is never used. Behind Cloudflare that fallback is an edge address shared by many visitors, so it is a fallback, not a per-visitor key.
+This is correct only when the app is reachable solely through Cloudflare. A request that bypasses the edge can set `CF-Connecting-IP` to any value and choose its own key. Only that one header is read; `X-Forwarded-For` and the rest are ignored. A value is taken only when it is exactly one IPv4 or IPv6 address. A missing, empty or malformed value, or a comma-separated list, falls back to the socket address. The first entry of a list is never used. Behind Cloudflare that fallback is an edge address shared by many visitors, so it is a fallback, not a per-visitor key. Under `Http.make` serving Web `Request`s (Workers, for example) there is no socket address, so an unusable header resolves no address and the per-IP limit does not apply to that request (#358). An accepted IPv6 address is canonicalised (RFC 5952), and an IPv4-mapped address becomes dotted IPv4, so one visitor has one key.
 
 Without `trustedProxy`, forwarded headers are ignored and the socket address is used as-is.
 

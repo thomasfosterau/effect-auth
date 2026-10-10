@@ -356,9 +356,44 @@ describe("ClientIP.cloudflare (opt-in single trusted header)", () => {
     expect(resolve("  198.51.100.7  ")).toBe("198.51.100.7");
     expect(resolve("2001:DB8::1")).toBe("2001:db8::1");
     expect(resolve("::1")).toBe("::1");
-    expect(resolve("1:2:3:4:5:6:7::")).toBe("1:2:3:4:5:6:7::");
+    // RFC 5952: a single zero group is not compressed.
+    expect(resolve("1:2:3:4:5:6:7::")).toBe("1:2:3:4:5:6:7:0");
     expect(resolve("::FFFF:203.0.113.7")).toBe("203.0.113.7");
     expect(resolve("::ffff:203.0.113.7")).toBe("203.0.113.7");
+  });
+
+  it("canonicalises IPv6 (RFC 5952) so one visitor gets one key however the address is written", () => {
+    const resolve = (value: string) =>
+      resolveClientIP(edge({ "cf-connecting-ip": value }), ClientIP.cloudflare);
+    expect(resolve("2001:0db8:0000:0000:0000:0000:0000:0001")).toBe("2001:db8::1");
+    expect(resolve("2001:0db8::0001")).toBe("2001:db8::1");
+    expect(resolve("2001:db8:0:0:1:0:0:1")).toBe("2001:db8::1:0:0:1");
+    expect(resolve("0:0:0:0:0:0:0:1")).toBe("::1");
+    // Every spelling of an IPv4-mapped address unwraps to dotted IPv4, as the
+    // socket path does.
+    expect(resolve("0:0:0:0:0:ffff:203.0.113.7")).toBe("203.0.113.7");
+    expect(resolve("::ffff:cb00:7107")).toBe("203.0.113.7");
+    expect(resolve("::FFFF:CB00:7107")).toBe("203.0.113.7");
+  });
+
+  it("refuses duplicate headers, which the Fetch API joins with a comma", () => {
+    const headers = new Headers();
+    headers.append("cf-connecting-ip", "203.0.113.7");
+    headers.append("cf-connecting-ip", "6.6.6.6");
+    expect(resolveClientIP(edge(Object.fromEntries(headers)), ClientIP.cloudflare)).toBe(
+      "10.0.0.50",
+    );
+  });
+
+  it("ignores inherited object keys as header names", () => {
+    expect(resolveClientIP(edge({}), ClientIP.trustedHeader("constructor"))).toBe("10.0.0.50");
+  });
+
+  it("trims only HTTP whitespace (SP and HTAB) around the value", () => {
+    const resolve = (value: string) =>
+      resolveClientIP(edge({ "cf-connecting-ip": value }), ClientIP.cloudflare);
+    expect(resolve("\t203.0.113.7 ")).toBe("203.0.113.7");
+    expect(resolve("\u00a0203.0.113.7")).toBe("10.0.0.50");
   });
 
   it("accepts an IPv6 address with an embedded IPv4 tail, in hex-group form", () => {

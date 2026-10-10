@@ -62,7 +62,7 @@ export interface TrustedProxyCidrs {
  * app through Cloudflare, so the socket address is a Cloudflare address and
  * `CF-Connecting-IP` carries the visitor's. Anyone who can reach the app
  * directly, bypassing the edge, can send that header with any value and so
- * choose their own rate-limit key or audit address. Deploy only behind the edge
+ * choose their own rate-limit key (and the address any hook reads). Deploy only behind the edge
  * (for example, a Worker route that is the sole public entry point).
  *
  * Resolution, when this form is configured:
@@ -243,21 +243,18 @@ const isStrictIPv6 = (s: string): boolean => {
 
 /**
  * Parse `raw` as exactly one IPv4 or IPv6 literal, or return `undefined`.
- * Surrounding whitespace is ignored. Anything else is rejected, including a
+ * Surrounding HTTP whitespace (SP, HTAB) is ignored. Anything else is rejected, including a
  * comma-separated list, a port, brackets, a zone ID and a CIDR suffix.
  *
- * Returns the normalised form (see {@link normalizeIp}).
+ * Returns IPv4 as written and IPv6 in canonical form (see `canonicalIPv6`).
  */
 const parseIpLiteral = (raw: string): string | undefined => {
-  const s = raw.trim();
+  // HTTP optional whitespace is SP and HTAB only (RFC 9110 §5.6.3).
+  const s = raw.replace(/^[ \t]+|[ \t]+$/g, "");
   if (strictIPv4Re.test(s)) return s;
   if (!s.includes(":")) return undefined;
 
-  // IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is the only dotted form accepted here.
-  const mapped = /^::ffff:(.+)$/i.exec(s);
-  if (mapped !== null) return strictIPv4Re.test(mapped[1]!) ? mapped[1] : undefined;
-
-  // Any other embedded IPv4 tail becomes two hex groups before the colon-hex check.
+  // An embedded IPv4 tail becomes two hex groups before the colon-hex check.
   let body = s;
   const lastColon = s.lastIndexOf(":");
   const tail = s.slice(lastColon + 1);
@@ -266,7 +263,43 @@ const parseIpLiteral = (raw: string): string | undefined => {
     const n = ipv4ToUint32(tail)!;
     body = `${s.slice(0, lastColon + 1)}${(n >>> 16).toString(16)}:${(n & 0xffff).toString(16)}`;
   }
-  return isStrictIPv6(body) ? normalizeIp(body) : undefined;
+  return isStrictIPv6(body) ? canonicalIPv6(body) : undefined;
+};
+
+/**
+ * The RFC 5952 text form of a validated colon-hex IPv6 address: lowercase,
+ * no leading zeros, the longest run of two or more zero groups compressed to
+ * `::` (the first on a tie). An IPv4-mapped address (`::ffff:0:0/96`) becomes
+ * dotted IPv4, as {@link normalizeIp} makes it on the socket path, so a
+ * visitor gets the same rate-limit key however the address is written.
+ */
+const canonicalIPv6 = (ip: string): string => {
+  const groups = expandIPv6(ip)!
+    .split(":")
+    .map((g) => parseInt(g, 16));
+  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
+    const hi = groups[6]!;
+    const lo = groups[7]!;
+    return `${hi >>> 8}.${hi & 0xff}.${lo >>> 8}.${lo & 0xff}`;
+  }
+  let bestStart = -1;
+  let bestLength = 0;
+  for (let i = 0; i < 8;) {
+    if (groups[i] !== 0) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < 8 && groups[j] === 0) j++;
+    if (j - i > bestLength) {
+      bestStart = i;
+      bestLength = j - i;
+    }
+    i = j;
+  }
+  const hex = groups.map((g) => g.toString(16));
+  if (bestLength < 2) return hex.join(":");
+  return `${hex.slice(0, bestStart).join(":")}::${hex.slice(bestStart + bestLength).join(":")}`;
 };
 
 const ipv6ToBigInt = (ip: string): bigint | undefined => {
@@ -393,8 +426,9 @@ export const resolveClientIP = (
   if (config.trustedHeader !== undefined) {
     // Exactly one header, read on its own. Only a single well-formed address is
     // taken; anything else falls back to the socket address.
-    const raw: string | undefined = req.headers[config.trustedHeader.toLowerCase()];
-    const fromHeader = raw === undefined ? undefined : parseIpLiteral(raw);
+    const name = config.trustedHeader.toLowerCase();
+    const raw = Object.hasOwn(req.headers, name) ? req.headers[name] : undefined;
+    const fromHeader = typeof raw === "string" ? parseIpLiteral(raw) : undefined;
     return fromHeader ?? remoteIp;
   }
 
