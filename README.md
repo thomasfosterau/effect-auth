@@ -2,6 +2,8 @@
 
 Batteries-included authentication and authorization for [Effect](https://effect.website/) v4: a headless core of services and layers, plus an optional HTTP API, a typed browser client, framework bindings and storage and vendor adapters, each opt-in. How it relates to effect-jsonapi and legation is stated once in [the three-library boundary](docs/BOUNDARY.md).
 
+**Disclaimer:** This is an experimental project, mostly written using Claude Code, and is not production-ready. If you want something usable, BetterAuth is probably the best option.
+
 ## Packages
 
 | Package                                                   | Purpose                                                                                                     |
