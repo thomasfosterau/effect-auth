@@ -79,8 +79,8 @@ catalogs:
       specifier: ^13.0.3
       version: 13.0.3
     drizzle-orm:
-      specifier: ^0.45.3
-      version: 0.45.3
+      specifier: ^0.45.4
+      version: 0.45.4
     drizzle-orm-effect:
       specifier: npm:drizzle-orm@1.0.0-rc.5-ab785fc
       version: 1.0.0-rc.5-ab785fc
@@ -287,7 +287,7 @@ importers:
         version: 13.0.3
       drizzle-orm:
         specifier: 'catalog:'
-        version: 0.45.3(@cloudflare/workers-types@5.20260929.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(mysql2@3.24.2(@types/node@26.6.4))(pg@8.23.0)
+        version: 0.45.4(@cloudflare/workers-types@5.20260929.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(mysql2@3.24.2(@types/node@26.6.4))(pg@8.23.0)
       drizzle-orm-effect:
         specifier: 'catalog:'
         version: drizzle-orm@1.0.0-rc.5-ab785fc(@cloudflare/workers-types@5.20260929.1)(@effect/sql-d1@4.0.0(effect@4.0.0))(@effect/sql-pg@4.0.0(effect@4.0.0))(@effect/sql-pglite@4.0.0(effect@4.0.0))(@effect/sql-sqlite-do@4.0.0(effect@4.0.0))(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(effect@4.0.0)(mysql2@3.24.2(@types/node@26.6.4))(pg@8.23.0)(valibot@1.2.0(@typescript/typescript6@6.0.2))
@@ -2911,8 +2911,8 @@ packages:
   dom-accessibility-api@0.5.16:
     resolution: {integrity: sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg==}
 
-  drizzle-orm@0.45.3:
-    resolution: {integrity: sha512-CAloER21cDdcgZ1OmjrZX82EeRNsdP+y0onX/eyoYDaYzki/adrAa91lzM5jWh7zZPK4qUbw/6LGv9J+A+uizA==}
+  drizzle-orm@0.45.4:
+    resolution: {integrity: sha512-NiM1YZpJ2UxyeE67DpDDZ+Tsw4YLX3trSlkNT7Tm9eKoUNb1LvaAaQzXgYQsWs+AQ9TUmmwMmBOCXuqqxUWKKQ==}
     peerDependencies:
       '@aws-sdk/client-rds-data': '>=3'
       '@cloudflare/workers-types': '>=4'
@@ -6388,7 +6388,7 @@ snapshots:
 
   dom-accessibility-api@0.5.16: {}
 
-  drizzle-orm@0.45.3(@cloudflare/workers-types@5.20260929.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(mysql2@3.24.2(@types/node@26.6.4))(pg@8.23.0):
+  drizzle-orm@0.45.4(@cloudflare/workers-types@5.20260929.1)(@electric-sql/pglite@0.5.8)(@libsql/client@0.17.4)(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(mysql2@3.24.2(@types/node@26.6.4))(pg@8.23.0):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20260929.1
       '@electric-sql/pglite': 0.5.8
