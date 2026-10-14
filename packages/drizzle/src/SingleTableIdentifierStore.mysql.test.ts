@@ -33,6 +33,39 @@ const usersMapping = defineUsers({
   columns: { id: "userId", email: "email", emailVerified: "emailVerified", createdAt: "createdAt" },
 });
 
+/** The same table with `email` NOT NULL: the store cannot clear an address on it. */
+const strictUsers = mysqlTable("app_users_strict", {
+  userId: varchar("id", { length: 255 }).primaryKey(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  emailVerified: boolean("email_verified").notNull().default(false),
+  createdAt: datetime("created_at", { mode: "date", fsp: 3 }).notNull(),
+});
+
+const strictMapping = defineUsers({
+  table: strictUsers,
+  columns: { id: "userId", email: "email", emailVerified: "emailVerified", createdAt: "createdAt" },
+});
+
+/** The nullable table with the application's verification-time column mapped. */
+const verifiedUsers = mysqlTable("app_users_verified", {
+  userId: varchar("id", { length: 255 }).primaryKey(),
+  email: varchar("email", { length: 255 }).unique(),
+  emailVerified: boolean("email_verified").notNull().default(false),
+  emailVerifiedAt: datetime("email_verified_at", { mode: "date", fsp: 3 }),
+  createdAt: datetime("created_at", { mode: "date", fsp: 3 }).notNull(),
+});
+
+const verifiedMapping = defineUsers({
+  table: verifiedUsers,
+  columns: {
+    id: "userId",
+    email: "email",
+    emailVerified: "emailVerified",
+    emailVerifiedAt: "emailVerifiedAt",
+    createdAt: "createdAt",
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
@@ -79,12 +112,19 @@ const wireRow = (values: {
   readonly createdAt: unknown;
 }): ReadonlyArray<unknown> => [values.id, values.email, values.emailVerified, values.createdAt];
 
-const run = <A, E>(proxy: Proxy, program: Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+const runWith = <A, E>(
+  proxy: Proxy,
+  mapping: Parameters<typeof layer>[0],
+  program: Effect.Effect<A, E, Auth.IdentifierStore>,
+): Promise<A> =>
   Effect.runPromise(
     program.pipe(
-      Effect.provide(layer(usersMapping).pipe(Layer.provide(databaseLayer(proxy.db)))),
+      Effect.provide(layer(mapping).pipe(Layer.provide(databaseLayer(proxy.db)))),
     ) as Effect.Effect<A, E>,
   );
+
+const run = <A, E>(proxy: Proxy, program: Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+  runWith(proxy, usersMapping, program);
 
 const USER_ID = "5e1f0c3a-7b1d-4a53-9c0e-00000000000a";
 
@@ -196,5 +236,128 @@ describe("single-table MySQL / statements", () => {
     );
     expect(update?.params).toEqual([null, false, USER_ID]);
     expect(proxy.statements.some((statement) => /\bdelete\b/i.test(statement.sql))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NOT NULL email and the mapped verification time
+// ---------------------------------------------------------------------------
+
+describe("single-table MySQL / NOT NULL email", () => {
+  it("refuses a targeted delete while the row holds the address, sending no UPDATE", async () => {
+    const proxy = makeProxy();
+    // The row exists and holds an address: the read the refusal depends on.
+    proxy.respondWith([
+      wireRow({
+        id: USER_ID,
+        email: "ada@example.com",
+        emailVerified: 0,
+        createdAt: "2026-01-01 00:00:00.000",
+      }),
+    ]);
+
+    const error = await runWith(
+      proxy,
+      strictMapping,
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        return yield* Effect.flip(store.delete(USER_ID));
+      }),
+    );
+
+    expect(error._tag).toBe("AuthError");
+    expect(error.message).toContain("NOT NULL");
+    expect(proxy.statements).toHaveLength(1);
+    expect(proxy.statements[0]?.sql).toMatch(/^select /i);
+    expect(proxy.statements.some((statement) => /^update /i.test(statement.sql))).toBe(false);
+  });
+
+  it("sends no statement for deleteByUser, so account deletion's row delete removes the address", async () => {
+    const proxy = makeProxy();
+
+    await runWith(
+      proxy,
+      strictMapping,
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        return yield* store.deleteByUser(USER_ID);
+      }),
+    );
+
+    expect(proxy.statements).toEqual([]);
+  });
+});
+
+describe("single-table MySQL / mapped emailVerifiedAt", () => {
+  const wireVerifiedRow = (verifiedAt: string | null) => [
+    USER_ID,
+    "ada@example.com",
+    1,
+    "2026-01-01 00:00:00.000",
+    verifiedAt,
+  ];
+
+  it("writes the verification time to its own column on setVerified, and reads it back", async () => {
+    const proxy = makeProxy();
+    proxy.respondWith([wireVerifiedRow("2026-01-02 09:30:00.000")]);
+    const verifiedAt = new Date("2026-01-02T09:30:00.000Z");
+
+    const verified = await runWith(
+      proxy,
+      verifiedMapping,
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        return yield* store.setVerified(USER_ID, verifiedAt);
+      }),
+    );
+
+    const [update] = proxy.statements;
+    expect(update?.sql).toBe(
+      "update `app_users_verified` set `email_verified` = ?, `email_verified_at` = ? where (`app_users_verified`.`id` = ? and `app_users_verified`.`email` is not null)",
+    );
+    expect(update?.params).toEqual([true, "2026-01-02 09:30:00.000", USER_ID]);
+    expect(verified?.verifiedAt).toEqual(verifiedAt);
+  });
+
+  it("clears the verification time with the address on delete", async () => {
+    const proxy = makeProxy();
+
+    await runWith(
+      proxy,
+      verifiedMapping,
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        return yield* store.delete(USER_ID);
+      }),
+    );
+
+    expect(proxy.statements).toHaveLength(1);
+    expect(proxy.statements[0]?.sql).toBe(
+      "update `app_users_verified` set `email` = ?, `email_verified` = ?, `email_verified_at` = ? where `app_users_verified`.`id` = ?",
+    );
+    expect(proxy.statements[0]?.params).toEqual([null, false, null, USER_ID]);
+  });
+
+  it("writes no verification-time column when the mapping omits it", async () => {
+    const proxy = makeProxy();
+    proxy.respondWith([
+      wireRow({
+        id: USER_ID,
+        email: "ada@example.com",
+        emailVerified: 1,
+        createdAt: "2026-01-01 00:00:00.000",
+      }),
+    ]);
+
+    const verified = await run(
+      proxy,
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        return yield* store.setVerified(USER_ID, new Date("2026-01-02T09:30:00.000Z"));
+      }),
+    );
+
+    expect(proxy.statements[0]?.sql).not.toContain("email_verified_at");
+    expect(verified && "verifiedAt" in verified).toBe(false);
   });
 });

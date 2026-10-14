@@ -1,11 +1,12 @@
 /**
- * The single-table `IdentifierStore` over PostgreSQL (PGlite), against an
- * application-shaped users table: `uuid` keys, a nullable unique `email`, the
- * verified flag on the row.
+ * The single-table `IdentifierStore` over PostgreSQL (PGlite), against
+ * application-shaped users tables: `uuid` keys, a unique `email` that is either
+ * nullable or NOT NULL, the verified flag on the row, and optionally the
+ * verification time.
  *
- * Runs the shared contract (`testing/IdentifierStoreContract.ts`) and the
- * single-table semantics, then the one behaviour that depends on the database
- * rather than the store: a `NOT NULL` email column cannot be cleared.
+ * Runs the shared contract (`testing/IdentifierStoreContract.ts`) for each shape:
+ * the nullable table, the NOT NULL table (where a delete is refused and account
+ * deletion removes the row), and the table that maps `email_verified_at`.
  */
 
 import type { PGlite } from "@electric-sql/pglite";
@@ -13,15 +14,17 @@ import { eq } from "drizzle-orm";
 import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
 import { defineUsers, layer } from "./SingleTableIdentifierStore.ts";
 import {
   identifierStoreContract,
+  notNullContract,
   singleTableContract,
   USER,
   USER_CREATED_AT,
+  verifiedAtContract,
 } from "./testing/IdentifierStoreContract.ts";
 import { migratedPglite, truncate } from "./testing/PgliteTemplate.ts";
 
@@ -43,6 +46,15 @@ const strictUsers = pgTable("app_users_strict", {
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
 });
 
+/** The nullable table, with the application's own verification-time column mapped. */
+const verifiedUsers = pgTable("app_users_verified", {
+  userId: uuid("id").primaryKey(),
+  email: text("email").unique(),
+  emailVerified: boolean("email_verified").notNull().default(false),
+  emailVerifiedAt: timestamp("email_verified_at", { mode: "date", withTimezone: true }),
+  createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
+});
+
 const usersMapping = defineUsers({
   table: appUsers,
   columns: { id: "userId", email: "email", emailVerified: "emailVerified", createdAt: "createdAt" },
@@ -54,6 +66,17 @@ const strictMapping = defineUsers({
     id: "userId",
     email: "email",
     emailVerified: "emailVerified",
+    createdAt: "createdAt",
+  },
+});
+
+const verifiedMapping = defineUsers({
+  table: verifiedUsers,
+  columns: {
+    id: "userId",
+    email: "email",
+    emailVerified: "emailVerified",
+    emailVerifiedAt: "emailVerifiedAt",
     createdAt: "createdAt",
   },
 });
@@ -78,6 +101,13 @@ beforeAll(async () => {
       email_verified boolean NOT NULL DEFAULT false,
       created_at timestamptz NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS app_users_verified (
+      id uuid PRIMARY KEY,
+      email text UNIQUE,
+      email_verified boolean NOT NULL DEFAULT false,
+      email_verified_at timestamptz,
+      created_at timestamptz NOT NULL
+    );
   `);
 });
 
@@ -86,7 +116,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await truncate(client, ["app_users", "app_users_strict"]);
+  await truncate(client, ["app_users", "app_users_strict", "app_users_verified"]);
 });
 
 /** Run `build` against a single-table store over `mapping`, on the file's database. */
@@ -129,28 +159,66 @@ const harness = {
 identifierStoreContract("single-table PostgreSQL", harness);
 singleTableContract("single-table PostgreSQL", harness);
 
-describe("single-table PostgreSQL: NOT NULL email", () => {
-  it("cannot clear an address on a NOT NULL column: delete fails with AuthError and the address stays", async () => {
-    await drizzle(client).insert(strictUsers).values({
-      userId: USER.ada,
-      email: "ada@example.com",
-      emailVerified: true,
-      createdAt: USER_CREATED_AT,
-    });
+// The NOT NULL table: both users hold an address from the start, as the
+// application's own writer leaves them.
+notNullContract("single-table PostgreSQL", {
+  run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+    runWith(strictMapping, build),
+  seedUsers: async () => {
+    await drizzle(client)
+      .insert(strictUsers)
+      .values([
+        {
+          userId: USER.ada,
+          email: "ada@example.com",
+          createdAt: USER_CREATED_AT,
+        },
+        {
+          userId: USER.grace,
+          email: "grace@example.com",
+          createdAt: USER_CREATED_AT,
+        },
+      ]);
+  },
+  readUserRow: async (userId: string) => {
+    const rows = await drizzle(client)
+      .select({ email: strictUsers.email, emailVerified: strictUsers.emailVerified })
+      .from(strictUsers)
+      .where(eq(strictUsers.userId, userId))
+      .limit(1);
+    return rows[0] ?? null;
+  },
+  deleteUserRow: async (userId: string) => {
+    await drizzle(client).delete(strictUsers).where(eq(strictUsers.userId, userId));
+  },
+});
 
-    const result = await runWith(strictMapping, () =>
-      Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
-        const failed = yield* Effect.flip(store.delete(USER.ada));
-        return {
-          failed,
-          still: yield* store.getByValue("email", "ada@example.com"),
-        };
-      }),
-    );
-
-    expect(result.failed._tag).toBe("AuthError");
-    expect(result.failed.message).toBe("drizzle identifier.delete failed");
-    expect(result.still?.userId).toBe(USER.ada);
-  });
+// The mapped verification time: the table's own `email_verified_at` column.
+verifiedAtContract("single-table PostgreSQL", {
+  run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+    runWith(verifiedMapping, build),
+  seedUsers: async () => {
+    await drizzle(client)
+      .insert(verifiedUsers)
+      .values([
+        { userId: USER.ada, createdAt: USER_CREATED_AT },
+        { userId: USER.grace, createdAt: USER_CREATED_AT },
+      ]);
+  },
+  readUserRow: async (userId: string) => {
+    const rows = await drizzle(client)
+      .select({ email: verifiedUsers.email, emailVerified: verifiedUsers.emailVerified })
+      .from(verifiedUsers)
+      .where(eq(verifiedUsers.userId, userId))
+      .limit(1);
+    return rows[0] ?? null;
+  },
+  readVerifiedAt: async (userId: string) => {
+    const rows = await drizzle(client)
+      .select({ verifiedAt: verifiedUsers.emailVerifiedAt })
+      .from(verifiedUsers)
+      .where(eq(verifiedUsers.userId, userId))
+      .limit(1);
+    return rows[0]?.verifiedAt ?? null;
+  },
 });

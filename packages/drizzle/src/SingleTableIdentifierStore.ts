@@ -17,22 +17,38 @@
  * with an `AuthError` rather than silently dropping the write. Core flows that
  * need several identifiers at once (for example SCIM's add-then-remove when a
  * `userName` changes) fail on this store; flows that replace an address by
- * removing the old one first (`AccountManagement`) work.
+ * removing the old one first (`AccountManagement`) work on a nullable column.
  *
  * ### How each field is read and written
  *
- * | `Identifier` field | Lives in                                             |
- * | ------------------ | ---------------------------------------------------- |
+ * | `Identifier` field | Lives in                                               |
+ * | ------------------ | ------------------------------------------------------ |
  * | `id`               | `users.id` — an email identifier's id is its user's id |
- * | `userId`           | `users.id`                                           |
- * | `type`             | always `"email"`; no column                          |
- * | `value`            | `users.email`                                        |
- * | `verified`         | `users.email_verified`                               |
- * | `verifiedAt`       | not stored; never reported                           |
- * | `createdAt`        | `users.created_at`                                   |
+ * | `userId`           | `users.id`                                             |
+ * | `type`             | always `"email"`; no column                            |
+ * | `value`            | `users.email`                                          |
+ * | `verified`         | `users.email_verified`                                 |
+ * | `verifiedAt`       | `users.email_verified_at`, when that column is mapped; otherwise not stored and never reported |
+ * | `createdAt`        | `users.created_at`                                     |
  *
  * An identifier exists while `users.email` is non-null. A user whose email is
  * `NULL` holds no identifier.
+ *
+ * ### Nullable or NOT NULL `email`
+ *
+ * Whether `users.email` is nullable is read from the drizzle column at
+ * {@link defineUsers} time, so the same store serves both:
+ *
+ * - **Nullable** (the usual case). Deleting an address writes `NULL` to
+ *   `email`, and the row stays. Account deletion clears the address and then
+ *   deletes the row.
+ * - **NOT NULL.** The store never writes `NULL`. Deleting a user's address by
+ *   identifier (`delete`) is refused with an `AuthError` while the row holds
+ *   it, so a targeted delete leaves the address in place. `deleteByUser` does
+ *   nothing: the user row is about to be deleted (account deletion does this
+ *   right after it), and deleting the row takes the address with it. Account
+ *   deletion therefore works; email change does not, because it removes the old
+ *   address first and that removal is refused.
  *
  * ### Per-method behaviour
  *
@@ -41,26 +57,28 @@
  * - `listByUser` returns the user's email identifier, or `[]`.
  * - `create` refuses any type but `email` (`AuthError`), refuses a user with no
  *   row or one that already holds an email (`AuthError`), and otherwise writes
- *   `users.email` and `users.email_verified` on that row. The uniqueness of
- *   `users.email` is what rejects an address claimed by another user; the driver
- *   error surfaces as `AuthError`, which `Auth.claimIdentifier` re-reads into an
+ *   `users.email`, `users.email_verified` and, when mapped,
+ *   `users.email_verified_at` on that row. The uniqueness of `users.email` is
+ *   what rejects an address claimed by another user; the driver error surfaces
+ *   as `AuthError`, which `Auth.claimIdentifier` re-reads into an
  *   `IdentifierTakenError`. The store's own duplicate check does not exist here:
  *   the index must carry it (see the requirements below).
- * - `setVerified` sets `users.email_verified`, returns the identifier, or `null`
- *   when the id names no user holding an email. The `verifiedAt` argument has no
- *   column to go to and is dropped.
- * - `delete` and `deleteByUser` set `users.email` and `users.email_verified` back
- *   to `NULL` and `false`, and leave the user row alone. Deleting a missing
- *   identifier is a no-op. This needs `users.email` to be nullable: on a
- *   `NOT NULL` column the database rejects the write and it surfaces as
- *   `AuthError`.
+ * - `setVerified` sets `users.email_verified`, and `users.email_verified_at` when
+ *   mapped, then returns the identifier, or `null` when the id names no user
+ *   holding an email. Without the `emailVerifiedAt` mapping the `verifiedAt`
+ *   argument has no column to go to and is dropped.
+ * - `delete` and `deleteByUser` on a nullable column set `users.email`,
+ *   `users.email_verified` and, when mapped, `users.email_verified_at` back to
+ *   `NULL`, `false` and `NULL`, and leave the user row alone. Deleting a missing
+ *   identifier is a no-op. On a NOT NULL column see the section above.
  *
  * ### What the application's table must satisfy
  *
- * - `users.email` is **nullable** and carries a **unique index**. The index is
- *   the only thing that stops two users holding one address; the store does not
- *   check it.
+ * - `users.email` carries a **unique index**. The index is the only thing that
+ *   stops two users holding one address; the store does not check it. It may be
+ *   nullable or NOT NULL (see above).
  * - `users.email_verified` is a non-null boolean.
+ * - `users.email_verified_at`, if mapped, is a nullable timestamp.
  * - The user row exists before its email is claimed. The store never inserts a
  *   user; the application's own user writer does.
  * - Addresses are normalised by the application, as for every identifier store.
@@ -73,13 +91,15 @@
  * import { Layer } from "effect";
  * import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
  *
- * // `appUsers` is the application's own table: `email` nullable and unique.
+ * // `appUsers` is the application's own table: `email` unique, nullable or
+ * // NOT NULL, with `email_verified_at` mapped if the application keeps one.
  * const users = Drizzle.SingleTableIdentifierStore.defineUsers({
  *   table: appUsers,
  *   columns: {
  *     id: "userId",
  *     email: "email",
  *     emailVerified: "emailVerified",
+ *     emailVerifiedAt: "emailVerifiedAt",
  *     createdAt: "createdAt",
  *   },
  * });
@@ -114,10 +134,19 @@ import { makeQuery } from "./internal.ts";
 export interface SingleTableUserColumnNames<TTable extends Table> {
   /** The user's primary key; also the id of the email identifier. */
   readonly id: ColumnKey<TTable, string>;
-  /** The login address. Nullable, unique — see the module docs. */
+  /**
+   * The login address. Unique. Nullable or NOT NULL: the store detects which from
+   * the column, and see the module docs for what each one means.
+   */
   readonly email: ColumnKey<TTable, string | null>;
   /** Whether {@link email} has been verified. */
   readonly emailVerified: ColumnKey<TTable, boolean>;
+  /**
+   * When the address was verified, as a nullable timestamp. Optional: when
+   * mapped, {@link Auth.Identifier.verifiedAt} is stored and reported; when not
+   * mapped it is neither stored nor reported.
+   */
+  readonly emailVerifiedAt?: ColumnKey<TTable, Date | null> | undefined;
   /** The user's creation time, which the email identifier reports as its own. */
   readonly createdAt: ColumnKey<TTable, Date>;
 }
@@ -127,23 +156,37 @@ export type SingleTableUserColumns = {
   readonly id: StoreColumn<string>;
   readonly email: NullableColumn<string>;
   readonly emailVerified: StoreColumn<boolean>;
+  readonly emailVerifiedAt?: NullableColumn<Date>;
   readonly createdAt: StoreColumn<Date>;
 };
 
-/** A users table and where the login address lives in it. */
-export type SingleTableUsers = TableSchema<SingleTableUserColumns>;
+/**
+ * A users table and where the login address lives in it.
+ *
+ * {@link emailNullable} is read from the drizzle `email` column by
+ * {@link defineUsers}: `true` when the column allows `NULL`.
+ */
+export type SingleTableUsers = TableSchema<SingleTableUserColumns> & {
+  readonly emailNullable: boolean;
+};
 
 /**
  * Map an application's `users` table onto the single-table store.
  *
  * Each column is named by its key on the table object, as in `defineSchema`, not
  * by its database name. The column types are checked at this call site: `email`
- * must read back as a string or `null`, `emailVerified` as a boolean, `createdAt`
- * as a `Date`.
+ * must read back as a string or `null`, `emailVerified` as a boolean,
+ * `emailVerifiedAt` as a `Date` or `null`, `createdAt` as a `Date`.
+ *
+ * Whether `email` is nullable is taken from the column's own `NOT NULL` setting,
+ * so a `NOT NULL` column is supported without any extra option.
  */
 export const defineUsers = <TUsers extends Table>(
   spec: TableSpec<TUsers, SingleTableUserColumnNames<TUsers>>,
-): SingleTableUsers => resolveTable<SingleTableUserColumns>(spec);
+): SingleTableUsers => {
+  const users = resolveTable<SingleTableUserColumns>(spec);
+  return { ...users, emailNullable: !users.columns.email.notNull };
+};
 
 // ---------------------------------------------------------------------------
 // Rows
@@ -151,18 +194,31 @@ export const defineUsers = <TUsers extends Table>(
 
 type UserRow = DrizzleSelected<SingleTableUserColumns>;
 
-/** The identifier a user row holds, or `null` when the row holds no email. */
-const toIdentifier = (row: UserRow): Auth.Identifier | null =>
-  row.email === null
-    ? null
-    : {
-        id: row.id,
-        userId: row.id,
-        type: "email",
-        value: row.email,
-        verified: row.emailVerified,
-        createdAt: row.createdAt,
-      };
+/** The row's verification time: `null` when the column is unmapped, or holds no time. */
+const verifiedAtOf = (row: UserRow): Date | null => {
+  const value = row.emailVerifiedAt;
+  return value instanceof Date ? value : null;
+};
+
+/**
+ * The identifier a user row holds, or `null` when the row holds no email.
+ *
+ * `verifiedAt` is reported only when the `emailVerifiedAt` column is mapped (the
+ * projection then includes it) and holds a value.
+ */
+const toIdentifier = (row: UserRow): Auth.Identifier | null => {
+  if (row.email === null) return null;
+  const verifiedAt = verifiedAtOf(row);
+  return {
+    id: row.id,
+    userId: row.id,
+    type: "email",
+    value: row.email,
+    verified: row.emailVerified,
+    createdAt: row.createdAt,
+    ...(verifiedAt === null ? {} : { verifiedAt }),
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Store
@@ -176,12 +232,23 @@ export const make = (
     const query = makeQuery(yield* DrizzleDatabase);
     const column = users.columns;
     const table = users.table;
+    const nullable = users.emailNullable;
+    const verifiedAtColumn = column.emailVerifiedAt;
     const selection = {
       id: column.id,
       email: column.email,
       emailVerified: column.emailVerified,
       createdAt: column.createdAt,
+      ...(verifiedAtColumn !== undefined && { emailVerifiedAt: verifiedAtColumn }),
     };
+
+    /**
+     * The `emailVerifiedAt` part of a write: the value when the column is
+     * mapped, nothing when it is not (so nothing is written to a column that
+     * does not exist).
+     */
+    const verifiedAtWrite = (value: Date | null) =>
+      verifiedAtColumn === undefined ? {} : { emailVerifiedAt: value };
 
     /** `users.email IS NOT NULL`: the row holds an identifier. */
     const holdsEmail = () => isNotNull(column.email);
@@ -196,10 +263,34 @@ export const make = (
       query(label, (db) =>
         db
           .update(table)
-          .set(writeValues(users, { email: null, emailVerified: false }))
+          .set(
+            writeValues(users, {
+              email: null,
+              emailVerified: false,
+              ...verifiedAtWrite(null),
+            }),
+          )
           .where(eq(column.id, userId))
           .execute(),
       ).pipe(Effect.asVoid);
+
+    /**
+     * A NOT NULL `email` cannot be cleared. A targeted delete of a user's address
+     * refuses while the row holds one; a missing row holds nothing to delete.
+     */
+    const refuseClear = (userId: string) =>
+      readUser(userId, "identifier.delete.read").pipe(
+        Effect.flatMap((row) =>
+          row === null
+            ? Effect.void
+            : Effect.fail(
+                new Auth.AuthError({
+                  message:
+                    "the single-table IdentifierStore cannot remove the email of a user whose users.email is NOT NULL: the address would be left NULL. Deleting the user row removes it.",
+                }),
+              ),
+        ),
+      );
 
     return {
       getByValue: (type, value) => {
@@ -262,6 +353,7 @@ export const make = (
                 writeValues(users, {
                   email: identifier.value,
                   emailVerified: identifier.verified,
+                  ...verifiedAtWrite(identifier.verifiedAt ?? null),
                 }),
               )
               .where(and(eq(column.id, identifier.userId), isNull(column.email)))
@@ -280,13 +372,12 @@ export const make = (
       },
 
       // The identifier's id is the user's id, so `setVerified` takes it there.
-      // `verifiedAt` has no column and is not stored.
-      setVerified: (id) =>
+      setVerified: (id, verifiedAt) =>
         Effect.gen(function* () {
           yield* query("identifier.setVerified", (db) =>
             db
               .update(table)
-              .set(writeValues(users, { emailVerified: true }))
+              .set(writeValues(users, { emailVerified: true, ...verifiedAtWrite(verifiedAt) }))
               .where(and(eq(column.id, id), holdsEmail()))
               .execute(),
           );
@@ -305,9 +396,15 @@ export const make = (
         }),
 
       // An email identifier's id is its user's id, so deleting one and deleting
-      // all of a user's identifiers are the same write.
-      delete: (id) => clearEmail(id, "identifier.delete"),
-      deleteByUser: (userId) => clearEmail(userId, "identifier.deleteByUser"),
+      // all of a user's identifiers address the same row.
+      delete: (id) => (nullable ? clearEmail(id, "identifier.delete") : refuseClear(id)),
+
+      // On a NOT NULL column this does nothing. Account deletion deletes the user
+      // row straight after this call, and the row's address goes with it; clearing
+      // the column here would be refused. A NOT NULL caller that keeps the row
+      // keeps the address.
+      deleteByUser: (userId) =>
+        nullable ? clearEmail(userId, "identifier.deleteByUser") : Effect.void,
     } satisfies typeof Auth.IdentifierStore.Service;
   });
 
