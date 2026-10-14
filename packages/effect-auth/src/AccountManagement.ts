@@ -125,7 +125,17 @@ export class AccountManagementService extends Context.Service<
       Errors.AuthError | Errors.UserNotFoundError | Errors.EmailInUseError
     >;
 
-    /** Confirm an email change by token: swaps the email and marks it verified. */
+    /**
+     * Confirm an email change by token: claims the new address as verified,
+     * then releases the previous one. If the claim fails (the address was taken
+     * meanwhile, or the store failed) the previous address is left in place and
+     * the token is not consumed.
+     *
+     * A store that holds one email per user (the single-table store in
+     * `@thomasfosterau/effect-auth-drizzle`) refuses the claim while the user
+     * still holds their current address, so the change fails with an
+     * `AuthError` and the previous address is kept.
+     */
     readonly confirmEmailChange: (
       token: string,
     ) => Effect.Effect<
@@ -247,14 +257,11 @@ export const make = (
           return yield* new AccountTokenError({ message: "Email already in use" });
         }
 
-        // Swap the email identifier: remove existing email identifiers, then
-        // claim the confirmed one as verified (the token proved ownership).
+        // Claim the confirmed address first (the token proved ownership), then
+        // release the previous one. A failed claim, whether another account took
+        // the address meanwhile or the store failed, leaves the user's previous
+        // address in place and verified.
         if (clash === null) {
-          for (const id of currentIdentifiers) {
-            if (id.type === "email") {
-              yield* identifiers.delete(id.id);
-            }
-          }
           yield* claimIdentifier(
             identifiers,
             makeIdentifier({
@@ -272,6 +279,15 @@ export const make = (
         } else if (!clash.verified) {
           // Already this user's identifier — the token proves ownership.
           yield* identifiers.setVerified(clash.id, new Date());
+        }
+
+        // Release every other email identifier. This also runs when the new
+        // address is already this user's, so a retry after a failed release
+        // converges instead of leaving the previous address behind.
+        for (const id of currentIdentifiers) {
+          if (id.type === "email" && id.value !== newEmail) {
+            yield* identifiers.delete(id.id);
+          }
         }
 
         const updated = yield* users.update({
