@@ -109,7 +109,7 @@ catalog:
   vitest: 4.1.11
   vue: ^3.5.43
   vue-tsc: ^3.3.12
-  xml-crypto: ^6.3.2
+  xml-crypto: ^6.3.3
 
 # Peer ranges the PUBLISHED packages declare. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges (the catalog
