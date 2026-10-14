@@ -24,7 +24,10 @@
  * one: {@link protectedField} accepts any {@link Policy.Policy} — a declarative,
  * storable, tenant-editable policy or a `Policy.custom` escape hatch — and the
  * decision is made exactly as `Authorizer` makes it (`CurrentPrincipal` +
- * an {@link EntityResolver}-resolved slice + the pure kernel).
+ * an {@link EntityResolver}-resolved slice + the pure kernel). For a system
+ * principal (`System::"<name>"`) that includes the kernel's default deny and
+ * `Authorizer`'s decision log: every field decision about it is logged with its
+ * name and the determining policies.
  *
  * @example Viewer projection + write guard on one field
  * ```ts
@@ -69,7 +72,12 @@
  * @module protected
  */
 import { Effect, Option, Schema, SchemaGetter, SchemaIssue } from "effect";
-import { CurrentPrincipal, EntityResolver, requestRefs } from "./Authorizer.ts";
+import {
+  auditSystemDecision,
+  CurrentPrincipal,
+  EntityResolver,
+  requestRefs,
+} from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
 import * as Policy from "./Policy.ts";
 
@@ -154,6 +162,10 @@ const requestFor = <E>(
  * empty slice still decides context-only and ownerless policies); a resolver
  * *failure* is fail-closed — it denies, matching the kernel's posture for
  * evaluation errors.
+ *
+ * A decision about a system principal is written to the same decision log as
+ * `Authorizer`'s (its name, the outcome, the determining policy ids), so a
+ * field a job reads or writes is audited like any other check it makes.
  */
 const decide = <E>(
   policies: ReadonlyArray<Policy.Policy<E, never>>,
@@ -167,8 +179,17 @@ const decide = <E>(
           Effect.map((entities): Entity.EntitySlice | null => Entity.slice(entities)),
           Effect.catch(() => Effect.succeed<Entity.EntitySlice | null>(null)),
         );
-    if (slice === null) return false;
-    return yield* Policy.check(policies, request, slice);
+    if (slice === null) {
+      yield* auditSystemDecision(request, {
+        allowed: false,
+        reason: "resolver-error",
+        determining: [],
+      });
+      return false;
+    }
+    const decision = yield* Policy.decide(policies, request, slice);
+    yield* auditSystemDecision(request, decision);
+    return decision.allowed;
   });
 
 // ---------------------------------------------------------------------------

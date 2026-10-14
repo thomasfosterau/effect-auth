@@ -202,20 +202,33 @@ const toActionRef = (action: Entity.EntityRef | string): Entity.EntityRef =>
  * with the principal's name and the policies that determined the outcome:
  * allows at info, denies at warning. Human decisions are not logged by this
  * module; the HTTP authorization middleware logs its own.
+ *
+ * Every kernel entry point that decides for a {@link CurrentPrincipal} calls
+ * it: `Authorizer` here, and the `protectedField` schema guard
+ * (`Protected.ts`), which passes `"resolver-error"` as the reason when its
+ * slice could not be resolved and it denied without deciding. A no-op for any
+ * principal that is not a system principal.
+ *
+ * @internal
  */
-const auditSystemDecision = (
+export const auditSystemDecision = (
   request: Policy.PolicyRequest,
-  decision: Policy.Decision,
+  outcome: {
+    readonly allowed: boolean;
+    readonly reason: Policy.Decision["reason"] | "resolver-error";
+    readonly determining: ReadonlyArray<Policy.PolicyOutcome>;
+  },
 ): Effect.Effect<void> => {
+  if (request.principal.type !== Entity.systemType) return Effect.void;
   const fields = {
     principal: Entity.formatRef(request.principal),
     action: Entity.formatRef(request.action),
     resource: Entity.formatRef(request.resource),
-    allowed: decision.allowed,
-    reason: decision.reason,
-    policies: decision.determining.map((outcome) => outcome.policyId),
+    allowed: outcome.allowed,
+    reason: outcome.reason,
+    policies: outcome.determining.map((determining) => determining.policyId),
   };
-  return decision.allowed
+  return outcome.allowed
     ? Effect.logInfo("authorization.decision", fields)
     : Effect.logWarning("authorization.decision", fields);
 };
@@ -341,9 +354,7 @@ export const make = <E = unknown>(
       const policies = yield* allPolicies();
       const slice = yield* sliceFor(policies, request);
       const decision = yield* Policy.decide(policies, request, slice);
-      if (request.principal.type === Entity.systemType) {
-        yield* auditSystemDecision(request, decision);
-      }
+      yield* auditSystemDecision(request, decision);
       return decision;
     });
 

@@ -15,7 +15,12 @@
  *   computed by a bespoke store.
  *
  * There is no `RoleStore` and no `checkPermission` behind this: the output
- * feeds `Authorizer`/`Policy.decide` like any other policy set. See
+ * feeds `Authorizer`/`Policy.decide` like any other policy set.
+ *
+ * Role assignment is for users. A system principal (`System::"<name>"`) holds
+ * no roles: `principalType: "System"` is refused, and the kernel never lets a
+ * role permit (`principal in Role::"…"`) reach a system principal, so a role
+ * change can never widen what a job may do. Grant a job with `System.grant`. See
  * [ADR 0018](../../../docs/adr/0018-one-authorization-kernel.md) and
  * [the migration guide](../../../docs/guides/authorization-kernel-migration.md).
  *
@@ -105,10 +110,29 @@ export interface RbacConfig {
   readonly roleHierarchy?: StringKeyed<readonly string[]>;
   /**
    * Entity type for the principals in {@link userRoles}. Defaults to
-   * `"User"` — set it when principals are, say, `ApiKey::"..."`.
+   * `"User"` — set it when principals are, say, `ApiKey::"..."`. `"System"`
+   * is refused: role assignment is for users, and a system principal is
+   * allowed only what an explicit `System.grant` names (ADR-0019).
    */
   readonly principalType?: string;
 }
+
+/**
+ * The configured principal type, refusing the reserved `System` type: a role
+ * change must never widen what a job may do, so system principals hold no
+ * roles. (The kernel enforces the same thing at decision time: a role permit,
+ * `principal in Role::"…"`, never reaches a system principal, whatever parents
+ * a resolver gives it.)
+ */
+const principalTypeOf = (config: RbacConfig): string => {
+  const principalType = config.principalType ?? DefaultPrincipalType;
+  if (principalType === Entity.systemType) {
+    throw new Error(
+      `Rbac: principalType "${principalType}" is reserved for system principals, which hold no roles; grant a job with System.grant`,
+    );
+  }
+  return principalType;
+};
 
 const entries = <V>(source: StringKeyed<V>): ReadonlyArray<readonly [string, V]> =>
   source instanceof Map ? [...source.entries()] : Object.entries(source);
@@ -193,14 +217,14 @@ const roleNames = (config: RbacConfig): ReadonlyArray<string> => {
 /**
  * Project the configuration into entities: one principal per `userRoles` key
  * with its roles as parents, and one `Role::` entity per role naming its
- * parent roles.
+ * parent roles. Throws when `principalType` is `"System"`.
  *
  * Feed these to an {@link EntityResolver} (see {@link entityResolver}) — or
  * merge them with an application's own entities when policies also talk about
  * domain objects.
  */
 export const entities = (config: RbacConfig): ReadonlyArray<Entity.Entity> => {
-  const principalType = config.principalType ?? DefaultPrincipalType;
+  const principalType = principalTypeOf(config);
   const hierarchy = config.roleHierarchy;
   const parentsOf = (role: string): readonly string[] =>
     hierarchy === undefined ? [] : (lookup(hierarchy, role) ?? []);
@@ -247,7 +271,7 @@ export const entityResolverLayer = (config: RbacConfig): Layer.Layer<EntityResol
  * hierarchy edges.
  */
 export const model = (config: RbacConfig): AuthorizationModel.Model => {
-  const principalType = config.principalType ?? DefaultPrincipalType;
+  const principalType = principalTypeOf(config);
   const resourceTypes = new Set<string>();
   const actionResources = new Map<string, Set<string>>();
 
@@ -289,7 +313,9 @@ export const model = (config: RbacConfig): AuthorizationModel.Model => {
  * resolver, and wires them together.
  *
  * Stored policies are ignored (`useStore: false`) so the layer means exactly
- * what the configuration says. Applications that mix RBAC with their own
+ * what the configuration says. Throws when `principalType` is `"System"`:
+ * role assignment is for users, and a system principal is granted with
+ * `System.grant`. Applications that mix RBAC with their own
  * policies, a `PolicyStore` or a domain entity resolver should compose
  * {@link policies}, {@link model} and {@link entities} into their own
  * `Authorizer.layer(...)` instead.

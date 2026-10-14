@@ -9,6 +9,13 @@
  * decided exactly like a user, with four properties:
  *
  * - **Denied by default.** A policy must name it before it is allowed anything.
+ *   The kernel enforces this: a permit reaches a system principal only when its
+ *   principal scope names the `System` type (`System.grant`,
+ *   `Policy.eq(System.ref(…))`, `Policy.isType("System")`). An unscoped permit
+ *   (`Policy.permit` with no principal, `Policy.permission`, `Policy.action`,
+ *   `Policy.roleAtLeast`, the `OwnedAccess` policies), a role permit
+ *   (`principal in Role::"…"`, so `Rbac`) and a `Policy.custom` permit never
+ *   match one.
  * - **Granted explicitly.** It is allowed what a policy grants and nothing else.
  *   {@link grant} writes that policy: a permit scoped to `System::"<name>"` that
  *   names one action and one resource scope. A grant is data, so it can be
@@ -17,16 +24,20 @@
  * - **Never short-circuited.** There is no "system bypasses the kernel" branch,
  *   and no allow-all for system principals. Its decisions run the same policies
  *   as everyone's.
- * - **Named in every audit.** Each decision about it is logged with
- *   `System::"<name>"` and the policies that determined it, and a denial's error
- *   message names it (see {@link Authorizer}).
+ * - **Named in every audit.** Each decision about it, by `Authorizer` or by a
+ *   `protectedField` guard, is logged with `System::"<name>"` and the policies
+ *   that determined it, and a denial's error message names it (see
+ *   {@link Authorizer}).
  *
- * Two consequences for policy authors. A permit whose principal scope is `any`
- * reaches a system principal too, so scope user policies to users
- * (`Policy.isType("User")`, or `Policy.eq(User::"…")`). And a forbid whose
- * condition reads a user attribute errors for a system principal, and an erroring
- * forbid denies, so scope forbids the same way. The rung and owner policies that
- * `Guard` builds are already scoped to the viewer's type.
+ * Role assignment is for users: `Rbac` refuses `"System"` as its principal type,
+ * and a role permit never reaches a system principal, so a role change cannot
+ * widen what a job may do.
+ *
+ * Forbids are not narrowed: an unscoped forbid binds a system principal like
+ * everyone else. So a forbid whose condition reads a user attribute errors for a
+ * system principal, and an erroring forbid denies; scope such forbids to users
+ * (`Policy.isType("User")`). The rung and owner policies that `Guard` builds are
+ * already scoped to the viewer's type.
  *
  * ```ts
  * import { Effect } from "effect"
