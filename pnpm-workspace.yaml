@@ -64,7 +64,7 @@ catalog:
   "@types/react-dom": ^19.3.0
   # Types for `semver` in `scripts/check-dist.ts` (checked by `vp run check:scripts`).
   "@types/semver": ^7.8.0
-  "@vitejs/plugin-vue": ^6.0.9
+  "@vitejs/plugin-vue": ^6.0.10
   "@vue/test-utils": ^2.5.1
   alchemy: 2.0.0-beta.83
   better-sqlite3: ^13.0.3
@@ -108,7 +108,7 @@ catalog:
   vite: npm:@voidzero-dev/vite-plus-core@0.3.3
   vitest: 4.1.11
   vue: ^3.5.43
-  vue-tsc: ^3.3.12
+  vue-tsc: ^3.3.13
   xml-crypto: ^6.3.3
 
 # Peer ranges the PUBLISHED packages declare. Kept as a named catalog so the
