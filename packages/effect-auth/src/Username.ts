@@ -15,7 +15,6 @@ import * as Errors from "./Errors.ts";
 import {
   EmailPasswordService,
   EmailPasswordStore,
-  isStandInSignUp,
   SecondFactorGate,
   type AuthResult,
 } from "./email/EmailPassword.ts";
@@ -27,6 +26,7 @@ import {
   primaryEmail,
 } from "./Identifier.ts";
 import { UserStore } from "./UserStore.ts";
+import { normalizeEmail } from "./utils.ts";
 import { MultiAlgorithmVerifier, PasswordHasher } from "./password/Password.ts";
 import { SessionService } from "./SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
@@ -219,8 +219,16 @@ export const make = (
         // Under anti-enumeration, an address another user holds gets a
         // stand-in user no row backs. Claiming the username for it would squat
         // the username on a user that doesn't exist, so the claim is skipped;
-        // the availability check stands in for the claim's own failure.
-        if (isStandInSignUp(result)) {
+        // the availability check stands in for the claim's own failure. The
+        // store tells the two apart: a fresh sign-up's user holds the address,
+        // a stand-in's does not. Asking it rather than recognising the result
+        // object holds when a decorated `EmailPasswordService` copies the
+        // result, and both answers pay the same read.
+        const holder = yield* identifiers.getByValue(
+          "email",
+          result.identifier?.value ?? normalizeEmail(input.email),
+        );
+        if (holder === null || holder.userId !== result.user.id) {
           if ((yield* identifiers.getByValue("username", username)) !== null) {
             return yield* new UsernameError({ message: "Username is already taken" });
           }

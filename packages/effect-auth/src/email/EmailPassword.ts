@@ -56,9 +56,11 @@ export class EmailPasswordStore extends Context.Service<
      * {@link EmailPasswordConfig.antiEnumeration}); its id comes from here, so
      * a store whose ids are not random UUIDs (sequential integers, prefixed or
      * time-ordered ids) can keep the stand-in's id the same shape as a real
-     * one. The id must be one no user holds, and minting it must not read or
-     * change any existing user. Without it the stand-in's id is a random UUID
-     * (`crypto.randomUUID()`), the shape effect-auth-sql's `createUser` assigns.
+     * one. The id must be one no user holds or will later be assigned: draw it
+     * from the same sequence `createUser` uses, reserving it. Minting it must
+     * not read or change any existing user. Without it the stand-in's id is a
+     * random UUID (`crypto.randomUUID()`), the shape effect-auth-sql's
+     * `createUser` assigns.
      */
     readonly newUserId?: (() => Effect.Effect<string, Errors.AuthError>) | undefined;
 
@@ -94,16 +96,16 @@ export interface EmailPasswordConfig {
    * (`POST /sign-up` through `Http.make`), both answers are a `200` with the
    * same headers (`Content-Length` follows the body, so it matches while the
    * ids have the same length), no `Set-Cookie` and no bearer-token header,
-   * and a body
-   * with the same fields: `needsEmailVerification`, and a `user` whose
-   * `email` is the submitted address (after the `beforeSignUp` hooks) with
-   * `emailVerified: false`. The stand-in's other fields are what a store
-   * that keeps its input as given (as effect-auth-sql's does) returns for a
-   * new user: the submitted `name` and `attributes` (`{}` when none), no
-   * `image`, and one timestamp, taken during the request, for both
-   * `createdAt` and `updatedAt`. Its `id` is a random UUID unless the store
-   * implements `EmailPasswordStore.newUserId`; a store whose ids have
-   * another shape needs that seam for the two ids to look alike.
+   * and a body with the same fields: `needsEmailVerification`, and a `user`
+   * whose `email` is the submitted address, trimmed and lower-cased (after
+   * the `beforeSignUp` hooks), with `emailVerified: false`. The stand-in's
+   * other fields are what a store that keeps its input as given (as
+   * effect-auth-sql's does) returns for a new user: the submitted `name` and
+   * `attributes` (`{}` when none), no `image`, and one timestamp, taken
+   * during the request, for both `createdAt` and `updatedAt`. Its `id` is a
+   * random UUID unless the store implements `EmailPasswordStore.newUserId`;
+   * a store whose ids have another shape needs that seam for the two ids to
+   * look alike.
    *
    * What still differs: the time a response takes (a fresh sign-up also
    * creates the user, claims the address and stores the hash), the
@@ -298,20 +300,6 @@ const validatePasswordLength = (
     }
   });
 
-// The anti-enumeration answers `signUp` gives for an address another user
-// holds. Their user is a stand-in no row backs, so a flow that builds on a
-// sign-up (username sign-up) must not attach anything to its id.
-const standIns = new WeakSet<AuthResult>();
-
-/**
- * Whether `result` is the anti-enumeration answer {@link EmailPasswordService}
- * `signUp` gave for an address another user holds, whose user is a stand-in
- * that no row backs. Not part of the public API.
- *
- * @internal
- */
-export const isStandInSignUp = (result: AuthResult): boolean => standIns.has(result);
-
 export const make = (
   config: EmailPasswordConfig = {},
 ): Effect.Effect<
@@ -366,7 +354,7 @@ export const make = (
         const id =
           store.newUserId === undefined ? globalThis.crypto.randomUUID() : yield* store.newUserId();
         const now = new Date();
-        const result: AuthResult = {
+        return {
           user: {
             id,
             ...(input.name !== undefined && { name: input.name }),
@@ -376,9 +364,7 @@ export const make = (
           },
           identifier: { type: "email", value: email },
           method: "email-password",
-        };
-        standIns.add(result);
-        return result;
+        } satisfies AuthResult;
       });
 
     return {

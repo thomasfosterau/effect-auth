@@ -34,10 +34,13 @@ export interface AuthLifecycleConfig {
 export interface AuthLifecycleResult {
   readonly user: Types.User;
   /**
-   * The login handle a sign-up was made with: the email address it claimed,
-   * or (under `antiEnumeration`) the address another user holds. Set by
-   * `signUp`, whose address is always unverified at this point; the HTTP
-   * sign-up response reports the user's `email` from it.
+   * The login handle a sign-up was made with: the email address it claimed;
+   * under `antiEnumeration`, the address another user holds; or, with
+   * `antiEnumeration` off, the address an existing user holds unverified,
+   * whose verification `signUp` re-issues instead of failing (the result's
+   * `user` is then that existing user). Set by `signUp`, whose address is
+   * always unverified at this point; the HTTP sign-up response reports the
+   * user's `email` from it.
    */
   readonly identifier?: { readonly type: IdentifierType; readonly value: string } | undefined;
   readonly session?: Types.Session;

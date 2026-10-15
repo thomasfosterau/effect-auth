@@ -357,6 +357,9 @@ describe("UsernameService under anti-enumeration (#414)", () => {
       readonly store?: typeof EmailPasswordStore.Service;
       readonly hasher?: typeof PasswordHasher.Service;
       readonly emailPassword?: EmailPasswordConfig;
+      readonly decorate?: (
+        service: typeof EmailPasswordService.Service,
+      ) => typeof EmailPasswordService.Service;
     } = {},
   ) => {
     const stores = Layer.mergeAll(
@@ -371,11 +374,20 @@ describe("UsernameService under anti-enumeration (#414)", () => {
       stores,
       SessionService.layer(sessionConfig).pipe(Layer.provide(stores)),
     );
+    const emailPassword = EmailPasswordService.layer(
+      opts.emailPassword ?? { antiEnumeration: true },
+    ).pipe(Layer.provide(withSessions));
+    const decorate = opts.decorate;
     const deps = Layer.mergeAll(
       withSessions,
-      EmailPasswordService.layer(opts.emailPassword ?? { antiEnumeration: true }).pipe(
-        Layer.provide(withSessions),
-      ),
+      decorate === undefined
+        ? emailPassword
+        : Layer.effect(
+            EmailPasswordService,
+            Effect.gen(function* () {
+              return decorate(yield* EmailPasswordService);
+            }),
+          ).pipe(Layer.provide(emailPassword)),
     );
     return Effect.runPromise(
       Effect.gen(function* () {
@@ -487,6 +499,32 @@ describe("UsernameService under anti-enumeration (#414)", () => {
       expect(findIdentifier("username", "squat_me")?.userId).toBe(later.user.id);
     },
   );
+
+  it("a decorated EmailPasswordService that copies the result still claims no username for the stand-in", async () => {
+    // A wrapper (tracing, auditing, …) that hands back a copy of the result
+    // rather than the object `signUp` built.
+    const copying = (service: typeof EmailPasswordService.Service) => ({
+      ...service,
+      signUp: (input: Parameters<typeof service.signUp>[0]) =>
+        service
+          .signUp(input)
+          .pipe(Effect.map((result) => ({ ...result, user: { ...result.user } }))),
+    });
+    const owner = seedOwner(VICTIM);
+    const fresh = await runAntiEnumeration(
+      (svc) =>
+        svc.signUp({ username: "fresh_one", email: "fresh@example.com", password: PASSWORD }),
+      { decorate: copying },
+    );
+    const taken = await runAntiEnumeration(
+      (svc) => svc.signUp({ username: "squat_me", email: VICTIM, password: PASSWORD }),
+      { decorate: copying },
+    );
+
+    expect(taken.user.id).not.toBe(owner.id);
+    expect(findIdentifier("username", "fresh_one")?.userId).toBe(fresh.user.id);
+    expect(findIdentifier("username", "squat_me")).toBeNull();
+  });
 
   it("a username taken before sign-up fails the same way for a fresh or a taken address", async () => {
     await runAntiEnumeration((svc) =>

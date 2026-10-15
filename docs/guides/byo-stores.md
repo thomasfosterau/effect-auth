@@ -304,7 +304,7 @@ Provide `storesLayer` underneath `Auth.SessionService.layer(config)` and whichev
 
 ## 4. What "implement only what you use" means in practice
 
-A store contract's methods correspond 1:1 to what the feature that owns it needs — there's no unused surface to stub out. If your app never enables WebAuthn, you never implement `ChallengeStore`/`CredentialStore`; if you don't mount the OIDC provider, `OidcClientStore`/`OidcCodeStore`/`OidcTokenStore`/ `OidcConsentStore` don't exist for you. A handful of methods are themselves optional on the interface (`OAuthAccountStore.hasPassword`, `OAuthUserStore.updateUser`, `OidcTokenStore.listByFamily`) — each is documented at the call site with what's skipped when it's absent.
+A store contract's methods correspond 1:1 to what the feature that owns it needs — there's no unused surface to stub out. If your app never enables WebAuthn, you never implement `ChallengeStore`/`CredentialStore`; if you don't mount the OIDC provider, `OidcClientStore`/`OidcCodeStore`/`OidcTokenStore`/ `OidcConsentStore` don't exist for you. A handful of methods are themselves optional on the interface (`OAuthAccountStore.hasPassword`, `OAuthUserStore.updateUser`, `OidcTokenStore.listByFamily`, `EmailPasswordStore.newUserId`) — each is documented at the call site with what's skipped when it's absent. A store whose ids are not random v4 UUIDs should implement `newUserId` so the anti-enumeration stand-in's id has the same shape: with `antiEnumeration` on, sign-up answers an address another user holds with a stand-in user whose id comes from `newUserId`, or is a random UUID without it.
 
 Every store that creates users (`EmailPasswordStore`, `OAuthUserStore`, `MagicLinkUserStore`, `EmailOtpUserStore`, `PhoneOtpUserStore`, `AdminUserStore`, `ScimUserStore`) resolves its `createUser` (`create` on `ScimUserStore`) to `Auth.CreateUserResult`, `{ user, created }`. Report `created: true` only for a user this call inserted. A writer that finds or creates on the address reports `created: false` when it returns a user who already existed; the flow then fails with the address in use and writes nothing to that user (no password, no linked account, no verified address). When the user already exists, the writer must not modify that row either: core sees `created` only after the write, so an `INSERT … ON CONFLICT DO UPDATE` has already copied the caller's fields onto someone else's account. Use a plain `INSERT` and let the unique index on the address fail (the writer fails with `AuthError`; core then reports the address taken when it finds it held), or `INSERT … ON CONFLICT DO NOTHING` followed by a select of the existing row, reported as `created: false`. If that select finds no row (for example under a REPEATABLE READ snapshot that predates the conflicting insert), fail with `AuthError` rather than return an invented user. Never `ON CONFLICT DO UPDATE`. The input's optional `identifier` carries the address the user is created with, for a store that keeps it on the user row; a store with an identifiers table of its own can ignore it.
 
@@ -324,12 +324,12 @@ Grouped by cluster, in the same order the source is organized. "Namespace" is ho
 
 **Password & recovery**
 
-| Contract                 | Namespace                              | What it holds                              | Powers                                   |
-| ------------------------ | -------------------------------------- | ------------------------------------------ | ---------------------------------------- |
-| `EmailPasswordStore`     | `Auth.Email.EmailPasswordStore`        | Create a user; get/set the password hash   | `EmailPasswordService` — sign-up/sign-in |
-| `EmailVerificationStore` | `Auth.Email.EmailVerificationStore`    | Email-verification tokens                  | `EmailVerificationService`               |
-| `PasswordResetStore`     | `Auth.Password.PasswordResetStore`     | Password-reset tokens                      | `PasswordResetService`                   |
-| `PasswordResetUserStore` | `Auth.Password.PasswordResetUserStore` | Set the password hash on a completed reset | `PasswordResetService`                   |
+| Contract                 | Namespace                              | What it holds                                                                     | Powers                                   |
+| ------------------------ | -------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------- |
+| `EmailPasswordStore`     | `Auth.Email.EmailPasswordStore`        | Create a user; get/set the password hash; optionally mint a user id (`newUserId`) | `EmailPasswordService` — sign-up/sign-in |
+| `EmailVerificationStore` | `Auth.Email.EmailVerificationStore`    | Email-verification tokens                                                         | `EmailVerificationService`               |
+| `PasswordResetStore`     | `Auth.Password.PasswordResetStore`     | Password-reset tokens                                                             | `PasswordResetService`                   |
+| `PasswordResetUserStore` | `Auth.Password.PasswordResetUserStore` | Set the password hash on a completed reset                                        | `PasswordResetService`                   |
 
 **Passwordless sign-in**
 
