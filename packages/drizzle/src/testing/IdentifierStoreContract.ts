@@ -9,6 +9,10 @@
  *   the single-table store both qualify. It runs against each of them.
  * - {@link singleTableContract} — what only the single-table store does: one
  *   email per user, the user row as the identifier, refusals for other types.
+ * - {@link notNullContract} — a `NOT NULL` email column: a targeted delete is
+ *   refused, `deleteByUser` leaves the row for account deletion to remove.
+ * - {@link verifiedAtContract} — a mapped `emailVerifiedAt` column stores and
+ *   reports the verification time.
  *
  * A harness supplies the database and the user rows; everything else is the
  * assertion. Never published (`tsconfig.json` excludes `src/testing/`).
@@ -382,5 +386,242 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
       expect(result.adaListed).toEqual([]);
       expect(result.moved.userId).toBe(USER.grace);
       expect(result.moved.verified).toBe(true);
+    });
+  });
+
+/**
+ * The NOT NULL `email` suite: the store's behaviour when the column cannot hold
+ * `NULL`. The harness seeds {@link USER}'s `ada` and `grace` with addresses, since
+ * a NOT NULL row always holds one.
+ */
+export interface NotNullHarness extends SingleTableHarness {
+  /** Delete the user row itself, as account deletion does after the identifier store. */
+  readonly deleteUserRow: (userId: string) => Promise<void>;
+}
+
+/** The NOT NULL suite; see {@link NotNullHarness}. */
+export const notNullContract = (label: string, harness: NotNullHarness) =>
+  describe(`${label}: NOT NULL email`, () => {
+    beforeEach(() => harness.seedUsers());
+
+    it("reads the seeded addresses as identifiers", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          return {
+            ada: yield* store.getByValue("email", "ada@example.com"),
+            adaListed: yield* store.listByUser(USER.ada),
+          };
+        }),
+      );
+
+      expect(result.ada?.userId).toBe(USER.ada);
+      expect(result.adaListed.map((identifier) => identifier.value)).toEqual(["ada@example.com"]);
+    });
+
+    it("refuses a targeted delete with AuthError while the row holds the address, and keeps it", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          return {
+            refused: yield* Effect.flip(store.delete(USER.ada)),
+            still: yield* store.getByValue("email", "ada@example.com"),
+          };
+        }),
+      );
+
+      expect(result.refused._tag).toBe("AuthError");
+      expect(result.refused.message).toContain("NOT NULL");
+      expect(result.still?.userId).toBe(USER.ada);
+      expect(await harness.readUserRow(USER.ada)).toEqual({
+        email: "ada@example.com",
+        emailVerified: false,
+      });
+    });
+
+    it("a targeted delete of a user with no row is still a no-op", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          yield* store.delete(USER.ghost);
+          return "ok" as const;
+        }),
+      );
+
+      expect(result).toBe("ok");
+    });
+
+    it("email change never leaves the address NULL: the old address is refused before anything is claimed", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          // The swap AccountManagement runs: remove the current address, then claim
+          // the new one. The removal is refused, so the claim never runs.
+          const current = yield* store.listByUser(USER.ada);
+          const refused = yield* Effect.flip(
+            Effect.forEach(current, (id) => store.delete(id.id), { discard: true }),
+          );
+          return {
+            refused,
+            newAddress: yield* store.getByValue("email", "ada-new@example.com"),
+          };
+        }),
+      );
+
+      expect(result.refused._tag).toBe("AuthError");
+      expect(result.newAddress).toBeNull();
+      expect(await harness.readUserRow(USER.ada)).toEqual({
+        email: "ada@example.com",
+        emailVerified: false,
+      });
+    });
+
+    it("account deletion: deleteByUser leaves the address for the row delete, which removes it", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          yield* store.deleteByUser(USER.ada);
+          return {
+            // Still held: deleteByUser does not write NULL.
+            held: yield* store.getByValue("email", "ada@example.com"),
+          };
+        }),
+      );
+
+      expect(result.held?.userId).toBe(USER.ada);
+      expect(await harness.readUserRow(USER.ada)).toEqual({
+        email: "ada@example.com",
+        emailVerified: false,
+      });
+
+      // The application's account deletion deletes the row next.
+      await harness.deleteUserRow(USER.ada);
+
+      const after = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          return {
+            gone: yield* store.getByValue("email", "ada@example.com"),
+            listed: yield* store.listByUser(USER.ada),
+          };
+        }),
+      );
+
+      expect(await harness.readUserRow(USER.ada)).toBeNull();
+      expect(after.gone).toBeNull();
+      expect(after.listed).toEqual([]);
+    });
+
+    it("refuses a second address for a user who already holds one", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          return yield* Effect.flip(store.create(emailFor(USER.ada, "ada-work@example.com")));
+        }),
+      );
+
+      expect(result._tag).toBe("AuthError");
+      expect(await harness.readUserRow(USER.ada)).toEqual({
+        email: "ada@example.com",
+        emailVerified: false,
+      });
+    });
+
+    it("setVerified works on a NOT NULL row", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          return yield* store.setVerified(USER.ada, new Date(Date.UTC(2026, 0, 2)));
+        }),
+      );
+
+      expect(result?.verified).toBe(true);
+      expect(await harness.readUserRow(USER.ada)).toEqual({
+        email: "ada@example.com",
+        emailVerified: true,
+      });
+    });
+  });
+
+/** The mapped `emailVerifiedAt` suite's harness: the single-table one plus a read of the column. */
+export interface VerifiedAtHarness extends SingleTableHarness {
+  /** The raw `email_verified_at` column of a user row, or `null`. */
+  readonly readVerifiedAt: (userId: string) => Promise<Date | null>;
+}
+
+/**
+ * The suite for a store that maps `emailVerifiedAt`: the timestamp is stored and
+ * reported. The unmapped case is {@link singleTableContract}'s
+ * "never reports a verifiedAt".
+ */
+export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
+  describe(`${label}: mapped emailVerifiedAt`, () => {
+    beforeEach(() => harness.seedUsers());
+
+    it("stores the verification time on setVerified and reports it", async () => {
+      const verifiedAt = new Date(Date.UTC(2026, 0, 2, 9, 30));
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          yield* store.create(emailFor(USER.ada, "ada@example.com"));
+          return {
+            verified: yield* store.setVerified(USER.ada, verifiedAt),
+            reloaded: yield* store.getByValue("email", "ada@example.com"),
+          };
+        }),
+      );
+
+      expect(result.verified?.verifiedAt).toEqual(verifiedAt);
+      expect(result.reloaded?.verifiedAt).toEqual(verifiedAt);
+      expect(await harness.readVerifiedAt(USER.ada)).toEqual(verifiedAt);
+    });
+
+    it("stores and reports a verifiedAt given at claim", async () => {
+      const verifiedAt = new Date(Date.UTC(2026, 0, 3));
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          return yield* store.create(
+            Auth.makeIdentifier({
+              userId: USER.ada,
+              type: "email",
+              value: "ada@example.com",
+              verified: true,
+              verifiedAt,
+            }),
+          );
+        }),
+      );
+
+      expect(result.verifiedAt).toEqual(verifiedAt);
+      expect(await harness.readVerifiedAt(USER.ada)).toEqual(verifiedAt);
+    });
+
+    it("reports no verifiedAt for an identifier that was never verified", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          return yield* store.create(emailFor(USER.ada, "ada@example.com"));
+        }),
+      );
+
+      expect("verifiedAt" in result).toBe(false);
+      expect(await harness.readVerifiedAt(USER.ada)).toBeNull();
+    });
+
+    it("delete clears the verification time with the address", async () => {
+      const verifiedAt = new Date(Date.UTC(2026, 0, 2));
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          yield* store.create(emailFor(USER.ada, "ada@example.com"));
+          yield* store.setVerified(USER.ada, verifiedAt);
+          yield* store.delete(USER.ada);
+          return { listed: yield* store.listByUser(USER.ada) };
+        }),
+      );
+
+      expect(result.listed).toEqual([]);
+      expect(await harness.readVerifiedAt(USER.ada)).toBeNull();
     });
   });

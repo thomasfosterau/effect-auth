@@ -117,10 +117,16 @@ export type ColumnKey<TTable extends Table, TValue> = {
  * `AnyColumn` is drizzle's own way of describing a column by part of its config
  * and leaving the rest open, which is what lets one store serve `text`, `uuid`
  * and `varchar` keys alike: they differ in `columnType`, and agree on `data`.
+ *
+ * @internal
  */
 export type StoreColumn<TValue> = AnyColumn<{ data: TValue; notNull: true }>;
 
-/** A resolved column the store tolerates `NULL` in. */
+/**
+ * A resolved column the store tolerates `NULL` in.
+ *
+ * @internal
+ */
 export type NullableColumn<TValue> = AnyColumn<{ data: TValue; notNull: false }>;
 
 // ---------------------------------------------------------------------------
@@ -278,6 +284,8 @@ export interface AuthSchemaSpec<
  * at the caller's own call site, that every named column reads back as the value
  * the store needs; what it cannot do is carry that fact through a lookup on a
  * table whose shape is still generic. `TColumns` restates it, once, here.
+ *
+ * @internal
  */
 export const resolveTable = <TColumns>(spec: TableSpec<Table, object>): TableSchema<TColumns> => {
   const source = spec.table as unknown as Readonly<Record<string, Column>>;

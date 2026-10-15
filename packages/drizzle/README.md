@@ -355,10 +355,16 @@ them with an `AuthError` rather than dropping the write.
 import { Layer } from "effect";
 import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
 
-// The application's own table: a nullable, unique email.
+// The application's own table: a unique email, nullable or NOT NULL.
 const users = Drizzle.SingleTableIdentifierStore.defineUsers({
   table: appUsers,
-  columns: { id: "userId", email: "email", emailVerified: "emailVerified", createdAt: "createdAt" },
+  columns: {
+    id: "userId",
+    email: "email",
+    emailVerified: "emailVerified",
+    emailVerifiedAt: "emailVerifiedAt", // optional; see below
+    createdAt: "createdAt",
+  },
 });
 
 const identifiers = Drizzle.SingleTableIdentifierStore.layer(users).pipe(
@@ -371,25 +377,83 @@ part of `Drizzle.layer()`, so choosing it is an explicit provide.
 
 ### What the table has to satisfy
 
-- `email` is **nullable** and carries a **unique index**. The index is the only
-  thing that stops two users holding one address; the store does not check it.
-  Deleting an address writes `NULL`, so a `NOT NULL` column makes delete fail.
-- `email_verified` is a non-null boolean.
-- The user row exists before its address is claimed. The store does not insert
-  users; your user writer does.
+- **`email` has a unique index.** The index is the only thing that stops two
+  users holding one address; the store does not check it. Without it, two users
+  can own one address and `getByValue`'s `LIMIT 1` picks one. Create it per
+  dialect:
+
+  ```sql
+  -- PostgreSQL
+  CREATE UNIQUE INDEX app_users_email_key ON app_users (email);
+
+  -- SQLite
+  CREATE UNIQUE INDEX app_users_email_key ON app_users (email);
+
+  -- MySQL: the column must be VARCHAR(n), not TEXT, to be indexed
+  CREATE UNIQUE INDEX app_users_email_key ON app_users (email);
+  ```
+
+  A unique index admits several `NULL`s on all three dialects, so a nullable
+  `email` is fine with it.
+
+- **`email` is nullable or `NOT NULL`.** The store detects which from the column
+  when you call `defineUsers`. See [Nullable or NOT NULL](#nullable-or-not-null-email).
+- **`email_verified` is a non-null boolean.**
+- **`email_verified_at`, if you map it, is a nullable timestamp.**
+- **The user row exists before its address is claimed.** The store never inserts
+  a user; your user writer does.
 
 Nothing else on the row is written, including `updated_at`.
 
+### Nullable or NOT NULL email
+
+The store reads the column's `NOT NULL` setting, so both shapes work without any
+option:
+
+- **Nullable** (the usual case). Deleting an address writes `NULL` to `email`
+  and `false` to `email_verified`, and the row stays. Account deletion clears the
+  address and then deletes the row. An address can be claimed again once it is
+  cleared.
+- **`NOT NULL`.** The store never writes `NULL`, so an address cannot be removed
+  from the row while the row exists:
+  - Deleting a user's address by identifier is refused with an `AuthError`,
+    and the address stays. Account email change removes the old address first,
+    so on a `NOT NULL` column its confirmation fails with that `AuthError` and
+    nothing changes.
+  - `deleteByUser` does nothing. Account deletion deletes the user row right
+    after it, and the address goes with the row, so account deletion works. An
+    application that calls `deleteByUser` and keeps the row keeps the address.
+  - A user whose row holds an address cannot be given a second one, which is
+    the same refusal as on a nullable column.
+
+  Core sign-up does not suit a `NOT NULL` column. It creates the user row first
+  and claims the address afterwards, and the row cannot be inserted without an
+  address. A `NOT NULL` schema fits an application whose own writer creates the
+  row with its address, and which uses the store for lookups, verification and
+  sign-in.
+
+### `verifiedAt`: mapped or not
+
+`verifiedAt` is stored only when you map `emailVerifiedAt`. When it is mapped:
+
+- `setVerified(id, verifiedAt)` stores the timestamp in that column, and reads
+  report it as the identifier's `verifiedAt`.
+- A claim that carries a `verifiedAt` stores it too.
+- Deleting the address clears the column.
+
+When it is not mapped, `verifiedAt` isn't stored: the argument is dropped, and no
+read reports one. The `verified` flag is always stored, in `email_verified`.
+
 ### How each field maps
 
-| `Identifier` field | Stored in                                                |
-| ------------------ | -------------------------------------------------------- |
-| `id`, `userId`     | the user's id; an email identifier's id is its user's id |
-| `type`             | always `"email"`                                         |
-| `value`            | `email`                                                  |
-| `verified`         | `email_verified`                                         |
-| `verifiedAt`       | not stored, so never reported                            |
-| `createdAt`        | the user row's creation time                             |
+| `Identifier` field | Stored in                                                                 |
+| ------------------ | ------------------------------------------------------------------------- |
+| `id`, `userId`     | the user's id; an email identifier's id is its user's id                  |
+| `type`             | always `"email"`                                                          |
+| `value`            | `email`                                                                   |
+| `verified`         | `email_verified`                                                          |
+| `verifiedAt`       | `email_verified_at`, when mapped; otherwise not stored, so never reported |
+| `createdAt`        | the user row's creation time                                              |
 
 A user whose `email` is `NULL` holds no identifier.
 
@@ -400,13 +464,23 @@ A user whose `email` is `NULL` holds no identifier.
   that already holds an address. A duplicate address owned by another user
   fails through the unique index as `AuthError`, which `claimIdentifier` reports
   as `IdentifierTakenError`, as it does for the default store.
-- `delete` and `deleteByUser` clear `email` and `email_verified` and leave the
-  row in place.
+- `delete` and `deleteByUser` follow the column's nullability, described above.
 
-Core flows that need several identifiers at once fail on this store. SCIM's
-`userName` change adds the new address before removing the old one, so it is
-refused. Replacing an address by removing the old one first, as account email
-change does, works.
+### Flows this store does not support
+
+- **Batched reads.** `Requests.getIdentifierByValue` and
+  `Requests.listIdentifiersByUser` read the default identifiers table, so they
+  don't apply to this store. `Requests.getUser` and `Requests.getSession` are
+  unaffected.
+- **SCIM `userName` change.** It adds the new address before it removes the old
+  one, so the store refuses it with an `AuthError`. The SCIM route answers that
+  with a `500` today, not a client error.
+- **Admin `identifiers[]` extras, and the username and phone-number flows.** This
+  store holds only email identifiers, so these are refused with an `AuthError`.
+
+Replacing an address by removing the old one first, as account email change
+does, works on a nullable column. On a `NOT NULL` column it is refused, as
+described above.
 
 ## Store semantics
 
