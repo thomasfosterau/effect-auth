@@ -598,6 +598,13 @@ const { handler, dispose } = await Auth.Http.makeAsync({
 });
 ```
 
+To keep `Http.make` and have it refuse a build it cannot finish, set `strict: true`. `make` then throws `ServicesBuildPendingError` (also exported as `Http.ServicesBuildPendingError`) when the `services` build has not finished by the time it has run the build synchronously, so the app fails to start; the error's message names `Http.makeAsync`. Before it throws, `make` interrupts the build and releases what the build acquired, as far as that runs synchronously. Two parts finish after `make` has thrown: a finalizer that does asynchronous work, and, when the build is in an uninterruptible step that waits on asynchronous work (an `Effect.acquireRelease` acquire that awaits), the whole release, since the interrupt waits for that step to end. A build that was failing when `make` threw (a step that failed while a finalizer it runs awaits) ends with that failure, which `make` logs with `Effect.logError`, since `ServicesBuildPendingError` cannot carry it. A build that finishes synchronously is unaffected: `make` throws the startup errors or the build's own failure, or returns the handler, as without the option. `Http.makeAsync` ignores the option, since it waits for the build whatever it says.
+
+```typescript
+// Throws ServicesBuildPendingError if `services` cannot finish building synchronously.
+const { handler } = Auth.Http.make({ services, strict: true });
+```
+
 ## Abuse protection
 
 `CaptchaPlugin` and `HaveIBeenPwnedPlugin` are hooks plugins composed with `composePlugins`. Both use `effect/http`'s `HttpClient`, so provide `FetchHttpClient.layer` (or a stub in tests).

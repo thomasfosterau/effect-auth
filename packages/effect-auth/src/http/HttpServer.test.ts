@@ -5,6 +5,8 @@ import { HttpApiBuilder } from "effect/http-api";
 import { BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
 import * as HttpClient from "./HttpClient.ts";
+import * as HttpSubpath from "./index.ts";
+import * as Root from "../index.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import { SessionService } from "../SessionService.ts";
@@ -79,7 +81,11 @@ import {
 import { generateHotp, generateTotp } from "../multifactor/Otp.ts";
 import type * as Types from "../Types.ts";
 import { ClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
-import { ClientAddressConfigError, RateLimiterConfigError } from "../Errors.ts";
+import {
+  ClientAddressConfigError,
+  RateLimiterConfigError,
+  ServicesBuildPendingError,
+} from "../Errors.ts";
 import { IPRateLimitPlugin } from "../plugins/IPRateLimit.ts";
 import { NormalizeEmailPlugin } from "../plugins/NormalizeEmail.ts";
 import { AuthApi } from "./HttpApi.ts";
@@ -3656,6 +3662,358 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       expect(counter.state.ticks).toBeGreaterThan(atDispose);
     } finally {
       counter.state.stopped = true;
+    }
+  });
+});
+
+describe("make with strict (#416)", () => {
+  const signIn = () => jsonRequest("/sign-in", { email: "nobody@example.com", password: PW });
+
+  // Services whose build has not finished when make has run it synchronously.
+  // Each settles without a timer, so the fallback below finishes deterministically.
+  const pending: ReadonlyArray<readonly [string, () => Layer.Layer<AuthServices>]> = [
+    [
+      "merged layers that yield",
+      () =>
+        Layer.mergeAll(
+          makeFixture().services,
+          Layer.effectDiscard(Effect.yieldNow),
+          Layer.effectDiscard(Effect.yieldNow),
+        ) as Layer.Layer<AuthServices>,
+    ],
+    [
+      "an Effect.promise step",
+      () =>
+        Layer.effectDiscard(Effect.promise(() => Promise.resolve())).pipe(
+          Layer.provideMerge(makeFixture().services),
+        ) as Layer.Layer<AuthServices>,
+    ],
+    [
+      "a forkScoped fiber that yields before it completes a Deferred the build awaits",
+      () =>
+        Layer.effectDiscard(
+          Effect.gen(function* () {
+            const ready = yield* Deferred.make<void>();
+            yield* Effect.forkScoped(
+              Effect.yieldNow.pipe(Effect.andThen(Deferred.succeed(ready, undefined))),
+            );
+            yield* Deferred.await(ready);
+          }),
+        ).pipe(Layer.provideMerge(makeFixture().services)) as Layer.Layer<AuthServices>,
+    ],
+  ];
+
+  for (const [composition, services] of pending) {
+    it(`throws ServicesBuildPendingError for ${composition}, and takes the fallback without it`, async () => {
+      const error = thrownBy(() =>
+        HttpServer.make({
+          services: services(),
+          cookie: { secure: false },
+          strict: true,
+        }),
+      );
+      expect(error).toBeInstanceOf(ServicesBuildPendingError);
+      expect(String(error)).toMatch(/Use Http\.makeAsync/);
+
+      // Without the option, make returns and the handler serves the build once
+      // it finishes.
+      const { handler, dispose } = HttpServer.make({
+        services: services(),
+        cookie: { secure: false },
+      });
+      expect((await handler(signIn())).status).toBe(401);
+      await dispose();
+
+      // An explicit false is the default.
+      const off = HttpServer.make({
+        services: services(),
+        cookie: { secure: false },
+        strict: false,
+      });
+      expect((await off.handler(signIn())).status).toBe(401);
+      await off.dispose();
+    });
+  }
+
+  it("returns the handler for a synchronous build", async () => {
+    const { handler, dispose } = HttpServer.make({
+      services: makeFixture().services,
+      cookie: { secure: false },
+      strict: true,
+    });
+    expect((await handler(signIn())).status).toBe(401);
+    await dispose();
+  });
+
+  it("throws a synchronous build's own failure, and its startup errors", () => {
+    const failure = new BootError({ reason: "no database" });
+    const failing = Layer.effectDiscard(Effect.fail(failure)).pipe(
+      Layer.provideMerge(makeFixture().services),
+    ) as unknown as Layer.Layer<AuthServices>;
+    expect(
+      thrownBy(() =>
+        HttpServer.make({
+          services: failing,
+          cookie: { secure: false },
+          strict: true,
+        }),
+      ),
+    ).toBe(failure);
+
+    expect(() =>
+      HttpServer.make({
+        services: makeFixture().services,
+        trustedProxy: ClientIP.cloudflare,
+        ipRateLimit: {},
+        strict: true,
+      }),
+    ).toThrow(RateLimiterConfigError);
+  });
+
+  it("interrupts the build and releases what it acquired before it throws", async () => {
+    let acquired = 0;
+    let released = 0;
+    let interrupted = false;
+    const counted = Layer.effectDiscard(
+      Effect.acquireRelease(
+        Effect.sync(() => void acquired++),
+        () => Effect.sync(() => void released++),
+      ),
+    );
+    // Never completed: only interruption ends this step.
+    const gate = Effect.runSync(Deferred.make<void>());
+    const waiting = Layer.effectDiscard(
+      Deferred.await(gate).pipe(
+        Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true))),
+      ),
+    );
+    const services = waiting.pipe(
+      Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
+    ) as Layer.Layer<AuthServices>;
+
+    const error = thrownBy(() =>
+      HttpServer.make({ services, cookie: { secure: false }, strict: true }),
+    );
+    expect(error).toBeInstanceOf(ServicesBuildPendingError);
+    expect(acquired).toBe(1);
+    expect(interrupted).toBe(true);
+    expect(released).toBe(1);
+
+    // Nothing runs again once make has thrown.
+    await macrotasks(3);
+    expect(acquired).toBe(1);
+    expect(released).toBe(1);
+  });
+
+  it("interrupts a merged layer that keeps yielding", async () => {
+    let spins = 0;
+    let interrupted = false;
+    const spinning = Layer.effectDiscard(
+      Effect.forever(
+        Effect.andThen(
+          Effect.yieldNow,
+          Effect.sync(() => void spins++),
+        ),
+      ).pipe(Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true)))),
+    );
+    const services = Layer.merge(makeFixture().services, spinning) as Layer.Layer<AuthServices>;
+
+    expect(
+      thrownBy(() => HttpServer.make({ services, cookie: { secure: false }, strict: true })),
+    ).toBeInstanceOf(ServicesBuildPendingError);
+    expect(interrupted).toBe(true);
+    const atThrow = spins;
+    await macrotasks(3);
+    expect(spins).toBe(atThrow);
+  });
+
+  it("finishes an asynchronous finalizer after make throws", async () => {
+    let released = false;
+    const slowRelease = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () =>
+        Effect.promise(() => Promise.resolve()).pipe(
+          Effect.andThen(Effect.sync(() => void (released = true))),
+        ),
+      ),
+    );
+    const services = Layer.effectDiscard(Effect.promise(() => Promise.resolve())).pipe(
+      Layer.provideMerge(Layer.merge(makeFixture().services, slowRelease)),
+    ) as Layer.Layer<AuthServices>;
+
+    expect(
+      thrownBy(() => HttpServer.make({ services, cookie: { secure: false }, strict: true })),
+    ).toBeInstanceOf(ServicesBuildPendingError);
+    expect(released).toBe(false);
+    await macrotasks(3);
+    expect(released).toBe(true);
+  });
+
+  // A layer whose build records `acquired` and whose release records
+  // `released`, merged beside the fixture so it builds before `step` (which
+  // runs on the build's own fiber).
+  const recordedServices = (
+    events: Array<string>,
+    step: Layer.Layer<never>,
+    names: readonly [acquired: string, released: string] = ["acquired", "released"],
+  ): Layer.Layer<AuthServices> =>
+    step.pipe(
+      Layer.provideMerge(
+        Layer.merge(
+          makeFixture().services,
+          Layer.effectDiscard(
+            Effect.acquireRelease(
+              Effect.sync(() => void events.push(names[0])),
+              () => Effect.sync(() => void events.push(names[1])),
+            ),
+          ),
+        ),
+      ),
+    ) as Layer.Layer<AuthServices>;
+
+  it("interrupts the build before it releases what the build acquired", () => {
+    const events: Array<string> = [];
+    const gate = Effect.runSync(Deferred.make<void>());
+    const waiting = Layer.effectDiscard(
+      Deferred.await(gate).pipe(
+        Effect.onInterrupt(() => Effect.sync(() => void events.push("interrupted"))),
+      ),
+    );
+
+    expect(
+      thrownBy(() =>
+        HttpServer.make({
+          services: recordedServices(events, waiting),
+          cookie: { secure: false },
+          strict: true,
+        }),
+      ),
+    ).toBeInstanceOf(ServicesBuildPendingError);
+    expect(events).toEqual(["acquired", "interrupted", "released"]);
+  });
+
+  it("runs the build's unwinding to the end before it throws when the build yields while it unwinds", async () => {
+    const events: Array<string> = [];
+    const gate = Effect.runSync(Deferred.make<void>());
+    // The interrupted build yields before it records the interrupt, so its next
+    // step is a task on the build's own dispatcher.
+    const waiting = Layer.effectDiscard(
+      Deferred.await(gate).pipe(
+        Effect.onInterrupt(() =>
+          Effect.yieldNow.pipe(
+            Effect.andThen(Effect.yieldNow),
+            Effect.andThen(Effect.sync(() => void events.push("interrupted"))),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      thrownBy(() =>
+        HttpServer.make({
+          services: recordedServices(events, waiting),
+          cookie: { secure: false },
+          strict: true,
+        }),
+      ),
+    ).toBeInstanceOf(ServicesBuildPendingError);
+    expect(events).toEqual(["acquired", "interrupted", "released"]);
+    await macrotasks(3);
+    expect(events).toEqual(["acquired", "interrupted", "released"]);
+  });
+
+  it("releases after make throws when the build is in an uninterruptible acquire that awaits", async () => {
+    const events: Array<string> = [];
+    // acquireRelease's acquire is uninterruptible, so the interrupt waits for
+    // its promise, and the whole release runs after make has thrown.
+    const slowAcquire = Layer.effectDiscard(
+      Effect.acquireRelease(
+        Effect.promise(() => Promise.resolve()).pipe(
+          Effect.andThen(Effect.sync(() => void events.push("acquire 2"))),
+        ),
+        () => Effect.sync(() => void events.push("release 2")),
+      ),
+    );
+
+    expect(
+      thrownBy(() =>
+        HttpServer.make({
+          services: recordedServices(events, slowAcquire, ["acquire 1", "release 1"]),
+          cookie: { secure: false },
+          strict: true,
+        }),
+      ),
+    ).toBeInstanceOf(ServicesBuildPendingError);
+    expect(events).toEqual(["acquire 1"]);
+    await macrotasks(3);
+    expect(events).toEqual(["acquire 1", "acquire 2", "release 2", "release 1"]);
+  });
+
+  it("logs the failure of a build whose finalizer is asynchronous, which the thrown error cannot carry", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      let released = false;
+      // The step fails, and Effect runs its finalizer, which awaits, before the
+      // build ends: the build has no exit when make has run it synchronously.
+      const failing = Layer.effectDiscard(
+        Effect.acquireRelease(Effect.void, () =>
+          Effect.promise(() => Promise.resolve()).pipe(
+            Effect.andThen(Effect.sync(() => void (released = true))),
+          ),
+        ).pipe(Effect.andThen(Effect.fail(new BootError({ reason: "no database" })))),
+      ).pipe(Layer.provideMerge(makeFixture().services)) as unknown as Layer.Layer<AuthServices>;
+
+      expect(
+        thrownBy(() =>
+          HttpServer.make({ services: failing, cookie: { secure: false }, strict: true }),
+        ),
+      ).toBeInstanceOf(ServicesBuildPendingError);
+      expect(released).toBe(false);
+      await macrotasks(3);
+      expect(released).toBe(true);
+      const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+      expect(logged).toContainEqual(
+        expect.stringMatching(
+          /ERROR .*refused with ServicesBuildPendingError \(strict\) failed.*BootError/s,
+        ),
+      );
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("logs nothing for a build that ends by the interrupt alone", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const services = Layer.effectDiscard(Effect.promise(() => Promise.resolve())).pipe(
+        Layer.provideMerge(makeFixture().services),
+      ) as Layer.Layer<AuthServices>;
+      expect(
+        thrownBy(() => HttpServer.make({ services, cookie: { secure: false }, strict: true })),
+      ).toBeInstanceOf(ServicesBuildPendingError);
+      await macrotasks(3);
+      const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+      expect(logged).not.toContainEqual(expect.stringMatching(/ServicesBuildPendingError/));
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("is the same class from the http subpath and as Http.ServicesBuildPendingError", () => {
+    expect(HttpServer.ServicesBuildPendingError).toBe(ServicesBuildPendingError);
+    expect(HttpSubpath.ServicesBuildPendingError).toBe(ServicesBuildPendingError);
+    expect(Root.Http.ServicesBuildPendingError).toBe(ServicesBuildPendingError);
+    expect(Root.ServicesBuildPendingError).toBe(ServicesBuildPendingError);
+  });
+
+  it("is ignored by makeAsync, which waits for the build", async () => {
+    for (const [, services] of pending) {
+      const { handler, dispose } = await HttpServer.makeAsync({
+        services: services(),
+        cookie: { secure: false },
+        strict: true,
+      });
+      expect((await handler(signIn())).status).toBe(401);
+      await dispose();
     }
   });
 });
