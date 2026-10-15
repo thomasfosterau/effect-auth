@@ -102,6 +102,20 @@ export class PhoneOtpUserStore extends Context.Service<
   }
 >()("@effect-auth/PhoneOtpUserStore") {}
 
+/** Why an OTP verification failed: no record, a wrong code, expiry or the attempt limit. */
+type VerifyFailure = "missing" | "mismatch" | "expired" | "attempts";
+
+/** The generic answer to a failed verification. */
+const invalidOtpMessage = "Invalid or expired OTP";
+
+/** The message each verification failure answers where existence isn't hidden. */
+const failureMessages: Record<VerifyFailure, string> = {
+  missing: invalidOtpMessage,
+  mismatch: invalidOtpMessage,
+  expired: "OTP has expired",
+  attempts: "Too many attempts",
+};
+
 /**
  * Configuration for {@link PhoneOtpService}.
  */
@@ -109,7 +123,12 @@ export interface PhoneOtpConfig {
   readonly otpLength?: number; // Default: 6 digits
   readonly expiresIn?: number; // Default: 5 minutes
   readonly maxAttempts?: number; // Default: 3
-  readonly disableSignUp?: boolean; // Default: false
+  /**
+   * Refuse to create a user at `sign-in`. Off by default. When set, `sign-in`
+   * hides whether a number has an account: see {@link PhoneOtpService} `send`
+   * and `signIn`.
+   */
+  readonly disableSignUp?: boolean;
   /**
    * Minimum interval (ms) between successive send requests for the same phone
    * number + purpose pair. When an outstanding OTP created within this window
@@ -119,7 +138,7 @@ export interface PhoneOtpConfig {
    * number alike, whether or not it has an account, so the error reveals
    * nothing about which numbers are registered. With sign-up disabled, a
    * `sign-in` request for a number with no account stores an undelivered
-   * cooldown marker, so if that number gains an account within the window,
+   * marker record, so if that number gains an account within the window,
    * its first `sign-in` send is delayed by up to the cooldown.
    */
   readonly resendCooldown?: number;
@@ -158,14 +177,17 @@ export class PhoneOtpService extends Context.Service<
      * Generate an OTP for the given phone number + purpose (replacing any
      * outstanding one) and send it. Only a SHA-256 hash of the code is stored.
      * Anti-enumeration: for `sign-in` with sign-up disabled and no user, this
-     * succeeds silently without sending.
+     * succeeds without sending. It stores an undelivered marker record in
+     * place of the code: the record holds the hash of a random 32-byte secret
+     * that is never sent, so no code redeems it, and it expires and counts
+     * attempts exactly as a code's record does. `signIn` then sees the same
+     * record states for a number with and without an account.
      *
      * When `resendCooldown` is configured and an outstanding OTP for the phone +
      * purpose was created within the cooldown window, fails with
      * {@link Errors.ResendTooSoonError} containing the remaining wait time.
-     * The cooldown applies to a number with no account as well: with sign-up
-     * disabled, such a request stores an undelivered record that no code
-     * redeems, so a repeat within the window fails the same way for a known
+     * The marker record makes the cooldown apply to a number with no account
+     * as well, so a repeat within the window fails the same way for a known
      * and an unknown number.
      */
     readonly send: (
@@ -176,6 +198,13 @@ export class PhoneOtpService extends Context.Service<
     /**
      * Verify a `sign-in` OTP (single use) and sign the user in, creating a new
      * user with a verified `phone` identifier when none exists (unless `disableSignUp`).
+     *
+     * A code that fails verification fails with {@link PhoneOtpError}. With
+     * sign-up disabled, each such failure answers `"Invalid or expired OTP"`,
+     * whether the code was wrong, had expired or reached `maxAttempts`, so the
+     * answer is the same for a number with and without an outstanding code.
+     * With sign-up enabled, an expired code answers `"OTP has expired"` and
+     * the attempt limit answers `"Too many attempts"`.
      */
     readonly signIn: (
       phoneNumber: string,
@@ -249,7 +278,7 @@ export const make = (
       });
 
     /**
-     * The secret behind an unknown number's cooldown marker: 32 random bytes,
+     * The secret behind an unknown number's marker record: 32 random bytes,
      * base64url-encoded. It is hashed into the marker record and then
      * discarded.
      */
@@ -267,7 +296,31 @@ export const make = (
         ? config.normalizePhoneNumber(raw)
         : Effect.succeed(raw.trim());
 
-    const invalidOtp = () => Effect.fail(new PhoneOtpError({ message: "Invalid or expired OTP" }));
+    /**
+     * Whether `send` hides, for this purpose, whether the number has an
+     * account. It then answers alike for both, and verification must too.
+     */
+    const hidesAccount = (purpose: PhoneOtpPurpose): boolean =>
+      purpose === "sign-in" && disableSignUp;
+
+    /**
+     * Fail a verification. Where `send` hides whether the number has an
+     * account, every reason answers the generic message. The marker record
+     * already gives a known and an unknown number the same record states; the
+     * generic message also makes one that holds a record answer as one that
+     * holds none, so expiry and the attempt limit can't show whether a code
+     * was requested for it. The reason stays on the span for operators.
+     */
+    const rejectOtp = (purpose: PhoneOtpPurpose, reason: VerifyFailure) =>
+      Effect.annotateCurrentSpan("auth.otp.failure", reason).pipe(
+        Effect.andThen(
+          Effect.fail(
+            new PhoneOtpError({
+              message: hidesAccount(purpose) ? invalidOtpMessage : failureMessages[reason],
+            }),
+          ),
+        ),
+      );
 
     const verifyOtp = (
       phoneNumber: string,
@@ -276,31 +329,31 @@ export const make = (
     ): Effect.Effect<void, PhoneOtpError | Errors.AuthError> =>
       Effect.gen(function* () {
         if (!phoneNumber || !otp) {
-          return yield* invalidOtp();
+          return yield* rejectOtp(purpose, "missing");
         }
 
         const record = yield* store.get(phoneNumber, purpose);
         if (!record) {
-          return yield* invalidOtp();
+          return yield* rejectOtp(purpose, "missing");
         }
 
         if (Date.now() > record.expiresAt) {
           yield* store.delete(phoneNumber, purpose);
-          return yield* new PhoneOtpError({ message: "OTP has expired" });
+          return yield* rejectOtp(purpose, "expired");
         }
 
         if (record.attempts >= maxAttempts) {
           yield* store.delete(phoneNumber, purpose);
-          return yield* new PhoneOtpError({ message: "Too many attempts" });
+          return yield* rejectOtp(purpose, "attempts");
         }
 
         if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
           const attempts = yield* store.incrementAttempts(phoneNumber, purpose);
           if (attempts >= maxAttempts) {
             yield* store.delete(phoneNumber, purpose);
-            return yield* new PhoneOtpError({ message: "Too many attempts" });
+            return yield* rejectOtp(purpose, "attempts");
           }
-          return yield* invalidOtp();
+          return yield* rejectOtp(purpose, "mismatch");
         }
 
         // Consume the OTP (one-time use).
@@ -319,16 +372,9 @@ export const make = (
 
         // Anti-enumeration: sign-in with sign-up disabled and no user
         // succeeds without sending.
-        const deliver =
-          purpose === "sign-in" && disableSignUp
-            ? (yield* identifiers.getByValue("phone", phoneNumber)) !== null
-            : true;
-
-        // Without a resend cooldown there is nothing for a later request to
-        // see, so an unknown number stores nothing.
-        if (!deliver && config.resendCooldown === undefined) {
-          return;
-        }
+        const deliver = hidesAccount(purpose)
+          ? (yield* identifiers.getByValue("phone", phoneNumber)) !== null
+          : true;
 
         // Resend cooldown: reject if an outstanding OTP was created within
         // the configured window. It runs for a number with no account too,
@@ -347,11 +393,13 @@ export const make = (
           }
         }
 
-        // A number with no account gets a record only as its cooldown
-        // marker, whose hash is of a random 32-byte secret rather than of a
-        // code: no `otpLength`-digit guess can match it, and the secret is
-        // never sent. Both values are drawn on every send, so the random work
-        // is the same whether or not the number has an account.
+        // A number with no account gets a marker record, whose hash is of a
+        // random 32-byte secret rather than of a code: no `otpLength`-digit
+        // guess can match it, and the secret is never sent. It is written
+        // whether or not a cooldown is set, with the same attempts and expiry
+        // as a code's record, so both branches do the same store work here
+        // and verification later sees the same record states. Both values are
+        // drawn on every send, so the random work is the same too.
         const otp = yield* generateOtp(otpLength);
         const markerSecret = yield* generateMarkerSecret;
         const record: PhoneOtpRecord = {
