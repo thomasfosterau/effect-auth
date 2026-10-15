@@ -366,7 +366,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
           const cleared = yield* Effect.promise(() => harness.readUserRow(USER.ada));
           const afterDelete = yield* store.getByValue("email", "ada@example.com");
           const adaListed = yield* store.listByUser(USER.ada);
-          // The address moves to another user: the AccountManagement swap.
+          // Once cleared, the address is free for another user to claim.
           const moved = yield* Auth.claimIdentifier(
             store,
             emailFor(USER.grace, "ada@example.com", true),
@@ -451,24 +451,27 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
       expect(result).toBe("ok");
     });
 
-    it("email change never leaves the address NULL: the old address is refused before anything is claimed", async () => {
+    it("email change never leaves the address NULL: the new address is refused while the old one is held, and nothing is written", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
-          // The swap AccountManagement runs: remove the current address, then claim
-          // the new one. The removal is refused, so the claim never runs.
-          const current = yield* store.listByUser(USER.ada);
+          // Core email change claims the confirmed address first, while the user
+          // still holds the old one. The store refuses a second address, so the
+          // claim fails and the old address is never released.
           const refused = yield* Effect.flip(
-            Effect.forEach(current, (id) => store.delete(id.id), { discard: true }),
+            store.create(emailFor(USER.ada, "ada-new@example.com", true)),
           );
           return {
             refused,
+            kept: yield* store.listByUser(USER.ada),
             newAddress: yield* store.getByValue("email", "ada-new@example.com"),
           };
         }),
       );
 
       expect(result.refused._tag).toBe("AuthError");
+      expect(result.refused.message).toContain("one email identifier per user");
+      expect(result.kept.map((identifier) => identifier.value)).toEqual(["ada@example.com"]);
       expect(result.newAddress).toBeNull();
       expect(await harness.readUserRow(USER.ada)).toEqual({
         email: "ada@example.com",
