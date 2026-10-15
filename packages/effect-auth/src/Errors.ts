@@ -585,6 +585,14 @@ export class ClientAddressConfigError extends Data.TaggedError("ClientAddressCon
 }> {}
 
 /**
+ * An IP-keyed limit is configured with no `RateLimiter` in `services`, so it
+ * would silently do nothing. `Http.make` fails its layer build instead (#389).
+ */
+export class RateLimiterConfigError extends Data.TaggedError("RateLimiterConfigError")<{
+  readonly message: string;
+}> {}
+
+/**
  * Magic link send/verify failure (infrastructure or token mismatch).
  */
 export class MagicLinkError extends Data.TaggedError("MagicLinkError")<{

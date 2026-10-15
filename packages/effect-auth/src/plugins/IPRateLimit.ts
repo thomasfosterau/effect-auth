@@ -3,7 +3,11 @@
  *
  * Applies per-operation rate limits keyed by the resolved client IP (from the
  * {@link ClientIP} service). When the {@link ClientIP} service is absent (e.g.
- * running outside an HTTP context) the plugin is a no-op.
+ * running outside an HTTP context) there is no request to limit and the plugin
+ * is a no-op. When the service is present but carries no address, the request
+ * is refused with a {@link RateLimitError} (`429` under the HTTP layer): it is
+ * never let through unlimited and never counted under a bucket shared with other
+ * callers (#389).
  *
  * Composes with the existing {@link RateLimiter} / {@link RateLimitStore}
  * infrastructure, so in-memory, SQL, and Redis backends all work.
@@ -56,6 +60,7 @@ import { Effect, Option } from "effect";
 import { ClientIP } from "../ClientIP.ts";
 import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
 import { makePlugin } from "../Hooks.ts";
+import { RateLimitError } from "../Errors.ts";
 import {
   type RateLimitConfig,
   RateLimitPresets,
@@ -92,7 +97,8 @@ export interface IPRateLimitPluginConfig {
  * used by {@link RateLimitPlugin}.
  *
  * Requires `RateLimiter` and `RateLimitStore` in the Layer graph.
- * Uses `Effect.serviceOption(ClientIP)` — no-op when the service is absent.
+ * Uses `Effect.serviceOption(ClientIP)`: a no-op when the service is absent, and
+ * a {@link RateLimitError} refusal when it carries no address.
  */
 export const IPRateLimitPlugin = (config?: IPRateLimitPluginConfig) =>
   makePlugin(
@@ -103,8 +109,17 @@ export const IPRateLimitPlugin = (config?: IPRateLimitPluginConfig) =>
       const check = (operation: string, limitConfig: RateLimitConfig) =>
         Effect.gen(function* () {
           const ipOpt = yield* Effect.serviceOption(ClientIP);
-          if (Option.isNone(ipOpt) || ipOpt.value.ip === undefined) return;
-          const key = `ip:${operation}:${ipOpt.value.ip}`;
+          if (Option.isNone(ipOpt)) return;
+          const ip = ipOpt.value.ip;
+          // A request with no resolvable address cannot be keyed. Refuse it rather
+          // than skip the limit or count it under a bucket other callers share (#389).
+          if (ip === undefined) {
+            return yield* new RateLimitError({
+              message: "Client address unavailable; this request cannot be rate limited",
+              key: `ip:${operation}`,
+            });
+          }
+          const key = `ip:${operation}:${ip}`;
           yield* rateLimiter
             .consumeToken(key, limitConfig)
             .pipe(Effect.provideService(RateLimitStore, store));

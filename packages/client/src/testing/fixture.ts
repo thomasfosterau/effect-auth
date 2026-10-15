@@ -407,9 +407,29 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     Auth.OrganizationService.layer().pipe(Layer.provide(organizationBase)),
   );
 
+  // The device user-code limit is configured by the feature set, and the core's
+  // build check needs a RateLimiter for it (#389), so the feature set carries an
+  // in-memory one.
+  const rateLimitEntries = new Map<string, Auth.RateLimitEntry>();
+  const rateLimitStore: typeof Auth.RateLimitStore.Service = {
+    get: (key) => Effect.sync(() => rateLimitEntries.get(key) ?? null),
+    set: (key, entry) => Effect.sync(() => void rateLimitEntries.set(key, entry)),
+    increment: (key) =>
+      Effect.sync(() => {
+        const entry = rateLimitEntries.get(key);
+        const count = (entry?.count ?? 0) + 1;
+        if (entry) rateLimitEntries.set(key, { ...entry, count });
+        return count;
+      }),
+    delete: (key) => Effect.sync(() => void rateLimitEntries.delete(key)),
+  };
+  const rateLimiterLayer = Auth.RateLimiter.layer().pipe(
+    Layer.provide(Layer.succeed(Auth.RateLimitStore, rateLimitStore)),
+  );
+
   const services: Layer.Layer<Auth.Http.AuthServices> = Layer.mergeAll(
     core,
-    options.features === true ? featureLayer : Layer.empty,
+    options.features === true ? Layer.merge(featureLayer, rateLimiterLayer) : Layer.empty,
     options.organization === true ? organizationLayer : Layer.empty,
   ) as Layer.Layer<Auth.Http.AuthServices>;
 

@@ -57,7 +57,7 @@ import {
   type ScimUserResource,
 } from "../Scim.ts";
 import type * as Errors from "../Errors.ts";
-import { ClientAddressConfigError } from "../Errors.ts";
+import { ClientAddressConfigError, RateLimiterConfigError } from "../Errors.ts";
 import { hashToken } from "../TokenHash.ts";
 import { GoogleOneTapService } from "../GoogleOneTap.ts";
 import {
@@ -701,9 +701,9 @@ const internalServerError = (e: unknown): Effect.Effect<never, S.InternalServerE
 
 /**
  * Per-user-code rate limit for device-authorization approve/deny endpoints
- * (RFC 8628 §5.2). Optionally applied when `RateLimiter` is in scope (it
- * resolves its own `RateLimitStore` at Layer-construction time); silent
- * no-op when the service is absent.
+ * (RFC 8628 §5.2). The limiter is always in scope here: `make` fails its layer
+ * build when device authorization is in `services` and no `RateLimiter` is
+ * (#389), so the lookup below cannot come back empty under `Http.make`.
  */
 const USER_CODE_RATE_LIMIT: RateLimitConfig = {
   maxRequests: 5,
@@ -734,9 +734,10 @@ const applyUserCodeRateLimit = (
 const NO_CLIENT_ADDRESS = "Client address unavailable; this request cannot be rate limited";
 
 /**
- * Per-IP rate limit for anonymous dynamic client registration. Applied when a
- * `RateLimiter` is in scope (silent no-op otherwise), mirroring the device
- * user-code limiter; the window comes from the provider's own configuration.
+ * Per-IP rate limit for anonymous dynamic client registration. The limiter is
+ * in scope whenever registration is enabled: `make` fails its layer build when
+ * registration is enabled and no `RateLimiter` is in `services` (#389). The
+ * window comes from the provider's own configuration.
  *
  * A caller with no resolvable client address is refused, never keyed under a
  * shared bucket and never let through uncounted (#358).
@@ -757,6 +758,37 @@ const applyRegistrationRateLimit = (
       Effect.catchTag("AuthError", (e) => internalServerError(e)),
     );
   });
+
+/**
+ * Build-time check (#389): every IP-keyed limit this handler runs needs a
+ * `RateLimiter` in `services`, or it would silently do nothing. The limits are
+ * `ipRateLimit`, the dynamic client registration limit and the device user-code
+ * limit. Their presence is read from `services`, so the check sees exactly what
+ * the handler sees. `Http.make` is synchronous and cannot inspect a Layer, so the
+ * check runs as a layer build: the build starts when `make` is called, a
+ * failure is logged then, and every request rejects with the error.
+ */
+const requireRateLimiterForLimits = (ipRateLimit: HttpIPRateLimitConfig | undefined) =>
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      if (Option.isSome(yield* Effect.serviceOption(RateLimiter))) return;
+      const configured: Array<string> = [];
+      if (ipRateLimit !== undefined) configured.push("ipRateLimit");
+      const oidc = yield* Effect.serviceOption(OidcProviderService);
+      if (Option.isSome(oidc) && oidc.value.dynamicRegistration.enabled) {
+        configured.push("the dynamic client registration limit (POST /register)");
+      }
+      if (Option.isSome(yield* Effect.serviceOption(DeviceAuthorizationService))) {
+        configured.push("the device user-code limit");
+      }
+      if (configured.length === 0) return;
+      const message =
+        `${configured.join(", ")} configured with no RateLimiter in services, so it would silently do nothing. ` +
+        "Compose RateLimiter.layer() with its RateLimitStore into services, or remove the limit.";
+      yield* Effect.logError(message);
+      return yield* new RateLimiterConfigError({ message });
+    }),
+  );
 
 /** Layer implementing the `auth` group handlers. */
 export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
@@ -4154,6 +4186,8 @@ export interface AuthWebHandlerOptions {
    *
    * Requires `RateLimiter` in the `services` layer (compose it with its
    * store via `RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer))`).
+   * Without one, the layer build fails with `RateLimiterConfigError`, and every
+   * request rejects with it, rather than the limit silently doing nothing (#389).
    * Requests that exceed a limit receive HTTP 429 before any auth logic runs.
    *
    * **Client address required**: the limiter keys each request by its client
@@ -4302,7 +4336,11 @@ export const make = (
   // `Request<"Requires", RIn>` types; providing `services` to the layer's OUTPUT
   // (provideMerge) both satisfies them at runtime and zeroes the web handler's
   // leftover context (HR), yielding a plain `(request) => Promise<Response>`.
-  const appLayer = apiLayer.pipe(Layer.provideMerge(options.services));
+  const appLayer = apiLayer.pipe(
+    Layer.provideMerge(
+      Layer.provideMerge(requireRateLimiterForLimits(options.ipRateLimit), options.services),
+    ),
+  );
 
   const ipRateRules = options.ipRateLimit?.rules ?? defaultEndpointRules;
 

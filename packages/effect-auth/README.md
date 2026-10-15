@@ -572,6 +572,8 @@ This is correct only when the app is reachable solely through Cloudflare. A requ
 
 Without `trustedProxy`, forwarded headers are ignored and the socket address is used as-is. Under `Http.make` there is no socket address, so `ipRateLimit` without `trustedProxy` is a build error. Set `allowMissingClientIp: true` to accept refusing address-less requests on rate-limited endpoints instead. Dynamic client registration is keyed the same way: `OidcProviderConfig.dynamicRegistration` declares the same `trustedProxy` (or `allowMissingClientIp: true`), and `OidcProviderService.layer` fails at build without one of them.
 
+The IP-keyed limits also need a `RateLimiter` in the handler's `services`: `ipRateLimit`, the dynamic registration limit and the device user-code limit. Without one, `Http.make`'s layer build fails with `RateLimiterConfigError`, and every request rejects with it, so a limit is never silently off (#389).
+
 ## Abuse protection
 
 `CaptchaPlugin` and `HaveIBeenPwnedPlugin` are hooks plugins composed with `composePlugins`. Both use `effect/http`'s `HttpClient`, so provide `FetchHttpClient.layer` (or a stub in tests).

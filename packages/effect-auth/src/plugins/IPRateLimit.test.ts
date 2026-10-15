@@ -100,12 +100,31 @@ describe("IPRateLimitPlugin", () => {
       }).pipe(Effect.provide(makeHooksLayer())),
     ));
 
-  it("is a no-op when ip is undefined (no IP available)", () =>
+  it("refuses every request whose ClientIP carries no address, and counts none of them", () =>
     Effect.runPromise(
       Effect.gen(function* () {
-        // All 10 should succeed — nothing to key on
+        // Ten address-less sign-ins: each is refused, none is let through unlimited
+        // or counted under a bucket that other callers share (#389).
         for (let i = 0; i < 10; i++) {
-          expect(yield* callSignIn(undefined)).toBe("ok");
+          expect(yield* callSignIn(undefined)).toBe("limited");
+        }
+        const hooks = yield* Hooks;
+        const err = yield* Effect.flip(
+          hooks.beforeSignIn(signIn).pipe(Effect.provideService(ClientIP, { ip: undefined })),
+        );
+        expect(err).toBeInstanceOf(RateLimitError);
+        expect(err).toMatchObject({ key: "ip:signin" });
+        // A visitor with an address is still keyed on their own budget.
+        expect(yield* callSignIn("198.51.100.4")).toBe("ok");
+      }).pipe(Effect.provide(makeHooksLayer())),
+    ));
+
+  it("is a no-op when the ClientIP service is absent (no request in scope)", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const hooks = yield* Hooks;
+        for (let i = 0; i < 10; i++) {
+          yield* hooks.beforeSignIn(signIn);
         }
       }).pipe(Effect.provide(makeHooksLayer())),
     ));
