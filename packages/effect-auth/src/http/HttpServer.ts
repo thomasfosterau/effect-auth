@@ -821,7 +821,7 @@ const servicesConfigError = (
     if (keyed.length > 0) {
       return new ClientAddressConfigError({
         message:
-          `${keyed.join(", ")} keys its limits on the client address, and a Web Request has none under Http.make. ` +
+          `${keyed.join(", ")} keys its limits on the client address, and a Web Request has none under Http.make or Http.makeAsync. ` +
           "Set trustedProxy (for example ClientIP.cloudflare) to key the limits by the visitor's address, " +
           "or set allowMissingClientIp: true to accept that every request without an address is refused on those hooks.",
       });
@@ -4544,7 +4544,7 @@ const ipRateLimitAddressError = (
   options.allowMissingClientIp !== true
     ? new ClientAddressConfigError({
         message:
-          "ipRateLimit needs a client address, and a Web Request has none under Http.make. " +
+          "ipRateLimit needs a client address, and a Web Request has none under Http.make or Http.makeAsync. " +
           "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address, " +
           "or set allowMissingClientIp: true to accept that address-less requests on rate-limited endpoints are refused.",
       })
@@ -4575,7 +4575,7 @@ const releaseRefusedServices = (scope: Scope.Closeable): Effect.Effect<void> =>
   Scope.close(scope, Exit.void).pipe(
     Effect.catchCause((cause) =>
       Effect.logError(
-        "[effect-auth] releasing the services Http.make refused failed; the services build was refused for another reason",
+        "[effect-auth] releasing the services Http.make or Http.makeAsync refused failed; the services build was refused for another reason",
         cause,
       ),
     ),
@@ -4744,7 +4744,8 @@ const serve = (
  * throw only when the `services` build finishes before it returns. It runs the
  * build on the calling stack, the way `Effect.runSync` does: every step on the
  * build's own fiber, however many, and the start of every fiber the build
- * forks. `Layer.provideMerge` and `Layer.provide` chains build on that fiber.
+ * forks and awaits. `Layer.provideMerge` and `Layer.provide` chains build on
+ * that fiber.
  * The build is still running when `make` returns if it waits on:
  *
  * - asynchronous work: a database connection, `Effect.promise`, a timer, any
@@ -4768,10 +4769,15 @@ const serve = (
  * thrown. A finalizer that fails is logged with `Effect.logError` whenever it
  * finishes, and `make` throws the reason it refused the services.
  *
- * **Forked fibers.** `make` runs the build until it finishes, and no further: a
- * fiber the build forks and does not await (a background job, a refresh loop)
- * keeps running on the default scheduler after `make` returns. One forked into
- * the layer's scope (`Effect.forkScoped`) stops on `dispose`.
+ * **Forked fibers.** `make` runs the build until it finishes, and no further. A
+ * fiber the build forks with `Effect.forkChild` is interrupted when the layer
+ * that forks it finishes building. Under `Layer.merge` or `Layer.mergeAll` that
+ * is the merged layer's own build, which can end before the whole `services`
+ * build does, so a fiber that has not started by then never runs. A fiber
+ * forked into the layer's scope (`Effect.forkScoped`, or `Effect.forkIn` with
+ * that scope) keeps running on the default scheduler after `make` returns, and
+ * stops on `dispose`. A fiber forked with `Effect.forkDetach` keeps running
+ * after `make` returns, and `dispose` does not stop it.
  */
 export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
   const addressError = ipRateLimitAddressError(options);
@@ -4796,8 +4802,8 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
       refused = { error: thrown };
     }
     if (refused !== undefined) {
-      // Release what the build acquired, as far as that runs synchronously.
-      // An asynchronous finalizer finishes after make throws.
+      // Release what the build acquired, as far as that runs synchronously. An
+      // asynchronous finalizer finishes after make throws.
       const close = runSynchronously(releaseRefusedServices(servicesScope));
       try {
         close.run();
@@ -4851,9 +4857,13 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  * logged with `Effect.logError`, and the promise rejects with the reason the
  * services were refused.
  *
- * A fiber the build forks and does not await keeps running after the promise
- * resolves. One forked into the layer's scope (`Effect.forkScoped`) stops on
- * `dispose`.
+ * A fiber the build forks with `Effect.forkChild` is interrupted when the layer
+ * that forks it finishes building, and under `Layer.merge` or `Layer.mergeAll`
+ * that can be before the whole `services` build finishes, so a fiber that has
+ * not started by then never runs. One forked into the layer's scope
+ * (`Effect.forkScoped`, or `Effect.forkIn` with that scope) keeps running after
+ * the promise resolves, and stops on `dispose`. One forked with
+ * `Effect.forkDetach` keeps running, and `dispose` does not stop it.
  */
 export const makeAsync = (options: AuthWebHandlerOptions): Promise<AuthWebHandler> =>
   Effect.runPromise(

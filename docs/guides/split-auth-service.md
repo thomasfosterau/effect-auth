@@ -7,13 +7,11 @@ app does not have to.
 
 ## Should you split?
 
-Mounting `Http.make` directly in the app's Worker is simpler and should be the default:
+Mounting `Http.makeAsync` directly in the app's Worker is simpler and should be the default:
 
 ```ts
-const mount = Effect.gen(function* () {
-  const { handler } = yield* Http.make({ prefix: "/api/auth" /* … */ });
-  return handler; // mount it in your framework
-});
+const { handler } = await Http.makeAsync({ services, prefix: "/api/auth" /* … */ });
+// Mount `handler` in your framework.
 ```
 
 One deployment, no transport, no relay, and the session is resolved in-process. Split when

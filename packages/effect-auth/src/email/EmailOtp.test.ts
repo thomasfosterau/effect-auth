@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect } from "effect";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
+import { Context, Crypto, Effect, Tracer } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
@@ -22,13 +22,22 @@ import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 import * as Errors from "../Errors.ts";
-import { observable, zeroCrypto } from "../testing/Passwordless.ts";
+import {
+  observable,
+  type RecordState,
+  runVerifySequence,
+  verifySequences,
+  wrongCode,
+  zeroCrypto,
+} from "../testing/Passwordless.ts";
 
 const users = new Map<string, User>();
 const identifierRecords = new Map<string, Identifier>();
 const otpRecords = new Map<string, EmailOtpRecord>();
 const sessions = new Map<string, Session>();
 const sentOtps: Array<{ email: string; otp: string; purpose: EmailOtpPurpose }> = [];
+/** The name of each `EmailOtpStore` call, in order. */
+const storeOps: string[] = [];
 
 const identifierStore = memoryIdentifierStore(identifierRecords);
 
@@ -114,20 +123,26 @@ const createdWith: Array<EmailOtpCreateUserInput["identifier"]> = [];
 const emailOtpStore = {
   upsert: (record: EmailOtpRecord) =>
     Effect.sync(() => {
+      storeOps.push("upsert");
       otpRecords.set(recordKey(record.email, record.purpose), record);
       return record;
     }),
 
   get: (email: string, purpose: EmailOtpPurpose) =>
-    Effect.sync(() => otpRecords.get(recordKey(email, purpose)) ?? null),
+    Effect.sync(() => {
+      storeOps.push("get");
+      return otpRecords.get(recordKey(email, purpose)) ?? null;
+    }),
 
   delete: (email: string, purpose: EmailOtpPurpose) =>
     Effect.sync(() => {
+      storeOps.push("delete");
       otpRecords.delete(recordKey(email, purpose));
     }),
 
   incrementAttempts: (email: string, purpose: EmailOtpPurpose) =>
     Effect.gen(function* () {
+      storeOps.push("incrementAttempts");
       const record = otpRecords.get(recordKey(email, purpose));
       if (!record) {
         return yield* new Errors.AuthError({
@@ -190,6 +205,7 @@ describe("EmailOtpService", () => {
     otpRecords.clear();
     sessions.clear();
     sentOtps.splice(0, sentOtps.length);
+    storeOps.length = 0;
     createdWith.length = 0;
   });
 
@@ -402,7 +418,7 @@ describe("EmailOtpService", () => {
     expect(sessions.size).toBe(1);
   });
 
-  it("should not send sign-in OTPs to unknown emails when sign-up is disabled", async () => {
+  it("should not send sign-in OTPs to unknown emails when sign-up is disabled, storing a marker", async () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
@@ -413,13 +429,14 @@ describe("EmailOtpService", () => {
       yield* service.send("stranger@example.com", "sign-in");
     });
 
-    // Anti-enumeration: succeeds silently.
+    // Anti-enumeration: succeeds without sending, and stores an undelivered
+    // marker record as it would a code (#417).
     await Effect.runPromise(
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(sentOtps.length).toBe(0);
-    expect(otpRecords.size).toBe(0);
+    expect(otpRecords.get("stranger@example.com:sign-in")?.attempts).toBe(0);
   });
 
   it("should not create users at sign-in when sign-up is disabled", async () => {
@@ -476,11 +493,13 @@ describe("EmailOtpService", () => {
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
-    // Anti-enumeration: both calls succeed, only the existing user gets a code.
+    // Anti-enumeration: both calls succeed, only the existing user gets a code,
+    // and the missing email holds an undelivered marker record (#417).
     expect(sentOtps.length).toBe(1);
     expect(sentOtps[0]?.email).toBe("member@example.com");
     expect(sentOtps[0]?.purpose).toBe("forget-password");
-    expect(otpRecords.size).toBe(1);
+    expect(otpRecords.size).toBe(2);
+    expect(otpRecords.has("missing@example.com:forget-password")).toBe(true);
   });
 
   it("should verify email-verification OTPs via check without creating a session", async () => {
@@ -723,4 +742,249 @@ describe("EmailOtpService", () => {
       expect(createdWith).toEqual([]);
     },
   );
+});
+
+// #417: where `send` hides whether the email has an account, verification must
+// answer an email that holds an outstanding code exactly as it answers one
+// that holds a marker record or nothing at all: through wrong codes, the
+// attempt limit and expiry.
+describe("EmailOtpService verification where send hides the account (#417)", () => {
+  const maxAttempts = 3;
+  const expiresIn = 5 * 60 * 1000;
+  const hidden = [
+    { purpose: "sign-in", disableSignUp: true },
+    { purpose: "forget-password", disableSignUp: false },
+  ] as const;
+  const invalid = { _tag: "Failure", error: "EmailOtpError", message: "Invalid or expired OTP" };
+
+  beforeEach(() => {
+    users.clear();
+    identifierRecords.clear();
+    otpRecords.clear();
+    sessions.clear();
+    sentOtps.splice(0, sentOtps.length);
+    storeOps.length = 0;
+    createdWith.length = 0;
+    addUser({ id: "user-member", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addEmailIdentifier("user-member", "member@example.com", true);
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const recordOf = (email: string, purpose: EmailOtpPurpose) => (): RecordState | null => {
+    const record = otpRecords.get(recordKey(email, purpose));
+    return record === undefined
+      ? null
+      : { attempts: record.attempts, lifetime: record.expiresAt - record.createdAt };
+  };
+
+  /** Run `sequence` for `email`, requesting a code first when `send` is set. */
+  const run = (
+    config: { readonly purpose: EmailOtpPurpose; readonly disableSignUp: boolean },
+    sequence: (typeof verifySequences)[number],
+    email: string,
+    send: boolean,
+  ) =>
+    Effect.gen(function* () {
+      const service = yield* EmailOtp.make({
+        maxAttempts,
+        expiresIn,
+        disableSignUp: config.disableSignUp,
+        sendVerificationOtp: recordingSend,
+      });
+      return yield* runVerifySequence(sequence, {
+        maxAttempts,
+        expiresIn,
+        send: send ? service.send(email, config.purpose) : undefined,
+        verify:
+          config.purpose === "sign-in"
+            ? service.signIn(email, wrongCode)
+            : service.check(email, wrongCode, config.purpose),
+        record: recordOf(email, config.purpose),
+      });
+    });
+
+  const runPromise = <A, E>(
+    program: Effect.Effect<
+      A,
+      E,
+      | EmailOtpStore
+      | EmailOtpUserStore
+      | IdentifierStore
+      | UserStore
+      | SessionService
+      | Crypto.Crypto
+    >,
+  ) =>
+    makeTestContext().then((context) =>
+      Effect.runPromise(Effect.provide(program, context).pipe(Effect.provide(Hooks.Default))),
+    );
+
+  it.each(hidden.flatMap((config) => verifySequences.map((sequence) => ({ ...config, sequence }))))(
+    "answers $sequence alike for every email ($purpose, disableSignUp: $disableSignUp)",
+    async ({ purpose, disableSignUp, sequence }) => {
+      const config = { purpose, disableSignUp };
+      const { known, unknown, unrequested } = await runPromise(
+        Effect.gen(function* () {
+          return {
+            known: yield* run(config, sequence, "member@example.com", true),
+            unknown: yield* run(config, sequence, "missing@example.com", true),
+            unrequested: yield* run(config, sequence, "absent@example.com", false),
+          };
+        }),
+      );
+
+      // The unknown email's marker record is counted and expired exactly as
+      // the account holder's code record, and every answer matches.
+      expect(unknown).toEqual(known);
+      const lifetime = expiresIn;
+      expect(known.map((step) => step.record)).toEqual(
+        sequence === "wrong codes"
+          ? [
+              { attempts: 0, lifetime },
+              { attempts: 1, lifetime },
+              { attempts: 2, lifetime },
+              null,
+              null,
+            ]
+          : [{ attempts: 0, lifetime }, null, null],
+      );
+      // An email holding no record at all answers the same.
+      expect(unrequested.map((step) => step.answer)).toEqual(known.map((step) => step.answer));
+      expect(known.slice(1).map((step) => step.answer)).toEqual(known.slice(1).map(() => invalid));
+      expect(sentOtps.map((sent) => sent.email)).toEqual(["member@example.com"]);
+    },
+  );
+
+  it.each([
+    { purpose: "sign-in", disableSignUp: false },
+    { purpose: "email-verification", disableSignUp: true },
+  ] as const)(
+    "keeps the expiry and attempt-limit answers where the account isn't hidden ($purpose, disableSignUp: $disableSignUp)",
+    async ({ purpose, disableSignUp }) => {
+      const config = { purpose, disableSignUp };
+      const { wrong, expired } = await runPromise(
+        Effect.gen(function* () {
+          return {
+            wrong: yield* run(config, "wrong codes", "member@example.com", true),
+            expired: yield* run(config, "expired code", "member@example.com", true),
+          };
+        }),
+      );
+
+      const answer = (message: string) => ({ _tag: "Failure", error: "EmailOtpError", message });
+      expect(wrong.slice(1).map((step) => step.answer)).toEqual([
+        invalid,
+        invalid,
+        answer("Too many attempts"),
+        invalid,
+      ]);
+      expect(expired.slice(1).map((step) => step.answer)).toEqual([
+        answer("OTP has expired"),
+        invalid,
+      ]);
+    },
+  );
+
+  it.each(hidden)(
+    "does the same store work to send to a known and an unknown email without a cooldown ($purpose)",
+    async ({ purpose, disableSignUp }) => {
+      const { knownOps, unknownOps } = await runPromise(
+        Effect.gen(function* () {
+          const service = yield* EmailOtp.make({
+            disableSignUp,
+            sendVerificationOtp: recordingSend,
+          });
+          yield* service.send("member@example.com", purpose);
+          const knownOps = storeOps.splice(0);
+          yield* service.send("missing@example.com", purpose);
+          return { knownOps, unknownOps: storeOps.splice(0) };
+        }),
+      );
+
+      expect(unknownOps).toEqual(knownOps);
+      expect(knownOps).toEqual(["upsert"]);
+      expect(recordOf("missing@example.com", purpose)()).toEqual(
+        recordOf("member@example.com", purpose)(),
+      );
+    },
+  );
+
+  it.each(hidden)(
+    "answers the generic message for a known email whose record has used every attempt ($purpose, disableSignUp: $disableSignUp)",
+    async ({ purpose, disableSignUp }) => {
+      // Seed the defensive branch: a record that reached `maxAttempts` without
+      // being deleted. Even the correct code must answer the generic message.
+      const { answer, record } = await runPromise(
+        Effect.gen(function* () {
+          const service = yield* EmailOtp.make({
+            maxAttempts,
+            expiresIn,
+            disableSignUp,
+            sendVerificationOtp: recordingSend,
+          });
+          yield* service.send("member@example.com", purpose);
+          const stored = otpRecords.get(recordKey("member@example.com", purpose))!;
+          otpRecords.set(recordKey("member@example.com", purpose), {
+            ...stored,
+            attempts: maxAttempts,
+          });
+          const otp = sentOtps[0]!.otp;
+          const result =
+            purpose === "sign-in"
+              ? yield* Effect.result(service.signIn("member@example.com", otp))
+              : yield* Effect.result(service.check("member@example.com", otp, purpose));
+          return {
+            answer: observable(result),
+            record: recordOf("member@example.com", purpose)(),
+          };
+        }),
+      );
+
+      expect(answer).toEqual(invalid);
+      expect(record).toBeNull();
+    },
+  );
+
+  it("records the real reason on the signIn span while answering the generic message", async () => {
+    // The span keeps the reason operators need; the caller sees only the
+    // generic message. Capture the spans the service creates.
+    const spans: Tracer.NativeSpan[] = [];
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options);
+        spans.push(span);
+        return span;
+      },
+    });
+
+    const answers = await runPromise(
+      Effect.gen(function* () {
+        const service = yield* EmailOtp.make({
+          maxAttempts,
+          expiresIn,
+          disableSignUp: true,
+          sendVerificationOtp: recordingSend,
+        });
+        yield* service.send("member@example.com", "sign-in");
+        const seen: unknown[] = [];
+        // Wrong codes past the limit, then one more against the deleted record.
+        for (let i = 0; i < maxAttempts + 1; i++) {
+          seen.push(
+            observable(yield* Effect.result(service.signIn("member@example.com", wrongCode))),
+          );
+        }
+        return seen;
+      }).pipe(Effect.provideService(Tracer.Tracer, tracer)),
+    );
+
+    expect(answers).toEqual(Array.from({ length: maxAttempts + 1 }, () => invalid));
+    const reasons = spans
+      .filter((span) => span.name === "EmailOtpService.signIn")
+      .map((span) => span.attributes.get("auth.otp.failure"));
+    expect(reasons).toEqual(["mismatch", "mismatch", "attempts", "missing"]);
+  });
 });

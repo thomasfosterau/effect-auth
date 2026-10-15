@@ -99,8 +99,8 @@ export interface MagicLinkConfig {
    * 60_000 for SMS-style flows. Complements the global RateLimit. It applies
    * to every email alike, whether or not it has an account, so the error
    * reveals nothing about which emails are registered. With sign-up disabled,
-   * a request for an email with no account stores an undelivered cooldown
-   * marker, so if that email gains an account within the window, its first
+   * a request for an email with no account stores an undelivered marker
+   * token, so if that email gains an account within the window, its first
    * send is delayed by up to the cooldown.
    */
   readonly resendCooldown?: number;
@@ -137,14 +137,16 @@ export class MagicLinkService extends Context.Service<
      *
      * Anti-enumeration: when sign-up is enabled the link is always sent (the
      * user is created at verification time); when sign-up is disabled and no
-     * user exists this succeeds silently without sending anything.
+     * user exists this succeeds without sending anything. It still replaces
+     * the email's outstanding tokens with a marker token that is never sent,
+     * so a known and an unknown email get the same store work.
      *
      * When `resendCooldown` is configured and an outstanding token for the email
      * was created within the cooldown window, fails with
      * {@link Errors.ResendTooSoonError} containing the remaining wait time.
-     * The cooldown applies to an email with no account as well: with sign-up
-     * disabled, such a request stores a token that is never sent, so a repeat
-     * within the window fails the same way for a known and an unknown email.
+     * The marker token makes the cooldown apply to an email with no account
+     * as well, so a repeat within the window fails the same way for a known
+     * and an unknown email.
      */
     readonly send: (
       email: string,
@@ -217,12 +219,6 @@ export const make = (
           ? (yield* identifiers.getByValue("email", email)) !== null
           : true;
 
-        // Without a resend cooldown there is nothing for a later request to
-        // see, so an unknown address stores nothing.
-        if (!deliver && config.resendCooldown === undefined) {
-          return;
-        }
-
         // Resend cooldown: reject if an outstanding token was created within
         // the configured window. It runs for an address with no account too,
         // whose earlier request stored an undelivered token below, so a known
@@ -254,8 +250,10 @@ export const make = (
 
         yield* store.create(magicLink);
 
-        // An address with no account keeps the token only as its cooldown
-        // marker. Nobody receives the raw token, so it can never be verified.
+        // An address with no account keeps the token only as a marker,
+        // written whether or not a cooldown is set so both branches do the
+        // same store work. Nobody receives the raw token, so it can never be
+        // verified.
         if (!deliver) {
           return;
         }
