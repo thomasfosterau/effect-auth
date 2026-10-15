@@ -136,8 +136,10 @@ export class SmsSender extends Context.Service<
  * Dispatch a send on its own detached fiber instead of awaiting it inline.
  *
  * Every delivery flow (verification email, magic link, OTP, ...) sends on
- * only one of its branches — e.g. sign-up's fresh-registration branch mails
- * a token, its duplicate-registration branch does not. Awaiting the vendor
+ * only one of its branches, or sends a different message on each. E.g.
+ * sign-up's fresh-registration branch mails a verification link, while its
+ * duplicate-registration branch mails the optional existing-account notice
+ * (and nothing when that is unset). Awaiting the vendor
  * round-trip inline before answering the caller makes that difference in
  * work itself a timing oracle, exactly the asymmetry `EmailPasswordConfig`'s
  * `antiEnumeration` mode closes at the response-body level. `forkDetach`

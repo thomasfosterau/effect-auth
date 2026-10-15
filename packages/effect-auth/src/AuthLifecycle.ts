@@ -21,6 +21,13 @@ import type * as Types from "./Types.ts";
 
 /**
  * Configuration for {@link AuthLifecycleService}.
+ *
+ * The stand-in check that picks the existing-account notice over the
+ * verification send (`answeredByStandIn`, in `email/EmailPassword.ts`) assumes
+ * read-your-writes: the identifier store must show a fresh sign-up's
+ * just-claimed address, or, if it lags, the user store must show the fresh
+ * user. A store that lags on both can send a fresh sign-up the notice instead
+ * of its verification link.
  */
 export interface AuthLifecycleConfig {
   readonly requireEmailVerification?: boolean;
@@ -44,10 +51,24 @@ export interface AuthLifecycleConfig {
    * two answers makes one send. A failed notice fails the sign-up with the
    * same `EmailVerificationError` a failed verification send does.
    *
-   * Unset, such a sign-up sends nothing. A `sendEmail` that awaits its
-   * vendor's round-trip then makes a fresh sign-up slower than one for a held
-   * address by that round-trip; the callbacks `emailCallbacks` derives send
-   * off the response path, so they add no such difference.
+   * Pair the notice with the verification send on one transport, ideally both
+   * derived from `emailCallbacks`. Those sends go through the same detached
+   * dispatch, so neither puts a vendor round-trip on the response path, and a
+   * failed send is logged and counted rather than answered. Hand-written
+   * callbacks that await their vendor put one round-trip on each answer's
+   * response path.
+   *
+   * Unset, such a sign-up sends nothing. With the notice unset and an inline
+   * `sendEmail`, a vendor outage answers `500` for a fresh sign-up (its
+   * verification send fails) and `200` for a held address (nothing is sent).
+   * Likewise, a notice that fails where the verification send does not (for
+   * example a renderer with no `"existing-account"` case) answers `500` for
+   * held addresses only. When the notice is set, each answer makes one send,
+   * so an awaited `sendEmail` costs both answers one round-trip each.
+   *
+   * `beforeCreateVerification` and `afterCreateVerification`, and anything
+   * they enforce (throttling, captcha, bans), apply only to the fresh branch's
+   * verification send. The notice is sent without them.
    */
   readonly sendExistingAccountNotice?:
     | ((email: string) => Effect.Effect<void, Errors.AuthError | Errors.EmailVerificationError>)

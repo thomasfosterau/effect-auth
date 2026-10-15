@@ -110,9 +110,12 @@ export interface EmailPasswordConfig {
    * look alike.
    *
    * What still differs: the time a response takes (a fresh sign-up also
-   * creates the user, claims the address and stores the hash), the
-   * `afterSignUp` hooks (they run for a fresh sign-up only), and anything a
-   * later request observes. Signing in with the submitted password succeeds
+   * creates the user, claims the address and stores the hash), what a fresh
+   * sign-up also does when email verification is on (it stores a
+   * verification record, runs the `beforeCreateVerification` and
+   * `afterCreateVerification` hooks, and sends the verification email; see
+   * below), the `afterSignUp` hooks (they run for a fresh sign-up only), and
+   * anything a later request observes. Signing in with the submitted password succeeds
    * only for a fresh sign-up, and a username sign-up's username is claimed
    * only for a fresh sign-up (see `UsernameService.signUp`).
    *
