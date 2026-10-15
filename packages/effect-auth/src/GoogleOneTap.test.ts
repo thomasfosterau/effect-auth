@@ -17,7 +17,7 @@ import { PasswordResetService } from "./password/PasswordReset.ts";
 import { type AuthServices } from "./http/HttpServer.ts";
 import * as HttpServer from "./http/HttpServer.ts";
 import { IdentifierStore, memoryIdentifierStore, type Identifier } from "./Identifier.ts";
-import { OAuthUserStore } from "./oauth/OAuth.ts";
+import { type OAuthCreateUserInput, OAuthUserStore } from "./oauth/OAuth.ts";
 import { GoogleOneTapError, GoogleOneTapService, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 import * as GoogleOneTap from "./GoogleOneTap.ts";
 import type * as Types from "./Types.ts";
@@ -99,6 +99,8 @@ const makeStores = () => {
   const identifierRecords = new Map<string, Identifier>();
   const identifiers = memoryIdentifierStore(identifierRecords);
   let userSeq = 0;
+  /** The `identifier` each `createUser` call was given. */
+  const createdWith: Array<OAuthCreateUserInput["identifier"]> = [];
 
   const userStore: typeof OAuthUserStore.Service = {
     getUser: (userId) => {
@@ -107,6 +109,7 @@ const makeStores = () => {
     },
     createUser: (input) =>
       Effect.sync(() => {
+        createdWith.push(input.identifier);
         const now = new Date();
         const user: Types.User = {
           id: `u${++userSeq}`,
@@ -152,14 +155,14 @@ const makeStores = () => {
     Hooks.Default,
     PlatformCrypto.layer,
   );
-  return { layer, users, identifiers, nonceStore };
+  return { layer, users, identifiers, createdWith, nonceStore };
 };
 
 describe("GoogleOneTapService", () => {
   const config = { clientId: CLIENT_ID, jwksEndpoint: JWKS_ENDPOINT };
 
   it("verifies a credential and provisions the user once", async () => {
-    const { layer, users, identifiers, nonceStore } = makeStores();
+    const { layer, users, identifiers, createdWith, nonceStore } = makeStores();
     const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
 
     const nonce1 = "test-nonce-1";
@@ -193,6 +196,10 @@ describe("GoogleOneTapService", () => {
     );
     expect(emailIdentifier?.userId).toBe(first.user.id);
     expect(emailIdentifier?.verified).toBe(true);
+    // The store was handed the address to create the user with (#380).
+    expect(createdWith).toEqual([
+      { type: "email", value: "alice@gmail.test", verified: true, verifiedAt: expect.any(Date) },
+    ]);
     expect(first.user.name).toBe("Alice");
     expect(first.session.userId).toBe(first.user.id);
     expect(first.claims["sub"]).toBe("google-user-1");

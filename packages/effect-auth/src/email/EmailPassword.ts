@@ -1,29 +1,29 @@
 import { Context, Effect, Layer, Option } from "effect";
 import * as Errors from "../Errors.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
-import {
-  claimIdentifier,
-  IdentifierStore,
-  makeIdentifier,
-  resolveUserByIdentifier,
-  type IdentifierType,
-} from "../Identifier.ts";
+import { IdentifierStore, resolveUserByIdentifier, type IdentifierType } from "../Identifier.ts";
 import { MultiAlgorithmVerifier, PasswordHasher } from "../password/Password.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 import { SessionService } from "../SessionService.ts";
-import { UserStore } from "../UserStore.ts";
+import { createUserWithIdentifier, type NewUserIdentifier, UserStore } from "../UserStore.ts";
 import * as Obs from "../Observability.ts";
 
 /**
- * Profile fields for a new user record. The login handle (email/username/
- * phone) is NOT part of this input — services record it as an `Identifier`
- * after the user row exists.
+ * Fields for a new user record. Services record the login handle as an
+ * `Identifier` after the user row exists; `identifier` carries it to the store
+ * as well, for a store that keeps it on the user row.
  */
 export interface CreateUserInput {
   readonly name?: string;
   readonly image?: string;
   readonly attributes?: Record<string, unknown>;
+  /**
+   * The login handle the user is created with: a store that keeps it on the
+   * user row writes it there on insert, and any other store ignores it (see
+   * {@link NewUserIdentifier}).
+   */
+  readonly identifier?: NewUserIdentifier | undefined;
 }
 
 /**
@@ -336,18 +336,21 @@ export const make = (
             };
           }
 
-          const user = yield* store.createUser({
-            ...(input.name !== undefined && { name: input.name }),
-            ...(input.attributes !== undefined && { attributes: input.attributes }),
-          });
-
           // The identifier's unique (type, value) index is the real claim; a
-          // lost race surfaces as EmailInUseError. The just-created user row
-          // is then orphaned (no identifiers, no password) — harmless but
-          // worth a periodic sweep in high-contention deployments.
-          const emailIdentifier = yield* claimIdentifier(
+          // lost race surfaces as EmailInUseError. When the claim loses it, the
+          // just-created user row is orphaned (no identifiers, no password) —
+          // harmless but worth a periodic sweep in high-contention deployments.
+          // A store that writes the address into the user row loses the race
+          // at the insert instead, and no row is left.
+          const { user, identifier: emailIdentifier } = yield* createUserWithIdentifier(
             identifiers,
-            makeIdentifier({ userId: user.id, type: "email", value: email }),
+            { type: "email", value: email, verified: false },
+            (identifier) =>
+              store.createUser({
+                ...(input.name !== undefined && { name: input.name }),
+                ...(input.attributes !== undefined && { attributes: input.attributes }),
+                identifier,
+              }),
           ).pipe(
             Effect.catchTag("IdentifierTakenError", () =>
               Effect.fail(

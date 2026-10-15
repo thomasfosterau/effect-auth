@@ -94,6 +94,7 @@ const findEmailIdentifier = (email: string): Identifier | null =>
 const emailOtpUserStore = {
   createUser: (input: EmailOtpCreateUserInput) =>
     Effect.sync(() => {
+      createdWith.push(input.identifier);
       const user: User = {
         id: `user-${users.size + 1}`,
         ...(input.name !== undefined && { name: input.name }),
@@ -105,6 +106,9 @@ const emailOtpUserStore = {
       return user;
     }),
 };
+
+/** The `identifier` each `createUser` call was given. */
+const createdWith: Array<EmailOtpCreateUserInput["identifier"]> = [];
 
 const emailOtpStore = {
   upsert: (record: EmailOtpRecord) =>
@@ -185,6 +189,7 @@ describe("EmailOtpService", () => {
     otpRecords.clear();
     sessions.clear();
     sentOtps.splice(0, sentOtps.length);
+    createdWith.length = 0;
   });
 
   it("should send a numeric OTP and store only its hash", async () => {
@@ -255,6 +260,10 @@ describe("EmailOtpService", () => {
     const identifier = findEmailIdentifier("fresh@example.com");
     expect(identifier?.userId).toBe(result.user.id);
     expect(identifier?.verified).toBe(true);
+    // The store was handed the address to create the user with (#380).
+    expect(createdWith).toEqual([
+      { type: "email", value: "fresh@example.com", verified: true, verifiedAt: expect.any(Date) },
+    ]);
     expect(result.session.userId).toBe(result.user.id);
     expect(result.session.attributes).toEqual({ device: "test" });
     expect(sessions.size).toBe(1);

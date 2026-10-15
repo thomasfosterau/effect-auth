@@ -10,8 +10,8 @@
  */
 import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
-import { claimIdentifier, IdentifierStore, makeIdentifier } from "../Identifier.ts";
-import { UserStore } from "../UserStore.ts";
+import { IdentifierStore } from "../Identifier.ts";
+import { createUserWithIdentifier, type NewUserIdentifier, UserStore } from "../UserStore.ts";
 import type { HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService } from "../SessionService.ts";
@@ -48,11 +48,18 @@ export interface EmailOtpRecord {
  * Input for creating a user during email OTP sign-in
  */
 /**
- * Profile fields for a user created during OTP sign-in. The email itself is
- * recorded as a verified `Identifier` by the service.
+ * Fields for a user created during OTP sign-in. The email itself is recorded as
+ * a verified `Identifier` by the service, and `identifier` carries it to the
+ * store as well.
  */
 export interface EmailOtpCreateUserInput {
   readonly name?: string;
+  /**
+   * The login handle the user is created with: a store that keeps it on the
+   * user row writes it there on insert, and any other store ignores it (see
+   * {@link NewUserIdentifier}).
+   */
+  readonly identifier?: NewUserIdentifier | undefined;
 }
 
 /**
@@ -378,21 +385,16 @@ export const make = (
           }
 
           // A verified OTP proves ownership of the email.
-          user = yield* userStore.createUser({});
-          yield* claimIdentifier(
+          const created = yield* createUserWithIdentifier(
             identifiers,
-            makeIdentifier({
-              userId: user.id,
-              type: "email",
-              value: email,
-              verified: true,
-              verifiedAt: new Date(),
-            }),
+            { type: "email", value: email, verified: true, verifiedAt: new Date() },
+            (identifier) => userStore.createUser({ identifier }),
           ).pipe(
             Effect.catchTag("IdentifierTakenError", () =>
               Effect.fail(new EmailOtpError({ message: "This email is already in use" })),
             ),
           );
+          user = created.user;
         } else if (identifier !== null && !identifier.verified) {
           // The OTP proves ownership — promote the identifier to verified.
           yield* identifiers.setVerified(identifier.id, new Date());

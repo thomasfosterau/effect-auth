@@ -35,7 +35,7 @@ import {
   type ScimConnection,
 } from "./Scim.ts";
 import { SessionService } from "./SessionService.ts";
-import { UserStore } from "./UserStore.ts";
+import { type NewUserIdentifier, UserStore } from "./UserStore.ts";
 import { UserService, UserServiceStore } from "./User.ts";
 import type * as Types from "./Types.ts";
 
@@ -61,10 +61,13 @@ const makeStores = () => {
   const sessions = new Map<string, Types.Session>();
   let userSeq = 0;
   let teamSeq = 0;
+  /** The `identifier` each `create` call was given. */
+  const createdWith: Array<NewUserIdentifier | undefined> = [];
 
   const userStore: typeof ScimUserStore.Service = {
     create: (input) =>
       Effect.sync(() => {
+        createdWith.push(input.identifier);
         const now = new Date();
         const user: Types.User = {
           id: `u${++userSeq}`,
@@ -257,6 +260,7 @@ const makeStores = () => {
   return {
     layer,
     usersById,
+    createdWith,
     organizations,
     seedOrganization,
     identifiers,
@@ -373,6 +377,11 @@ describe("ScimService — users", () => {
       "ada@acme.test",
     ]);
     expect(resource.emails.filter((e) => e.primary === true)).toHaveLength(1);
+    // The store was handed the userName, and only it, to create the user
+    // with (#380); the extra address is claimed afterwards.
+    expect(fx.createdWith).toEqual([
+      { type: "email", value: "ada@acme.test", verified: true, verifiedAt: expect.any(Date) },
+    ]);
   });
 
   it("reports a taken address as a 409 uniqueness conflict, creating nothing", async () => {

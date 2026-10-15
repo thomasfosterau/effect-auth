@@ -400,8 +400,11 @@ part of `Drizzle.layer()`, so choosing it is an explicit provide.
   when you call `defineUsers`. See [Nullable or NOT NULL](#nullable-or-not-null-email).
 - **`email_verified` is a non-null boolean.**
 - **`email_verified_at`, if you map it, is a nullable timestamp.**
-- **The user row exists before its address is claimed.** The store never inserts
-  a user; your user writer does.
+- **Your user writer inserts the row.** The store never inserts a user. Core
+  passes the address a user signs up with to your `createUser` as
+  `input.identifier`; write it into the row on insert (see
+  [Sign-up](#sign-up-the-address-at-creation)), or, on a nullable column, leave
+  it out and the claim that follows writes it.
 
 Nothing else on the row is written, including `updated_at`.
 
@@ -425,16 +428,60 @@ option:
     deletes all of a user's identifiers. It relies on your user writer
     hard-deleting the row. A soft-delete writer, one that keeps the row and marks
     it deleted, leaves the address claimed, so no one else can register it.
+  - Sign-up works when your user writer inserts the row with the address core
+    passes it (see [Sign-up](#sign-up-the-address-at-creation)). A writer that
+    leaves the address out cannot insert the row: the database refuses it, and
+    sign-up fails with an `AuthError`.
   - Email change works: core's confirmation goes through `replace`, which
     rewrites the address in one `UPDATE` and never writes `NULL`.
   - A user whose row holds an address cannot be given a second one, which is
     the same refusal as on a nullable column.
 
-  Core sign-up does not suit a `NOT NULL` column. It creates the user row first
-  and claims the address afterwards, and the row cannot be inserted without an
-  address. A `NOT NULL` schema fits an application whose own writer creates the
-  row with its address, and which uses the store for lookups, verification and
-  sign-in.
+  Every user row holds an address, so a flow that creates a user without one
+  (anonymous sign-in, phone OTP sign-up) cannot run on a `NOT NULL` column.
+
+### Sign-up: the address at creation
+
+Core flows that create a user for a known address (email and password sign-up,
+magic link, email OTP, OAuth, SSO and Google One Tap first sign-in, SCIM and
+admin creation) pass it to the store's `createUser` as `input.identifier`: its
+`type`, normalised `value`, `verified` flag and, when verified, `verifiedAt`.
+Your writer puts it on the row it inserts, and the claim that follows finds the
+address already there and writes nothing more:
+
+```ts
+import { Effect } from "effect";
+import * as Auth from "@thomasfosterau/effect-auth";
+
+const emailPasswordStore: typeof Auth.Email.EmailPasswordStore.Service = {
+  createUser: (input) =>
+    Effect.tryPromise({
+      try: async () => {
+        const id = crypto.randomUUID();
+        const now = new Date();
+        await db.insert(appUsers).values({
+          userId: id,
+          name: input.name ?? null,
+          // The address the user signs up with; NOT NULL needs it here.
+          email: input.identifier?.type === "email" ? input.identifier.value : null,
+          emailVerified: input.identifier?.verified ?? false,
+          createdAt: now,
+          updatedAt: now,
+        });
+        return { id, createdAt: now, updatedAt: now, attributes: {} };
+      },
+      catch: (cause) => new Auth.AuthError({ message: "insert into users failed", cause }),
+    }),
+  // getPasswordHash, setPasswordHash: your password column.
+};
+```
+
+The users table's unique index decides a race between two sign-ups for one
+address: the losing insert fails, and core reports it as the address being in
+use (`EmailInUseError` for email and password sign-up), as it does when the
+claim loses on a store with an identifiers table. If the writer stores the
+address but not its `verified` flag, the claim marks the row verified when the
+flow asked for a verified address.
 
 ### `verifiedAt`: mapped or not
 

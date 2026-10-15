@@ -22,7 +22,7 @@ import {
 import { PasswordHasher } from "./password/Password.ts";
 import { make, SessionService } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
-import { UserStore } from "./UserStore.ts";
+import { type NewUserIdentifier, UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type { Session, SessionConfig, User } from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
@@ -31,6 +31,8 @@ const users = new Map<string, User>();
 const sessions = new Map<string, Session>();
 const identifiers = new Map<string, Identifier>();
 const passwordHashes = new Map<string, string>();
+/** The `identifier` each `createUser` call was given. */
+const createdWith: Array<NewUserIdentifier | undefined> = [];
 
 const sessionStore = {
   create: (session: Session) =>
@@ -106,8 +108,14 @@ const adminUserStore = {
       return { users: matching.slice(offset, offset + limit), total: matching.length };
     }),
 
-  createUser: (input: { name?: string; image?: string; attributes?: Record<string, unknown> }) =>
+  createUser: (input: {
+    name?: string;
+    image?: string;
+    attributes?: Record<string, unknown>;
+    identifier?: NewUserIdentifier | undefined;
+  }) =>
     Effect.sync(() => {
+      createdWith.push(input.identifier);
       const id = `user-${users.size + 1}`;
       const user: User = {
         id,
@@ -217,6 +225,7 @@ describe("AdminService", () => {
     sessions.clear();
     identifiers.clear();
     passwordHashes.clear();
+    createdWith.length = 0;
   });
 
   it("rejects non-admin actors on every method", async () => {
@@ -569,6 +578,12 @@ describe("AdminService", () => {
     expect(emailIdent?.verified).toBe(true);
     expect(usernameIdent?.value).toBe("bobthemod");
     expect(usernameIdent?.verified).toBe(false);
+
+    // The store was handed each primary address to create the user with (#380).
+    expect(createdWith).toEqual([
+      { type: "email", value: "alice@example.com", verified: false },
+      { type: "email", value: "bob@example.com", verified: true, verifiedAt: expect.any(Date) },
+    ]);
   });
 
   it("createUser: rejects an email already claimed by another user", async () => {

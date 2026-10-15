@@ -16,7 +16,7 @@
 import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
-import { UserStore } from "./UserStore.ts";
+import { createUserWithIdentifier, type NewUserIdentifier, UserStore } from "./UserStore.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
@@ -66,11 +66,18 @@ export class PhoneOtpStore extends Context.Service<
 >()("@effect-auth/PhoneOtpStore") {}
 
 /**
- * Profile fields for a user created during phone OTP sign-in. The phone number
- * itself is recorded as a verified `phone` `Identifier` by the service.
+ * Fields for a user created during phone OTP sign-in. The phone number itself
+ * is recorded as a verified `phone` `Identifier` by the service, and
+ * `identifier` carries it to the store as well.
  */
 export interface PhoneOtpCreateUserInput {
   readonly name?: string;
+  /**
+   * The login handle the user is created with: a store that keeps it on the
+   * user row writes it there on insert, and any other store ignores it (see
+   * {@link NewUserIdentifier}).
+   */
+  readonly identifier?: NewUserIdentifier | undefined;
 }
 
 /** User creation seam for phone-OTP sign-up. */
@@ -338,21 +345,16 @@ export const make = (
             return yield* new PhoneOtpError({ message: "Sign-up is disabled" });
           }
           // A verified OTP proves ownership of the phone number.
-          user = yield* userStore.createUser({});
-          yield* claimIdentifier(
+          const created = yield* createUserWithIdentifier(
             identifiers,
-            makeIdentifier({
-              userId: user.id,
-              type: "phone",
-              value: phoneNumber,
-              verified: true,
-              verifiedAt: new Date(),
-            }),
+            { type: "phone", value: phoneNumber, verified: true, verifiedAt: new Date() },
+            (identifier) => userStore.createUser({ identifier }),
           ).pipe(
             Effect.catchTag("IdentifierTakenError", () =>
               Effect.fail(new PhoneOtpError({ message: "This phone number is already in use" })),
             ),
           );
+          user = created.user;
         } else if (identifier !== null && !identifier.verified) {
           // The OTP proves ownership — promote the identifier to verified.
           yield* identifiers.setVerified(identifier.id, new Date());
