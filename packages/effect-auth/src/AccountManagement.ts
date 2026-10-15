@@ -26,6 +26,7 @@ import {
   IdentifierStore,
   makeIdentifier,
   replaceIdentifier,
+  type Identifier,
 } from "./Identifier.ts";
 
 /** Which flow a pending token belongs to. */
@@ -87,7 +88,10 @@ export interface AccountManagementConfig {
     readonly email: string | null;
     readonly token: string;
   }) => Effect.Effect<void, Errors.AuthError>;
-  /** Optional notice to the OLD address once an email change is confirmed. */
+  /**
+   * Optional notice to the OLD address once an email change is confirmed. A
+   * confirmation submitted twice concurrently may send this notice twice.
+   */
   readonly notifyEmailChanged?: (params: {
     readonly user: Types.User;
     readonly oldEmail: string | null;
@@ -144,7 +148,9 @@ export class AccountManagementService extends Context.Service<
      * the confirmation succeeds if the user now holds the new address (a
      * concurrent confirmation of the same change, such as a double submit, made
      * it first) and consumes the token; otherwise it fails with
-     * `AccountTokenError` and the token is not consumed.
+     * `AccountTokenError` and the token is not consumed. A user with no email
+     * whose claim finds the address already theirs converges the same way.
+     * Either way the new address ends verified.
      *
      * Every identifier store supports it, including one that holds a single
      * email per user (the single-table store in
@@ -280,6 +286,8 @@ export const make = (
         // failed, leaves the user's previous address in place and verified.
         let replaced: string | null = null;
         let held = currentIdentifiers;
+        // The identifier holding the confirmed address once this user has it.
+        let confirmed: Identifier;
         if (clash === null) {
           const next = makeIdentifier({
             userId: user.id,
@@ -288,15 +296,25 @@ export const make = (
             verified: true,
             verifiedAt: new Date(),
           });
-          const converged = yield* (
+          const outcome = yield* (
             current === null
               ? claimIdentifier(identifiers, next)
               : replaceIdentifier(identifiers, current, next)
           ).pipe(
-            Effect.as(null),
+            Effect.map((identifier) => ({ identifier, converged: null })),
             Effect.catchTags({
+              // Another account holds the address. Or, for a user with no
+              // email, a concurrent confirmation (a double submit) claimed it
+              // for this user first: finish that change as this request's own.
               IdentifierTakenError: () =>
-                Effect.fail(new AccountTokenError({ message: "Email already in use" })),
+                Effect.gen(function* () {
+                  const found =
+                    current === null ? yield* identifiers.getByValue("email", newEmail) : null;
+                  if (found !== null && found.userId === user.id) {
+                    return { identifier: found, converged: currentIdentifiers };
+                  }
+                  return yield* new AccountTokenError({ message: "Email already in use" });
+                }),
               // The email of record changed between the read and the replace.
               // When the user now holds the confirmed address, a concurrent
               // confirmation (a double submit) made this change first: finish it
@@ -305,18 +323,33 @@ export const make = (
               IdentifierNotFoundError: () =>
                 Effect.gen(function* () {
                   const now = yield* identifiers.listByUser(user.id);
-                  if (now.some((id) => id.type === "email" && id.value === newEmail)) return now;
+                  const found = now.find((id) => id.type === "email" && id.value === newEmail);
+                  if (found !== undefined) return { identifier: found, converged: now };
                   return yield* new AccountTokenError({
                     message: "The account's email changed during the confirmation; try again",
                   });
                 }),
             }),
           );
-          if (converged === null) replaced = current?.id ?? null;
-          else held = converged;
-        } else if (!clash.verified) {
-          // Already this user's identifier — the token proves ownership.
-          yield* identifiers.setVerified(clash.id, new Date());
+          if (outcome.converged === null) replaced = current?.id ?? null;
+          else held = outcome.converged;
+          confirmed = outcome.identifier;
+        } else {
+          confirmed = clash;
+        }
+
+        // The token proves ownership, so the confirmed address ends verified,
+        // whichever write put it there: this user's earlier claim, a concurrent
+        // confirmation, or a store that reports a row already holding it.
+        // A concurrent delete may remove the identifier first; then refuse and
+        // keep the token, so the user can confirm again.
+        if (!confirmed.verified) {
+          const verified = yield* identifiers.setVerified(confirmed.id, new Date());
+          if (verified === null) {
+            return yield* new AccountTokenError({
+              message: "The account's email changed during the confirmation; try again",
+            });
+          }
         }
 
         // Release every other email identifier the user held. This also runs

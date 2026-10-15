@@ -963,9 +963,12 @@ const storeContract = (engine: StoreEngine): void => {
           const staleTyped = yield* Effect.flip(
             Auth.replaceIdentifier(store, ada, email("user-ada", "ada-other@example.com")),
           );
-          // Another user's or another type's replacement is refused outright.
+          // Another user's replacement, or one reusing `from`'s id, is refused outright.
           const wrongUser = yield* Effect.flip(
             store.replace(replaced!, email("user-grace", "x@example.com")),
+          );
+          const sameId = yield* Effect.flip(
+            store.replace(replaced!, { ...email("user-ada", "y@example.com"), id: replaced!.id }),
           );
           return {
             replaced,
@@ -975,6 +978,7 @@ const storeContract = (engine: StoreEngine): void => {
             stale,
             staleTyped,
             wrongUser,
+            sameId,
             listed: yield* store.listByUser("user-ada"),
             grace: yield* store.getByValue("email", "grace@example.com"),
             other: yield* store.getByValue("email", "ada-other@example.com"),
@@ -991,6 +995,8 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.stale).toBeNull();
       expect(result.staleTyped._tag).toBe("IdentifierNotFoundError");
       expect(result.wrongUser._tag).toBe("AuthError");
+      expect(result.sameId._tag).toBe("AuthError");
+      expect(result.sameId.message).toContain("with its own id");
       expect(result.listed.map((i) => i.value)).toEqual(["ada-new@example.com"]);
       expect(result.grace?.userId).toBe("user-grace");
       expect(result.other).toBeNull();

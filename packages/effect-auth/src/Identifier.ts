@@ -121,12 +121,15 @@ export class IdentifierStore extends Context.Service<
      * in-memory store (one synchronous step), effect-auth-sql (a compare-and-swap
      * on the release) and effect-auth-drizzle's single-table store (an `UPDATE`
      * guarded on `from`'s value) let one succeed, and the other resolves to
-     * `null`, writing nothing. On D1 (effect-auth-alchemy), which has no
-     * transactions, the losing call removes its claim in a statement of its own,
-     * so a failure before that statement leaves the user holding both new
-     * values. `IdentifierStoreKV` and effect-auth-drizzle's default store check
-     * `from` before they write and release it unguarded, so both replaces can
-     * succeed and the user holds both new values.
+     * `null`, writing nothing. For effect-auth-sql on PostgreSQL that holds at
+     * the default READ COMMITTED isolation; at stricter levels the losing call
+     * fails with a serialization error, surfaced as `AuthError`. On D1
+     * (effect-auth-alchemy), which has no transactions, the losing call removes
+     * its claim in a statement of its own, so a failure before that statement
+     * leaves the user holding both new values. `IdentifierStoreKV` and
+     * effect-auth-drizzle's default store check `from` before they write and
+     * release it unguarded, so both replaces can succeed and the user holds
+     * both new values.
      */
     readonly replace: (
       from: Identifier,
@@ -301,11 +304,15 @@ export const claimIdentifier = (
  * and type. As with {@link claimIdentifier}, an address another user holds is an
  * {@link IdentifierTakenError}, whether it was held before the call or a
  * concurrent claim won the store's unique index; other store failures pass
- * through as `AuthError`. Either way `from` stays the user's. When `from` is no
- * longer the user's (it was released or replaced meanwhile) the failure is an
- * {@link IdentifierNotFoundError} and nothing is written, including when the
- * store refused `to` because a concurrent replace of `from` already gave the
- * user that value.
+ * through as `AuthError`. Either way `from` stays the user's. When the user does
+ * not hold `from` (it was released or replaced meanwhile) the failure is an
+ * {@link IdentifierNotFoundError}, including when the store refused `to`
+ * because a concurrent replace of `from` already gave the user that value. That
+ * failure does not promise that nothing was written: a store that writes
+ * without a transaction (D1 when undoing its own claim fails), or a lost commit
+ * acknowledgement, may leave the user holding `to` when it reports
+ * `IdentifierNotFoundError`. A caller that needs to know re-reads the user's
+ * identifiers.
  */
 export const replaceIdentifier = (
   store: typeof IdentifierStore.Service,
