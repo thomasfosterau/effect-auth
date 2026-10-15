@@ -261,6 +261,33 @@ describe("single-table IdentifierStore: email change", () => {
       expect(h.tokens.has(token)).toBe(true);
     });
 
+    it("a row a concurrent write already moved to the new address, unverified, ends verified, and the token is consumed", async () => {
+      // A concurrent writer moves Ada's row to the new address, unverified, just
+      // before the store writes: the guarded UPDATE matches nothing, and the
+      // store reports the row as it stands.
+      const h = makeHarness(
+        mapping,
+        async () => {},
+        (store) => ({
+          ...store,
+          replace: (from, to) =>
+            Effect.promise(() =>
+              drizzle(client)
+                .update(appUsers)
+                .set({ email: NEW, emailVerified: false })
+                .where(eq(appUsers.userId, USER.ada)),
+            ).pipe(Effect.andThen(store.replace(from, to))),
+        }),
+      );
+      const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
+
+      const { user } = await h.run((svc) => svc.confirmEmailChange(token));
+
+      expect(user.id).toBe(USER.ada);
+      expect(await readRow(USER.ada)).toEqual({ email: NEW, emailVerified: true });
+      expect(h.tokens.has(token)).toBe(false);
+    });
+
     it("an address another user claims after the change is requested fails with AccountTokenError and the previous address stays", async () => {
       const h = makeHarness(mapping, async () => {});
       const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));

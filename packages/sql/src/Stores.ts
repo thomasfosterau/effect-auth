@@ -1215,8 +1215,9 @@ export const makeIdentifierStore: Effect.Effect<
     // user, type and value, so a `from` that is gone (another replace released
     // it first) deletes nothing, the claim is removed again and the call
     // resolves to null. On PostgreSQL a concurrent second DELETE waits for the
-    // first to commit and then matches nothing, so of two replaces of one
-    // `from` one succeeds. D1 has no transactions: the statements autocommit in
+    // first to commit and then matches nothing (at PostgreSQL's default READ
+    // COMMITTED isolation; stricter levels fail with a serialization error,
+    // surfaced as `AuthError`), so of two replaces of one `from` one succeeds. D1 has no transactions: the statements autocommit in
     // the same order, so a failure between them leaves both rows, never
     // neither, and the removal of a stale claim is a statement of its own.
     replace: (from, to) => {

@@ -368,16 +368,17 @@ describe("AccountManagement — change email: failed claims keep the previous ad
   });
 
   // A double submit: a second confirmation of the same token completes the
-  // replace between this request's read and its own replace.
+  // replace between this request's read and its own replace. `verified` is
+  // the state the concurrent write leaves the new address in.
   const doubleSubmit =
-    (rejectTakenFirst: boolean) =>
+    (rejectTakenFirst: boolean, verified = true) =>
     (store: typeof IdentifierStore.Service): typeof IdentifierStore.Service => ({
       ...store,
       replace: (from, to) =>
         Effect.gen(function* () {
           yield* store.replace(
             from,
-            makeIdentifier({ userId: to.userId, type: "email", value: to.value, verified: true }),
+            makeIdentifier({ userId: to.userId, type: "email", value: to.value, verified }),
           );
           // A store that claims `to` before it looks at `from` (effect-auth-sql's
           // INSERT first) refuses the now-held value instead of resolving to null.
@@ -404,7 +405,39 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       expect(h.revoked).toEqual(["user-1"]);
       expect(h.notifiedOld).toEqual([{ oldEmail: "alice@example.com", newEmail: NEW_EMAIL }]);
     });
+
+    it(`a converged confirmation leaves the new address verified when the concurrent write left it unverified and the store ${label}`, async () => {
+      const h = makeHarness(doubleSubmit(rejectTakenFirst, false));
+      const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+
+      await run(h, (svc) => svc.confirmEmailChange(token));
+
+      expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
+      expect(h.tokens.has(token)).toBe(false);
+    });
   }
+
+  it("a store that reports a row already holding the new address, unverified, ends with it verified", async () => {
+    // The single-table store resolves a stale `from` to the row when the row
+    // already holds `to`'s address, as the row stands: here, unverified.
+    const h = makeHarness((store) => ({
+      ...store,
+      replace: (from, to) =>
+        Effect.gen(function* () {
+          yield* store.replace(
+            from,
+            makeIdentifier({ userId: to.userId, type: "email", value: to.value }),
+          );
+          return yield* store.getByValue(to.type, to.value);
+        }),
+    }));
+    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+
+    await run(h, (svc) => svc.confirmEmailChange(token));
+
+    expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
+    expect(h.tokens.has(token)).toBe(false);
+  });
 
   it("a user with no email claims the new address", async () => {
     const h = makeHarness();
@@ -417,6 +450,56 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
     expect(h.notifiedOld).toEqual([{ oldEmail: null, newEmail: NEW_EMAIL }]);
+  });
+
+  // A user with no email; `owner` claims the new address, unverified, after
+  // the confirm-time check and before this request's own claim.
+  const claimedMidConfirm = (owner: string): Harness => {
+    const h = makeHarness((store, records) => ({
+      ...store,
+      create: (identifier) =>
+        Effect.suspend(() => {
+          const concurrent = makeIdentifier({
+            userId: owner,
+            type: "email",
+            value: identifier.value,
+          });
+          records.set(concurrent.id, concurrent);
+          return store.create(identifier);
+        }),
+    }));
+    for (const [id, identifier] of h.identifiers) {
+      if (identifier.userId === "user-1") h.identifiers.delete(id);
+    }
+    return h;
+  };
+
+  it("a double-submitted confirmation by a user with no email converges to success, with the address verified", async () => {
+    const h = claimedMidConfirm("user-1");
+    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+
+    const { user } = await run(h, (svc) => svc.confirmEmailChange(token));
+
+    expect(user.id).toBe("user-1");
+    expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
+    expect(h.tokens.has(token)).toBe(false);
+    expect(h.revoked).toEqual(["user-1"]);
+    expect(h.notifiedOld).toEqual([{ oldEmail: null, newEmail: NEW_EMAIL }]);
+  });
+
+  it("a user with no email whose claim another account wins mid-confirm fails with Email already in use and keeps the token", async () => {
+    const h = claimedMidConfirm("user-2");
+    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+
+    const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
+
+    expect(err).toBeInstanceOf(AccountTokenError);
+    expect(err.message).toBe("Email already in use");
+    expect(userEmails(h, "user-1")).toEqual([]);
+    expect([...h.identifiers.values()].find((i) => i.value === NEW_EMAIL)?.userId).toBe("user-2");
+    expect(h.tokens.has(token)).toBe(true);
+    expect(h.revoked).toEqual([]);
+    expect(h.notifiedOld).toEqual([]);
   });
 });
 
