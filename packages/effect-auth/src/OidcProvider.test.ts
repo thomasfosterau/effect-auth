@@ -812,6 +812,11 @@ const makeHttpFixture = (
     /** Provide `RateLimiter`, so the per-IP registration limit runs. */
     readonly rateLimit?: boolean;
     readonly trustedProxy?: TrustedProxyConfig;
+    /**
+     * `false` leaves both `dynamicRegistration.trustedProxy` and its
+     * `allowMissingClientIp` opt-out unset, so the OIDC layer fails its build.
+     */
+    readonly declareRegistrationAddress?: boolean;
   } = {},
 ) => {
   const usersById = new Map<string, Types.User>();
@@ -935,9 +940,11 @@ const makeHttpFixture = (
     ...(options.dynamicRegistration !== undefined && {
       dynamicRegistration: {
         ...options.dynamicRegistration,
-        ...(addressSource !== undefined
-          ? { trustedProxy: addressSource }
-          : { allowMissingClientIp: true }),
+        ...(options.declareRegistrationAddress === false
+          ? {}
+          : addressSource !== undefined
+            ? { trustedProxy: addressSource }
+            : { allowMissingClientIp: true }),
       },
     }),
   }).pipe(Layer.provide(oidcDeps));
@@ -2129,6 +2136,16 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
     expect(() => makeHttpFixture({ dynamicRegistration: {}, rateLimit: false })).toThrow(
       /the dynamic client registration limit \(POST \/register\) configured with no RateLimiter/,
     );
+  });
+
+  it("throws the OIDC layer's ClientAddressConfigError from Http.make (#402)", () => {
+    // The OIDC layer fails its build when registration has no address source
+    // (#388). The build runs inside Http.make, which throws that failure, so the
+    // app fails to start rather than reject every request.
+    const make = () =>
+      makeHttpFixture({ dynamicRegistration: {}, declareRegistrationAddress: false });
+    expect(make).toThrow(ClientAddressConfigError);
+    expect(make).toThrow(/dynamicRegistration\.trustedProxy/);
   });
 
   it("refuses registrations with 429 outside Http.make when no RateLimiter is in scope", async () => {

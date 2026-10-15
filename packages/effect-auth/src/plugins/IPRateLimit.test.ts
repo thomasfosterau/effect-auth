@@ -11,9 +11,10 @@ import { IPRateLimitPlugin } from "./IPRateLimit.ts";
 // Test harness
 // ---------------------------------------------------------------------------
 
-/** In-memory rate-limit store backed by a simple Map. */
-const makeMemStore = (): typeof RateLimitStore.Service => {
-  const store = new Map<string, RateLimitEntry>();
+/** In-memory rate-limit store backed by a simple Map (pass one to inspect it). */
+const makeMemStore = (
+  store: Map<string, RateLimitEntry> = new Map(),
+): typeof RateLimitStore.Service => {
   return {
     get: (key) => Effect.succeed(store.get(key) ?? null),
     set: (key, entry) =>
@@ -44,8 +45,11 @@ const makeMemStore = (): typeof RateLimitStore.Service => {
  * Build the Hooks layer (without ClientIP — that is provided per-call at
  * runtime, mirroring what the HTTP middleware does).
  */
-const makeHooksLayer = (cfg?: Parameters<typeof IPRateLimitPlugin>[0]) => {
-  const storeImpl = makeMemStore();
+const makeHooksLayer = (
+  cfg?: Parameters<typeof IPRateLimitPlugin>[0],
+  entries?: Map<string, RateLimitEntry>,
+) => {
+  const storeImpl = makeMemStore(entries);
   const storeLayer = Layer.succeed(RateLimitStore, storeImpl);
   const limiterLayer = RateLimiter.layer().pipe(Layer.provide(storeLayer));
   return IPRateLimitPlugin(cfg).pipe(
@@ -100,8 +104,9 @@ describe("IPRateLimitPlugin", () => {
       }).pipe(Effect.provide(makeHooksLayer())),
     ));
 
-  it("refuses every request whose ClientIP carries no address, and counts none of them", () =>
-    Effect.runPromise(
+  it("refuses every request whose ClientIP carries no address, and counts none of them", () => {
+    const entries = new Map<string, RateLimitEntry>();
+    return Effect.runPromise(
       Effect.gen(function* () {
         // Ten address-less sign-ins: each is refused, none is let through unlimited
         // or counted under a bucket that other callers share (#389).
@@ -114,10 +119,14 @@ describe("IPRateLimitPlugin", () => {
         );
         expect(err).toBeInstanceOf(RateLimitError);
         expect(err).toMatchObject({ key: "ip:signin" });
+        // None of the refusals touched the store.
+        expect([...entries.keys()]).toEqual([]);
         // A visitor with an address is still keyed on their own budget.
         expect(yield* callSignIn("198.51.100.4")).toBe("ok");
-      }).pipe(Effect.provide(makeHooksLayer())),
-    ));
+        expect([...entries.keys()]).toEqual(["ip:signin:198.51.100.4"]);
+      }).pipe(Effect.provide(makeHooksLayer(undefined, entries))),
+    );
+  });
 
   it("refuses every request when the ClientIP service is absent (a hook run outside HTTP)", () =>
     Effect.runPromise(

@@ -1,4 +1,5 @@
 import {
+  Cause,
   Context,
   Effect,
   Exit,
@@ -864,35 +865,125 @@ const requireServicesConfig = (options: AuthWebHandlerOptions) =>
   );
 
 /**
- * A scheduler for building `services` inside `make`. Every fiber it runs shares
- * one dispatcher, so `flush` runs the build, and every fiber the build forks,
- * until each has finished or waits on real asynchronous work. `release` hands
- * the dispatcher to the default scheduler's, so whatever the build left running
- * (an asynchronous step, a fiber a layer forked) is scheduled as it would be
- * without this scheduler once `make` returns.
+ * A dispatcher that holds its tasks, by priority as Effect's own dispatcher
+ * does, until `run` runs them or `handOver` moves them to another dispatcher.
  */
-const synchronousScheduler = (): {
-  readonly scheduler: Scheduler.Scheduler;
-  readonly flush: () => void;
+class HeldDispatcher implements Scheduler.SchedulerDispatcher {
+  // Tasks by ascending priority, first in first out within a priority.
+  private queued: Array<[priority: number, tasks: Array<() => void>]> = [];
+  private target: Scheduler.SchedulerDispatcher | undefined;
+
+  scheduleTask(task: () => void, priority: number): void {
+    if (this.target !== undefined) return this.target.scheduleTask(task, priority);
+    this.enqueue(task, priority, false);
+  }
+
+  flush(): void {
+    // While held, only `run` runs the queue. A caller that flushes to finish
+    // synchronously sees no exit and takes its asynchronous path.
+    this.target?.flush();
+  }
+
+  /**
+   * Run the queued tasks until `fiber` has an exit or nothing is queued. Like
+   * Effect's dispatcher, it runs what is queued as one batch, so a task
+   * scheduled while a batch runs waits for the next one.
+   */
+  run(fiber: Fiber.Fiber<unknown, unknown>): void {
+    while (this.target === undefined && fiber.pollUnsafe() === undefined) {
+      const batch = this.queued.flatMap(([priority, tasks]) =>
+        tasks.map((task) => [priority, task] as const),
+      );
+      if (batch.length === 0) return;
+      this.queued = [];
+      let next = 0;
+      try {
+        while (next < batch.length && fiber.pollUnsafe() === undefined) batch[next++]![1]();
+      } finally {
+        // The batch's unrun tasks go back ahead of those scheduled since.
+        for (let i = batch.length - 1; i >= next; i--) {
+          this.enqueue(batch[i]![1], batch[i]![0], true);
+        }
+      }
+    }
+  }
+
+  /** Move the queued tasks, and every task scheduled from now on, to `target`. */
+  handOver(target: Scheduler.SchedulerDispatcher): void {
+    if (this.target !== undefined) return;
+    this.target = target;
+    const queued = this.queued;
+    this.queued = [];
+    for (const [priority, tasks] of queued) {
+      for (const task of tasks) target.scheduleTask(task, priority);
+    }
+  }
+
+  private enqueue(task: () => void, priority: number, first: boolean): void {
+    let index = 0;
+    while (index < this.queued.length && this.queued[index]![0] < priority) index++;
+    const bucket = this.queued[index];
+    if (bucket !== undefined && bucket[0] === priority) {
+      if (first) bucket[1].unshift(task);
+      else bucket[1].push(task);
+    } else {
+      this.queued.splice(index, 0, [priority, [task]]);
+    }
+  }
+}
+
+/**
+ * Run `effect` synchronously as far as it can go, the way `Effect.runSync`
+ * does, without the fibers it forks staying on a synchronous scheduler (#389,
+ * #402). `make` uses it to build `services` and to close them.
+ *
+ * Only the effect's own fiber runs synchronously: `run` runs the tasks it
+ * schedules (yields, the start of a fiber it forks) until it has an exit, or
+ * until it has nothing queued because it waits on asynchronous work or on
+ * another fiber. Every other fiber runs on the default scheduler, so a
+ * long-lived fiber a layer forks (a busy loop, a background job) cannot keep
+ * `make` from returning, and does not starve the event loop as fibers forked
+ * under `Effect.runSync` do (they run on microtasks).
+ *
+ * `release` hands what the effect's fiber still has queued to the default
+ * scheduler, so whatever is left running carries on as it would without this.
+ */
+const runSynchronously = <A, E>(
+  effect: Effect.Effect<A, E>,
+): {
+  readonly fiber: Fiber.Fiber<A, E>;
+  readonly run: () => void;
   readonly release: () => void;
 } => {
   const base = new Scheduler.MixedScheduler();
-  const synchronous = new Scheduler.MixedScheduler("sync").makeDispatcher();
-  let current = synchronous;
-  const dispatcher: Scheduler.SchedulerDispatcher = {
-    scheduleTask: (task, priority) => current.scheduleTask(task, priority),
-    flush: () => current.flush(),
-  };
-  return {
-    scheduler: {
-      executionMode: "async",
-      shouldYield: (fiber) => base.shouldYield(fiber),
-      makeDispatcher: () => dispatcher,
+  // Dispatchers made before the fiber's own is known: one is its, and the rest
+  // belong to fibers it forked while it started.
+  const held: Array<HeldDispatcher> = [];
+  let started = false;
+  const scheduler: Scheduler.Scheduler = {
+    executionMode: "async",
+    shouldYield: (fiber) => base.shouldYield(fiber),
+    makeDispatcher: () => {
+      if (started) return base.makeDispatcher();
+      const dispatcher = new HeldDispatcher();
+      held.push(dispatcher);
+      return dispatcher;
     },
-    flush: () => synchronous.flush(),
+  };
+  const fiber = Effect.runFork(effect, { scheduler });
+  // Reading it makes the fiber's dispatcher if it has none yet, so it is held.
+  const own = fiber.currentDispatcher;
+  started = true;
+  for (const dispatcher of held) {
+    if (dispatcher !== own) dispatcher.handOver(base.makeDispatcher());
+  }
+  return {
+    fiber,
+    run: () => {
+      if (own instanceof HeldDispatcher) own.run(fiber);
+    },
     release: () => {
-      synchronous.flush();
-      current = base.makeDispatcher();
+      if (own instanceof HeldDispatcher) own.handOver(base.makeDispatcher());
     },
   };
 };
@@ -4304,10 +4395,9 @@ export interface AuthWebHandlerOptions {
    * with neither {@link trustedProxy} nor {@link allowMissingClientIp}. A Web
    * `Request` has no socket address to fall back on.
    *
-   * When a `RateLimiter` is in `services`, a request to a rate-limited endpoint
-   * that resolves no address is refused with `429` and is not counted. It is
-   * never let through unlimited and never counted under a bucket shared with
-   * other callers. Requests to endpoints with no rule are unaffected.
+   * A request to a rate-limited endpoint that resolves no address is refused
+   * with `429` and is not counted. It is never let through unlimited and never
+   * counted under a bucket shared with other callers. Requests to endpoints with no rule are unaffected.
    *
    * Set to `{}` to use the built-in {@link defaultEndpointRules}, or supply
    * `{ rules: [...] }` for a custom rule set.
@@ -4425,11 +4515,22 @@ const isTrustedRequest = (
  * - `RateLimiterConfigError`: `ipRateLimit`, dynamic client registration or a
  *   `DeviceAuthorizationService` (without `allowMissingRateLimiter: true`) with
  *   no `RateLimiter` in `services`.
+ * - Any failure of the `services` build itself, such as the OIDC layer's
+ *   `ClientAddressConfigError`. `make` closes what the build acquired, then
+ *   throws the failure's error, or for a defect the defect itself, as
+ *   `Effect.runSync` does.
+ *
+ * `make` runs the build until it finishes, and no further: a fiber the build
+ * forks and does not await (a background job, a refresh loop) keeps running
+ * after `make` returns. One forked into the layer's scope (`Effect.forkScoped`)
+ * stops on `dispose`.
  *
  * The `services` checks need the built services. When `services` does
  * asynchronous work while building, the build finishes after `make` returns, so
  * `make` cannot throw: the handler's build fails with the same error, and every
- * request rejects with it.
+ * request rejects with it. The same holds when the build waits on a fiber that
+ * yields before it finishes: these are the builds `Effect.runSync` reports as
+ * asynchronous.
  */
 export const make = (
   options: AuthWebHandlerOptions,
@@ -4453,25 +4554,40 @@ export const make = (
     });
   }
 
-  // Build `services` here, on a scheduler `make` can run to completion
-  // synchronously, so the startup check below sees what the handler will serve
-  // (#389). The handler reuses this build rather than building `services` again.
+  // Build `services` here, synchronously until the build has an exit, so the
+  // startup check below sees what the handler will serve (#389). The handler
+  // reuses this build rather than building `services` again. Fibers the build
+  // forks run on the default scheduler, and make does not wait for them (#402).
   const servicesScope = Scope.makeUnsafe();
-  const { scheduler, flush, release } = synchronousScheduler();
-  const servicesFiber = Effect.runFork(Layer.buildWithScope(options.services, servicesScope), {
-    scheduler,
-  });
-  flush();
-  const builtServices = servicesFiber.pollUnsafe();
-  if (builtServices !== undefined && Exit.isSuccess(builtServices)) {
-    const error = servicesConfigError(builtServices.value, options);
-    if (error !== undefined) {
-      Effect.runFork(Scope.close(servicesScope, Exit.void), { scheduler });
-      release();
-      throw error;
+  const build = runSynchronously(Layer.buildWithScope(options.services, servicesScope));
+  const servicesFiber = build.fiber;
+  try {
+    build.run();
+    const built = servicesFiber.pollUnsafe();
+    // A build that fails synchronously makes `make` throw, so the app fails to
+    // start: a typed failure throws its error, and a defect throws the defect,
+    // as `Effect.runSync` does (`Cause.squash`). The error sits in a record
+    // because a defect may be any value, `undefined` included.
+    let failure: { readonly error: unknown } | undefined;
+    if (built !== undefined && Exit.isFailure(built)) {
+      failure = { error: Cause.squash(built.cause) };
+    } else if (built !== undefined) {
+      const error = servicesConfigError(built.value, options);
+      if (error !== undefined) failure = { error };
     }
+    if (failure !== undefined) {
+      // Release what the build acquired, as far as that runs synchronously.
+      const close = runSynchronously(Scope.close(servicesScope, Exit.void));
+      try {
+        close.run();
+      } finally {
+        close.release();
+      }
+      throw failure.error;
+    }
+  } finally {
+    build.release();
   }
-  release();
   // Still building (asynchronous work in `services`): the same check runs as a
   // layer when the build finishes, and fails the handler's build instead.
   const servicesLayer: Layer.Layer<AuthServices> = Layer.effectContext(Fiber.join(servicesFiber));

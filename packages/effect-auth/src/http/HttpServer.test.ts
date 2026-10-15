@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, FileSystem, Layer, Path, Redacted } from "effect";
+import { Data, Effect, Fiber, FileSystem, Layer, Logger, Path, Redacted } from "effect";
 import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.ts";
@@ -2458,12 +2458,27 @@ describe("IPRateLimitPlugin needs a client-address source under make (#389)", ()
 });
 
 describe("the exported group layers outside make refuse rather than skip (#389)", () => {
-  it("refuses device approve/deny with 429 when no RateLimiter is in scope", async () => {
-    const handler = handBuiltHandler(makeFixture().featureServicesWithoutRateLimiter);
+  it("refuses device approve/deny with 429 when no RateLimiter is in scope, and logs it as an error", async () => {
+    const logs: Array<{ readonly level: string; readonly message: string }> = [];
+    const collector = Logger.make((options) => {
+      logs.push({ level: options.logLevel, message: String(options.message) });
+    });
+    const handler = handBuiltHandler(
+      Layer.merge(
+        makeFixture().featureServicesWithoutRateLimiter,
+        Logger.layer([collector]),
+      ) as Layer.Layer<AuthServices>,
+    );
     const res = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
     expect(res.status).toBe(429);
     expect(await res.json()).toMatchObject({
       message: "No RateLimiter in services; this request cannot be rate limited",
+    });
+    // The misconfiguration reaches the server log, not only the response.
+    expect(logs).toContainEqual({
+      level: "Error",
+      message:
+        "[effect-auth] the device user-code limit is configured with no RateLimiter in services; the request is refused",
     });
   });
 
@@ -2484,5 +2499,178 @@ describe("the exported group layers outside make refuse rather than skip (#389)"
     expect(await res.json()).toMatchObject({
       message: "No ClientIP service in scope; this request cannot be rate limited",
     });
+  });
+});
+
+/** What `thunk` throws, or a failed assertion when it returns. */
+const thrownBy = (thunk: () => unknown): unknown => {
+  try {
+    thunk();
+  } catch (error) {
+    return error;
+  }
+  return expect.unreachable("expected a throw");
+};
+
+/** Let the event loop run a few macrotasks (setImmediate callbacks). */
+const macrotasks = async (count: number): Promise<void> => {
+  for (let i = 0; i < count; i++) await new Promise((resolve) => setImmediate(resolve));
+};
+
+class BootError extends Data.TaggedError("BootError")<{ readonly reason: string }> {}
+
+describe("make builds services synchronously, up to their exit (#402)", () => {
+  it("returns while a fiber that services forked keeps running, and dispose stops it", async () => {
+    // A busy fiber the build forks and never awaits. make must not wait for it.
+    // If it did, make would only return once this fiber died at the bound below,
+    // so the bound turns a hang into a failed assertion.
+    const BOUND = 10_000;
+    let returned = false;
+    let spins = 0;
+    let interrupted = false;
+    const busy = Layer.effectDiscard(
+      Effect.forkScoped(
+        Effect.forever(
+          Effect.andThen(
+            Effect.yieldNow,
+            Effect.sync(() => {
+              spins++;
+              if (!returned && spins >= BOUND) throw new Error("make waited on a forked fiber");
+            }),
+          ),
+        ).pipe(Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true)))),
+      ),
+    );
+    const fixture = makeFixture();
+
+    const { handler, dispose } = HttpServer.make({
+      // provideMerge builds `busy` on the build's own fiber, after the rest.
+      services: busy.pipe(Layer.provideMerge(fixture.services)) as Layer.Layer<AuthServices>,
+      cookie: { secure: false },
+    });
+    returned = true;
+    expect(spins).toBeLessThan(BOUND);
+
+    // The fiber runs on after make returns, and the handler is served beside it.
+    const res = await handler(
+      jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+    );
+    expect(res.status).toBe(401);
+    const running = spins;
+    await macrotasks(3);
+    expect(spins).toBeGreaterThan(running);
+    expect(interrupted).toBe(false);
+
+    await dispose();
+    expect(interrupted).toBe(true);
+    const stopped = spins;
+    await macrotasks(3);
+    expect(spins).toBe(stopped);
+  });
+
+  it("returns when services build asynchronously beside a busy forked fiber", async () => {
+    // The build waits on asynchronous work while a forked fiber stays busy. make
+    // returns at once and leaves the build to finish later (the fallback below).
+    const BOUND = 10_000;
+    let returned = false;
+    let spins = 0;
+    const busy = Layer.effectDiscard(
+      Effect.forkScoped(
+        Effect.forever(
+          Effect.andThen(
+            Effect.yieldNow,
+            Effect.sync(() => {
+              spins++;
+              if (!returned && spins >= BOUND) throw new Error("make waited on a forked fiber");
+            }),
+          ),
+        ),
+      ),
+    );
+    const asyncStep = Layer.effectDiscard(Effect.promise(() => Promise.resolve()));
+    const fixture = makeFixture();
+
+    const { handler, dispose } = HttpServer.make({
+      services: Layer.mergeAll(fixture.services, busy, asyncStep) as Layer.Layer<AuthServices>,
+      cookie: { secure: false },
+      trustedProxy: ClientIP.cloudflare,
+      ipRateLimit: {},
+    });
+    returned = true;
+    expect(spins).toBeLessThan(BOUND);
+    const atReturn = spins;
+    await macrotasks(3);
+    expect(spins).toBeGreaterThan(atReturn);
+
+    // The startup check runs when the build finishes, and fails the handler's build.
+    await expect(
+      handler(jsonRequest("/sign-in", { email: "nobody@example.com", password: PW })),
+    ).rejects.toBeInstanceOf(RateLimiterConfigError);
+    await dispose();
+  });
+
+  it("throws a typed failure of the services build from make, and releases what it built", () => {
+    let released = 0;
+    const counted = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () => Effect.sync(() => void released++)),
+    );
+    const failure = new BootError({ reason: "no database" });
+    // provideMerge builds `counted` before the failing layer runs.
+    const services = Layer.effectDiscard(Effect.fail(failure)).pipe(
+      Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
+    ) as unknown as Layer.Layer<AuthServices>;
+
+    expect(thrownBy(() => HttpServer.make({ services, cookie: { secure: false } }))).toBe(failure);
+    expect(released).toBe(1);
+  });
+
+  it("throws a defect of the services build from make as the defect itself", () => {
+    let released = 0;
+    const counted = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () => Effect.sync(() => void released++)),
+    );
+    const defect = new Error("services could not start");
+    const services = Layer.effectDiscard(Effect.die(defect)).pipe(
+      Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
+    ) as Layer.Layer<AuthServices>;
+
+    expect(thrownBy(() => HttpServer.make({ services, cookie: { secure: false } }))).toBe(defect);
+    expect(released).toBe(1);
+  });
+
+  it("hands a fiber the build left running to the default scheduler when make throws", async () => {
+    // A detached fiber outlives the services scope that make closes before it
+    // throws. It must still run once make has thrown, not wait on make's queue.
+    // The bound turns a make that waits on it into a failed assertion.
+    const BOUND = 10_000;
+    let thrown = false;
+    let spins = 0;
+    let detached: Fiber.Fiber<never> | undefined;
+    const spinner = Layer.effectDiscard(
+      Effect.forkDetach(
+        Effect.forever(
+          Effect.andThen(
+            Effect.yieldNow,
+            Effect.sync(() => {
+              spins++;
+              if (!thrown && spins >= BOUND) throw new Error("make waited on a forked fiber");
+            }),
+          ),
+        ),
+      ).pipe(Effect.tap((fiber) => Effect.sync(() => void (detached = fiber)))),
+    );
+    const failure = new BootError({ reason: "after the fork" });
+    const services = Layer.effectDiscard(Effect.fail(failure)).pipe(
+      Layer.provideMerge(spinner),
+      Layer.provideMerge(makeFixture().services),
+    ) as unknown as Layer.Layer<AuthServices>;
+
+    expect(thrownBy(() => HttpServer.make({ services, cookie: { secure: false } }))).toBe(failure);
+    thrown = true;
+    expect(spins).toBeLessThan(BOUND);
+    const atThrow = spins;
+    await macrotasks(3);
+    expect(spins).toBeGreaterThan(atThrow);
+    await Effect.runPromise(Fiber.interrupt(detached!));
   });
 });
