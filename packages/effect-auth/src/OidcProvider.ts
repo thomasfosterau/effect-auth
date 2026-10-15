@@ -359,13 +359,14 @@ export interface OidcDynamicRegistrationConfig {
    * Per-IP rate limit for `POST /register`, applied by the HTTP layer. Defaults
    * to {@link DEFAULT_OIDC_REGISTRATION_RATE_LIMIT}. The limit needs a
    * `RateLimiter` in the handler's `services`: without one, `Http.make` throws
-   * `RateLimiterConfigError`, and the group layers composed outside `Http.make`
-   * refuse every registration with `429`.
+   * `RateLimiterConfigError`, and `Http.makeAsync` rejects with it. The group
+   * layers composed outside `Http.make` and `Http.makeAsync` refuse every
+   * registration with `429`.
    */
   readonly rateLimit?: RateLimitConfig;
   /**
    * The client-address source the registration rate limit keys on. Declare the
-   * source passed to `Http.make` as `trustedProxy` (for example
+   * source passed to `Http.make` or `Http.makeAsync` as `trustedProxy` (for example
    * `ClientIP.cloudflare`), so {@link OidcProviderService.layer} can check at
    * build time that a limited registration has an address to key on. This layer
    * does not resolve addresses itself. Without `trustedProxy`, or the
@@ -789,7 +790,7 @@ export const make = (
       return yield* new ClientAddressConfigError({
         message:
           "dynamicRegistration is rate limited per client address, and a Web Request has none unless the app declares a source. " +
-          "Set dynamicRegistration.trustedProxy to the source passed to Http.make (for example ClientIP.cloudflare), " +
+          "Set dynamicRegistration.trustedProxy to the source passed to Http.make or Http.makeAsync (for example ClientIP.cloudflare), " +
           "or set dynamicRegistration.allowMissingClientIp: true to accept that address-less registrations are refused.",
       });
     }

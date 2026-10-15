@@ -578,6 +578,9 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
  *   `dynamicRegistration` is set with no `dynamicRegistration.trustedProxy` and
  *   no `dynamicRegistration.allowMissingClientIp: true` (#388).
  *
+ * `Http.makeAsync` rejects with the same errors `Http.make` throws, so the app
+ * fails to start either way.
+ *
  * Exported from the package root as `ClientAddressConfigError` and as
  * `Http.ClientAddressConfigError`, and from the `./http` subpath. Every name is
  * the same class.
@@ -596,9 +599,10 @@ export class ClientAddressConfigError extends Data.TaggedError("ClientAddressCon
  *
  * `Http.make` throws it synchronously when `services` builds synchronously, so
  * the app fails to start. When `services` does asynchronous work while building
- * (a database connection, for example), `make` cannot see the built services
- * before it returns: the handler's build fails with this error instead, and
- * every request rejects with it.
+ * (a database connection, for example), `make` returns before the build can be
+ * checked: the handler's build fails with this error instead, and every request
+ * rejects with it. `Http.makeAsync` rejects with it at startup, so the app fails
+ * to start, however `services` is composed.
  */
 export class RateLimiterConfigError extends Data.TaggedError("RateLimiterConfigError")<{
   readonly message: string;
