@@ -4149,11 +4149,12 @@ export interface AuthWebHandlerOptions {
    *
    * `Http.make` serves Web `Request`s, which never carry a socket address, so
    * with this option set the address comes only from the forwarded data. When
-   * that data is absent or unusable, the request has no client address: a
-   * request that reaches a rate-limited endpoint is then refused with `429`
-   * (see {@link ipRateLimit}), and `ClientIP` carries `undefined`.
+   * that data is absent or unusable, the request has no client address: when a
+   * `RateLimiter` is in `services`, a request that reaches a rate-limited
+   * endpoint is then refused with `429` (see {@link ipRateLimit}), and
+   * `ClientIP` carries `undefined`.
    */
-  readonly trustedProxy?: TrustedProxyConfig;
+  readonly trustedProxy?: TrustedProxyConfig | undefined;
   /**
    * Enable IP-keyed rate limiting at the HTTP boundary, before handlers run.
    *
@@ -4166,32 +4167,34 @@ export interface AuthWebHandlerOptions {
    * with neither {@link trustedProxy} nor {@link allowMissingClientIp}. A Web
    * `Request` has no socket address to fall back on.
    *
-   * A request to a rate-limited endpoint that resolves no address is refused
-   * with `429` and is not counted. It is never let through unlimited and never
-   * counted under a bucket shared with other callers. Requests to endpoints
-   * with no rule are unaffected.
+   * When a `RateLimiter` is in `services`, a request to a rate-limited endpoint
+   * that resolves no address is refused with `429` and is not counted. It is
+   * never let through unlimited and never counted under a bucket shared with
+   * other callers. Requests to endpoints with no rule are unaffected.
    *
    * Set to `{}` to use the built-in {@link defaultEndpointRules}, or supply
    * `{ rules: [...] }` for a custom rule set.
    */
-  readonly ipRateLimit?: HttpIPRateLimitConfig;
+  readonly ipRateLimit?: HttpIPRateLimitConfig | undefined;
   /**
    * Accept that a request may have no resolvable client address, so
    * {@link ipRateLimit} can be configured without {@link trustedProxy}. Default
    * `false`.
    *
-   * This opts out of the build-time check only. The limiter still runs: a
-   * request with no address that reaches a rate-limited endpoint is refused
-   * with `429`, not skipped. Use it when that refusal is the intended behaviour
-   * for address-less requests, and prefer {@link trustedProxy}, which gives
-   * every request an address when the edge provides one.
+   * This opts out of the build-time check only. The limiter still runs: when a
+   * `RateLimiter` is in `services`, a request with no address that reaches a
+   * rate-limited endpoint is refused with `429`, not skipped. Use it when that
+   * refusal is the intended behaviour for address-less requests, and prefer
+   * {@link trustedProxy}, which gives every request an address when the edge
+   * provides one.
    *
    * The dynamic client registration limit (`POST /register`) is configured on
-   * the OIDC provider, not here, so `make` cannot check it at build. A request
-   * with no address that reaches it is refused with `429` whatever this option
-   * says, and is never counted under a shared bucket.
+   * the OIDC provider, not here, so `make` cannot check it at build. When a
+   * `RateLimiter` is in `services`, a request with no address that reaches it is
+   * refused with `429` whatever this option says, and is never counted under a
+   * shared bucket.
    */
-  readonly allowMissingClientIp?: boolean;
+  readonly allowMissingClientIp?: boolean | undefined;
 }
 
 /** Minimal Scalar API reference shell pointing at the sibling `openapi.json`. */

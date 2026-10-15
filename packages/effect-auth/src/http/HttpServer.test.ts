@@ -2099,10 +2099,8 @@ describe("client IP at the HTTP boundary", () => {
       services,
       cookie: { secure: false },
       ipRateLimit: signInOncePerHour,
-      ...(options.trustedProxy !== undefined && { trustedProxy: options.trustedProxy }),
-      ...(options.allowMissingClientIp !== undefined && {
-        allowMissingClientIp: options.allowMissingClientIp,
-      }),
+      trustedProxy: options.trustedProxy,
+      allowMissingClientIp: options.allowMissingClientIp,
     }).handler;
     return { handler, keys };
   };
