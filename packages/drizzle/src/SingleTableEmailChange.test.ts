@@ -347,6 +347,29 @@ describe("single-table IdentifierStore: email change", () => {
       expect(h.tokens.has(token)).toBe(true);
     });
 
+    it("a row a concurrent write already moved to the new address, unverified, ends verified, and the token is consumed", async () => {
+      // A concurrent writer moves Ada's row to the new address, unverified, just
+      // before the store writes: the guarded UPDATE matches nothing, and the
+      // store reports the row as it stands.
+      const h = makeHarness(strictMapping, deleteStrictRow, (store) => ({
+        ...store,
+        replace: (from, to) =>
+          Effect.promise(() =>
+            drizzle(client)
+              .update(strictUsers)
+              .set({ email: NEW, emailVerified: false })
+              .where(eq(strictUsers.userId, USER.ada)),
+          ).pipe(Effect.andThen(store.replace(from, to))),
+      }));
+      const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
+
+      const { user } = await h.run((svc) => svc.confirmEmailChange(token));
+
+      expect(user.id).toBe(USER.ada);
+      expect(await readStrictRow(USER.ada)).toEqual({ email: NEW, emailVerified: true });
+      expect(h.tokens.has(token)).toBe(false);
+    });
+
     it("account deletion completes: the user row and its address go, the token is consumed, and the other user is untouched", async () => {
       const h = makeHarness(strictMapping, deleteStrictRow);
       const { token } = await h.run((svc) => svc.requestAccountDeletion(USER.ada));

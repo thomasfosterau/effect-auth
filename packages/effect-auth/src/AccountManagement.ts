@@ -341,8 +341,15 @@ export const make = (
         // The token proves ownership, so the confirmed address ends verified,
         // whichever write put it there: this user's earlier claim, a concurrent
         // confirmation, or a store that reports a row already holding it.
+        // A concurrent delete may remove the identifier first; then refuse and
+        // keep the token, so the user can confirm again.
         if (!confirmed.verified) {
-          yield* identifiers.setVerified(confirmed.id, new Date());
+          const verified = yield* identifiers.setVerified(confirmed.id, new Date());
+          if (verified === null) {
+            return yield* new AccountTokenError({
+              message: "The account's email changed during the confirmation; try again",
+            });
+          }
         }
 
         // Release every other email identifier the user held. This also runs

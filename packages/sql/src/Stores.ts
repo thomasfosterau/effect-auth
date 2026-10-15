@@ -1217,9 +1217,10 @@ export const makeIdentifierStore: Effect.Effect<
     // resolves to null. On PostgreSQL a concurrent second DELETE waits for the
     // first to commit and then matches nothing (at PostgreSQL's default READ
     // COMMITTED isolation; stricter levels fail with a serialization error,
-    // surfaced as `AuthError`), so of two replaces of one `from` one succeeds. D1 has no transactions: the statements autocommit in
-    // the same order, so a failure between them leaves both rows, never
-    // neither, and the removal of a stale claim is a statement of its own.
+    // surfaced as `AuthError`), so of two replaces of one `from` one succeeds.
+    // D1 has no transactions: the statements autocommit in the same order, so
+    // a failure between them leaves both rows, never neither, and the removal
+    // of a stale claim is a statement of its own.
     replace: (from, to) => {
       const invalid = Auth.replaceInputError(from, to);
       if (invalid !== null) return Effect.fail(invalid);

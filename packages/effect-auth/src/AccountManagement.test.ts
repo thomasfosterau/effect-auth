@@ -439,6 +439,67 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     expect(h.tokens.has(token)).toBe(false);
   });
 
+  it("a user who already holds the new address, unverified, ends with it verified and the previous address released", async () => {
+    const h = makeHarness();
+    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+    const held = makeIdentifier({
+      userId: "user-1",
+      type: "email",
+      value: NEW_EMAIL,
+      now: new Date(Date.now() + 1000),
+    });
+    h.identifiers.set(held.id, held);
+
+    await run(h, (svc) => svc.confirmEmailChange(token));
+
+    expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
+    expect(h.tokens.has(token)).toBe(false);
+  });
+
+  it("a failed verification of a converged address fails and keeps the token; a retry completes the change verified", async () => {
+    let failSetVerified = true;
+    const h = makeHarness((store) => ({
+      ...doubleSubmit(false, false)(store),
+      setVerified: (id, verifiedAt) => {
+        if (failSetVerified) {
+          failSetVerified = false;
+          return Effect.fail(new AuthError({ message: "store unavailable" }));
+        }
+        return store.setVerified(id, verifiedAt);
+      },
+    }));
+    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+
+    const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
+
+    expect(err).toBeInstanceOf(AuthError);
+    expect(h.tokens.has(token)).toBe(true);
+    expect(h.revoked).toEqual([]);
+
+    await run(h, (svc) => svc.confirmEmailChange(token));
+    expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
+    expect(h.tokens.has(token)).toBe(false);
+  });
+
+  it("an address deleted before its verification fails with AccountTokenError and keeps the token", async () => {
+    // A concurrent delete removes the converged identifier, so `setVerified`
+    // resolves to null.
+    const h = makeHarness((store) => ({
+      ...doubleSubmit(false, false)(store),
+      setVerified: (id, verifiedAt) =>
+        store.delete(id).pipe(Effect.andThen(store.setVerified(id, verifiedAt))),
+    }));
+    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+
+    const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
+
+    expect(err).toBeInstanceOf(AccountTokenError);
+    expect(err.message).toBe("The account's email changed during the confirmation; try again");
+    expect(h.tokens.has(token)).toBe(true);
+    expect(h.revoked).toEqual([]);
+    expect(h.notifiedOld).toEqual([]);
+  });
+
   it("a user with no email claims the new address", async () => {
     const h = makeHarness();
     for (const [id, identifier] of h.identifiers) {
