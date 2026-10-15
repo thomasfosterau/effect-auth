@@ -14,7 +14,7 @@
  *   `Policy.eq(System.ref(…))`, `Policy.inScope(System.ref(…))` for a group,
  *   `Policy.isType("System")`). An unscoped permit
  *   (`Policy.permit` with no principal, `Policy.permission`, `Policy.action`,
- *   `Policy.roleAtLeast`, the `OwnedAccess` policies), a role permit
+ *   `Policy.roleAtLeast`, the `OwnedAccess` read policies), a role permit
  *   (`principal in Role::"…"`, so `Rbac`) and a `Policy.custom` permit never
  *   match one.
  * - **Granted explicitly.** It is allowed what a policy grants and nothing else.

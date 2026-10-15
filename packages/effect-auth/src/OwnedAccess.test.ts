@@ -258,6 +258,42 @@ describe("handed to an Authorizer, the policies decide reads and nothing else", 
     expect(await authorize(memberEntity.ref, "read", privateRow.ref, resolved, false)).toBe(true);
   });
 
+  it("no viewer can update or delete any row, whatever its visibility or draft state", async () => {
+    const viewers: ReadonlyArray<AppUser | null> = [
+      null,
+      member,
+      otherMember,
+      contributor,
+      moderator,
+    ];
+    for (const visibility of ["public", "followers", "private"] as const) {
+      for (const draft of [false, true]) {
+        const resource = ownedByMember(`write-${visibility}-${draft}`, visibility, draft);
+        for (const viewer of viewers) {
+          const principal =
+            viewer === null ? Entity.ref("Anonymous", "anonymous") : Entity.ref("User", viewer.id);
+          const resolved = [
+            resource,
+            memberEntity,
+            ...(viewer === null
+              ? []
+              : [Entity.entity(principal, { attributes: { role: viewer.role } })]),
+          ];
+          // The follower permit applies when the viewer follows the owner, so
+          // every follower path is exercised too.
+          for (const follows of [false, true]) {
+            for (const action of ["update", "delete"]) {
+              expect(
+                await authorize(principal, action, resource.ref, resolved, follows),
+                `${viewer?.id ?? "anonymous"} ${action}, ${visibility}, draft=${draft}, follows=${follows}`,
+              ).toBe(false);
+            }
+          }
+        }
+      }
+    }
+  });
+
   it("read decisions agree with canView, row for row, for every viewer", async () => {
     const viewers: ReadonlyArray<AppUser | null> = [
       null,
