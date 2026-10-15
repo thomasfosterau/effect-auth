@@ -22,6 +22,7 @@ import { UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import { Hooks } from "./Hooks.ts";
 import type * as Types from "./Types.ts";
+import { observable, zeroCrypto } from "./testing/Passwordless.ts";
 
 // --- in-memory state ---------------------------------------------------------
 const users = new Map<string, Types.User>();
@@ -152,19 +153,6 @@ const makeTestContext = async () => {
 
 const recordingSend = (phoneNumber: string, otp: string, purpose: PhoneOtpPurpose) =>
   Effect.sync(() => void sentOtps.push({ phoneNumber, otp, purpose }));
-
-/** A `send` outcome as a caller sees it, apart from the time-dependent `retryAfter`. */
-const observable = (
-  result:
-    | { readonly _tag: "Success" }
-    | {
-        readonly _tag: "Failure";
-        readonly failure: { readonly _tag: string; readonly message: string };
-      },
-) =>
-  result._tag === "Success"
-    ? { _tag: "Success" }
-    : { _tag: "Failure", error: result.failure._tag, message: result.failure.message };
 
 const phoneNumberOf = (userId: string) => Effect.runPromise(getPhoneNumber(identifiers, userId));
 
@@ -445,5 +433,39 @@ describe("PhoneOtpService", () => {
     expect(sentOtps.map((sent) => sent.phoneNumber)).toEqual(["+15559990010"]);
     expect(records.has("+15559990011:sign-in")).toBe(true);
     expect(users.size).toBe(1);
+  });
+
+  // #415: an unknown number's cooldown marker must never be redeemable. With
+  // `zeroCrypto` the only code `send` can draw is all zeros, so a marker that
+  // held an `otpLength`-digit code would match that guess.
+  it("stores a cooldown marker for an unknown number that no code redeems", async () => {
+    const testContext = await makeTestContext();
+    seedPhoneUser("+15559990020", true);
+    const otpLength = 6;
+    const guess = "0".repeat(otpLength);
+
+    const { marker, error } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* PhoneOtp.make({
+          otpLength,
+          disableSignUp: true,
+          resendCooldown: 60_000,
+          sendOtp: recordingSend,
+        }).pipe(Effect.provideService(Crypto.Crypto, zeroCrypto));
+        yield* service.send("+15559990020", "sign-in");
+        yield* service.send("+15559990021", "sign-in");
+        const marker = records.get(key("+15559990021", "sign-in"));
+        const error = yield* Effect.flip(service.signIn("+15559990021", guess));
+        return { marker, error };
+      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+    );
+
+    // The stub draws only the all-zero code, as the account holder's shows.
+    expect(sentOtps).toEqual([{ phoneNumber: "+15559990020", otp: guess, purpose: "sign-in" }]);
+    expect(marker).toBeDefined();
+    expect(marker?.otpHash).not.toBe(hashToken(guess));
+    expect(error).toMatchObject({ _tag: "PhoneOtpError", message: "Invalid or expired OTP" });
+    expect(users.size).toBe(1);
+    expect(createdWith).toEqual([]);
   });
 });

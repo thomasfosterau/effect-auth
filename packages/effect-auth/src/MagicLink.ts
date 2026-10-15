@@ -98,7 +98,10 @@ export interface MagicLinkConfig {
    * fails with {@link Errors.ResendTooSoonError}. Off by default; consider
    * 60_000 for SMS-style flows. Complements the global RateLimit. It applies
    * to every email alike, whether or not it has an account, so the error
-   * reveals nothing about which emails are registered.
+   * reveals nothing about which emails are registered. With sign-up disabled,
+   * a request for an email with no account stores an undelivered cooldown
+   * marker, so if that email gains an account within the window, its first
+   * send is delayed by up to the cooldown.
    */
   readonly resendCooldown?: number;
   readonly sendMagicLink: (

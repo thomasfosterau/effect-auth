@@ -123,7 +123,11 @@ export interface EmailOtpConfig {
    * exists, `send` fails with {@link Errors.ResendTooSoonError}. Off by
    * default. Complements the global RateLimit. It applies to every email
    * alike, whether or not it has an account, so the error reveals nothing
-   * about which emails are registered.
+   * about which emails are registered. Where `send` hides whether an account
+   * exists (`"sign-in"` with sign-up disabled, and `"forget-password"`), a
+   * request for an email with no account stores an undelivered cooldown
+   * marker, so if that email gains an account within the window, its first
+   * send for that purpose is delayed by up to the cooldown.
    */
   readonly resendCooldown?: number;
   readonly sendVerificationOtp: (
@@ -174,9 +178,9 @@ export class EmailOtpService extends Context.Service<
      * purpose was created within the cooldown window, fails with
      * {@link Errors.ResendTooSoonError} containing the remaining wait time.
      * The cooldown applies to an email with no account as well: in the cases
-     * above, such a request stores a record whose code is never sent, so a
-     * repeat within the window fails the same way for a known and an unknown
-     * email.
+     * above, such a request stores an undelivered record that no code
+     * redeems, so a repeat within the window fails the same way for a known
+     * and an unknown email.
      */
     readonly send: (
       email: string,
@@ -234,10 +238,16 @@ export const generateOtp = (crypto: Crypto.Crypto, length: number): Effect.Effec
   });
 
 /**
- * Digits in the code behind an unknown address's cooldown marker: about 106
- * bits, against the handful of guesses `maxAttempts` allows.
+ * The secret behind an unknown address's cooldown marker: 32 random bytes,
+ * base64url-encoded. It is hashed into the marker record and then discarded.
  */
-const MARKER_CODE_LENGTH = 32;
+const generateMarkerSecret = (crypto: Crypto.Crypto): Effect.Effect<string, Errors.AuthError> =>
+  crypto.randomBytes(32).pipe(
+    Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+    Effect.mapError(
+      (cause) => new Errors.AuthError({ message: "Failed to generate OTP marker", cause }),
+    ),
+  );
 
 /**
  * Create an email OTP service
@@ -363,12 +373,15 @@ export const make = (
         }
 
         // An address with no account gets a record only as its cooldown
-        // marker. Its code is never sent and is `MARKER_CODE_LENGTH` digits
-        // long, so guessing it within the attempt limit is not feasible.
-        const otp = yield* generateOtp(crypto, deliver ? otpLength : MARKER_CODE_LENGTH);
+        // marker, whose hash is of a random 32-byte secret rather than of a
+        // code: no `otpLength`-digit guess can match it, and the secret is
+        // never sent. Both values are drawn on every send, so the random work
+        // is the same whether or not the address has an account.
+        const otp = yield* generateOtp(crypto, otpLength);
+        const markerSecret = yield* generateMarkerSecret(crypto);
         const record: EmailOtpRecord = {
           email,
-          otpHash: hashToken(otp),
+          otpHash: hashToken(deliver ? otp : markerSecret),
           purpose,
           attempts: 0,
           createdAt: Date.now(),

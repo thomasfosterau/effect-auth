@@ -22,6 +22,7 @@ import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 import * as Errors from "../Errors.ts";
+import { observable, zeroCrypto } from "../testing/Passwordless.ts";
 
 const users = new Map<string, User>();
 const identifierRecords = new Map<string, Identifier>();
@@ -181,19 +182,6 @@ const recordingSend = (email: string, otp: string, purpose: EmailOtpPurpose) =>
   Effect.sync(() => {
     sentOtps.push({ email, otp, purpose });
   });
-
-/** A `send` outcome as a caller sees it, apart from the time-dependent `retryAfter`. */
-const observable = (
-  result:
-    | { readonly _tag: "Success" }
-    | {
-        readonly _tag: "Failure";
-        readonly failure: { readonly _tag: string; readonly message: string };
-      },
-) =>
-  result._tag === "Success"
-    ? { _tag: "Success" }
-    : { _tag: "Failure", error: result.failure._tag, message: result.failure.message };
 
 describe("EmailOtpService", () => {
   beforeEach(() => {
@@ -686,6 +674,53 @@ describe("EmailOtpService", () => {
       // undelivered record as its cooldown marker.
       expect(sentOtps.map((sent) => sent.email)).toEqual(["member@example.com"]);
       expect(otpRecords.has(`missing@example.com:${purpose}`)).toBe(true);
+    },
+  );
+
+  // #415: an unknown email's cooldown marker must never be redeemable. With
+  // `zeroCrypto` the only code `send` can draw is all zeros, so a marker that
+  // held an `otpLength`-digit code would match that guess.
+  it.each([
+    { purpose: "sign-in", disableSignUp: true },
+    { purpose: "forget-password", disableSignUp: false },
+  ] as const)(
+    "stores a cooldown marker for an unknown email that no code redeems ($purpose)",
+    async ({ purpose, disableSignUp }) => {
+      const testContext = await makeTestContext();
+      addUser({ id: "user-member", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+      addEmailIdentifier("user-member", "member@example.com", true);
+      const otpLength = 6;
+      const guess = "0".repeat(otpLength);
+
+      const program = Effect.gen(function* () {
+        const service = yield* EmailOtp.make({
+          otpLength,
+          disableSignUp,
+          resendCooldown: 60_000,
+          sendVerificationOtp: recordingSend,
+        }).pipe(Effect.provideService(Crypto.Crypto, zeroCrypto));
+        yield* service.send("member@example.com", purpose);
+        yield* service.send("missing@example.com", purpose);
+        const marker = otpRecords.get(recordKey("missing@example.com", purpose));
+        const error = yield* Effect.flip(
+          purpose === "sign-in"
+            ? Effect.asVoid(service.signIn("missing@example.com", guess))
+            : Effect.asVoid(service.check("missing@example.com", guess, purpose)),
+        );
+        return { marker, error };
+      });
+
+      const { marker, error } = await Effect.runPromise(
+        Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      );
+
+      // The stub draws only the all-zero code, as the account holder's shows.
+      expect(sentOtps).toEqual([{ email: "member@example.com", otp: guess, purpose }]);
+      expect(marker).toBeDefined();
+      expect(marker?.otpHash).not.toBe(hashToken(guess));
+      expect(error).toMatchObject({ _tag: "EmailOtpError", message: "Invalid or expired OTP" });
+      expect(users.size).toBe(1);
+      expect(createdWith).toEqual([]);
     },
   );
 });

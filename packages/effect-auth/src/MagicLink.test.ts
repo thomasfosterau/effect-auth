@@ -20,6 +20,7 @@ import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type { Session, User, SessionConfig } from "./Types.ts";
+import { observable } from "./testing/Passwordless.ts";
 
 const users = new Map<string, User>();
 const identifierRecords = new Map<string, Identifier>();
@@ -178,19 +179,6 @@ const recordingSend = (email: string, token: string) =>
   Effect.sync(() => {
     sentLinks.push({ email, token });
   });
-
-/** A `send` outcome as a caller sees it, apart from the time-dependent `retryAfter`. */
-const observable = (
-  result:
-    | { readonly _tag: "Success" }
-    | {
-        readonly _tag: "Failure";
-        readonly failure: { readonly _tag: string; readonly message: string };
-      },
-) =>
-  result._tag === "Success"
-    ? { _tag: "Success" }
-    : { _tag: "Failure", error: result.failure._tag, message: result.failure.message };
 
 describe("MagicLinkService", () => {
   beforeEach(() => {
