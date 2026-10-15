@@ -200,7 +200,7 @@ The rules a system principal follows:
   anything: `System.grant`, `Policy.eq(System.ref(…))` or `Policy.isType("System")`. The kernel
   enforces this for every policy set, so a permit with no principal scope (`Policy.permit` without
   `principal`, `Policy.permission`, even `{ action: "*", resource: "*" }`, `Policy.action`,
-  `Policy.roleAtLeast`, the `OwnedAccess` policies), a role permit (`Rbac`, `Policy.role`) and a
+  `Policy.roleAtLeast`, the `OwnedAccess` read policies), a role permit (`Rbac`, `Policy.role`) and a
   `Policy.custom` permit never match one. There is no allow-all for system principals.
 - **Named by a grant.** `System.grant` takes one action and one resource scope, so a job is granted what it
   needs and nothing wider. A wider grant is several grants, each with its own id.
