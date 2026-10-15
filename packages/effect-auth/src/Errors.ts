@@ -609,6 +609,24 @@ export class RateLimiterConfigError extends Data.TaggedError("RateLimiterConfigE
 }> {}
 
 /**
+ * `Http.make` was called with `requireSynchronousBuild: true`, and the
+ * `services` build had not finished when `make` had run it as far as it runs
+ * synchronously (#416). The build waits on asynchronous work (a database
+ * connection, `Effect.promise`), on a merged layer that yields, or on a forked
+ * fiber that yields before it completes a `Deferred` the build awaits. The
+ * message names `Http.makeAsync`, which waits for such a build.
+ *
+ * `make` throws it synchronously, so the app fails to start. Before it throws,
+ * `make` interrupts the build and releases what the build acquired; a
+ * finalizer that does asynchronous work finishes after `make` has thrown.
+ * Without `requireSynchronousBuild`, `make` never raises it: it returns, and
+ * the startup checks run when the build finishes.
+ */
+export class ServicesBuildPendingError extends Data.TaggedError("ServicesBuildPendingError")<{
+  readonly message: string;
+}> {}
+
+/**
  * Magic link send/verify failure (infrastructure or token mismatch).
  */
 export class MagicLinkError extends Data.TaggedError("MagicLinkError")<{

@@ -70,7 +70,11 @@ import {
   type ScimUserResource,
 } from "../Scim.ts";
 import type * as Errors from "../Errors.ts";
-import { ClientAddressConfigError, RateLimiterConfigError } from "../Errors.ts";
+import {
+  ClientAddressConfigError,
+  RateLimiterConfigError,
+  ServicesBuildPendingError,
+} from "../Errors.ts";
 import { hashToken } from "../TokenHash.ts";
 import { GoogleOneTapService } from "../GoogleOneTap.ts";
 import {
@@ -4427,6 +4431,28 @@ export interface AuthWebHandlerOptions {
    * counted under a shared bucket.
    */
   readonly allowMissingClientIp?: boolean | undefined;
+  /**
+   * Make {@link make} throw {@link ServicesBuildPendingError} when the
+   * `services` build has not finished by the time `make` has run it as far as
+   * it runs synchronously. Default `false`.
+   *
+   * Without it, `make` returns for such a build (asynchronous work, merged
+   * layers that yield, a forked fiber the build waits on: see `make`), and the
+   * startup checks run when the build finishes: a failure then fails the
+   * handler's build, so every request rejects with it. With it, the app fails
+   * to start instead, and the error's message names {@link makeAsync}, which
+   * waits for such a build. Before it throws, `make` interrupts the build and
+   * releases what the build acquired; a finalizer that does asynchronous work
+   * finishes after `make` has thrown.
+   *
+   * A build that finishes synchronously is unaffected: `make` throws the
+   * startup errors or the build's own failure, or returns the handler, as it
+   * does without this option.
+   *
+   * {@link makeAsync} ignores it: it waits for the build however it is
+   * composed, so its startup errors always reject at startup.
+   */
+  readonly requireSynchronousBuild?: boolean | undefined;
 }
 
 /** Minimal Scalar API reference shell pointing at the sibling `openapi.json`. */
@@ -4564,6 +4590,18 @@ const releaseRefusedServices = (scope: Scope.Closeable): Effect.Effect<void> =>
       ),
     ),
   );
+
+/**
+ * What `make` throws under `requireSynchronousBuild` when the `services` build
+ * has no exit after it ran synchronously (#416).
+ */
+const pendingBuildError = (): ServicesBuildPendingError =>
+  new ServicesBuildPendingError({
+    message:
+      "requireSynchronousBuild is set, and the services build did not finish while Http.make ran it synchronously: " +
+      "it waits on asynchronous work (a database connection, Effect.promise), on a merged layer that yields, " +
+      "or on a forked fiber. Use Http.makeAsync, which waits for the build, or make the build synchronous.",
+  });
 
 /**
  * The handler over `services`, built once: `make` and `makeAsync` pass the
@@ -4723,6 +4761,8 @@ const serve = (
  * - Any failure of the `services` build itself, such as the OIDC layer's
  *   `ClientAddressConfigError`: the failure's error, or for a defect the defect
  *   itself, as `Effect.runSync` throws.
+ * - {@link ServicesBuildPendingError}, only with `requireSynchronousBuild: true`:
+ *   the build had not finished when `make` had run it synchronously (below).
  *
  * **When `make` throws, and when it cannot.** `make` is synchronous, so it can
  * throw only when the `services` build finishes before it returns. It runs the
@@ -4748,8 +4788,14 @@ const serve = (
  * {@link makeAsync} when `services` may build like this. It waits for the build
  * however it is composed, and rejects with the same errors.
  *
- * **Release before a throw.** `make` closes what the build acquired, then
- * throws. A finalizer that does asynchronous work finishes after `make` has
+ * **Requiring a synchronous build.** With `requireSynchronousBuild: true`,
+ * `make` throws {@link ServicesBuildPendingError} for such a build instead of
+ * returning, so the app fails to start; the error's message names
+ * {@link makeAsync}. A build that finishes synchronously is unaffected: it
+ * throws its own errors or returns the handler, as without the option.
+ *
+ * **Release before a throw.** `make` interrupts the build if it is still
+ * running, closes what the build acquired, then throws. A finalizer that does asynchronous work finishes after `make` has
  * thrown. A finalizer that fails is logged with `Effect.logError` whenever it
  * finishes, and `make` throws the reason it refused the services.
  *
@@ -4780,15 +4826,19 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
       build.run();
       const built = servicesFiber.pollUnsafe();
       if (built !== undefined) refused = refusedBuild(built, options);
+      else if (options.requireSynchronousBuild === true) refused = { error: pendingBuildError() };
     } catch (thrown) {
       // A task of the build, or the check itself, threw: refuse the services
       // all the same, and release what the build acquired.
       refused = { error: thrown };
     }
     if (refused !== undefined) {
-      // Release what the build acquired, as far as that runs synchronously. An
+      // Stop the build if it is still running (a no-op once it has an exit),
+      // then release what it acquired, as far as that runs synchronously. An
       // asynchronous finalizer finishes after make throws.
-      const close = runSynchronously(releaseRefusedServices(servicesScope));
+      const close = runSynchronously(
+        Fiber.interrupt(servicesFiber).pipe(Effect.andThen(releaseRefusedServices(servicesScope))),
+      );
       try {
         close.run();
       } finally {
@@ -4799,8 +4849,9 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
   } finally {
     build.release();
   }
-  // Still building (see "When make throws" above): the same check runs as a
-  // layer when the build finishes, and fails the handler's build instead.
+  // Still building, without requireSynchronousBuild (see "When make throws"
+  // above): the same check runs as a layer when the build finishes, and fails
+  // the handler's build instead.
   return serve(
     options,
     Layer.provideMerge(
@@ -4840,6 +4891,9 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  * for every finalizer, asynchronous ones included. A finalizer that fails is
  * logged with `Effect.logError`, and the promise rejects with the reason the
  * services were refused.
+ *
+ * `makeAsync` ignores `requireSynchronousBuild`: it waits for the build
+ * whatever the option says, so it never needs a synchronous one.
  *
  * A fiber the build forks with `Effect.forkChild` is interrupted when the layer
  * that forks it finishes building, and under `Layer.merge` or `Layer.mergeAll`

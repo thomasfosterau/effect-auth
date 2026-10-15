@@ -75,7 +75,11 @@ import {
 import { generateHotp, generateTotp } from "../multifactor/Otp.ts";
 import type * as Types from "../Types.ts";
 import { ClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
-import { ClientAddressConfigError, RateLimiterConfigError } from "../Errors.ts";
+import {
+  ClientAddressConfigError,
+  RateLimiterConfigError,
+  ServicesBuildPendingError,
+} from "../Errors.ts";
 import { IPRateLimitPlugin } from "../plugins/IPRateLimit.ts";
 import { NormalizeEmailPlugin } from "../plugins/NormalizeEmail.ts";
 import { AuthApi } from "./HttpApi.ts";
@@ -3457,6 +3461,205 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       expect(counter.state.ticks).toBeGreaterThan(atDispose);
     } finally {
       counter.state.stopped = true;
+    }
+  });
+});
+
+describe("make with requireSynchronousBuild (#416)", () => {
+  const signIn = () => jsonRequest("/sign-in", { email: "nobody@example.com", password: PW });
+
+  // Services whose build has not finished when make has run it synchronously.
+  // Each settles without a timer, so the fallback below finishes deterministically.
+  const pending: ReadonlyArray<readonly [string, () => Layer.Layer<AuthServices>]> = [
+    [
+      "merged layers that yield",
+      () =>
+        Layer.mergeAll(
+          makeFixture().services,
+          Layer.effectDiscard(Effect.yieldNow),
+          Layer.effectDiscard(Effect.yieldNow),
+        ) as Layer.Layer<AuthServices>,
+    ],
+    [
+      "an Effect.promise step",
+      () =>
+        Layer.effectDiscard(Effect.promise(() => Promise.resolve())).pipe(
+          Layer.provideMerge(makeFixture().services),
+        ) as Layer.Layer<AuthServices>,
+    ],
+    [
+      "a forkScoped fiber that yields before it completes a Deferred the build awaits",
+      () =>
+        Layer.effectDiscard(
+          Effect.gen(function* () {
+            const ready = yield* Deferred.make<void>();
+            yield* Effect.forkScoped(
+              Effect.yieldNow.pipe(Effect.andThen(Deferred.succeed(ready, undefined))),
+            );
+            yield* Deferred.await(ready);
+          }),
+        ).pipe(Layer.provideMerge(makeFixture().services)) as Layer.Layer<AuthServices>,
+    ],
+  ];
+
+  for (const [composition, services] of pending) {
+    it(`throws ServicesBuildPendingError for ${composition}, and takes the fallback without it`, async () => {
+      const error = thrownBy(() =>
+        HttpServer.make({
+          services: services(),
+          cookie: { secure: false },
+          requireSynchronousBuild: true,
+        }),
+      );
+      expect(error).toBeInstanceOf(ServicesBuildPendingError);
+      expect(String(error)).toMatch(/Use Http\.makeAsync/);
+
+      // Without the option, make returns and the handler serves the build once
+      // it finishes.
+      const { handler, dispose } = HttpServer.make({
+        services: services(),
+        cookie: { secure: false },
+      });
+      expect((await handler(signIn())).status).toBe(401);
+      await dispose();
+
+      // An explicit false is the default.
+      const off = HttpServer.make({
+        services: services(),
+        cookie: { secure: false },
+        requireSynchronousBuild: false,
+      });
+      expect((await off.handler(signIn())).status).toBe(401);
+      await off.dispose();
+    });
+  }
+
+  it("returns the handler for a synchronous build", async () => {
+    const { handler, dispose } = HttpServer.make({
+      services: makeFixture().services,
+      cookie: { secure: false },
+      requireSynchronousBuild: true,
+    });
+    expect((await handler(signIn())).status).toBe(401);
+    await dispose();
+  });
+
+  it("throws a synchronous build's own failure, and its startup errors", () => {
+    const failure = new BootError({ reason: "no database" });
+    const failing = Layer.effectDiscard(Effect.fail(failure)).pipe(
+      Layer.provideMerge(makeFixture().services),
+    ) as unknown as Layer.Layer<AuthServices>;
+    expect(
+      thrownBy(() =>
+        HttpServer.make({
+          services: failing,
+          cookie: { secure: false },
+          requireSynchronousBuild: true,
+        }),
+      ),
+    ).toBe(failure);
+
+    expect(() =>
+      HttpServer.make({
+        services: makeFixture().services,
+        trustedProxy: ClientIP.cloudflare,
+        ipRateLimit: {},
+        requireSynchronousBuild: true,
+      }),
+    ).toThrow(RateLimiterConfigError);
+  });
+
+  it("interrupts the build and releases what it acquired before it throws", async () => {
+    let acquired = 0;
+    let released = 0;
+    let interrupted = false;
+    const counted = Layer.effectDiscard(
+      Effect.acquireRelease(
+        Effect.sync(() => void acquired++),
+        () => Effect.sync(() => void released++),
+      ),
+    );
+    // Never completed: only interruption ends this step.
+    const gate = Effect.runSync(Deferred.make<void>());
+    const waiting = Layer.effectDiscard(
+      Deferred.await(gate).pipe(
+        Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true))),
+      ),
+    );
+    const services = waiting.pipe(
+      Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
+    ) as Layer.Layer<AuthServices>;
+
+    const error = thrownBy(() =>
+      HttpServer.make({ services, cookie: { secure: false }, requireSynchronousBuild: true }),
+    );
+    expect(error).toBeInstanceOf(ServicesBuildPendingError);
+    expect(acquired).toBe(1);
+    expect(interrupted).toBe(true);
+    expect(released).toBe(1);
+
+    // Nothing runs again once make has thrown.
+    await macrotasks(3);
+    expect(acquired).toBe(1);
+    expect(released).toBe(1);
+  });
+
+  it("interrupts a merged layer that keeps yielding", async () => {
+    let spins = 0;
+    let interrupted = false;
+    const spinning = Layer.effectDiscard(
+      Effect.forever(
+        Effect.andThen(
+          Effect.yieldNow,
+          Effect.sync(() => void spins++),
+        ),
+      ).pipe(Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true)))),
+    );
+    const services = Layer.merge(makeFixture().services, spinning) as Layer.Layer<AuthServices>;
+
+    expect(
+      thrownBy(() =>
+        HttpServer.make({ services, cookie: { secure: false }, requireSynchronousBuild: true }),
+      ),
+    ).toBeInstanceOf(ServicesBuildPendingError);
+    expect(interrupted).toBe(true);
+    const atThrow = spins;
+    await macrotasks(3);
+    expect(spins).toBe(atThrow);
+  });
+
+  it("finishes an asynchronous finalizer after make throws", async () => {
+    let released = false;
+    const slowRelease = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () =>
+        Effect.promise(() => Promise.resolve()).pipe(
+          Effect.andThen(Effect.sync(() => void (released = true))),
+        ),
+      ),
+    );
+    const services = Layer.effectDiscard(Effect.promise(() => Promise.resolve())).pipe(
+      Layer.provideMerge(Layer.merge(makeFixture().services, slowRelease)),
+    ) as Layer.Layer<AuthServices>;
+
+    expect(
+      thrownBy(() =>
+        HttpServer.make({ services, cookie: { secure: false }, requireSynchronousBuild: true }),
+      ),
+    ).toBeInstanceOf(ServicesBuildPendingError);
+    expect(released).toBe(false);
+    await macrotasks(3);
+    expect(released).toBe(true);
+  });
+
+  it("is ignored by makeAsync, which waits for the build", async () => {
+    for (const [, services] of pending) {
+      const { handler, dispose } = await HttpServer.makeAsync({
+        services: services(),
+        cookie: { secure: false },
+        requireSynchronousBuild: true,
+      });
+      expect((await handler(signIn())).status).toBe(401);
+      await dispose();
     }
   });
 });
