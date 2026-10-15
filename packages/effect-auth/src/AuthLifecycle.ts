@@ -37,8 +37,8 @@ export interface AuthLifecycleResult {
    * The login handle a sign-up was made with: the email address it claimed;
    * under `antiEnumeration`, the address another user holds; or, with
    * `antiEnumeration` off, the address an existing user holds unverified,
-   * whose verification `signUp` re-issues instead of failing (the result's
-   * `user` is then that existing user). Set by `signUp`, whose address is
+   * which `signUp` answers with that user instead of failing (re-issuing its
+   * verification when `sendOnSignUp` is set). Set by `signUp`, whose address is
    * always unverified at this point; the HTTP sign-up response reports the
    * user's `email` from it.
    */

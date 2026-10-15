@@ -56,11 +56,13 @@ export class EmailPasswordStore extends Context.Service<
      * {@link EmailPasswordConfig.antiEnumeration}); its id comes from here, so
      * a store whose ids are not random UUIDs (sequential integers, prefixed or
      * time-ordered ids) can keep the stand-in's id the same shape as a real
-     * one. The id must be one no user holds or will later be assigned: draw it
-     * from the same sequence `createUser` uses, reserving it. Minting it must
-     * not read or change any existing user. Without it the stand-in's id is a
-     * random UUID (`crypto.randomUUID()`), the shape effect-auth-sql's
-     * `createUser` assigns.
+     * one. The id must be one no user holds or will later be assigned (an id
+     * equal to the address holder's would make `UsernameService.signUp` claim
+     * the username for that user): draw it from the same sequence
+     * `createUser` uses, reserving it. Minting it must not read or change any
+     * existing user. Without it the stand-in's id is a random UUID
+     * (`crypto.randomUUID()`), the shape effect-auth-sql's `createUser`
+     * assigns.
      */
     readonly newUserId?: (() => Effect.Effect<string, Errors.AuthError>) | undefined;
 

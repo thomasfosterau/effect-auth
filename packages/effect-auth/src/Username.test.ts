@@ -355,6 +355,7 @@ describe("UsernameService under anti-enumeration (#414)", () => {
     f: (svc: typeof UsernameService.Service) => Effect.Effect<A, E, UsernameDeps>,
     opts: {
       readonly store?: typeof EmailPasswordStore.Service;
+      readonly identifiers?: typeof IdentifierStore.Service;
       readonly hasher?: typeof PasswordHasher.Service;
       readonly emailPassword?: EmailPasswordConfig;
       readonly decorate?: (
@@ -363,7 +364,7 @@ describe("UsernameService under anti-enumeration (#414)", () => {
     } = {},
   ) => {
     const stores = Layer.mergeAll(
-      Layer.succeed(IdentifierStore)(identifierStore),
+      Layer.succeed(IdentifierStore)(opts.identifiers ?? identifierStore),
       Layer.succeed(EmailPasswordStore)(opts.store ?? emailPasswordStore),
       Layer.succeed(SessionStore)(sessionStore),
       Layer.succeed(UserStore)(userStore),
@@ -524,6 +525,52 @@ describe("UsernameService under anti-enumeration (#414)", () => {
     expect(taken.user.id).not.toBe(owner.id);
     expect(findIdentifier("username", "fresh_one")?.userId).toBe(fresh.user.id);
     expect(findIdentifier("username", "squat_me")).toBeNull();
+  });
+
+  it("a stand-in whose address has no holder by the check claims no username", async () => {
+    // The owner's address is released between the stand-in answer and the
+    // username claim, so the store reports no holder: the stand-in's id is
+    // never stored, so the user store does not know it either.
+    const owner = seedOwner(VICTIM);
+    const releasing = (service: typeof EmailPasswordService.Service) => ({
+      ...service,
+      signUp: (input: Parameters<typeof service.signUp>[0]) =>
+        service.signUp(input).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              const held = findIdentifier("email", VICTIM);
+              if (held !== null) identifierRecords.delete(held.id);
+            }),
+          ),
+        ),
+    });
+    const taken = await runAntiEnumeration(
+      (svc) => svc.signUp({ username: "squat_me", email: VICTIM, password: PASSWORD }),
+      { decorate: releasing },
+    );
+
+    expect(taken.user.id).not.toBe(owner.id);
+    expect(findIdentifier("email", VICTIM)).toBeNull();
+    expect(findIdentifier("username", "squat_me")).toBeNull();
+  });
+
+  it("a fresh sign-up whose identifier store has not caught up still claims its username", async () => {
+    // A store whose email reads lag its writes (a cache of negative lookups)
+    // reports no holder for the address the sign-up has just claimed; the
+    // user store, which does know the new user, settles it.
+    const lagging: typeof IdentifierStore.Service = {
+      ...identifierStore,
+      getByValue: (type, value) =>
+        type === "email" ? Effect.succeed(null) : identifierStore.getByValue(type, value),
+    };
+    const fresh = await runAntiEnumeration(
+      (svc) =>
+        svc.signUp({ username: "fresh_one", email: "fresh@example.com", password: PASSWORD }),
+      { identifiers: lagging },
+    );
+
+    expect(findIdentifier("email", "fresh@example.com")?.userId).toBe(fresh.user.id);
+    expect(findIdentifier("username", "fresh_one")?.userId).toBe(fresh.user.id);
   });
 
   it("a username taken before sign-up fails the same way for a fresh or a taken address", async () => {
