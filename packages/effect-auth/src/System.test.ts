@@ -460,20 +460,23 @@ describe("a system principal is denied under every library policy set with no gr
     }
   });
 
-  it("OwnedAccess.policies: a user's decisions are unchanged", async () => {
+  it("OwnedAccess.policies: a user is allowed reads on owned rows and no other action (#387)", async () => {
     const publicRow = ownedRow("public", Entity.ref("User", "carol"), "public");
     const privateRow = ownedRow("private", Entity.ref("User", "carol"), "private");
     const bob = Entity.entity(Entity.ref("User", "bob"), { attributes: { role: "user" } });
-    // `owned:public` is action-agnostic for users, as before.
-    expect(await allowedActions(bob.ref, owned.policies, publicRow.ref, [publicRow, bob])).toEqual(
-      everyAction,
-    );
+    // The owned:* permits are read-scoped: `owned:public` admits bob's read of a
+    // public row, and nothing else on it.
+    expect(await allowedActions(bob.ref, owned.policies, publicRow.ref, [publicRow, bob])).toEqual([
+      "read",
+    ]);
     expect(
       await allowedActions(bob.ref, owned.policies, privateRow.ref, [privateRow, bob]),
     ).toEqual([]);
+    // alice holds the viewPrivate rung, so `owned:view-private` admits her read of a
+    // private row, and still nothing else.
     expect(
       await allowedActions(alice, owned.policies, privateRow.ref, [privateRow, aliceAsAdmin]),
-    ).toEqual(everyAction);
+    ).toEqual(["read"]);
   });
 
   it("Guard policies: neither the rung nor the owner policy reaches it", async () => {

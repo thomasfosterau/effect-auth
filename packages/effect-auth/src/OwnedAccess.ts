@@ -205,11 +205,14 @@ export interface OwnedAccess<Id> {
   /** The per-request read scope a list renders as its `WHERE`. */
   readonly readScope: Effect.Effect<OwnedReadScope, never, Id>;
   /**
-   * The declarative policies {@link OwnedAccess.canView} decides. The row is
-   * the resource (`owner`, `visibility`, `draft` attributes); the follow fact
-   * is `context.follows`. Their principal scopes are unscoped (`any`), which
-   * the kernel never lets reach a system principal (`System::"<name>"`), so
-   * handing them to an `Authorizer` grants a job nothing.
+   * The declarative policies {@link OwnedAccess.canView} decides, and read
+   * policies only: each permit's action scope is `Action::"read"`, so under
+   * these policies alone an update or delete of a row is denied, whoever asks.
+   * The row is the resource (`owner`, `visibility`, `draft` attributes); the
+   * follow fact is `context.follows`. Their principal scopes are unscoped
+   * (`any`), which the kernel never lets reach a system principal
+   * (`System::"<name>"`), so handing them to an `Authorizer` grants a job
+   * nothing.
    */
   readonly policies: ReadonlyArray<Policy.DeclarativePolicy>;
 }
@@ -231,6 +234,14 @@ export interface OwnedAccessOptions<Id, User extends Guard.ViewerShape, Rung ext
 const anonymousPrincipal = Entity.entity(Entity.ref("Anonymous", "anonymous"));
 
 /**
+ * The one action the owned-material policies decide: `Action::"read"`. Every
+ * `owned:*` permit is scoped to it, so the policy set answers only "may this
+ * viewer read this row", never "may they update or delete it".
+ */
+const readAction = Entity.ref("Action", "read");
+const readScopeOf = Policy.eq(readAction);
+
+/**
  * Build the owned-material read access.
  *
  * @since 1.0.0
@@ -248,20 +259,24 @@ export const make = <Id, User extends Guard.ViewerShape, Rung extends string>(
   const policies: ReadonlyArray<Policy.DeclarativePolicy> = [
     Policy.permit({
       id: "owned:public",
+      action: readScopeOf,
       resource: resourceScope,
       when: Condition.and(Condition.eq(attr("visibility"), Condition.lit("public")), notDraft),
     }),
     Policy.permit({
       id: "owned:owner",
+      action: readScopeOf,
       resource: resourceScope,
       when: Condition.eq(Condition.principal, attr("owner")),
     }),
     Policy.roleAtLeast(guards.ladder, viewPrivate, {
       id: "owned:view-private",
+      action: readScopeOf,
       resource: resourceScope,
     }),
     Policy.permit({
       id: "owned:follower",
+      action: readScopeOf,
       resource: resourceScope,
       when: Condition.and(
         Condition.eq(attr("visibility"), Condition.lit("followers")),
@@ -287,7 +302,7 @@ export const make = <Id, User extends Guard.ViewerShape, Rung extends string>(
       policies,
       Policy.request({
         principal: principal.ref,
-        action: Entity.ref("Action", "read"),
+        action: readAction,
         resource: resource.ref,
         context: { follows },
       }),

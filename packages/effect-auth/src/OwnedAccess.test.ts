@@ -10,9 +10,12 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { Context, Effect, Layer, Option } from "effect";
+import * as Authorizer from "./Authorizer.ts";
+import * as Entity from "./Entity.ts";
 import * as Guard from "./Guard.ts";
 import * as Ladder from "./Ladder.ts";
 import * as OwnedAccess from "./OwnedAccess.ts";
+import * as Policy from "./Policy.ts";
 import * as SessionContext from "./SessionContext.ts";
 
 interface AppUser {
@@ -172,5 +175,117 @@ describe("the policies canView decides", () => {
       "owned:follower",
     ]);
     for (const policy of owned.policies) expect(policy._tag).toBe("DeclarativePolicy");
+  });
+
+  it('are read policies: every permit is scoped to Action::"read"', () => {
+    for (const policy of owned.policies) {
+      expect(policy.action, policy.id).toEqual(Policy.eq(Entity.ref("Action", "read")));
+    }
+  });
+});
+
+describe("handed to an Authorizer, the policies decide reads and nothing else", () => {
+  /** `owned.policies` alone, as an application's Authorizer would hold them. */
+  const authorize = (
+    principal: Entity.EntityRef,
+    action: string,
+    resource: Entity.EntityRef,
+    resolved: ReadonlyArray<Entity.Entity>,
+    follows: boolean,
+  ): Promise<boolean> =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const authorizer = yield* Authorizer.Authorizer;
+        return yield* authorizer.check({ action, resource, context: { follows } });
+      }).pipe(
+        Authorizer.CurrentPrincipal.provide(principal),
+        Effect.provide(Authorizer.Authorizer.layer({ policies: owned.policies })),
+        Effect.provideService(Authorizer.EntityResolver, Authorizer.memoryEntityResolver(resolved)),
+      ),
+    );
+
+  const memberEntity = Entity.entity(Entity.ref("User", member.id), {
+    attributes: { role: member.role },
+  });
+  const moderatorEntity = Entity.entity(Entity.ref("User", moderator.id), {
+    attributes: { role: moderator.role },
+  });
+  const otherMemberEntity = Entity.entity(Entity.ref("User", otherMember.id), {
+    attributes: { role: otherMember.role },
+  });
+
+  /** An owned row owned by `member`, as the resolver sees it. */
+  const ownedByMember = (id: string, visibility: OwnedAccess.Visibility, draft = false) =>
+    Entity.entity(Entity.ref("Owned", id), {
+      attributes: {
+        owner: Entity.entityValue(Entity.ref("User", member.id)),
+        visibility,
+        draft,
+      },
+    });
+
+  it("a user's update and delete on a public row are denied, owner included", async () => {
+    const publicRow = ownedByMember("public-row", "public");
+    const resolved = [publicRow, memberEntity, otherMemberEntity];
+    for (const principal of [memberEntity, otherMemberEntity]) {
+      expect(
+        await authorize(principal.ref, "read", publicRow.ref, resolved, false),
+        `${principal.ref.id} reads`,
+      ).toBe(true);
+      for (const action of ["update", "delete"]) {
+        expect(
+          await authorize(principal.ref, action, publicRow.ref, resolved, false),
+          `${principal.ref.id} ${action}`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("the viewPrivate axis reads a private row and still cannot update or delete it", async () => {
+    const privateRow = ownedByMember("private-row", "private");
+    const resolved = [privateRow, memberEntity, moderatorEntity];
+    for (const action of ["update", "delete"]) {
+      expect(await authorize(moderatorEntity.ref, action, privateRow.ref, resolved, false)).toBe(
+        false,
+      );
+      expect(await authorize(memberEntity.ref, action, privateRow.ref, resolved, false)).toBe(
+        false,
+      );
+    }
+    expect(await authorize(moderatorEntity.ref, "read", privateRow.ref, resolved, false)).toBe(
+      true,
+    );
+    expect(await authorize(memberEntity.ref, "read", privateRow.ref, resolved, false)).toBe(true);
+  });
+
+  it("read decisions agree with canView, row for row, for every viewer", async () => {
+    const viewers: ReadonlyArray<AppUser | null> = [
+      null,
+      member,
+      otherMember,
+      contributor,
+      moderator,
+    ];
+    for (const visibility of ["public", "followers", "private"] as const) {
+      for (const draft of [false, true]) {
+        const resource = ownedByMember(`row-${visibility}-${draft}`, visibility, draft);
+        for (const viewer of viewers) {
+          const principal =
+            viewer === null ? Entity.ref("Anonymous", "anonymous") : Entity.ref("User", viewer.id);
+          const resolved = [
+            resource,
+            memberEntity,
+            ...(viewer === null
+              ? []
+              : [Entity.entity(principal, { attributes: { role: viewer.role } })]),
+          ];
+          const followsOwner = viewer?.id === otherMember.id;
+          expect(
+            await authorize(principal, "read", resource.ref, resolved, followsOwner),
+            `${viewer?.id ?? "anonymous"}, ${visibility}, draft=${draft}`,
+          ).toBe(canView(row(visibility, draft), viewer, follows));
+        }
+      }
+    }
   });
 });
