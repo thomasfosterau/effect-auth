@@ -636,4 +636,74 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
     expect(knownOps).toEqual(["upsert"]);
     expect(recordOf("+15559990101")()).toEqual(recordOf(member)());
   });
+
+  it("answers a known number whose record has used every attempt generically", async () => {
+    // The defensive branch: a record that reached `maxAttempts` without being
+    // deleted. The correct code must answer the generic message as well.
+    const { answer, record } = await runPromise(
+      Effect.gen(function* () {
+        const service = yield* PhoneOtp.make({
+          maxAttempts,
+          expiresIn,
+          disableSignUp: true,
+          sendOtp: recordingSend,
+        });
+        yield* service.send(member, "sign-in");
+        const stored = records.get(key(member, "sign-in"))!;
+        records.set(key(member, "sign-in"), { ...stored, attempts: maxAttempts });
+        return {
+          answer: observable(yield* Effect.result(service.signIn(member, sentOtps[0]!.otp))),
+          record: recordOf(member)(),
+        };
+      }),
+    );
+
+    expect(answer).toEqual(invalid);
+    expect(record).toBeNull();
+  });
+
+  it("keeps the specific expiry and attempt-limit messages for phone-verification", async () => {
+    const created = seedPhoneUser("+15559990200", false);
+    const phone = "+15559990200";
+    const recordState = (): RecordState | null => {
+      const record = records.get(key(phone, "phone-verification"));
+      return record === undefined
+        ? null
+        : { attempts: record.attempts, lifetime: record.expiresAt - record.createdAt };
+    };
+
+    const { wrong, expired } = await runPromise(
+      Effect.gen(function* () {
+        const run = (sequence: (typeof verifySequences)[number]) =>
+          Effect.gen(function* () {
+            const service = yield* PhoneOtp.make({
+              maxAttempts,
+              expiresIn,
+              disableSignUp: true,
+              sendOtp: recordingSend,
+            });
+            return yield* runVerifySequence(sequence, {
+              maxAttempts,
+              expiresIn,
+              send: service.send(phone, "phone-verification"),
+              verify: service.verifyPhoneNumber(created.id, phone, wrongCode),
+              record: recordState,
+            });
+          });
+        return { wrong: yield* run("wrong codes"), expired: yield* run("expired code") };
+      }),
+    );
+
+    const answer = (message: string) => ({ _tag: "Failure", error: "PhoneOtpError", message });
+    expect(wrong.slice(1).map((step) => step.answer)).toEqual([
+      answer("Invalid or expired OTP"),
+      answer("Invalid or expired OTP"),
+      answer("Too many attempts"),
+      answer("Invalid or expired OTP"),
+    ]);
+    expect(expired.slice(1).map((step) => step.answer)).toEqual([
+      answer("OTP has expired"),
+      answer("Invalid or expired OTP"),
+    ]);
+  });
 });

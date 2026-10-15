@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
-import { Context, Crypto, Effect } from "effect";
+import { Context, Crypto, Effect, Tracer } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
@@ -912,4 +912,79 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
       );
     },
   );
+
+  it.each(hidden)(
+    "answers the generic message for a known email whose record has used every attempt ($purpose, disableSignUp: $disableSignUp)",
+    async ({ purpose, disableSignUp }) => {
+      // Seed the defensive branch: a record that reached `maxAttempts` without
+      // being deleted. Even the correct code must answer the generic message.
+      const { answer, record } = await runPromise(
+        Effect.gen(function* () {
+          const service = yield* EmailOtp.make({
+            maxAttempts,
+            expiresIn,
+            disableSignUp,
+            sendVerificationOtp: recordingSend,
+          });
+          yield* service.send("member@example.com", purpose);
+          const stored = otpRecords.get(recordKey("member@example.com", purpose))!;
+          otpRecords.set(recordKey("member@example.com", purpose), {
+            ...stored,
+            attempts: maxAttempts,
+          });
+          const otp = sentOtps[0]!.otp;
+          const result =
+            purpose === "sign-in"
+              ? yield* Effect.result(service.signIn("member@example.com", otp))
+              : yield* Effect.result(service.check("member@example.com", otp, purpose));
+          return {
+            answer: observable(result),
+            record: recordOf("member@example.com", purpose)(),
+          };
+        }),
+      );
+
+      expect(answer).toEqual(invalid);
+      expect(record).toBeNull();
+    },
+  );
+
+  it("records the real reason on the signIn span while answering the generic message", async () => {
+    // The span keeps the reason operators need; the caller sees only the
+    // generic message. Capture the spans the service creates.
+    const spans: Tracer.NativeSpan[] = [];
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options);
+        spans.push(span);
+        return span;
+      },
+    });
+
+    const answers = await runPromise(
+      Effect.gen(function* () {
+        const service = yield* EmailOtp.make({
+          maxAttempts,
+          expiresIn,
+          disableSignUp: true,
+          sendVerificationOtp: recordingSend,
+        });
+        yield* service.send("member@example.com", "sign-in");
+        const seen: unknown[] = [];
+        // Wrong codes past the limit, then one more against the deleted record.
+        for (let i = 0; i < maxAttempts + 1; i++) {
+          seen.push(
+            observable(yield* Effect.result(service.signIn("member@example.com", wrongCode))),
+          );
+        }
+        return seen;
+      }).pipe(Effect.provideService(Tracer.Tracer, tracer)),
+    );
+
+    expect(answers).toEqual(Array.from({ length: maxAttempts + 1 }, () => invalid));
+    const reasons = spans
+      .filter((span) => span.name === "EmailOtpService.signIn")
+      .map((span) => span.attributes.get("auth.otp.failure"));
+    expect(reasons).toEqual(["mismatch", "mismatch", "attempts", "missing"]);
+  });
 });
