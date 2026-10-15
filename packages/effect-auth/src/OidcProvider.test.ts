@@ -40,10 +40,12 @@ import {
   type OidcClient,
   type OidcConsent,
   type OidcDynamicRegistrationConfig,
+  type OidcProviderConfig,
   type OidcToken,
   OidcProviderService,
 } from "./OidcProvider.ts";
 import * as OidcProvider from "./OidcProvider.ts";
+import { ClientAddressConfigError } from "./Errors.ts";
 import type * as Types from "./Types.ts";
 
 const ISSUER = "http://idp.test/api/auth";
@@ -456,7 +458,10 @@ describe("OidcProviderService dynamic client registration", () => {
     );
     const config = {
       ...baseConfig,
-      ...(dynamicRegistration !== undefined && { dynamicRegistration }),
+      // Registration is rate limited per client address, so the build needs a source (#388).
+      ...(dynamicRegistration !== undefined && {
+        dynamicRegistration: { trustedProxy: ClientIP.cloudflare, ...dynamicRegistration },
+      }),
     };
     const service = Effect.runSync(OidcProvider.make(config).pipe(Effect.provide(layer)));
     return { stores, layer, service };
@@ -495,6 +500,46 @@ describe("OidcProviderService dynamic client registration", () => {
     expect(confidential.client.clientSecretHash).toBe(hashOidcSecret(confidential.clientSecret!));
     // The default scope is the provider's full allowed set.
     expect(confidential.client.scope).toBe("openid profile email offline_access");
+  });
+
+  // The OIDC layer built over the same stores, as an app builds it.
+  const buildProvider = (dynamicRegistration?: OidcDynamicRegistrationConfig) => {
+    const { layer } = setup();
+    const config = {
+      ...baseConfig,
+      ...(dynamicRegistration !== undefined && { dynamicRegistration }),
+    };
+    return Effect.scoped(Layer.build(OidcProviderService.layer(config).pipe(Layer.provide(layer))));
+  };
+
+  it("fails the layer build when registration has no client-address source and no opt-out", async () => {
+    const err = await Effect.runPromise(Effect.flip(buildProvider({})));
+    expect(err).toBeInstanceOf(ClientAddressConfigError);
+    expect(err.message).toContain("dynamicRegistration.trustedProxy");
+    expect(err.message).toContain("allowMissingClientIp");
+  });
+
+  it("fails the provider build the same way, before any request", () => {
+    const { layer } = setup();
+    const err = Effect.runSync(
+      Effect.flip(
+        OidcProvider.make({ ...baseConfig, dynamicRegistration: {} }).pipe(Effect.provide(layer)),
+      ),
+    );
+    expect(err).toBeInstanceOf(ClientAddressConfigError);
+  });
+
+  it("builds with a declared trustedProxy or with the allowMissingClientIp opt-out", async () => {
+    await expect(
+      Effect.runPromise(buildProvider({ trustedProxy: ClientIP.cloudflare })),
+    ).resolves.toBeDefined();
+    await expect(
+      Effect.runPromise(buildProvider({ allowMissingClientIp: true })),
+    ).resolves.toBeDefined();
+  });
+
+  it("builds without dynamic registration, which needs no address source", async () => {
+    await expect(Effect.runPromise(buildProvider())).resolves.toBeDefined();
   });
 
   it("fails with access_denied when dynamic registration is not configured", async () => {
@@ -725,6 +770,29 @@ describe("OidcProviderService dynamic client registration", () => {
     expect(custom.dynamicRegistration?.skipConsent).toBe(true);
     expect(custom.dynamicRegistration?.management).toBe(true);
   });
+
+  it("mcpProviderPreset fails the layer build without a client-address source", async () => {
+    // The preset always enables registration, so an MCP provider declares an
+    // address source or opts out (#388).
+    const { layer } = setup();
+    const build = (config: OidcProviderConfig) =>
+      Effect.scoped(Layer.build(OidcProviderService.layer(config).pipe(Layer.provide(layer))));
+
+    const err = await Effect.runPromise(Effect.flip(build(mcpProviderPreset(baseConfig))));
+    expect(err).toBeInstanceOf(ClientAddressConfigError);
+    expect(err.message).toContain("dynamicRegistration.trustedProxy");
+
+    await expect(
+      Effect.runPromise(
+        build(
+          mcpProviderPreset({
+            ...baseConfig,
+            dynamicRegistration: { trustedProxy: ClientIP.cloudflare },
+          }),
+        ),
+      ),
+    ).resolves.toBeDefined();
+  });
 });
 
 // -----------------------------------------------------------------------------
@@ -851,12 +919,20 @@ const makeHttpFixture = (
     Layer.succeed(IdentifierStore)(identifierStore),
   );
 
+  // The registration declares the address source the fixture's Http.make has:
+  // its trustedProxy, or none, which is the opt-out (#388).
+  const addressSource: TrustedProxyConfig | undefined = options.trustedProxy;
   const oidcServiceLayer = OidcProviderService.layer({
     issuer: ISSUER,
     loginPage: "http://idp.test/login",
     consentPage: "http://idp.test/consent",
     ...(options.dynamicRegistration !== undefined && {
-      dynamicRegistration: options.dynamicRegistration,
+      dynamicRegistration: {
+        ...options.dynamicRegistration,
+        ...(addressSource !== undefined
+          ? { trustedProxy: addressSource }
+          : { allowMissingClientIp: true }),
+      },
     }),
   }).pipe(Layer.provide(oidcDeps));
 

@@ -562,6 +562,29 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
 }
 
 /**
+ * A client-address-keyed rate limit is configured with no client-address
+ * source: no `trustedProxy`, and no opt-out. A Web `Request` never carries a
+ * socket address, so without a configured source the limiter could not key the
+ * request. It would have to skip the request or share one bucket between
+ * callers, and neither is allowed (#358, #388).
+ *
+ * Raised at build time, before any request:
+ *
+ * - `Http.make` throws it synchronously when `ipRateLimit` is configured with no
+ *   `trustedProxy` and no `allowMissingClientIp: true` (#358).
+ * - `OidcProviderService.layer` (and `OidcProvider.make`) fails with it when
+ *   `dynamicRegistration` is set with no `dynamicRegistration.trustedProxy` and
+ *   no `dynamicRegistration.allowMissingClientIp: true` (#388).
+ *
+ * Exported from the package root as `ClientAddressConfigError` and as
+ * `Http.ClientAddressConfigError`, and from the `./http` subpath. Every name is
+ * the same class.
+ */
+export class ClientAddressConfigError extends Data.TaggedError("ClientAddressConfigError")<{
+  readonly message: string;
+}> {}
+
+/**
  * Magic link send/verify failure (infrastructure or token mismatch).
  */
 export class MagicLinkError extends Data.TaggedError("MagicLinkError")<{
