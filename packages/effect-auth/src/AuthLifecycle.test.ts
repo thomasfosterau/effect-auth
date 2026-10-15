@@ -288,15 +288,18 @@ describe("AuthLifecycleService", () => {
     expect(identifier?.verified).toBe(false);
   });
 
-  it("a sign-up for an address held unverified answers with the submitted address", async () => {
+  it("a sign-up for an address held unverified answers with none of the holder's data (#421)", async () => {
     const testContext = await makeTestContext();
 
-    // An earlier sign-up for the address whose verification never completed.
+    // An earlier sign-up for the address whose verification never completed,
+    // with a profile of its own.
     const pending: User = {
       id: "user-pending",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      attributes: {},
+      name: "Pending Holder",
+      image: "https://example.com/pending.png",
+      createdAt: new Date("2020-01-01T00:00:00Z"),
+      updatedAt: new Date("2021-01-01T00:00:00Z"),
+      attributes: { plan: "enterprise", secret: "holder-only" },
     };
     users.set(pending.id, pending);
     addEmailIdentifier(pending.id, "pending@example.com", false);
@@ -306,6 +309,8 @@ describe("AuthLifecycleService", () => {
       return yield* service.signUp({
         email: "  Pending@Example.com ",
         password: "strong-password-123",
+        name: "Probe",
+        attributes: { plan: "free" },
       });
     });
 
@@ -313,14 +318,50 @@ describe("AuthLifecycleService", () => {
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
-    // The recovered branch answers with the held user and the address it was
-    // made with (normalized), which the HTTP sign-up response reports as the
-    // user's `email`.
-    expect(result.user.id).toBe(pending.id);
+    // The answer is a stand-in built from the caller's own input: a fresh id,
+    // the submitted name and attributes, no image, and one new timestamp.
+    expect(result.user.id).not.toBe(pending.id);
+    expect(result.user.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(result.user.name).toBe("Probe");
+    expect(result.user.image).toBeUndefined();
+    expect(result.user.attributes).toEqual({ plan: "free" });
+    expect(result.user.createdAt).toEqual(result.user.updatedAt);
+    expect(result.user.createdAt.getTime()).toBeGreaterThan(pending.updatedAt.getTime());
     expect(result.identifier).toEqual({ type: "email", value: "pending@example.com" });
     expect(result.needsEmailVerification).toBe(true);
     expect(result.session).toBeUndefined();
+    // The holder's record is untouched, and the verification is re-issued to
+    // the holder, not to the stand-in.
+    expect(users.get(pending.id)).toEqual(pending);
     expect(sentEmails.map((sent) => sent.email)).toEqual(["pending@example.com"]);
+    expect([...verifications.values()].map((v) => v.userId)).toEqual([pending.id]);
+  });
+
+  it("a sign-up for an address held verified fails with EmailInUseError", async () => {
+    const testContext = await makeTestContext();
+
+    const holder: User = {
+      id: "user-holder",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(holder.id, holder);
+    addEmailIdentifier(holder.id, "held@example.com", true);
+
+    const program = Effect.gen(function* () {
+      const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
+      return yield* service.signUp({ email: "held@example.com", password: "strong-password-123" });
+    });
+
+    const error = await Effect.runPromise(
+      Effect.flip(Effect.provide(program, testContext)).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(error._tag).toBe("EmailInUseError");
+    expect(sentEmails).toEqual([]);
   });
 
   it("should return verification-needed on sign-in and resend when enabled", async () => {

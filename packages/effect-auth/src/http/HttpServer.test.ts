@@ -122,6 +122,11 @@ interface Fixture {
   readonly registerUsername: (userId: string, username: string) => void;
   /** Register a verified `phone` identifier for the phone OTP tests. */
   readonly registerPhone: (userId: string, phoneNumber: string) => void;
+  /**
+   * Store `user` as given, holding `email` unverified, as a sign-up whose
+   * verification never completed leaves it.
+   */
+  readonly seedUnverifiedEmailUser: (user: Types.User, email: string) => void;
   /** Number of session-store `get` reads so far (for the cookie-cache tests). */
   readonly sessionStoreReads: () => number;
 }
@@ -492,6 +497,17 @@ const makeFixture = (
     identifierRecords.set(identifier.id, identifier);
   };
 
+  const seedUnverifiedEmailUser = (user: Types.User, email: string): void => {
+    usersById.set(user.id, user);
+    const identifier = makeIdentifier({
+      userId: user.id,
+      type: "email",
+      value: email,
+      verified: false,
+    });
+    identifierRecords.set(identifier.id, identifier);
+  };
+
   const registerPhone = (userId: string, phoneNumber: string): void => {
     const identifier = makeIdentifier({
       userId,
@@ -587,6 +603,7 @@ const makeFixture = (
     sentPhoneOtps,
     registerUsername,
     registerPhone,
+    seedUnverifiedEmailUser,
     sessionStoreReads: () => sessionStoreReads,
   };
 };
@@ -853,6 +870,113 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
     const fallback = handlerFor(makeFixture({ emailPassword: { antiEnumeration: true } }));
     await signUpAs(fallback, VICTIM);
     expect((await observe(await signUpAs(fallback, VICTIM))).id).toMatch(UUID);
+  });
+});
+
+describe("sign-up for an address held unverified over HTTP (#421)", () => {
+  const HELD = "held@example.com";
+  const holder: Types.User = {
+    id: "user-holder",
+    name: "Holder Name",
+    image: "https://example.com/holder.png",
+    createdAt: new Date("2020-01-01T00:00:00Z"),
+    updatedAt: new Date("2021-01-01T00:00:00Z"),
+    attributes: { plan: "enterprise", secret: "holder-only" },
+  };
+
+  type SignUpBody = {
+    readonly user: Record<string, unknown>;
+    readonly needsEmailVerification: unknown;
+  };
+
+  const lifecycles: ReadonlyArray<AuthLifecycleConfig> = [{}, { requireEmailVerification: true }];
+
+  it.each(
+    lifecycles.map((lifecycle) => ({
+      lifecycle,
+      verification: lifecycle.requireEmailVerification === true,
+    })),
+  )(
+    "answers with only what the caller submitted (requireEmailVerification: $verification)",
+    async ({ lifecycle, verification }) => {
+      const fixture = makeFixture({ lifecycle });
+      fixture.seedUnverifiedEmailUser(holder, HELD);
+      const handler = handlerFor(fixture);
+
+      const res = await handler(
+        jsonRequest("/sign-up", {
+          email: " Held@Example.com ",
+          password: PW,
+          name: "Probe",
+          attributes: { plan: "free" },
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.getSetCookie()).toEqual([]);
+      const text = await res.text();
+
+      // Nothing the holder's record stores reaches the caller.
+      for (const value of [
+        holder.id,
+        holder.name,
+        holder.image,
+        "enterprise",
+        "holder-only",
+        String(holder.createdAt.getTime()),
+        String(holder.updatedAt.getTime()),
+      ]) {
+        expect(text).not.toContain(value);
+      }
+
+      const body = JSON.parse(text) as SignUpBody;
+      expect(body.needsEmailVerification).toBe(true);
+      expect(Object.keys(body.user)).toEqual([
+        "id",
+        "email",
+        "emailVerified",
+        "name",
+        "createdAt",
+        "updatedAt",
+        "attributes",
+      ]);
+      expect(body.user["id"]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+      expect(body.user["email"]).toBe(HELD);
+      expect(body.user["emailVerified"]).toBe(false);
+      expect(body.user["name"]).toBe("Probe");
+      expect(body.user["attributes"]).toEqual({ plan: "free" });
+      expect(body.user["createdAt"]).toBe(body.user["updatedAt"]);
+
+      // The verification is re-issued to the holder when sign-up sends one:
+      // its token verifies the holder's address.
+      expect(fixture.sentVerificationTokens).toHaveLength(verification ? 1 : 0);
+      if (verification) {
+        const verify = await handler(
+          jsonRequest("/email-verification/verify", { token: fixture.sentVerificationTokens[0] }),
+        );
+        expect(verify.status).toBe(200);
+        const verified = (await verify.json()) as SignUpBody;
+        expect(verified.user["id"]).toBe(holder.id);
+        expect(verified.user["emailVerified"]).toBe(true);
+      }
+    },
+  );
+
+  it("answers an address held verified with 409", async () => {
+    const fixture = makeFixture({ lifecycle: { requireEmailVerification: true } });
+    fixture.seedUnverifiedEmailUser(holder, HELD);
+    const handler = handlerFor(fixture);
+    // The holder verifies the address through the token a sign-up re-issued.
+    await handler(jsonRequest("/sign-up", { email: HELD, password: PW }));
+    const verify = await handler(
+      jsonRequest("/email-verification/verify", { token: fixture.sentVerificationTokens[0] }),
+    );
+    expect(verify.status).toBe(200);
+
+    const res = await handler(jsonRequest("/sign-up", { email: HELD, password: PW }));
+    expect(res.status).toBe(409);
+    expect(await res.text()).not.toContain(holder.id);
   });
 });
 

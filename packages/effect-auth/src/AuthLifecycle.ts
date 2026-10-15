@@ -32,15 +32,31 @@ export interface AuthLifecycleConfig {
  * Outcome of a sign-up or sign-in through {@link AuthLifecycleService}.
  */
 export interface AuthLifecycleResult {
+  /**
+   * The user the flow signed up, signed in or verified. From `signUp` for an
+   * address another user already holds, it is a stand-in built only from the
+   * caller's input, which no row backs: see `identifier`.
+   */
   readonly user: Types.User;
   /**
-   * The login handle a sign-up was made with: the email address it claimed;
-   * under `antiEnumeration`, the address another user holds; or, with
-   * `antiEnumeration` off, the address an existing user holds unverified,
-   * which `signUp` answers with that user instead of failing (re-issuing its
-   * verification when `sendOnSignUp` is set). Set by `signUp`, whose address is
-   * always unverified at this point; the HTTP sign-up response reports the
-   * user's `email` from it.
+   * The login handle a sign-up was made with, trimmed and lower-cased. The
+   * caller has proven nothing about it yet, so the HTTP sign-up response
+   * reports it as the user's `email` with `emailVerified: false`. Set by
+   * `signUp`. It is one of:
+   *
+   * - the email address the sign-up claimed;
+   * - under `antiEnumeration`, the address another user holds, answered with
+   *   `EmailPasswordService`'s stand-in user;
+   * - with `antiEnumeration` off, the address another user holds unverified.
+   *   `signUp` answers it with no session and `needsEmailVerification: true`
+   *   instead of failing, and re-issues that user's verification when
+   *   `sendOnSignUp` is set. The `user` it answers with is a stand-in built
+   *   only from the caller's input, never the holder's id or stored data: a
+   *   random UUID for its `id`, the submitted `name` and `attributes` (`{}`
+   *   when none), no `image`, and one timestamp, taken during the request, for
+   *   both `createdAt` and `updatedAt`. The caller has not proven they own the
+   *   address, so the holder's profile stays with the holder. An address held
+   *   verified fails with `EmailInUseError`.
    */
   readonly identifier?: { readonly type: IdentifierType; readonly value: string } | undefined;
   readonly session?: Types.Session;
@@ -151,26 +167,34 @@ export const make = (
           Effect.map((r) => ({ recovered: false as const, result: r })),
           Effect.catchTag("EmailInUseError", (e) =>
             Effect.gen(function* () {
-              const identifier = yield* identifiers.getByValue(
-                "email",
-                normalizeEmail(input.email),
-              );
+              const email = normalizeEmail(input.email);
+              const identifier = yield* identifiers.getByValue("email", email);
               const existing = identifier === null ? null : yield* userStore.get(identifier.userId);
 
               if (!identifier || !existing || identifier.verified) {
                 return yield* e;
               }
 
-              // Unverified duplicate: resend (also invalidates stale tokens,
-              // matching FIX 5 behaviour).
+              // Unverified duplicate: resend to the holder (also invalidates
+              // stale tokens, matching FIX 5 behaviour).
               if (sendOnSignUp) {
                 yield* verification.resendVerification(existing.id, identifier.value);
               }
 
+              // The caller has proven nothing about the address, so the answer
+              // is a stand-in built only from their own input (#421): never
+              // the holder's id, profile or timestamps.
+              const now = new Date();
               return {
                 recovered: true as const,
-                user: existing,
-                identifier: { type: "email" as const, value: identifier.value },
+                user: {
+                  id: globalThis.crypto.randomUUID(),
+                  ...(input.name !== undefined && { name: input.name }),
+                  createdAt: now,
+                  updatedAt: now,
+                  attributes: input.attributes ?? {},
+                } satisfies Types.User,
+                identifier: { type: "email" as const, value: email },
               };
             }),
           ),
