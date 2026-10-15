@@ -17,7 +17,7 @@ import Database from "better-sqlite3";
 import type { Logger } from "drizzle-orm";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
 import { layer } from "./Layers.ts";
@@ -30,6 +30,7 @@ import {
   type AuthRequests,
 } from "./Requests.ts";
 import { defineTables, migrationStatements, tables, type Tables } from "./SqliteSchema.ts";
+import { identifierStoreContract } from "./testing/IdentifierStoreContract.ts";
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -614,5 +615,34 @@ describe("SQLite / Requests", () => {
       expect(mine.map((row) => row.id)).toEqual(["email-1", "name-1"]);
       expect(none).toEqual([]);
     });
+  });
+});
+
+// The shared IdentifierStore contract (#182), run against the multi-identifier
+// store on SQLite as well as on PostgreSQL: a fresh database per test.
+describe("SQLite / IdentifierStore contract", () => {
+  let client: Database.Database;
+  let db: BetterSQLite3Database;
+
+  beforeEach(() => {
+    client = new Database(":memory:");
+    for (const statement of migrationStatements()) {
+      client.exec(statement);
+    }
+    db = drizzle(client);
+  });
+
+  afterEach(() => {
+    client.close();
+  });
+
+  identifierStoreContract("IdentifierStore (multi-identifier) SQLite", {
+    run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+      Effect.runPromise(
+        build().pipe(
+          Effect.provide(layer(tables).pipe(Layer.provide(databaseLayer(db)))),
+        ) as Effect.Effect<A, E>,
+      ),
+    seedUsers: async () => {},
   });
 });

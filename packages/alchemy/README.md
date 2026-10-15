@@ -73,12 +73,21 @@ the handle behind Alchemy's `Cloudflare.D1.QueryDatabase` all satisfy it.
 
 D1 has no explicit transactions — `BEGIN` / `COMMIT` / `SAVEPOINT` are rejected
 by the binding, and `batch()` is its only atomic primitive. `D1Client` therefore
-answers those control statements locally instead of sending them, so the three
-stores that ask for a transaction (`ChallengeStore.create`,
+answers those control statements locally instead of sending them, so the store
+methods that ask for a transaction (`ChallengeStore.create`,
 `OAuthStateStore.create`, `EmailOtpStore.upsert` — each a `DELETE` followed by
-an `INSERT`) run as autocommitted statements rather than failing. **Multi-step
+an `INSERT` — and `IdentifierStore.replace`, an `INSERT` followed by a
+`DELETE`) run as autocommitted statements rather than failing. **Multi-step
 writes are not atomic on D1.** Everything that needs atomicity is already a
 single statement (`ON CONFLICT … DO UPDATE`, `UPDATE … RETURNING`).
+`IdentifierStore.replace`, which email change uses, claims the new address
+before it releases the old one, so a failure between the two statements leaves
+the user holding both addresses, never neither; confirming the change again
+releases the old one. The release is a `DELETE … RETURNING` guarded on the old
+address, so of two concurrent replaces of the same address one succeeds; the
+other finds nothing to release and deletes its own claim again, in a statement
+of its own, so a failure before that statement leaves the user holding both new
+addresses.
 
 ## The `AuthSchema` resource
 

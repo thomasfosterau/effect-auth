@@ -425,10 +425,8 @@ option:
     deletes all of a user's identifiers. It relies on your user writer
     hard-deleting the row. A soft-delete writer, one that keeps the row and marks
     it deleted, leaves the address claimed, so no one else can register it.
-  - Email change is refused. It claims the new address while the old one is still
-    held, and the store holds one address per user, so the confirmation fails with
-    an `AuthError`. The old address and the confirm token stay, and nothing is
-    written. See [Flows this store does not support](#flows-this-store-does-not-support).
+  - Email change works: core's confirmation goes through `replace`, which
+    rewrites the address in one `UPDATE` and never writes `NULL`.
   - A user whose row holds an address cannot be given a second one, which is
     the same refusal as on a nullable column.
 
@@ -470,7 +468,24 @@ A user whose `email` is `NULL` holds no identifier.
   that already holds an address. A duplicate address owned by another user
   fails through the unique index as `AuthError`, which `claimIdentifier` reports
   as `IdentifierTakenError`, as it does for the default store.
+- `replace` rewrites the row's address in one statement,
+  `UPDATE … SET email = <new>, email_verified = <new flag>[, email_verified_at = <new time>] WHERE id = <user> AND email = <old>`,
+  then reads the row back. The guard on the old address means a stale call
+  writes nothing and resolves to `null`. An address another user holds fails
+  through the unique index as `AuthError`, which `replaceIdentifier` reports as
+  `IdentifierTakenError`, and the row keeps its address. The identifier keeps
+  the user's id and the row's creation time. It works on nullable and `NOT NULL`
+  columns alike.
 - `delete` and `deleteByUser` follow the column's nullability, described above.
+
+### Email change
+
+Core's `AccountManagement.confirmEmailChange` changes the address through
+`IdentifierStore.replace`, so it works on this store, on nullable and `NOT NULL`
+columns. The row holds the new address, verified, and the confirm token is
+consumed. If another user takes the new address first, the confirmation fails
+with `AccountTokenError` ("Email already in use") and the row keeps the previous
+address.
 
 ### Flows this store does not support
 
@@ -483,25 +498,26 @@ A user whose `email` is `NULL` holds no identifier.
   with a `500` today, not a client error.
 - **Admin `identifiers[]` extras, and the username and phone-number flows.** This
   store holds only email identifiers, so these are refused with an `AuthError`.
-- **Email change, on both nullable and `NOT NULL` columns.** Core's
-  `confirmEmailChange` claims the new address first, while the user still holds
-  the old one. The store refuses a second address, so the change fails with an
-  `AuthError` and the previous address stays verified. The token is not consumed.
-  The confirm-email-change HTTP route answers that `AuthError` with a `500` today,
-  not a client error. Email change becomes supported once `IdentifierStore.replace`
-  lands (#381).
 
 ## Store semantics
 
 The stores implement effect-auth's contracts exactly:
 
 - **`null` on a miss.** `get`, `getByValue` and `setVerified` return `null`
-  rather than failing when there is no matching row.
+  rather than failing when there is no matching row, and `replace` returns
+  `null` when the identifier it replaces is no longer the user's.
 - **Deletes are no-ops** when the row does not exist.
 - **Driver failures become `AuthError`** with the original error preserved as
   `cause` — including the unique-index violation raised when two users race for
-  the same `(type, value)`. `Auth.claimIdentifier` in core re-reads the pair on
-  failure and turns that race into an `IdentifierTakenError`.
+  the same `(type, value)`. `Auth.claimIdentifier` and `Auth.replaceIdentifier`
+  in core re-read the pair on failure and turn that race into an
+  `IdentifierTakenError`.
+- **`IdentifierStore.replace` claims, then releases.** The default store inserts
+  the new identifier and then deletes the old one. It opens no transaction of its
+  own: on a handle inside your transaction the two commit or roll back together;
+  otherwise each autocommits, and a failure between them leaves the user holding
+  both, never neither. Confirming an email change again releases the old one.
+  A value another user holds is refused before anything is deleted.
 - **Password hashes live outside `UserStore`.** Reading and writing
   `password_hash` is the job of a store this package does not implement yet
   (`EmailPasswordStore`), so pair it with the `sql` package or your own writer

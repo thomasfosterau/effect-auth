@@ -94,6 +94,46 @@ export class IdentifierStore extends Context.Service<
     readonly create: (identifier: Identifier) => Effect.Effect<Identifier, Errors.AuthError>;
 
     /**
+     * Swap one of a user's identifiers for a new value: claim `to` and release
+     * `from` as one change, so the user is never left holding neither.
+     *
+     * `from` is the identifier being replaced, as this store reported it. `to`
+     * is the new record (see {@link makeIdentifier}) for the same `userId` and
+     * `type`, with its own `id` and a different `value`; the store fails with
+     * `AuthError` when any of these rules is broken ({@link replaceInputError}).
+     * A store with transactions writes both in one. A store without them claims
+     * `to` before it releases `from`, so a failure between the two leaves the
+     * user holding both, never neither.
+     *
+     * Resolves to the replacement as the store now reports it, or `null` when
+     * `from` is no longer held by its user (no record matches its `id`,
+     * `userId`, `type` and `value`), in which case nothing is written. A store
+     * that keeps the identifier on the user's own record (effect-auth-drizzle's
+     * single-table store) instead resolves to that record when it already holds
+     * `to`'s value, since the user is then in the state the call asked for.
+     * When another user holds `to`'s `(type, value)` the store fails with
+     * `AuthError` and `from` stays, as `create` does; {@link replaceIdentifier}
+     * reports that as an {@link IdentifierTakenError}. When `from` is stale and
+     * `to` is taken as well, a store may report either. Core email change
+     * confirms through it.
+     *
+     * Two concurrent replaces of the same `from` with different values: the
+     * in-memory store (one synchronous step), effect-auth-sql (a compare-and-swap
+     * on the release) and effect-auth-drizzle's single-table store (an `UPDATE`
+     * guarded on `from`'s value) let one succeed, and the other resolves to
+     * `null`, writing nothing. On D1 (effect-auth-alchemy), which has no
+     * transactions, the losing call removes its claim in a statement of its own,
+     * so a failure before that statement leaves the user holding both new
+     * values. `IdentifierStoreKV` and effect-auth-drizzle's default store check
+     * `from` before they write and release it unguarded, so both replaces can
+     * succeed and the user holds both new values.
+     */
+    readonly replace: (
+      from: Identifier,
+      to: Identifier,
+    ) => Effect.Effect<Identifier | null, Errors.AuthError>;
+
+    /**
      * Mark an identifier as verified, recording the timestamp.
      * Returns `null` when no identifier with the given `id` exists.
      */
@@ -188,6 +228,29 @@ export const makeIdentifier = (input: {
   };
 };
 
+/** The `IdentifierTakenError` for a `(type, value)` another user holds. */
+const takenError = (type: IdentifierType): IdentifierTakenError =>
+  new IdentifierTakenError({
+    message: `This ${type} is already in use`,
+    identifierType: type,
+  });
+
+/**
+ * The `AuthError` an {@link IdentifierStore} `replace` fails with when `to` is
+ * not a new record for `from`'s user and type, with its own `id` and a
+ * different `value`, or `null` when the pair is valid.
+ *
+ * Exported for store implementations, so every store refuses the same inputs
+ * with the same message.
+ */
+export const replaceInputError = (from: Identifier, to: Identifier): Errors.AuthError | null =>
+  to.userId === from.userId && to.type === from.type && to.id !== from.id && to.value !== from.value
+    ? null
+    : new Errors.AuthError({
+        message:
+          "IdentifierStore.replace takes a new record, with its own id and a new value, for the same user and type as the identifier it replaces",
+      });
+
 /**
  * Claim a `(type, value)` identifier for a user.
  *
@@ -231,6 +294,63 @@ export const claimIdentifier = (
   });
 
 /**
+ * Replace one of a user's identifiers with a new value through
+ * {@link IdentifierStore} `replace`, with readable failures.
+ *
+ * `to` is the new record, built with {@link makeIdentifier} for `from`'s user
+ * and type. As with {@link claimIdentifier}, an address another user holds is an
+ * {@link IdentifierTakenError}, whether it was held before the call or a
+ * concurrent claim won the store's unique index; other store failures pass
+ * through as `AuthError`. Either way `from` stays the user's. When `from` is no
+ * longer the user's (it was released or replaced meanwhile) the failure is an
+ * {@link IdentifierNotFoundError} and nothing is written, including when the
+ * store refused `to` because a concurrent replace of `from` already gave the
+ * user that value.
+ */
+export const replaceIdentifier = (
+  store: typeof IdentifierStore.Service,
+  from: Identifier,
+  to: Identifier,
+): Effect.Effect<Identifier, Errors.AuthError | IdentifierTakenError | IdentifierNotFoundError> =>
+  Effect.gen(function* () {
+    const existing = yield* store.getByValue(to.type, to.value);
+    if (existing !== null && existing.userId !== to.userId) {
+      return yield* takenError(to.type);
+    }
+    const replaced = yield* store.replace(from, to).pipe(
+      Effect.catchTag(
+        "AuthError",
+        (error): Effect.Effect<Identifier | null, Errors.AuthError | IdentifierTakenError> =>
+          Effect.gen(function* () {
+            // The unique index may have rejected `to` because another user
+            // claimed it concurrently: re-check so the caller sees a conflict.
+            const raced = yield* store.getByValue(to.type, to.value);
+            if (raced !== null && raced.userId !== to.userId) {
+              return yield* takenError(to.type);
+            }
+            // Or a concurrent replace of the same `from` (a double submit)
+            // already gave this user `to`'s value and released `from`: report
+            // that `from` is gone, as a store that checks `from` first does.
+            if (raced !== null) {
+              const held = yield* store.getByValue(from.type, from.value);
+              if (held === null || held.id !== from.id || held.userId !== from.userId) {
+                return null;
+              }
+            }
+            return yield* error;
+          }),
+      ),
+    );
+    if (replaced === null) {
+      return yield* new IdentifierNotFoundError({
+        message: `The ${from.type} to replace is no longer held by this user`,
+        id: from.id,
+      });
+    }
+    return replaced;
+  });
+
+/**
  * In-memory {@link IdentifierStore} for tests and single-instance
  * deployments. Uniqueness on `(type, value)` is enforced by construction
  * (synchronous, single-threaded): `create` fails with `AuthError` when the
@@ -267,6 +387,31 @@ export const memoryIdentifierStore = (
         }
         records.set(identifier.id, identifier);
         return Effect.succeed(identifier);
+      }),
+    // Synchronous, so the claim and the release are one indivisible step.
+    replace: (from, to) =>
+      Effect.suspend(() => {
+        const invalid = replaceInputError(from, to);
+        if (invalid !== null) return Effect.fail(invalid);
+        const held = records.get(from.id);
+        if (
+          held === undefined ||
+          held.userId !== from.userId ||
+          held.type !== from.type ||
+          held.value !== from.value
+        ) {
+          return Effect.succeed(null);
+        }
+        if (byValue(to.type, to.value) !== null) {
+          return Effect.fail(
+            new Errors.AuthError({
+              message: `Identifier (${to.type}) already exists`,
+            }),
+          );
+        }
+        records.delete(from.id);
+        records.set(to.id, to);
+        return Effect.succeed(to);
       }),
     setVerified: (id, verifiedAt) =>
       Effect.sync(() => {

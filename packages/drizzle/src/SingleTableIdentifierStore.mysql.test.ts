@@ -239,6 +239,119 @@ describe("single-table MySQL / statements", () => {
   });
 });
 
+describe("single-table MySQL / replace", () => {
+  const from: Auth.Identifier = {
+    id: USER_ID,
+    userId: USER_ID,
+    type: "email",
+    value: "ada@example.com",
+    verified: true,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+  };
+  const to = Auth.makeIdentifier({
+    userId: USER_ID,
+    type: "email",
+    value: "ada-new@example.com",
+    verified: true,
+  });
+
+  it("rewrites the address with one UPDATE guarded on the old address, then reads the row", async () => {
+    const proxy = makeProxy();
+    proxy.respondWith([
+      wireRow({
+        id: USER_ID,
+        email: "ada-new@example.com",
+        emailVerified: 1,
+        createdAt: "2026-01-01 00:00:00.000",
+      }),
+    ]);
+
+    const replaced = await run(
+      proxy,
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        return yield* store.replace(from, to);
+      }),
+    );
+
+    expect(proxy.statements).toHaveLength(2);
+    const [update, read] = proxy.statements;
+    expect(update?.sql).toBe(
+      "update `app_users` set `email` = ?, `email_verified` = ? where (`app_users`.`id` = ? and `app_users`.`email` = ?)",
+    );
+    expect(update?.params).toEqual(["ada-new@example.com", true, USER_ID, "ada@example.com"]);
+    expect(read?.sql).toMatch(/^select /);
+    expect(replaced?.id).toBe(USER_ID);
+    expect(replaced?.value).toBe("ada-new@example.com");
+  });
+
+  it("sends the same UPDATE on a NOT NULL column: no NULL is ever written", async () => {
+    const proxy = makeProxy();
+    proxy.respondWith([
+      wireRow({
+        id: USER_ID,
+        email: "ada-new@example.com",
+        emailVerified: 1,
+        createdAt: "2026-01-01 00:00:00.000",
+      }),
+    ]);
+
+    await runWith(
+      proxy,
+      strictMapping,
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        return yield* store.replace(from, to);
+      }),
+    );
+
+    expect(proxy.statements[0]?.sql).toBe(
+      "update `app_users_strict` set `email` = ?, `email_verified` = ? where (`app_users_strict`.`id` = ? and `app_users_strict`.`email` = ?)",
+    );
+    expect(proxy.statements[0]?.params).not.toContain(null);
+  });
+
+  it("writes the replacement's verification time when the column is mapped", async () => {
+    const proxy = makeProxy();
+    const verifiedAt = new Date("2026-01-02T09:30:00.000Z");
+
+    await runWith(
+      proxy,
+      verifiedMapping,
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        return yield* store.replace(from, { ...to, verifiedAt });
+      }),
+    );
+
+    expect(proxy.statements[0]?.sql).toBe(
+      "update `app_users_verified` set `email` = ?, `email_verified` = ?, `email_verified_at` = ? where (`app_users_verified`.`id` = ? and `app_users_verified`.`email` = ?)",
+    );
+    expect(proxy.statements[0]?.params).toEqual([
+      "ada-new@example.com",
+      true,
+      "2026-01-02 09:30:00.000",
+      USER_ID,
+      "ada@example.com",
+    ]);
+  });
+
+  it("refuses a replacement for another user without sending a statement", async () => {
+    const proxy = makeProxy();
+
+    const error = await run(
+      proxy,
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        return yield* Effect.flip(store.replace(from, { ...to, userId: "someone-else" }));
+      }),
+    );
+
+    expect(error._tag).toBe("AuthError");
+    expect(proxy.statements).toEqual([]);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // NOT NULL email and the mapped verification time
 // ---------------------------------------------------------------------------

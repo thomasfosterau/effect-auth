@@ -15,12 +15,10 @@
  * A user has at most **one** identifier, and it is always of type `email`. The
  * store cannot hold a second address, a username or a phone number, and says so
  * with an `AuthError` rather than silently dropping the write. Core flows that
- * need several identifiers at once fail on this store. SCIM's add-then-remove
- * when a `userName` changes is one. Email change is another: it claims the new
- * address before it releases the old one, and the store refuses a second address
- * while the user holds one, on a nullable column and a NOT NULL one alike. The
- * change fails with an `AuthError` and the previous address stays. It becomes
- * supported once `IdentifierStore.replace` lands (#381).
+ * need several identifiers at once fail on this store; SCIM's add-then-remove
+ * when a `userName` changes is one. Email change works: it goes through
+ * `replace`, which rewrites the row's address in one `UPDATE`, on a nullable
+ * column and a NOT NULL one alike.
  *
  * ### How each field is read and written
  *
@@ -53,9 +51,8 @@
  *   departs from the {@link IdentifierStore} contract, which says `deleteByUser`
  *   deletes all of a user's identifiers: here the application's user writer must
  *   hard-delete the row. A soft-delete writer leaves the address claimed.
- *   Account deletion therefore works. Email change does not, on either shape: it
- *   claims the new address while the old one is still held, and the store
- *   refuses that claim.
+ *   Account deletion therefore works, and so does email change, whose `replace`
+ *   never writes `NULL`.
  *
  * ### Per-method behaviour
  *
@@ -70,6 +67,16 @@
  *   as `AuthError`, which `Auth.claimIdentifier` re-reads into an
  *   `IdentifierTakenError`. The store's own duplicate check does not exist here:
  *   the index must carry it (see the requirements below).
+ * - `replace` is one `UPDATE users SET email = <to>, email_verified = <to's>,
+ *   email_verified_at = <to's, when mapped> WHERE id = <user> AND email = <from>`,
+ *   then a read of the row. The `email = <from>` guard makes a stale `from`
+ *   write nothing, and the call resolves to `null`; if that row already holds
+ *   `to`'s address, the call reports it, since the row is then as asked. The
+ *   unique index rejects an address another user holds, as for `create`, and
+ *   `Auth.replaceIdentifier` re-reads that into an `IdentifierTakenError`. The
+ *   new identifier keeps the user's id as its id and `created_at` as its
+ *   creation time, so `to.id` and `to.createdAt` are not stored. Any type but
+ *   `email` is refused with an `AuthError`.
  * - `setVerified` sets `users.email_verified`, and `users.email_verified_at` when
  *   mapped, then returns the identifier, or `null` when the id names no user
  *   holding an email. Without the `emailVerifiedAt` mapping the `verifiedAt`
@@ -375,6 +382,42 @@ export const make = (
             });
           }
           return claimed;
+        });
+      },
+
+      // One guarded UPDATE: the row moves from `from`'s address to `to`'s, or
+      // stays as it is. Never NULL, so a NOT NULL column takes it too.
+      replace: (from, to) => {
+        const invalid = Auth.replaceInputError(from, to);
+        if (invalid !== null) return Effect.fail(invalid);
+        if (from.type !== "email") {
+          return Effect.fail(
+            new Auth.AuthError({
+              message: `the single-table IdentifierStore holds email identifiers only; a ${from.type} identifier needs the multi-identifier store`,
+            }),
+          );
+        }
+        // An email identifier's id is its user's id; any other id is not one this
+        // store holds.
+        if (from.id !== from.userId) return Effect.succeed(null);
+        return Effect.gen(function* () {
+          yield* query("identifier.replace", (db) =>
+            db
+              .update(table)
+              .set(
+                writeValues(users, {
+                  email: to.value,
+                  emailVerified: to.verified,
+                  ...verifiedAtWrite(to.verifiedAt ?? null),
+                }),
+              )
+              .where(and(eq(column.id, from.userId), eq(column.email, from.value)))
+              .execute(),
+          );
+
+          const stored = yield* readUser(from.userId, "identifier.replace.read");
+          const replaced = stored === null ? null : toIdentifier(stored);
+          return replaced !== null && replaced.value === to.value ? replaced : null;
         });
       },
 

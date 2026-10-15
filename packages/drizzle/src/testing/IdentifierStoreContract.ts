@@ -2,7 +2,7 @@
  * The `IdentifierStore` contract, written once and run against every drizzle
  * store that claims it (#182).
  *
- * Two suites live here:
+ * The suites:
  *
  * - {@link identifierStoreContract} — the semantics the core contract states for
  *   any store, restricted to email identifiers so the multi-identifier store and
@@ -10,7 +10,8 @@
  * - {@link singleTableContract} — what only the single-table store does: one
  *   email per user, the user row as the identifier, refusals for other types.
  * - {@link notNullContract} — a `NOT NULL` email column: a targeted delete is
- *   refused, `deleteByUser` leaves the row for account deletion to remove.
+ *   refused, `deleteByUser` leaves the row for account deletion to remove, and
+ *   `replace` rewrites the address without ever writing `NULL`.
  * - {@link verifiedAtContract} — a mapped `emailVerifiedAt` column stores and
  *   reports the verification time.
  *
@@ -210,6 +211,132 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
         "grace@example.com",
       ]);
     });
+
+    it("replace swaps the user's email for a new one, and the old one resolves to nothing", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          const ada = yield* store.create(emailFor(USER.ada, "ada@example.com"));
+          const replaced = yield* store.replace(
+            ada,
+            emailFor(USER.ada, "ada-new@example.com", true),
+          );
+          return {
+            replaced,
+            listed: yield* store.listByUser(USER.ada),
+            old: yield* store.getByValue("email", "ada@example.com"),
+            current: yield* store.getByValue("email", "ada-new@example.com"),
+            // Free again once released: another user can claim it.
+            moved: yield* Auth.claimIdentifier(store, emailFor(USER.grace, "ada@example.com")),
+          };
+        }),
+      );
+
+      expect(result.replaced?.userId).toBe(USER.ada);
+      expect(result.replaced?.value).toBe("ada-new@example.com");
+      expect(result.replaced?.verified).toBe(true);
+      expect(result.listed.map((identifier) => [identifier.value, identifier.verified])).toEqual([
+        ["ada-new@example.com", true],
+      ]);
+      expect(result.old).toBeNull();
+      expect(result.current?.userId).toBe(USER.ada);
+      expect(result.moved.userId).toBe(USER.grace);
+    });
+
+    it("replace refuses an address another user holds with AuthError, which replaceIdentifier reports as taken, and keeps the old one", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          const ada = yield* store.create(emailFor(USER.ada, "ada@example.com", true));
+          yield* store.create(emailFor(USER.grace, "grace@example.com"));
+
+          // The store call alone: the unique index refuses the write.
+          const refused = yield* Effect.flip(
+            store.replace(ada, emailFor(USER.ada, "grace@example.com")),
+          );
+          const taken = yield* Effect.flip(
+            Auth.replaceIdentifier(store, ada, emailFor(USER.ada, "grace@example.com")),
+          );
+          return {
+            refused,
+            taken,
+            adaListed: yield* store.listByUser(USER.ada),
+            owner: yield* store.getByValue("email", "grace@example.com"),
+          };
+        }),
+      );
+
+      expect(result.refused._tag).toBe("AuthError");
+      expect(result.taken._tag).toBe("IdentifierTakenError");
+      expect((result.taken as Auth.IdentifierTakenError).identifierType).toBe("email");
+      expect(result.adaListed.map((identifier) => [identifier.value, identifier.verified])).toEqual(
+        [["ada@example.com", true]],
+      );
+      expect(result.owner?.userId).toBe(USER.grace);
+    });
+
+    it("replace of an identifier the user no longer holds resolves to null and writes nothing", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          const ada = yield* store.create(emailFor(USER.ada, "ada@example.com"));
+          // The same record with an address the user does not hold: a stale read.
+          const stale: Auth.Identifier = { ...ada, value: "ada-old@example.com" };
+          return {
+            replaced: yield* store.replace(stale, emailFor(USER.ada, "ada-new@example.com")),
+            notFound: yield* Effect.flip(
+              Auth.replaceIdentifier(store, stale, emailFor(USER.ada, "ada-new@example.com")),
+            ),
+            listed: yield* store.listByUser(USER.ada),
+            newAddress: yield* store.getByValue("email", "ada-new@example.com"),
+          };
+        }),
+      );
+
+      expect(result.replaced).toBeNull();
+      expect(result.notFound._tag).toBe("IdentifierNotFoundError");
+      expect(result.listed.map((identifier) => identifier.value)).toEqual(["ada@example.com"]);
+      expect(result.newAddress).toBeNull();
+    });
+
+    it("replace refuses a replacement for another user, of another type, with the same id, or of the same value", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          const ada = yield* store.create(emailFor(USER.ada, "ada@example.com"));
+          return {
+            otherUser: yield* Effect.flip(
+              store.replace(ada, emailFor(USER.grace, "grace@example.com")),
+            ),
+            otherType: yield* Effect.flip(
+              store.replace(
+                ada,
+                Auth.makeIdentifier({ userId: USER.ada, type: "username", value: "ada" }),
+              ),
+            ),
+            sameId: yield* Effect.flip(
+              store.replace(ada, { ...emailFor(USER.ada, "ada-new@example.com"), id: ada.id }),
+            ),
+            sameValue: yield* Effect.flip(
+              store.replace(ada, emailFor(USER.ada, "ada@example.com", true)),
+            ),
+            adaListed: yield* store.listByUser(USER.ada),
+            graceListed: yield* store.listByUser(USER.grace),
+            newAddress: yield* store.getByValue("email", "ada-new@example.com"),
+          };
+        }),
+      );
+
+      expect(result.otherUser._tag).toBe("AuthError");
+      expect(result.otherType._tag).toBe("AuthError");
+      expect(result.sameId._tag).toBe("AuthError");
+      expect(result.sameValue._tag).toBe("AuthError");
+      expect(result.newAddress).toBeNull();
+      expect(result.adaListed.map((identifier) => [identifier.value, identifier.verified])).toEqual(
+        [["ada@example.com", false]],
+      );
+      expect(result.graceListed).toEqual([]);
+    });
   });
 
 /** What only the single-table store does, over the same database harness. */
@@ -342,6 +469,23 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
       expect(result.ghostListed).toEqual([]);
     });
 
+    it("replace rewrites the row's address in place, keeping the user's id and created_at", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          const ada = yield* store.create(emailFor(USER.ada, "ada@example.com"));
+          return yield* store.replace(ada, emailFor(USER.ada, "ada-new@example.com", true));
+        }),
+      );
+
+      expect(result?.id).toBe(USER.ada);
+      expect(result?.createdAt).toEqual(USER_CREATED_AT);
+      expect(await harness.readUserRow(USER.ada)).toEqual({
+        email: "ada-new@example.com",
+        emailVerified: true,
+      });
+    });
+
     it("a user whose email is NULL holds no identifier, and setVerified finds none", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
@@ -451,28 +595,40 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
       expect(result).toBe("ok");
     });
 
-    it("email change never leaves the address NULL: the new address is refused while the old one is held, and nothing is written", async () => {
+    it("replace rewrites a NOT NULL address in place: the row is never NULL", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
-          // Core email change claims the confirmed address first, while the user
-          // still holds the old one. The store refuses a second address, so the
-          // claim fails and the old address is never released.
-          const refused = yield* Effect.flip(
-            store.create(emailFor(USER.ada, "ada-new@example.com", true)),
-          );
+          const ada = yield* store.getByValue("email", "ada@example.com");
           return {
-            refused,
-            kept: yield* store.listByUser(USER.ada),
-            newAddress: yield* store.getByValue("email", "ada-new@example.com"),
+            replaced: yield* store.replace(ada!, emailFor(USER.ada, "ada-new@example.com", true)),
+            old: yield* store.getByValue("email", "ada@example.com"),
+            listed: yield* store.listByUser(USER.ada),
           };
         }),
       );
 
-      expect(result.refused._tag).toBe("AuthError");
-      expect(result.refused.message).toContain("one email identifier per user");
-      expect(result.kept.map((identifier) => identifier.value)).toEqual(["ada@example.com"]);
-      expect(result.newAddress).toBeNull();
+      expect(result.replaced?.value).toBe("ada-new@example.com");
+      expect(result.old).toBeNull();
+      expect(result.listed.map((identifier) => identifier.value)).toEqual(["ada-new@example.com"]);
+      expect(await harness.readUserRow(USER.ada)).toEqual({
+        email: "ada-new@example.com",
+        emailVerified: true,
+      });
+    });
+
+    it("replace with an address another user holds is refused, and the NOT NULL row keeps its address", async () => {
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          const ada = yield* store.getByValue("email", "ada@example.com");
+          return yield* Effect.flip(
+            Auth.replaceIdentifier(store, ada!, emailFor(USER.ada, "grace@example.com")),
+          );
+        }),
+      );
+
+      expect(result._tag).toBe("IdentifierTakenError");
       expect(await harness.readUserRow(USER.ada)).toEqual({
         email: "ada@example.com",
         emailVerified: false,
@@ -609,6 +765,37 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
       );
 
       expect("verifiedAt" in result).toBe(false);
+      expect(await harness.readVerifiedAt(USER.ada)).toBeNull();
+    });
+
+    it("replace writes the replacement's verification time, and clears it for an unverified one", async () => {
+      const verifiedAt = new Date(Date.UTC(2026, 0, 4));
+      const result = await harness.run(() =>
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          const ada = yield* store.create(emailFor(USER.ada, "ada@example.com"));
+          const verified = yield* store.replace(
+            ada,
+            Auth.makeIdentifier({
+              userId: USER.ada,
+              type: "email",
+              value: "ada-new@example.com",
+              verified: true,
+              verifiedAt,
+            }),
+          );
+          const storedVerifiedAt = yield* Effect.promise(() => harness.readVerifiedAt(USER.ada));
+          const unverified = yield* store.replace(
+            verified!,
+            emailFor(USER.ada, "ada-other@example.com"),
+          );
+          return { verified, storedVerifiedAt, unverified };
+        }),
+      );
+
+      expect(result.verified?.verifiedAt).toEqual(verifiedAt);
+      expect(result.storedVerifiedAt).toEqual(verifiedAt);
+      expect(result.unverified && "verifiedAt" in result.unverified).toBe(false);
       expect(await harness.readVerifiedAt(USER.ada)).toBeNull();
     });
 

@@ -3,11 +3,13 @@
  * single-table `IdentifierStore` (PGlite), on a nullable `email` column and on a
  * NOT NULL one.
  *
- * The store holds one email per user and refuses a second, so core's
- * claim-first confirm is refused while the user still holds the current
- * address: the change fails with an `AuthError` before anything is released,
- * and the previous address stays in place and verified. The token is not
- * consumed. This holds on both shapes.
+ * The store holds one email per user, so core's confirm goes through
+ * `IdentifierStore.replace`, which rewrites the row's address in one `UPDATE`:
+ * the change completes on both shapes, and a NOT NULL row is never left `NULL`.
+ * When the new address is taken, by a claim the confirm-time check saw or by
+ * one that lands between that check and the write, the change fails, the
+ * previous address stays in place and verified, and only the first case
+ * consumes the token.
  *
  * Account deletion is the other flow the NOT NULL shape has to get right: the
  * store leaves the address to the user row, and the application's user writer
@@ -117,9 +119,14 @@ const makeUser = (id: string): Auth.User => {
 /**
  * An `AccountManagementService` over the single-table store on this file's
  * database. `deleteRow` is what the application's user writer does when it
- * deletes a user, which `UserServiceStore.delete` stands for here.
+ * deletes a user, which `UserServiceStore.delete` stands for here. `wrap`, when
+ * given, wraps the identifier store, to stage a concurrent write.
  */
-const makeHarness = (users: SingleTableUsers, deleteRow: (userId: string) => Promise<void>) => {
+const makeHarness = (
+  users: SingleTableUsers,
+  deleteRow: (userId: string) => Promise<void>,
+  wrap?: (store: typeof Auth.IdentifierStore.Service) => typeof Auth.IdentifierStore.Service,
+) => {
   const userMap = new Map<string, Auth.User>([
     [USER.ada, makeUser(USER.ada)],
     [USER.grace, makeUser(USER.grace)],
@@ -174,7 +181,17 @@ const makeHarness = (users: SingleTableUsers, deleteRow: (userId: string) => Pro
         Layer.succeed(Auth.UserServiceStore)(userStore),
         Layer.succeed(Auth.AccountManagementStore)(tokenStore),
         Layer.succeed(Auth.SessionService)(sessions),
-        singleTableLayer(users).pipe(Layer.provide(databaseLayer(drizzle(client)))),
+        Layer.effect(
+          Auth.IdentifierStore,
+          Effect.gen(function* () {
+            const store = yield* Auth.IdentifierStore;
+            return wrap === undefined ? store : wrap(store);
+          }),
+        ).pipe(
+          Layer.provide(
+            singleTableLayer(users).pipe(Layer.provide(databaseLayer(drizzle(client)))),
+          ),
+        ),
       ),
     ),
   );
@@ -204,15 +221,43 @@ describe("single-table IdentifierStore: email change", () => {
         ]);
     });
 
-    it("refuses the claim while the user holds the current address: the change fails and the previous address stays verified", async () => {
+    it("changes the address in place: the row holds the new address, verified, and the token is consumed", async () => {
       const h = makeHarness(mapping, async () => {});
+      const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
+
+      const { user } = await h.run((svc) => svc.confirmEmailChange(token));
+
+      expect(user.id).toBe(USER.ada);
+      expect(await readRow(USER.ada)).toEqual({ email: NEW, emailVerified: true });
+      expect(await readRow(USER.grace)).toEqual({ email: null, emailVerified: false });
+      expect(h.tokens.has(token)).toBe(false);
+    });
+
+    it("an address another user claims between the confirm-time check and the write fails with AccountTokenError; the previous address and the token stay", async () => {
+      // Grace takes the new address just before the store writes it, so only the
+      // unique index can refuse it.
+      const h = makeHarness(
+        mapping,
+        async () => {},
+        (store) => ({
+          ...store,
+          replace: (from, to) =>
+            Effect.promise(() =>
+              drizzle(client)
+                .update(appUsers)
+                .set({ email: NEW, emailVerified: true })
+                .where(eq(appUsers.userId, USER.grace)),
+            ).pipe(Effect.andThen(store.replace(from, to))),
+        }),
+      );
       const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
 
       const err = await h.run((svc) => Effect.flip(svc.confirmEmailChange(token)));
 
-      expect(err).toBeInstanceOf(Auth.AuthError);
-      expect(err.message).toContain("allows one email identifier per user");
+      expect(err).toBeInstanceOf(Auth.AccountTokenError);
+      expect(err.message).toBe("Email already in use");
       expect(await readRow(USER.ada)).toEqual({ email: OLD, emailVerified: true });
+      expect(await readRow(USER.grace)).toEqual({ email: NEW, emailVerified: true });
       expect(h.tokens.has(token)).toBe(true);
     });
 
@@ -242,14 +287,35 @@ describe("single-table IdentifierStore: email change", () => {
         ]);
     });
 
-    it("refuses the claim of the new address while the old one is held: the change fails with AuthError, the old address and the token stay, and no NULL is written", async () => {
+    it("changes the address in place without ever writing NULL, and consumes the token", async () => {
       const h = makeHarness(strictMapping, deleteStrictRow);
+      const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
+
+      const { user } = await h.run((svc) => svc.confirmEmailChange(token));
+
+      expect(user.id).toBe(USER.ada);
+      expect(await readStrictRow(USER.ada)).toEqual({ email: NEW, emailVerified: true });
+      expect(await readStrictRow(USER.grace)).toEqual({ email: GRACE, emailVerified: false });
+      expect(h.tokens.has(token)).toBe(false);
+    });
+
+    it("an address another user claims between the confirm-time check and the write fails with AccountTokenError; the previous address and the token stay", async () => {
+      const h = makeHarness(strictMapping, deleteStrictRow, (store) => ({
+        ...store,
+        replace: (from, to) =>
+          Effect.promise(() =>
+            drizzle(client)
+              .update(strictUsers)
+              .set({ email: NEW })
+              .where(eq(strictUsers.userId, USER.grace)),
+          ).pipe(Effect.andThen(store.replace(from, to))),
+      }));
       const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
 
       const err = await h.run((svc) => Effect.flip(svc.confirmEmailChange(token)));
 
-      expect(err).toBeInstanceOf(Auth.AuthError);
-      expect(err.message).toContain("allows one email identifier per user");
+      expect(err).toBeInstanceOf(Auth.AccountTokenError);
+      expect(err.message).toBe("Email already in use");
       expect(await readStrictRow(USER.ada)).toEqual({ email: OLD, emailVerified: true });
       expect(h.tokens.has(token)).toBe(true);
     });

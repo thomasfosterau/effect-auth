@@ -17,11 +17,12 @@
  * `multiFactor`) and counters (`rateLimit.increment`,
  * `emailOtp.incrementAttempts`) use a single `ON CONFLICT … DO UPDATE` /
  * `UPDATE … RETURNING` statement for true atomicity — no read-modify-write
- * races. Multi-step upserts (challenge, oauthState, emailOtp.upsert) run
- * inside `sql.withTransaction`. `ON CONFLICT` targets a declared primary key
- * or unique index. MySQL has no `ON CONFLICT` clause, so these statements fail
- * there, and MySQL is not a supported dialect (#260). For MySQL, use
- * `@thomasfosterau/effect-auth-drizzle`'s MySQL tables.
+ * races. Multi-step writes (challenge, oauthState, emailOtp.upsert, and
+ * identifier.replace's claim-then-release) run inside `sql.withTransaction`.
+ * `ON CONFLICT` targets a declared primary key or unique index. MySQL has no
+ * `ON CONFLICT` clause, so these statements fail there, and MySQL is not a
+ * supported dialect (#260). For MySQL, use `@thomasfosterau/effect-auth-drizzle`'s
+ * MySQL tables.
  *
  * Token columns store SHA-256 hashes computed by the service layer (the
  * `auth_sessions.id` primary key included) — the database never sees a raw
@@ -1184,6 +1185,15 @@ export const makeIdentifierStore: Effect.Effect<
   SqlClient.SqlClient
 > = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const withTx = makeTx(sql);
+
+  const insert = (identifier: Auth.Identifier, label: string) =>
+    asVoid(
+      label,
+      sql`INSERT INTO auth_identifiers (id, user_id, type, value, verified, verified_at, created_at)
+          VALUES (${identifier.id}, ${identifier.userId}, ${identifier.type}, ${identifier.value}, ${identifier.verified ? 1 : 0}, ${identifier.verifiedAt != null ? dateToMs(identifier.verifiedAt) : null}, ${dateToMs(identifier.createdAt)})`,
+    ).pipe(Effect.as(identifier));
+
   return {
     getByValue: (type, value) =>
       firstRow(
@@ -1197,12 +1207,42 @@ export const makeIdentifierStore: Effect.Effect<
         sql<IdentifierRow>`SELECT * FROM auth_identifiers WHERE user_id = ${userId} ORDER BY created_at ASC`,
       ).pipe(Effect.map((rows) => rows.map(rowToIdentifier))),
 
-    create: (identifier) =>
-      asVoid(
-        "identifier.create",
-        sql`INSERT INTO auth_identifiers (id, user_id, type, value, verified, verified_at, created_at)
-            VALUES (${identifier.id}, ${identifier.userId}, ${identifier.type}, ${identifier.value}, ${identifier.verified ? 1 : 0}, ${identifier.verifiedAt != null ? dateToMs(identifier.verifiedAt) : null}, ${dateToMs(identifier.createdAt)})`,
-      ).pipe(Effect.as(identifier)),
+    create: (identifier) => insert(identifier, "identifier.create"),
+
+    // Claim, then release, in one transaction. A `to` another user holds fails
+    // the INSERT on the `(type, value)` unique index and rolls back, so `from`
+    // stays. The release is a compare-and-swap: the DELETE matches `from` by id,
+    // user, type and value, so a `from` that is gone (another replace released
+    // it first) deletes nothing, the claim is removed again and the call
+    // resolves to null. On PostgreSQL a concurrent second DELETE waits for the
+    // first to commit and then matches nothing, so of two replaces of one
+    // `from` one succeeds. D1 has no transactions: the statements autocommit in
+    // the same order, so a failure between them leaves both rows, never
+    // neither, and the removal of a stale claim is a statement of its own.
+    replace: (from, to) => {
+      const invalid = Auth.replaceInputError(from, to);
+      if (invalid !== null) return Effect.fail(invalid);
+      return withTx(
+        "identifier.replace",
+        Effect.gen(function* () {
+          yield* insert(to, "identifier.replace");
+          const released = yield* allRows(
+            "identifier.replace",
+            sql<{
+              readonly id: string;
+            }>`DELETE FROM auth_identifiers WHERE id = ${from.id} AND user_id = ${from.userId} AND type = ${from.type} AND value = ${from.value} RETURNING id`,
+          );
+          if (released.length > 0) return to;
+          // `from` was not held: take the claim back. A DELETE rather than a
+          // ROLLBACK, so D1, where a ROLLBACK does nothing, ends unchanged too.
+          yield* asVoid(
+            "identifier.replace.undo",
+            sql`DELETE FROM auth_identifiers WHERE id = ${to.id}`,
+          );
+          return null;
+        }),
+      );
+    },
 
     setVerified: (id, verifiedAt) =>
       Effect.gen(function* () {

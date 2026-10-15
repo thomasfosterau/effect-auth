@@ -12,19 +12,19 @@
  * `@effect/sql-d1` is the same idea and would be the obvious dependency, but
  * its client defines `transactionAcquirer` as `Effect.die("transactions are
  * not supported in D1")`. `@thomasfosterau/effect-auth-sql` calls
- * `sql.withTransaction` in three stores (`ChallengeStore.create`,
- * `OAuthStateStore.create`, `EmailOtpStore.upsert`), so WebAuthn, the OAuth
- * handshake and email OTP would all die at runtime on D1 — the stores this
- * package exists to reuse.
+ * `sql.withTransaction` in four store methods (`ChallengeStore.create`,
+ * `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`),
+ * so WebAuthn, the OAuth handshake, email OTP and email change would all die
+ * at runtime on D1 — the stores this package exists to reuse.
  *
  * D1 genuinely has no explicit transactions (`BEGIN` / `COMMIT` /
  * `SAVEPOINT` are rejected by the binding; `batch()` is the only atomic
  * primitive it offers), so the honest adaptation is to let those three
- * `DELETE`-then-`INSERT` upserts run as autocommitted statements rather than
- * to fail. That is what {@link make} does: the connection answers the
- * transaction-control statements the `SqlClient` transaction machinery emits
- * without sending them to D1, so `withTransaction` degrades to "run the
- * effect" instead of dying.
+ * `DELETE`-then-`INSERT` upserts, and `replace`'s `INSERT`-then-`DELETE`, run
+ * as autocommitted statements rather than to fail. That is what {@link make}
+ * does: the connection answers the transaction-control statements the
+ * `SqlClient` transaction machinery emits without sending them to D1, so
+ * `withTransaction` degrades to "run the effect" instead of dying.
  *
  * **This means nested writes on D1 are not atomic.** Callers that need
  * atomicity on D1 must express it as a single statement (`ON CONFLICT … DO

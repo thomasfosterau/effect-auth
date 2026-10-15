@@ -220,6 +220,50 @@ describe("MySQL / statements", () => {
     });
   });
 
+  it("replaces an identifier with a guarded read, then INSERT, then DELETE", async () => {
+    const proxy = makeProxy();
+    // The guarded read finds the identifier being replaced.
+    proxy.respondWith([["identifier-1"]]);
+    const from: Auth.Identifier = {
+      id: "identifier-1",
+      userId: "user-1",
+      type: "email",
+      value: "ada@example.com",
+      verified: true,
+      createdAt: at(0),
+    };
+    const to: Auth.Identifier = {
+      ...from,
+      id: "identifier-2",
+      value: "ada-new@example.com",
+      verifiedAt: at(9000),
+      createdAt: at(9000),
+    };
+
+    const replaced = await run(
+      proxy,
+      Effect.gen(function* () {
+        const store = yield* Auth.IdentifierStore;
+        return yield* store.replace(from, to);
+      }),
+    );
+
+    expect(replaced).toEqual(to);
+    expect(proxy.statements.map((statement) => statement.sql)).toEqual([
+      "select `id` from `effect_auth_identifiers` where (`effect_auth_identifiers`.`id` = ? and `effect_auth_identifiers`.`user_id` = ? and `effect_auth_identifiers`.`type` = ? and `effect_auth_identifiers`.`value` = ?) limit ?",
+      "insert into `effect_auth_identifiers` (`id`, `user_id`, `type`, `value`, `verified`, `verified_at`, `created_at`) values (?, ?, ?, ?, ?, ?, ?)",
+      "delete from `effect_auth_identifiers` where `effect_auth_identifiers`.`id` = ?",
+    ]);
+    expect(proxy.statements[0]?.params).toEqual([
+      "identifier-1",
+      "user-1",
+      "email",
+      "ada@example.com",
+      1,
+    ]);
+    expect(proxy.statements[2]?.params).toEqual(["identifier-1"]);
+  });
+
   it("nulls a miss and omits an absent verifiedAt", async () => {
     const proxy = makeProxy();
     proxy.respondWith([]);

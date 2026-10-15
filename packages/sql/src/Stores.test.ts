@@ -932,6 +932,113 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.afterDeleteUser).toHaveLength(0);
     });
 
+    it("IdentifierStore.replace swaps a user's identifier in one transaction, and keeps it on any refusal", async () => {
+      const email = (userId: string, value: string, verified = false) =>
+        Auth.makeIdentifier({ userId, type: "email", value, verified });
+      const result = await run(
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          const ada = yield* store.create(email("user-ada", "ada@example.com", true));
+          yield* store.create(email("user-grace", "grace@example.com"));
+
+          const replaced = yield* store.replace(
+            ada,
+            email("user-ada", "ada-new@example.com", true),
+          );
+          const afterReplace = {
+            listed: yield* store.listByUser("user-ada"),
+            old: yield* store.getByValue("email", "ada@example.com"),
+          };
+
+          // A value another user holds: the INSERT is refused by the unique
+          // index and the transaction rolls back, so the user keeps their address.
+          const takenRaw = yield* Effect.flip(
+            store.replace(replaced!, email("user-ada", "grace@example.com")),
+          );
+          const taken = yield* Effect.flip(
+            Auth.replaceIdentifier(store, replaced!, email("user-ada", "grace@example.com")),
+          );
+          // `from` is no longer held: null, and nothing is written.
+          const stale = yield* store.replace(ada, email("user-ada", "ada-other@example.com"));
+          const staleTyped = yield* Effect.flip(
+            Auth.replaceIdentifier(store, ada, email("user-ada", "ada-other@example.com")),
+          );
+          // Another user's or another type's replacement is refused outright.
+          const wrongUser = yield* Effect.flip(
+            store.replace(replaced!, email("user-grace", "x@example.com")),
+          );
+          return {
+            replaced,
+            afterReplace,
+            takenRaw,
+            taken,
+            stale,
+            staleTyped,
+            wrongUser,
+            listed: yield* store.listByUser("user-ada"),
+            grace: yield* store.getByValue("email", "grace@example.com"),
+            other: yield* store.getByValue("email", "ada-other@example.com"),
+          };
+        }),
+      );
+      expect(result.replaced?.value).toBe("ada-new@example.com");
+      expect(result.afterReplace.old).toBeNull();
+      expect(result.afterReplace.listed.map((i) => [i.value, i.verified])).toEqual([
+        ["ada-new@example.com", true],
+      ]);
+      expect(result.takenRaw._tag).toBe("AuthError");
+      expect(result.taken._tag).toBe("IdentifierTakenError");
+      expect(result.stale).toBeNull();
+      expect(result.staleTyped._tag).toBe("IdentifierNotFoundError");
+      expect(result.wrongUser._tag).toBe("AuthError");
+      expect(result.listed.map((i) => i.value)).toEqual(["ada-new@example.com"]);
+      expect(result.grace?.userId).toBe("user-grace");
+      expect(result.other).toBeNull();
+    });
+
+    it("IdentifierStore.replace releases `from` with a compare-and-swap: of two replaces of one `from`, the second resolves to null", async () => {
+      // The second replace runs after the first has committed, which is what a
+      // concurrent second sees on PostgreSQL once the first's row lock is
+      // released: its INSERT lands, its guarded DELETE matches nothing, and the
+      // claim is taken back.
+      const email = (value: string) =>
+        Auth.makeIdentifier({ userId: "user-ada", type: "email", value, verified: true });
+      const result = await run(
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          const ada = yield* store.create(email("ada@example.com"));
+          const first = yield* store.replace(ada, email("ada-a@example.com"));
+          const second = yield* store.replace(ada, email("ada-b@example.com"));
+          // A double submit of the same change: the second claim is refused by
+          // the unique index (this user already holds the value), and
+          // replaceIdentifier reports that `from` is gone.
+          const again = yield* Effect.flip(
+            Auth.replaceIdentifier(store, ada, email("ada-a@example.com")),
+          );
+          // The guard is the whole record, not just the id: the held row with a
+          // value it no longer has is not released.
+          const staleValue = yield* store.replace(
+            { ...first!, value: "ada@example.com" },
+            email("ada-c@example.com"),
+          );
+          return {
+            first,
+            second,
+            again,
+            staleValue,
+            listed: yield* store.listByUser("user-ada"),
+            b: yield* store.getByValue("email", "ada-b@example.com"),
+          };
+        }),
+      );
+      expect(result.first?.value).toBe("ada-a@example.com");
+      expect(result.second).toBeNull();
+      expect(result.again._tag).toBe("IdentifierNotFoundError");
+      expect(result.staleValue).toBeNull();
+      expect(result.listed.map((i) => i.value)).toEqual(["ada-a@example.com"]);
+      expect(result.b).toBeNull();
+    });
+
     it("ApiKeyStore roundtrips full records incl. permissions/metadata/refill/rateLimit", async () => {
       const now = Date.now();
       const apiKey: Auth.ApiKey = {
@@ -1226,3 +1333,53 @@ const storeContract = (engine: StoreEngine): void => {
 
 storeContract(sqlite);
 storeContract(postgres);
+
+// ---------------------------------------------------------------------------
+// IdentifierStore.replace inside its transaction (SQLite)
+//
+// A trigger makes one of replace's statements fail, so these cases show what
+// the transaction and the statement order guarantee rather than what a
+// well-behaved database happens to allow.
+// ---------------------------------------------------------------------------
+
+describe("@thomasfosterau/effect-auth-sql IdentifierStore.replace on SQLite: transaction and order", () => {
+  const email = (value: string) =>
+    Auth.makeIdentifier({ userId: "user-ada", type: "email", value, verified: true });
+
+  const replaceUnder = (trigger: string) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        yield* migrate;
+        const sql = yield* SqlClient.SqlClient;
+        const store = yield* Auth.IdentifierStore;
+        const ada = yield* store.create(email("ada@example.com"));
+        yield* sql.unsafe(trigger);
+        const outcome = yield* Effect.result(store.replace(ada, email("ada-new@example.com")));
+        const rows = yield* sql<{
+          readonly value: string;
+        }>`SELECT value FROM auth_identifiers WHERE user_id = ${"user-ada"} ORDER BY value`;
+        return { outcome, values: rows.map((row) => row.value) };
+      }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(sqlClientLayer())))),
+    );
+
+  it("a failed release rolls the claim back: only the old row remains", async () => {
+    const result = await replaceUnder(`
+      CREATE TRIGGER refuse_release BEFORE DELETE ON auth_identifiers
+      BEGIN SELECT RAISE(ABORT, 'release refused'); END`);
+    expect(result.outcome._tag).toBe("Failure");
+    expect(result.values).toEqual(["ada@example.com"]);
+  });
+
+  it("claims before it releases: a user is never without an identifier, even mid-transaction", async () => {
+    // Refuses any DELETE that would leave its user holding no identifier, so a
+    // release that ran before the claim would fail.
+    const result = await replaceUnder(`
+      CREATE TRIGGER keep_one BEFORE DELETE ON auth_identifiers
+      WHEN NOT EXISTS (
+        SELECT 1 FROM auth_identifiers WHERE user_id = OLD.user_id AND id <> OLD.id
+      )
+      BEGIN SELECT RAISE(ABORT, 'user left without an identifier'); END`);
+    expect(result.outcome._tag).toBe("Success");
+    expect(result.values).toEqual(["ada-new@example.com"]);
+  });
+});

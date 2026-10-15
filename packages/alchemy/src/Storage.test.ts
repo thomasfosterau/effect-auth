@@ -144,6 +144,93 @@ describe("D1-backed effect-auth storage", () => {
     expect(result.attempts).toBe(1);
   });
 
+  /**
+   * `IdentifierStore.replace` asks for a transaction too: its INSERT-then-DELETE
+   * autocommits on D1, in that order, and a taken address is still refused by
+   * the unique index with the old address kept.
+   */
+  it("replaces an identifier, and refuses a taken address keeping the old one", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const identifiers = yield* Auth.IdentifierStore;
+        const ada = yield* identifiers.create(
+          Auth.makeIdentifier({ userId: "user-1", type: "email", value: "ada@example.com" }),
+        );
+        yield* identifiers.create(
+          Auth.makeIdentifier({ userId: "user-2", type: "email", value: "grace@example.com" }),
+        );
+        const replaced = yield* Auth.replaceIdentifier(
+          identifiers,
+          ada,
+          Auth.makeIdentifier({
+            userId: "user-1",
+            type: "email",
+            value: "ada-new@example.com",
+            verified: true,
+          }),
+        );
+        const taken = yield* Effect.flip(
+          Auth.replaceIdentifier(
+            identifiers,
+            replaced,
+            Auth.makeIdentifier({ userId: "user-1", type: "email", value: "grace@example.com" }),
+          ),
+        );
+        // A concurrent claim the read-before-write cannot see: the store's own
+        // unique index refuses it and the old address stays.
+        const raced = yield* Effect.flip(
+          identifiers.replace(
+            replaced,
+            Auth.makeIdentifier({ userId: "user-1", type: "email", value: "grace@example.com" }),
+          ),
+        );
+        return {
+          replaced,
+          taken,
+          raced,
+          listed: yield* identifiers.listByUser("user-1"),
+          grace: yield* identifiers.getByValue("email", "grace@example.com"),
+        };
+      }),
+    );
+    expect(result.replaced.value).toBe("ada-new@example.com");
+    expect(result.taken._tag).toBe("IdentifierTakenError");
+    expect(result.raced._tag).toBe("AuthError");
+    expect(result.listed.map((identifier) => [identifier.value, identifier.verified])).toEqual([
+      ["ada-new@example.com", true],
+    ]);
+    expect(result.grace?.userId).toBe("user-2");
+  });
+
+  /**
+   * Without a transaction the release is still a compare-and-swap: two replaces
+   * of the same address run concurrently, their statements interleaving on the
+   * binding, and only one releases it. The other deletes its own claim again.
+   */
+  it("lets one of two concurrent replaces of the same address succeed", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const identifiers = yield* Auth.IdentifierStore;
+        const ada = yield* identifiers.create(
+          Auth.makeIdentifier({ userId: "user-1", type: "email", value: "ada@example.com" }),
+        );
+        const outcomes = yield* Effect.all(
+          ["ada-a@example.com", "ada-b@example.com"].map((value) =>
+            identifiers.replace(
+              ada,
+              Auth.makeIdentifier({ userId: "user-1", type: "email", value, verified: true }),
+            ),
+          ),
+          { concurrency: "unbounded" },
+        );
+        return { outcomes, listed: yield* identifiers.listByUser("user-1") };
+      }),
+    );
+    const won = result.outcomes.filter((outcome) => outcome !== null);
+    expect(won).toHaveLength(1);
+    expect(result.listed.map((identifier) => identifier.value)).toEqual([won[0]!.value]);
+  });
+
   it("keeps epoch-millisecond timestamps intact through BIGINT columns", async () => {
     // ~2065: overflows a 32-bit INTEGER, so this is the column-type check.
     const farFuture = 3_000_000_000_000;
