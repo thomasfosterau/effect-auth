@@ -93,18 +93,20 @@ const root = resolve(import.meta.dirname, "..");
 
 /**
  * `semver` is CommonJS, so its default import is whatever `module.exports`
- * held when Node read `node_modules/semver/index.js`. If that read saw an
- * empty or truncated file, the import still succeeds, with an empty object,
- * and the first call fails later as `semver.minVersion is not a function`
- * (#331). Fail here instead, naming the file and its size, so the cause is
- * visible at the point it happens.
+ * held when Node read `node_modules/semver/index.js`. If that object lacks the
+ * functions this script calls, the import still succeeds and the first call
+ * fails later as `semver.minVersion is not a function` (#331). Fail here
+ * instead, naming the file and its size. One known way to get there is an empty
+ * or truncated read of the file; the root cause of #331 is not confirmed.
  */
-const semverFile = fileURLToPath(import.meta.resolve("semver"));
 if (typeof semver.minVersion !== "function" || typeof semver.satisfies !== "function") {
+  // Resolved only on this path, so a healthy run never depends on
+  // `import.meta.resolve`.
+  const semverFile = fileURLToPath(import.meta.resolve("semver"));
   throw new Error(
     `semver loaded without its exports from ${semverFile} (${statSync(semverFile).size} bytes now). ` +
-      "The file was empty or truncated when it was read, so the module exported nothing. " +
-      "Rerun; if it recurs, reinstall the workspace (#331).",
+      "The module exported nothing; an empty or truncated read of the file is one known cause. " +
+      "Rerun, and if it recurs, record the run on #331.",
   );
 }
 
