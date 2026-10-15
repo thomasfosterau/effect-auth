@@ -6,7 +6,12 @@ import { MultiAlgorithmVerifier, PasswordHasher } from "../password/Password.ts"
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 import { SessionService } from "../SessionService.ts";
-import { createUserWithIdentifier, type NewUserIdentifier, UserStore } from "../UserStore.ts";
+import {
+  createUserWithIdentifier,
+  type CreateUserResult,
+  type NewUserIdentifier,
+  UserStore,
+} from "../UserStore.ts";
 import * as Obs from "../Observability.ts";
 
 /**
@@ -32,7 +37,15 @@ export interface CreateUserInput {
 export class EmailPasswordStore extends Context.Service<
   EmailPasswordStore,
   {
-    readonly createUser: (input: CreateUserInput) => Effect.Effect<Types.User, Errors.AuthError>;
+    /**
+     * Create a user. `created` in the result is `true` only when this call
+     * inserted the user; a user that already existed (an upsert or a
+     * find-or-create on the address) reports `false`, and sign-up then fails
+     * without writing to it (see {@link CreateUserResult}).
+     */
+    readonly createUser: (
+      input: CreateUserInput,
+    ) => Effect.Effect<CreateUserResult, Errors.AuthError>;
 
     readonly getPasswordHash: (userId: string) => Effect.Effect<string | null, Errors.AuthError>;
 

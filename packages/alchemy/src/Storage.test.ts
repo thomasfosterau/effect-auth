@@ -51,7 +51,7 @@ describe("D1-backed effect-auth storage", () => {
       Effect.gen(function* () {
         const users = yield* Auth.Email.EmailPasswordStore;
         const sessions = yield* Auth.SessionStore;
-        const user = yield* users.createUser({
+        const { user } = yield* users.createUser({
           name: "Test User",
           attributes: { plan: "pro" },
         });

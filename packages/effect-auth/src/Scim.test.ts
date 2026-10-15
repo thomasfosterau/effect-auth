@@ -78,7 +78,7 @@ const makeStores = () => {
           attributes: input.attributes ?? {},
         };
         usersById.set(user.id, user);
-        return user;
+        return { user, created: true };
       }),
     get: (userId) => Effect.sync(() => usersById.get(userId) ?? null),
     update: (user) => Effect.sync(() => (usersById.set(user.id, user), user)),

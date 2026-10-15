@@ -106,7 +106,7 @@ const emailPasswordStore = {
         attributes: attributes ?? {},
       };
       users.set(id, user);
-      return user;
+      return { user, created: true };
     }),
 
   getPasswordHash: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),

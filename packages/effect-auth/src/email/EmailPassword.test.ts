@@ -86,7 +86,7 @@ const emailPasswordStore = {
         attributes: attributes ?? {},
       };
       users.set(id, user);
-      return user;
+      return { user, created: true };
     }),
 
   getPasswordHash: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
@@ -104,7 +104,7 @@ const sessionConfig: SessionConfig = {
   },
 };
 
-const makeTestContext = async () => {
+const makeTestContext = async (store: typeof EmailPasswordStore.Service = emailPasswordStore) => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       make(sessionConfig),
@@ -123,7 +123,7 @@ const makeTestContext = async () => {
         Context.make(UserStore, userStore),
         Context.merge(
           Context.merge(
-            Context.make(EmailPasswordStore, emailPasswordStore),
+            Context.make(EmailPasswordStore, store),
             Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
           ),
           Context.merge(
@@ -177,6 +177,47 @@ describe("EmailPasswordService", () => {
     expect(stored?.verified).toBe(false);
     // The store was handed the address to create the user with (#380).
     expect(createdWith).toEqual([{ type: "email", value: "test@example.com", verified: false }]);
+  });
+
+  it("fails with EmailInUseError when the store's writer returns the existing owner, and leaves the owner untouched (#380)", async () => {
+    // A writer that upserts on the address. The owner's row lands between the
+    // sign-up's pre-check and its insert, so the upsert returns the owner and
+    // reports that it inserted nothing.
+    const owner: User = {
+      id: "owner",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    const upsertingStore: typeof EmailPasswordStore.Service = {
+      ...emailPasswordStore,
+      createUser: () =>
+        Effect.sync(() => {
+          users.set(owner.id, owner);
+          seedEmailIdentifier(owner.id, "owner@example.com", false);
+          passwordHashes.set(owner.id, "owner-hash");
+          return { user: owner, created: false };
+        }),
+    };
+    const testContext = await makeTestContext(upsertingStore);
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* EmailPassword.make();
+        return yield* Effect.result(
+          service.signUp({ email: "owner@example.com", password: "attacker-password-123" }),
+        );
+      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(result.failure._tag).toBe("EmailInUseError");
+    // No password, session or second identifier landed on the owner.
+    expect(passwordHashes.get(owner.id)).toBe("owner-hash");
+    expect(sessions.size).toBe(0);
+    expect(
+      Array.from(identifierRecords.values()).map(({ userId, verified }) => ({ userId, verified })),
+    ).toEqual([{ userId: owner.id, verified: false }]);
   });
 
   it("should sign in an existing user", async () => {
@@ -758,7 +799,7 @@ describe("EmailPasswordService - dangling session protection", () => {
           attributes: attributes ?? {},
         };
         localUsers.set(id, user);
-        return user;
+        return { user, created: true };
       }),
     getPasswordHash: (userId: string) => Effect.sync(() => localPasswordHashes.get(userId) ?? null),
     setPasswordHash: (userId: string, hash: string) =>

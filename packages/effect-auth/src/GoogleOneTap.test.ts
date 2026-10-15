@@ -120,7 +120,7 @@ const makeStores = () => {
           attributes: {},
         };
         users.set(user.id, user);
-        return user;
+        return { user, created: true };
       }),
   };
   const coreUserStore: typeof UserStore.Service = {
@@ -366,7 +366,7 @@ const makeHttpFixture = () => {
           attributes: {},
         };
         usersById.set(user.id, user);
-        return user;
+        return { user, created: true };
       }),
   };
   const userStore = {

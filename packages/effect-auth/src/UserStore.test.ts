@@ -41,9 +41,26 @@ const rowWriter = (records: Map<string, Identifier>, id: string, written?: Parti
         createdAt: now,
         ...written,
       });
-      return Effect.succeed(makeUser(id));
+      return Effect.succeed({ user: makeUser(id), created: true });
     });
   return { create, inputs };
+};
+
+/**
+ * A user writer that finds or creates on the address: when a user already
+ * holds it, it returns that user and reports `created: false`.
+ */
+const findOrCreateWriter = (records: Map<string, Identifier>, id: string) => {
+  const create = (identifier: NewUserIdentifier) =>
+    Effect.sync(() => {
+      for (const held of records.values()) {
+        if (held.type === identifier.type && held.value === identifier.value) {
+          return { user: makeUser(held.userId), created: false };
+        }
+      }
+      return { user: makeUser(id), created: true };
+    });
+  return { create };
 };
 
 /** A user writer that keeps identifiers elsewhere, and so ignores the field. */
@@ -52,7 +69,7 @@ const tableWriter = (id: string) => {
   const create = (identifier: NewUserIdentifier) =>
     Effect.sync(() => {
       inputs.push(identifier);
-      return makeUser(id);
+      return { user: makeUser(id), created: true };
     });
   return { create, inputs };
 };
@@ -136,6 +153,59 @@ describe("createUserWithIdentifier", () => {
     expect(error).toBeInstanceOf(IdentifierTakenError);
     expect(writer.inputs).toEqual([email]);
     expect(records.has("u-1")).toBe(false);
+  });
+
+  it("fails with IdentifierTakenError when create returns the existing owner, and changes nothing", async () => {
+    const records = new Map<string, Identifier>();
+    // The victim holds the address, unverified, from the insert on.
+    const victim = rowWriter(records, "victim");
+    await Effect.runPromise(
+      createUserWithIdentifier(memoryIdentifierStore(records), email, victim.create),
+    );
+    const before = structuredClone([...records.values()]);
+    const writer = findOrCreateWriter(records, "u-1");
+
+    const error = await Effect.runPromise(
+      Effect.flip(
+        createUserWithIdentifier(
+          memoryIdentifierStore(records),
+          { ...email, verified: true, verifiedAt: now },
+          writer.create,
+        ),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(IdentifierTakenError);
+    // The victim's address is neither re-claimed nor marked verified.
+    expect([...records.values()]).toEqual(before);
+    expect(records.get("victim")).toMatchObject({ userId: "victim", verified: false });
+  });
+
+  it("fails with IdentifierTakenError when create reports an existing user that holds no address", async () => {
+    const records = new Map<string, Identifier>();
+    const create = () => Effect.succeed({ user: makeUser("existing"), created: false });
+
+    const error = await Effect.runPromise(
+      Effect.flip(createUserWithIdentifier(memoryIdentifierStore(records), email, create)),
+    );
+
+    expect(error).toBeInstanceOf(IdentifierTakenError);
+    expect(records.size).toBe(0);
+  });
+
+  it("keeps create's failure when the lookup after it fails too", async () => {
+    const records = new Map<string, Identifier>();
+    const failure = new AuthError({ message: "insert into users failed" });
+    const store = {
+      ...memoryIdentifierStore(records),
+      getByValue: () => Effect.fail(new AuthError({ message: "lookup failed" })),
+    };
+
+    const error = await Effect.runPromise(
+      Effect.flip(createUserWithIdentifier(store, email, () => Effect.fail(failure))),
+    );
+
+    expect(error).toBe(failure);
   });
 
   it("passes any other failure of create through", async () => {

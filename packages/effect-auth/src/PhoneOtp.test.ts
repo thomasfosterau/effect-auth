@@ -70,7 +70,7 @@ const phoneOtpUserStore: typeof PhoneOtpUserStore.Service = {
         attributes: {},
       };
       users.set(user.id, user);
-      return user;
+      return { user, created: true };
     }),
 };
 

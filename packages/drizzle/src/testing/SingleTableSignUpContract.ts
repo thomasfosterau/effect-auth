@@ -44,9 +44,12 @@ export interface SignUpHarness {
 
 /**
  * Whether the application's writer puts `CreateUserInput.identifier` on the row
- * (`"writes"`), or leaves the address for the claim to write (`"omits"`).
+ * (`"writes"`), leaves the address for the claim to write (`"omits"`), or finds
+ * or creates on the address (`"findsOrCreates"`): it puts the address on the row
+ * of a new user, and returns the user who already holds it with
+ * `created: false`.
  */
-export type WriterMode = "writes" | "omits";
+export type WriterMode = "writes" | "omits" | "findsOrCreates";
 
 /** Fast test-only password hasher (not cryptographically secure). */
 const testHasher: typeof Password.PasswordHasher.Service = {
@@ -96,13 +99,22 @@ export const makeAppWriter = (
     createdAt: Date,
     identifier: Auth.NewUserIdentifier | undefined,
   ): UserRowInsert =>
-    mode === "writes" && identifier?.type === "email"
+    mode !== "omits" && identifier?.type === "email"
       ? { id, email: identifier.value, emailVerified: identifier.verified, createdAt }
       : { id, email: null, emailVerified: false, createdAt };
 
-  const createUser = (input: Email.CreateUserInput) =>
+  /** Insert a new user; in `"findsOrCreates"` mode, first look the address up through `lookup`. */
+  const createUserWith = (
+    input: Email.CreateUserInput,
+    lookup?: typeof Auth.IdentifierStore.Service,
+  ): Effect.Effect<Auth.CreateUserResult, Auth.AuthError> =>
     Effect.gen(function* () {
       createdWith.push(input.identifier);
+      if (mode === "findsOrCreates" && lookup !== undefined && input.identifier !== undefined) {
+        const held = yield* lookup.getByValue(input.identifier.type, input.identifier.value);
+        const existing = held === null ? undefined : users.get(held.userId);
+        if (existing !== undefined) return { user: existing, created: false };
+      }
       const id = globalThis.crypto.randomUUID();
       const now = new Date();
       yield* Effect.tryPromise({
@@ -111,8 +123,10 @@ export const makeAppWriter = (
       });
       const user: Auth.User = { id, createdAt: now, updatedAt: now, attributes: {} };
       users.set(id, user);
-      return user;
+      return { user, created: true };
     });
+
+  const createUser = (input: Email.CreateUserInput) => createUserWith(input);
 
   const emailPasswordStore: typeof Email.EmailPasswordStore.Service = {
     createUser,
@@ -137,7 +151,10 @@ export const makeAppWriter = (
       const layer = Email.EmailPasswordService.layer().pipe(
         Layer.provide(
           Layer.mergeAll(
-            Layer.succeed(Email.EmailPasswordStore)(emailPasswordStore),
+            Layer.succeed(Email.EmailPasswordStore)({
+              ...emailPasswordStore,
+              createUser: (input) => createUserWith(input, store),
+            }),
             Layer.succeed(Auth.IdentifierStore)(wrap === undefined ? store : wrap(store)),
             Layer.succeed(Auth.UserStore)(userStore),
             Layer.succeed(Password.PasswordHasher)(testHasher),
@@ -234,6 +251,50 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
       expect(missed).toBe(true);
       expect(error).toBeInstanceOf(Auth.EmailInUseError);
       expect(await harness.countUserRows()).toBe(1);
+    });
+
+    it("a writer that returns the address's existing owner fails sign-up with EmailInUseError, and the owner keeps their password", async () => {
+      const writer = makeAppWriter(harness.insertUser, "findsOrCreates");
+      const ada = await harness.run(() =>
+        writer.withService((service) => service.signUp({ email: ADA, password: PASSWORD })),
+      );
+
+      // The second sign-up's pre-check misses Ada, so it reaches the writer,
+      // which finds Ada's row and returns her with `created: false`.
+      let missed = false;
+      const error = await harness.run(() =>
+        writer.withService(
+          (service) => Effect.flip(service.signUp({ email: ADA, password: "attacker password" })),
+          (store) => ({
+            ...store,
+            getByValue: (type, value) => {
+              if (missed) return store.getByValue(type, value);
+              missed = true;
+              return Effect.succeed(null);
+            },
+          }),
+        ),
+      );
+
+      expect(missed).toBe(true);
+      expect(error).toBeInstanceOf(Auth.EmailInUseError);
+      expect(writer.createdWith).toHaveLength(2);
+      expect(await harness.countUserRows()).toBe(1);
+      expect(await harness.readUserRow(ada.user.id)).toEqual({ email: ADA, emailVerified: false });
+      // Ada's own password still signs her in, and the attacker's does not.
+      const signIns = await harness.run(() =>
+        writer.withService((service) =>
+          Effect.gen(function* () {
+            const own = yield* service.signIn({ email: ADA, password: PASSWORD });
+            const attacker = yield* Effect.flip(
+              service.signIn({ email: ADA, password: "attacker password" }),
+            );
+            return { own, attacker };
+          }),
+        ),
+      );
+      expect(signIns.own.user.id).toBe(ada.user.id);
+      expect(signIns.attacker).toBeInstanceOf(Auth.InvalidCredentialsError);
     });
 
     it("a verified address is held verified, whether the writer stores the flag or not", async () => {

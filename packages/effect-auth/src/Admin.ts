@@ -30,7 +30,12 @@ import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
-import { createUserWithIdentifier, type NewUserIdentifier } from "./UserStore.ts";
+import { normalizeEmail } from "./utils.ts";
+import {
+  createUserWithIdentifier,
+  type CreateUserResult,
+  type NewUserIdentifier,
+} from "./UserStore.ts";
 
 /**
  * Admin error
@@ -73,7 +78,7 @@ export interface ListUsersResult {
  * Input for admin-initiated user creation.
  */
 export interface AdminCreateUserInput {
-  /** Primary email address — recorded as an email `Identifier`. */
+  /** Primary email address — normalised (trimmed, lower-cased) and recorded as an email `Identifier`. */
   readonly email: string;
   /** Whether the primary email identifier is created verified. Default false. */
   readonly emailVerified?: boolean;
@@ -103,7 +108,13 @@ export class AdminUserStore extends Context.Service<
   {
     readonly listUsers: (query: ListUsersQuery) => Effect.Effect<ListUsersResult, Errors.AuthError>;
 
-    /** Create a new user record. The store is responsible for assigning `id` and timestamps. */
+    /**
+     * Create a new user record. The store is responsible for assigning `id`
+     * and timestamps. `created` in the result is `true` only when this call
+     * inserted the user; a user that already existed (an upsert or a
+     * find-or-create on the address) reports `false`, and `createUser` then
+     * fails without writing to it (see {@link CreateUserResult}).
+     */
     readonly createUser: (input: {
       readonly name?: string;
       readonly image?: string;
@@ -114,7 +125,7 @@ export class AdminUserStore extends Context.Service<
        * (see {@link NewUserIdentifier}).
        */
       readonly identifier?: NewUserIdentifier | undefined;
-    }) => Effect.Effect<Types.User, Errors.AuthError>;
+    }) => Effect.Effect<CreateUserResult, Errors.AuthError>;
 
     /** Persist a hashed password for an existing user (admin reset; no current-password check). */
     readonly setPasswordHash: (
@@ -522,7 +533,7 @@ export const make = (
           identifierStore,
           {
             type: "email",
-            value: input.email,
+            value: normalizeEmail(input.email),
             verified: emailVerified,
             ...(emailVerified ? { verifiedAt: new Date() } : {}),
           },

@@ -11,7 +11,12 @@
 import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore } from "../Identifier.ts";
-import { createUserWithIdentifier, type NewUserIdentifier, UserStore } from "../UserStore.ts";
+import {
+  createUserWithIdentifier,
+  type CreateUserResult,
+  type NewUserIdentifier,
+  UserStore,
+} from "../UserStore.ts";
 import type { HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService } from "../SessionService.ts";
@@ -91,9 +96,15 @@ export class EmailOtpStore extends Context.Service<
 export class EmailOtpUserStore extends Context.Service<
   EmailOtpUserStore,
   {
+    /**
+     * Create a user. `created` in the result is `true` only when this call
+     * inserted the user; a user that already existed (an upsert or a
+     * find-or-create on the address) reports `false`, and sign-up then fails
+     * without writing to it (see {@link CreateUserResult}).
+     */
     readonly createUser: (
       input: EmailOtpCreateUserInput,
-    ) => Effect.Effect<Types.User, Errors.AuthError>;
+    ) => Effect.Effect<CreateUserResult, Errors.AuthError>;
   }
 >()("@effect-auth/EmailOtpUserStore") {}
 

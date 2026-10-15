@@ -112,7 +112,7 @@ const makeStores = (
           attributes: {},
         };
         users.set(user.id, user);
-        return user;
+        return { user, created: true };
       }),
   };
 
@@ -950,7 +950,7 @@ const makeHttpFixture = () => {
           attributes: {},
         };
         usersById.set(id, user);
-        return user;
+        return { user, created: true };
       }),
   };
   const ssoStore: typeof SsoProviderStore.Service = {

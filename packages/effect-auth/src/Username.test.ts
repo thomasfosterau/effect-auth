@@ -54,7 +54,7 @@ const emailPasswordStore: typeof EmailPasswordStore.Service = {
         attributes: input.attributes ?? {},
       };
       usersById.set(user.id, user);
-      return user;
+      return { user, created: true };
     }),
   getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
   setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),

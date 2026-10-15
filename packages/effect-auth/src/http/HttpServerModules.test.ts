@@ -258,7 +258,7 @@ const makeFixture = () => {
           attributes: input.attributes ?? {},
         };
         usersById.set(id, user);
-        return user;
+        return { user, created: true };
       }),
 
     setPasswordHash: (_userId: string, _hash: string) => Effect.void,

@@ -69,7 +69,11 @@ import {
   type Identifier,
 } from "./Identifier.ts";
 import { OrganizationStore, type Member, type Team } from "./Organization.ts";
-import { createUserWithIdentifier, type NewUserIdentifier } from "./UserStore.ts";
+import {
+  createUserWithIdentifier,
+  type CreateUserResult,
+  type NewUserIdentifier,
+} from "./UserStore.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import { hashToken } from "./TokenHash.ts";
@@ -242,7 +246,13 @@ export const memoryScimConnectionStore = (
 export class ScimUserStore extends Context.Service<
   ScimUserStore,
   {
-    /** Create a user. The store assigns `id`, `createdAt` and `updatedAt`. */
+    /**
+     * Create a user. The store assigns `id`, `createdAt` and `updatedAt`.
+     * `created` in the result is `true` only when this call inserted the user;
+     * a user that already existed (an upsert or a find-or-create on the
+     * address) reports `false`, and provisioning then fails with a conflict
+     * without writing to it (see {@link CreateUserResult}).
+     */
     readonly create: (input: {
       readonly name?: string;
       readonly image?: string;
@@ -253,7 +263,7 @@ export class ScimUserStore extends Context.Service<
        * (see {@link NewUserIdentifier}).
        */
       readonly identifier?: NewUserIdentifier | undefined;
-    }) => Effect.Effect<Types.User, Errors.AuthError>;
+    }) => Effect.Effect<CreateUserResult, Errors.AuthError>;
     readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
     readonly update: (user: Types.User) => Effect.Effect<Types.User, Errors.AuthError>;
   }

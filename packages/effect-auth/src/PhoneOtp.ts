@@ -16,7 +16,12 @@
 import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
-import { createUserWithIdentifier, type NewUserIdentifier, UserStore } from "./UserStore.ts";
+import {
+  createUserWithIdentifier,
+  type CreateUserResult,
+  type NewUserIdentifier,
+  UserStore,
+} from "./UserStore.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
@@ -84,9 +89,15 @@ export interface PhoneOtpCreateUserInput {
 export class PhoneOtpUserStore extends Context.Service<
   PhoneOtpUserStore,
   {
+    /**
+     * Create a user. `created` in the result is `true` only when this call
+     * inserted the user; a user that already existed (an upsert or a
+     * find-or-create on the address) reports `false`, and sign-up then fails
+     * without writing to it (see {@link CreateUserResult}).
+     */
     readonly createUser: (
       input: PhoneOtpCreateUserInput,
-    ) => Effect.Effect<Types.User, Errors.AuthError>;
+    ) => Effect.Effect<CreateUserResult, Errors.AuthError>;
   }
 >()("@effect-auth/PhoneOtpUserStore") {}
 
