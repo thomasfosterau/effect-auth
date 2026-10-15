@@ -1,5 +1,0 @@
----
-"@thomasfosterau/effect-auth": minor
----
-
-`Http.make` takes `requireSynchronousBuild`, an opt-in for an app that wants `make` to fail at startup whenever it cannot check the `services` build. With `requireSynchronousBuild: true`, `make` throws `ServicesBuildPendingError` when the `services` build has not finished after `make` has run it synchronously: a build that waits on asynchronous work (a database connection, `Effect.promise`), on a merged layer that yields, or on a forked fiber. The error's message names `Http.makeAsync`, which waits for such a build. `make` interrupts the build and releases what the build acquired, then throws; a finalizer that does asynchronous work finishes after `make` has thrown. A build that finishes synchronously is unaffected: `make` throws the startup errors or the build's own failure, or returns the handler. Without the option, `make` returns for an unfinished build, and the startup checks run when the build finishes, failing the handler's build. `Http.makeAsync` ignores the option. `ServicesBuildPendingError` is exported from the package root (#416).

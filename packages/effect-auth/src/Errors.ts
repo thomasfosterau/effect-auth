@@ -609,18 +609,32 @@ export class RateLimiterConfigError extends Data.TaggedError("RateLimiterConfigE
 }> {}
 
 /**
- * `Http.make` was called with `requireSynchronousBuild: true`, and the
- * `services` build had not finished when `make` had run it as far as it runs
- * synchronously (#416). The build waits on asynchronous work (a database
- * connection, `Effect.promise`), on a merged layer that yields, or on a forked
- * fiber that yields before it completes a `Deferred` the build awaits. The
- * message names `Http.makeAsync`, which waits for such a build.
+ * `Http.make` was called with `strict: true`, and the `services` build had not
+ * finished when `make` had run it as far as it runs synchronously (#416). The
+ * build waits on asynchronous work (a database connection, `Effect.promise`),
+ * on a merged layer that yields, on a forked fiber that yields before it
+ * completes a `Deferred` the build awaits, or, when the build fails, on a
+ * finalizer that does asynchronous work. The message names `Http.makeAsync`,
+ * which waits for such a build.
  *
  * `make` throws it synchronously, so the app fails to start. Before it throws,
- * `make` interrupts the build and releases what the build acquired; a
- * finalizer that does asynchronous work finishes after `make` has thrown.
- * Without `requireSynchronousBuild`, `make` never raises it: it returns, and
- * the startup checks run when the build finishes.
+ * `make` interrupts the build and releases what the build acquired, as far as
+ * that runs synchronously. Two parts finish after `make` has thrown: a
+ * finalizer that does asynchronous work, and, when the build is in an
+ * uninterruptible step that waits on asynchronous work (an
+ * `Effect.acquireRelease` acquire that awaits), the whole release, since the
+ * interrupt waits for that step to end.
+ *
+ * It cannot carry a failure the build ends with only after `make` throws: when
+ * the build is failing (a step that failed while a finalizer it runs awaits),
+ * `make` logs that failure with `Effect.logError` when the build ends.
+ *
+ * Without `strict`, `make` never raises it: it returns, and the startup checks
+ * run when the build finishes.
+ *
+ * Exported from the package root as `ServicesBuildPendingError` and as
+ * `Http.ServicesBuildPendingError`, and from the `./http` subpath. Every name
+ * is the same class.
  */
 export class ServicesBuildPendingError extends Data.TaggedError("ServicesBuildPendingError")<{
   readonly message: string;
