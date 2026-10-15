@@ -2,8 +2,23 @@
  * IP-keyed rate limiting plugin.
  *
  * Applies per-operation rate limits keyed by the resolved client IP (from the
- * {@link ClientIP} service). When the {@link ClientIP} service is absent (e.g.
- * running outside an HTTP context) the plugin is a no-op.
+ * {@link ClientIP} service).
+ *
+ * **A request with no client address is refused.** When the {@link ClientIP}
+ * service is absent (a hook run outside an HTTP request, for example a direct
+ * `EmailPasswordService.signIn` call from server code), or present but carrying
+ * no address, the hook fails with a {@link RateLimitError} (`429` under the HTTP
+ * layer). Such a request is never let through unlimited and never counted under
+ * a bucket shared with other callers (#389). With this plugin installed, every
+ * sign-in, sign-up and password-reset request therefore needs an address.
+ *
+ * **`Http.make` needs an address source for it.** A Web `Request` carries no
+ * socket address, so under `Http.make` the address comes only from
+ * `trustedProxy` (for example `ClientIP.cloudflare`). When the `Hooks` in
+ * `services` include this plugin and `make` is given neither `trustedProxy` nor
+ * `allowMissingClientIp: true`, `make` throws `ClientAddressConfigError` (#389).
+ * `allowMissingClientIp: true` accepts that every request without a resolvable
+ * address is refused with `429` on these three hooks.
  *
  * Composes with the existing {@link RateLimiter} / {@link RateLimitStore}
  * infrastructure, so in-memory, SQL, and Redis backends all work.
@@ -52,10 +67,12 @@
  *
  * @module plugins/ip-rate-limit
  */
-import { Effect, Option } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { ClientIP } from "../ClientIP.ts";
 import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
-import { makePlugin } from "../Hooks.ts";
+import { Hooks, makePlugin } from "../Hooks.ts";
+import { recordClientAddressKeyed } from "../HooksClientAddress.ts";
+import { RateLimitError } from "../Errors.ts";
 import {
   type RateLimitConfig,
   RateLimitPresets,
@@ -84,17 +101,8 @@ export interface IPRateLimitPluginConfig {
 // Plugin
 // ---------------------------------------------------------------------------
 
-/**
- * Hook-level IP rate limiter.
- *
- * Hooks `beforeSignIn`, `beforeSignUp`, and `beforeRequestPasswordReset`.
- * Keys are `ip:<operation>:<ip>` so they are separate from the per-email keys
- * used by {@link RateLimitPlugin}.
- *
- * Requires `RateLimiter` and `RateLimitStore` in the Layer graph.
- * Uses `Effect.serviceOption(ClientIP)` — no-op when the service is absent.
- */
-export const IPRateLimitPlugin = (config?: IPRateLimitPluginConfig) =>
+/** The plugin's hooks, before {@link IPRateLimitPlugin} records it on `Hooks`. */
+const ipRateLimitHooks = (config: IPRateLimitPluginConfig | undefined) =>
   makePlugin(
     Effect.gen(function* () {
       const rateLimiter = yield* RateLimiter;
@@ -103,8 +111,19 @@ export const IPRateLimitPlugin = (config?: IPRateLimitPluginConfig) =>
       const check = (operation: string, limitConfig: RateLimitConfig) =>
         Effect.gen(function* () {
           const ipOpt = yield* Effect.serviceOption(ClientIP);
-          if (Option.isNone(ipOpt) || ipOpt.value.ip === undefined) return;
-          const key = `ip:${operation}:${ipOpt.value.ip}`;
+          const ip = Option.isSome(ipOpt) ? ipOpt.value.ip : undefined;
+          // A request with no resolvable address cannot be keyed, and with no
+          // ClientIP service there is no address to resolve. Refuse it rather than
+          // skip the limit or count it under a bucket other callers share (#389).
+          if (ip === undefined) {
+            return yield* new RateLimitError({
+              message: Option.isNone(ipOpt)
+                ? "No ClientIP service in scope; this request cannot be rate limited"
+                : "Client address unavailable; this request cannot be rate limited",
+              key: `ip:${operation}`,
+            });
+          }
+          const key = `ip:${operation}:${ip}`;
           yield* rateLimiter
             .consumeToken(key, limitConfig)
             .pipe(Effect.provideService(RateLimitStore, store));
@@ -125,3 +144,28 @@ export const IPRateLimitPlugin = (config?: IPRateLimitPluginConfig) =>
       };
     }),
   );
+
+/**
+ * Hook-level IP rate limiter.
+ *
+ * Hooks `beforeSignIn`, `beforeSignUp`, and `beforeRequestPasswordReset`.
+ * Keys are `ip:<operation>:<ip>` so they are separate from the per-email keys
+ * used by {@link RateLimitPlugin}.
+ *
+ * Requires `RateLimiter` and `RateLimitStore` in the Layer graph.
+ *
+ * A request with no client address is refused with a {@link RateLimitError}:
+ * both when the {@link ClientIP} service is absent and when it carries no
+ * address. Under `Http.make`, give the handler a `trustedProxy`, or `make`
+ * throws `ClientAddressConfigError` unless `allowMissingClientIp: true` is set.
+ * The module documentation has the details.
+ */
+export const IPRateLimitPlugin = (config?: IPRateLimitPluginConfig) =>
+  Layer.effect(
+    Hooks,
+    // Record the plugin on the Hooks it builds, so Http.make can refuse it at
+    // build when the handler has no client-address source (#389).
+    Effect.gen(function* () {
+      return recordClientAddressKeyed(yield* Hooks, "IPRateLimitPlugin");
+    }),
+  ).pipe(Layer.provide(ipRateLimitHooks(config)));

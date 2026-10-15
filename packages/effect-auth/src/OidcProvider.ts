@@ -356,9 +356,11 @@ export interface OidcDynamicRegistrationConfig {
    */
   readonly management?: boolean;
   /**
-   * Per-IP rate limit for `POST /register`, applied by the HTTP layer when a
-   * `RateLimiter` is in scope. Defaults to
-   * {@link DEFAULT_OIDC_REGISTRATION_RATE_LIMIT}.
+   * Per-IP rate limit for `POST /register`, applied by the HTTP layer. Defaults
+   * to {@link DEFAULT_OIDC_REGISTRATION_RATE_LIMIT}. The limit needs a
+   * `RateLimiter` in the handler's `services`: without one, `Http.make` throws
+   * `RateLimiterConfigError`, and the group layers composed outside `Http.make`
+   * refuse every registration with `429`.
    */
   readonly rateLimit?: RateLimitConfig;
   /**

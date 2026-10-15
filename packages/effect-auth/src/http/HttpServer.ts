@@ -1,4 +1,15 @@
-import { Context, Effect, FileSystem, Layer, Option, Path } from "effect";
+import {
+  Context,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Scheduler,
+  Scope,
+} from "effect";
 import { resolveMessage } from "../Messages.ts";
 import { HttpApiBuilder } from "effect/http-api";
 import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -9,6 +20,7 @@ import { RateLimiter, type RateLimitConfig } from "../RateLimit.ts";
 import * as S from "./HttpApiSchema.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
 import { Hooks } from "../Hooks.ts";
+import { clientAddressKeyedPlugins } from "../HooksClientAddress.ts";
 import { SessionService } from "../SessionService.ts";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
 import * as EmailPassword from "../email/EmailPassword.ts";
@@ -57,7 +69,7 @@ import {
   type ScimUserResource,
 } from "../Scim.ts";
 import type * as Errors from "../Errors.ts";
-import { ClientAddressConfigError } from "../Errors.ts";
+import { ClientAddressConfigError, RateLimiterConfigError } from "../Errors.ts";
 import { hashToken } from "../TokenHash.ts";
 import { GoogleOneTapService } from "../GoogleOneTap.ts";
 import {
@@ -701,9 +713,11 @@ const internalServerError = (e: unknown): Effect.Effect<never, S.InternalServerE
 
 /**
  * Per-user-code rate limit for device-authorization approve/deny endpoints
- * (RFC 8628 §5.2). Optionally applied when `RateLimiter` is in scope (it
- * resolves its own `RateLimitStore` at Layer-construction time); silent
- * no-op when the service is absent.
+ * (RFC 8628 §5.2), through the `RateLimiter` in scope. `make` refuses to build
+ * a handler whose `services` hold the device service and no `RateLimiter`
+ * (#389). Outside `make` (the exported group layers composed by hand), a
+ * request with no `RateLimiter` in scope is refused with `429`, unless the
+ * device service was built with `allowMissingRateLimiter: true`.
  */
 const USER_CODE_RATE_LIMIT: RateLimitConfig = {
   maxRequests: 5,
@@ -713,10 +727,15 @@ const USER_CODE_RATE_LIMIT: RateLimitConfig = {
 
 const applyUserCodeRateLimit = (
   userCode: string,
+  device: typeof DeviceAuthorizationService.Service,
 ): Effect.Effect<void, S.TooManyRequests | S.InternalServerError, never> =>
   Effect.gen(function* () {
     const rateLimiterOpt = yield* Effect.serviceOption(RateLimiter);
-    if (Option.isNone(rateLimiterOpt)) return;
+    if (Option.isNone(rateLimiterOpt)) {
+      // The app opted out of the limit explicitly; nothing else skips it.
+      if (device.allowMissingRateLimiter === true) return;
+      return yield* refuseWithoutRateLimiter("the device user-code limit");
+    }
     const key = `device-user-code:${normalizeUserCode(userCode)}`;
     yield* rateLimiterOpt.value.consumeToken(key, USER_CODE_RATE_LIMIT).pipe(
       Effect.catchTag("RateLimitError", (e) =>
@@ -733,20 +752,38 @@ const applyUserCodeRateLimit = (
  */
 const NO_CLIENT_ADDRESS = "Client address unavailable; this request cannot be rate limited";
 
+/** The refusal message when a rate-limited request finds no `RateLimiter` in scope. */
+const NO_RATE_LIMITER = "No RateLimiter in services; this request cannot be rate limited";
+
 /**
- * Per-IP rate limit for anonymous dynamic client registration. Applied when a
- * `RateLimiter` is in scope (silent no-op otherwise), mirroring the device
- * user-code limiter; the window comes from the provider's own configuration.
+ * Refuse a request whose limit has no `RateLimiter` to run on (#389). The
+ * refusal is the same `429` as a request with no client address: the request
+ * cannot be rate limited, so it is not served. The misconfiguration is logged.
+ */
+const refuseWithoutRateLimiter = (limit: string): Effect.Effect<never, S.TooManyRequests> =>
+  Effect.logError(
+    `[effect-auth] ${limit} is configured with no RateLimiter in services; the request is refused`,
+  ).pipe(Effect.andThen(Effect.fail(new S.TooManyRequests({ message: NO_RATE_LIMITER }))));
+
+/**
+ * Per-IP rate limit for anonymous dynamic client registration, through the
+ * `RateLimiter` in scope. The window comes from the provider's own
+ * configuration. `make` refuses to build a handler whose `services` enable
+ * registration with no `RateLimiter` (#389); outside `make`, a registration
+ * with no `RateLimiter` in scope is refused with `429`.
  *
- * A caller with no resolvable client address is refused, never keyed under a
- * shared bucket and never let through uncounted (#358).
+ * A caller with no resolvable client address (or no `ClientIP` service in
+ * scope) is refused, never keyed under a shared bucket and never let through
+ * uncounted (#358).
  */
 const applyRegistrationRateLimit = (
   limit: RateLimitConfig,
 ): Effect.Effect<void, S.TooManyRequests | S.InternalServerError, never> =>
   Effect.gen(function* () {
     const rateLimiterOpt = yield* Effect.serviceOption(RateLimiter);
-    if (Option.isNone(rateLimiterOpt)) return;
+    if (Option.isNone(rateLimiterOpt)) {
+      return yield* refuseWithoutRateLimiter("the dynamic client registration limit");
+    }
     const clientIp = yield* Effect.serviceOption(ClientIP);
     const ip = Option.isSome(clientIp) ? clientIp.value.ip : undefined;
     if (ip === undefined) return yield* new S.TooManyRequests({ message: NO_CLIENT_ADDRESS });
@@ -757,6 +794,108 @@ const applyRegistrationRateLimit = (
       Effect.catchTag("AuthError", (e) => internalServerError(e)),
     );
   });
+
+/**
+ * The build-time check of `make`'s `services` (#389). Returns the error `make`
+ * raises, or `undefined` when the services are consistent with the options:
+ *
+ * - The `Hooks` include a plugin that keys on the client address
+ *   (`IPRateLimitPlugin`) and there is no address source: no `trustedProxy`, and
+ *   no `allowMissingClientIp: true`. A Web `Request` has no socket address.
+ * - A limit is configured with no `RateLimiter`: `ipRateLimit`, dynamic client
+ *   registration, or the device user-code limit (whenever the device service is
+ *   present, unless it opted out with `allowMissingRateLimiter`).
+ */
+const servicesConfigError = (
+  services: Context.Context<never>,
+  options: AuthWebHandlerOptions,
+): ClientAddressConfigError | RateLimiterConfigError | undefined => {
+  const hooks = Context.getOption(services, Hooks);
+  if (
+    Option.isSome(hooks) &&
+    options.trustedProxy === undefined &&
+    options.allowMissingClientIp !== true
+  ) {
+    const keyed = clientAddressKeyedPlugins(hooks.value);
+    if (keyed.length > 0) {
+      return new ClientAddressConfigError({
+        message:
+          `${keyed.join(", ")} keys its limits on the client address, and a Web Request has none under Http.make. ` +
+          "Set trustedProxy (for example ClientIP.cloudflare) to key the limits by the visitor's address, " +
+          "or set allowMissingClientIp: true to accept that every request without an address is refused on those hooks.",
+      });
+    }
+  }
+
+  if (Option.isSome(Context.getOption(services, RateLimiter))) return undefined;
+  const configured: Array<string> = [];
+  if (options.ipRateLimit !== undefined) configured.push("ipRateLimit");
+  const oidc = Context.getOption(services, OidcProviderService);
+  if (Option.isSome(oidc) && oidc.value.dynamicRegistration.enabled) {
+    configured.push("the dynamic client registration limit (POST /register)");
+  }
+  const device = Context.getOption(services, DeviceAuthorizationService);
+  if (Option.isSome(device) && device.value.allowMissingRateLimiter !== true) {
+    configured.push("the device user-code limit (approve and deny)");
+  }
+  if (configured.length === 0) return undefined;
+  return new RateLimiterConfigError({
+    message:
+      `${configured.join(", ")} configured with no RateLimiter in services, so the limit could not run. ` +
+      "Compose RateLimiter.layer() with its RateLimitStore into services, or remove the limit " +
+      "(for the device user-code limit, DeviceAuthorizationConfig.allowMissingRateLimiter: true).",
+  });
+};
+
+/**
+ * The same check as a layer, for `services` that finish building only after
+ * `make` returns (asynchronous work while building). `make` cannot throw then,
+ * so the handler's build fails with the error and every request rejects with
+ * it. When the services build synchronously, `make` has already thrown.
+ */
+const requireServicesConfig = (options: AuthWebHandlerOptions) =>
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const error = servicesConfigError(yield* Effect.context<never>(), options);
+      if (error === undefined) return;
+      yield* Effect.logError(error.message);
+      return yield* error;
+    }),
+  );
+
+/**
+ * A scheduler for building `services` inside `make`. Every fiber it runs shares
+ * one dispatcher, so `flush` runs the build, and every fiber the build forks,
+ * until each has finished or waits on real asynchronous work. `release` hands
+ * the dispatcher to the default scheduler's, so whatever the build left running
+ * (an asynchronous step, a fiber a layer forked) is scheduled as it would be
+ * without this scheduler once `make` returns.
+ */
+const synchronousScheduler = (): {
+  readonly scheduler: Scheduler.Scheduler;
+  readonly flush: () => void;
+  readonly release: () => void;
+} => {
+  const base = new Scheduler.MixedScheduler();
+  const synchronous = new Scheduler.MixedScheduler("sync").makeDispatcher();
+  let current = synchronous;
+  const dispatcher: Scheduler.SchedulerDispatcher = {
+    scheduleTask: (task, priority) => current.scheduleTask(task, priority),
+    flush: () => current.flush(),
+  };
+  return {
+    scheduler: {
+      executionMode: "async",
+      shouldYield: (fiber) => base.shouldYield(fiber),
+      makeDispatcher: () => dispatcher,
+    },
+    flush: () => synchronous.flush(),
+    release: () => {
+      synchronous.flush();
+      current = base.makeDispatcher();
+    },
+  };
+};
 
 /** Layer implementing the `auth` group handlers. */
 export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
@@ -1702,7 +1841,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           // Rate-limit user_code attempts per RFC 8628 §5.2 to prevent
           // enumeration of pending codes (approve is session-gated, but
           // still benefits from per-code throttling).
-          yield* applyUserCodeRateLimit(payload.userCode);
+          yield* applyUserCodeRateLimit(payload.userCode, device.service);
           yield* device.service.approve(payload.userCode, resolved.user.id).pipe(
             Effect.catchTags({
               DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
@@ -1718,7 +1857,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           // Rate-limit unauthenticated deny attempts per RFC 8628 §5.2.
           // User codes are ~39 bits; without throttling an attacker can grief
           // pending codes at scale.
-          yield* applyUserCodeRateLimit(payload.userCode);
+          yield* applyUserCodeRateLimit(payload.userCode, device.service);
           yield* device.service.deny(payload.userCode).pipe(
             Effect.catchTags({
               DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
@@ -4143,10 +4282,10 @@ export interface AuthWebHandlerOptions {
    *
    * `Http.make` serves Web `Request`s, which never carry a socket address, so
    * with this option set the address comes only from the forwarded data. When
-   * that data is absent or unusable, the request has no client address: when a
-   * `RateLimiter` is in `services`, a request that reaches a rate-limited
-   * endpoint is then refused with `429` (see {@link ipRateLimit}), and
-   * `ClientIP` carries `undefined`.
+   * that data is absent or unusable, the request has no client address:
+   * `ClientIP` carries `undefined`, and a request that reaches a rate-limited
+   * endpoint (see {@link ipRateLimit}) or an `IPRateLimitPlugin` hook is refused
+   * with `429`.
    */
   readonly trustedProxy?: TrustedProxyConfig | undefined;
   /**
@@ -4154,7 +4293,11 @@ export interface AuthWebHandlerOptions {
    *
    * Requires `RateLimiter` in the `services` layer (compose it with its
    * store via `RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer))`).
-   * Requests that exceed a limit receive HTTP 429 before any auth logic runs.
+   * Without one, `make` throws `RateLimiterConfigError`, so the app fails to
+   * start rather than run with the limit off (#389). When `services` builds
+   * asynchronously, `make` cannot see it before returning, and the handler's
+   * build fails with that error instead. Requests that exceed a limit receive
+   * HTTP 429 before any auth logic runs.
    *
    * **Client address required**: the limiter keys each request by its client
    * address, so `make` throws {@link ClientAddressConfigError} when this is set
@@ -4172,21 +4315,23 @@ export interface AuthWebHandlerOptions {
   readonly ipRateLimit?: HttpIPRateLimitConfig | undefined;
   /**
    * Accept that a request may have no resolvable client address, so
-   * {@link ipRateLimit} can be configured without {@link trustedProxy}. Default
-   * `false`.
+   * {@link ipRateLimit}, or an `IPRateLimitPlugin` in the `services` `Hooks`,
+   * can be configured without {@link trustedProxy}. Default `false`; without it
+   * `make` throws `ClientAddressConfigError` for either.
    *
-   * This opts out of the build-time check only. The limiter still runs: when a
-   * `RateLimiter` is in `services`, a request with no address that reaches a
-   * rate-limited endpoint is refused with `429`, not skipped. Use it when that
-   * refusal is the intended behaviour for address-less requests, and prefer
-   * {@link trustedProxy}, which gives every request an address when the edge
-   * provides one.
+   * This opts out of the build-time check only. The limits still run: a request
+   * with no address that reaches a rate-limited endpoint, or an
+   * `IPRateLimitPlugin` hook (sign-in, sign-up, password-reset request), is
+   * refused with `429`, not skipped. Use it when that refusal is the intended
+   * behaviour for address-less requests, and prefer {@link trustedProxy}, which
+   * gives every request an address when the edge provides one.
    *
-   * The dynamic client registration limit (`POST /register`) is configured on
-   * the OIDC provider, not here, so `make` cannot check it at build. When a
-   * `RateLimiter` is in `services`, a request with no address that reaches it is
-   * refused with `429` whatever this option says, and is never counted under a
-   * shared bucket.
+   * The dynamic client registration limit (`POST /register`) declares its
+   * address source on the OIDC provider (`dynamicRegistration.trustedProxy`, or
+   * `dynamicRegistration.allowMissingClientIp`), and the OIDC layer checks it
+   * when it builds; this option does not apply to it. A registration with no
+   * address is refused with `429` whatever this option says, and is never
+   * counted under a shared bucket.
    */
   readonly allowMissingClientIp?: boolean | undefined;
 }
@@ -4268,7 +4413,23 @@ const isTrustedRequest = (
  * Build a standard Web `Request => Response` handler for the auth API.
  *
  * Mount the returned `handler` in any framework (SvelteKit/Next/Hono/...).
- * `dispose` releases the handler's scope.
+ * `dispose` releases the handler's scope, including the `services` it built.
+ *
+ * `make` builds `services` once, before it returns, and the handler serves that
+ * build. It throws, so the app fails to start, when the configuration cannot be
+ * served as written:
+ *
+ * - {@link ClientAddressConfigError}: `ipRateLimit`, or an `IPRateLimitPlugin`
+ *   in the `services` `Hooks`, with neither `trustedProxy` nor
+ *   `allowMissingClientIp: true`.
+ * - `RateLimiterConfigError`: `ipRateLimit`, dynamic client registration or a
+ *   `DeviceAuthorizationService` (without `allowMissingRateLimiter: true`) with
+ *   no `RateLimiter` in `services`.
+ *
+ * The `services` checks need the built services. When `services` does
+ * asynchronous work while building, the build finishes after `make` returns, so
+ * `make` cannot throw: the handler's build fails with the same error, and every
+ * request rejects with it.
  */
 export const make = (
   options: AuthWebHandlerOptions,
@@ -4291,6 +4452,30 @@ export const make = (
         "or set allowMissingClientIp: true to accept that address-less requests on rate-limited endpoints are refused.",
     });
   }
+
+  // Build `services` here, on a scheduler `make` can run to completion
+  // synchronously, so the startup check below sees what the handler will serve
+  // (#389). The handler reuses this build rather than building `services` again.
+  const servicesScope = Scope.makeUnsafe();
+  const { scheduler, flush, release } = synchronousScheduler();
+  const servicesFiber = Effect.runFork(Layer.buildWithScope(options.services, servicesScope), {
+    scheduler,
+  });
+  flush();
+  const builtServices = servicesFiber.pollUnsafe();
+  if (builtServices !== undefined && Exit.isSuccess(builtServices)) {
+    const error = servicesConfigError(builtServices.value, options);
+    if (error !== undefined) {
+      Effect.runFork(Scope.close(servicesScope, Exit.void), { scheduler });
+      release();
+      throw error;
+    }
+  }
+  release();
+  // Still building (asynchronous work in `services`): the same check runs as a
+  // layer when the build finishes, and fails the handler's build instead.
+  const servicesLayer: Layer.Layer<AuthServices> = Layer.effectContext(Fiber.join(servicesFiber));
+
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
     Layer.provide(authGroupLayer(options.cookie, options.multiSession)),
     // The SCIM group is always mounted; its handlers resolve `ScimService`
@@ -4302,7 +4487,9 @@ export const make = (
   // `Request<"Requires", RIn>` types; providing `services` to the layer's OUTPUT
   // (provideMerge) both satisfies them at runtime and zeroes the web handler's
   // leftover context (HR), yielding a plain `(request) => Promise<Response>`.
-  const appLayer = apiLayer.pipe(Layer.provideMerge(options.services));
+  const appLayer = apiLayer.pipe(
+    Layer.provideMerge(Layer.provideMerge(requireServicesConfig(options), servicesLayer)),
+  );
 
   const ipRateRules = options.ipRateLimit?.rules ?? defaultEndpointRules;
 
@@ -4322,38 +4509,41 @@ export const make = (
           const rule = findEndpointRule(ipRateRules, url.pathname, req.method);
           if (rule !== undefined) {
             const rateLimiterOpt = yield* Effect.serviceOption(RateLimiter);
-            if (Option.isSome(rateLimiterOpt)) {
-              // No address, no key (#358): refuse rather than skip the limit or
-              // count the request under a bucket that other callers share.
-              if (ip === undefined) {
-                return HttpServerResponse.jsonUnsafe(
-                  { message: NO_CLIENT_ADDRESS },
-                  { status: 429 },
-                );
-              }
-              const limitConfig: RateLimitConfig = {
-                maxRequests: rule.maxRequests,
-                windowMs: rule.windowMs,
-                ...(rule.blockDurationMs !== undefined && {
-                  blockDurationMs: rule.blockDurationMs,
-                }),
-              };
-              const denied = yield* rateLimiterOpt.value
-                .consumeToken(`ip:${url.pathname}:${ip}`, limitConfig)
-                .pipe(
-                  Effect.as(null as null),
-                  Effect.catchTag("RateLimitError", (e) => Effect.succeed(e)),
-                  Effect.catchTag("AuthError", () => Effect.succeed(null)),
-                );
-              if (denied !== null) {
-                return HttpServerResponse.jsonUnsafe(
-                  {
-                    message: "Too many requests",
-                    ...(denied.retryAfter !== undefined && { retryAfter: denied.retryAfter }),
-                  },
-                  { status: 429 },
-                );
-              }
+            // The startup check refuses ipRateLimit without a RateLimiter, so this
+            // refusal is a backstop: the limit never runs as a silent no-op (#389).
+            if (Option.isNone(rateLimiterOpt)) {
+              yield* Effect.logError(
+                "[effect-auth] ipRateLimit is configured with no RateLimiter in services; the request is refused",
+              );
+              return HttpServerResponse.jsonUnsafe({ message: NO_RATE_LIMITER }, { status: 429 });
+            }
+            // No address, no key (#358): refuse rather than skip the limit or
+            // count the request under a bucket that other callers share.
+            if (ip === undefined) {
+              return HttpServerResponse.jsonUnsafe({ message: NO_CLIENT_ADDRESS }, { status: 429 });
+            }
+            const limitConfig: RateLimitConfig = {
+              maxRequests: rule.maxRequests,
+              windowMs: rule.windowMs,
+              ...(rule.blockDurationMs !== undefined && {
+                blockDurationMs: rule.blockDurationMs,
+              }),
+            };
+            const denied = yield* rateLimiterOpt.value
+              .consumeToken(`ip:${url.pathname}:${ip}`, limitConfig)
+              .pipe(
+                Effect.as(null as null),
+                Effect.catchTag("RateLimitError", (e) => Effect.succeed(e)),
+                Effect.catchTag("AuthError", () => Effect.succeed(null)),
+              );
+            if (denied !== null) {
+              return HttpServerResponse.jsonUnsafe(
+                {
+                  message: "Too many requests",
+                  ...(denied.retryAfter !== undefined && { retryAfter: denied.retryAfter }),
+                },
+                { status: 429 },
+              );
             }
           }
         }
@@ -4413,5 +4603,15 @@ export const make = (
     }
     return web.handler(request, context);
   };
-  return { handler, dispose: web.dispose };
+  const dispose = (): Promise<void> =>
+    web
+      .dispose()
+      .then(() =>
+        Effect.runPromise(
+          Fiber.interrupt(servicesFiber).pipe(
+            Effect.andThen(Scope.close(servicesScope, Exit.void)),
+          ),
+        ),
+      );
+  return { handler, dispose };
 };

@@ -23,6 +23,12 @@ export interface ServerFixtureOptions {
    * Mount the optional auth features: username + anonymous sign-in,
    * multi-factor (with the sign-in gate), account management
    * (change-email / delete-user), phone OTP and device authorization.
+   *
+   * The feature set includes an in-memory `RateLimiter`, because the core
+   * requires one for device authorization. Device approve and deny are
+   * therefore rate limited as in production: 5 attempts per user code per 15
+   * minutes, then `429`. A test that approves or denies one code more than 5
+   * times in a window sees the limit.
    */
   readonly features?: boolean;
   /**
@@ -407,9 +413,30 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     Auth.OrganizationService.layer().pipe(Layer.provide(organizationBase)),
   );
 
+  // The feature set mounts device authorization, whose user-code limit needs a
+  // RateLimiter (Http.make throws without one, #389), so the feature set carries
+  // an in-memory one. Device approve/deny are limited to 5 per user code per 15
+  // minutes, as in production.
+  const rateLimitEntries = new Map<string, Auth.RateLimitEntry>();
+  const rateLimitStore: typeof Auth.RateLimitStore.Service = {
+    get: (key) => Effect.sync(() => rateLimitEntries.get(key) ?? null),
+    set: (key, entry) => Effect.sync(() => void rateLimitEntries.set(key, entry)),
+    increment: (key) =>
+      Effect.sync(() => {
+        const entry = rateLimitEntries.get(key);
+        const count = (entry?.count ?? 0) + 1;
+        if (entry) rateLimitEntries.set(key, { ...entry, count });
+        return count;
+      }),
+    delete: (key) => Effect.sync(() => void rateLimitEntries.delete(key)),
+  };
+  const rateLimiterLayer = Auth.RateLimiter.layer().pipe(
+    Layer.provide(Layer.succeed(Auth.RateLimitStore, rateLimitStore)),
+  );
+
   const services: Layer.Layer<Auth.Http.AuthServices> = Layer.mergeAll(
     core,
-    options.features === true ? featureLayer : Layer.empty,
+    options.features === true ? Layer.merge(featureLayer, rateLimiterLayer) : Layer.empty,
     options.organization === true ? organizationLayer : Layer.empty,
   ) as Layer.Layer<Auth.Http.AuthServices>;
 

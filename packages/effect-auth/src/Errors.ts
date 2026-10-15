@@ -571,7 +571,9 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
  * Raised at build time, before any request:
  *
  * - `Http.make` throws it synchronously when `ipRateLimit` is configured with no
- *   `trustedProxy` and no `allowMissingClientIp: true` (#358).
+ *   `trustedProxy` and no `allowMissingClientIp: true` (#358), and when the
+ *   `Hooks` in `services` include `IPRateLimitPlugin` with neither of them
+ *   (#389).
  * - `OidcProviderService.layer` (and `OidcProvider.make`) fails with it when
  *   `dynamicRegistration` is set with no `dynamicRegistration.trustedProxy` and
  *   no `dynamicRegistration.allowMissingClientIp: true` (#388).
@@ -581,6 +583,24 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
  * the same class.
  */
 export class ClientAddressConfigError extends Data.TaggedError("ClientAddressConfigError")<{
+  readonly message: string;
+}> {}
+
+/**
+ * A rate limit is configured with no `RateLimiter` in `services`, so it could not
+ * run (#389). The limits are `Http.make`'s `ipRateLimit`, the dynamic client
+ * registration limit (`POST /register`) and the device user-code limit on
+ * approve/deny, which counts as configured whenever a
+ * `DeviceAuthorizationService` is in `services` unless it was built with
+ * `allowMissingRateLimiter: true`.
+ *
+ * `Http.make` throws it synchronously when `services` builds synchronously, so
+ * the app fails to start. When `services` does asynchronous work while building
+ * (a database connection, for example), `make` cannot see the built services
+ * before it returns: the handler's build fails with this error instead, and
+ * every request rejects with it.
+ */
+export class RateLimiterConfigError extends Data.TaggedError("RateLimiterConfigError")<{
   readonly message: string;
 }> {}
 
