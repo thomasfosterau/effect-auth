@@ -23,6 +23,8 @@ const users = new Map<string, User>();
 const identifierRecords = new Map<string, Identifier>();
 const passwordHashes = new Map<string, string>();
 const sessions = new Map<string, Session>();
+/** The `identifier` each `createUser` call was given. */
+const createdWith: Array<CreateUserInput["identifier"]> = [];
 
 const identifierStore = memoryIdentifierStore(identifierRecords);
 
@@ -71,8 +73,9 @@ const userStore = {
 };
 
 const emailPasswordStore = {
-  createUser: ({ name, image, attributes }: CreateUserInput) =>
+  createUser: ({ name, image, attributes, identifier }: CreateUserInput) =>
     Effect.sync(() => {
+      createdWith.push(identifier);
       const id = `user-${users.size + 1}`;
       const user: User = {
         id,
@@ -139,6 +142,7 @@ describe("EmailPasswordService", () => {
     identifierRecords.clear();
     passwordHashes.clear();
     sessions.clear();
+    createdWith.length = 0;
   });
 
   it("should sign up and create a session by default", async () => {
@@ -171,6 +175,8 @@ describe("EmailPasswordService", () => {
     );
     expect(stored?.userId).toBe(result.user.id);
     expect(stored?.verified).toBe(false);
+    // The store was handed the address to create the user with (#380).
+    expect(createdWith).toEqual([{ type: "email", value: "test@example.com", verified: false }]);
   });
 
   it("should sign in an existing user", async () => {

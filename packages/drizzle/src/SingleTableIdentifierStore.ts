@@ -52,7 +52,9 @@
  *   deletes all of a user's identifiers: here the application's user writer must
  *   hard-delete the row. A soft-delete writer leaves the address claimed.
  *   Account deletion therefore works, and so does email change, whose `replace`
- *   never writes `NULL`.
+ *   never writes `NULL`. Sign-up works when the application's user writer
+ *   inserts the row with the address core passes to `createUser` (see the
+ *   requirements below); a writer that leaves it out cannot insert the row.
  *
  * ### Per-method behaviour
  *
@@ -93,8 +95,14 @@
  *   nullable or NOT NULL (see above).
  * - `users.email_verified` is a non-null boolean.
  * - `users.email_verified_at`, if mapped, is a nullable timestamp.
- * - The user row exists before its email is claimed. The store never inserts a
- *   user; the application's own user writer does.
+ * - The application's own user writer inserts the user row; the store never
+ *   does. Core passes the address a user is created with to `createUser` as
+ *   `input.identifier` (`Auth.NewUserIdentifier`). The writer stores it on the
+ *   row it inserts, and the claim that follows (`Auth.createUserWithIdentifier`)
+ *   finds the address already held by that user and writes nothing more. On a
+ *   NOT NULL column this is the only way to insert the row. On a nullable one
+ *   the writer may also leave the address out, and the claim writes it through
+ *   `create`.
  * - Addresses are normalised by the application, as for every identifier store.
  *
  * The store writes nothing else on the row: `updated_at` and every other column

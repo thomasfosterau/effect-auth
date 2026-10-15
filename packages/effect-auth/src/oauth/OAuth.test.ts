@@ -18,6 +18,7 @@ import {
   OAuthStateStore,
   OAuthAccountStore,
   OAuthUserStore,
+  type OAuthCreateUserInput,
   str,
   nested,
   profile,
@@ -1463,10 +1464,14 @@ describe("OAuthService linking controls", () => {
   it("trustedProviders: unclaimed unverified email creates a new user with an unverified identifier", async () => {
     const newUser = makeUser({ id: "new-user-id" });
     const identifiers = makeIdentifiers();
+    const createdWith: Array<OAuthCreateUserInput["identifier"]> = [];
 
     const userLayer = Layer.succeed(OAuthUserStore, {
       getUser: () => Effect.succeed(newUser),
-      createUser: () => Effect.succeed(newUser),
+      createUser: (input) => {
+        createdWith.push(input.identifier);
+        return Effect.succeed(newUser);
+      },
     });
 
     const service = await Effect.runPromise(
@@ -1496,6 +1501,8 @@ describe("OAuthService linking controls", () => {
     );
     expect(claimed?.userId).toBe(newUser.id);
     expect(claimed?.verified).toBe(false);
+    // The store was handed the address to create the user with (#380).
+    expect(createdWith).toEqual([{ type: "email", value: "user@example.com", verified: false }]);
   });
 
   it("updateUserInfoOnLink: false (default) does not update the user profile", async () => {

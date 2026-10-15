@@ -31,7 +31,12 @@ import {
   type OrganizationDomain,
   type SsoProvider,
 } from "./index.ts";
-import { OAuthStateStore, OAuthUserStore, type OAuthState } from "./oauth/OAuth.ts";
+import {
+  type OAuthCreateUserInput,
+  OAuthStateStore,
+  OAuthUserStore,
+  type OAuthState,
+} from "./oauth/OAuth.ts";
 import { SsoProviderStore, SsoError, SsoService } from "./Sso.ts";
 import * as Sso from "./Sso.ts";
 import {
@@ -78,6 +83,8 @@ const makeStores = (
   const domainRecords = new Map<string, OrganizationDomain>();
   const domainStore = overrides.domainStore ?? memoryOrganizationDomainStore(domainRecords);
   let userSeq = 0;
+  /** The `identifier` each `createUser` call was given. */
+  const createdWith: Array<OAuthCreateUserInput["identifier"]> = [];
 
   const ssoStore: typeof SsoProviderStore.Service = {
     create: (p) => Effect.sync(() => (providers.set(p.id, p), p)),
@@ -92,8 +99,9 @@ const makeStores = (
       const u = users.get(userId);
       return u ? Effect.succeed(u) : Effect.fail(new UserNotFoundError({ message: "nf", userId }));
     },
-    createUser: (input: { name?: string; image?: string }) =>
+    createUser: (input: OAuthCreateUserInput) =>
       Effect.sync(() => {
+        createdWith.push(input.identifier);
         const now = new Date();
         const user: Types.User = {
           id: `u${++userSeq}`,
@@ -242,6 +250,7 @@ const makeStores = (
     providers,
     users,
     identifiers,
+    createdWith,
     members,
     organizations,
     seedOrganization,
@@ -284,7 +293,7 @@ describe("SsoService", () => {
   });
 
   it("provisions a user + org membership on first login and reuses on the second", async () => {
-    const { layer, users, identifiers, members } = makeStores();
+    const { layer, users, identifiers, createdWith, members } = makeStores();
     const sso = await Effect.runPromise(
       Sso.make({ defaultRole: "member" }).pipe(Effect.provide(layer)),
     );
@@ -316,6 +325,10 @@ describe("SsoService", () => {
     );
     expect(emailIdentifier?.userId).toBe(first.user.id);
     expect(emailIdentifier?.verified).toBe(true);
+    // The store was handed the address to create the user with (#380).
+    expect(createdWith).toEqual([
+      { type: "email", value: "worker@acme.test", verified: true, verifiedAt: expect.any(Date) },
+    ]);
     expect(first.session.userId).toBe(first.user.id);
     expect(members).toEqual([
       { ...members[0], organizationId: "org-1", userId: first.user.id, role: "member" },

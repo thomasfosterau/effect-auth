@@ -30,8 +30,8 @@ import { type HookError } from "../Hooks.ts";
 import { SessionService } from "../SessionService.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
-import { claimIdentifier, IdentifierStore, makeIdentifier } from "../Identifier.ts";
-import { UserStore } from "../UserStore.ts";
+import { IdentifierStore } from "../Identifier.ts";
+import { createUserWithIdentifier, type NewUserIdentifier, UserStore } from "../UserStore.ts";
 
 /**
  * OAuth2 provider configuration
@@ -158,16 +158,20 @@ export interface OAuthCallbackResult {
 }
 
 /**
- * Input for creating a user from an OAuth provider profile.
- */
-/**
- * Profile fields for a user created from an OAuth provider profile. The
- * provider email is recorded as an email `Identifier` by the service (with
- * the provider's `email_verified` claim carried over).
+ * Fields for a user created from an OAuth provider profile. The provider email
+ * is recorded as an email `Identifier` by the service (with the provider's
+ * `email_verified` claim carried over), and `identifier` carries it to the
+ * store as well.
  */
 export interface OAuthCreateUserInput {
   readonly name?: string;
   readonly image?: string;
+  /**
+   * The login handle the user is created with: a store that keeps it on the
+   * user row writes it there on insert, and any other store ignores it (see
+   * {@link NewUserIdentifier}).
+   */
+  readonly identifier?: NewUserIdentifier | undefined;
 }
 
 /**
@@ -1153,19 +1157,20 @@ export const make = (
                   message: "This email is already associated with an account",
                 });
               }
-              user = yield* userStore.createUser({
-                ...(userInfo.name !== undefined && { name: userInfo.name }),
-                ...(userInfo.picture !== undefined && { image: userInfo.picture }),
-              });
-              yield* claimIdentifier(
+              const created = yield* createUserWithIdentifier(
                 identifiers,
-                makeIdentifier({
-                  userId: user.id,
+                {
                   type: "email",
                   value: email,
                   verified: emailVerified,
                   ...(emailVerified ? { verifiedAt: new Date() } : {}),
-                }),
+                },
+                (identifier) =>
+                  userStore.createUser({
+                    ...(userInfo.name !== undefined && { name: userInfo.name }),
+                    ...(userInfo.picture !== undefined && { image: userInfo.picture }),
+                    identifier,
+                  }),
               ).pipe(
                 Effect.catchTag("IdentifierTakenError", () =>
                   Effect.fail(
@@ -1175,6 +1180,7 @@ export const make = (
                   ),
                 ),
               );
+              user = created.user;
             }
 
             const newAccountId = yield* randomAccountId();

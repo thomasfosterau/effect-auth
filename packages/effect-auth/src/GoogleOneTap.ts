@@ -32,8 +32,8 @@ import type { HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import { OAuthUserStore, generateNonce, verifyIdToken } from "./oauth/OAuth.ts";
-import { claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
-import { UserStore } from "./UserStore.ts";
+import { IdentifierStore } from "./Identifier.ts";
+import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 
@@ -233,25 +233,22 @@ export const make = (
         }
         const isNewUser = user === null;
         if (user === null) {
-          user = yield* userStore.createUser({
-            ...(typeof claims["name"] === "string" && { name: claims["name"] }),
-            ...(typeof claims["picture"] === "string" && { image: claims["picture"] }),
-          });
           // Google attested the address as verified.
-          yield* claimIdentifier(
+          const created = yield* createUserWithIdentifier(
             identifiers,
-            makeIdentifier({
-              userId: user.id,
-              type: "email",
-              value: normalized,
-              verified: true,
-              verifiedAt: new Date(),
-            }),
+            { type: "email", value: normalized, verified: true, verifiedAt: new Date() },
+            (identifier) =>
+              userStore.createUser({
+                ...(typeof claims["name"] === "string" && { name: claims["name"] }),
+                ...(typeof claims["picture"] === "string" && { image: claims["picture"] }),
+                identifier,
+              }),
           ).pipe(
             Effect.catchTag("IdentifierTakenError", () =>
               Effect.fail(new GoogleOneTapError({ message: "This email is already in use" })),
             ),
           );
+          user = created.user;
         } else if (identifier !== null && !identifier.verified) {
           yield* identifiers.setVerified(identifier.id, new Date());
         }

@@ -69,6 +69,7 @@ import {
   type Identifier,
 } from "./Identifier.ts";
 import { OrganizationStore, type Member, type Team } from "./Organization.ts";
+import { createUserWithIdentifier, type NewUserIdentifier } from "./UserStore.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import { hashToken } from "./TokenHash.ts";
@@ -246,6 +247,12 @@ export class ScimUserStore extends Context.Service<
       readonly name?: string;
       readonly image?: string;
       readonly attributes?: Record<string, unknown>;
+      /**
+       * The login handle the user is created with: a store that keeps it on
+       * the user row writes it there on insert, and any other store ignores it
+       * (see {@link NewUserIdentifier}).
+       */
+      readonly identifier?: NewUserIdentifier | undefined;
     }) => Effect.Effect<Types.User, Errors.AuthError>;
     readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
     readonly update: (user: Types.User) => Effect.Effect<Types.User, Errors.AuthError>;
@@ -937,12 +944,24 @@ export const make = (
         }
         if (input.active === false) attributes[SCIM_DEACTIVATED_ATTRIBUTE] = true;
 
-        const user = yield* users.create({
-          ...(input.displayName !== undefined && { name: input.displayName }),
-          attributes,
-        });
+        // `userName` is the user's primary address, created with the user;
+        // the IdP is the system of record for its users' addresses.
+        const { user } = yield* createUserWithIdentifier(
+          identifiers,
+          { type: "email", value: userName, verified: true, verifiedAt: new Date() },
+          (identifier) =>
+            users.create({
+              ...(input.displayName !== undefined && { name: input.displayName }),
+              attributes,
+              identifier,
+            }),
+        ).pipe(
+          Effect.catchTag("IdentifierTakenError", () =>
+            Effect.fail(conflict(`The email "${userName}" is already in use`)),
+          ),
+        );
 
-        for (const email of [userName, ...extras]) {
+        for (const email of extras) {
           yield* claimEmail(user.id, email);
         }
 

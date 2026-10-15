@@ -5,6 +5,7 @@ import {
   getPhoneNumber,
   type PhoneOtpRecord,
   type PhoneOtpPurpose,
+  type PhoneOtpCreateUserInput,
   PhoneOtpStore,
   PhoneOtpUserStore,
 } from "./PhoneOtp.ts";
@@ -53,9 +54,13 @@ const phoneOtpStore: typeof PhoneOtpStore.Service = {
     }),
 };
 
+/** The `identifier` each `createUser` call was given. */
+const createdWith: Array<PhoneOtpCreateUserInput["identifier"]> = [];
+
 const phoneOtpUserStore: typeof PhoneOtpUserStore.Service = {
   createUser: (input) =>
     Effect.sync(() => {
+      createdWith.push(input.identifier);
       const now = new Date();
       const user: Types.User = {
         id: `user-${++seq}`,
@@ -158,6 +163,7 @@ describe("PhoneOtpService", () => {
     sessions.clear();
     sentOtps.length = 0;
     seq = 0;
+    createdWith.length = 0;
   });
 
   it("sends a numeric OTP and stores only its hash", async () => {
@@ -194,6 +200,10 @@ describe("PhoneOtpService", () => {
     const identifier = await Effect.runPromise(identifiers.getByValue("phone", "+15551231111"));
     expect(identifier?.userId).toBe(result.user.id);
     expect(identifier?.verified).toBe(true);
+    // The store was handed the number to create the user with (#380).
+    expect(createdWith).toEqual([
+      { type: "phone", value: "+15551231111", verified: true, verifiedAt: expect.any(Date) },
+    ]);
     expect(result.session.userId).toBe(result.user.id);
   });
 

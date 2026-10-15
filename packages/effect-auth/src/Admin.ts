@@ -24,17 +24,13 @@
 import { Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { Hooks, makePlugin, type HookError } from "./Hooks.ts";
-import {
-  claimIdentifier,
-  makeIdentifier,
-  IdentifierStore,
-  type IdentifierType,
-} from "./Identifier.ts";
+import { IdentifierStore, type IdentifierType } from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
+import { createUserWithIdentifier, type NewUserIdentifier } from "./UserStore.ts";
 
 /**
  * Admin error
@@ -112,6 +108,12 @@ export class AdminUserStore extends Context.Service<
       readonly name?: string;
       readonly image?: string;
       readonly attributes?: Record<string, unknown>;
+      /**
+       * The login handle the user is created with: a store that keeps it on
+       * the user row writes it there on insert, and any other store ignores it
+       * (see {@link NewUserIdentifier}).
+       */
+      readonly identifier?: NewUserIdentifier | undefined;
     }) => Effect.Effect<Types.User, Errors.AuthError>;
 
     /** Persist a hashed password for an existing user (admin reset; no current-password check). */
@@ -514,27 +516,23 @@ export const make = (
           yield* requireRole(role);
         }
 
-        const createInput: {
-          name?: string;
-          image?: string;
-          attributes?: Record<string, unknown>;
-        } = { attributes };
-        if (input.name !== undefined) createInput.name = input.name;
-        if (input.image !== undefined) createInput.image = input.image;
-
-        const user = yield* adminStore.createUser(createInput);
-
-        // Claim the primary email identifier.
+        // Create the user with its primary email identifier.
         const emailVerified = input.emailVerified ?? false;
-        yield* claimIdentifier(
+        const { user } = yield* createUserWithIdentifier(
           identifierStore,
-          makeIdentifier({
-            userId: user.id,
+          {
             type: "email",
             value: input.email,
             verified: emailVerified,
             ...(emailVerified ? { verifiedAt: new Date() } : {}),
-          }),
+          },
+          (identifier) =>
+            adminStore.createUser({
+              attributes,
+              ...(input.name !== undefined && { name: input.name }),
+              ...(input.image !== undefined && { image: input.image }),
+              identifier,
+            }),
         ).pipe(
           Effect.catchTag("IdentifierTakenError", () =>
             Effect.fail(new AdminError({ message: "This email is already in use" })),

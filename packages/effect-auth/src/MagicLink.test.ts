@@ -90,6 +90,7 @@ const findEmailIdentifier = (email: string): Identifier | null =>
 const magicLinkUserStore = {
   createUser: (input: MagicLinkCreateUserInput) =>
     Effect.sync(() => {
+      createdWith.push(input.identifier);
       const user: User = {
         id: `user-${users.size + 1}`,
         ...(input.name !== undefined && { name: input.name }),
@@ -101,6 +102,9 @@ const magicLinkUserStore = {
       return user;
     }),
 };
+
+/** The `identifier` each `createUser` call was given. */
+const createdWith: Array<MagicLinkCreateUserInput["identifier"]> = [];
 
 const magicLinkStore = {
   create: (token: MagicLinkToken) =>
@@ -182,6 +186,7 @@ describe("MagicLinkService", () => {
     magicLinkTokens.clear();
     sessions.clear();
     sentLinks.splice(0, sentLinks.length);
+    createdWith.length = 0;
   });
 
   it("should store a token and send a magic link for a new email", async () => {
@@ -310,6 +315,10 @@ describe("MagicLinkService", () => {
     const identifier = findEmailIdentifier("fresh@example.com");
     expect(identifier?.userId).toBe(result.user.id);
     expect(identifier?.verified).toBe(true);
+    // The store was handed the address to create the user with (#380).
+    expect(createdWith).toEqual([
+      { type: "email", value: "fresh@example.com", verified: true, verifiedAt: expect.any(Date) },
+    ]);
     expect(result.session.userId).toBe(result.user.id);
     expect(result.session.attributes).toEqual({ device: "test" });
     expect(sessions.size).toBe(1);
