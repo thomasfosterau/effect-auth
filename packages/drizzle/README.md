@@ -452,12 +452,19 @@ address already there and writes nothing more.
 
 `createUser` resolves to `{ user, created }`. `created` is `true` only when this
 call inserted the user. Core treats an address already on the row as the new
-user's own only when `created` is `true`. A writer that upserts, or finds or
-creates on the address, and returns a user who already existed must report
-`created: false`; sign-up then fails as the address being in use
-(`EmailInUseError` for email and password sign-up) and writes nothing to that
-user, so it cannot set a password on, link an account to, or verify someone
-else's account. A plain `INSERT`, as below, always reports `true`.
+user's own only when `created` is `true`. A writer that finds or creates on the
+address, and returns a user who already existed, must report `created: false`;
+sign-up then fails as the address being in use (`EmailInUseError` for email and
+password sign-up) and writes nothing to that user, so it cannot set a password
+on, link an account to, or verify someone else's account.
+
+When the user already exists, the writer must not modify that row. Core sees
+`created` only after the write, so `onConflictDoUpdate` has already copied the
+caller's fields onto someone else's account. Use a plain `INSERT`, as below,
+and let the unique index on `email` fail (core maps that failure to the address
+being in use), or `onConflictDoNothing()` followed by a select of the existing
+row, reported as `created: false`. Never `onConflictDoUpdate`. A plain `INSERT`
+always reports `true`.
 
 On a `NOT NULL` `email` column the row can't be inserted without the address,
 so the writer fails when there is none:
@@ -489,7 +496,14 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
       catch: (cause) => new Auth.AuthError({ message: "insert into users failed", cause }),
     });
     // A plain INSERT: when it succeeds, this call created the user.
-    return { user: { id, createdAt: now, updatedAt: now, attributes: {} }, created: true };
+    const user = {
+      id,
+      ...(input.name !== undefined && { name: input.name }),
+      createdAt: now,
+      updatedAt: now,
+      attributes: {},
+    };
+    return { user, created: true };
   });
 ```
 
@@ -520,7 +534,14 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
       catch: (cause) => new Auth.AuthError({ message: "insert into users failed", cause }),
     });
     // A plain INSERT: when it succeeds, this call created the user.
-    return { user: { id, createdAt: now, updatedAt: now, attributes: {} }, created: true };
+    const user = {
+      id,
+      ...(input.name !== undefined && { name: input.name }),
+      createdAt: now,
+      updatedAt: now,
+      attributes: {},
+    };
+    return { user, created: true };
   });
 ```
 

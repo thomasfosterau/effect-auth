@@ -22,7 +22,14 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
       catch: (cause) => new Auth.AuthError({ message: "insert into users failed", cause }),
     });
     // A plain INSERT: when it succeeds, this call created the user.
-    return { user: { id, createdAt: now, updatedAt: now, attributes: {} }, created: true };
+    const user = {
+      id,
+      ...(input.name !== undefined && { name: input.name }),
+      createdAt: now,
+      updatedAt: now,
+      attributes: {},
+    };
+    return { user, created: true };
   });
 // README:end
 

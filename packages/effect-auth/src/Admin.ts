@@ -109,11 +109,12 @@ export class AdminUserStore extends Context.Service<
     readonly listUsers: (query: ListUsersQuery) => Effect.Effect<ListUsersResult, Errors.AuthError>;
 
     /**
-     * Create a new user record. The store is responsible for assigning `id`
-     * and timestamps. `created` in the result is `true` only when this call
-     * inserted the user; a user that already existed (an upsert or a
-     * find-or-create on the address) reports `false`, and `createUser` then
-     * fails without writing to it (see {@link CreateUserResult}).
+     * Create a new user record. The store is responsible for assigning `id` and
+     * timestamps. `created` in the result is `true` only when this call
+     * inserted the user; a user that already existed (as a find-or-create on
+     * the address returns) reports `false`, and `createUser` then fails without
+     * writing to it. The store must leave that row as it was: never an upsert
+     * that updates it (see {@link CreateUserResult}).
      */
     readonly createUser: (input: {
       readonly name?: string;

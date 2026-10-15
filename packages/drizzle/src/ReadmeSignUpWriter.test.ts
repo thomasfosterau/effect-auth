@@ -67,6 +67,7 @@ describe("README: sign-up writer examples", () => {
     const result = await Effect.runPromise(notNullWriter({ name: "Ada", identifier: ada }));
 
     expect(result.created).toBe(true);
+    expect(result.user.name).toBe("Ada");
     const rows = await drizzle(client)
       .select()
       .from(notNullUsers)
@@ -86,9 +87,10 @@ describe("README: sign-up writer examples", () => {
 
   it("nullable: inserts NULL when there is no address, and the address when there is one", async () => {
     const without = await Effect.runPromise(nullableWriter({}));
-    const withAddress = await Effect.runPromise(nullableWriter({ identifier: ada }));
+    const withAddress = await Effect.runPromise(nullableWriter({ name: "Ada", identifier: ada }));
 
     expect([without.created, withAddress.created]).toEqual([true, true]);
+    expect([without.user.name, withAddress.user.name]).toEqual([undefined, "Ada"]);
     const read = async (id: string) =>
       (
         await drizzle(client)

@@ -103,9 +103,11 @@
  *   NOT NULL column this is the only way to insert the row. On a nullable one
  *   the writer may also leave the address out, and the claim writes it through
  *   `create`. The writer reports `created: true` only for a row it inserted
- *   (`Auth.CreateUserResult`); a writer that upserts or finds or creates on the
- *   address reports `created: false` for an existing user, and core then fails
- *   the sign-up instead of adopting that user.
+ *   (`Auth.CreateUserResult`); a writer that finds or creates on the address
+ *   reports `created: false` for an existing user, and core then fails the
+ *   sign-up instead of adopting that user. The writer never modifies an
+ *   existing row: a plain insert that lets the unique index fail, or
+ *   `onConflictDoNothing` followed by a select, never `onConflictDoUpdate`.
  * - Addresses are normalised by the application, as for every identifier store.
  *
  * The store writes nothing else on the row: `updated_at` and every other column
