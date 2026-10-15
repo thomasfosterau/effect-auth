@@ -20,7 +20,9 @@
  * Role assignment is for users. A system principal (`System::"<name>"`) holds
  * no roles: `principalType: "System"` is refused, and the kernel never lets a
  * role permit (`principal in Role::"…"`) reach a system principal, so a role
- * change can never widen what a job may do. Grant a job with `System.grant`. See
+ * change can never widen what a job may do (unless the application's own resolver
+ * nests a `Role` inside a `System` group; see `System`). Grant a job with
+ * `System.grant`. See
  * [ADR 0018](../../../docs/adr/0018-one-authorization-kernel.md) and
  * [the migration guide](../../../docs/guides/authorization-kernel-migration.md).
  *

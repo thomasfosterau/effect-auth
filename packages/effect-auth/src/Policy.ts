@@ -216,7 +216,8 @@ const makeDeclarative = (effect: PolicyEffect, options: MakeOptions): Declarativ
 /**
  * Build a declarative permit policy (scopes default to `any`). A permit whose
  * principal scope is `any` does not reach a system principal: name it with
- * `System.grant`, `eq(System.ref(…))` or `isType("System")`.
+ * `System.grant`, `eq(System.ref(…))`, `inScope(System.ref(…))` or
+ * `isType("System")`.
  */
 export const permit = (options: MakeOptions): DeclarativePolicy =>
   makeDeclarative("permit", options);
@@ -267,7 +268,8 @@ export const permission = (
 
 /**
  * RBAC as hierarchy: a permit for principals in `Role::"<roleId>"`,
- * optionally narrowed to an action/resource scope.
+ * optionally narrowed to an action/resource scope. It never reaches a system
+ * principal: roles are for users (see `System`).
  */
 export const role = (
   roleId: string,
