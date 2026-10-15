@@ -23,7 +23,7 @@ The practical consequences are worth internalising before you start:
 | `betterAuth({ ... })` instance                   | a `Layer` composed from per-service `X.layer(config)` calls                                                           |
 | `plugins: [twoFactor(), organization(), …]`      | merging `MultiFactorService.layer(…)`, `OrganizationService.layer(…)`, … into that layer                              |
 | `database: drizzleAdapter(db, …)`                | store contracts + one of `@thomasfosterau/effect-auth-sql`, `-drizzle`, `-alchemy`, or your own                       |
-| `auth.handler` (mounted at `/api/auth/*`)        | `Auth.Http.make({ services, prefix: "/api/auth" }).handler` — a plain `(Request) => Promise<Response>`                |
+| `auth.handler` (mounted at `/api/auth/*`)        | `(await Auth.Http.makeAsync({ services, prefix: "/api/auth" })).handler` — a plain `(Request) => Promise<Response>`   |
 | `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(id)` on `Auth.SessionService`, or `GET /session` over HTTP                           |
 | `emailAndPassword: { enabled: true }`            | `Auth.Email.EmailPasswordService.layer(config)` (+ `Auth.AuthLifecycleService` for the sign-up/sign-in orchestration) |
 | `socialProviders: { github: { … } }`             | `Auth.OAuth.OAuthService.layer({ github: Auth.OAuth.GitHubProvider({ … }) })`                                         |
@@ -36,7 +36,7 @@ The practical consequences are worth internalising before you start:
 
 ### Config → layers, concretely
 
-A minimal Better Auth instance with email+password and GitHub becomes a layer graph. Each service asks for its stores; you provide them once, and `Auth.Http.make` takes the whole thing as `services`:
+A minimal Better Auth instance with email+password and GitHub becomes a layer graph. Each service asks for its stores; you provide them once, and `Auth.Http.makeAsync` takes the whole thing as `services`:
 
 ```ts
 import { Layer } from "effect";
@@ -56,16 +56,16 @@ const services = Layer.mergeAll(
   Auth.Hooks.Default,
 ).pipe(Layer.provideMerge(stores));
 
-const { handler } = Auth.Http.make({
+const { handler } = await Auth.Http.makeAsync({
   services,
   prefix: "/api/auth",
   trustedOrigins: ["https://app.example.com"],
 });
 ```
 
-`Auth.Http.make` returns `{ handler, dispose }`. `handler` is a standard Web `Request => Promise<Response>`, so it mounts anywhere Better Auth's handler did (Next.js route handlers, Hono, Elysia, Bun/Deno/Workers `fetch`) with the same catch-all path.
+`Auth.Http.makeAsync` resolves to `{ handler, dispose }`. `handler` is a standard Web `Request => Promise<Response>`, so it mounts anywhere Better Auth's handler did (Next.js route handlers, Hono, Elysia, Bun/Deno/Workers `fetch`) with the same catch-all path.
 
-When `services` connects to the database while it builds, `make` returns before the build finishes and cannot throw a startup error such as a missing `RateLimiter`; every request rejects with it instead. Use `await Auth.Http.makeAsync({ … })` with the same options there: it resolves to the same `{ handler, dispose }` once `services` is built and checked, and rejects with the startup error otherwise.
+`services` connects to the database while it builds, so the example uses `Auth.Http.makeAsync`, which waits for that build. It resolves to the same `{ handler, dispose }` once `services` is built and checked, and rejects with the startup errors (a missing `RateLimiter`, for example), so the app fails to start. `Auth.Http.make` is the synchronous form: it throws those errors only for a build that finishes before it returns. With an asynchronous build like this one it cannot, and every request would reject with them instead.
 
 The set of services `Auth.Http.make` requires is `AuthServices` in `http/HttpServer.ts`: `AuthLifecycleService`, `SessionService`, `EmailPasswordService`, `IdentifierStore`, `PasswordHasher`, `EmailVerificationService`, `PasswordResetService`, `UserService`, `Hooks`. Everything else — magic link, OTP, multi-factor, organizations, admin, API keys, SSO, the OIDC provider, SCIM — is resolved optionally per handler, which is why those routes return `404` until you merge the corresponding layer in.
 

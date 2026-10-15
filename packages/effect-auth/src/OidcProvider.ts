@@ -789,7 +789,7 @@ export const make = (
       return yield* new ClientAddressConfigError({
         message:
           "dynamicRegistration is rate limited per client address, and a Web Request has none unless the app declares a source. " +
-          "Set dynamicRegistration.trustedProxy to the source passed to Http.make (for example ClientIP.cloudflare), " +
+          "Set dynamicRegistration.trustedProxy to the source passed to Http.make or Http.makeAsync (for example ClientIP.cloudflare), " +
           "or set dynamicRegistration.allowMissingClientIp: true to accept that address-less registrations are refused.",
       });
     }

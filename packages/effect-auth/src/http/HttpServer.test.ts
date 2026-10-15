@@ -2748,6 +2748,22 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     await dispose();
   });
 
+  it("interrupts a forkChild fiber when the build finishes, so it never runs", async () => {
+    // Effect.forkChild ties the fiber to the build. The build finishes before
+    // make returns, so the fiber is interrupted before its first step.
+    let started = false;
+    const child = Layer.effectDiscard(Effect.forkChild(Effect.sync(() => void (started = true))));
+    const fixture = makeFixture();
+
+    const { dispose } = HttpServer.make({
+      services: child.pipe(Layer.provideMerge(fixture.services)) as Layer.Layer<AuthServices>,
+      cookie: { secure: false },
+    });
+    await macrotasks(3);
+    expect(started).toBe(false);
+    await dispose();
+  });
+
   it("runs the build's queued tasks by priority, lowest first", async () => {
     // The build queues a fork's start (priority 0) and then its own resumption
     // at `priority`. Resuming finishes the build, so the fork runs after make
@@ -2840,7 +2856,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
       const logged = log.mock.calls.map((args) => args.map(String).join(" "));
       expect(logged).toContainEqual(
         expect.stringMatching(
-          /ERROR .*releasing the services Http\.make refused failed.*release failed/s,
+          /ERROR .*releasing the services Http\.make or Http\.makeAsync refused failed.*release failed/s,
         ),
       );
     } finally {
@@ -2866,7 +2882,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
       const logged = log.mock.calls.map((args) => args.map(String).join(" "));
       expect(logged).toContainEqual(
         expect.stringMatching(
-          /ERROR .*releasing the services Http\.make refused failed.*release failed/s,
+          /ERROR .*releasing the services Http\.make or Http\.makeAsync refused failed.*release failed/s,
         ),
       );
     } finally {
@@ -3126,7 +3142,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       const logged = log.mock.calls.map((args) => args.map(String).join(" "));
       expect(logged).toContainEqual(
         expect.stringMatching(
-          /ERROR .*releasing the services Http\.make refused failed.*release failed/s,
+          /ERROR .*releasing the services Http\.make or Http\.makeAsync refused failed.*release failed/s,
         ),
       );
     } finally {

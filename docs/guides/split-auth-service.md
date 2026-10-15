@@ -10,10 +10,8 @@ app does not have to.
 Mounting `Http.make` directly in the app's Worker is simpler and should be the default:
 
 ```ts
-const mount = Effect.gen(function* () {
-  const { handler } = yield* Http.make({ prefix: "/api/auth" /* … */ });
-  return handler; // mount it in your framework
-});
+const { handler } = Http.make({ services, prefix: "/api/auth" /* … */ });
+// Mount `handler` in your framework.
 ```
 
 One deployment, no transport, no relay, and the session is resolved in-process. Split when
