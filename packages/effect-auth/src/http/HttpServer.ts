@@ -852,7 +852,8 @@ const servicesConfigError = (
  * The same check as a layer, for `services` that finish building only after
  * `make` returns (asynchronous work while building). `make` cannot throw then,
  * so the handler's build fails with the error and every request rejects with
- * it. When the services build synchronously, `make` has already thrown.
+ * it. When the services build synchronously, `make` has already thrown, and
+ * `makeAsync` waits for the build, so it never needs this layer.
  */
 const requireServicesConfig = (options: AuthWebHandlerOptions) =>
   Layer.effectDiscard(
@@ -4385,10 +4386,11 @@ export interface AuthWebHandlerOptions {
    * Requires `RateLimiter` in the `services` layer (compose it with its
    * store via `RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer))`).
    * Without one, `make` throws `RateLimiterConfigError`, so the app fails to
-   * start rather than run with the limit off (#389). When `services` builds
-   * asynchronously, `make` cannot see it before returning, and the handler's
-   * build fails with that error instead. Requests that exceed a limit receive
-   * HTTP 429 before any auth logic runs.
+   * start rather than run with the limit off (#389). When `services` finishes
+   * building only after `make` returns (asynchronous work while building; see
+   * `make`), the handler's build fails with that error instead, and every
+   * request rejects with it; {@link makeAsync} rejects with it at startup.
+   * Requests that exceed a limit receive HTTP 429 before any auth logic runs.
    *
    * **Client address required**: the limiter keys each request by its client
    * address, so `make` throws {@link ClientAddressConfigError} when this is set
@@ -4397,7 +4399,8 @@ export interface AuthWebHandlerOptions {
    *
    * A request to a rate-limited endpoint that resolves no address is refused
    * with `429` and is not counted. It is never let through unlimited and never
-   * counted under a bucket shared with other callers. Requests to endpoints with no rule are unaffected.
+   * counted under a bucket shared with other callers. Requests to endpoints
+   * with no rule are unaffected.
    *
    * Set to `{}` to use the built-in {@link defaultEndpointRules}, or supply
    * `{ rules: [...] }` for a custom rule set.
@@ -4500,98 +4503,78 @@ const isTrustedRequest = (
 };
 
 /**
- * Build a standard Web `Request => Response` handler for the auth API.
- *
- * Mount the returned `handler` in any framework (SvelteKit/Next/Hono/...).
- * `dispose` releases the handler's scope, including the `services` it built.
- *
- * `make` builds `services` once, before it returns, and the handler serves that
- * build. It throws, so the app fails to start, when the configuration cannot be
- * served as written:
- *
- * - {@link ClientAddressConfigError}: `ipRateLimit`, or an `IPRateLimitPlugin`
- *   in the `services` `Hooks`, with neither `trustedProxy` nor
- *   `allowMissingClientIp: true`.
- * - `RateLimiterConfigError`: `ipRateLimit`, dynamic client registration or a
- *   `DeviceAuthorizationService` (without `allowMissingRateLimiter: true`) with
- *   no `RateLimiter` in `services`.
- * - Any failure of the `services` build itself, such as the OIDC layer's
- *   `ClientAddressConfigError`. `make` closes what the build acquired, then
- *   throws the failure's error, or for a defect the defect itself, as
- *   `Effect.runSync` does.
- *
- * `make` runs the build until it finishes, and no further: a fiber the build
- * forks and does not await (a background job, a refresh loop) keeps running
- * after `make` returns. One forked into the layer's scope (`Effect.forkScoped`)
- * stops on `dispose`.
- *
- * The `services` checks need the built services. When `services` does
- * asynchronous work while building, the build finishes after `make` returns, so
- * `make` cannot throw: the handler's build fails with the same error, and every
- * request rejects with it. The same holds when the build waits on a fiber that
- * yields before it finishes: these are the builds `Effect.runSync` reports as
- * asynchronous.
+ * A mounted auth handler, as {@link make} and {@link makeAsync} return it.
  */
-export const make = (
-  options: AuthWebHandlerOptions,
-): {
+export interface AuthWebHandler {
+  /**
+   * Serve one Web `Request`. Mount it in any framework (SvelteKit, Next, Hono,
+   * …).
+   */
   readonly handler: (request: Request, context?: Context.Context<never>) => Promise<Response>;
+  /** Release the handler's scope, including the `services` it built. */
   readonly dispose: () => Promise<void>;
-} => {
-  // Startup check (#358): a rate limit keyed by client address needs an address
-  // source. A Web Request has no socket address, so `trustedProxy` (or an explicit
-  // opt-out) must be configured. Without one, fail here, not per request.
-  if (
-    options.ipRateLimit !== undefined &&
-    options.trustedProxy === undefined &&
-    options.allowMissingClientIp !== true
-  ) {
-    throw new ClientAddressConfigError({
-      message:
-        "ipRateLimit needs a client address, and a Web Request has none under Http.make. " +
-        "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address, " +
-        "or set allowMissingClientIp: true to accept that address-less requests on rate-limited endpoints are refused.",
-    });
-  }
+}
 
-  // Build `services` here, synchronously until the build has an exit, so the
-  // startup check below sees what the handler will serve (#389). The handler
-  // reuses this build rather than building `services` again. Fibers the build
-  // forks run on the default scheduler, and make does not wait for them (#402).
-  const servicesScope = Scope.makeUnsafe();
-  const build = runSynchronously(Layer.buildWithScope(options.services, servicesScope));
-  const servicesFiber = build.fiber;
-  try {
-    build.run();
-    const built = servicesFiber.pollUnsafe();
-    // A build that fails synchronously makes `make` throw, so the app fails to
-    // start: a typed failure throws its error, and a defect throws the defect,
-    // as `Effect.runSync` does (`Cause.squash`). The error sits in a record
-    // because a defect may be any value, `undefined` included.
-    let failure: { readonly error: unknown } | undefined;
-    if (built !== undefined && Exit.isFailure(built)) {
-      failure = { error: Cause.squash(built.cause) };
-    } else if (built !== undefined) {
-      const error = servicesConfigError(built.value, options);
-      if (error !== undefined) failure = { error };
-    }
-    if (failure !== undefined) {
-      // Release what the build acquired, as far as that runs synchronously.
-      const close = runSynchronously(Scope.close(servicesScope, Exit.void));
-      try {
-        close.run();
-      } finally {
-        close.release();
-      }
-      throw failure.error;
-    }
-  } finally {
-    build.release();
-  }
-  // Still building (asynchronous work in `services`): the same check runs as a
-  // layer when the build finishes, and fails the handler's build instead.
-  const servicesLayer: Layer.Layer<AuthServices> = Layer.effectContext(Fiber.join(servicesFiber));
+/**
+ * The startup check of `ipRateLimit` (#358), which needs no build: a rate limit
+ * keyed by client address needs an address source. A Web Request has no socket
+ * address, so `trustedProxy` (or the explicit opt-out) must be configured.
+ */
+const ipRateLimitAddressError = (
+  options: AuthWebHandlerOptions,
+): ClientAddressConfigError | undefined =>
+  options.ipRateLimit !== undefined &&
+  options.trustedProxy === undefined &&
+  options.allowMissingClientIp !== true
+    ? new ClientAddressConfigError({
+        message:
+          "ipRateLimit needs a client address, and a Web Request has none under Http.make. " +
+          "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address, " +
+          "or set allowMissingClientIp: true to accept that address-less requests on rate-limited endpoints are refused.",
+      })
+    : undefined;
 
+/**
+ * Why a finished `services` build cannot be served, or `undefined` when it can:
+ * a failed build gives the failure's error, or for a defect the defect itself,
+ * as `Effect.runSync` throws (`Cause.squash`); a built context gives the error
+ * of {@link servicesConfigError}. The error sits in a record because a defect
+ * may be any value, `undefined` included.
+ */
+const refusedBuild = (
+  built: Exit.Exit<Context.Context<AuthServices>, unknown>,
+  options: AuthWebHandlerOptions,
+): { readonly error: unknown } | undefined => {
+  if (Exit.isFailure(built)) return { error: Cause.squash(built.cause) };
+  const error = servicesConfigError(built.value, options);
+  return error === undefined ? undefined : { error };
+};
+
+/**
+ * Release the `services` that `make` or `makeAsync` refused. A finalizer that
+ * fails is logged as an error rather than lost: the caller reports the reason
+ * it refused the services, not the failed release.
+ */
+const releaseRefusedServices = (scope: Scope.Closeable): Effect.Effect<void> =>
+  Scope.close(scope, Exit.void).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logError(
+        "[effect-auth] releasing the services Http.make refused failed; the services build was refused for another reason",
+        cause,
+      ),
+    ),
+  );
+
+/**
+ * The handler over `services`, built once: `make` and `makeAsync` pass the
+ * build they ran. `release` runs on `dispose`, after the handler's own scope
+ * closes, and releases that build.
+ */
+const serve = (
+  options: AuthWebHandlerOptions,
+  services: Layer.Layer<AuthServices, ClientAddressConfigError | RateLimiterConfigError>,
+  release: Effect.Effect<void>,
+): AuthWebHandler => {
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
     Layer.provide(authGroupLayer(options.cookie, options.multiSession)),
     // The SCIM group is always mounted; its handlers resolve `ScimService`
@@ -4603,9 +4586,7 @@ export const make = (
   // `Request<"Requires", RIn>` types; providing `services` to the layer's OUTPUT
   // (provideMerge) both satisfies them at runtime and zeroes the web handler's
   // leftover context (HR), yielding a plain `(request) => Promise<Response>`.
-  const appLayer = apiLayer.pipe(
-    Layer.provideMerge(Layer.provideMerge(requireServicesConfig(options), servicesLayer)),
-  );
+  const appLayer = apiLayer.pipe(Layer.provideMerge(services));
 
   const ipRateRules = options.ipRateLimit?.rules ?? defaultEndpointRules;
 
@@ -4719,15 +4700,158 @@ export const make = (
     }
     return web.handler(request, context);
   };
-  const dispose = (): Promise<void> =>
-    web
-      .dispose()
-      .then(() =>
-        Effect.runPromise(
-          Fiber.interrupt(servicesFiber).pipe(
-            Effect.andThen(Scope.close(servicesScope, Exit.void)),
-          ),
-        ),
-      );
+  const dispose = (): Promise<void> => web.dispose().then(() => Effect.runPromise(release));
   return { handler, dispose };
 };
+
+/**
+ * Build a standard Web `Request => Response` handler for the auth API.
+ *
+ * Mount the returned `handler` in any framework (SvelteKit/Next/Hono/...).
+ * `dispose` releases the handler's scope, including the `services` it built.
+ *
+ * `make` builds `services` once, before it returns, and the handler serves that
+ * build. It throws, so the app fails to start, when the configuration cannot be
+ * served as written:
+ *
+ * - {@link ClientAddressConfigError}: `ipRateLimit`, or an `IPRateLimitPlugin`
+ *   in the `services` `Hooks`, with neither `trustedProxy` nor
+ *   `allowMissingClientIp: true`.
+ * - `RateLimiterConfigError`: `ipRateLimit`, dynamic client registration or a
+ *   `DeviceAuthorizationService` (without `allowMissingRateLimiter: true`) with
+ *   no `RateLimiter` in `services`.
+ * - Any failure of the `services` build itself, such as the OIDC layer's
+ *   `ClientAddressConfigError`: the failure's error, or for a defect the defect
+ *   itself, as `Effect.runSync` throws.
+ *
+ * **When `make` throws, and when it cannot.** `make` is synchronous, so it can
+ * throw only when the `services` build finishes before it returns. It runs the
+ * build on the calling stack, the way `Effect.runSync` does: every step on the
+ * build's own fiber, however many, and the start of every fiber the build
+ * forks. `Layer.provideMerge` and `Layer.provide` chains build on that fiber.
+ * The build is still running when `make` returns if it waits on:
+ *
+ * - asynchronous work: a database connection, `Effect.promise`, a timer, any
+ *   callback that resumes later;
+ * - a forked fiber that yields before it finishes. `Layer.merge` and
+ *   `Layer.mergeAll` build each layer on a fiber of its own, so a merged layer
+ *   whose build yields (`Effect.yieldNow`), or runs past Effect's per-slice
+ *   operation budget (2,048 operations by default), counts. So does a fiber
+ *   forked with `Effect.forkScoped` that yields before it completes a
+ *   `Deferred` the build awaits;
+ * - a finalizer that does asynchronous work, when the build fails: Effect
+ *   releases what the failed build acquired before the build ends.
+ *
+ * Then the same checks run when the build finishes, and fail the handler's
+ * build instead of `make`: every request rejects with the error. Use
+ * {@link makeAsync} when `services` may build like this. It waits for the build
+ * however it is composed, and rejects with the same errors.
+ *
+ * **Release before a throw.** `make` closes what the build acquired, then
+ * throws. A finalizer that does asynchronous work finishes after `make` has
+ * thrown. A finalizer that fails is logged with `Effect.logError` whenever it
+ * finishes, and `make` throws the reason it refused the services.
+ *
+ * **Forked fibers.** `make` runs the build until it finishes, and no further: a
+ * fiber the build forks and does not await (a background job, a refresh loop)
+ * keeps running on the default scheduler after `make` returns. One forked into
+ * the layer's scope (`Effect.forkScoped`) stops on `dispose`.
+ */
+export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
+  const addressError = ipRateLimitAddressError(options);
+  if (addressError !== undefined) throw addressError;
+
+  // Build `services` here, synchronously until the build has an exit, so the
+  // startup check below sees what the handler will serve (#389). The handler
+  // reuses this build rather than building `services` again. Fibers the build
+  // forks run on the default scheduler, and make does not wait for them (#402).
+  const servicesScope = Scope.makeUnsafe();
+  const build = runSynchronously(Layer.buildWithScope(options.services, servicesScope));
+  const servicesFiber = build.fiber;
+  try {
+    let refused: { readonly error: unknown } | undefined;
+    try {
+      build.run();
+      const built = servicesFiber.pollUnsafe();
+      if (built !== undefined) refused = refusedBuild(built, options);
+    } catch (thrown) {
+      // A task of the build, or the check itself, threw: refuse the services
+      // all the same, and release what the build acquired.
+      refused = { error: thrown };
+    }
+    if (refused !== undefined) {
+      // Release what the build acquired, as far as that runs synchronously.
+      // An asynchronous finalizer finishes after make throws.
+      const close = runSynchronously(releaseRefusedServices(servicesScope));
+      try {
+        close.run();
+      } finally {
+        close.release();
+      }
+      throw refused.error;
+    }
+  } finally {
+    build.release();
+  }
+  // Still building (see "When make throws" above): the same check runs as a
+  // layer when the build finishes, and fails the handler's build instead.
+  return serve(
+    options,
+    Layer.provideMerge(
+      requireServicesConfig(options),
+      Layer.effectContext(Fiber.join(servicesFiber)),
+    ),
+    Fiber.interrupt(servicesFiber).pipe(Effect.andThen(Scope.close(servicesScope, Exit.void))),
+  );
+};
+
+/**
+ * Build a standard Web `Request => Response` handler for the auth API, like
+ * {@link make}, and wait for the `services` build however it is composed.
+ *
+ * Use it when `services` may finish building only after a synchronous call
+ * returns: asynchronous work while building (a database connection,
+ * `Effect.promise`), merged layers that yield, or a finalizer that does
+ * asynchronous work (see {@link make}). The startup checks then still fail at
+ * startup, rather than as every request rejecting.
+ *
+ * The promise resolves once `services` is built and checked, with the same
+ * `handler` and `dispose` that `make` returns. The handler serves that build,
+ * so `services` is built once, and `dispose` releases it. The promise rejects,
+ * so the app fails to start, with the error `make` would throw:
+ *
+ * - {@link ClientAddressConfigError}: `ipRateLimit`, or an `IPRateLimitPlugin`
+ *   in the `services` `Hooks`, with neither `trustedProxy` nor
+ *   `allowMissingClientIp: true`.
+ * - `RateLimiterConfigError`: `ipRateLimit`, dynamic client registration or a
+ *   `DeviceAuthorizationService` (without `allowMissingRateLimiter: true`) with
+ *   no `RateLimiter` in `services`.
+ * - Any failure of the `services` build itself, such as the OIDC layer's
+ *   `ClientAddressConfigError`: the failure's error, or for a defect the defect
+ *   itself, as `Effect.runPromise` rejects.
+ *
+ * Before it rejects, `makeAsync` releases what the build acquired and waits
+ * for every finalizer, asynchronous ones included. A finalizer that fails is
+ * logged with `Effect.logError`, and the promise rejects with the reason the
+ * services were refused.
+ *
+ * A fiber the build forks and does not await keeps running after the promise
+ * resolves. One forked into the layer's scope (`Effect.forkScoped`) stops on
+ * `dispose`.
+ */
+export const makeAsync = (options: AuthWebHandlerOptions): Promise<AuthWebHandler> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const addressError = ipRateLimitAddressError(options);
+      if (addressError !== undefined) return yield* addressError;
+      const servicesScope = yield* Scope.make();
+      const services = yield* Layer.buildWithScope(options.services, servicesScope).pipe(
+        Effect.tap((built) => {
+          const error = servicesConfigError(built, options);
+          return error === undefined ? Effect.void : Effect.fail(error);
+        }),
+        Effect.onError(() => releaseRefusedServices(servicesScope)),
+      );
+      return serve(options, Layer.succeedContext(services), Scope.close(servicesScope, Exit.void));
+    }),
+  );

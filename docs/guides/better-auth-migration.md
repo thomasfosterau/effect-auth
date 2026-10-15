@@ -65,6 +65,8 @@ const { handler } = Auth.Http.make({
 
 `Auth.Http.make` returns `{ handler, dispose }`. `handler` is a standard Web `Request => Promise<Response>`, so it mounts anywhere Better Auth's handler did (Next.js route handlers, Hono, Elysia, Bun/Deno/Workers `fetch`) with the same catch-all path.
 
+When `services` connects to the database while it builds, `make` returns before the build finishes and cannot throw a startup error such as a missing `RateLimiter`; every request rejects with it instead. Use `await Auth.Http.makeAsync({ … })` with the same options there: it resolves to the same `{ handler, dispose }` once `services` is built and checked, and rejects with the startup error otherwise.
+
 The set of services `Auth.Http.make` requires is `AuthServices` in `http/HttpServer.ts`: `AuthLifecycleService`, `SessionService`, `EmailPasswordService`, `IdentifierStore`, `PasswordHasher`, `EmailVerificationService`, `PasswordResetService`, `UserService`, `Hooks`. Everything else — magic link, OTP, multi-factor, organizations, admin, API keys, SSO, the OIDC provider, SCIM — is resolved optionally per handler, which is why those routes return `404` until you merge the corresponding layer in.
 
 ### Plugins vs hooks
