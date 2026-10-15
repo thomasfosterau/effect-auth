@@ -121,7 +121,9 @@ export interface EmailOtpConfig {
    * Minimum interval (ms) between successive send requests for the same email
    * + purpose pair. When an outstanding OTP created within this window already
    * exists, `send` fails with {@link Errors.ResendTooSoonError}. Off by
-   * default. Complements the global RateLimit.
+   * default. Complements the global RateLimit. It applies to every email
+   * alike, whether or not it has an account, so the error reveals nothing
+   * about which emails are registered.
    */
   readonly resendCooldown?: number;
   readonly sendVerificationOtp: (
@@ -171,6 +173,10 @@ export class EmailOtpService extends Context.Service<
      * When `resendCooldown` is configured and an outstanding OTP for the email +
      * purpose was created within the cooldown window, fails with
      * {@link Errors.ResendTooSoonError} containing the remaining wait time.
+     * The cooldown applies to an email with no account as well: in the cases
+     * above, such a request stores a record whose code is never sent, so a
+     * repeat within the window fails the same way for a known and an unknown
+     * email.
      */
     readonly send: (
       email: string,
@@ -226,6 +232,12 @@ export const generateOtp = (crypto: Crypto.Crypto, length: number): Effect.Effec
     }
     return otp;
   });
+
+/**
+ * Digits in the code behind an unknown address's cooldown marker: about 106
+ * bits, against the handful of guesses `maxAttempts` allows.
+ */
+const MARKER_CODE_LENGTH = 32;
 
 /**
  * Create an email OTP service
@@ -318,27 +330,25 @@ export const make = (
         }
 
         // Do not reveal whether the user exists to reduce email enumeration
-        // risk: succeed silently (without sending) for sign-in when sign-up
-        // is disabled and no user exists, and for forget-password when no
-        // user exists. Sign-in with sign-up enabled always sends (the user
-        // is created at verification time).
-        if (purpose === "sign-in" && disableSignUp) {
-          const identifier = yield* identifiers.getByValue("email", email);
-          if (!identifier) {
-            return;
-          }
-        }
+        // risk: succeed without sending for sign-in when sign-up is disabled
+        // and no user exists, and for forget-password when no user exists.
+        // Sign-in with sign-up enabled always sends (the user is created at
+        // verification time).
+        const deliver =
+          (purpose === "sign-in" && disableSignUp) || purpose === "forget-password"
+            ? (yield* identifiers.getByValue("email", email)) !== null
+            : true;
 
-        if (purpose === "forget-password") {
-          const identifier = yield* identifiers.getByValue("email", email);
-          if (!identifier) {
-            return;
-          }
+        // Without a resend cooldown there is nothing for a later request to
+        // see, so an unknown address stores nothing.
+        if (!deliver && config.resendCooldown === undefined) {
+          return;
         }
 
         // Resend cooldown: reject if an outstanding OTP was created within
-        // the configured window. The identifier (email) is already known to
-        // the caller, so this is not an enumeration risk.
+        // the configured window. It runs for an address with no account too,
+        // whose earlier request stored an undelivered record below, so a known
+        // and an unknown address get the same answer inside the window.
         if (config.resendCooldown !== undefined) {
           const existing = yield* store.get(email, purpose);
           if (existing !== null) {
@@ -352,7 +362,10 @@ export const make = (
           }
         }
 
-        const otp = yield* generateOtp(crypto, otpLength);
+        // An address with no account gets a record only as its cooldown
+        // marker. Its code is never sent and is `MARKER_CODE_LENGTH` digits
+        // long, so guessing it within the attempt limit is not feasible.
+        const otp = yield* generateOtp(crypto, deliver ? otpLength : MARKER_CODE_LENGTH);
         const record: EmailOtpRecord = {
           email,
           otpHash: hashToken(otp),
@@ -364,6 +377,10 @@ export const make = (
 
         // One active OTP per email + purpose: replaces any outstanding one.
         yield* store.upsert(record);
+
+        if (!deliver) {
+          return;
+        }
 
         yield* Effect.catch(config.sendVerificationOtp(email, otp, purpose), (error) =>
           Effect.fail(

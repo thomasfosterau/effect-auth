@@ -115,7 +115,9 @@ export interface PhoneOtpConfig {
    * number + purpose pair. When an outstanding OTP created within this window
    * already exists, `send` fails with {@link Errors.ResendTooSoonError}. Off
    * by default; recommend 60_000 (60 s) for SMS to limit carrier cost and
-   * DoS exposure. Complements the global RateLimit.
+   * DoS exposure. Complements the global RateLimit. It applies to every
+   * number alike, whether or not it has an account, so the error reveals
+   * nothing about which numbers are registered.
    */
   readonly resendCooldown?: number;
   readonly sendOtp: (
@@ -158,6 +160,10 @@ export class PhoneOtpService extends Context.Service<
      * When `resendCooldown` is configured and an outstanding OTP for the phone +
      * purpose was created within the cooldown window, fails with
      * {@link Errors.ResendTooSoonError} containing the remaining wait time.
+     * The cooldown applies to a number with no account as well: with sign-up
+     * disabled, such a request stores a record whose code is never sent, so
+     * a repeat within the window fails the same way for a known and an
+     * unknown number.
      */
     readonly send: (
       phoneNumber: string,
@@ -207,6 +213,12 @@ export const getPhoneNumber = (
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     return (phones.find((id) => id.verified) ?? phones[0])?.value ?? null;
   });
+
+/**
+ * Digits in the code behind an unknown number's cooldown marker: about 106
+ * bits, against the handful of guesses `maxAttempts` allows.
+ */
+const MARKER_CODE_LENGTH = 32;
 
 export const make = (
   config: PhoneOtpConfig,
@@ -294,18 +306,23 @@ export const make = (
           return;
         }
 
-        // Anti-enumeration: sign-in with sign-up disabled and no user, and
-        // phone-verification with no user, succeed silently without sending.
-        if (purpose === "sign-in" && disableSignUp) {
-          const identifier = yield* identifiers.getByValue("phone", phoneNumber);
-          if (!identifier) {
-            return;
-          }
+        // Anti-enumeration: sign-in with sign-up disabled and no user
+        // succeeds without sending.
+        const deliver =
+          purpose === "sign-in" && disableSignUp
+            ? (yield* identifiers.getByValue("phone", phoneNumber)) !== null
+            : true;
+
+        // Without a resend cooldown there is nothing for a later request to
+        // see, so an unknown number stores nothing.
+        if (!deliver && config.resendCooldown === undefined) {
+          return;
         }
 
         // Resend cooldown: reject if an outstanding OTP was created within
-        // the configured window. The identifier (phone number) is already
-        // known to the caller, so this is not an enumeration risk.
+        // the configured window. It runs for a number with no account too,
+        // whose earlier request stored an undelivered record below, so a known
+        // and an unknown number get the same answer inside the window.
         if (config.resendCooldown !== undefined) {
           const existing = yield* store.get(phoneNumber, purpose);
           if (existing !== null) {
@@ -319,7 +336,10 @@ export const make = (
           }
         }
 
-        const otp = yield* generateOtp(otpLength);
+        // A number with no account gets a record only as its cooldown
+        // marker. Its code is never sent and is `MARKER_CODE_LENGTH` digits
+        // long, so guessing it within the attempt limit is not feasible.
+        const otp = yield* generateOtp(deliver ? otpLength : MARKER_CODE_LENGTH);
         const record: PhoneOtpRecord = {
           phoneNumber,
           otpHash: hashToken(otp),
@@ -330,6 +350,10 @@ export const make = (
         };
 
         yield* store.upsert(record);
+
+        if (!deliver) {
+          return;
+        }
 
         yield* Effect.catch(config.sendOtp(phoneNumber, otp, purpose), (error) =>
           Effect.fail(
