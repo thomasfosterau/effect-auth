@@ -3,6 +3,7 @@ import * as Errors from "./Errors.ts";
 import { normalizeEmail } from "./utils.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import {
+  answeredByStandIn,
   EmailPasswordService,
   type SecondFactorChallenge,
   type SignInInput,
@@ -26,6 +27,31 @@ export interface AuthLifecycleConfig {
   readonly sendOnSignUp?: boolean;
   readonly sendOnSignIn?: boolean;
   readonly autoSignInAfterVerification?: boolean;
+  /**
+   * Sends an address's holder a notice that someone tried to sign up with
+   * it, in place of the verification email a fresh sign-up gets, when
+   * `EmailPasswordConfig.antiEnumeration` answers a sign-up for an address
+   * another user holds. `emailCallbacks(...).sendExistingAccountNotice` in
+   * `Delivery.ts` derives it from an `EmailSender` (purpose
+   * `"existing-account"`).
+   *
+   * That sign-up is answered by a stand-in user that no row backs, so a
+   * verification link would be one the address's holder can never use.
+   * `signUp` therefore stores no verification record for it, runs no
+   * verification hooks, and sends this notice in place of the link. It sends
+   * only where a fresh sign-up sends a verification email
+   * (`requireEmailVerification`, with `sendOnSignUp` left on), so each of the
+   * two answers makes one send. A failed notice fails the sign-up with the
+   * same `EmailVerificationError` a failed verification send does.
+   *
+   * Unset, such a sign-up sends nothing. A `sendEmail` that awaits its
+   * vendor's round-trip then makes a fresh sign-up slower than one for a held
+   * address by that round-trip; the callbacks `emailCallbacks` derives send
+   * off the response path, so they add no such difference.
+   */
+  readonly sendExistingAccountNotice?:
+    | ((email: string) => Effect.Effect<void, Errors.AuthError | Errors.EmailVerificationError>)
+    | undefined;
 }
 
 /**
@@ -190,7 +216,27 @@ export const make = (
         const needsEmailVerification = requireEmailVerification;
 
         if (sendOnSignUp && needsEmailVerification && email !== undefined) {
-          yield* verification.createVerification(result.user.id, email);
+          // Under anti-enumeration, an address another user holds is answered
+          // by a stand-in no row backs: a verification record for it would
+          // point at no user, and its link would reach the address's holder
+          // and never verify. That holder gets the existing-account notice
+          // instead, so each answer makes one send, and a failed notice fails
+          // as a failed verification send does.
+          if (yield* answeredByStandIn(identifiers, userStore, result, input.email)) {
+            if (config.sendExistingAccountNotice !== undefined) {
+              yield* config.sendExistingAccountNotice(email).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new Errors.EmailVerificationError({
+                      message: `Failed to send verification email to ${email}`,
+                      cause,
+                    }),
+                ),
+              );
+            }
+          } else {
+            yield* verification.createVerification(result.user.id, email);
+          }
         }
 
         return {

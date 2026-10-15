@@ -13,6 +13,7 @@
 import { Context, Data, Effect, Layer, Option } from "effect";
 import * as Errors from "./Errors.ts";
 import {
+  answeredByStandIn,
   EmailPasswordService,
   EmailPasswordStore,
   SecondFactorGate,
@@ -26,7 +27,6 @@ import {
   primaryEmail,
 } from "./Identifier.ts";
 import { UserStore } from "./UserStore.ts";
-import { normalizeEmail } from "./utils.ts";
 import { MultiAlgorithmVerifier, PasswordHasher } from "./password/Password.ts";
 import { SessionService } from "./SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
@@ -219,30 +219,11 @@ export const make = (
         // Under anti-enumeration, an address another user holds gets a
         // stand-in user no row backs. Claiming the username for it would squat
         // the username on a user that doesn't exist, so the claim is skipped;
-        // the availability check stands in for the claim's own failure. The
-        // stores tell the two apart: a fresh sign-up's user holds the address,
-        // a stand-in's does not. Asking them rather than recognising the result
-        // object holds when a decorated `EmailPasswordService` copies the
-        // result, and both answers pay the same read.
-        //
-        // This expects the identifier store to read its own writes. A store
-        // whose reads lag (a cache of negative lookups, say) can report no
-        // holder for the address a fresh sign-up has just claimed, so a
-        // missing holder falls back to the user store: the stand-in's id is
-        // never stored, so a user found under it is a real sign-up. Without
-        // that fallback such a store would silently leave the username
-        // unclaimed.
-        //
-        // A decorator must keep `identifier` on the result: without it this
-        // reads the address as submitted, before any hook rewrote it.
-        const holder = yield* identifiers.getByValue(
-          "email",
-          result.identifier?.value ?? normalizeEmail(input.email),
-        );
-        const standIn =
-          holder !== null
-            ? holder.userId !== result.user.id
-            : (yield* users.get(result.user.id)) === null;
+        // the availability check stands in for the claim's own failure.
+        // `answeredByStandIn` asks the stores which answer this is; without
+        // its user-store fallback, an identifier store whose reads lag would
+        // silently leave a fresh sign-up's username unclaimed.
+        const standIn = yield* answeredByStandIn(identifiers, users, result, input.email);
         if (standIn) {
           if ((yield* identifiers.getByValue("username", username)) !== null) {
             return yield* new UsernameError({ message: "Username is already taken" });

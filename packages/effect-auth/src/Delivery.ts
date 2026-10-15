@@ -81,6 +81,7 @@ import { getPhoneNumber } from "./PhoneOtp.ts";
  */
 export type DeliveryPurpose =
   | "email-verification"
+  | "existing-account"
   | "magic-link"
   | `email-otp:${EmailOtpPurpose}`
   | "password-reset"
@@ -183,6 +184,14 @@ export const emailCallbacks = (
       "email-verification",
       sender.send({ to, purpose: "email-verification", params: { token } }),
     ),
+
+  /**
+   * `AuthLifecycleConfig.sendExistingAccountNotice`: tells an address's holder
+   * that someone tried to sign up with it. It carries no token, so `params`
+   * is empty.
+   */
+  sendExistingAccountNotice: (to: string) =>
+    dispatch("existing-account", sender.send({ to, purpose: "existing-account", params: {} })),
 
   /** `MagicLinkConfig.sendMagicLink` */
   sendMagicLink: (email: string, token: string) =>
