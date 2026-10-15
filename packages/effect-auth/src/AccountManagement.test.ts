@@ -348,8 +348,9 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
   });
 
-  it("an email of record that changes during the confirmation fails with AuthError and keeps the token", async () => {
-    // The address is released between the read and the replace.
+  it("an email of record released during the confirmation fails with AccountTokenError and keeps the token", async () => {
+    // The address is released between the read and the replace, and the user
+    // does not hold the new one: nothing to converge on.
     const h = makeHarness((store) => ({
       ...store,
       replace: (from, to) => store.delete(from.id).pipe(Effect.andThen(store.replace(from, to))),
@@ -358,11 +359,52 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
 
-    expect(err).toBeInstanceOf(AuthError);
+    expect(err).toBeInstanceOf(AccountTokenError);
     expect(err.message).toContain("changed during the confirmation");
     expect(userEmails(h, "user-1")).toEqual([]);
     expect(h.tokens.has(token)).toBe(true);
+    expect(h.revoked).toEqual([]);
+    expect(h.notifiedOld).toEqual([]);
   });
+
+  // A double submit: a second confirmation of the same token completes the
+  // replace between this request's read and its own replace.
+  const doubleSubmit =
+    (rejectTakenFirst: boolean) =>
+    (store: typeof IdentifierStore.Service): typeof IdentifierStore.Service => ({
+      ...store,
+      replace: (from, to) =>
+        Effect.gen(function* () {
+          yield* store.replace(
+            from,
+            makeIdentifier({ userId: to.userId, type: "email", value: to.value, verified: true }),
+          );
+          // A store that claims `to` before it looks at `from` (effect-auth-sql's
+          // INSERT first) refuses the now-held value instead of resolving to null.
+          if (rejectTakenFirst && (yield* store.getByValue(to.type, to.value)) !== null) {
+            return yield* new AuthError({ message: "unique index violation" });
+          }
+          return yield* store.replace(from, to);
+        }),
+    });
+
+  for (const [label, rejectTakenFirst] of [
+    ["resolves to null", false],
+    ["refuses the held value", true],
+  ] as const) {
+    it(`a double-submitted confirmation converges to success when the store ${label}`, async () => {
+      const h = makeHarness(doubleSubmit(rejectTakenFirst));
+      const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", NEW_EMAIL));
+
+      const { user } = await run(h, (svc) => svc.confirmEmailChange(token));
+
+      expect(user.id).toBe("user-1");
+      expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
+      expect(h.tokens.has(token)).toBe(false);
+      expect(h.revoked).toEqual(["user-1"]);
+      expect(h.notifiedOld).toEqual([{ oldEmail: "alice@example.com", newEmail: NEW_EMAIL }]);
+    });
+  }
 
   it("a user with no email claims the new address", async () => {
     const h = makeHarness();

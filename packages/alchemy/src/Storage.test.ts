@@ -202,6 +202,35 @@ describe("D1-backed effect-auth storage", () => {
     expect(result.grace?.userId).toBe("user-2");
   });
 
+  /**
+   * Without a transaction the release is still a compare-and-swap: two replaces
+   * of the same address run concurrently, their statements interleaving on the
+   * binding, and only one releases it. The other deletes its own claim again.
+   */
+  it("lets one of two concurrent replaces of the same address succeed", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const identifiers = yield* Auth.IdentifierStore;
+        const ada = yield* identifiers.create(
+          Auth.makeIdentifier({ userId: "user-1", type: "email", value: "ada@example.com" }),
+        );
+        const outcomes = yield* Effect.all(
+          ["ada-a@example.com", "ada-b@example.com"].map((value) =>
+            identifiers.replace(
+              ada,
+              Auth.makeIdentifier({ userId: "user-1", type: "email", value, verified: true }),
+            ),
+          ),
+          { concurrency: "unbounded" },
+        );
+        return { outcomes, listed: yield* identifiers.listByUser("user-1") };
+      }),
+    );
+    const won = result.outcomes.filter((outcome) => outcome !== null);
+    expect(won).toHaveLength(1);
+    expect(result.listed.map((identifier) => identifier.value)).toEqual([won[0]!.value]);
+  });
+
   it("keeps epoch-millisecond timestamps intact through BIGINT columns", async () => {
     // ~2065: overflows a 32-bit INTEGER, so this is the column-type check.
     const farFuture = 3_000_000_000_000;

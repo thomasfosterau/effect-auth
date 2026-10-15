@@ -83,7 +83,11 @@ single statement (`ON CONFLICT … DO UPDATE`, `UPDATE … RETURNING`).
 `IdentifierStore.replace`, which email change uses, claims the new address
 before it releases the old one, so a failure between the two statements leaves
 the user holding both addresses, never neither; confirming the change again
-releases the old one.
+releases the old one. The release is a `DELETE … RETURNING` guarded on the old
+address, so of two concurrent replaces of the same address one succeeds; the
+other finds nothing to release and deletes its own claim again, in a statement
+of its own, so a failure before that statement leaves the user holding both new
+addresses.
 
 ## The `AuthSchema` resource
 

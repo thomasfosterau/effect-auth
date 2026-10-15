@@ -299,7 +299,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
       expect(result.newAddress).toBeNull();
     });
 
-    it("replace refuses a replacement for another user, of another type, or of the same value", async () => {
+    it("replace refuses a replacement for another user, of another type, with the same id, or of the same value", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
@@ -314,18 +314,24 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
                 Auth.makeIdentifier({ userId: USER.ada, type: "username", value: "ada" }),
               ),
             ),
+            sameId: yield* Effect.flip(
+              store.replace(ada, { ...emailFor(USER.ada, "ada-new@example.com"), id: ada.id }),
+            ),
             sameValue: yield* Effect.flip(
               store.replace(ada, emailFor(USER.ada, "ada@example.com", true)),
             ),
             adaListed: yield* store.listByUser(USER.ada),
             graceListed: yield* store.listByUser(USER.grace),
+            newAddress: yield* store.getByValue("email", "ada-new@example.com"),
           };
         }),
       );
 
       expect(result.otherUser._tag).toBe("AuthError");
       expect(result.otherType._tag).toBe("AuthError");
+      expect(result.sameId._tag).toBe("AuthError");
       expect(result.sameValue._tag).toBe("AuthError");
+      expect(result.newAddress).toBeNull();
       expect(result.adaListed.map((identifier) => [identifier.value, identifier.verified])).toEqual(
         [["ada@example.com", false]],
       );

@@ -21,10 +21,10 @@
  * `SAVEPOINT` are rejected by the binding; `batch()` is the only atomic
  * primitive it offers), so the honest adaptation is to let those three
  * `DELETE`-then-`INSERT` upserts, and `replace`'s `INSERT`-then-`DELETE`, run
- * as autocommitted statements rather than to fail. That is what {@link make} does: the connection answers the
- * transaction-control statements the `SqlClient` transaction machinery emits
- * without sending them to D1, so `withTransaction` degrades to "run the
- * effect" instead of dying.
+ * as autocommitted statements rather than to fail. That is what {@link make}
+ * does: the connection answers the transaction-control statements the
+ * `SqlClient` transaction machinery emits without sending them to D1, so
+ * `withTransaction` degrades to "run the effect" instead of dying.
  *
  * **This means nested writes on D1 are not atomic.** Callers that need
  * atomicity on D1 must express it as a single statement (`ON CONFLICT … DO

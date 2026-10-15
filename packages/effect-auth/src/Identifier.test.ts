@@ -254,10 +254,6 @@ describe("IdentifierStoreKV", () => {
 });
 
 // ---------------------------------------------------------------------------
-// primaryEmail helper
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // replace — the same contract over the in-memory and KeyValueStore stores
 // ---------------------------------------------------------------------------
 
@@ -340,7 +336,7 @@ for (const [label, makeLayer] of replaceStores) {
       expect(result.listed.map((i) => i.value)).toEqual(["alice@example.com"]);
     });
 
-    it("refuses a replacement for another user, of another type, or of the same value", async () => {
+    it("refuses a replacement for another user, of another type, with the same id, or of the same value", async () => {
       const result = await runOn(
         Effect.gen(function* () {
           const store = yield* IdentifierStore;
@@ -353,6 +349,11 @@ for (const [label, makeLayer] of replaceStores) {
                 makeIdentifier({ userId: "user-1", type: "username", value: "alice" }),
               ),
             ),
+            // Reusing `from`'s id would make the claim overwrite `from`, so the
+            // release would take the replacement with it.
+            sameId: yield* Effect.flip(
+              store.replace(alice, { ...email("user-1", "alice-new@example.com"), id: alice.id }),
+            ),
             sameValue: yield* Effect.flip(
               store.replace(alice, email("user-1", "alice@example.com", true)),
             ),
@@ -362,6 +363,7 @@ for (const [label, makeLayer] of replaceStores) {
       );
       expect(result.otherUser._tag).toBe("AuthError");
       expect(result.otherType._tag).toBe("AuthError");
+      expect(result.sameId._tag).toBe("AuthError");
       expect(result.sameValue._tag).toBe("AuthError");
       expect(result.listed.map((i) => [i.value, i.verified])).toEqual([
         ["alice@example.com", false],
@@ -369,6 +371,10 @@ for (const [label, makeLayer] of replaceStores) {
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// primaryEmail helper
+// ---------------------------------------------------------------------------
 
 describe("primaryEmail", () => {
   it("returns null for an empty list", () => {

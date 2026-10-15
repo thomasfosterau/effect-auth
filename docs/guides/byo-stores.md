@@ -23,7 +23,7 @@ Most store methods are ordinary CRUD and tolerate a read-then-write implementati
 - **`SamlReplayStore.consume`** (`src/Saml.ts`). Must be an atomic get-and-delete: two concurrent callers passing the same assertion/request id must not both receive the record — the loser gets `null`. This is the one-time-use replay guard for SAML AuthnRequest and assertion ids; a non-atomic implementation reopens the replay window the store exists to close. Implement it as a conditional `DELETE ... RETURNING` (or compare-and-swap), the same way `DeviceAuthorizationStore.claimApproval` does.
 - **`DeviceAuthorizationStore.claimApproval`** (`src/DeviceAuthorization.ts`). Must atomically consume an approved record: if it exists and is `"approved"`, delete it and return it; otherwise return `null`. Two concurrent polls on the same approved `device_code` must each see at most one win — a read-then-delete implementation lets both polls mint a session from the same approval.
 - **`IdentifierStore`'s `(type, value)` uniqueness** (`src/Identifier.ts`). `create` isn't itself required to be a single statement, but the `(type, value)` pair _must_ be enforced unique by the store (a real unique index/constraint), not just checked in application code first. The `claimIdentifier` helper's race-repair logic depends on a concurrent duplicate `create` actually failing — it re-checks `getByValue` after a failed `create` and only then decides between "someone beat you to this email" (`IdentifierTakenError`) and a genuine infrastructure error. Without a real unique constraint, two concurrent sign-ups can both claim the same email.
-- **`IdentifierStore.replace`** (`src/Identifier.ts`), which email change confirms through. It is a required member of the contract, so every custom `IdentifierStore` implements it. It must never leave the user holding neither identifier: write the new one before you release the old one, in one transaction if your database has them (`packages/sql` uses `sql.withTransaction`), or as one statement when both values live in one row (`packages/drizzle`'s single-table store runs one `UPDATE ... WHERE id = ? AND email = <old>`). Rely on the same unique constraint as `create` to refuse a value another user holds, before anything is released; `replaceIdentifier` re-reads the pair and reports that as `IdentifierTakenError`. Return `null`, writing nothing, when `from` no longer matches a record by `id`, `userId`, `type` and `value`. Start with `Auth.replaceInputError(from, to)` so a `to` for another user, another type or the same value is refused like every other store refuses it.
+- **`IdentifierStore.replace`** (`src/Identifier.ts`), which email change confirms through. It is a required member of the contract, so every custom `IdentifierStore` implements it. It must never leave the user holding neither identifier: write the new one before you release the old one, in one transaction if your database has them (`packages/sql` uses `sql.withTransaction`), or as one statement when both values live in one row (`packages/drizzle`'s single-table store runs one `UPDATE ... WHERE id = ? AND email = <old>`). Rely on the same unique constraint as `create` to refuse a value another user holds, before anything is released; `replaceIdentifier` re-reads the pair and reports that as `IdentifierTakenError`. Return `null`, writing nothing, when `from` no longer matches a record by `id`, `userId`, `type` and `value`. Make the release a compare-and-swap: delete `from` only where all four still match (`DELETE ... RETURNING`, or the affected-row count where your driver reports one), and when it deletes nothing, take the claim back and return `null`. Then of two concurrent replaces of the same `from` with different values, one succeeds and the other resolves to `null`; `packages/sql` does this. Three stores leave a gap here. On D1 (`packages/alchemy`), which has no transactions, taking the claim back is a statement of its own, so a failure before it leaves the user holding both new values. `IdentifierStoreKV` and `packages/drizzle`'s default store check `from` before they write and release it unguarded, so both replaces can succeed and the user holds both new values. Start with `Auth.replaceInputError(from, to)` so a `to` for another user, another type, with `from`'s own id or with the same value is refused like every other store refuses it.
 
 A second tier is **strongly recommended** atomic (packages/sql and packages/alchemy both treat these as single `INSERT ... ON CONFLICT ... DO UPDATE` / `UPDATE ... RETURNING` statements, never a separate SELECT then write): `RateLimitStore.set`/`increment`, `Auth.OAuth.OAuthAccountStore`'s link-or-update path, `Auth.MultiFactor.MultiFactorStore.upsert`, and the `Email`/`PhoneOtpStore` `upsert`/`incrementAttempts` pair. A race here just double-counts an OTP attempt or drops a rate-limit tick — annoying, not a security bypass — so a read-modify-write implementation is a legitimate starting point, but reach for a real atomic statement once your driver supports one. The `KeyValueStore`-backed defaults in `KeyValueStores.ts` document taking the read-modify-write shortcut here deliberately, for exactly this reason.
 
@@ -232,16 +232,13 @@ const identifierStore: typeof Auth.IdentifierStore.Service = {
     const invalid = Auth.replaceInputError(from, to);
     if (invalid !== null) return Effect.fail(invalid);
     // Claim the new value first: the UNIQUE(type, value) index refuses one
-    // another user holds while `from` is still in place. Wrap the three
-    // statements in a transaction if your driver has one; without it, a
-    // failure after the INSERT leaves the user holding both, never neither.
+    // another user holds while `from` is still in place. Then release `from`
+    // only if it still matches (a compare-and-swap), and take the claim back
+    // when it does not. Wrap the statements in a transaction if your driver
+    // has one; without it, a failure after the INSERT leaves the user holding
+    // both, never neither.
     return Effect.tryPromise({
       try: async () => {
-        const held = await db.query<IdentifierRow>(
-          "SELECT * FROM identifiers WHERE id = ? AND user_id = ? AND type = ? AND value = ?",
-          [from.id, from.userId, from.type, from.value],
-        );
-        if (held.length === 0) return null;
         await db.execute(
           `INSERT INTO identifiers (id, user_id, type, value, verified, verified_at, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -255,8 +252,13 @@ const identifierStore: typeof Auth.IdentifierStore.Service = {
             to.createdAt.getTime(),
           ],
         );
-        await db.execute("DELETE FROM identifiers WHERE id = ?", [from.id]);
-        return to;
+        const released = await db.query<{ id: string }>(
+          "DELETE FROM identifiers WHERE id = ? AND user_id = ? AND type = ? AND value = ? RETURNING id",
+          [from.id, from.userId, from.type, from.value],
+        );
+        if (released.length > 0) return to;
+        await db.execute("DELETE FROM identifiers WHERE id = ?", [to.id]);
+        return null;
       },
       catch: infra("identifier.replace"),
     });

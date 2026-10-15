@@ -140,6 +140,12 @@ export class AccountManagementService extends Context.Service<
      * is left in place and the token is not consumed. A user with no email
      * claims the new address instead.
      *
+     * When the email of record changes between the read and the replacement,
+     * the confirmation succeeds if the user now holds the new address (a
+     * concurrent confirmation of the same change, such as a double submit, made
+     * it first) and consumes the token; otherwise it fails with
+     * `AccountTokenError` and the token is not consumed.
+     *
      * Every identifier store supports it, including one that holds a single
      * email per user (the single-table store in
      * `@thomasfosterau/effect-auth-drizzle`), whose `replace` rewrites that
@@ -273,6 +279,7 @@ export const make = (
         // whether another account took the address meanwhile or the store
         // failed, leaves the user's previous address in place and verified.
         let replaced: string | null = null;
+        let held = currentIdentifiers;
         if (clash === null) {
           const next = makeIdentifier({
             userId: user.id,
@@ -281,23 +288,32 @@ export const make = (
             verified: true,
             verifiedAt: new Date(),
           });
-          yield* (
+          const converged = yield* (
             current === null
               ? claimIdentifier(identifiers, next)
               : replaceIdentifier(identifiers, current, next)
           ).pipe(
+            Effect.as(null),
             Effect.catchTags({
               IdentifierTakenError: () =>
                 Effect.fail(new AccountTokenError({ message: "Email already in use" })),
+              // The email of record changed between the read and the replace.
+              // When the user now holds the confirmed address, a concurrent
+              // confirmation (a double submit) made this change first: finish it
+              // as this request's own. Otherwise refuse and keep the token, so
+              // the user can confirm again.
               IdentifierNotFoundError: () =>
-                Effect.fail(
-                  new Errors.AuthError({
+                Effect.gen(function* () {
+                  const now = yield* identifiers.listByUser(user.id);
+                  if (now.some((id) => id.type === "email" && id.value === newEmail)) return now;
+                  return yield* new AccountTokenError({
                     message: "The account's email changed during the confirmation; try again",
-                  }),
-                ),
+                  });
+                }),
             }),
           );
-          replaced = current?.id ?? null;
+          if (converged === null) replaced = current?.id ?? null;
+          else held = converged;
         } else if (!clash.verified) {
           // Already this user's identifier — the token proves ownership.
           yield* identifiers.setVerified(clash.id, new Date());
@@ -308,7 +324,7 @@ export const make = (
         // failed release converges instead of leaving a previous address
         // behind. The replaced identifier is skipped: it is gone, and a store
         // that keeps one email per user reuses its id for the new address.
-        for (const id of currentIdentifiers) {
+        for (const id of held) {
           if (id.type === "email" && id.value !== newEmail && id.id !== replaced) {
             yield* identifiers.delete(id.id);
           }

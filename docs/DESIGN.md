@@ -563,7 +563,11 @@ global uniqueness on the pair, a `verified`/`verifiedAt` promotion state, and
 - **Claiming**: creation-time uniqueness rides the store's unique index;
   `claimIdentifier` adds the check-first + race re-check pattern and a typed
   `IdentifierTakenError`. Flows map it to their own conflict error
-  (`EmailInUseError`, `UsernameError`, ...).
+  (`EmailInUseError`, `UsernameError`, ...). Swapping a held identifier for a
+  new value is `IdentifierStore.replace`, which claims the new value before
+  (or together with) releasing the old one, and its wrapper
+  `replaceIdentifier` adds the same pattern plus `IdentifierNotFoundError`
+  when the old value is no longer held; email change confirms through it.
 - **Verification is proof-of-ownership**: completing an email verification,
   magic link, email OTP, phone OTP, or a trusted OAuth/SSO assertion promotes
   the identifier via `setVerified`. `requireEmailVerification`-style gates
