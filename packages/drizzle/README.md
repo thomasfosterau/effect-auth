@@ -417,12 +417,18 @@ option:
 - **`NOT NULL`.** The store never writes `NULL`, so an address cannot be removed
   from the row while the row exists:
   - Deleting a user's address by identifier is refused with an `AuthError`,
-    and the address stays. Account email change removes the old address first,
-    so on a `NOT NULL` column its confirmation fails with that `AuthError` and
-    nothing changes.
+    and the address stays.
   - `deleteByUser` does nothing. Account deletion deletes the user row right
     after it, and the address goes with the row, so account deletion works. An
     application that calls `deleteByUser` and keeps the row keeps the address.
+    This departs from the `IdentifierStore` contract, which says `deleteByUser`
+    deletes all of a user's identifiers. It relies on your user writer
+    hard-deleting the row. A soft-delete writer, one that keeps the row and marks
+    it deleted, leaves the address claimed, so no one else can register it.
+  - Email change is refused. It claims the new address while the old one is still
+    held, and the store holds one address per user, so the confirmation fails with
+    an `AuthError`. The old address and the confirm token stay, and nothing is
+    written. See [Flows this store does not support](#flows-this-store-does-not-support).
   - A user whose row holds an address cannot be given a second one, which is
     the same refusal as on a nullable column.
 
@@ -477,10 +483,13 @@ A user whose `email` is `NULL` holds no identifier.
   with a `500` today, not a client error.
 - **Admin `identifiers[]` extras, and the username and phone-number flows.** This
   store holds only email identifiers, so these are refused with an `AuthError`.
-
-Replacing an address by removing the old one first, as account email change
-does, works on a nullable column. On a `NOT NULL` column it is refused, as
-described above.
+- **Email change, on both nullable and `NOT NULL` columns.** Core's
+  `confirmEmailChange` claims the new address first, while the user still holds
+  the old one. The store refuses a second address, so the change fails with an
+  `AuthError` and the previous address stays verified. The token is not consumed.
+  The confirm-email-change HTTP route answers that `AuthError` with a `500` today,
+  not a client error. Email change becomes supported once `IdentifierStore.replace`
+  lands (#381).
 
 ## Store semantics
 

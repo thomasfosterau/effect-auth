@@ -15,9 +15,12 @@
  * A user has at most **one** identifier, and it is always of type `email`. The
  * store cannot hold a second address, a username or a phone number, and says so
  * with an `AuthError` rather than silently dropping the write. Core flows that
- * need several identifiers at once (for example SCIM's add-then-remove when a
- * `userName` changes) fail on this store; flows that replace an address by
- * removing the old one first (`AccountManagement`) work on a nullable column.
+ * need several identifiers at once fail on this store. SCIM's add-then-remove
+ * when a `userName` changes is one. Email change is another: it claims the new
+ * address before it releases the old one, and the store refuses a second address
+ * while the user holds one, on a nullable column and a NOT NULL one alike. The
+ * change fails with an `AuthError` and the previous address stays. It becomes
+ * supported once `IdentifierStore.replace` lands (#381).
  *
  * ### How each field is read and written
  *
@@ -46,9 +49,13 @@
  *   identifier (`delete`) is refused with an `AuthError` while the row holds
  *   it, so a targeted delete leaves the address in place. `deleteByUser` does
  *   nothing: the user row is about to be deleted (account deletion does this
- *   right after it), and deleting the row takes the address with it. Account
- *   deletion therefore works; email change does not, because it removes the old
- *   address first and that removal is refused.
+ *   right after it), and deleting the row takes the address with it. This
+ *   departs from the {@link IdentifierStore} contract, which says `deleteByUser`
+ *   deletes all of a user's identifiers: here the application's user writer must
+ *   hard-delete the row. A soft-delete writer leaves the address claimed.
+ *   Account deletion therefore works. Email change does not, on either shape: it
+ *   claims the new address while the old one is still held, and the store
+ *   refuses that claim.
  *
  * ### Per-method behaviour
  *

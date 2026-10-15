@@ -14,7 +14,7 @@ import { eq } from "drizzle-orm";
 import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
-import { afterAll, beforeAll, beforeEach } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
 import { defineUsers, layer } from "./SingleTableIdentifierStore.ts";
@@ -221,4 +221,29 @@ verifiedAtContract("single-table PostgreSQL", {
       .limit(1);
     return rows[0]?.verifiedAt ?? null;
   },
+});
+
+describe("defineUsers: NOT NULL detection", () => {
+  it("reads the email column's NOT NULL setting: a primary key is NOT NULL, a unique column alone is nullable", () => {
+    // A primary key cannot hold NULL, so the column is NOT NULL without a notNull().
+    const keyedUsers = pgTable("app_users_keyed", {
+      email: text("email").primaryKey(),
+      userId: uuid("id").notNull().unique(),
+      emailVerified: boolean("email_verified").notNull().default(false),
+      createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
+    });
+    const keyed = defineUsers({
+      table: keyedUsers,
+      columns: {
+        id: "userId",
+        email: "email",
+        emailVerified: "emailVerified",
+        createdAt: "createdAt",
+      },
+    });
+
+    expect(keyed.emailNullable).toBe(false);
+    expect(usersMapping.emailNullable).toBe(true);
+    expect(strictMapping.emailNullable).toBe(false);
+  });
 });
