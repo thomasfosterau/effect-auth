@@ -3,11 +3,13 @@
  * and hand its path to the test files (#291).
  *
  * `PGlite.create()` runs `initdb` inside the WASM module before it opens a
- * database — seconds of CPU on an idle machine, and past the package's 30 s
- * test and hook timeouts on a loaded one. That cost belongs here, in the main
- * process, where no timeout applies and it is paid once. A test file then
- * starts each database from this dump with {@link migratedPglite}, which skips
- * `initdb` (and the migrations) entirely.
+ * database: seconds of CPU on an idle machine, and on a loaded one enough to
+ * exceed the 10 s hook timeout that a test file's `beforeAll` runs under
+ * (Vitest's default; this package sets neither `hookTimeout` nor `testTimeout`).
+ * Vitest applies no timeout to `globalSetup`, so that cost belongs here, in the
+ * main process, and is paid once. A test file then starts each database from
+ * this dump with {@link migratedPglite}, which skips `initdb` (and the
+ * migrations) entirely.
  *
  * Wired up in this package's `vite.config.ts`; never published (`tsconfig.json`
  * excludes `src/testing/`).
