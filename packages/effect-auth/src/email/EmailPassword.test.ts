@@ -104,7 +104,10 @@ const sessionConfig: SessionConfig = {
   },
 };
 
-const makeTestContext = async (store: typeof EmailPasswordStore.Service = emailPasswordStore) => {
+const makeTestContext = async (
+  store: typeof EmailPasswordStore.Service = emailPasswordStore,
+  hasher: typeof PasswordHasher.Service = Password.pbkdf2Hasher({ iterations: 1000 }),
+) => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       make(sessionConfig),
@@ -124,7 +127,7 @@ const makeTestContext = async (store: typeof EmailPasswordStore.Service = emailP
         Context.merge(
           Context.merge(
             Context.make(EmailPasswordStore, store),
-            Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
+            Context.make(PasswordHasher, hasher),
           ),
           Context.merge(
             Context.make(IdentifierStore, identifierStore),
@@ -1044,4 +1047,100 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
     // One hash for the fresh branch, one for the duplicate branch.
     expect(hashCalls).toBe(2);
   });
+
+  // The address is found taken at the insert rather than at the pre-check.
+  // Each store seeds the owner's row from inside `createUser`, after the
+  // sign-up's pre-check found the address free.
+  const owner: User = {
+    id: "owner",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    attributes: {},
+  };
+  const seedOwner = (email: string) => {
+    users.set(owner.id, owner);
+    seedEmailIdentifier(owner.id, email, false);
+    passwordHashes.set(owner.id, "owner-hash");
+  };
+  const takenAtInsert: ReadonlyArray<{
+    readonly name: string;
+    readonly store: (email: string) => typeof EmailPasswordStore.Service;
+  }> = [
+    {
+      name: "a writer that returns the existing owner with created: false",
+      store: (email) => ({
+        ...emailPasswordStore,
+        createUser: () =>
+          Effect.sync(() => {
+            seedOwner(email);
+            return { user: owner, created: false };
+          }),
+      }),
+    },
+    {
+      name: "a plain insert that loses the identifier claim to a concurrent sign-up",
+      store: (email) => ({
+        ...emailPasswordStore,
+        createUser: (input) =>
+          Effect.gen(function* () {
+            seedOwner(email);
+            return yield* emailPasswordStore.createUser(input);
+          }),
+      }),
+    },
+  ];
+
+  it.each(takenAtInsert)(
+    "antiEnumeration mode: $name answers as the pre-check duplicate does",
+    async ({ store }) => {
+      let hashCalls = 0;
+      const realHasher = Password.pbkdf2Hasher({ iterations: 1000 });
+      const spyHasher: typeof PasswordHasher.Service = {
+        algorithm: realHasher.algorithm,
+        hash: (password) => {
+          hashCalls++;
+          return realHasher.hash(password);
+        },
+        verify: (password, hash) => realHasher.verify(password, hash),
+      };
+      const signUp = (testStore: typeof EmailPasswordStore.Service, email: string) =>
+        Effect.gen(function* () {
+          const testContext = yield* Effect.promise(() => makeTestContext(testStore, spyHasher));
+          const service = yield* EmailPassword.make({ antiEnumeration: true }).pipe(
+            Effect.provide(testContext),
+          );
+          return yield* service
+            .signUp({ email, password: "attacker-password-123", name: "Attacker" })
+            .pipe(Effect.provide(testContext));
+        }).pipe(Effect.provide(Hooks.Default));
+
+      // The reference answer: the pre-check finds the address taken.
+      seedEmailIdentifier("someone", "precheck@example.com", false);
+      const precheck = await Effect.runPromise(signUp(emailPasswordStore, "precheck@example.com"));
+      const precheckHashes = hashCalls;
+
+      const result = await Effect.runPromise(
+        signUp(store("victim@example.com"), "victim@example.com"),
+      );
+
+      // Same shape as the pre-check duplicate, with no session.
+      expect(result.session).toBeUndefined();
+      expect(Object.keys(result).sort()).toEqual(Object.keys(precheck).sort());
+      expect(Object.keys(result.user).sort()).toEqual(Object.keys(precheck.user).sort());
+      expect(result.identifier).toEqual({ type: "email", value: "victim@example.com" });
+      expect(result.method).toBe(precheck.method);
+      expect(result.user.id).not.toBe(owner.id);
+      // The submitted password is hashed, as on the pre-check branch.
+      expect(precheckHashes).toBe(1);
+      expect(hashCalls).toBe(2);
+      // Nothing landed on the owner.
+      expect(passwordHashes.get(owner.id)).toBe("owner-hash");
+      expect(sessions.size).toBe(0);
+      expect(
+        Array.from(identifierRecords.values())
+          .filter((identifier) => identifier.value === "victim@example.com")
+          .map(({ userId, verified }) => ({ userId, verified })),
+      ).toEqual([{ userId: owner.id, verified: false }]);
+    },
+  );
 });

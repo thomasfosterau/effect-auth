@@ -91,9 +91,10 @@ export class PhoneOtpUserStore extends Context.Service<
   {
     /**
      * Create a user. `created` in the result is `true` only when this call
-     * inserted the user; a user that already existed (an upsert or a
-     * find-or-create on the address) reports `false`, and sign-up then fails
-     * without writing to it (see {@link CreateUserResult}).
+     * inserted the user; a user that already existed (as a find-or-create on
+     * the address returns) reports `false`, and sign-up then fails without
+     * writing to it. The store must leave that row as it was: never an upsert
+     * that updates it (see {@link CreateUserResult}).
      */
     readonly createUser: (
       input: PhoneOtpCreateUserInput,

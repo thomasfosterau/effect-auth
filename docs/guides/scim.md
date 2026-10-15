@@ -42,6 +42,8 @@ Merge `scim` into the layer you hand `Auth.Http.make`. Until you do, every SCIM 
 
 `ScimUserStore` is a three-method contract (`create` / `get` / `update`) over the same `User` table everything else uses; declaring its own tag follows the convention `OAuthUserStore`, `MagicLinkUserStore` and `AdminUserStore` already set.
 
+`create` resolves to `Auth.CreateUserResult`, `{ user, created }`. Report `created: true` only for a user this call inserted. A store that returns a user who already existed reports `created: false`, and provisioning then answers `409` (`uniqueness`) without writing to that user: no identifier, no organization membership. When the user already exists, `create` must not modify that row either: use a plain `INSERT` and let the unique index on the address fail, or `INSERT … ON CONFLICT DO NOTHING` followed by a select (If that select finds no row (for example under a REPEATABLE READ snapshot that predates the conflicting insert), fail with `AuthError` rather than return an invented user.), never `ON CONFLICT DO UPDATE` ([BYO stores](./byo-stores.md) has the full contract).
+
 ## 2. Mint a connection
 
 A **connection is per organization**: it is one tenant's provisioning credential, and everything it can read or write is scoped to that organization's members and teams.

@@ -51,12 +51,21 @@ export interface NewUserIdentifier {
  * inserted it.
  *
  * `created` is `true` only when this call inserted a new user. A writer that
- * upserts, or finds or creates on the address, and returns a user that already
- * existed reports `false`, and the flow that called it fails with
+ * finds or creates on the address, and returns a user that already existed,
+ * reports `false`, and the flow that called it fails with
  * {@link IdentifierTakenError} without writing anything to that user (no
  * password, no linked account, no verified address). The flag is what lets core
  * treat an address the store wrote on insert as the new user's own (see
  * {@link createUserWithIdentifier}), so a writer reports it honestly.
+ *
+ * When the user already exists, the writer must not modify that row: core sees
+ * the flag only after the write, so an `INSERT … ON CONFLICT DO UPDATE` has
+ * already copied the caller's fields onto someone else's account. Use a plain
+ * `INSERT` and let the unique index on the address fail (the writer fails with
+ * `AuthError`; core then reports the address taken when it finds it held), or
+ * `INSERT … ON CONFLICT DO NOTHING` followed by a select of the existing row,
+ * reported as `created: false`. If that select finds no row (for example under a REPEATABLE READ snapshot that predates the conflicting insert), fail with `AuthError` rather than return an invented user. Never
+ * `ON CONFLICT DO UPDATE`.
  */
 export interface CreateUserResult {
   readonly user: Types.User;
@@ -94,8 +103,8 @@ const takenOr = <E>(
  * `create` receives `identifier` to pass on as its input's `identifier` field,
  * and resolves to a {@link CreateUserResult}.
  *
- * - **`created: false`** (the store returned a user that already existed, as an
- *   upsert or a find-or-create on the address does) fails with
+ * - **`created: false`** (the store returned a user that already existed, as a
+ *   find-or-create on the address does) fails with
  *   {@link IdentifierTakenError}. Nothing is claimed, and the flow writes
  *   nothing to that user.
  * - **`created: true`**: the claim runs. When the store wrote the handle into

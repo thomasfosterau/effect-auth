@@ -39,9 +39,11 @@ export class EmailPasswordStore extends Context.Service<
   {
     /**
      * Create a user. `created` in the result is `true` only when this call
-     * inserted the user; a user that already existed (an upsert or a
-     * find-or-create on the address) reports `false`, and sign-up then fails
-     * without writing to it (see {@link CreateUserResult}).
+     * inserted the user; a user that already existed (as a find-or-create on
+     * the address returns) reports `false`, and sign-up then fails without
+     * writing to it (or, with `antiEnumeration`, the same no-session answer as
+     * any duplicate). The store must leave that row as it was: never an upsert
+     * that updates it (see {@link CreateUserResult}).
      */
     readonly createUser: (
       input: CreateUserInput,
@@ -72,7 +74,9 @@ export interface EmailPasswordConfig {
    * branches cost comparable work) and answers with the same no-session
    * result shape a fresh sign-up gets, instead of `EmailInUseError`. Never
    * touches the real account — the result carries only the caller's own
-   * submitted input, never the existing user's data.
+   * submitted input, never the existing user's data. The same answer covers
+   * an address found taken at the insert: a lost race, or a store whose
+   * `createUser` reports `created: false`.
    *
    * Implies no immediate session on the fresh branch either (as if
    * `autoSignIn: false`), so both branches are answered identically —
@@ -299,6 +303,33 @@ export const make = (
       return cachedDecoyHash;
     });
 
+    // The answer to a sign-up for an address another user holds, however the
+    // flow finds that out (the pre-check, a lost insert race, or a store that
+    // reports `created: false`). Under anti-enumeration it pays the same
+    // hashing cost a fresh sign-up would, then answers with an identical,
+    // no-session result built only from the caller's own input (never the
+    // real account's data), so it discloses nothing about the address.
+    const addressTaken = (input: SignUpInput, email: string) =>
+      Effect.gen(function* () {
+        if (!resolved.antiEnumeration) {
+          return yield* new Errors.EmailInUseError({
+            message: "A user with this email already exists",
+          });
+        }
+        yield* passwordHasher.hash(input.password);
+        return {
+          user: {
+            id: globalThis.crypto.randomUUID(),
+            ...(input.name !== undefined && { name: input.name }),
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            attributes: input.attributes ?? {},
+          },
+          identifier: { type: "email" as const, value: email },
+          method: "email-password" as const,
+        };
+      });
+
     return {
       signUp: Effect.fn("EmailPasswordService.signUp")((rawInput: SignUpInput) =>
         Effect.gen(function* () {
@@ -324,38 +355,16 @@ export const make = (
           });
 
           const taken = yield* identifiers.getByValue("email", email);
-          if (taken) {
-            if (!resolved.antiEnumeration) {
-              return yield* new Errors.EmailInUseError({
-                message: "A user with this email already exists",
-              });
-            }
-
-            // Anti-enumeration: pay the same hashing cost a fresh sign-up
-            // would, then answer with an identical, no-session result built
-            // only from the caller's own input — never the real account's
-            // data — so this branch discloses nothing about the address.
-            yield* passwordHasher.hash(input.password);
-            return {
-              user: {
-                id: globalThis.crypto.randomUUID(),
-                ...(input.name !== undefined && { name: input.name }),
-                createdAt: new Date(),
-                updatedAt: new Date(),
-                attributes: input.attributes ?? {},
-              },
-              identifier: { type: "email" as const, value: email },
-              method: "email-password" as const,
-            };
-          }
+          if (taken) return yield* addressTaken(input, email);
 
           // The identifier's unique (type, value) index is the real claim; a
-          // lost race surfaces as EmailInUseError. When the claim loses it, the
-          // just-created user row is orphaned (no identifiers, no password) —
-          // harmless but worth a periodic sweep in high-contention deployments.
-          // A store that writes the address into the user row loses the race
-          // at the insert instead, and no row is left.
-          const { user, identifier: emailIdentifier } = yield* createUserWithIdentifier(
+          // lost race, or a store reporting `created: false`, gets the same
+          // answer as the pre-check. When the claim loses it, the just-created
+          // user row is orphaned (no identifiers, no password) — harmless but
+          // worth a periodic sweep in high-contention deployments. A store
+          // that writes the address into the user row loses the race at the
+          // insert instead, and no row is left.
+          const created = yield* createUserWithIdentifier(
             identifiers,
             { type: "email", value: email, verified: false },
             (identifier) =>
@@ -364,15 +373,9 @@ export const make = (
                 ...(input.attributes !== undefined && { attributes: input.attributes }),
                 identifier,
               }),
-          ).pipe(
-            Effect.catchTag("IdentifierTakenError", () =>
-              Effect.fail(
-                new Errors.EmailInUseError({
-                  message: "A user with this email already exists",
-                }),
-              ),
-            ),
-          );
+          ).pipe(Effect.catchTag("IdentifierTakenError", () => Effect.succeed(null)));
+          if (created === null) return yield* addressTaken(input, email);
+          const { user, identifier: emailIdentifier } = created;
 
           const hashedPassword = yield* passwordHasher.hash(input.password);
           yield* store.setPasswordHash(user.id, hashedPassword.hash);
