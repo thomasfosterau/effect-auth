@@ -10,7 +10,7 @@ Model Context Protocol clients authenticate against a remote MCP server with pla
 
 ```ts
 import { Layer, Redacted } from "effect";
-import { OidcProviderService, mcpProviderPreset } from "@thomasfosterau/effect-auth";
+import { ClientIP, OidcProviderService, mcpProviderPreset } from "@thomasfosterau/effect-auth";
 
 const oidc = OidcProviderService.layer(
   mcpProviderPreset({
@@ -22,6 +22,9 @@ const oidc = OidcProviderService.layer(
     dynamicRegistration: {
       // Optional guardrails — see §4.
       initialAccessToken: Redacted.make(process.env["MCP_REGISTRATION_TOKEN"]!),
+      // The address source the registration rate limit keys on: the same
+      // `trustedProxy` the app passes to `Http.make` (see §4).
+      trustedProxy: ClientIP.cloudflare,
     },
   }),
 ).pipe(Layer.provide(oidcStores));
@@ -189,7 +192,7 @@ dynamicRegistration: {
 
 Returning `false` (or `allow: false`) answers `400 invalid_client_metadata`, which is the only refusal RFC 7591 §3.2.2 defines. When the refusal is about the _caller_ rather than the metadata, name it explicitly: `{ allow: false, error: "access_denied" }` answers `403`. An accepting disposition may also carry `skipConsent` to waive the consent screen for a client the policy recognises as first-party.
 
-**Rate limiting.** `POST /register` is limited per client IP through the usual `RateLimiter` service — 10 registrations per hour by default, tunable with `dynamicRegistration.rateLimit`. The limit is applied only when a `RateLimiter` is in scope. A registration whose client address cannot be resolved (for example, a Web-handler deployment with no `trustedProxy`) is refused with `429` rather than counted under a shared bucket. `/register` is also covered by `defaultEndpointRules` for deployments that enable `ipRateLimit`, which needs a `trustedProxy` to resolve addresses.
+**Rate limiting.** `POST /register` is limited per client IP through the usual `RateLimiter` service — 10 registrations per hour by default, tunable with `dynamicRegistration.rateLimit`. The limit is applied only when a `RateLimiter` is in scope. The limit is keyed by client address, so the layer needs an address source at build. Set `dynamicRegistration.trustedProxy` to the source the app passes to `Http.make` (for example `ClientIP.cloudflare`), or set `dynamicRegistration.allowMissingClientIp: true` to accept that address-less registrations are refused. With neither, `OidcProviderService.layer` fails at build with `ClientAddressConfigError`, before any request. The preset enables registration, so an MCP provider always needs one of the two. A registration whose client address cannot be resolved is refused with `429` rather than counted under a shared bucket. `/register` is also covered by `defaultEndpointRules` for deployments that enable `ipRateLimit`, which needs a `trustedProxy` to resolve addresses.
 
 ## 5. Managing a registration (RFC 7592)
 

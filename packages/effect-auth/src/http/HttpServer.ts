@@ -1,4 +1,4 @@
-import { Context, Data, Effect, FileSystem, Layer, Option, Path } from "effect";
+import { Context, Effect, FileSystem, Layer, Option, Path } from "effect";
 import { resolveMessage } from "../Messages.ts";
 import { HttpApiBuilder } from "effect/http-api";
 import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -57,6 +57,7 @@ import {
   type ScimUserResource,
 } from "../Scim.ts";
 import type * as Errors from "../Errors.ts";
+import { ClientAddressConfigError } from "../Errors.ts";
 import { hashToken } from "../TokenHash.ts";
 import { GoogleOneTapService } from "../GoogleOneTap.ts";
 import {
@@ -4066,14 +4067,10 @@ const findEndpointRule = (
 
 /**
  * Thrown by {@link make} when `ipRateLimit` is configured with no client-address
- * source: no `trustedProxy`, and no `allowMissingClientIp` opt-out. A Web
- * `Request` never carries a socket address, so without a configured source the
- * limiter could not key the request. It would have to skip the request or share
- * one bucket between callers, and neither is allowed (#358).
+ * source: no `trustedProxy`, and no `allowMissingClientIp` opt-out (#358). The
+ * class lives in `Errors.ts`, which the OIDC layer also uses (#388).
  */
-export class ClientAddressConfigError extends Data.TaggedError("ClientAddressConfigError")<{
-  readonly message: string;
-}> {}
+export { ClientAddressConfigError } from "../Errors.ts";
 
 /**
  * Options for the mountable auth Web handler.
