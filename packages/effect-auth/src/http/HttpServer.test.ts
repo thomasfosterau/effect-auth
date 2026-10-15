@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer, Redacted } from "effect";
-import { FetchHttpClient } from "effect/http";
+import { Effect, FileSystem, Layer, Path, Redacted } from "effect";
+import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http";
+import { HttpApiBuilder } from "effect/http-api";
 import { BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
 import * as HttpClient from "./HttpClient.ts";
@@ -24,7 +25,7 @@ import {
 } from "../password/PasswordReset.ts";
 import { UserServiceStore, UserService } from "../User.ts";
 import { hashToken } from "../TokenHash.ts";
-import { Hooks } from "../Hooks.ts";
+import { composePlugins, Hooks } from "../Hooks.ts";
 import {
   IdentifierStore,
   makeIdentifier,
@@ -74,7 +75,10 @@ import {
 import { generateHotp, generateTotp } from "../multifactor/Otp.ts";
 import type * as Types from "../Types.ts";
 import { ClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
-import { RateLimiterConfigError } from "../Errors.ts";
+import { ClientAddressConfigError, RateLimiterConfigError } from "../Errors.ts";
+import { IPRateLimitPlugin } from "../plugins/IPRateLimit.ts";
+import { NormalizeEmailPlugin } from "../plugins/NormalizeEmail.ts";
+import { AuthApi } from "./HttpApi.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
 
 const HOUR = 60 * 60 * 1000;
@@ -114,7 +118,14 @@ interface Fixture {
  * in-memory stores. Outbound email is captured into arrays so tests can
  * complete token/OTP roundtrips.
  */
-const makeFixture = (): Fixture => {
+const makeFixture = (
+  options: {
+    /** The `Hooks` stack in `services`. Default `Hooks.Default`. */
+    readonly hooks?: Layer.Layer<Hooks> | undefined;
+    /** Build the device service with `allowMissingRateLimiter: true` (#389). */
+    readonly deviceAllowMissingRateLimiter?: boolean | undefined;
+  } = {},
+): Fixture => {
   // --- shared in-memory state -----------------------------------------------
   const usersById = new Map<string, Types.User>();
   const identifierRecords = new Map<string, Identifier>();
@@ -245,7 +256,7 @@ const makeFixture = (): Fixture => {
     Layer.succeed(PasswordResetStore)(passwordResetStore),
     Layer.succeed(PasswordResetUserStore)(passwordResetUserStore),
     Layer.succeed(UserServiceStore)(userServiceStore),
-    Hooks.Default,
+    options.hooks ?? Hooks.Default,
   );
 
   const sessionServiceLayer = SessionService.layer(SESSION_CONFIG).pipe(Layer.provide(storeLayer));
@@ -460,6 +471,7 @@ const makeFixture = (): Fixture => {
       verificationUri: "https://example.com/device",
       // interval 0 so back-to-back polls in a single test don't hit slow_down.
       interval: 0,
+      allowMissingRateLimiter: options.deviceAllowMissingRateLimiter,
     }).pipe(Layer.provide(featureBase)),
     PhoneOtpService.layer({
       sendOtp: (phoneNumber, otp, purpose) =>
@@ -509,7 +521,11 @@ const makeFixture = (): Fixture => {
 };
 
 /** A `RateLimiter` over an in-memory store, for the limits that need one (#389). */
-const memoryRateLimiterLayer = (): Layer.Layer<RateLimiter> => {
+const memoryRateLimiterLayer = (): Layer.Layer<RateLimiter> =>
+  RateLimiter.layer().pipe(Layer.provide(memoryRateLimitStoreLayer()));
+
+/** An in-memory `RateLimitStore`. */
+const memoryRateLimitStoreLayer = (): Layer.Layer<RateLimitStore> => {
   const entries = new Map<string, RateLimitEntry>();
   const store = {
     get: (key: string) => Effect.sync(() => entries.get(key) ?? null),
@@ -524,7 +540,7 @@ const memoryRateLimiterLayer = (): Layer.Layer<RateLimiter> => {
       }),
     delete: (key: string) => Effect.sync(() => void entries.delete(key)),
   };
-  return RateLimiter.layer().pipe(Layer.provide(Layer.succeed(RateLimitStore, store)));
+  return Layer.succeed(RateLimitStore, store);
 };
 
 // --- request helpers ---------------------------------------------------------
@@ -2212,34 +2228,89 @@ describe("client IP at the HTTP boundary", () => {
   });
 });
 
-describe("IP-keyed limits need a RateLimiter at the build (#389)", () => {
-  // The layer build starts when `make` is called, so a missing RateLimiter is a
-  // failure every request sees: the handler rejects with the build error rather
-  // than serving requests with the limit silently off.
-  it("fails the build when ipRateLimit is set with no RateLimiter in services", async () => {
-    const fixture = makeFixture();
-    const { handler } = HttpServer.make({
-      services: fixture.services,
-      cookie: { secure: false },
-      trustedProxy: ClientIP.cloudflare,
-      ipRateLimit: {},
-    });
+/**
+ * The auth API composed by hand from the exported group layers, outside
+ * `Http.make`: no startup check, no `ClientIP` middleware (#389).
+ */
+const handBuiltHandler = (services: Layer.Layer<AuthServices>): Handler => {
+  const platform = Layer.mergeAll(Etag.layer, Path.layer, HttpPlatform.layer).pipe(
+    Layer.provideMerge(FileSystem.layerNoop({})),
+  );
+  const api = HttpApiBuilder.layer(AuthApi).pipe(
+    Layer.provide(HttpServer.authGroupLayer({ secure: false })),
+    Layer.provide(HttpServer.scimGroupLayer()),
+    Layer.provide(platform),
+  );
+  // The handlers' phantom requirements are satisfied by `services` at runtime;
+  // `Http.make` narrows its handler the same way.
+  return HttpRouter.toWebHandler(api.pipe(Layer.provideMerge(services)), {
+    disableLogger: true,
+  }).handler as unknown as (request: Request) => Promise<Response>;
+};
 
-    await expect(
-      handler(jsonRequest("/sign-in", { email: "nobody@example.com", password: PW })),
-    ).rejects.toBeInstanceOf(RateLimiterConfigError);
+/** A hooks stack with `IPRateLimitPlugin` (one sign-in per hour per address). */
+const ipRateLimitHooks = (): Layer.Layer<Hooks> =>
+  // NormalizeEmailPlugin runs after it, so the check sees through the stack.
+  composePlugins([
+    IPRateLimitPlugin({ signIn: { maxRequests: 1, windowMs: HOUR } }),
+    NormalizeEmailPlugin,
+  ]).pipe(
+    Layer.provide(Hooks.Default),
+    Layer.provide(RateLimiter.layer()),
+    Layer.provide(memoryRateLimitStoreLayer()),
+  );
+
+describe("rate limits need a RateLimiter when make is called (#389)", () => {
+  it("throws RateLimiterConfigError from make when ipRateLimit has no RateLimiter", () => {
+    const fixture = makeFixture();
+    expect(() =>
+      HttpServer.make({
+        services: fixture.services,
+        cookie: { secure: false },
+        trustedProxy: ClientIP.cloudflare,
+        ipRateLimit: {},
+      }),
+    ).toThrow(RateLimiterConfigError);
+    expect(() =>
+      HttpServer.make({
+        services: fixture.services,
+        trustedProxy: ClientIP.cloudflare,
+        ipRateLimit: {},
+      }),
+    ).toThrow(/ipRateLimit configured with no RateLimiter/);
   });
 
-  it("fails the build when device authorization (the user-code limit) has no RateLimiter", async () => {
+  it("throws from make when the device service has no RateLimiter for the user-code limit", () => {
     const fixture = makeFixture();
+    expect(() =>
+      HttpServer.make({
+        services: fixture.featureServicesWithoutRateLimiter,
+        cookie: { secure: false },
+      }),
+    ).toThrow(/the device user-code limit \(approve and deny\) configured with no RateLimiter/);
+  });
+
+  it("builds without a RateLimiter when the device service opts out, and leaves approve/deny unlimited", async () => {
+    const fixture = makeFixture({ deviceAllowMissingRateLimiter: true });
     const { handler } = HttpServer.make({
       services: fixture.featureServicesWithoutRateLimiter,
       cookie: { secure: false },
     });
+    // An unknown code is a 400 every time: no limiter, by explicit choice.
+    for (let i = 0; i < 7; i++) {
+      const res = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
+      expect(res.status).toBe(400);
+    }
+  });
 
-    await expect(handler(jsonRequest("/device/code", {}))).rejects.toBeInstanceOf(
-      RateLimiterConfigError,
-    );
+  it("limits device approve/deny to 5 attempts per user code when a RateLimiter is in services", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    for (let i = 0; i < 5; i++) {
+      const res = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
+      expect(res.status).toBe(400);
+    }
+    const sixth = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
+    expect(sixth.status).toBe(429);
   });
 
   it("builds and serves when a RateLimiter is in services", async () => {
@@ -2261,10 +2332,10 @@ describe("IP-keyed limits need a RateLimiter at the build (#389)", () => {
         { "cf-connecting-ip": "203.0.113.5" },
       ),
     );
-    expect(res.status).toBeLessThan(500);
+    expect(res.status).toBe(401);
   });
 
-  it("builds without any IP-keyed limit, with or without a RateLimiter", async () => {
+  it("builds without any rate limit, with no RateLimiter", async () => {
     const fixture = makeFixture();
     const { handler } = HttpServer.make({
       services: fixture.services,
@@ -2274,6 +2345,144 @@ describe("IP-keyed limits need a RateLimiter at the build (#389)", () => {
     const res = await handler(
       jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
     );
-    expect(res.status).toBeLessThan(500);
+    expect(res.status).toBe(401);
+  });
+
+  it("builds services once, for the check and the handler, and releases them on dispose", async () => {
+    let builds = 0;
+    let released = 0;
+    const counted = Layer.effectDiscard(
+      Effect.acquireRelease(
+        Effect.sync(() => void builds++),
+        () => Effect.sync(() => void released++),
+      ),
+    );
+    const fixture = makeFixture();
+    const { handler, dispose } = HttpServer.make({
+      services: Layer.merge(fixture.services, counted) as Layer.Layer<AuthServices>,
+      cookie: { secure: false },
+    });
+    expect(builds).toBe(1);
+    const res = await handler(
+      jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+    );
+    expect(res.status).toBe(401);
+    expect(builds).toBe(1);
+    expect(released).toBe(0);
+    await dispose();
+    expect(released).toBe(1);
+  });
+
+  it("releases the services it built when make throws", () => {
+    let released = 0;
+    const counted = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () => Effect.sync(() => void released++)),
+    );
+    const fixture = makeFixture();
+    expect(() =>
+      HttpServer.make({
+        services: Layer.merge(fixture.services, counted) as Layer.Layer<AuthServices>,
+        trustedProxy: ClientIP.cloudflare,
+        ipRateLimit: {},
+      }),
+    ).toThrow(RateLimiterConfigError);
+    expect(released).toBe(1);
+  });
+
+  it("fails the handler's build instead when services build asynchronously", async () => {
+    // make cannot see services that finish building after it returns, so it
+    // cannot throw. The same check then fails the build: every request rejects.
+    const fixture = makeFixture();
+    const asyncStep = Layer.effectDiscard(Effect.promise(() => Promise.resolve()));
+    const { handler } = HttpServer.make({
+      services: Layer.merge(fixture.services, asyncStep) as Layer.Layer<AuthServices>,
+      cookie: { secure: false },
+      trustedProxy: ClientIP.cloudflare,
+      ipRateLimit: {},
+    });
+
+    await expect(
+      handler(jsonRequest("/sign-in", { email: "nobody@example.com", password: PW })),
+    ).rejects.toBeInstanceOf(RateLimiterConfigError);
+  });
+});
+
+describe("IPRateLimitPlugin needs a client-address source under make (#389)", () => {
+  it("throws ClientAddressConfigError from make with no trustedProxy and no opt-out", () => {
+    const fixture = makeFixture({ hooks: ipRateLimitHooks() });
+    expect(() =>
+      HttpServer.make({ services: fixture.services, cookie: { secure: false } }),
+    ).toThrow(ClientAddressConfigError);
+    expect(() => HttpServer.make({ services: fixture.services })).toThrow(
+      /IPRateLimitPlugin keys its limits on the client address/,
+    );
+  });
+
+  it("builds with trustedProxy and keys each address on its own budget", async () => {
+    const fixture = makeFixture({ hooks: ipRateLimitHooks() });
+    const { handler } = HttpServer.make({
+      services: fixture.services,
+      cookie: { secure: false },
+      trustedProxy: ClientIP.cloudflare,
+    });
+    const signIn = (ip: string) =>
+      handler(
+        jsonRequest(
+          "/sign-in",
+          { email: "nobody@example.com", password: PW },
+          { "cf-connecting-ip": ip },
+        ),
+      );
+
+    expect((await signIn("203.0.113.20")).status).toBe(401);
+    expect((await signIn("203.0.113.20")).status).toBe(429);
+    expect((await signIn("203.0.113.21")).status).toBe(401);
+  });
+
+  it("refuses an address-less sign-in with 429 when the app opts out with allowMissingClientIp", async () => {
+    const fixture = makeFixture({ hooks: ipRateLimitHooks() });
+    const { handler } = HttpServer.make({
+      services: fixture.services,
+      cookie: { secure: false },
+      allowMissingClientIp: true,
+    });
+
+    const res = await handler(
+      jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+    );
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({
+      message: "Client address unavailable; this request cannot be rate limited",
+    });
+  });
+});
+
+describe("the exported group layers outside make refuse rather than skip (#389)", () => {
+  it("refuses device approve/deny with 429 when no RateLimiter is in scope", async () => {
+    const handler = handBuiltHandler(makeFixture().featureServicesWithoutRateLimiter);
+    const res = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({
+      message: "No RateLimiter in services; this request cannot be rate limited",
+    });
+  });
+
+  it("runs device approve/deny without the limit when the device service opts out", async () => {
+    const handler = handBuiltHandler(
+      makeFixture({ deviceAllowMissingRateLimiter: true }).featureServicesWithoutRateLimiter,
+    );
+    const res = await handler(jsonRequest("/device/deny", { userCode: "BCDF-GHJK" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses a sign-in through IPRateLimitPlugin with 429 when no ClientIP is in scope", async () => {
+    const handler = handBuiltHandler(makeFixture({ hooks: ipRateLimitHooks() }).services);
+    const res = await handler(
+      jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+    );
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({
+      message: "No ClientIP service in scope; this request cannot be rate limited",
+    });
   });
 });

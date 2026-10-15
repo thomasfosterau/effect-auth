@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer, Redacted } from "effect";
+import { Effect, FileSystem, Layer, Path, Redacted } from "effect";
+import { Etag, HttpPlatform, HttpRouter } from "effect/http";
+import { HttpApiBuilder } from "effect/http-api";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionStore } from "./SessionStore.ts";
@@ -23,6 +25,7 @@ import {
 } from "./password/PasswordReset.ts";
 import { type AuthServices } from "./http/HttpServer.ts";
 import * as HttpServer from "./http/HttpServer.ts";
+import { AuthApi } from "./http/HttpApi.ts";
 import { ClientIP, type TrustedProxyConfig } from "./ClientIP.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "./RateLimit.ts";
 import { JwtKeyStore, type JwtKeyPair, JwtService } from "./Jwt.ts";
@@ -980,6 +983,10 @@ const makeHttpFixture = (
     makeSession,
     oidcTokenStore: oidc.tokens,
     rateLimitKeys,
+    /** The fixture's services with OIDC and no `RateLimiter`. */
+    servicesWithoutRateLimiter: withOidc,
+    /** The fixture's services with OIDC and its `RateLimiter`. */
+    servicesWithRateLimiter: withOidcLimiter,
     handler: HttpServer.make({
       services: limited ? withOidcLimiter : withOidc,
       cookie: { secure: false },
@@ -988,6 +995,26 @@ const makeHttpFixture = (
     handlerWithoutOidc: HttpServer.make({ services: withoutOidc, cookie: { secure: false } })
       .handler,
   };
+};
+
+/**
+ * The auth API composed by hand from the exported group layers, outside
+ * `Http.make`: no startup check and no `ClientIP` middleware (#389).
+ */
+const handBuiltHandler = (services: Layer.Layer<AuthServices>) => {
+  const platform = Layer.mergeAll(Etag.layer, Path.layer, HttpPlatform.layer).pipe(
+    Layer.provideMerge(FileSystem.layerNoop({})),
+  );
+  const api = HttpApiBuilder.layer(AuthApi).pipe(
+    Layer.provide(HttpServer.authGroupLayer({ secure: false })),
+    Layer.provide(HttpServer.scimGroupLayer()),
+    Layer.provide(platform),
+  );
+  // The handlers' phantom requirements are satisfied by `services` at runtime;
+  // `Http.make` narrows its handler the same way.
+  return HttpRouter.toWebHandler(api.pipe(Layer.provideMerge(services)), {
+    disableLogger: true,
+  }).handler as unknown as (request: Request) => Promise<Response>;
 };
 
 /**
@@ -2093,14 +2120,40 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
       }),
     });
 
-  it("fails the HTTP build when registration is enabled with no RateLimiter in services", async () => {
-    // Registration needs its limit to run, so the handler rejects rather than serve
-    // registrations with the limit silently off (#389).
-    const fx = makeHttpFixture({ dynamicRegistration: {}, rateLimit: false });
+  it("throws from Http.make when registration is enabled with no RateLimiter in services", () => {
+    // Registration needs its limit to run, so the app fails to start rather than
+    // serve registrations with the limit silently off (#389).
+    expect(() => makeHttpFixture({ dynamicRegistration: {}, rateLimit: false })).toThrow(
+      RateLimiterConfigError,
+    );
+    expect(() => makeHttpFixture({ dynamicRegistration: {}, rateLimit: false })).toThrow(
+      /the dynamic client registration limit \(POST \/register\) configured with no RateLimiter/,
+    );
+  });
 
-    await expect(
-      fx.handler(register({ "cf-connecting-ip": "203.0.113.9" })),
-    ).rejects.toBeInstanceOf(RateLimiterConfigError);
+  it("refuses registrations with 429 outside Http.make when no RateLimiter is in scope", async () => {
+    const fx = makeHttpFixture({ dynamicRegistration: {}, rateLimit: true });
+    const handler = handBuiltHandler(fx.servicesWithoutRateLimiter);
+
+    const res = await handler(register({ "cf-connecting-ip": "203.0.113.9" }));
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({
+      message: "No RateLimiter in services; this request cannot be rate limited",
+    });
+  });
+
+  it("refuses registrations with 429 outside Http.make when no ClientIP is in scope", async () => {
+    const fx = makeHttpFixture({ dynamicRegistration: {}, rateLimit: true });
+    const handler = handBuiltHandler(fx.servicesWithRateLimiter);
+
+    const res = await handler(register({ "cf-connecting-ip": "203.0.113.9" }));
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({
+      message: "Client address unavailable; this request cannot be rate limited",
+    });
+    expect([...fx.rateLimitKeys]).toEqual([]);
   });
 
   it("refuses a registration with no client address and never keys it under a shared bucket", async () => {

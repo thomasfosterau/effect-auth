@@ -119,12 +119,22 @@ describe("IPRateLimitPlugin", () => {
       }).pipe(Effect.provide(makeHooksLayer())),
     ));
 
-  it("is a no-op when the ClientIP service is absent (no request in scope)", () =>
+  it("refuses every request when the ClientIP service is absent (a hook run outside HTTP)", () =>
     Effect.runPromise(
       Effect.gen(function* () {
+        // No ClientIP service: there is no address to key on, so each hook is
+        // refused, never let through unlimited (#389).
         const hooks = yield* Hooks;
-        for (let i = 0; i < 10; i++) {
-          yield* hooks.beforeSignIn(signIn);
+        for (const run of [
+          hooks.beforeSignIn(signIn),
+          hooks.beforeSignUp(signIn),
+          hooks.beforeRequestPasswordReset({ email: signIn.email }),
+        ]) {
+          const err = yield* Effect.flip(run);
+          expect(err).toBeInstanceOf(RateLimitError);
+          expect(err.message).toBe(
+            "No ClientIP service in scope; this request cannot be rate limited",
+          );
         }
       }).pipe(Effect.provide(makeHooksLayer())),
     ));

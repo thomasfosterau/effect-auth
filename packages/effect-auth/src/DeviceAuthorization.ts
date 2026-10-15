@@ -85,6 +85,22 @@ export interface DeviceAuthorizationConfig {
   readonly userCodeLength?: number;
   /** Alphabet for the user code (ambiguous characters excluded by default). */
   readonly userCodeAlphabet?: string;
+  /**
+   * Accept that the user-code limit may be off. Default `false`.
+   *
+   * The HTTP layer limits approve and deny to 5 attempts per user code per 15
+   * minutes (RFC 8628 §5.2) through the `RateLimiter` in `services`. The limit
+   * counts as configured whenever this service is in `services`, so without a
+   * `RateLimiter`, `Http.make` throws `RateLimiterConfigError`, and the
+   * approve/deny endpoints served outside `Http.make` refuse every request with
+   * `429` (#389).
+   *
+   * With `true`, approve and deny run without the limit when no `RateLimiter` is
+   * in `services`. A `RateLimiter` in `services` still applies the limit. Prefer
+   * adding a `RateLimiter`: without the limit, an attacker can try user codes
+   * and deny pending requests at scale.
+   */
+  readonly allowMissingRateLimiter?: boolean | undefined;
 }
 
 /**
@@ -143,6 +159,14 @@ export class DeviceAuthorizationService extends Context.Service<
 
     /** Deny a user code. */
     readonly deny: (userCode: string) => Effect.Effect<void, DeviceCodeError | Errors.AuthError>;
+
+    /**
+     * `true` when the service was built with
+     * {@link DeviceAuthorizationConfig.allowMissingRateLimiter}. The HTTP layer
+     * reads it to decide whether approve and deny may run without a
+     * `RateLimiter`. Absent means `false`.
+     */
+    readonly allowMissingRateLimiter?: boolean | undefined;
   }
 >()("@effect-auth/DeviceAuthorizationService") {
   /**
@@ -320,5 +344,7 @@ export const make = (
         }
         yield* store.update({ ...record, status: "denied" });
       }),
+
+      allowMissingRateLimiter: config.allowMissingRateLimiter === true,
     };
   });
