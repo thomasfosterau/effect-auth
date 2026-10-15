@@ -252,6 +252,13 @@ export interface Guards<Id, User extends ViewerShape, Rung extends string> {
    * The declarative policies behind the gates — store them, validate them
    * against an `AuthorizationModel`, or hand them to an `Authorizer`; they are
    * the values the gates decide, not copies.
+   *
+   * They are action-agnostic by design: a gate answers "may this viewer act
+   * here at all", so each permit has no action scope and allows every action
+   * to a viewer at the rung (or the owner). Handed to an `Authorizer` that also
+   * decides individual actions, they grant all of them. Scope your own
+   * per-action permits for that (as `OwnedAccess.policies` scopes its permits
+   * to `Action::"read"`).
    */
   readonly policies: {
     readonly roleAtLeast: (
