@@ -69,7 +69,7 @@ export interface TrustedProxyCidrs {
  * - Only the named header is read. `X-Forwarded-For` and every other header are
  *   ignored.
  * - The value is taken only when it is one IPv4 or IPv6 literal, with
- *   surrounding whitespace ignored. A missing, empty, malformed, or
+ *   surrounding SP and HTAB ignored. A missing, empty, malformed, or
  *   comma-separated value falls back to the socket address. The first entry of
  *   a list is never taken, because a client can prepend anything to a list.
  * - The accepted address is normalised like every other resolved address: an
@@ -433,7 +433,7 @@ export const resolveClientIP = (
   }
 
   const headerName = (config.header ?? "x-forwarded-for").toLowerCase();
-  const rawHeader: string | undefined = req.headers[headerName];
+  const rawHeader = Object.hasOwn(req.headers, headerName) ? req.headers[headerName] : undefined;
   if (rawHeader === undefined || rawHeader === "") return remoteIp;
 
   const xffEntries = rawHeader

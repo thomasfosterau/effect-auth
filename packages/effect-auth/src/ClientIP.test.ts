@@ -369,6 +369,8 @@ describe("ClientIP.cloudflare (opt-in single trusted header)", () => {
     expect(resolve("2001:0db8::0001")).toBe("2001:db8::1");
     expect(resolve("2001:db8:0:0:1:0:0:1")).toBe("2001:db8::1:0:0:1");
     expect(resolve("0:0:0:0:0:0:0:1")).toBe("::1");
+    // The longest zero run is compressed, not the first.
+    expect(resolve("2001:0:0:1:0:0:0:1")).toBe("2001:0:0:1::1");
     // Every spelling of an IPv4-mapped address unwraps to dotted IPv4, as the
     // socket path does.
     expect(resolve("0:0:0:0:0:ffff:203.0.113.7")).toBe("203.0.113.7");
@@ -383,6 +385,18 @@ describe("ClientIP.cloudflare (opt-in single trusted header)", () => {
     expect(resolveClientIP(edge(Object.fromEntries(headers)), ClientIP.cloudflare)).toBe(
       "10.0.0.50",
     );
+  });
+
+  it("reads only an own header property, never an inherited one", () => {
+    const inherited = Object.create({ "cf-connecting-ip": "203.0.113.7" }) as Record<
+      string,
+      string
+    >;
+    expect(resolveClientIP(edge(inherited), ClientIP.cloudflare)).toBe("10.0.0.50");
+  });
+
+  it("never reads an inherited key as the forwarded-list header either", () => {
+    expect(resolveClientIP(edge({}), { header: "constructor", hopCount: 1 })).toBe("10.0.0.50");
   });
 
   it("ignores inherited object keys as header names", () => {
