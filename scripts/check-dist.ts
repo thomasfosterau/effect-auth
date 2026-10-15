@@ -81,13 +81,32 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import semver from "semver";
 
 const root = resolve(import.meta.dirname, "..");
+
+/**
+ * `semver` is CommonJS, so its default import is whatever `module.exports`
+ * held when Node read `node_modules/semver/index.js`. If that read saw an
+ * empty or truncated file, the import still succeeds, with an empty object,
+ * and the first call fails later as `semver.minVersion is not a function`
+ * (#331). Fail here instead, naming the file and its size, so the cause is
+ * visible at the point it happens.
+ */
+const semverFile = fileURLToPath(import.meta.resolve("semver"));
+if (typeof semver.minVersion !== "function" || typeof semver.satisfies !== "function") {
+  throw new Error(
+    `semver loaded without its exports from ${semverFile} (${statSync(semverFile).size} bytes now). ` +
+      "The file was empty or truncated when it was read, so the module exported nothing. " +
+      "Rerun; if it recurs, reinstall the workspace (#331).",
+  );
+}
 
 /** Workspace directories smoke-tested here, with any peer to install beside them. */
 interface Target {
