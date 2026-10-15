@@ -11,7 +11,8 @@
  * - **Denied by default.** A policy must name it before it is allowed anything.
  *   The kernel enforces this: a permit reaches a system principal only when its
  *   principal scope names the `System` type (`System.grant`,
- *   `Policy.eq(System.ref(…))`, `Policy.isType("System")`). An unscoped permit
+ *   `Policy.eq(System.ref(…))`, `Policy.inScope(System.ref(…))` for a group,
+ *   `Policy.isType("System")`). An unscoped permit
  *   (`Policy.permit` with no principal, `Policy.permission`, `Policy.action`,
  *   `Policy.roleAtLeast`, the `OwnedAccess` policies), a role permit
  *   (`principal in Role::"…"`, so `Rbac`) and a `Policy.custom` permit never
@@ -31,7 +32,9 @@
  *
  * Role assignment is for users: `Rbac` refuses `"System"` as its principal type,
  * and a role permit never reaches a system principal, so a role change cannot
- * widen what a job may do.
+ * widen what a job may do. The exception is the application's own resolver: if
+ * it places a `Role` inside a `System` group, a grant to that group reaches the
+ * role's members, users included. Keep `Role` entities out of `System` groups.
  *
  * Forbids are not narrowed: an unscoped forbid binds a system principal like
  * everyone else. So a forbid whose condition reads a user attribute errors for a

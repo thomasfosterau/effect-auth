@@ -51,6 +51,7 @@ The rules, stated once:
 6. **No roles.** Role assignment is for users. `Rbac` refuses `"System"` as its principal type, and
    rule 1 keeps a role permit from matching a system principal whatever parents a resolver gives
    it, so a role change can never widen what a job may do. A job is granted with `System.grant`.
+   One exception is under the application's control: if its entity resolver places a `Role` inside a `System` group, a grant to that group (`inScope(System::"…")`) reaches every member of the role, users included, so keep `Role` entities out of `System` groups.
 
 ## The alternatives we rejected
 

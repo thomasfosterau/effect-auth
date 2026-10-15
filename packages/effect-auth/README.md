@@ -197,7 +197,8 @@ await Effect.runPromise(chargeInvoices);
 The rules a system principal follows:
 
 - **Denied by default.** Only a permit whose principal scope names the `System` type can allow it
-  anything: `System.grant`, `Policy.eq(System.ref(…))` or `Policy.isType("System")`. The kernel
+  anything: `System.grant`, `Policy.eq(System.ref(…))`, `Policy.inScope(System.ref(…))` (a group of
+  system principals) or `Policy.isType("System")`. The kernel
   enforces this for every policy set, so a permit with no principal scope (`Policy.permit` without
   `principal`, `Policy.permission`, even `{ action: "*", resource: "*" }`, `Policy.action`,
   `Policy.roleAtLeast`, the `OwnedAccess` policies), a role permit (`Rbac`, `Policy.role`) and a
@@ -209,7 +210,7 @@ The rules a system principal follows:
   matches a system principal, nor does a system grant match a user with the same name.
 - **No roles.** Role assignment is for users. `Rbac` refuses `"System"` as its principal type, and
   a role permit never matches a system principal, whatever parents a resolver gives it, so a role
-  change cannot widen what a job may do.
+  change cannot widen what a job may do. One exception is under the application's control: if its entity resolver places a `Role` inside a `System` group, a grant to that group (`inScope(System::"…")`) reaches every member of the role, users included, so keep `Role` entities out of `System` groups.
 - **Named in the audit.** `Authorizer` and `Auth.protectedField` log every decision about a system
   principal with `System::"<name>"` and the policies that decided it (allows at info, denials at
   warning), and a denial's error message names it.
