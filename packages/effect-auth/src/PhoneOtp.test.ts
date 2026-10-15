@@ -22,6 +22,7 @@ import { UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import { Hooks } from "./Hooks.ts";
 import type * as Types from "./Types.ts";
+import { observable, zeroCrypto } from "./testing/Passwordless.ts";
 
 // --- in-memory state ---------------------------------------------------------
 const users = new Map<string, Types.User>();
@@ -387,5 +388,84 @@ describe("PhoneOtpService", () => {
     );
     expect(sentOtps).toHaveLength(2);
     expect(records.has("+15559990003:sign-in")).toBe(true);
+  });
+
+  // #415: with sign-up disabled, an unknown number must hit the cooldown exactly
+  // as a known one does, or the second request's answer reveals the account.
+  it("answers a known and an unknown number alike within the cooldown when sign-up is disabled", async () => {
+    const testContext = await makeTestContext();
+    seedPhoneUser("+15559990010", true);
+
+    const { known, unknown } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* PhoneOtp.make({
+          disableSignUp: true,
+          resendCooldown: 60_000,
+          sendOtp: recordingSend,
+        });
+        const twice = (phoneNumber: string) =>
+          Effect.all([
+            Effect.result(service.send(phoneNumber, "sign-in")),
+            Effect.result(service.send(phoneNumber, "sign-in")),
+          ]);
+        return { known: yield* twice("+15559990010"), unknown: yield* twice("+15559990011") };
+      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+    );
+
+    expect(unknown.map(observable)).toEqual(known.map(observable));
+    expect(known.map(observable)).toEqual([
+      { _tag: "Success" },
+      {
+        _tag: "Failure",
+        error: "ResendTooSoonError",
+        message: "Please wait before requesting another OTP",
+      },
+    ]);
+    for (const result of [known[1], unknown[1]]) {
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure" && result.failure._tag === "ResendTooSoonError") {
+        expect(result.failure.retryAfter).toBeGreaterThan(0);
+        expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
+      }
+    }
+    // Only the account holder is sent a code; the unknown number holds an
+    // undelivered record as its cooldown marker.
+    expect(sentOtps.map((sent) => sent.phoneNumber)).toEqual(["+15559990010"]);
+    expect(records.has("+15559990011:sign-in")).toBe(true);
+    expect(users.size).toBe(1);
+  });
+
+  // #415: an unknown number's cooldown marker must never be redeemable. With
+  // `zeroCrypto` the only code `send` can draw is all zeros, so a marker that
+  // held an `otpLength`-digit code would match that guess.
+  it("stores a cooldown marker for an unknown number that no code redeems", async () => {
+    const testContext = await makeTestContext();
+    seedPhoneUser("+15559990020", true);
+    const otpLength = 6;
+    const guess = "0".repeat(otpLength);
+
+    const { marker, error } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* PhoneOtp.make({
+          otpLength,
+          disableSignUp: true,
+          resendCooldown: 60_000,
+          sendOtp: recordingSend,
+        }).pipe(Effect.provideService(Crypto.Crypto, zeroCrypto));
+        yield* service.send("+15559990020", "sign-in");
+        yield* service.send("+15559990021", "sign-in");
+        const marker = records.get(key("+15559990021", "sign-in"));
+        const error = yield* Effect.flip(service.signIn("+15559990021", guess));
+        return { marker, error };
+      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+    );
+
+    // The stub draws only the all-zero code, as the account holder's shows.
+    expect(sentOtps).toEqual([{ phoneNumber: "+15559990020", otp: guess, purpose: "sign-in" }]);
+    expect(marker).toBeDefined();
+    expect(marker?.otpHash).not.toBe(hashToken(guess));
+    expect(error).toMatchObject({ _tag: "PhoneOtpError", message: "Invalid or expired OTP" });
+    expect(users.size).toBe(1);
+    expect(createdWith).toEqual([]);
   });
 });

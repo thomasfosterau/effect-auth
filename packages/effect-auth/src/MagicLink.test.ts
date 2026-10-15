@@ -20,6 +20,7 @@ import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type { Session, User, SessionConfig } from "./Types.ts";
+import { observable } from "./testing/Passwordless.ts";
 
 const users = new Map<string, User>();
 const identifierRecords = new Map<string, Identifier>();
@@ -530,5 +531,56 @@ describe("MagicLinkService", () => {
 
     expect(sentLinks.length).toBe(2);
     expect(magicLinkTokens.size).toBe(1);
+  });
+
+  // #415: with sign-up disabled, an unknown email must hit the cooldown exactly
+  // as a known one does, or the second request's answer reveals the account.
+  it("answers a known and an unknown email alike within the cooldown when sign-up is disabled", async () => {
+    const testContext = await makeTestContext();
+    addUser({ id: "user-member", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addEmailIdentifier("user-member", "member@example.com", true);
+
+    const program = Effect.gen(function* () {
+      const service = yield* MagicLink.make({
+        disableSignUp: true,
+        resendCooldown: 60_000,
+        sendMagicLink: recordingSend,
+      });
+      const twice = (email: string) =>
+        Effect.all([Effect.result(service.send(email)), Effect.result(service.send(email))]);
+      return {
+        known: yield* twice("member@example.com"),
+        unknown: yield* twice("missing@example.com"),
+      };
+    });
+
+    const { known, unknown } = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(unknown.map(observable)).toEqual(known.map(observable));
+    expect(known.map(observable)).toEqual([
+      { _tag: "Success" },
+      {
+        _tag: "Failure",
+        error: "ResendTooSoonError",
+        message: "Please wait before requesting another magic link",
+      },
+    ]);
+    for (const result of [known[1], unknown[1]]) {
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure" && result.failure._tag === "ResendTooSoonError") {
+        expect(result.failure.retryAfter).toBeGreaterThan(0);
+        expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
+      }
+    }
+    // Only the account holder is sent a link; the unknown email holds an
+    // undelivered token as its cooldown marker.
+    expect(sentLinks.map((link) => link.email)).toEqual(["member@example.com"]);
+    expect(Array.from(magicLinkTokens.values(), (token) => token.email).sort()).toEqual([
+      "member@example.com",
+      "missing@example.com",
+    ]);
+    expect(users.size).toBe(1);
   });
 });

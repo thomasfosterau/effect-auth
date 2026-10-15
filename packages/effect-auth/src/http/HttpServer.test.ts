@@ -109,6 +109,8 @@ interface Fixture {
   readonly sentPhoneOtps: Array<{ phoneNumber: string; otp: string; purpose: PhoneOtpPurpose }>;
   /** Register a verified `username` identifier for the username sign-in tests. */
   readonly registerUsername: (userId: string, username: string) => void;
+  /** Register a verified `phone` identifier for the phone OTP tests. */
+  readonly registerPhone: (userId: string, phoneNumber: string) => void;
   /** Number of session-store `get` reads so far (for the cookie-cache tests). */
   readonly sessionStoreReads: () => number;
 }
@@ -124,6 +126,10 @@ const makeFixture = (
     readonly hooks?: Layer.Layer<Hooks> | undefined;
     /** Build the device service with `allowMissingRateLimiter: true` (#389). */
     readonly deviceAllowMissingRateLimiter?: boolean | undefined;
+    /** Shared config for the magic-link, email OTP and phone OTP services. */
+    readonly passwordless?:
+      | { readonly disableSignUp: boolean; readonly resendCooldown: number }
+      | undefined;
   } = {},
 ): Fixture => {
   // --- shared in-memory state -----------------------------------------------
@@ -435,6 +441,16 @@ const makeFixture = (
     identifierRecords.set(identifier.id, identifier);
   };
 
+  const registerPhone = (userId: string, phoneNumber: string): void => {
+    const identifier = makeIdentifier({
+      userId,
+      type: "phone",
+      value: phoneNumber,
+      verified: true,
+    });
+    identifierRecords.set(identifier.id, identifier);
+  };
+
   const anonymousUserStore: typeof AnonymousUserStore.Service = {
     createAnonymousUser: () => Effect.sync(() => createUser({ attributes: { isAnonymous: true } })),
     deleteUser: (userId) => Effect.sync(() => void usersById.delete(userId)),
@@ -474,6 +490,7 @@ const makeFixture = (
       allowMissingRateLimiter: options.deviceAllowMissingRateLimiter,
     }).pipe(Layer.provide(featureBase)),
     PhoneOtpService.layer({
+      ...options.passwordless,
       sendOtp: (phoneNumber, otp, purpose) =>
         Effect.sync(() => void sentPhoneOtps.push({ phoneNumber, otp, purpose })),
     }).pipe(Layer.provide(featureBase)),
@@ -485,9 +502,11 @@ const makeFixture = (
       beforeDelete: (user) => Effect.sync(() => void beforeDeleteCalls.push(user.id)),
     }).pipe(Layer.provide(featureBase)),
     MagicLinkService.layer({
+      ...options.passwordless,
       sendMagicLink: (_email, token) => Effect.sync(() => void sentMagicLinkTokens.push(token)),
     }).pipe(Layer.provide(featureBase)),
     EmailOtpService.layer({
+      ...options.passwordless,
       sendVerificationOtp: (email, otp, purpose) =>
         Effect.sync(() => void sentOtps.push({ email, otp, purpose })),
     }).pipe(Layer.provide(featureBase)),
@@ -516,6 +535,7 @@ const makeFixture = (
     beforeDeleteCalls,
     sentPhoneOtps,
     registerUsername,
+    registerPhone,
     sessionStoreReads: () => sessionStoreReads,
   };
 };
@@ -1611,6 +1631,76 @@ describe("HTTP phone OTP", () => {
     );
     expect(res.status).toBe(404);
   });
+});
+
+// #415: where a passwordless send hides whether the address has an account, a
+// repeat request within the resend cooldown must answer an unknown address
+// exactly as it answers a known one: the same status, body and headers.
+describe("passwordless send within the resend cooldown", () => {
+  /** Everything a caller can observe of a response. */
+  const observe = async (response: Response) => ({
+    status: response.status,
+    headers: Array.from(response.headers.entries()),
+    body: await response.text(),
+  });
+
+  const cases = [
+    {
+      flow: "magic link sign-in",
+      disableSignUp: true,
+      path: "/magic-link/send",
+      payload: (email: string, _phone: string) => ({ email }),
+    },
+    {
+      flow: "email OTP sign-in",
+      disableSignUp: true,
+      path: "/email-otp/send",
+      payload: (email: string, _phone: string) => ({ email, purpose: "sign-in" }),
+    },
+    {
+      flow: "email OTP forget-password",
+      disableSignUp: false,
+      path: "/email-otp/send",
+      payload: (email: string, _phone: string) => ({ email, purpose: "forget-password" }),
+    },
+    {
+      flow: "phone OTP sign-in",
+      disableSignUp: true,
+      path: "/phone-otp/send",
+      payload: (_email: string, phoneNumber: string) => ({ phoneNumber, purpose: "sign-in" }),
+    },
+  ] as const;
+
+  it.each(cases)(
+    "answers a known and an unknown address alike: $flow (disableSignUp: $disableSignUp)",
+    async ({ disableSignUp, path, payload }) => {
+      const fixture = makeFixture({ passwordless: { disableSignUp, resendCooldown: 60_000 } });
+      const handler = handlerFor(fixture, { features: true });
+
+      const up = await handler(
+        jsonRequest("/sign-up", { email: "member@example.com", password: PW }),
+      );
+      expect(up.status).toBe(200);
+      const user = ((await up.json()) as { user: { id: string } }).user;
+      fixture.registerPhone(user.id, "+15557770001");
+      const sentBefore =
+        fixture.sentMagicLinkTokens.length + fixture.sentOtps.length + fixture.sentPhoneOtps.length;
+
+      const twice = async (email: string, phoneNumber: string) => [
+        await observe(await handler(jsonRequest(path, payload(email, phoneNumber)))),
+        await observe(await handler(jsonRequest(path, payload(email, phoneNumber)))),
+      ];
+      const known = await twice("member@example.com", "+15557770001");
+      const unknown = await twice("missing@example.com", "+15557770002");
+
+      expect(unknown).toEqual(known);
+      expect(known.map((response) => response.status)).toEqual([200, 429]);
+      // Only the account holder was sent anything.
+      expect(
+        fixture.sentMagicLinkTokens.length + fixture.sentOtps.length + fixture.sentPhoneOtps.length,
+      ).toBe(sentBefore + 1);
+    },
+  );
 });
 
 describe("HTTP anonymous sign-in", () => {

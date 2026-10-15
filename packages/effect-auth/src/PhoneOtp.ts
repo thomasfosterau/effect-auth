@@ -115,7 +115,12 @@ export interface PhoneOtpConfig {
    * number + purpose pair. When an outstanding OTP created within this window
    * already exists, `send` fails with {@link Errors.ResendTooSoonError}. Off
    * by default; recommend 60_000 (60 s) for SMS to limit carrier cost and
-   * DoS exposure. Complements the global RateLimit.
+   * DoS exposure. Complements the global RateLimit. It applies to every
+   * number alike, whether or not it has an account, so the error reveals
+   * nothing about which numbers are registered. With sign-up disabled, a
+   * `sign-in` request for a number with no account stores an undelivered
+   * cooldown marker, so if that number gains an account within the window,
+   * its first `sign-in` send is delayed by up to the cooldown.
    */
   readonly resendCooldown?: number;
   readonly sendOtp: (
@@ -158,6 +163,10 @@ export class PhoneOtpService extends Context.Service<
      * When `resendCooldown` is configured and an outstanding OTP for the phone +
      * purpose was created within the cooldown window, fails with
      * {@link Errors.ResendTooSoonError} containing the remaining wait time.
+     * The cooldown applies to a number with no account as well: with sign-up
+     * disabled, such a request stores an undelivered record that no code
+     * redeems, so a repeat within the window fails the same way for a known
+     * and an unknown number.
      */
     readonly send: (
       phoneNumber: string,
@@ -239,6 +248,20 @@ export const make = (
         return otp;
       });
 
+    /**
+     * The secret behind an unknown number's cooldown marker: 32 random bytes,
+     * base64url-encoded. It is hashed into the marker record and then
+     * discarded.
+     */
+    const generateMarkerSecret: Effect.Effect<string, Errors.AuthError> = crypto
+      .randomBytes(32)
+      .pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
+        Effect.mapError(
+          (cause) => new Errors.AuthError({ message: "Failed to generate OTP marker", cause }),
+        ),
+      );
+
     const normalize = (raw: string): Effect.Effect<string, Errors.AuthError> =>
       config.normalizePhoneNumber !== undefined
         ? config.normalizePhoneNumber(raw)
@@ -294,18 +317,23 @@ export const make = (
           return;
         }
 
-        // Anti-enumeration: sign-in with sign-up disabled and no user, and
-        // phone-verification with no user, succeed silently without sending.
-        if (purpose === "sign-in" && disableSignUp) {
-          const identifier = yield* identifiers.getByValue("phone", phoneNumber);
-          if (!identifier) {
-            return;
-          }
+        // Anti-enumeration: sign-in with sign-up disabled and no user
+        // succeeds without sending.
+        const deliver =
+          purpose === "sign-in" && disableSignUp
+            ? (yield* identifiers.getByValue("phone", phoneNumber)) !== null
+            : true;
+
+        // Without a resend cooldown there is nothing for a later request to
+        // see, so an unknown number stores nothing.
+        if (!deliver && config.resendCooldown === undefined) {
+          return;
         }
 
         // Resend cooldown: reject if an outstanding OTP was created within
-        // the configured window. The identifier (phone number) is already
-        // known to the caller, so this is not an enumeration risk.
+        // the configured window. It runs for a number with no account too,
+        // whose earlier request stored an undelivered record below, so a known
+        // and an unknown number get the same answer inside the window.
         if (config.resendCooldown !== undefined) {
           const existing = yield* store.get(phoneNumber, purpose);
           if (existing !== null) {
@@ -319,10 +347,16 @@ export const make = (
           }
         }
 
+        // A number with no account gets a record only as its cooldown
+        // marker, whose hash is of a random 32-byte secret rather than of a
+        // code: no `otpLength`-digit guess can match it, and the secret is
+        // never sent. Both values are drawn on every send, so the random work
+        // is the same whether or not the number has an account.
         const otp = yield* generateOtp(otpLength);
+        const markerSecret = yield* generateMarkerSecret;
         const record: PhoneOtpRecord = {
           phoneNumber,
-          otpHash: hashToken(otp),
+          otpHash: hashToken(deliver ? otp : markerSecret),
           purpose,
           attempts: 0,
           createdAt: Date.now(),
@@ -330,6 +364,10 @@ export const make = (
         };
 
         yield* store.upsert(record);
+
+        if (!deliver) {
+          return;
+        }
 
         yield* Effect.catch(config.sendOtp(phoneNumber, otp, purpose), (error) =>
           Effect.fail(

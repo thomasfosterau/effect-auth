@@ -96,7 +96,12 @@ export interface MagicLinkConfig {
    * Minimum interval (ms) between successive send requests for the same email.
    * When an outstanding token created within this window already exists, `send`
    * fails with {@link Errors.ResendTooSoonError}. Off by default; consider
-   * 60_000 for SMS-style flows. Complements the global RateLimit.
+   * 60_000 for SMS-style flows. Complements the global RateLimit. It applies
+   * to every email alike, whether or not it has an account, so the error
+   * reveals nothing about which emails are registered. With sign-up disabled,
+   * a request for an email with no account stores an undelivered cooldown
+   * marker, so if that email gains an account within the window, its first
+   * send is delayed by up to the cooldown.
    */
   readonly resendCooldown?: number;
   readonly sendMagicLink: (
@@ -137,6 +142,9 @@ export class MagicLinkService extends Context.Service<
      * When `resendCooldown` is configured and an outstanding token for the email
      * was created within the cooldown window, fails with
      * {@link Errors.ResendTooSoonError} containing the remaining wait time.
+     * The cooldown applies to an email with no account as well: with sign-up
+     * disabled, such a request stores a token that is never sent, so a repeat
+     * within the window fails the same way for a known and an unknown email.
      */
     readonly send: (
       email: string,
@@ -203,18 +211,22 @@ export const make = (
 
         // Do not reveal whether the user exists to reduce email enumeration
         // risk: when sign-up is disabled and there is no matching account,
-        // succeed silently without sending anything. When sign-up is enabled
-        // the link is always sent (the user is created at verify time).
-        if (disableSignUp) {
-          const identifier = yield* identifiers.getByValue("email", email);
-          if (!identifier) {
-            return;
-          }
+        // succeed without sending anything. When sign-up is enabled the link
+        // is always sent (the user is created at verify time).
+        const deliver = disableSignUp
+          ? (yield* identifiers.getByValue("email", email)) !== null
+          : true;
+
+        // Without a resend cooldown there is nothing for a later request to
+        // see, so an unknown address stores nothing.
+        if (!deliver && config.resendCooldown === undefined) {
+          return;
         }
 
         // Resend cooldown: reject if an outstanding token was created within
-        // the configured window. The identifier (email) is already known to
-        // the caller, so this is not an enumeration risk.
+        // the configured window. It runs for an address with no account too,
+        // whose earlier request stored an undelivered token below, so a known
+        // and an unknown address get the same answer inside the window.
         if (config.resendCooldown !== undefined) {
           const existing = yield* store.getByEmail(email);
           if (existing !== null) {
@@ -241,6 +253,12 @@ export const make = (
         };
 
         yield* store.create(magicLink);
+
+        // An address with no account keeps the token only as its cooldown
+        // marker. Nobody receives the raw token, so it can never be verified.
+        if (!deliver) {
+          return;
+        }
 
         yield* Effect.catch(config.sendMagicLink(email, rawToken), (error) =>
           Effect.fail(
