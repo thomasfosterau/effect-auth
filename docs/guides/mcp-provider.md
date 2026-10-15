@@ -189,7 +189,7 @@ dynamicRegistration: {
 
 Returning `false` (or `allow: false`) answers `400 invalid_client_metadata`, which is the only refusal RFC 7591 §3.2.2 defines. When the refusal is about the _caller_ rather than the metadata, name it explicitly: `{ allow: false, error: "access_denied" }` answers `403`. An accepting disposition may also carry `skipConsent` to waive the consent screen for a client the policy recognises as first-party.
 
-**Rate limiting.** `POST /register` is limited per client IP through the usual `RateLimiter` service — 10 registrations per hour by default, tunable with `dynamicRegistration.rateLimit`. The limit is applied only when a `RateLimiter` is in scope, and `/register` is also covered by `defaultEndpointRules` for deployments that enable `ipRateLimit`.
+**Rate limiting.** `POST /register` is limited per client IP through the usual `RateLimiter` service — 10 registrations per hour by default, tunable with `dynamicRegistration.rateLimit`. The limit is applied only when a `RateLimiter` is in scope. A registration whose client address cannot be resolved (for example, a Web-handler deployment with no `trustedProxy`) is refused with `429` rather than counted under a shared bucket. `/register` is also covered by `defaultEndpointRules` for deployments that enable `ipRateLimit`, which needs a `trustedProxy` to resolve addresses.
 
 ## 5. Managing a registration (RFC 7592)
 

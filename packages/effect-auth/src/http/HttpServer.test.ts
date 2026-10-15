@@ -2062,14 +2062,30 @@ describe("client IP at the HTTP boundary", () => {
     rules: [{ path: "/sign-in", methods: ["POST"], maxRequests: 1, windowMs: HOUR }],
   };
 
-  const limitedHandler = (trustedProxy: TrustedProxyConfig | undefined): Handler => {
+  // Builds the limited handler and returns every limiter key it touched, so a
+  // test can see which bucket (if any) a request was counted under.
+  const limitedHandler = (
+    options: {
+      readonly trustedProxy?: TrustedProxyConfig | undefined;
+      readonly allowMissingClientIp?: boolean | undefined;
+    } = {},
+  ): { readonly handler: Handler; readonly keys: ReadonlySet<string> } => {
     const entries = new Map<string, RateLimitEntry>();
+    const keys = new Set<string>();
     const store = {
-      get: (key: string) => Effect.sync(() => entries.get(key) ?? null),
+      get: (key: string) =>
+        Effect.sync(() => {
+          keys.add(key);
+          return entries.get(key) ?? null;
+        }),
       set: (key: string, entry: RateLimitEntry, _ttl: number) =>
-        Effect.sync(() => void entries.set(key, entry)),
+        Effect.sync(() => {
+          keys.add(key);
+          entries.set(key, entry);
+        }),
       increment: (key: string, _ttl: number) =>
         Effect.sync(() => {
+          keys.add(key);
           const entry = entries.get(key);
           const count = (entry?.count ?? 0) + 1;
           if (entry) entries.set(key, { ...entry, count });
@@ -2079,12 +2095,14 @@ describe("client IP at the HTTP boundary", () => {
     };
     const limiter = RateLimiter.layer().pipe(Layer.provide(Layer.succeed(RateLimitStore, store)));
     const services = Layer.merge(makeFixture().services, limiter) as Layer.Layer<AuthServices>;
-    return HttpServer.make({
+    const handler = HttpServer.make({
       services,
       cookie: { secure: false },
       ipRateLimit: signInOncePerHour,
-      ...(trustedProxy !== undefined && { trustedProxy }),
+      trustedProxy: options.trustedProxy,
+      allowMissingClientIp: options.allowMissingClientIp,
     }).handler;
+    return { handler, keys };
   };
 
   // A sign-in for an unknown account: the limiter runs before the handler, so
@@ -2102,12 +2120,64 @@ describe("client IP at the HTTP boundary", () => {
     );
 
   it("keys the limit on CF-Connecting-IP and ignores X-Forwarded-For under ClientIP.cloudflare", async () => {
-    const handler = limitedHandler(ClientIP.cloudflare);
+    const { handler } = limitedHandler({ trustedProxy: ClientIP.cloudflare });
 
     expect((await attempt(handler, "203.0.113.1", "6.6.6.6")).status).not.toBe(429);
     // A different visitor behind the same edge has a bucket of their own.
     expect((await attempt(handler, "203.0.113.2", "7.7.7.7")).status).not.toBe(429);
     // The same visitor, with a different forged X-Forwarded-For, is still limited.
     expect((await attempt(handler, "203.0.113.1", "8.8.8.8")).status).toBe(429);
+  });
+
+  it("fails the build when ipRateLimit has no trustedProxy and no opt-out", () => {
+    // A Web Request has no socket address, so the limiter would have nothing to key on.
+    expect(() => limitedHandler()).toThrow(HttpServer.ClientAddressConfigError);
+    expect(() => limitedHandler({ trustedProxy: undefined })).toThrow(
+      HttpServer.ClientAddressConfigError,
+    );
+  });
+
+  it("builds with a trustedProxy or with the allowMissingClientIp opt-out", () => {
+    expect(() => limitedHandler({ trustedProxy: ClientIP.cloudflare })).not.toThrow();
+    expect(() => limitedHandler({ allowMissingClientIp: true })).not.toThrow();
+  });
+
+  it("refuses an address-less request to a limited endpoint, counts nothing, and leaves other endpoints alone", async () => {
+    const { handler, keys } = limitedHandler({ allowMissingClientIp: true });
+
+    // Two address-less sign-ins: both refused, neither counted under a shared bucket.
+    for (let i = 0; i < 2; i++) {
+      const res = await handler(
+        jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+      );
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({
+        message: expect.stringContaining("Client address unavailable"),
+      });
+    }
+    expect([...keys]).toEqual([]);
+
+    // An endpoint with no rule is not limited, so it needs no address.
+    const session = await handler(getRequest("/session"));
+    expect(session.status).not.toBe(429);
+  });
+
+  it("refuses a request whose forwarded address is unusable and no socket, without a shared bucket", async () => {
+    const { handler, keys } = limitedHandler({ trustedProxy: ClientIP.cloudflare });
+
+    // A malformed header, a comma-separated list, and no header at all resolve
+    // no address, so each is refused rather than sharing one bucket.
+    expect((await attempt(handler, "not-an-ip", "6.6.6.6")).status).toBe(429);
+    expect((await attempt(handler, "203.0.113.1, 198.51.100.7", "6.6.6.6")).status).toBe(429);
+    const bare = await handler(
+      jsonRequest("/sign-in", { email: "nobody@example.com", password: PW }),
+    );
+    expect(bare.status).toBe(429);
+    expect([...keys]).toEqual([]);
+
+    // A valid address is still keyed on its own: the refusals used no bucket.
+    expect((await attempt(handler, "203.0.113.1", "6.6.6.6")).status).not.toBe(429);
+    expect(keys.size).toBeGreaterThan(0);
+    for (const key of keys) expect(key.endsWith("203.0.113.1")).toBe(true);
   });
 });

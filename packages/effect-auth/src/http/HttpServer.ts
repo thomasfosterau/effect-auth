@@ -1,4 +1,4 @@
-import { Context, Effect, FileSystem, Layer, Option, Path } from "effect";
+import { Context, Data, Effect, FileSystem, Layer, Option, Path } from "effect";
 import { resolveMessage } from "../Messages.ts";
 import { HttpApiBuilder } from "effect/http-api";
 import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -726,9 +726,19 @@ const applyUserCodeRateLimit = (
   });
 
 /**
+ * The refusal message when a request reaches a rate-limited endpoint with no
+ * client address. The limiter cannot key such a request, so it is refused
+ * rather than skipped or counted under a bucket that other callers share.
+ */
+const NO_CLIENT_ADDRESS = "Client address unavailable; this request cannot be rate limited";
+
+/**
  * Per-IP rate limit for anonymous dynamic client registration. Applied when a
  * `RateLimiter` is in scope (silent no-op otherwise), mirroring the device
  * user-code limiter; the window comes from the provider's own configuration.
+ *
+ * A caller with no resolvable client address is refused, never keyed under a
+ * shared bucket and never let through uncounted (#358).
  */
 const applyRegistrationRateLimit = (
   limit: RateLimitConfig,
@@ -738,7 +748,8 @@ const applyRegistrationRateLimit = (
     if (Option.isNone(rateLimiterOpt)) return;
     const clientIp = yield* Effect.serviceOption(ClientIP);
     const ip = Option.isSome(clientIp) ? clientIp.value.ip : undefined;
-    yield* rateLimiterOpt.value.consumeToken(`oidc-register:${ip ?? "unknown"}`, limit).pipe(
+    if (ip === undefined) return yield* new S.TooManyRequests({ message: NO_CLIENT_ADDRESS });
+    yield* rateLimiterOpt.value.consumeToken(`oidc-register:${ip}`, limit).pipe(
       Effect.catchTag("RateLimitError", (e) =>
         Effect.fail(new S.TooManyRequests({ message: e.message })),
       ),
@@ -4054,6 +4065,17 @@ const findEndpointRule = (
 ): EndpointRateLimitRule | undefined => rules.find((r) => matchesEndpointRule(r, pathname, method));
 
 /**
+ * Thrown by {@link make} when `ipRateLimit` is configured with no client-address
+ * source: no `trustedProxy`, and no `allowMissingClientIp` opt-out. A Web
+ * `Request` never carries a socket address, so without a configured source the
+ * limiter could not key the request. It would have to skip the request or share
+ * one bucket between callers, and neither is allowed (#358).
+ */
+export class ClientAddressConfigError extends Data.TaggedError("ClientAddressConfigError")<{
+  readonly message: string;
+}> {}
+
+/**
  * Options for the mountable auth Web handler.
  */
 export interface AuthWebHandlerOptions {
@@ -4124,8 +4146,15 @@ export interface AuthWebHandlerOptions {
    * alone). That is correct only when the app is reachable solely through
    * Cloudflare; the `trustedHeader` form of `TrustedProxyConfig` documents the
    * trust assumption in full.
+   *
+   * `Http.make` serves Web `Request`s, which never carry a socket address, so
+   * with this option set the address comes only from the forwarded data. When
+   * that data is absent or unusable, the request has no client address: when a
+   * `RateLimiter` is in `services`, a request that reaches a rate-limited
+   * endpoint is then refused with `429` (see {@link ipRateLimit}), and
+   * `ClientIP` carries `undefined`.
    */
-  readonly trustedProxy?: TrustedProxyConfig;
+  readonly trustedProxy?: TrustedProxyConfig | undefined;
   /**
    * Enable IP-keyed rate limiting at the HTTP boundary, before handlers run.
    *
@@ -4133,10 +4162,39 @@ export interface AuthWebHandlerOptions {
    * store via `RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer))`).
    * Requests that exceed a limit receive HTTP 429 before any auth logic runs.
    *
+   * **Client address required**: the limiter keys each request by its client
+   * address, so `make` throws {@link ClientAddressConfigError} when this is set
+   * with neither {@link trustedProxy} nor {@link allowMissingClientIp}. A Web
+   * `Request` has no socket address to fall back on.
+   *
+   * When a `RateLimiter` is in `services`, a request to a rate-limited endpoint
+   * that resolves no address is refused with `429` and is not counted. It is
+   * never let through unlimited and never counted under a bucket shared with
+   * other callers. Requests to endpoints with no rule are unaffected.
+   *
    * Set to `{}` to use the built-in {@link defaultEndpointRules}, or supply
    * `{ rules: [...] }` for a custom rule set.
    */
-  readonly ipRateLimit?: HttpIPRateLimitConfig;
+  readonly ipRateLimit?: HttpIPRateLimitConfig | undefined;
+  /**
+   * Accept that a request may have no resolvable client address, so
+   * {@link ipRateLimit} can be configured without {@link trustedProxy}. Default
+   * `false`.
+   *
+   * This opts out of the build-time check only. The limiter still runs: when a
+   * `RateLimiter` is in `services`, a request with no address that reaches a
+   * rate-limited endpoint is refused with `429`, not skipped. Use it when that
+   * refusal is the intended behaviour for address-less requests, and prefer
+   * {@link trustedProxy}, which gives every request an address when the edge
+   * provides one.
+   *
+   * The dynamic client registration limit (`POST /register`) is configured on
+   * the OIDC provider, not here, so `make` cannot check it at build. When a
+   * `RateLimiter` is in `services`, a request with no address that reaches it is
+   * refused with `429` whatever this option says, and is never counted under a
+   * shared bucket.
+   */
+  readonly allowMissingClientIp?: boolean | undefined;
 }
 
 /** Minimal Scalar API reference shell pointing at the sibling `openapi.json`. */
@@ -4224,6 +4282,21 @@ export const make = (
   readonly handler: (request: Request, context?: Context.Context<never>) => Promise<Response>;
   readonly dispose: () => Promise<void>;
 } => {
+  // Startup check (#358): a rate limit keyed by client address needs an address
+  // source. A Web Request has no socket address, so `trustedProxy` (or an explicit
+  // opt-out) must be configured. Without one, fail here, not per request.
+  if (
+    options.ipRateLimit !== undefined &&
+    options.trustedProxy === undefined &&
+    options.allowMissingClientIp !== true
+  ) {
+    throw new ClientAddressConfigError({
+      message:
+        "ipRateLimit needs a client address, and a Web Request has none under Http.make. " +
+        "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address, " +
+        "or set allowMissingClientIp: true to accept that address-less requests on rate-limited endpoints are refused.",
+    });
+  }
   const apiLayer = HttpApiBuilder.layer(AuthApi).pipe(
     Layer.provide(authGroupLayer(options.cookie, options.multiSession)),
     // The SCIM group is always mounted; its handlers resolve `ScimService`
@@ -4250,12 +4323,20 @@ export const make = (
 
         // Per-endpoint IP rate limiting (requires RateLimiter in services;
         // it resolves its own RateLimitStore at Layer-construction time)
-        if (options.ipRateLimit !== undefined && ip !== undefined) {
+        if (options.ipRateLimit !== undefined) {
           const url = new URL(req.url, "http://localhost");
           const rule = findEndpointRule(ipRateRules, url.pathname, req.method);
           if (rule !== undefined) {
             const rateLimiterOpt = yield* Effect.serviceOption(RateLimiter);
             if (Option.isSome(rateLimiterOpt)) {
+              // No address, no key (#358): refuse rather than skip the limit or
+              // count the request under a bucket that other callers share.
+              if (ip === undefined) {
+                return HttpServerResponse.jsonUnsafe(
+                  { message: NO_CLIENT_ADDRESS },
+                  { status: 429 },
+                );
+              }
               const limitConfig: RateLimitConfig = {
                 maxRequests: rule.maxRequests,
                 windowMs: rule.windowMs,

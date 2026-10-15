@@ -23,6 +23,8 @@ import {
 } from "./password/PasswordReset.ts";
 import { type AuthServices } from "./http/HttpServer.ts";
 import * as HttpServer from "./http/HttpServer.ts";
+import { ClientIP, type TrustedProxyConfig } from "./ClientIP.ts";
+import { RateLimiter, RateLimitStore, type RateLimitEntry } from "./RateLimit.ts";
 import { JwtKeyStore, type JwtKeyPair, JwtService } from "./Jwt.ts";
 import { generatePKCE, verifyIdToken } from "./oauth/OAuth.ts";
 import {
@@ -734,7 +736,12 @@ describe("OidcProviderService dynamic client registration", () => {
  * Pass `dynamicRegistration` to mount the RFC 7591/7592 endpoints.
  */
 const makeHttpFixture = (
-  options: { readonly dynamicRegistration?: OidcDynamicRegistrationConfig } = {},
+  options: {
+    readonly dynamicRegistration?: OidcDynamicRegistrationConfig;
+    /** Provide `RateLimiter`, so the per-IP registration limit runs. */
+    readonly rateLimit?: boolean;
+    readonly trustedProxy?: TrustedProxyConfig;
+  } = {},
 ) => {
   const usersById = new Map<string, Types.User>();
   const identifiers = new Map<string, Identifier>();
@@ -855,14 +862,48 @@ const makeHttpFixture = (
 
   const oidcLayer = Layer.mergeAll(oidcDeps, oidcServiceLayer);
 
+  // Every key the per-IP limiter touches, so a test can see its bucket (if any).
+  const rateLimitKeys = new Set<string>();
+  const rateLimitEntries = new Map<string, RateLimitEntry>();
+  const rateLimitStore = {
+    get: (key: string) =>
+      Effect.sync(() => {
+        rateLimitKeys.add(key);
+        return rateLimitEntries.get(key) ?? null;
+      }),
+    set: (key: string, entry: RateLimitEntry, _ttl: number) =>
+      Effect.sync(() => {
+        rateLimitKeys.add(key);
+        rateLimitEntries.set(key, entry);
+      }),
+    increment: (key: string, _ttl: number) =>
+      Effect.sync(() => {
+        rateLimitKeys.add(key);
+        const entry = rateLimitEntries.get(key);
+        const count = (entry?.count ?? 0) + 1;
+        if (entry) rateLimitEntries.set(key, { ...entry, count });
+        return count;
+      }),
+    delete: (key: string) => Effect.sync(() => void rateLimitEntries.delete(key)),
+  };
+  const limiterLayer = RateLimiter.layer().pipe(
+    Layer.provide(Layer.succeed(RateLimitStore, rateLimitStore)),
+  );
+
   const withOidc = Layer.mergeAll(base, oidcLayer) as Layer.Layer<AuthServices>;
+  const withOidcLimiter = Layer.merge(withOidc, limiterLayer) as Layer.Layer<AuthServices>;
   const withoutOidc = base as Layer.Layer<AuthServices>;
 
   return {
     seedUser,
     makeSession,
     oidcTokenStore: oidc.tokens,
-    handler: HttpServer.make({ services: withOidc, cookie: { secure: false } }).handler,
+    rateLimitKeys,
+    handler: HttpServer.make({
+      services: options.rateLimit === true ? withOidcLimiter : withOidc,
+      cookie: { secure: false },
+      ...(options.trustedProxy !== undefined && { trustedProxy: options.trustedProxy }),
+    }).handler,
     handlerWithoutOidc: HttpServer.make({ services: withoutOidc, cookie: { secure: false } })
       .handler,
   };
@@ -1947,5 +1988,63 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     expect(
       (await withoutDCR.handlerWithoutOidc(get("/.well-known/oauth-authorization-server"))).status,
     ).toBe(404);
+  });
+});
+
+describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
+  // An anonymous RFC 7591 registration: POST /register, no initial access token.
+  const register = (headers: Record<string, string> = {}): Request =>
+    new Request("http://idp.test/register", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify({
+        redirect_uris: ["http://127.0.0.1:9876/callback"],
+        token_endpoint_auth_method: "none",
+        client_name: "MCP Client",
+      }),
+    });
+
+  it("refuses a registration with no client address and never keys it under a shared bucket", async () => {
+    const fx = makeHttpFixture({ dynamicRegistration: {}, rateLimit: true });
+
+    const res = await fx.handler(register());
+
+    expect(res.status).toBe(429);
+    expect([...fx.rateLimitKeys]).toEqual([]);
+  });
+
+  it("keys the registration limit by the resolved client address", async () => {
+    const fx = makeHttpFixture({
+      dynamicRegistration: {},
+      rateLimit: true,
+      trustedProxy: ClientIP.cloudflare,
+    });
+
+    const res = await fx.handler(register({ "cf-connecting-ip": "203.0.113.9" }));
+
+    expect(res.status).toBe(201);
+    expect(fx.rateLimitKeys.has("oidc-register:203.0.113.9")).toBe(true);
+    expect([...fx.rateLimitKeys].some((key) => key.includes("unknown"))).toBe(false);
+  });
+
+  it("refuses a registration whose forwarded address is unusable, without a shared bucket", async () => {
+    const fx = makeHttpFixture({
+      dynamicRegistration: {},
+      rateLimit: true,
+      trustedProxy: ClientIP.cloudflare,
+    });
+
+    const res = await fx.handler(register({ "cf-connecting-ip": "203.0.113.9, 198.51.100.1" }));
+
+    expect(res.status).toBe(429);
+    expect([...fx.rateLimitKeys]).toEqual([]);
+  });
+
+  it("registers an address-less caller when no RateLimiter is in scope (the limit is not configured)", async () => {
+    const fx = makeHttpFixture({ dynamicRegistration: {} });
+
+    const res = await fx.handler(register());
+
+    expect(res.status).toBe(201);
   });
 });
