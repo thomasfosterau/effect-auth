@@ -17,8 +17,8 @@
  * `multiFactor`) and counters (`rateLimit.increment`,
  * `emailOtp.incrementAttempts`) use a single `ON CONFLICT … DO UPDATE` /
  * `UPDATE … RETURNING` statement for true atomicity — no read-modify-write
- * races. Multi-step upserts (challenge, oauthState, emailOtp.upsert) run
- * inside `sql.withTransaction`. `ON CONFLICT` targets a declared primary key
+ * races. Multi-step writes (challenge, oauthState, emailOtp.upsert, and
+ * identifier.replace's claim-then-release) run inside `sql.withTransaction`. `ON CONFLICT` targets a declared primary key
  * or unique index. MySQL has no `ON CONFLICT` clause, so these statements fail
  * there, and MySQL is not a supported dialect (#260). For MySQL, use
  * `@thomasfosterau/effect-auth-drizzle`'s MySQL tables.
@@ -1184,6 +1184,15 @@ export const makeIdentifierStore: Effect.Effect<
   SqlClient.SqlClient
 > = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const withTx = makeTx(sql);
+
+  const insert = (identifier: Auth.Identifier, label: string) =>
+    asVoid(
+      label,
+      sql`INSERT INTO auth_identifiers (id, user_id, type, value, verified, verified_at, created_at)
+          VALUES (${identifier.id}, ${identifier.userId}, ${identifier.type}, ${identifier.value}, ${identifier.verified ? 1 : 0}, ${identifier.verifiedAt != null ? dateToMs(identifier.verifiedAt) : null}, ${dateToMs(identifier.createdAt)})`,
+    ).pipe(Effect.as(identifier));
+
   return {
     getByValue: (type, value) =>
       firstRow(
@@ -1197,12 +1206,32 @@ export const makeIdentifierStore: Effect.Effect<
         sql<IdentifierRow>`SELECT * FROM auth_identifiers WHERE user_id = ${userId} ORDER BY created_at ASC`,
       ).pipe(Effect.map((rows) => rows.map(rowToIdentifier))),
 
-    create: (identifier) =>
-      asVoid(
-        "identifier.create",
-        sql`INSERT INTO auth_identifiers (id, user_id, type, value, verified, verified_at, created_at)
-            VALUES (${identifier.id}, ${identifier.userId}, ${identifier.type}, ${identifier.value}, ${identifier.verified ? 1 : 0}, ${identifier.verifiedAt != null ? dateToMs(identifier.verifiedAt) : null}, ${dateToMs(identifier.createdAt)})`,
-      ).pipe(Effect.as(identifier)),
+    create: (identifier) => insert(identifier, "identifier.create"),
+
+    // Claim, then release, in one transaction: a `to` another user holds fails
+    // the INSERT on the `(type, value)` unique index and rolls back, so `from`
+    // stays. On D1, which has no transactions, the two statements autocommit in
+    // the same order, so a failure between them leaves both rows, never neither.
+    replace: (from, to) => {
+      const invalid = Auth.replaceInputError(from, to);
+      if (invalid !== null) return Effect.fail(invalid);
+      return withTx(
+        "identifier.replace",
+        Effect.gen(function* () {
+          const held = yield* firstRow(
+            "identifier.replace",
+            sql<IdentifierRow>`SELECT * FROM auth_identifiers WHERE id = ${from.id} AND user_id = ${from.userId} AND type = ${from.type} AND value = ${from.value}`,
+          );
+          if (held === null) return null;
+          yield* insert(to, "identifier.replace");
+          yield* asVoid(
+            "identifier.replace",
+            sql`DELETE FROM auth_identifiers WHERE id = ${from.id}`,
+          );
+          return to;
+        }),
+      );
+    },
 
     setVerified: (id, verifiedAt) =>
       Effect.gen(function* () {

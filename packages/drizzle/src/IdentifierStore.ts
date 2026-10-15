@@ -17,8 +17,14 @@
  * - Every driver failure surfaces as `Auth.AuthError` with the original error
  *   preserved as `cause`, including the unique-index violation raised when two
  *   users race for the same `(type, value)` identifier. `Auth.claimIdentifier`
- *   in core re-reads the pair on failure and turns that race into an
- *   `IdentifierTakenError`.
+ *   and `Auth.replaceIdentifier` in core re-read the pair on failure and turn
+ *   that race into an `IdentifierTakenError`.
+ * - `replace` inserts the new identifier and then deletes the old one. The
+ *   store opens no transaction of its own: run on a handle inside the
+ *   application's transaction, the two statements commit or roll back together;
+ *   otherwise each autocommits, and a failure between them leaves the user
+ *   holding both identifiers, never neither. A value another user holds is
+ *   refused by the unique index before anything is deleted.
  */
 
 import { and, asc, eq, inArray, or } from "drizzle-orm";
@@ -66,6 +72,24 @@ export const make = (
     const column = identifiers.columns;
     const table = identifiers.table;
 
+    const insert = (identifier: Auth.Identifier, label: string) =>
+      query(label, (db) =>
+        db
+          .insert(table)
+          .values(
+            writeValues(identifiers, {
+              id: identifier.id,
+              userId: identifier.userId,
+              type: identifier.type,
+              value: identifier.value,
+              verified: identifier.verified,
+              verifiedAt: identifier.verifiedAt ?? null,
+              createdAt: identifier.createdAt,
+            }),
+          )
+          .execute(),
+      ).pipe(Effect.as(identifier));
+
     return {
       getByValue: (type, value) =>
         query("identifier.getByValue", (db) =>
@@ -96,23 +120,37 @@ export const make = (
       // racer's INSERT is rejected by the database and surfaces here as an
       // `AuthError`, which `Auth.claimIdentifier` re-reads into an
       // `IdentifierTakenError`.
-      create: (identifier) =>
-        query("identifier.create", (db) =>
-          db
-            .insert(table)
-            .values(
-              writeValues(identifiers, {
-                id: identifier.id,
-                userId: identifier.userId,
-                type: identifier.type,
-                value: identifier.value,
-                verified: identifier.verified,
-                verifiedAt: identifier.verifiedAt ?? null,
-                createdAt: identifier.createdAt,
-              }),
-            )
-            .execute(),
-        ).pipe(Effect.as(identifier)),
+      create: (identifier) => insert(identifier, "identifier.create"),
+
+      // Claim, then release: the INSERT goes first so the unique index refuses a
+      // taken value while `from` is still in place.
+      replace: (from, to) => {
+        const invalid = Auth.replaceInputError(from, to);
+        if (invalid !== null) return Effect.fail(invalid);
+        return Effect.gen(function* () {
+          const held = yield* query("identifier.replace.read", (db) =>
+            db
+              .select({ id: column.id })
+              .from(table)
+              .where(
+                and(
+                  eq(column.id, from.id),
+                  eq(column.userId, from.userId),
+                  eq(column.type, from.type),
+                  eq(column.value, from.value),
+                ),
+              )
+              .limit(1)
+              .execute(),
+          );
+          if (held.length === 0) return null;
+          yield* insert(to, "identifier.replace");
+          yield* query("identifier.replace.release", (db) =>
+            db.delete(table).where(eq(column.id, from.id)).execute(),
+          );
+          return to;
+        });
+      },
 
       // `UPDATE ... RETURNING` would be one statement, but MySQL has no
       // `RETURNING` clause, so the updated row is read back instead — the same

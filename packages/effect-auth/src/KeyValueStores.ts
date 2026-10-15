@@ -44,7 +44,12 @@ import { Effect, Layer } from "effect";
 import { KeyValueStore } from "effect/persistence";
 import * as Errors from "./Errors.ts";
 import { type EmailOtpPurpose, type EmailOtpRecord, EmailOtpStore } from "./email/EmailOtp.ts";
-import { type Identifier, IdentifierStore, type IdentifierType } from "./Identifier.ts";
+import {
+  type Identifier,
+  IdentifierStore,
+  type IdentifierType,
+  replaceInputError,
+} from "./Identifier.ts";
 import { type EmailVerification, EmailVerificationStore } from "./email/EmailVerification.ts";
 import { MagicLinkStore, type MagicLinkToken } from "./MagicLink.ts";
 import { type OAuthState, OAuthStateStore } from "./oauth/OAuth.ts";
@@ -604,17 +609,39 @@ export const identifierStoreKV: Effect.Effect<
   KeyValueStore.KeyValueStore
 > = Effect.gen(function* () {
   const kv = jsonKv(yield* KeyValueStore.KeyValueStore);
+
+  const getByValue = (type: IdentifierType, value: string, label: string) =>
+    Effect.gen(function* () {
+      const id = yield* kv.read<string>(identifierTypeValueKey(type, value), label);
+      if (id == null) return null;
+      const stored = yield* kv.read<StoredIdentifier>(identifierKey(id), label);
+      return stored == null ? null : decodeIdentifier(stored);
+    });
+
+  const create = (identifier: Identifier, label: string) =>
+    Effect.gen(function* () {
+      const stored = encodeIdentifier(identifier);
+      yield* kv.write(identifierKey(identifier.id), stored, label);
+      yield* kv.write(
+        identifierTypeValueKey(identifier.type, identifier.value),
+        identifier.id,
+        label,
+      );
+      yield* kv.indexAdd(identifierUserKey(identifier.userId), identifier.id, label);
+      return identifier;
+    });
+
+  const remove = (id: string, label: string) =>
+    Effect.gen(function* () {
+      const stored = yield* kv.read<StoredIdentifier>(identifierKey(id), label);
+      if (stored == null) return;
+      yield* kv.remove(identifierKey(id), label);
+      yield* kv.remove(identifierTypeValueKey(stored.type, stored.value), label);
+      yield* kv.indexRemove(identifierUserKey(stored.userId), id, label);
+    });
+
   return {
-    getByValue: (type, value) =>
-      Effect.gen(function* () {
-        const id = yield* kv.read<string>(
-          identifierTypeValueKey(type, value),
-          "identifier.getByValue",
-        );
-        if (id == null) return null;
-        const stored = yield* kv.read<StoredIdentifier>(identifierKey(id), "identifier.getByValue");
-        return stored == null ? null : decodeIdentifier(stored);
-      }),
+    getByValue: (type, value) => getByValue(type, value, "identifier.getByValue"),
 
     listByUser: (userId) =>
       Effect.gen(function* () {
@@ -630,21 +657,33 @@ export const identifierStoreKV: Effect.Effect<
           .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
       }),
 
-    create: (identifier) =>
+    create: (identifier) => create(identifier, "identifier.create"),
+
+    // A KeyValueStore has no transactions: the replacement is claimed before
+    // the old record is released, so a failure in between leaves the user
+    // holding both, never neither. The taken-value check is a read before the
+    // write, as everywhere in this store.
+    replace: (from, to) =>
       Effect.gen(function* () {
-        const stored = encodeIdentifier(identifier);
-        yield* kv.write(identifierKey(identifier.id), stored, "identifier.create");
-        yield* kv.write(
-          identifierTypeValueKey(identifier.type, identifier.value),
-          identifier.id,
-          "identifier.create",
-        );
-        yield* kv.indexAdd(
-          identifierUserKey(identifier.userId),
-          identifier.id,
-          "identifier.create",
-        );
-        return identifier;
+        const invalid = replaceInputError(from, to);
+        if (invalid !== null) return yield* invalid;
+        const held = yield* kv.read<StoredIdentifier>(identifierKey(from.id), "identifier.replace");
+        if (
+          held == null ||
+          held.userId !== from.userId ||
+          held.type !== from.type ||
+          held.value !== from.value
+        ) {
+          return null;
+        }
+        if ((yield* getByValue(to.type, to.value, "identifier.replace")) !== null) {
+          return yield* new Errors.AuthError({
+            message: `Identifier (${to.type}) already exists`,
+          });
+        }
+        yield* create(to, "identifier.replace");
+        yield* remove(from.id, "identifier.replace");
+        return to;
       }),
 
     setVerified: (id, verifiedAt) =>
@@ -663,14 +702,7 @@ export const identifierStoreKV: Effect.Effect<
         return decodeIdentifier(updated);
       }),
 
-    delete: (id) =>
-      Effect.gen(function* () {
-        const stored = yield* kv.read<StoredIdentifier>(identifierKey(id), "identifier.delete");
-        if (stored == null) return;
-        yield* kv.remove(identifierKey(id), "identifier.delete");
-        yield* kv.remove(identifierTypeValueKey(stored.type, stored.value), "identifier.delete");
-        yield* kv.indexRemove(identifierUserKey(stored.userId), id, "identifier.delete");
-      }),
+    delete: (id) => remove(id, "identifier.delete"),
 
     deleteByUser: (userId) =>
       Effect.gen(function* () {

@@ -1,7 +1,15 @@
 import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import { KeyValueStore } from "effect/persistence";
-import { IdentifierStore, type Identifier, primaryEmail, primaryEmailValue } from "./Identifier.ts";
+import {
+  IdentifierStore,
+  type Identifier,
+  makeIdentifier,
+  memoryIdentifierStore,
+  primaryEmail,
+  primaryEmailValue,
+  replaceIdentifier,
+} from "./Identifier.ts";
 import { IdentifierStoreKV } from "./KeyValueStores.ts";
 
 // ---------------------------------------------------------------------------
@@ -248,6 +256,119 @@ describe("IdentifierStoreKV", () => {
 // ---------------------------------------------------------------------------
 // primaryEmail helper
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// replace — the same contract over the in-memory and KeyValueStore stores
+// ---------------------------------------------------------------------------
+
+const replaceStores: ReadonlyArray<readonly [string, () => Layer.Layer<IdentifierStore>]> = [
+  ["memoryIdentifierStore", () => Layer.succeed(IdentifierStore)(memoryIdentifierStore())],
+  ["IdentifierStoreKV", testLayer],
+];
+
+for (const [label, makeLayer] of replaceStores) {
+  const runOn = <A, E>(effect: Effect.Effect<A, E, IdentifierStore>): Promise<A> =>
+    Effect.runPromise(effect.pipe(Effect.provide(makeLayer())) as Effect.Effect<A, E>);
+  const email = (userId: string, value: string, verified = false) =>
+    makeIdentifier({ userId, type: "email", value, verified });
+
+  describe(`${label}: replace`, () => {
+    it("swaps the user's identifier for the new one and releases the old value", async () => {
+      const result = await runOn(
+        Effect.gen(function* () {
+          const store = yield* IdentifierStore;
+          const alice = yield* store.create(email("user-1", "alice@example.com"));
+          const replaced = yield* store.replace(
+            alice,
+            email("user-1", "alice-new@example.com", true),
+          );
+          return {
+            replaced,
+            listed: yield* store.listByUser("user-1"),
+            old: yield* store.getByValue("email", "alice@example.com"),
+          };
+        }),
+      );
+      expect(result.replaced?.value).toBe("alice-new@example.com");
+      expect(result.listed.map((i) => [i.value, i.verified])).toEqual([
+        ["alice-new@example.com", true],
+      ]);
+      expect(result.old).toBeNull();
+    });
+
+    it("refuses a value another user holds with AuthError (IdentifierTakenError through replaceIdentifier) and keeps the old one", async () => {
+      const result = await runOn(
+        Effect.gen(function* () {
+          const store = yield* IdentifierStore;
+          const alice = yield* store.create(email("user-1", "alice@example.com", true));
+          yield* store.create(email("user-2", "bob@example.com"));
+          return {
+            refused: yield* Effect.flip(store.replace(alice, email("user-1", "bob@example.com"))),
+            taken: yield* Effect.flip(
+              replaceIdentifier(store, alice, email("user-1", "bob@example.com")),
+            ),
+            listed: yield* store.listByUser("user-1"),
+            bob: yield* store.getByValue("email", "bob@example.com"),
+          };
+        }),
+      );
+      expect(result.refused._tag).toBe("AuthError");
+      expect(result.taken._tag).toBe("IdentifierTakenError");
+      expect(result.listed.map((i) => [i.value, i.verified])).toEqual([
+        ["alice@example.com", true],
+      ]);
+      expect(result.bob?.userId).toBe("user-2");
+    });
+
+    it("resolves to null for an identifier the user no longer holds (IdentifierNotFoundError through replaceIdentifier), writing nothing", async () => {
+      const result = await runOn(
+        Effect.gen(function* () {
+          const store = yield* IdentifierStore;
+          const alice = yield* store.create(email("user-1", "alice@example.com"));
+          const stale = { ...alice, value: "alice-old@example.com" };
+          return {
+            replaced: yield* store.replace(stale, email("user-1", "alice-new@example.com")),
+            notFound: yield* Effect.flip(
+              replaceIdentifier(store, stale, email("user-1", "alice-new@example.com")),
+            ),
+            listed: yield* store.listByUser("user-1"),
+          };
+        }),
+      );
+      expect(result.replaced).toBeNull();
+      expect(result.notFound._tag).toBe("IdentifierNotFoundError");
+      expect(result.listed.map((i) => i.value)).toEqual(["alice@example.com"]);
+    });
+
+    it("refuses a replacement for another user, of another type, or of the same value", async () => {
+      const result = await runOn(
+        Effect.gen(function* () {
+          const store = yield* IdentifierStore;
+          const alice = yield* store.create(email("user-1", "alice@example.com"));
+          return {
+            otherUser: yield* Effect.flip(store.replace(alice, email("user-2", "x@example.com"))),
+            otherType: yield* Effect.flip(
+              store.replace(
+                alice,
+                makeIdentifier({ userId: "user-1", type: "username", value: "alice" }),
+              ),
+            ),
+            sameValue: yield* Effect.flip(
+              store.replace(alice, email("user-1", "alice@example.com", true)),
+            ),
+            listed: yield* store.listByUser("user-1"),
+          };
+        }),
+      );
+      expect(result.otherUser._tag).toBe("AuthError");
+      expect(result.otherType._tag).toBe("AuthError");
+      expect(result.sameValue._tag).toBe("AuthError");
+      expect(result.listed.map((i) => [i.value, i.verified])).toEqual([
+        ["alice@example.com", false],
+      ]);
+    });
+  });
+}
 
 describe("primaryEmail", () => {
   it("returns null for an empty list", () => {

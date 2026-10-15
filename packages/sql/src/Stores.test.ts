@@ -932,6 +932,70 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.afterDeleteUser).toHaveLength(0);
     });
 
+    it("IdentifierStore.replace swaps a user's identifier in one transaction, and keeps it on any refusal", async () => {
+      const email = (userId: string, value: string, verified = false) =>
+        Auth.makeIdentifier({ userId, type: "email", value, verified });
+      const result = await run(
+        Effect.gen(function* () {
+          const store = yield* Auth.IdentifierStore;
+          const ada = yield* store.create(email("user-ada", "ada@example.com", true));
+          yield* store.create(email("user-grace", "grace@example.com"));
+
+          const replaced = yield* store.replace(
+            ada,
+            email("user-ada", "ada-new@example.com", true),
+          );
+          const afterReplace = {
+            listed: yield* store.listByUser("user-ada"),
+            old: yield* store.getByValue("email", "ada@example.com"),
+          };
+
+          // A value another user holds: the INSERT is refused by the unique
+          // index and the transaction rolls back, so the user keeps their address.
+          const takenRaw = yield* Effect.flip(
+            store.replace(replaced!, email("user-ada", "grace@example.com")),
+          );
+          const taken = yield* Effect.flip(
+            Auth.replaceIdentifier(store, replaced!, email("user-ada", "grace@example.com")),
+          );
+          // `from` is no longer held: null, and nothing is written.
+          const stale = yield* store.replace(ada, email("user-ada", "ada-other@example.com"));
+          const staleTyped = yield* Effect.flip(
+            Auth.replaceIdentifier(store, ada, email("user-ada", "ada-other@example.com")),
+          );
+          // Another user's or another type's replacement is refused outright.
+          const wrongUser = yield* Effect.flip(
+            store.replace(replaced!, email("user-grace", "x@example.com")),
+          );
+          return {
+            replaced,
+            afterReplace,
+            takenRaw,
+            taken,
+            stale,
+            staleTyped,
+            wrongUser,
+            listed: yield* store.listByUser("user-ada"),
+            grace: yield* store.getByValue("email", "grace@example.com"),
+            other: yield* store.getByValue("email", "ada-other@example.com"),
+          };
+        }),
+      );
+      expect(result.replaced?.value).toBe("ada-new@example.com");
+      expect(result.afterReplace.old).toBeNull();
+      expect(result.afterReplace.listed.map((i) => [i.value, i.verified])).toEqual([
+        ["ada-new@example.com", true],
+      ]);
+      expect(result.takenRaw._tag).toBe("AuthError");
+      expect(result.taken._tag).toBe("IdentifierTakenError");
+      expect(result.stale).toBeNull();
+      expect(result.staleTyped._tag).toBe("IdentifierNotFoundError");
+      expect(result.wrongUser._tag).toBe("AuthError");
+      expect(result.listed.map((i) => i.value)).toEqual(["ada-new@example.com"]);
+      expect(result.grace?.userId).toBe("user-grace");
+      expect(result.other).toBeNull();
+    });
+
     it("ApiKeyStore roundtrips full records incl. permissions/metadata/refill/rateLimit", async () => {
       const now = Date.now();
       const apiKey: Auth.ApiKey = {

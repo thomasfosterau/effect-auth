@@ -19,7 +19,14 @@ import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 import { SessionService } from "./SessionService.ts";
 import { normalizeEmail } from "./utils.ts";
-import { anyEmailValue, claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
+import {
+  anyEmail,
+  anyEmailValue,
+  claimIdentifier,
+  IdentifierStore,
+  makeIdentifier,
+  replaceIdentifier,
+} from "./Identifier.ts";
 
 /** Which flow a pending token belongs to. */
 export type AccountTokenPurpose = "change-email" | "delete-account";
@@ -126,15 +133,17 @@ export class AccountManagementService extends Context.Service<
     >;
 
     /**
-     * Confirm an email change by token: claims the new address as verified,
-     * then releases the previous one. If the claim fails (the address was taken
-     * meanwhile, or the store failed) the previous address is left in place and
-     * the token is not consumed.
+     * Confirm an email change by token: replaces the user's email of record
+     * with the new address, verified, through `IdentifierStore.replace`, then
+     * releases any other email the user holds. If the replacement fails (the
+     * address was taken meanwhile, or the store failed) the previous address
+     * is left in place and the token is not consumed. A user with no email
+     * claims the new address instead.
      *
-     * A store that holds one email per user (the single-table store in
-     * `@thomasfosterau/effect-auth-drizzle`) refuses the claim while the user
-     * still holds their current address, so the change fails with an
-     * `AuthError` and the previous address is kept.
+     * Every identifier store supports it, including one that holds a single
+     * email per user (the single-table store in
+     * `@thomasfosterau/effect-auth-drizzle`), whose `replace` rewrites that
+     * one address in place.
      */
     readonly confirmEmailChange: (
       token: string,
@@ -246,7 +255,8 @@ export const make = (
           });
         }
         const currentIdentifiers = yield* identifiers.listByUser(user.id);
-        const oldEmail = anyEmailValue(currentIdentifiers);
+        const current = anyEmail(currentIdentifiers);
+        const oldEmail = current?.value ?? null;
         const newEmail = record.newEmail;
 
         // Re-check uniqueness at confirm time (the address may have been
@@ -257,35 +267,49 @@ export const make = (
           return yield* new AccountTokenError({ message: "Email already in use" });
         }
 
-        // Claim the confirmed address first (the token proved ownership), then
-        // release the previous one. A failed claim, whether another account took
-        // the address meanwhile or the store failed, leaves the user's previous
-        // address in place and verified.
+        // Swap the email of record for the confirmed address (the token proved
+        // ownership) in one store call: the store claims the new address before
+        // it releases the previous one, or does both at once. A failed claim,
+        // whether another account took the address meanwhile or the store
+        // failed, leaves the user's previous address in place and verified.
+        let replaced: string | null = null;
         if (clash === null) {
-          yield* claimIdentifier(
-            identifiers,
-            makeIdentifier({
-              userId: user.id,
-              type: "email",
-              value: newEmail,
-              verified: true,
-              verifiedAt: new Date(),
-            }),
+          const next = makeIdentifier({
+            userId: user.id,
+            type: "email",
+            value: newEmail,
+            verified: true,
+            verifiedAt: new Date(),
+          });
+          yield* (
+            current === null
+              ? claimIdentifier(identifiers, next)
+              : replaceIdentifier(identifiers, current, next)
           ).pipe(
-            Effect.catchTag("IdentifierTakenError", () =>
-              Effect.fail(new AccountTokenError({ message: "Email already in use" })),
-            ),
+            Effect.catchTags({
+              IdentifierTakenError: () =>
+                Effect.fail(new AccountTokenError({ message: "Email already in use" })),
+              IdentifierNotFoundError: () =>
+                Effect.fail(
+                  new Errors.AuthError({
+                    message: "The account's email changed during the confirmation; try again",
+                  }),
+                ),
+            }),
           );
+          replaced = current?.id ?? null;
         } else if (!clash.verified) {
           // Already this user's identifier — the token proves ownership.
           yield* identifiers.setVerified(clash.id, new Date());
         }
 
-        // Release every other email identifier. This also runs when the new
-        // address is already this user's, so a retry after a failed release
-        // converges instead of leaving the previous address behind.
+        // Release every other email identifier the user held. This also runs
+        // when the new address is already this user's, so a retry after a
+        // failed release converges instead of leaving a previous address
+        // behind. The replaced identifier is skipped: it is gone, and a store
+        // that keeps one email per user reuses its id for the new address.
         for (const id of currentIdentifiers) {
-          if (id.type === "email" && id.value !== newEmail) {
+          if (id.type === "email" && id.value !== newEmail && id.id !== replaced) {
             yield* identifiers.delete(id.id);
           }
         }
