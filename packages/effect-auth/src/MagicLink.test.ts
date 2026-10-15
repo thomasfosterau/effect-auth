@@ -107,17 +107,26 @@ const magicLinkUserStore = {
 /** The `identifier` each `createUser` call was given. */
 const createdWith: Array<MagicLinkCreateUserInput["identifier"]> = [];
 
+/** The name of each `MagicLinkStore` call, in order. */
+const storeOps: string[] = [];
+
 const magicLinkStore = {
   create: (token: MagicLinkToken) =>
     Effect.sync(() => {
+      storeOps.push("create");
       magicLinkTokens.set(token.token, token);
       return token;
     }),
 
-  get: (token: string) => Effect.sync(() => magicLinkTokens.get(token) ?? null),
+  get: (token: string) =>
+    Effect.sync(() => {
+      storeOps.push("get");
+      return magicLinkTokens.get(token) ?? null;
+    }),
 
   getByEmail: (email: string) =>
     Effect.sync(() => {
+      storeOps.push("getByEmail");
       for (const token of magicLinkTokens.values()) {
         if (token.email === email) return token;
       }
@@ -126,11 +135,13 @@ const magicLinkStore = {
 
   delete: (token: string) =>
     Effect.sync(() => {
+      storeOps.push("delete");
       magicLinkTokens.delete(token);
     }),
 
   deleteByEmail: (email: string) =>
     Effect.sync(() => {
+      storeOps.push("deleteByEmail");
       for (const [token, magicLink] of magicLinkTokens.entries()) {
         if (magicLink.email === email) {
           magicLinkTokens.delete(token);
@@ -187,6 +198,7 @@ describe("MagicLinkService", () => {
     magicLinkTokens.clear();
     sessions.clear();
     sentLinks.splice(0, sentLinks.length);
+    storeOps.length = 0;
     createdWith.length = 0;
   });
 
@@ -249,7 +261,7 @@ describe("MagicLinkService", () => {
     expect(magicLinkTokens.has(hashToken(sentLinks[0]!.token))).toBe(false);
   });
 
-  it("should not send or store anything for unknown emails when sign-up is disabled", async () => {
+  it("should not send to unknown emails when sign-up is disabled, storing a marker token", async () => {
     const testContext = await makeTestContext();
 
     const program = Effect.gen(function* () {
@@ -260,13 +272,40 @@ describe("MagicLinkService", () => {
       yield* service.send("stranger@example.com");
     });
 
-    // Anti-enumeration: succeeds silently.
+    // Anti-enumeration: succeeds without sending, and stores an undelivered
+    // marker token as it would a link's (#417).
     await Effect.runPromise(
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(sentLinks.length).toBe(0);
-    expect(magicLinkTokens.size).toBe(0);
+    expect([...magicLinkTokens.values()].map((token) => token.email)).toEqual([
+      "stranger@example.com",
+    ]);
+  });
+
+  // #417: without a cooldown, the unknown branch must do the store work the
+  // known branch does, or its timing reveals the account.
+  it("does the same store work to send to a known and an unknown email without a cooldown", async () => {
+    const testContext = await makeTestContext();
+    addUser({ id: "user-member", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addEmailIdentifier("user-member", "member@example.com", true);
+
+    const program = Effect.gen(function* () {
+      const service = yield* MagicLink.make({ disableSignUp: true, sendMagicLink: recordingSend });
+      yield* service.send("member@example.com");
+      const knownOps = storeOps.splice(0);
+      yield* service.send("missing@example.com");
+      return { knownOps, unknownOps: storeOps.splice(0) };
+    });
+
+    const { knownOps, unknownOps } = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(unknownOps).toEqual(knownOps);
+    expect(knownOps).toEqual(["deleteByEmail", "create"]);
+    expect(sentLinks.map((sent) => sent.email)).toEqual(["member@example.com"]);
   });
 
   it("should send to existing users when sign-up is disabled", async () => {

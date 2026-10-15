@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vite-plus/test";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test";
 import { Data, Deferred, Effect, Fiber, FileSystem, Layer, Logger, Path, Redacted } from "effect";
 import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
@@ -80,6 +80,7 @@ import { IPRateLimitPlugin } from "../plugins/IPRateLimit.ts";
 import { NormalizeEmailPlugin } from "../plugins/NormalizeEmail.ts";
 import { AuthApi } from "./HttpApi.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
+import { verifySequences, wrongCode } from "../testing/Passwordless.ts";
 
 const HOUR = 60 * 60 * 1000;
 const SESSION_CONFIG: Types.SessionConfig = {
@@ -128,10 +129,19 @@ const makeFixture = (
     readonly deviceAllowMissingRateLimiter?: boolean | undefined;
     /** Shared config for the magic-link, email OTP and phone OTP services. */
     readonly passwordless?:
-      | { readonly disableSignUp: boolean; readonly resendCooldown: number }
+      | { readonly disableSignUp: boolean; readonly resendCooldown?: number | undefined }
       | undefined;
   } = {},
 ): Fixture => {
+  const passwordless =
+    options.passwordless === undefined
+      ? {}
+      : {
+          disableSignUp: options.passwordless.disableSignUp,
+          ...(options.passwordless.resendCooldown !== undefined && {
+            resendCooldown: options.passwordless.resendCooldown,
+          }),
+        };
   // --- shared in-memory state -----------------------------------------------
   const usersById = new Map<string, Types.User>();
   const identifierRecords = new Map<string, Identifier>();
@@ -490,7 +500,7 @@ const makeFixture = (
       allowMissingRateLimiter: options.deviceAllowMissingRateLimiter,
     }).pipe(Layer.provide(featureBase)),
     PhoneOtpService.layer({
-      ...options.passwordless,
+      ...passwordless,
       sendOtp: (phoneNumber, otp, purpose) =>
         Effect.sync(() => void sentPhoneOtps.push({ phoneNumber, otp, purpose })),
     }).pipe(Layer.provide(featureBase)),
@@ -502,11 +512,11 @@ const makeFixture = (
       beforeDelete: (user) => Effect.sync(() => void beforeDeleteCalls.push(user.id)),
     }).pipe(Layer.provide(featureBase)),
     MagicLinkService.layer({
-      ...options.passwordless,
+      ...passwordless,
       sendMagicLink: (_email, token) => Effect.sync(() => void sentMagicLinkTokens.push(token)),
     }).pipe(Layer.provide(featureBase)),
     EmailOtpService.layer({
-      ...options.passwordless,
+      ...passwordless,
       sendVerificationOtp: (email, otp, purpose) =>
         Effect.sync(() => void sentOtps.push({ email, otp, purpose })),
     }).pipe(Layer.provide(featureBase)),
@@ -1699,6 +1709,143 @@ describe("passwordless send within the resend cooldown", () => {
       expect(
         fixture.sentMagicLinkTokens.length + fixture.sentOtps.length + fixture.sentPhoneOtps.length,
       ).toBe(sentBefore + 1);
+    },
+  );
+});
+
+// #417: where a passwordless send hides whether the address has an account,
+// the verify endpoint must answer an address that holds an outstanding code
+// exactly as it answers one that holds a marker record or nothing at all:
+// through wrong codes, the attempt limit and expiry.
+describe("passwordless verify where send hides the account", () => {
+  const expiresIn = 5 * 60 * 1000;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Everything a caller can observe of a response. */
+  const observe = async (response: Response) => ({
+    status: response.status,
+    headers: Array.from(response.headers.entries()),
+    body: await response.text(),
+  });
+
+  const flows = [
+    {
+      flow: "email OTP sign-in",
+      send: "/email-otp/send",
+      verify: "/sign-in/email-otp",
+      sendPayload: (email: string, _phone: string) => ({ email, purpose: "sign-in" }),
+      verifyPayload: (email: string, _phone: string) => ({ email, otp: wrongCode }),
+    },
+    {
+      flow: "phone OTP sign-in",
+      send: "/phone-otp/send",
+      verify: "/sign-in/phone-otp",
+      sendPayload: (_email: string, phoneNumber: string) => ({ phoneNumber, purpose: "sign-in" }),
+      verifyPayload: (_email: string, phoneNumber: string) => ({ phoneNumber, otp: wrongCode }),
+    },
+  ] as const;
+
+  /** A fixture with one account, holding `member@example.com` and `+15557770001`. */
+  const setUp = async (disableSignUp: boolean) => {
+    const fixture = makeFixture({ passwordless: { disableSignUp } });
+    const handler = handlerFor(fixture, { features: true });
+    const up = await handler(
+      jsonRequest("/sign-up", { email: "member@example.com", password: PW }),
+    );
+    expect(up.status).toBe(200);
+    const user = ((await up.json()) as { user: { id: string } }).user;
+    fixture.registerPhone(user.id, "+15557770001");
+    return { fixture, handler };
+  };
+
+  /** Run `sequence` for one address, requesting a code first when `send` is set. */
+  const run = async (
+    handler: Handler,
+    { send, verify, sendPayload, verifyPayload }: (typeof flows)[number],
+    sequence: (typeof verifySequences)[number],
+    address: { readonly email: string; readonly phone: string; readonly send: boolean },
+  ) => {
+    const steps: Array<Awaited<ReturnType<typeof observe>>> = [];
+    if (address.send) {
+      steps.push(
+        await observe(await handler(jsonRequest(send, sendPayload(address.email, address.phone)))),
+      );
+    }
+    if (sequence === "expired code") {
+      vi.setSystemTime(Date.now() + expiresIn + 1);
+    }
+    const tries = sequence === "wrong codes" ? 4 : 2;
+    for (let i = 0; i < tries; i++) {
+      steps.push(
+        await observe(
+          await handler(jsonRequest(verify, verifyPayload(address.email, address.phone))),
+        ),
+      );
+    }
+    return steps;
+  };
+
+  const messageOf = (response: { readonly body: string }) =>
+    (JSON.parse(response.body) as { message?: string }).message;
+
+  it.each(flows.flatMap((flow) => verifySequences.map((sequence) => ({ ...flow, sequence }))))(
+    "answers $sequence alike for every address: $flow (disableSignUp: true)",
+    async ({ sequence, ...flow }) => {
+      const { fixture, handler } = await setUp(true);
+
+      const known = await run(handler, flow, sequence, {
+        email: "member@example.com",
+        phone: "+15557770001",
+        send: true,
+      });
+      const unknown = await run(handler, flow, sequence, {
+        email: "missing@example.com",
+        phone: "+15557770002",
+        send: true,
+      });
+      const unrequested = await run(handler, flow, sequence, {
+        email: "absent@example.com",
+        phone: "+15557770003",
+        send: false,
+      });
+
+      expect(unknown).toEqual(known);
+      expect(unrequested).toEqual(known.slice(1));
+      expect(known[0]?.status).toBe(200);
+      expect(known.slice(1).map((response) => [response.status, messageOf(response)])).toEqual(
+        known.slice(1).map(() => [400, "Invalid or expired OTP"]),
+      );
+      // Only the account holder was sent a code.
+      expect(fixture.sentOtps.length + fixture.sentPhoneOtps.length).toBe(1);
+    },
+  );
+
+  it.each(flows)(
+    "keeps the expiry and attempt-limit answers where sign-up is enabled: $flow",
+    async (flow) => {
+      const { handler } = await setUp(false);
+      const member = { email: "member@example.com", phone: "+15557770001", send: true };
+
+      const wrong = await run(handler, flow, "wrong codes", member);
+      const expired = await run(handler, flow, "expired code", member);
+
+      expect(wrong.slice(1).map(messageOf)).toEqual([
+        "Invalid or expired OTP",
+        "Invalid or expired OTP",
+        "Too many attempts",
+        "Invalid or expired OTP",
+      ]);
+      expect(expired.slice(1).map(messageOf)).toEqual([
+        "OTP has expired",
+        "Invalid or expired OTP",
+      ]);
     },
   );
 });

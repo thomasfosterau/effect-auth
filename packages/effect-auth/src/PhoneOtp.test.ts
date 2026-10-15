@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { Context, Crypto, Effect } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -22,7 +22,14 @@ import { UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import { Hooks } from "./Hooks.ts";
 import type * as Types from "./Types.ts";
-import { observable, zeroCrypto } from "./testing/Passwordless.ts";
+import {
+  observable,
+  type RecordState,
+  runVerifySequence,
+  verifySequences,
+  wrongCode,
+  zeroCrypto,
+} from "./testing/Passwordless.ts";
 
 // --- in-memory state ---------------------------------------------------------
 const users = new Map<string, Types.User>();
@@ -37,16 +44,29 @@ const sentOtps: Array<{ phoneNumber: string; otp: string; purpose: PhoneOtpPurpo
 
 const key = (phone: string, purpose: PhoneOtpPurpose) => `${phone}:${purpose}`;
 
+/** The name of each `PhoneOtpStore` call, in order. */
+const storeOps: string[] = [];
+
 const phoneOtpStore: typeof PhoneOtpStore.Service = {
   upsert: (record) =>
     Effect.sync(() => {
+      storeOps.push("upsert");
       records.set(key(record.phoneNumber, record.purpose), record);
       return record;
     }),
-  get: (phone, purpose) => Effect.sync(() => records.get(key(phone, purpose)) ?? null),
-  delete: (phone, purpose) => Effect.sync(() => void records.delete(key(phone, purpose))),
+  get: (phone, purpose) =>
+    Effect.sync(() => {
+      storeOps.push("get");
+      return records.get(key(phone, purpose)) ?? null;
+    }),
+  delete: (phone, purpose) =>
+    Effect.sync(() => {
+      storeOps.push("delete");
+      records.delete(key(phone, purpose));
+    }),
   incrementAttempts: (phone, purpose) =>
     Effect.sync(() => {
+      storeOps.push("incrementAttempts");
       const record = records.get(key(phone, purpose));
       if (!record) return 0;
       const updated = { ...record, attempts: record.attempts + 1 };
@@ -163,6 +183,7 @@ describe("PhoneOtpService", () => {
     records.clear();
     sessions.clear();
     sentOtps.length = 0;
+    storeOps.length = 0;
     seq = 0;
     createdWith.length = 0;
   });
@@ -276,7 +297,7 @@ describe("PhoneOtpService", () => {
     expect(outcome).toEqual(["Failure", "Failure", "Failure", "Failure"]);
   });
 
-  it("does not create a user or send when sign-up is disabled and no user exists", async () => {
+  it("does not create a user or send when sign-up is disabled and no user exists, storing a marker", async () => {
     const testContext = await makeTestContext();
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -288,7 +309,9 @@ describe("PhoneOtpService", () => {
       }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
     );
     expect(sentOtps).toHaveLength(0);
-    expect(records.size).toBe(0);
+    // An undelivered marker record stands in for the code (#417).
+    expect(records.get("+15551236666:sign-in")?.attempts).toBe(0);
+    expect(users.size).toBe(0);
   });
 
   it("verifies an existing user's phone number", async () => {
@@ -467,5 +490,150 @@ describe("PhoneOtpService", () => {
     expect(error).toMatchObject({ _tag: "PhoneOtpError", message: "Invalid or expired OTP" });
     expect(users.size).toBe(1);
     expect(createdWith).toEqual([]);
+  });
+});
+
+// #417: with sign-up disabled, `send` hides whether the number has an account,
+// so verification must answer a number that holds an outstanding code exactly
+// as it answers one that holds a marker record or nothing at all: through
+// wrong codes, the attempt limit and expiry.
+describe("PhoneOtpService verification where send hides the account (#417)", () => {
+  const maxAttempts = 3;
+  const expiresIn = 5 * 60 * 1000;
+  const member = "+15559990100";
+  const invalid = { _tag: "Failure", error: "PhoneOtpError", message: "Invalid or expired OTP" };
+
+  beforeEach(() => {
+    users.clear();
+    identifierRecords.clear();
+    records.clear();
+    sessions.clear();
+    sentOtps.length = 0;
+    storeOps.length = 0;
+    seq = 0;
+    createdWith.length = 0;
+    seedPhoneUser(member, true);
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const recordOf = (phoneNumber: string) => (): RecordState | null => {
+    const record = records.get(key(phoneNumber, "sign-in"));
+    return record === undefined
+      ? null
+      : { attempts: record.attempts, lifetime: record.expiresAt - record.createdAt };
+  };
+
+  /** Run `sequence` for `phoneNumber`, requesting a code first when `send` is set. */
+  const run = (
+    disableSignUp: boolean,
+    sequence: (typeof verifySequences)[number],
+    phoneNumber: string,
+    send: boolean,
+  ) =>
+    Effect.gen(function* () {
+      const service = yield* PhoneOtp.make({
+        maxAttempts,
+        expiresIn,
+        disableSignUp,
+        sendOtp: recordingSend,
+      });
+      return yield* runVerifySequence(sequence, {
+        maxAttempts,
+        expiresIn,
+        send: send ? service.send(phoneNumber, "sign-in") : undefined,
+        verify: service.signIn(phoneNumber, wrongCode),
+        record: recordOf(phoneNumber),
+      });
+    });
+
+  const runPromise = <A, E>(
+    program: Effect.Effect<
+      A,
+      E,
+      | PhoneOtpStore
+      | PhoneOtpUserStore
+      | IdentifierStore
+      | UserStore
+      | SessionService
+      | Crypto.Crypto
+    >,
+  ) =>
+    makeTestContext().then((context) =>
+      Effect.runPromise(program.pipe(Effect.provide(context), Effect.provide(Hooks.Default))),
+    );
+
+  it.each(verifySequences)("answers %s alike for every number", async (sequence) => {
+    const { known, unknown, unrequested } = await runPromise(
+      Effect.gen(function* () {
+        return {
+          known: yield* run(true, sequence, member, true),
+          unknown: yield* run(true, sequence, "+15559990101", true),
+          unrequested: yield* run(true, sequence, "+15559990102", false),
+        };
+      }),
+    );
+
+    // The unknown number's marker record is counted and expired exactly as
+    // the account holder's code record, and every answer matches.
+    expect(unknown).toEqual(known);
+    const lifetime = expiresIn;
+    expect(known.map((step) => step.record)).toEqual(
+      sequence === "wrong codes"
+        ? [
+            { attempts: 0, lifetime },
+            { attempts: 1, lifetime },
+            { attempts: 2, lifetime },
+            null,
+            null,
+          ]
+        : [{ attempts: 0, lifetime }, null, null],
+    );
+    // A number holding no record at all answers the same.
+    expect(unrequested.map((step) => step.answer)).toEqual(known.map((step) => step.answer));
+    expect(known.slice(1).map((step) => step.answer)).toEqual(known.slice(1).map(() => invalid));
+    expect(sentOtps.map((sent) => sent.phoneNumber)).toEqual([member]);
+  });
+
+  it("keeps the expiry and attempt-limit answers where sign-up is enabled", async () => {
+    const { wrong, expired } = await runPromise(
+      Effect.gen(function* () {
+        return {
+          wrong: yield* run(false, "wrong codes", member, true),
+          expired: yield* run(false, "expired code", member, true),
+        };
+      }),
+    );
+
+    const answer = (message: string) => ({ _tag: "Failure", error: "PhoneOtpError", message });
+    expect(wrong.slice(1).map((step) => step.answer)).toEqual([
+      invalid,
+      invalid,
+      answer("Too many attempts"),
+      invalid,
+    ]);
+    expect(expired.slice(1).map((step) => step.answer)).toEqual([
+      answer("OTP has expired"),
+      invalid,
+    ]);
+  });
+
+  it("does the same store work to send to a known and an unknown number without a cooldown", async () => {
+    const { knownOps, unknownOps } = await runPromise(
+      Effect.gen(function* () {
+        const service = yield* PhoneOtp.make({ disableSignUp: true, sendOtp: recordingSend });
+        yield* service.send(member, "sign-in");
+        const knownOps = storeOps.splice(0);
+        yield* service.send("+15559990101", "sign-in");
+        return { knownOps, unknownOps: storeOps.splice(0) };
+      }),
+    );
+
+    expect(unknownOps).toEqual(knownOps);
+    expect(knownOps).toEqual(["upsert"]);
+    expect(recordOf("+15559990101")()).toEqual(recordOf(member)());
   });
 });
