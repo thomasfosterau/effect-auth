@@ -1,8 +1,9 @@
 /**
  * effect-auth-sql keeps identifiers in `auth_identifiers`, apart from the user
  * row, so it ignores the `identifier` core passes to `createUser` (#380): every
- * `createUser` seam inserts the user with no identifier, and the claim that
- * follows records the address, as it does without the field.
+ * `createUser` seam inserts the user with no identifier and reports
+ * `created: true`, and the claim that follows records the address, as it does
+ * without the field.
  */
 
 import type { PGlite } from "@electric-sql/pglite";
@@ -40,7 +41,7 @@ const identifierFor = (value: string): Auth.NewUserIdentifier => ({
 });
 
 describe("effect-auth-sql: createUser ignores the identifier", () => {
-  it("every createUser seam inserts the user without an identifier", async () => {
+  it("every createUser seam inserts a new user without an identifier", async () => {
     const result = await run(
       Effect.gen(function* () {
         const identifiers = yield* Auth.IdentifierStore;
@@ -62,12 +63,14 @@ describe("effect-auth-sql: createUser ignores the identifier", () => {
           }),
         ];
         const held = [];
-        for (const user of created) held.push(...(yield* identifiers.listByUser(user.id)));
+        for (const { user } of created) held.push(...(yield* identifiers.listByUser(user.id)));
         return { created, held };
       }),
     );
 
     expect(result.created).toHaveLength(5);
+    // A plain insert: each one reports a new user.
+    expect(result.created.map(({ created }) => created)).toEqual([true, true, true, true, true]);
     expect(result.held).toEqual([]);
   });
 

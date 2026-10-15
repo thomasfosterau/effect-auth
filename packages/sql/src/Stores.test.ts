@@ -216,7 +216,7 @@ const makeUser = (email: string) =>
   Effect.gen(function* () {
     const store = yield* Auth.Email.EmailPasswordStore;
     const identifiers = yield* Auth.IdentifierStore;
-    const user = yield* store.createUser({ name: "Test User", attributes: { plan: "pro" } });
+    const { user } = yield* store.createUser({ name: "Test User", attributes: { plan: "pro" } });
     yield* identifiers.create(
       Auth.makeIdentifier({ userId: user.id, type: "email", value: email }),
     );
@@ -642,7 +642,7 @@ const storeContract = (engine: StoreEngine): void => {
       const result = await run(
         Effect.gen(function* () {
           const store = yield* Auth.OAuth.OAuthUserStore;
-          const created = yield* store.createUser({
+          const { user: created } = yield* store.createUser({
             name: "OAuth User",
             image: "https://example.com/pic.png",
           });
@@ -705,7 +705,7 @@ const storeContract = (engine: StoreEngine): void => {
           yield* store.deleteByEmail("a@example.com");
           const two = yield* store.get("ml-2");
           const three = yield* store.get("ml-3");
-          const user = yield* userStore.createUser({ name: "Magic User" });
+          const { user } = yield* userStore.createUser({ name: "Magic User" });
           return { loaded, two, three, user };
         }),
       );
@@ -740,7 +740,7 @@ const storeContract = (engine: StoreEngine): void => {
           const missingIncrement = yield* Effect.flip(
             store.incrementAttempts("otp@example.com", "sign-in"),
           );
-          const user = yield* userStore.createUser({ name: "OTP User" });
+          const { user } = yield* userStore.createUser({ name: "OTP User" });
           return { attempts1, attempts2, replaced, other, deleted, missingIncrement, user };
         }),
       );
@@ -1155,7 +1155,10 @@ const storeContract = (engine: StoreEngine): void => {
           const emailPassword = yield* Auth.Email.EmailPasswordStore;
           const alice = yield* makeUser("alice@example.com");
           const bob = yield* makeUser("bob@example.com");
-          const created = yield* store.createUser({ name: "Carol", attributes: { role: "admin" } });
+          const { user: created } = yield* store.createUser({
+            name: "Carol",
+            attributes: { role: "admin" },
+          });
 
           const all = yield* store.listUsers({});
           const page = yield* store.listUsers({ limit: 2, offset: 1 });

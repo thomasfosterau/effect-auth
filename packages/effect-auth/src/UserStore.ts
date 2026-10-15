@@ -33,8 +33,9 @@ export class UserStore extends Context.Service<
  * straight after the user row exists ({@link createUserWithIdentifier}). A store
  * that keeps the address on the user row itself, such as effect-auth-drizzle's
  * single-table store with a `NOT NULL` `email` column, writes it into the row
- * on insert, and the claim that follows finds it already there. A store that
- * keeps identifiers in a table of their own ignores the field.
+ * on insert and reports `created: true` ({@link CreateUserResult}), and the
+ * claim that follows finds it already there. A store that keeps identifiers in
+ * a table of their own ignores the field.
  */
 export interface NewUserIdentifier {
   readonly type: IdentifierType;
@@ -45,54 +46,90 @@ export interface NewUserIdentifier {
   readonly verifiedAt?: Date | undefined;
 }
 
-/** `error`, or an {@link IdentifierTakenError} when another user holds `identifier`. */
+/**
+ * What a store's `createUser` resolves to: the user, and whether this call
+ * inserted it.
+ *
+ * `created` is `true` only when this call inserted a new user. A writer that
+ * upserts, or finds or creates on the address, and returns a user that already
+ * existed reports `false`, and the flow that called it fails with
+ * {@link IdentifierTakenError} without writing anything to that user (no
+ * password, no linked account, no verified address). The flag is what lets core
+ * treat an address the store wrote on insert as the new user's own (see
+ * {@link createUserWithIdentifier}), so a writer reports it honestly.
+ */
+export interface CreateUserResult {
+  readonly user: Types.User;
+  /** `true` only when this call inserted `user`; `false` when it returned an existing user. */
+  readonly created: boolean;
+}
+
+const takenError = (identifier: NewUserIdentifier): IdentifierTakenError =>
+  new IdentifierTakenError({
+    message: `This ${identifier.type} is already in use`,
+    identifierType: identifier.type,
+  });
+
+/**
+ * `error`, or an {@link IdentifierTakenError} when another user holds
+ * `identifier`. A failed lookup keeps `error`.
+ */
 const takenOr = <E>(
   store: typeof IdentifierStore.Service,
   identifier: NewUserIdentifier,
   error: E,
-): Effect.Effect<never, E | Errors.AuthError | IdentifierTakenError> =>
+): Effect.Effect<never, E | IdentifierTakenError> =>
   Effect.gen(function* () {
-    const held = yield* store.getByValue(identifier.type, identifier.value);
+    const held = yield* store
+      .getByValue(identifier.type, identifier.value)
+      .pipe(Effect.orElseSucceed(() => null));
     if (held === null) return yield* Effect.fail(error);
-    return yield* new IdentifierTakenError({
-      message: `This ${identifier.type} is already in use`,
-      identifierType: identifier.type,
-    });
+    return yield* takenError(identifier);
   });
 
 /**
  * Create a user with `create` and record the {@link NewUserIdentifier} it was
  * created with, through {@link claimIdentifier}.
  *
- * `create` receives `identifier` to pass on as its input's `identifier` field.
- * When the store wrote the handle into the user row on insert, the claim finds
- * it already held by this same user: that is the claim succeeding, not a
- * conflict, and the result carries the held record. A held record that is
- * unverified while `identifier` says verified is marked verified, so the user
- * ends up in the state the flow asked for.
+ * `create` receives `identifier` to pass on as its input's `identifier` field,
+ * and resolves to a {@link CreateUserResult}.
+ *
+ * - **`created: false`** (the store returned a user that already existed, as an
+ *   upsert or a find-or-create on the address does) fails with
+ *   {@link IdentifierTakenError}. Nothing is claimed, and the flow writes
+ *   nothing to that user.
+ * - **`created: true`**: the claim runs. When the store wrote the handle into
+ *   the user row on insert, the claim finds it already held by this new user:
+ *   that is the claim succeeding, not a conflict, and the result carries the
+ *   held record. A held record that is unverified while `identifier` says
+ *   verified is marked verified, so the user ends up in the state the flow
+ *   asked for.
  *
  * A handle another user holds fails with {@link IdentifierTakenError}, both when
  * the claim loses to it and when `create` fails with `AuthError` because the
  * store's unique index on the row's address rejected the insert. Any other
- * failure of `create` passes through. As with {@link claimIdentifier}, a user
+ * failure of `create` passes through, as does an `AuthError` when the address
+ * is not held or the lookup fails. As with {@link claimIdentifier}, a user
  * created before the claim fails is left without the handle.
  */
 export const createUserWithIdentifier = <E, R>(
   store: typeof IdentifierStore.Service,
   identifier: NewUserIdentifier,
-  create: (identifier: NewUserIdentifier) => Effect.Effect<Types.User, E, R>,
+  create: (identifier: NewUserIdentifier) => Effect.Effect<CreateUserResult, E, R>,
 ): Effect.Effect<
   { readonly user: Types.User; readonly identifier: Identifier },
   E | Errors.AuthError | IdentifierTakenError,
   R
 > =>
   Effect.gen(function* () {
-    const user = yield* create(identifier).pipe(
+    const { user, created } = yield* create(identifier).pipe(
       Effect.catchIf(
         (error): error is E & Errors.AuthError => error instanceof Errors.AuthError,
         (error) => takenOr(store, identifier, error),
       ),
     );
+    // Only a fresh insert may treat the address it holds as its own.
+    if (!created) return yield* takenError(identifier);
     const claimed = yield* claimIdentifier(
       store,
       makeIdentifier({

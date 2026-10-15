@@ -306,6 +306,8 @@ Provide `storesLayer` underneath `Auth.SessionService.layer(config)` and whichev
 
 A store contract's methods correspond 1:1 to what the feature that owns it needs — there's no unused surface to stub out. If your app never enables WebAuthn, you never implement `ChallengeStore`/`CredentialStore`; if you don't mount the OIDC provider, `OidcClientStore`/`OidcCodeStore`/`OidcTokenStore`/ `OidcConsentStore` don't exist for you. A handful of methods are themselves optional on the interface (`OAuthAccountStore.hasPassword`, `OAuthUserStore.updateUser`, `OidcTokenStore.listByFamily`) — each is documented at the call site with what's skipped when it's absent.
 
+Every store that creates users (`EmailPasswordStore`, `OAuthUserStore`, `MagicLinkUserStore`, `EmailOtpUserStore`, `PhoneOtpUserStore`, `AdminUserStore`, `ScimUserStore`) resolves its `createUser` (`create` on `ScimUserStore`) to `Auth.CreateUserResult`, `{ user, created }`. Report `created: true` only for a user this call inserted. A writer that upserts, or finds or creates on the address, reports `created: false` when it returns a user who already existed; the flow then fails with the address in use and writes nothing to that user (no password, no linked account, no verified address). The input's optional `identifier` carries the address the user is created with, for a store that keeps it on the user row; a store with an identifiers table of its own can ignore it.
+
 ## 5. Every store contract in core
 
 Grouped by cluster, in the same order the source is organized. "Namespace" is how you reach it from `import * as Auth from "@thomasfosterau/effect-auth"` (a bare name is exported at the package root); "Powers" names the service that consumes it.

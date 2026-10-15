@@ -126,7 +126,7 @@ const adminUserStore = {
         attributes: input.attributes ?? {},
       };
       users.set(id, user);
-      return user;
+      return { user, created: true };
     }),
 
   setPasswordHash: (userId: string, hash: string) =>
@@ -152,7 +152,10 @@ const sessionConfig: SessionConfig = {
   },
 };
 
-const makeTestContext = async (hooksLayer: Layer.Layer<Hooks> = Hooks.Default) => {
+const makeTestContext = async (
+  hooksLayer: Layer.Layer<Hooks> = Hooks.Default,
+  store: typeof AdminUserStore.Service = adminUserStore,
+) => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
       make(sessionConfig),
@@ -170,7 +173,7 @@ const makeTestContext = async (hooksLayer: Layer.Layer<Hooks> = Hooks.Default) =
     Context.add(SessionStore, sessionStore),
     Context.add(UserStore, sessionUserStore),
     Context.add(UserServiceStore, userServiceStore),
-    Context.add(AdminUserStore, adminUserStore),
+    Context.add(AdminUserStore, store),
     Context.add(IdentifierStore, identifierStore),
     Context.add(PasswordHasher, testHasher),
     Context.add(Crypto.Crypto, PlatformCrypto.instance),
@@ -599,6 +602,88 @@ describe("AdminService", () => {
     if (result._tag === "Failure") {
       expect(result.failure._tag).toBe("AdminError");
     }
+  });
+
+  it("createUser: normalises the primary email before it is created and claimed", async () => {
+    const testContext = await makeTestContext();
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    seedUser("user-1", "taken@example.com");
+
+    const result = await runService(testContext, {}, (service) =>
+      Effect.gen(function* () {
+        const created = yield* service.createUser(admin, { email: "  Carol@Example.COM " });
+        const duplicate = yield* Effect.result(
+          service.createUser(admin, { email: "Taken@Example.com" }),
+        );
+        return { created, duplicate };
+      }),
+    );
+
+    const claimed = Array.from(identifiers.values()).find(
+      (identifier) => identifier.userId === result.created.id,
+    );
+    expect(claimed?.value).toBe("carol@example.com");
+    expect(createdWith[0]).toEqual({ type: "email", value: "carol@example.com", verified: false });
+    // A case variant of a held address is the same address.
+    expect(result.duplicate._tag).toBe("Failure");
+    if (result.duplicate._tag === "Failure") {
+      expect(result.duplicate.failure._tag).toBe("AdminError");
+    }
+  });
+
+  it("createUser: refuses when the store's writer returns the existing owner, and leaves the owner untouched (#380)", async () => {
+    // A writer that finds or creates on the address: it returns the user who
+    // already holds it and reports that it inserted nothing.
+    const findOrCreateStore: typeof AdminUserStore.Service = {
+      ...adminUserStore,
+      createUser: (input) =>
+        Effect.gen(function* () {
+          const held =
+            input.identifier === undefined
+              ? null
+              : yield* identifierStore.getByValue(input.identifier.type, input.identifier.value);
+          const owner = held === null ? undefined : users.get(held.userId);
+          if (owner !== undefined) return { user: owner, created: false };
+          return yield* adminUserStore.createUser(input);
+        }),
+    };
+    const testContext = await makeTestContext(Hooks.Default, findOrCreateStore);
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    const owner: User = {
+      id: "owner",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(owner.id, owner);
+    const ownerEmail = makeIdentifier({
+      userId: owner.id,
+      type: "email",
+      value: "owner@example.com",
+      verified: false,
+    });
+    identifiers.set(ownerEmail.id, ownerEmail);
+    passwordHashes.set(owner.id, "owner-hash");
+
+    const result = await runService(testContext, {}, (service) =>
+      Effect.result(
+        service.createUser(admin, {
+          email: "owner@example.com",
+          emailVerified: true,
+          password: "attacker-password",
+          identifiers: [{ type: "username", value: "attacker" }],
+        }),
+      ),
+    );
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(result.failure._tag).toBe("AdminError");
+    // No password, no extra identifier, and the owner's address is still unverified.
+    expect(passwordHashes.get(owner.id)).toBe("owner-hash");
+    expect(Array.from(identifiers.values()).filter((i) => i.userId === owner.id)).toEqual([
+      ownerEmail,
+    ]);
+    expect(Array.from(identifiers.values()).some((i) => i.value === "attacker")).toBe(false);
   });
 
   it("createUser: authorization failure for non-admin", async () => {

@@ -99,7 +99,7 @@ const magicLinkUserStore = {
         attributes: {},
       };
       addUser(user);
-      return user;
+      return { user, created: true };
     }),
 };
 

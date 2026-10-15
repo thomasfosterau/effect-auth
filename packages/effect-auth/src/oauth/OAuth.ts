@@ -31,7 +31,12 @@ import { SessionService } from "../SessionService.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 import { IdentifierStore } from "../Identifier.ts";
-import { createUserWithIdentifier, type NewUserIdentifier, UserStore } from "../UserStore.ts";
+import {
+  createUserWithIdentifier,
+  type CreateUserResult,
+  type NewUserIdentifier,
+  UserStore,
+} from "../UserStore.ts";
 
 /**
  * OAuth2 provider configuration
@@ -295,7 +300,15 @@ export class OAuthUserStore extends Context.Service<
   OAuthUserStore,
   {
     readonly getUser: (userId: string) => Effect.Effect<Types.User, AuthError | UserNotFoundError>;
-    readonly createUser: (input: OAuthCreateUserInput) => Effect.Effect<Types.User, AuthError>;
+    /**
+     * Create a user. `created` in the result is `true` only when this call
+     * inserted the user; a user that already existed (an upsert or a
+     * find-or-create on the address) reports `false`, and sign-up then fails
+     * without writing to it (see {@link CreateUserResult}).
+     */
+    readonly createUser: (
+      input: OAuthCreateUserInput,
+    ) => Effect.Effect<CreateUserResult, AuthError>;
     /**
      * Optional: update profile fields (`name` / `image`) on an existing user.
      * Consulted by {@link OAuthService.linkAccount} when

@@ -404,7 +404,8 @@ part of `Drizzle.layer()`, so choosing it is an explicit provide.
   passes the address a user signs up with to your `createUser` as
   `input.identifier`; write it into the row on insert (see
   [Sign-up](#sign-up-the-address-at-creation)), or, on a nullable column, leave
-  it out and the claim that follows writes it.
+  it out and the claim that follows writes it. Report `created: true` only for
+  a row this call inserted.
 
 Nothing else on the row is written, including `updated_at`.
 
@@ -447,41 +448,88 @@ magic link, email OTP, OAuth, SSO and Google One Tap first sign-in, SCIM and
 admin creation) pass it to the store's `createUser` as `input.identifier`: its
 `type`, normalised `value`, `verified` flag and, when verified, `verifiedAt`.
 Your writer puts it on the row it inserts, and the claim that follows finds the
-address already there and writes nothing more:
+address already there and writes nothing more.
+
+`createUser` resolves to `{ user, created }`. `created` is `true` only when this
+call inserted the user. Core treats an address already on the row as the new
+user's own only when `created` is `true`. A writer that upserts, or finds or
+creates on the address, and returns a user who already existed must report
+`created: false`; sign-up then fails as the address being in use
+(`EmailInUseError` for email and password sign-up) and writes nothing to that
+user, so it cannot set a password on, link an account to, or verify someone
+else's account. A plain `INSERT`, as below, always reports `true`.
+
+On a `NOT NULL` `email` column the row can't be inserted without the address,
+so the writer fails when there is none:
 
 ```ts
 import { Effect } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
-const emailPasswordStore: typeof Auth.Email.EmailPasswordStore.Service = {
-  createUser: (input) =>
-    Effect.tryPromise({
-      try: async () => {
-        const id = crypto.randomUUID();
-        const now = new Date();
-        await db.insert(appUsers).values({
+// `email` NOT NULL: the row can't be inserted without the address.
+const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] = (input) =>
+  Effect.gen(function* () {
+    const email = input.identifier;
+    if (email?.type !== "email") {
+      return yield* new Auth.AuthError({ message: "A user needs an email address" });
+    }
+    const id = crypto.randomUUID();
+    const now = new Date();
+    yield* Effect.tryPromise({
+      try: () =>
+        db.insert(appUsers).values({
           userId: id,
           name: input.name ?? null,
-          // The address the user signs up with; NOT NULL needs it here.
-          email: input.identifier?.type === "email" ? input.identifier.value : null,
-          emailVerified: input.identifier?.verified ?? false,
+          email: email.value,
+          emailVerified: email.verified,
+          emailVerifiedAt: email.verifiedAt ?? null, // only if the table maps it
           createdAt: now,
           updatedAt: now,
-        });
-        return { id, createdAt: now, updatedAt: now, attributes: {} };
-      },
+        }),
       catch: (cause) => new Auth.AuthError({ message: "insert into users failed", cause }),
-    }),
-  // getPasswordHash, setPasswordHash: your password column.
-};
+    });
+    // A plain INSERT: when it succeeds, this call created the user.
+    return { user: { id, createdAt: now, updatedAt: now, attributes: {} }, created: true };
+  });
 ```
 
-The users table's unique index decides a race between two sign-ups for one
-address: the losing insert fails, and core reports it as the address being in
-use (`EmailInUseError` for email and password sign-up), as it does when the
-claim loses on a store with an identifiers table. If the writer stores the
-address but not its `verified` flag, the claim marks the row verified when the
-flow asked for a verified address.
+On a nullable column the writer can insert the row without an address, and the
+claim that follows writes it:
+
+```ts
+import { Effect } from "effect";
+import * as Auth from "@thomasfosterau/effect-auth";
+
+// `email` nullable: a user created without an address gets `NULL`.
+const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] = (input) =>
+  Effect.gen(function* () {
+    const email = input.identifier?.type === "email" ? input.identifier : undefined;
+    const id = crypto.randomUUID();
+    const now = new Date();
+    yield* Effect.tryPromise({
+      try: () =>
+        db.insert(appUsers).values({
+          userId: id,
+          name: input.name ?? null,
+          email: email?.value ?? null,
+          emailVerified: email?.verified ?? false,
+          emailVerifiedAt: email?.verifiedAt ?? null, // only if the table maps it
+          createdAt: now,
+          updatedAt: now,
+        }),
+      catch: (cause) => new Auth.AuthError({ message: "insert into users failed", cause }),
+    });
+    // A plain INSERT: when it succeeds, this call created the user.
+    return { user: { id, createdAt: now, updatedAt: now, attributes: {} }, created: true };
+  });
+```
+
+Drop `emailVerifiedAt` from the insert if your table doesn't map it. The users
+table's unique index decides a race between two sign-ups for one address: the
+losing insert fails, and core reports it as the address being in use, as it
+does when the claim loses on a store with an identifiers table. If the writer
+stores the address but not its `verified` flag, the claim marks the row verified
+when the flow asked for a verified address.
 
 ### `verifiedAt`: mapped or not
 

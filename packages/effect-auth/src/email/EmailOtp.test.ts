@@ -103,7 +103,7 @@ const emailOtpUserStore = {
         attributes: {},
       };
       addUser(user);
-      return user;
+      return { user, created: true };
     }),
 };
 

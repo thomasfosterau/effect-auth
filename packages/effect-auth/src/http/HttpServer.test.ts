@@ -198,7 +198,7 @@ const makeFixture = (
   };
 
   const emailPasswordStore: typeof EmailPasswordStore.Service = {
-    createUser: (input) => Effect.sync(() => createUser(input)),
+    createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
@@ -310,7 +310,7 @@ const makeFixture = (
       }),
   };
   const magicLinkUserStore: typeof MagicLinkUserStore.Service = {
-    createUser: (input) => Effect.sync(() => createUser(input)),
+    createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
   };
 
   const emailOtps = new Map<string, EmailOtpRecord>();
@@ -333,7 +333,7 @@ const makeFixture = (
       }),
   };
   const emailOtpUserStore: typeof EmailOtpUserStore.Service = {
-    createUser: (input) => Effect.sync(() => createUser(input)),
+    createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
   };
 
   const multiFactorRecords = new Map<string, MultiFactorRecord>();
@@ -395,7 +395,7 @@ const makeFixture = (
   // The phone number itself is claimed as a verified `phone` identifier by the
   // service; the user store only creates the bare profile row.
   const phoneOtpUserStore: typeof PhoneOtpUserStore.Service = {
-    createUser: (input) => Effect.sync(() => createUser(input)),
+    createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
   };
 
   const deviceRecords = new Map<string, DeviceAuthorizationRecord>();

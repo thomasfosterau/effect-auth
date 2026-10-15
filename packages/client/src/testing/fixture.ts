@@ -88,7 +88,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   };
 
   const emailPasswordStore: typeof Auth.Email.EmailPasswordStore.Service = {
-    createUser: (input) => Effect.sync(() => createUser(input)),
+    createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
@@ -231,7 +231,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       }),
   };
   const phoneOtpUserStore: typeof Auth.PhoneOtpUserStore.Service = {
-    createUser: (input) => Effect.sync(() => createUser(input)),
+    createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
   };
 
   const deviceRecords = new Map<string, Auth.DeviceAuthorizationRecord>();

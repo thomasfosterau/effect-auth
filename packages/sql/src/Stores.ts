@@ -153,7 +153,7 @@ const userQueries = (sql: SqlClient.SqlClient) => {
       readonly attributes?: Record<string, unknown>;
     },
     label: string,
-  ): Effect.Effect<Auth.User, Auth.AuthError> =>
+  ): Effect.Effect<Auth.CreateUserResult, Auth.AuthError> =>
     Effect.gen(function* () {
       const now = new Date();
       const user: Auth.User = {
@@ -164,8 +164,9 @@ const userQueries = (sql: SqlClient.SqlClient) => {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.image !== undefined ? { image: input.image } : {}),
       };
+      // A plain INSERT with a fresh id: every success is a new user.
       yield* insert(user, label);
-      return user;
+      return { user, created: true };
     });
 
   const setPasswordHash = (userId: string, hash: string, label: string) =>

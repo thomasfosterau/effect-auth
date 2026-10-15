@@ -1232,7 +1232,7 @@ describe("OAuthService linking controls", () => {
         id === user.id
           ? Effect.succeed(user)
           : Effect.fail(new AuthError({ message: "not found" })),
-      createUser: (input) => Effect.succeed(makeUser(input)),
+      createUser: (input) => Effect.succeed({ user: makeUser(input), created: true }),
       ...(onUpdate && {
         updateUser: (id: string, u: { name?: string; image?: string }) => {
           onUpdate(id, u);
@@ -1470,7 +1470,7 @@ describe("OAuthService linking controls", () => {
       getUser: () => Effect.succeed(newUser),
       createUser: (input) => {
         createdWith.push(input.identifier);
-        return Effect.succeed(newUser);
+        return Effect.succeed({ user: newUser, created: true });
       },
     });
 
@@ -1503,6 +1503,114 @@ describe("OAuthService linking controls", () => {
     expect(claimed?.verified).toBe(false);
     // The store was handed the address to create the user with (#380).
     expect(createdWith).toEqual([{ type: "email", value: "user@example.com", verified: false }]);
+  });
+
+  it("an unclaimed email the provider verified creates a new user with a verified identifier", async () => {
+    const newUser = makeUser({ id: "new-user-id" });
+    const identifiers = makeIdentifiers();
+    const createdWith: Array<OAuthCreateUserInput["identifier"]> = [];
+
+    const userLayer = Layer.succeed(OAuthUserStore, {
+      getUser: () => Effect.succeed(newUser),
+      createUser: (input) => {
+        createdWith.push(input.identifier);
+        return Effect.succeed({ user: newUser, created: true });
+      },
+    });
+
+    const service = await Effect.runPromise(
+      OAuth.make({ github: makeTestProvider("github") }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            makeStateLayer(makeState("github", "verified-state")),
+            makeAccountLayer(),
+            userLayer,
+            identifiers.layer,
+            makeCoreUserLayer(newUser),
+            makeSessionLayer(newUser.id),
+            PlatformCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
+    const result = await withProviderFetch(
+      mockUserInfo({ email: "user@example.com", id: "gh-verified", email_verified: true }),
+      () => Effect.runPromise(service.signInWithCallback("verified-state", "code-verified")),
+    );
+
+    expect(result.isNewUser).toBe(true);
+    const claimed = await Effect.runPromise(
+      identifiers.store.getByValue("email", "user@example.com"),
+    );
+    expect(claimed?.userId).toBe(newUser.id);
+    expect(claimed?.verified).toBe(true);
+    expect(claimed?.verifiedAt).toBeInstanceOf(Date);
+    expect(createdWith).toEqual([
+      { type: "email", value: "user@example.com", verified: true, verifiedAt: expect.any(Date) },
+    ]);
+  });
+
+  it("refuses when the store's writer returns the existing owner, and links nothing to the owner (#380)", async () => {
+    const owner = makeUser({ id: "owner-id" });
+    const identifiers = makeIdentifiers();
+    const accounts = new Map<string, OAuthAccount>();
+    const accountLayer = Layer.succeed(OAuthAccountStore, {
+      create: (a) => Effect.sync(() => (accounts.set(a.id, a), a)),
+      get: () => Effect.succeed(null),
+      getByUserId: (uid) => Effect.succeed([...accounts.values()].filter((a) => a.userId === uid)),
+      update: (a) => Effect.sync(() => (accounts.set(a.id, a), a)),
+      linkToUser: (uid, a) => Effect.sync(() => void accounts.set(a.id, { ...a, userId: uid })),
+      unlinkFromUser: () => Effect.void,
+      delete: () => Effect.void,
+    });
+    // A writer that finds or creates on the address. The owner's row, holding
+    // the address unverified, lands between the flow's lookup and its insert,
+    // so the writer returns the owner and reports that it inserted nothing.
+    const userLayer = Layer.succeed(OAuthUserStore, {
+      getUser: () => Effect.succeed(owner),
+      createUser: () =>
+        Effect.sync(() => {
+          const held = makeIdentifier({
+            userId: owner.id,
+            type: "email",
+            value: "owner@example.com",
+            verified: false,
+          });
+          identifiers.records.set(held.id, held);
+          return { user: owner, created: false };
+        }),
+    });
+
+    const service = await Effect.runPromise(
+      OAuth.make({ github: makeTestProvider("github") }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            makeStateLayer(makeState("github", "owner-state")),
+            accountLayer,
+            userLayer,
+            identifiers.layer,
+            makeCoreUserLayer(owner),
+            makeSessionLayer(owner.id),
+            PlatformCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
+    const err = await withProviderFetch(
+      mockUserInfo({ email: "owner@example.com", id: "gh-attacker", email_verified: true }),
+      () => Effect.runPromise(Effect.flip(service.signInWithCallback("owner-state", "code-owner"))),
+    );
+
+    expect(err).toBeInstanceOf(AuthError);
+    expect((err as AuthError).message).toMatch(/already associated/i);
+    // No account linked to the owner, and the owner's address is still unverified.
+    expect(accounts.size).toBe(0);
+    const held = await Effect.runPromise(
+      identifiers.store.getByValue("email", "owner@example.com"),
+    );
+    expect(held).toMatchObject({ userId: owner.id, verified: false });
   });
 
   it("updateUserInfoOnLink: false (default) does not update the user profile", async () => {
