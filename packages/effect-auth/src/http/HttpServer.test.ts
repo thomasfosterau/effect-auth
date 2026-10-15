@@ -3248,4 +3248,68 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     await dispose();
     expect(interrupted).toBe(true);
   });
+
+  /** A fiber body that yields once per tick and counts its ticks until `stopped`. */
+  const ticker = () => {
+    const state = { ticks: 0, stopped: false };
+    const tick: Effect.Effect<void> = Effect.suspend(() => {
+      if (state.stopped) return Effect.void;
+      state.ticks++;
+      return Effect.andThen(Effect.yieldNow, tick);
+    });
+    return { state, tick };
+  };
+
+  /** Yield to the event loop until `state.ticks` reaches `target`, for at most 1,000 turns. */
+  const untilTicks = async (state: { ticks: number }, target: number): Promise<void> => {
+    for (let turn = 0; turn < 1000 && state.ticks < target; turn++) await macrotasks(1);
+  };
+
+  it("interrupts a forkChild loop when the layer that forks it finishes, so its ticks are frozen by the time the promise resolves", async () => {
+    const counter = ticker();
+    let interrupted = false;
+    // The forking layer waits until the child has ticked three times, then finishes.
+    const forking = Layer.effectDiscard(
+      Effect.gen(function* () {
+        yield* Effect.forkChild(
+          counter.tick.pipe(Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true)))),
+        );
+        while (counter.state.ticks < 3) yield* Effect.yieldNow;
+      }),
+    );
+    try {
+      const { dispose } = await HttpServer.makeAsync({
+        services: Layer.merge(makeFixture().services, forking) as Layer.Layer<AuthServices>,
+        cookie: { secure: false },
+      });
+      const atResolve = counter.state.ticks;
+      expect(atResolve).toBeGreaterThanOrEqual(3);
+      expect(interrupted).toBe(true);
+      await macrotasks(3);
+      expect(counter.state.ticks).toBe(atResolve);
+      await dispose();
+    } finally {
+      counter.state.stopped = true;
+    }
+  });
+
+  it("keeps a forkDetach loop running after the promise resolves, and dispose does not stop it", async () => {
+    const counter = ticker();
+    const detached = Layer.effectDiscard(Effect.forkDetach(counter.tick));
+    try {
+      const { dispose } = await HttpServer.makeAsync({
+        services: Layer.merge(makeFixture().services, detached) as Layer.Layer<AuthServices>,
+        cookie: { secure: false },
+      });
+      const atResolve = counter.state.ticks;
+      await untilTicks(counter.state, atResolve + 1);
+      expect(counter.state.ticks).toBeGreaterThan(atResolve);
+      await dispose();
+      const atDispose = counter.state.ticks;
+      await untilTicks(counter.state, atDispose + 1);
+      expect(counter.state.ticks).toBeGreaterThan(atDispose);
+    } finally {
+      counter.state.stopped = true;
+    }
+  });
 });

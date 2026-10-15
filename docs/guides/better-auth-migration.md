@@ -29,8 +29,8 @@ The practical consequences are worth internalising before you start:
 | `socialProviders: { github: { … } }`             | `Auth.OAuth.OAuthService.layer({ github: Auth.OAuth.GitHubProvider({ … }) })`                                         |
 | `sendVerificationEmail` / `sendResetPassword` …  | per-feature callbacks, or derive all of them from one `EmailSender` with `Auth.emailCallbacks(sender, identifiers)`   |
 | `secret` (signing key)                           | per-feature secrets: `Cipher` keys, `SessionCacheConfig` HMAC key, `JwtKeyStore` keys — no single global secret       |
-| `session.cookieCache`                            | `cookie: { cache: { … } }` on `Auth.Http.make` (`SessionCookieCache.ts`)                                              |
-| `advanced.crossSubDomainCookies` / trusted hosts | `trustedOrigins` + `trustedProxy` options on `Auth.Http.make`                                                         |
+| `session.cookieCache`                            | `cookie: { cache: { … } }` on `Auth.Http.makeAsync` (`SessionCookieCache.ts`)                                         |
+| `advanced.crossSubDomainCookies` / trusted hosts | `trustedOrigins` + `trustedProxy` options on `Auth.Http.makeAsync`                                                    |
 | `createAuthClient` from `better-auth/client`     | `createAuthClient` from `@thomasfosterau/effect-auth-client`                                                          |
 | `better-auth/react` \| `/svelte` \| `/vue`       | `@thomasfosterau/effect-auth-react` \| `-svelte` \| `-vue` \| `-solid`                                                |
 
@@ -67,7 +67,7 @@ const { handler } = await Auth.Http.makeAsync({
 
 `services` connects to the database while it builds, so the example uses `Auth.Http.makeAsync`, which waits for that build. It resolves to the same `{ handler, dispose }` once `services` is built and checked, and rejects with the startup errors (a missing `RateLimiter`, for example), so the app fails to start. `Auth.Http.make` is the synchronous form: it throws those errors only for a build that finishes before it returns. With an asynchronous build like this one it cannot, and every request would reject with them instead.
 
-The set of services `Auth.Http.make` requires is `AuthServices` in `http/HttpServer.ts`: `AuthLifecycleService`, `SessionService`, `EmailPasswordService`, `IdentifierStore`, `PasswordHasher`, `EmailVerificationService`, `PasswordResetService`, `UserService`, `Hooks`. Everything else — magic link, OTP, multi-factor, organizations, admin, API keys, SSO, the OIDC provider, SCIM — is resolved optionally per handler, which is why those routes return `404` until you merge the corresponding layer in.
+The set of services `Auth.Http.makeAsync` requires is `AuthServices` in `http/HttpServer.ts`: `AuthLifecycleService`, `SessionService`, `EmailPasswordService`, `IdentifierStore`, `PasswordHasher`, `EmailVerificationService`, `PasswordResetService`, `UserService`, `Hooks`. Everything else — magic link, OTP, multi-factor, organizations, admin, API keys, SSO, the OIDC provider, SCIM — is resolved optionally per handler, which is why those routes return `404` until you merge the corresponding layer in.
 
 ### Plugins vs hooks
 
@@ -212,7 +212,7 @@ Better Auth's generic `verification` table backs email verification, password re
 
 1. Stand up the new schema (`Sql.migrate`, or your own DDL) alongside the running Better Auth database.
 2. Backfill `auth_users` → `auth_identifiers` → `auth_oauth_accounts` → plugin tables, in that order (identifiers depend on users; everything depends on both).
-3. Wire the layers and mount `Auth.Http.make` at the same prefix Better Auth used, so client paths that survive (`/sign-in`, `/sign-up`, `/sign-out`, `/session`) keep working.
+3. Wire the layers and mount `Auth.Http.makeAsync` at the same prefix Better Auth used, so client paths that survive (`/sign-in`, `/sign-up`, `/sign-out`, `/session`) keep working.
 4. Write the routes with no contract equivalent: social OAuth start/callback, and passkeys if you use them.
 5. Swap the browser client, then cut over and accept the forced re-authentication.
 

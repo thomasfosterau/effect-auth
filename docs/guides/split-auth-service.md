@@ -7,10 +7,10 @@ app does not have to.
 
 ## Should you split?
 
-Mounting `Http.make` directly in the app's Worker is simpler and should be the default:
+Mounting `Http.makeAsync` directly in the app's Worker is simpler and should be the default:
 
 ```ts
-const { handler } = Http.make({ services, prefix: "/api/auth" /* … */ });
+const { handler } = await Http.makeAsync({ services, prefix: "/api/auth" /* … */ });
 // Mount `handler` in your framework.
 ```
 

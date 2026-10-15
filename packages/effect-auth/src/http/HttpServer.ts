@@ -4754,13 +4754,14 @@ const serve = (
  * finishes, and `make` throws the reason it refused the services.
  *
  * **Forked fibers.** `make` runs the build until it finishes, and no further. A
- * fiber the build forks with `Effect.forkChild` belongs to the build: it is
- * interrupted when the build finishes, so one that has not started by then
- * never runs. A fiber forked into the layer's scope (`Effect.forkScoped`, or
- * `Effect.forkIn` with that scope) keeps running on the default scheduler after
- * `make` returns, and stops on `dispose`. A fiber forked with
- * `Effect.forkDetach` keeps running after `make` returns, and `dispose` does
- * not stop it.
+ * fiber the build forks with `Effect.forkChild` is interrupted when the layer
+ * that forks it finishes building. Under `Layer.merge` or `Layer.mergeAll` that
+ * is the merged layer's own build, which can end before the whole `services`
+ * build does, so a fiber that has not started by then never runs. A fiber
+ * forked into the layer's scope (`Effect.forkScoped`, or `Effect.forkIn` with
+ * that scope) keeps running on the default scheduler after `make` returns, and
+ * stops on `dispose`. A fiber forked with `Effect.forkDetach` keeps running
+ * after `make` returns, and `dispose` does not stop it.
  */
 export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
   const addressError = ipRateLimitAddressError(options);
@@ -4785,17 +4786,9 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
       refused = { error: thrown };
     }
     if (refused !== undefined) {
-      // A build with no exit yet (a task of it threw before it finished) is
-      // interrupted first, so it runs no further. Then release what the build
-      // acquired, as far as that runs synchronously. An asynchronous finalizer
-      // finishes after make throws.
-      const unfinished = servicesFiber.pollUnsafe() === undefined;
-      const close = runSynchronously(
-        Effect.andThen(
-          unfinished ? Fiber.interrupt(servicesFiber) : Effect.void,
-          releaseRefusedServices(servicesScope),
-        ),
-      );
+      // Release what the build acquired, as far as that runs synchronously. An
+      // asynchronous finalizer finishes after make throws.
+      const close = runSynchronously(releaseRefusedServices(servicesScope));
       try {
         close.run();
       } finally {
@@ -4848,12 +4841,13 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  * logged with `Effect.logError`, and the promise rejects with the reason the
  * services were refused.
  *
- * A fiber the build forks with `Effect.forkChild` is interrupted when the build
- * finishes, before the promise resolves, so one that has not started by then
- * never runs. One forked into the layer's scope (`Effect.forkScoped`, or
- * `Effect.forkIn` with that scope) keeps running after the promise resolves,
- * and stops on `dispose`. One forked with `Effect.forkDetach` keeps running,
- * and `dispose` does not stop it.
+ * A fiber the build forks with `Effect.forkChild` is interrupted when the layer
+ * that forks it finishes building, and under `Layer.merge` or `Layer.mergeAll`
+ * that can be before the whole `services` build finishes, so a fiber that has
+ * not started by then never runs. One forked into the layer's scope
+ * (`Effect.forkScoped`, or `Effect.forkIn` with that scope) keeps running after
+ * the promise resolves, and stops on `dispose`. One forked with
+ * `Effect.forkDetach` keeps running, and `dispose` does not stop it.
  */
 export const makeAsync = (options: AuthWebHandlerOptions): Promise<AuthWebHandler> =>
   Effect.runPromise(
