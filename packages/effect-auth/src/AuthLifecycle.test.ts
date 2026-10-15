@@ -288,6 +288,41 @@ describe("AuthLifecycleService", () => {
     expect(identifier?.verified).toBe(false);
   });
 
+  it("a sign-up for an address held unverified answers with the submitted address", async () => {
+    const testContext = await makeTestContext();
+
+    // An earlier sign-up for the address whose verification never completed.
+    const pending: User = {
+      id: "user-pending",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(pending.id, pending);
+    addEmailIdentifier(pending.id, "pending@example.com", false);
+
+    const program = Effect.gen(function* () {
+      const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
+      return yield* service.signUp({
+        email: "  Pending@Example.com ",
+        password: "strong-password-123",
+      });
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    // The recovered branch answers with the held user and the address it was
+    // made with (normalized), which the HTTP sign-up response reports as the
+    // user's `email`.
+    expect(result.user.id).toBe(pending.id);
+    expect(result.identifier).toEqual({ type: "email", value: "pending@example.com" });
+    expect(result.needsEmailVerification).toBe(true);
+    expect(result.session).toBeUndefined();
+    expect(sentEmails.map((sent) => sent.email)).toEqual(["pending@example.com"]);
+  });
+
   it("should return verification-needed on sign-in and resend when enabled", async () => {
     const testContext = await makeTestContext({ requireEmailVerification: true });
 

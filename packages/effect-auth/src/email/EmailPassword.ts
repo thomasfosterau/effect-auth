@@ -49,6 +49,23 @@ export class EmailPasswordStore extends Context.Service<
       input: CreateUserInput,
     ) => Effect.Effect<CreateUserResult, Errors.AuthError>;
 
+    /**
+     * Optional. Mint an id in the shape `createUser` assigns to a new user,
+     * without writing anything. Under `antiEnumeration`, sign-up answers an
+     * address another user holds with a stand-in user that no row backs (see
+     * {@link EmailPasswordConfig.antiEnumeration}); its id comes from here, so
+     * a store whose ids are not random UUIDs (sequential integers, prefixed or
+     * time-ordered ids) can keep the stand-in's id the same shape as a real
+     * one. The id must be one no user holds or will later be assigned (an id
+     * equal to the address holder's would make `UsernameService.signUp` claim
+     * the username for that user): draw it from the same sequence
+     * `createUser` uses, reserving it. Minting it must not read or change any
+     * existing user. Without it the stand-in's id is a random UUID
+     * (`crypto.randomUUID()`), the shape effect-auth-sql's `createUser`
+     * assigns.
+     */
+    readonly newUserId?: (() => Effect.Effect<string, Errors.AuthError>) | undefined;
+
     readonly getPasswordHash: (userId: string) => Effect.Effect<string | null, Errors.AuthError>;
 
     readonly setPasswordHash: (
@@ -68,22 +85,38 @@ export interface EmailPasswordConfig {
   readonly maxPasswordLength?: number;
   readonly autoSignIn?: boolean;
   /**
-   * Opt-in anti-enumeration mode for `signUp`. When `true`, the
-   * duplicate-registration branch does not disclose that the email is
-   * already registered: it hashes the submitted password (so the two
-   * branches cost comparable work) and answers with the same no-session
-   * result shape a fresh sign-up gets, instead of `EmailInUseError`. Never
-   * touches the real account — the result carries only the caller's own
-   * submitted input, never the existing user's data. The same answer covers
-   * an address found taken at the insert: a lost race, or a store whose
-   * `createUser` reports `created: false`.
+   * Opt-in anti-enumeration mode for `signUp`. When `true`, a sign-up for an
+   * address another user already holds does not fail with `EmailInUseError`.
+   * It hashes the submitted password (one hash, as a fresh sign-up pays) and
+   * answers with a no-session result for a stand-in user built only from the
+   * caller's own input: never the existing user's id or data, and nothing is
+   * written. The same answer covers an address found taken at the insert: a
+   * lost race, or a store whose `createUser` reports `created: false`.
    *
-   * Implies no immediate session on the fresh branch either (as if
-   * `autoSignIn: false`), so both branches are answered identically —
-   * otherwise "a session came back" would itself be the oracle.
+   * A fresh sign-up gets no session either (as if `autoSignIn: false`), so
+   * "a session came back" cannot itself tell the two apart. Over HTTP
+   * (`POST /sign-up` through `Http.make`), both answers are a `200` with the
+   * same headers (`Content-Length` follows the body, so it matches while the
+   * ids have the same length), no `Set-Cookie` and no bearer-token header,
+   * and a body with the same fields: `needsEmailVerification`, and a `user`
+   * whose `email` is the submitted address, trimmed and lower-cased (after
+   * the `beforeSignUp` hooks), with `emailVerified: false`. The stand-in's
+   * other fields are what a store that keeps its input as given (as
+   * effect-auth-sql's does) returns for a new user: the submitted `name` and
+   * `attributes` (`{}` when none), no `image`, and one timestamp, taken
+   * during the request, for both `createdAt` and `updatedAt`. Its `id` is a
+   * random UUID unless the store implements `EmailPasswordStore.newUserId`;
+   * a store whose ids have another shape needs that seam for the two ids to
+   * look alike.
    *
-   * Default `false`: existing behaviour (`EmailInUseError`) is unchanged
-   * unless explicitly opted in.
+   * What still differs: the time a response takes (a fresh sign-up also
+   * creates the user, claims the address and stores the hash), the
+   * `afterSignUp` hooks (they run for a fresh sign-up only), and anything a
+   * later request observes. Signing in with the submitted password succeeds
+   * only for a fresh sign-up, and a username sign-up's username is claimed
+   * only for a fresh sign-up (see `UsernameService.signUp`).
+   *
+   * Default `false`: a duplicate fails with `EmailInUseError`.
    */
   readonly antiEnumeration?: boolean;
 }
@@ -307,8 +340,11 @@ export const make = (
     // flow finds that out (the pre-check, a lost insert race, or a store that
     // reports `created: false`). Under anti-enumeration it pays the same
     // hashing cost a fresh sign-up would, then answers with an identical,
-    // no-session result built only from the caller's own input (never the
-    // real account's data), so it discloses nothing about the address.
+    // no-session result for a stand-in user built only from the caller's own
+    // input (never the real account's data), so it discloses nothing about
+    // the address. The stand-in's fields match what a store's `createUser`
+    // returns for the same input: an id in the store's shape when it can mint
+    // one, and one timestamp for both `createdAt` and `updatedAt`.
     const addressTaken = (input: SignUpInput, email: string) =>
       Effect.gen(function* () {
         if (!resolved.antiEnumeration) {
@@ -317,17 +353,20 @@ export const make = (
           });
         }
         yield* passwordHasher.hash(input.password);
+        const id =
+          store.newUserId === undefined ? globalThis.crypto.randomUUID() : yield* store.newUserId();
+        const now = new Date();
         return {
           user: {
-            id: globalThis.crypto.randomUUID(),
+            id,
             ...(input.name !== undefined && { name: input.name }),
-            createdAt: new Date(),
-            updatedAt: new Date(),
+            createdAt: now,
+            updatedAt: now,
             attributes: input.attributes ?? {},
           },
-          identifier: { type: "email" as const, value: email },
-          method: "email-password" as const,
-        };
+          identifier: { type: "email", value: email },
+          method: "email-password",
+        } satisfies AuthResult;
       });
 
     return {

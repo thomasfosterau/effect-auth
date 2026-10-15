@@ -8,7 +8,7 @@ import {
   type SignInInput,
   type SignUpInput,
 } from "./email/EmailPassword.ts";
-import { IdentifierStore } from "./Identifier.ts";
+import { IdentifierStore, type IdentifierType } from "./Identifier.ts";
 import { UserStore } from "./UserStore.ts";
 import {
   type EmailVerificationResult,
@@ -33,6 +33,16 @@ export interface AuthLifecycleConfig {
  */
 export interface AuthLifecycleResult {
   readonly user: Types.User;
+  /**
+   * The login handle a sign-up was made with: the email address it claimed;
+   * under `antiEnumeration`, the address another user holds; or, with
+   * `antiEnumeration` off, the address an existing user holds unverified,
+   * which `signUp` answers with that user instead of failing (re-issuing its
+   * verification when `sendOnSignUp` is set). Set by `signUp`, whose address is
+   * always unverified at this point; the HTTP sign-up response reports the
+   * user's `email` from it.
+   */
+  readonly identifier?: { readonly type: IdentifierType; readonly value: string } | undefined;
   readonly session?: Types.Session;
   readonly needsEmailVerification: boolean;
   /** Present when a second factor is required to complete sign-in. */
@@ -157,7 +167,11 @@ export const make = (
                 yield* verification.resendVerification(existing.id, identifier.value);
               }
 
-              return { recovered: true as const, user: existing };
+              return {
+                recovered: true as const,
+                user: existing,
+                identifier: { type: "email" as const, value: identifier.value },
+              };
             }),
           ),
         );
@@ -165,6 +179,7 @@ export const make = (
         if (outcome.recovered) {
           return {
             user: outcome.user,
+            identifier: outcome.identifier,
             needsEmailVerification: true,
           } satisfies AuthLifecycleResult;
         }
@@ -180,6 +195,7 @@ export const make = (
 
         return {
           user: result.user,
+          ...(result.identifier !== undefined && { identifier: result.identifier }),
           ...(!needsEmailVerification &&
             result.session !== undefined && { session: result.session }),
           needsEmailVerification,

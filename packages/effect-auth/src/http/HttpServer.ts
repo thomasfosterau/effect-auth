@@ -1053,7 +1053,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             }),
           );
           const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
+            user:
+              result.identifier?.type === "email"
+                ? encodeSignUpUserView(result.user, result.identifier.value)
+                : yield* encodeUserView(result.user),
             needsEmailVerification: result.needsEmailVerification,
           };
           return yield* withSessionCookie(body, result.session, cfg, "email-password");
@@ -4018,6 +4021,19 @@ const encodeUserView = (user: Types.User): Effect.Effect<S.UserView, never, Iden
       );
     return S.encodeUser(user, list);
   });
+
+/**
+ * Encode the user a sign-up answers with, taking `email` from the address the
+ * sign-up was made with (unverified, as every address is at sign-up) rather
+ * than from the identifier store. Under `antiEnumeration` the user for an
+ * address another user holds is a stand-in no identifier names, so a store
+ * lookup would leave its `email` fields out and give the address away; this
+ * builds both answers the same way. The field order is {@link S.encodeUser}'s.
+ */
+const encodeSignUpUserView = (user: Types.User, email: string): S.UserView => {
+  const { id, ...rest } = S.encodeUser(user);
+  return { id, email, emailVerified: false, ...rest };
+};
 
 /** {@link encodeUserView} over a session+user pair. */
 const encodeSessionWithUserView = (

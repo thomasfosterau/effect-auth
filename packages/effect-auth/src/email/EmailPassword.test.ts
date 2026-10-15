@@ -1048,6 +1048,49 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
     expect(hashCalls).toBe(2);
   });
 
+  it("antiEnumeration mode: the stand-in's id comes from the store's newUserId", async () => {
+    const minted: string[] = [];
+    const store: typeof EmailPasswordStore.Service = {
+      ...emailPasswordStore,
+      newUserId: () =>
+        Effect.sync(() => {
+          const id = `user-${users.size + 1 + minted.length}`;
+          minted.push(id);
+          return id;
+        }),
+    };
+    const signUpTwice = (testStore: typeof EmailPasswordStore.Service) =>
+      Effect.gen(function* () {
+        const testContext = yield* Effect.promise(() => makeTestContext(testStore));
+        const service = yield* EmailPassword.make({ antiEnumeration: true }).pipe(
+          Effect.provide(testContext),
+        );
+        const signUp = (password: string) =>
+          service.signUp({ email: "mint@example.com", password }).pipe(Effect.provide(testContext));
+        const fresh = yield* signUp("strong-password-123");
+        const duplicate = yield* signUp("another-strong-pw");
+        return { fresh, duplicate };
+      }).pipe(Effect.provide(Hooks.Default));
+
+    const minting = await Effect.runPromise(signUpTwice(store));
+    expect(minting.fresh.user.id).toBe("user-1");
+    // Minted by the store, so it has the shape of the store's own ids, and
+    // it names no user.
+    expect(minted).toEqual([minting.duplicate.user.id]);
+    expect(minting.duplicate.user.id).toMatch(/^user-\d+$/);
+    expect(users.has(minting.duplicate.user.id)).toBe(false);
+    // One timestamp for both, as a store's `createUser` sets them.
+    expect(minting.duplicate.user.updatedAt).toBe(minting.duplicate.user.createdAt);
+
+    // Without the seam the stand-in's id is a random UUID.
+    users.clear();
+    identifierRecords.clear();
+    const fallback = await Effect.runPromise(signUpTwice(emailPasswordStore));
+    expect(fallback.duplicate.user.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
   // The address is found taken at the insert rather than at the pre-check.
   // Each store seeds the owner's row from inside `createUser`, after the
   // sign-up's pre-check found the address free.

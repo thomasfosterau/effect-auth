@@ -1,0 +1,9 @@
+---
+"@thomasfosterau/effect-auth": patch
+---
+
+With `antiEnumeration: true`, `POST /sign-up` answers an email and password sign-up for an address another user holds as it answers a fresh one (#414), with the same id shape when the store's ids are random UUIDs or it implements `newUserId`: a `200` with the same headers and no `Set-Cookie`, and a `user` with the same fields, whose `email` is the submitted address, trimmed and lower-cased, with `emailVerified: false`. Response timing can differ between the two; the `EmailPasswordConfig.antiEnumeration` docs say how. The sign-up response takes `email` from the address submitted with the sign-up, which `AuthLifecycleResult` carries as `identifier`.
+
+The stand-in user in that answer has one timestamp for both `createdAt` and `updatedAt`. Its id is a random UUID, or comes from the optional `EmailPasswordStore.newUserId` seam, so a store whose ids have another shape can give the stand-in an id of that shape.
+
+`UsernameService.signUp` claims no username for the stand-in, so a sign-up with a held address cannot squat a username. It fails with `UsernameError` when someone holds the username by then, as the claim does. The `EmailPasswordConfig.antiEnumeration` docs list what the two answers share and what tells them apart.
