@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vite-plus/test";
-import { Data, Effect, Fiber, FileSystem, Layer, Logger, Path, Redacted } from "effect";
+import { describe, it, expect, vi } from "vite-plus/test";
+import { Data, Deferred, Effect, Fiber, FileSystem, Layer, Logger, Path, Redacted } from "effect";
 import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.ts";
@@ -2591,7 +2591,12 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     const fixture = makeFixture();
 
     const { handler, dispose } = HttpServer.make({
-      services: Layer.mergeAll(fixture.services, busy, asyncStep) as Layer.Layer<AuthServices>,
+      // The yield runs first, so the merge forks `busy` once the build has
+      // started: a fiber forked while make starts the build could take another
+      // path than one forked by a build that is already running.
+      services: Layer.mergeAll(fixture.services, busy, asyncStep).pipe(
+        Layer.provide(Layer.effectDiscard(Effect.yieldNow)),
+      ) as Layer.Layer<AuthServices>,
       cookie: { secure: false },
       trustedProxy: ClientIP.cloudflare,
       ipRateLimit: {},
@@ -2607,6 +2612,176 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
       handler(jsonRequest("/sign-in", { email: "nobody@example.com", password: PW })),
     ).rejects.toBeInstanceOf(RateLimiterConfigError);
     await dispose();
+  });
+
+  it("throws for a build whose own fiber runs past Effect's op budget", () => {
+    // provideMerge builds on the build's own fiber, which make runs to its exit
+    // however many operations that takes, as Effect.runSync does.
+    const long = Layer.effectDiscard(
+      Effect.forEach(Array.from({ length: 3000 }), () => Effect.void, { discard: true }),
+    );
+    expect(() =>
+      HttpServer.make({
+        services: long.pipe(
+          Layer.provideMerge(makeFixture().services),
+        ) as Layer.Layer<AuthServices>,
+        trustedProxy: ClientIP.cloudflare,
+        ipRateLimit: {},
+      }),
+    ).toThrow(RateLimiterConfigError);
+  });
+
+  it("runs the tasks the build left queued once make returns", async () => {
+    // The build forks A, which completes the Deferred, then B, then awaits the
+    // Deferred. Both forks queue their start on the build's own queue. A's
+    // start finishes the build, so make returns before B's start has run: B
+    // must still run afterwards, not be dropped with the build's queue.
+    let bRan = false;
+    const forks = Layer.effectDiscard(
+      Effect.gen(function* () {
+        const done = yield* Deferred.make<void>();
+        yield* Effect.forkScoped(Deferred.succeed(done, undefined));
+        yield* Effect.forkScoped(Effect.sync(() => void (bRan = true)));
+        yield* Deferred.await(done);
+      }),
+    );
+    const fixture = makeFixture();
+
+    const { dispose } = HttpServer.make({
+      // provideMerge builds `forks` last, on the build's own fiber.
+      services: forks.pipe(Layer.provideMerge(fixture.services)) as Layer.Layer<AuthServices>,
+      cookie: { secure: false },
+    });
+    expect(bRan).toBe(false);
+    await macrotasks(3);
+    expect(bRan).toBe(true);
+    await dispose();
+  });
+
+  it("runs the build's queued tasks by priority, lowest first", async () => {
+    // The build queues a fork's start (priority 0) and then its own resumption
+    // at `priority`. Resuming finishes the build, so the fork runs after make
+    // returns when the build resumes first, and during make otherwise.
+    const order = (priority: number): Array<string> => {
+      const ran: Array<string> = [];
+      const queued = Layer.effectDiscard(
+        Effect.gen(function* () {
+          yield* Effect.forkScoped(Effect.sync(() => void ran.push("fork")));
+          yield* Effect.yieldNowWith(priority);
+          ran.push("build");
+        }),
+      );
+      HttpServer.make({
+        services: queued.pipe(
+          Layer.provideMerge(makeFixture().services),
+        ) as Layer.Layer<AuthServices>,
+        cookie: { secure: false },
+      });
+      return ran;
+    };
+    const first = order(-1);
+    const after = order(1);
+    await macrotasks(3);
+    expect(first).toEqual(["build", "fork"]);
+    expect(after).toEqual(["fork", "build"]);
+  });
+
+  it("closes the services and rethrows when the startup check itself throws", () => {
+    let released = 0;
+    const counted = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () => Effect.sync(() => void released++)),
+    );
+    const boom = new Error("unreadable hooks");
+    // A Hooks value whose client-address record throws when the check reads it.
+    const throwingHooks = Layer.effect(
+      Hooks,
+      Effect.gen(function* () {
+        const hooks = yield* Hooks;
+        return Object.defineProperty(
+          { ...hooks },
+          Symbol.for("@thomasfosterau/effect-auth/Hooks/clientAddressKeyed"),
+          {
+            get: () => {
+              throw boom;
+            },
+          },
+        );
+      }),
+    ).pipe(Layer.provide(Hooks.Default));
+    const services = Layer.mergeAll(makeFixture().services, counted, throwingHooks);
+
+    expect(
+      thrownBy(() =>
+        HttpServer.make({
+          services: services as Layer.Layer<AuthServices>,
+          cookie: { secure: false },
+        }),
+      ),
+    ).toBe(boom);
+    expect(released).toBe(1);
+  });
+
+  it("finishes an asynchronous finalizer after make throws, and logs a failed release", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      let released = false;
+      // Releasing waits on a promise, then fails.
+      const slowRelease = Layer.effectDiscard(
+        Effect.acquireRelease(Effect.void, () =>
+          Effect.promise(() => Promise.resolve()).pipe(
+            Effect.andThen(Effect.sync(() => void (released = true))),
+            Effect.andThen(Effect.die(new Error("release failed"))),
+          ),
+        ),
+      );
+      const fixture = makeFixture();
+
+      expect(() =>
+        HttpServer.make({
+          services: Layer.merge(fixture.services, slowRelease) as Layer.Layer<AuthServices>,
+          trustedProxy: ClientIP.cloudflare,
+          ipRateLimit: {},
+        }),
+      ).toThrow(RateLimiterConfigError);
+      // make threw before the finalizer's promise settled.
+      expect(released).toBe(false);
+      await macrotasks(3);
+      expect(released).toBe(true);
+      const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+      expect(logged).toContainEqual(
+        expect.stringMatching(
+          /ERROR .*releasing the services Http\.make refused failed.*release failed/s,
+        ),
+      );
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("logs a release that fails synchronously, and throws the reason it refused the services", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const failingRelease = Layer.effectDiscard(
+        Effect.acquireRelease(Effect.void, () => Effect.die(new Error("release failed"))),
+      );
+      const fixture = makeFixture();
+
+      expect(() =>
+        HttpServer.make({
+          services: Layer.merge(fixture.services, failingRelease) as Layer.Layer<AuthServices>,
+          trustedProxy: ClientIP.cloudflare,
+          ipRateLimit: {},
+        }),
+      ).toThrow(RateLimiterConfigError);
+      const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+      expect(logged).toContainEqual(
+        expect.stringMatching(
+          /ERROR .*releasing the services Http\.make refused failed.*release failed/s,
+        ),
+      );
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("throws a typed failure of the services build from make, and releases what it built", () => {
@@ -2672,5 +2847,299 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     await macrotasks(3);
     expect(spins).toBeGreaterThan(atThrow);
     await Effect.runPromise(Fiber.interrupt(detached!));
+  });
+});
+
+describe("makeAsync builds services fully before it resolves (#400)", () => {
+  /** What `promise` rejects with, or a failed assertion when it resolves. */
+  const rejectionOf = (promise: Promise<unknown>): Promise<unknown> =>
+    promise.then(
+      () => expect.unreachable("expected a rejection"),
+      (error: unknown) => error,
+    );
+
+  const signIn = () => jsonRequest("/sign-in", { email: "nobody@example.com", password: PW });
+
+  // `ipRateLimit` with no RateLimiter in services: the startup check refuses it.
+  const limitWithoutLimiter = {
+    cookie: { secure: false },
+    trustedProxy: ClientIP.cloudflare,
+    ipRateLimit: {},
+  } as const;
+
+  // Services that finish building only after a synchronous call returns, so
+  // `make` cannot throw for them and takes the fallback.
+  const asynchronous: ReadonlyArray<readonly [string, () => Layer.Layer<AuthServices>]> = [
+    [
+      "an Effect.promise step, as a database connection makes",
+      () =>
+        Layer.merge(
+          makeFixture().services,
+          Layer.effectDiscard(
+            Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 1))),
+          ),
+        ) as Layer.Layer<AuthServices>,
+    ],
+    [
+      "merged layers that yield",
+      () =>
+        Layer.mergeAll(
+          makeFixture().services,
+          Layer.effectDiscard(Effect.yieldNow),
+          Layer.effectDiscard(Effect.yieldNow),
+        ) as Layer.Layer<AuthServices>,
+    ],
+    [
+      "a merged layer that runs past Effect's op budget",
+      () =>
+        Layer.mergeAll(
+          makeFixture().services,
+          Layer.effectDiscard(
+            Effect.forEach(Array.from({ length: 3000 }), () => Effect.void, { discard: true }),
+          ),
+        ) as Layer.Layer<AuthServices>,
+    ],
+    [
+      "a provideMerge chain with an asynchronous step",
+      () =>
+        Layer.effectDiscard(Effect.void).pipe(
+          Layer.provideMerge(Layer.effectDiscard(Effect.promise(() => Promise.resolve()))),
+          Layer.provideMerge(makeFixture().services),
+        ) as Layer.Layer<AuthServices>,
+    ],
+    [
+      "a forkScoped fiber that yields before it completes a Deferred the build awaits",
+      () =>
+        Layer.effectDiscard(
+          Effect.gen(function* () {
+            const ready = yield* Deferred.make<void>();
+            yield* Effect.forkScoped(
+              Effect.yieldNow.pipe(Effect.andThen(Deferred.succeed(ready, undefined))),
+            );
+            yield* Deferred.await(ready);
+          }),
+        ).pipe(Layer.provideMerge(makeFixture().services)) as Layer.Layer<AuthServices>,
+    ],
+  ];
+
+  for (const [composition, services] of asynchronous) {
+    it(`rejects RateLimiterConfigError for ${composition}, where make takes the fallback`, async () => {
+      const made = HttpServer.make({ services: services(), ...limitWithoutLimiter });
+      await expect(made.handler(signIn())).rejects.toBeInstanceOf(RateLimiterConfigError);
+      await made.dispose();
+
+      const error = await rejectionOf(
+        HttpServer.makeAsync({ services: services(), ...limitWithoutLimiter }),
+      );
+      expect(error).toBeInstanceOf(RateLimiterConfigError);
+      expect(String(error)).toMatch(/ipRateLimit configured with no RateLimiter/);
+    });
+  }
+
+  it("rejects ClientAddressConfigError for an IPRateLimitPlugin with no address source, built asynchronously", async () => {
+    const services = Layer.merge(
+      makeFixture({ hooks: ipRateLimitHooks() }).services,
+      Layer.effectDiscard(Effect.promise(() => Promise.resolve())),
+    ) as Layer.Layer<AuthServices>;
+    const error = await rejectionOf(HttpServer.makeAsync({ services, cookie: { secure: false } }));
+    expect(error).toBeInstanceOf(ClientAddressConfigError);
+    expect(String(error)).toMatch(/IPRateLimitPlugin/);
+  });
+
+  it("rejects ClientAddressConfigError for ipRateLimit with no address source, before it builds anything", async () => {
+    let builds = 0;
+    const counted = Layer.effectDiscard(Effect.sync(() => void builds++));
+    const error = await rejectionOf(
+      HttpServer.makeAsync({
+        services: Layer.merge(makeFixture().services, counted) as Layer.Layer<AuthServices>,
+        ipRateLimit: {},
+      }),
+    );
+    expect(error).toBeInstanceOf(ClientAddressConfigError);
+    expect(builds).toBe(0);
+  });
+
+  it("rejects with a failure of the services build after its asynchronous finalizers finish, where make takes the fallback", async () => {
+    let released = 0;
+    let finishedAtRejection = -1;
+    const slowRelease = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () =>
+        Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 1))).pipe(
+          Effect.andThen(Effect.sync(() => void released++)),
+        ),
+      ),
+    );
+    const failure = new BootError({ reason: "no database" });
+    const services = (): Layer.Layer<AuthServices> =>
+      Layer.effectDiscard(Effect.fail(failure)).pipe(
+        Layer.provideMerge(Layer.merge(makeFixture().services, slowRelease)),
+      ) as unknown as Layer.Layer<AuthServices>;
+
+    // Effect releases what the failed build acquired before the build ends, so
+    // the asynchronous finalizer keeps make from seeing the failure.
+    const made = HttpServer.make({ services: services(), cookie: { secure: false } });
+    await expect(made.handler(signIn())).rejects.toBe(failure);
+    await made.dispose();
+    expect(released).toBe(1);
+
+    const error = await HttpServer.makeAsync({
+      services: services(),
+      cookie: { secure: false },
+    }).then(
+      () => expect.unreachable("expected a rejection"),
+      (error: unknown) => {
+        finishedAtRejection = released;
+        return error;
+      },
+    );
+    expect(error).toBe(failure);
+    expect(finishedAtRejection).toBe(2);
+  });
+
+  it("rejects with a defect of the services build as the defect itself", async () => {
+    const defect = new Error("services could not start");
+    const services = Layer.effectDiscard(
+      Effect.promise(() => Promise.resolve()).pipe(Effect.andThen(Effect.die(defect))),
+    ).pipe(Layer.provideMerge(makeFixture().services)) as Layer.Layer<AuthServices>;
+    expect(await rejectionOf(HttpServer.makeAsync({ services, cookie: { secure: false } }))).toBe(
+      defect,
+    );
+  });
+
+  it("releases what it built before it rejects, asynchronous finalizers included, and logs a failed release", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      let released = 0;
+      let finishedAtRejection = -1;
+      const slowFailingRelease = Layer.effectDiscard(
+        Effect.acquireRelease(Effect.void, () =>
+          Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 1))).pipe(
+            Effect.andThen(Effect.sync(() => void released++)),
+            Effect.andThen(Effect.die(new Error("release failed"))),
+          ),
+        ),
+      );
+      const services = Layer.merge(
+        makeFixture().services,
+        slowFailingRelease,
+      ) as Layer.Layer<AuthServices>;
+
+      const error = await HttpServer.makeAsync({ services, ...limitWithoutLimiter }).then(
+        () => expect.unreachable("expected a rejection"),
+        (error: unknown) => {
+          finishedAtRejection = released;
+          return error;
+        },
+      );
+      expect(error).toBeInstanceOf(RateLimiterConfigError);
+      expect(finishedAtRejection).toBe(1);
+      const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+      expect(logged).toContainEqual(
+        expect.stringMatching(
+          /ERROR .*releasing the services Http\.make refused failed.*release failed/s,
+        ),
+      );
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("rejects with what the startup check throws, and releases what it built", async () => {
+    let released = 0;
+    const counted = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () => Effect.sync(() => void released++)),
+    );
+    const boom = new Error("unreadable hooks");
+    const throwingHooks = Layer.effect(
+      Hooks,
+      Effect.gen(function* () {
+        const hooks = yield* Hooks;
+        return Object.defineProperty(
+          { ...hooks },
+          Symbol.for("@thomasfosterau/effect-auth/Hooks/clientAddressKeyed"),
+          {
+            get: () => {
+              throw boom;
+            },
+          },
+        );
+      }),
+    ).pipe(Layer.provide(Hooks.Default));
+    const services = Layer.mergeAll(makeFixture().services, counted, throwingHooks);
+
+    expect(
+      await rejectionOf(
+        HttpServer.makeAsync({
+          services: services as Layer.Layer<AuthServices>,
+          cookie: { secure: false },
+        }),
+      ),
+    ).toBe(boom);
+    expect(released).toBe(1);
+  });
+
+  it("builds services once, asynchronous steps included, serves that build, and releases it on dispose", async () => {
+    let builds = 0;
+    let released = 0;
+    const counted = Layer.effectDiscard(
+      Effect.acquireRelease(
+        Effect.promise(() => Promise.resolve()).pipe(
+          Effect.andThen(Effect.sync(() => void builds++)),
+        ),
+        () => Effect.sync(() => void released++),
+      ),
+    );
+    const { handler, dispose } = await HttpServer.makeAsync({
+      services: Layer.mergeAll(
+        makeFixture().services,
+        counted,
+        memoryRateLimiterLayer(),
+      ) as Layer.Layer<AuthServices>,
+      ...limitWithoutLimiter,
+    });
+    expect(builds).toBe(1);
+    const res = await handler(
+      jsonRequest(
+        "/sign-in",
+        { email: "nobody@example.com", password: PW },
+        { "cf-connecting-ip": "203.0.113.5" },
+      ),
+    );
+    expect(res.status).toBe(401);
+    expect(builds).toBe(1);
+    expect(released).toBe(0);
+    await dispose();
+    expect(released).toBe(1);
+  });
+
+  it("resolves while a fiber that services forked keeps running, and dispose stops it", async () => {
+    let spins = 0;
+    let interrupted = false;
+    const busy = Layer.effectDiscard(
+      Effect.forkScoped(
+        Effect.forever(
+          Effect.andThen(
+            Effect.yieldNow,
+            Effect.sync(() => void spins++),
+          ),
+        ).pipe(Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true)))),
+      ),
+    );
+    const { handler, dispose } = await HttpServer.makeAsync({
+      services: Layer.mergeAll(
+        makeFixture().services,
+        busy,
+        Layer.effectDiscard(Effect.promise(() => Promise.resolve())),
+      ) as Layer.Layer<AuthServices>,
+      cookie: { secure: false },
+    });
+    const res = await handler(signIn());
+    expect(res.status).toBe(401);
+    const running = spins;
+    await macrotasks(3);
+    expect(spins).toBeGreaterThan(running);
+    expect(interrupted).toBe(false);
+    await dispose();
+    expect(interrupted).toBe(true);
   });
 });

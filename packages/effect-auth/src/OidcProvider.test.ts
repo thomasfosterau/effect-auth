@@ -817,6 +817,11 @@ const makeHttpFixture = (
      * `allowMissingClientIp` opt-out unset, so the OIDC layer fails its build.
      */
     readonly declareRegistrationAddress?: boolean;
+    /**
+     * Add a build step that waits on a promise, as a database connection does,
+     * so the services finish building only after `Http.make` returns.
+     */
+    readonly connectAsynchronously?: boolean;
   } = {},
 ) => {
   const usersById = new Map<string, Types.User>();
@@ -979,7 +984,14 @@ const makeHttpFixture = (
     Layer.provide(Layer.succeed(RateLimitStore, rateLimitStore)),
   );
 
-  const withOidc = Layer.mergeAll(base, oidcLayer) as Layer.Layer<AuthServices>;
+  const connection =
+    options.connectAsynchronously === true
+      ? Layer.effectDiscard(Effect.promise(() => Promise.resolve()))
+      : Layer.empty;
+  // The connection is built first, so the OIDC layer builds after it returns.
+  const withOidc = Layer.mergeAll(base, oidcLayer).pipe(
+    Layer.provide(connection),
+  ) as Layer.Layer<AuthServices>;
   const withOidcLimiter = Layer.merge(withOidc, limiterLayer) as Layer.Layer<AuthServices>;
   const limited =
     options.rateLimit === true || (registrationEnabled && options.rateLimit !== false);
@@ -2146,6 +2158,26 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
       makeHttpFixture({ dynamicRegistration: {}, declareRegistrationAddress: false });
     expect(make).toThrow(ClientAddressConfigError);
     expect(make).toThrow(/dynamicRegistration\.trustedProxy/);
+  });
+
+  it("rejects Http.makeAsync with the OIDC layer's ClientAddressConfigError when services build asynchronously (#400)", async () => {
+    // With an asynchronous build step, the OIDC layer's failure arrives after
+    // Http.make returns, so make cannot throw it: every request rejects with it.
+    const fx = makeHttpFixture({
+      dynamicRegistration: {},
+      declareRegistrationAddress: false,
+      connectAsynchronously: true,
+    });
+    await expect(fx.handler(new Request("http://localhost/session"))).rejects.toThrow(
+      ClientAddressConfigError,
+    );
+    // makeAsync waits for the build, so the app fails to start instead.
+    const constructed = HttpServer.makeAsync({
+      services: fx.servicesWithRateLimiter,
+      cookie: { secure: false },
+    });
+    await expect(constructed).rejects.toThrow(ClientAddressConfigError);
+    await expect(constructed).rejects.toThrow(/dynamicRegistration\.trustedProxy/);
   });
 
   it("refuses registrations with 429 outside Http.make when no RateLimiter is in scope", async () => {

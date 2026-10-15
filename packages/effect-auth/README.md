@@ -106,7 +106,7 @@ export { customSessionLayer };
 - **API keys and JWT:** hashed API keys with permissions and quotas; ES256 / EdDSA JWTs with JWKS.
 - **Authorization:** one policy kernel (`Policy`, `Entity`, `Condition`, `Authorizer`) with RBAC as authoring sugar, schema-embedded field guards (`protectedField`), zero-IO guards and role ladders.
 - **Abuse protection:** rate limiting with presets and an optional `effect/persistence` backend (`rateLimiterPersistenceLayer`), per-IP limits, account lockout (`AccountLockoutPlugin`), captcha (Turnstile, reCAPTCHA, hCaptcha).
-- **HTTP API:** a typed `effect/http-api` contract served as a mountable Web handler (`Http.make`), with session cookies, trusted-origin CSRF checks, a derived typed client and an OpenAPI 3.1 document (`Http.getOpenApiSpec()`, or `Http.make({ docs: true })` for a Scalar reference page).
+- **HTTP API:** a typed `effect/http-api` contract served as a mountable Web handler (`Http.make`, or `Http.makeAsync` for services that build asynchronously), with session cookies, trusted-origin CSRF checks, a derived typed client and an OpenAPI 3.1 document (`Http.getOpenApiSpec()`, or `Http.make({ docs: true })` for a Scalar reference page).
 - **Hooks:** `before*` / `after*` hook points, composed as plugins with `composePlugins`; first-party plugins include audit logging and a last-login-method hint.
 
 ## Authorization
@@ -574,7 +574,29 @@ Without `trustedProxy`, forwarded headers are ignored and the socket address is 
 
 **`IPRateLimitPlugin` refuses every request without a client address.** The plugin limits sign-in, sign-up and password-reset requests per address. A request it cannot key is refused with `RateLimitError` (`429` over HTTP), never let through: a request whose address cannot be resolved, and any hook run with no `ClientIP` service in scope, such as a direct `EmailPasswordService.signIn` call from server code. So under `Http.make` the plugin needs `trustedProxy`. When the `Hooks` in `services` include it and `make` has neither `trustedProxy` nor `allowMissingClientIp: true`, `make` throws `ClientAddressConfigError`. With `allowMissingClientIp: true` and no `trustedProxy`, every sign-in, sign-up and password-reset request is refused with `429` (#389).
 
-The limits also need a `RateLimiter` in the handler's `services`: `ipRateLimit`, the dynamic registration limit and the device user-code limit (5 approve/deny attempts per user code per 15 minutes). The device limit counts as configured whenever a `DeviceAuthorizationService` is in `services`; build it with `allowMissingRateLimiter: true` to run approve and deny without the limit instead. Without a `RateLimiter`, `Http.make` throws `RateLimiterConfigError`, so the app fails to start rather than run a limit as a no-op. `make` builds `services` once to check this and the handler reuses that build. When `services` does asynchronous work while building (a database connection, for example), `make` returns before the build finishes, so it cannot throw: the handler's build fails with the same error, and every request rejects with it. Any other failure of a synchronous `services` build also makes `make` throw (the OIDC layer's `ClientAddressConfigError`, for example), after it releases what the build acquired. `make` waits for the build only: a fiber the build forks and does not await, such as a background job, keeps running after `make` returns; one forked into the layer's scope (`Effect.forkScoped`) stops on `dispose`. Outside `Http.make`, the exported group layers (`Http.authGroupLayer`) answer `429` when a configured limit finds no `RateLimiter` in scope (#389).
+The limits also need a `RateLimiter` in the handler's `services`: `ipRateLimit`, the dynamic registration limit and the device user-code limit (5 approve/deny attempts per user code per 15 minutes). The device limit counts as configured whenever a `DeviceAuthorizationService` is in `services`; build it with `allowMissingRateLimiter: true` to run approve and deny without the limit instead. Without a `RateLimiter`, `Http.make` throws `RateLimiterConfigError`, so the app fails to start rather than run a limit as a no-op. `make` builds `services` once to check this and the handler reuses that build. Any other failure of the `services` build also makes `make` throw (the OIDC layer's `ClientAddressConfigError`, for example). Before it throws, `make` releases what the build acquired: a finalizer that does asynchronous work finishes after `make` has thrown, and a finalizer that fails is logged as an error. `make` waits for the build only: a fiber the build forks and does not await, such as a background job, keeps running after `make` returns; one forked into the layer's scope (`Effect.forkScoped`) stops on `dispose`. Outside `Http.make`, the exported group layers (`Http.authGroupLayer`) answer `429` when a configured limit finds no `RateLimiter` in scope (#389).
+
+### Services that build asynchronously: `Http.makeAsync`
+
+`Http.make` is synchronous, so it can throw only when the `services` build finishes before it returns. It runs the build the way `Effect.runSync` does, and the build is still running when `make` returns if it waits on:
+
+- asynchronous work, such as a database connection or `Effect.promise`;
+- a merged layer (`Layer.merge`, `Layer.mergeAll`) whose build yields, or runs past Effect's per-slice operation budget (2,048 operations by default), since each merged layer builds on a fiber of its own;
+- a forked fiber that yields before it completes a `Deferred` the build awaits;
+- a finalizer that does asynchronous work, when the build fails.
+
+For those, `make` cannot throw: the same checks fail the handler's build instead, and every request rejects with the error. `Http.makeAsync` takes the same options and waits for the build however it is composed. It resolves to the same `{ handler, dispose }`, serving that one build, and rejects with the errors `make` throws, so the app fails to start. Before it rejects, it releases what the build acquired and waits for every finalizer, asynchronous ones included.
+
+```typescript
+import * as Auth from "@thomasfosterau/effect-auth";
+
+// `services` connects to a database while it builds.
+const { handler, dispose } = await Auth.Http.makeAsync({
+  services,
+  trustedProxy: Auth.ClientIP.cloudflare,
+  ipRateLimit: {},
+});
+```
 
 ## Abuse protection
 
