@@ -8,8 +8,12 @@ import * as HttpClient from "./HttpClient.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import { SessionService } from "../SessionService.ts";
-import { AuthLifecycleService } from "../AuthLifecycle.ts";
-import { EmailPasswordService, EmailPasswordStore } from "../email/EmailPassword.ts";
+import { type AuthLifecycleConfig, AuthLifecycleService } from "../AuthLifecycle.ts";
+import {
+  type EmailPasswordConfig,
+  EmailPasswordService,
+  EmailPasswordStore,
+} from "../email/EmailPassword.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as Password from "../password/Password.ts";
 import {
@@ -130,6 +134,24 @@ const makeFixture = (
     readonly passwordless?:
       | { readonly disableSignUp: boolean; readonly resendCooldown: number }
       | undefined;
+    /** The `EmailPasswordService` config. Default `{}`. */
+    readonly emailPassword?: EmailPasswordConfig | undefined;
+    /** The `AuthLifecycleService` config. Default `{}`. */
+    readonly lifecycle?: AuthLifecycleConfig | undefined;
+    /**
+     * Replace the `EmailPasswordStore`, given the fixture's own and a way to
+     * create users and email identifiers in the fixture's shared state.
+     */
+    readonly emailPasswordStore?:
+      | ((
+          base: typeof EmailPasswordStore.Service,
+          state: {
+            readonly createUser: (input: { readonly name?: string }) => Types.User;
+            readonly claimEmail: (userId: string, email: string) => void;
+            readonly nextUserId: () => string;
+          },
+        ) => typeof EmailPasswordStore.Service)
+      | undefined;
   } = {},
 ): Fixture => {
   // --- shared in-memory state -----------------------------------------------
@@ -203,11 +225,20 @@ const makeFixture = (
     get: getUserById,
   };
 
-  const emailPasswordStore: typeof EmailPasswordStore.Service = {
+  const baseEmailPasswordStore: typeof EmailPasswordStore.Service = {
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
+  const emailPasswordStore =
+    options.emailPasswordStore?.(baseEmailPasswordStore, {
+      createUser,
+      claimEmail: (userId, email) => {
+        const identifier = makeIdentifier({ userId, type: "email", value: email, verified: false });
+        identifierRecords.set(identifier.id, identifier);
+      },
+      nextUserId: () => `user-${++userSeq}`,
+    }) ?? baseEmailPasswordStore;
 
   const userServiceStore: typeof UserServiceStore.Service = {
     get: getUserById,
@@ -278,14 +309,18 @@ const makeFixture = (
   );
 
   // Stage 2: services needing stage-1 services (e.g. SessionService).
-  const emailPasswordServiceLayer = EmailPasswordService.layer().pipe(Layer.provide(stage1));
+  const emailPasswordServiceLayer = EmailPasswordService.layer(options.emailPassword).pipe(
+    Layer.provide(stage1),
+  );
   const passwordResetServiceLayer = PasswordResetService.layer({
     sendResetPassword: (_email, token) => Effect.sync(() => void sentResetTokens.push(token)),
   }).pipe(Layer.provide(stage1));
   const stage2 = Layer.mergeAll(stage1, emailPasswordServiceLayer, passwordResetServiceLayer);
 
   // Stage 3: AuthLifecycleService needs EmailPasswordService + others from stage 2.
-  const authLifecycleServiceLayer = AuthLifecycleService.layer().pipe(Layer.provide(stage2));
+  const authLifecycleServiceLayer = AuthLifecycleService.layer(options.lifecycle).pipe(
+    Layer.provide(stage2),
+  );
 
   // `baseServices` keeps every output of the stage layers — the optional
   // feature services below are built on top of it and read the raw stores
@@ -640,6 +675,170 @@ const signIn = async (handler: Handler, email: string, password: string = PW): P
 };
 
 // --- tests --------------------------------------------------------------------
+
+describe("anti-enumeration sign-up over HTTP (#414)", () => {
+  const VICTIM = "victim@example.com";
+  const FRESH = "fresh1@example.com"; // As long as VICTIM, so bodies match in length.
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  type SignUpBody = {
+    readonly user: Record<string, unknown>;
+    readonly needsEmailVerification: unknown;
+  };
+
+  const signUpAs = (handler: Handler, email: string) =>
+    handler(
+      jsonRequest("/sign-up", {
+        email,
+        password: PW,
+        name: "Probe",
+        attributes: { plan: "free" },
+      }),
+    );
+
+  /**
+   * Everything a caller can compare across two sign-up responses, bar the
+   * values that differ for any two users: the status, every header (and
+   * `Set-Cookie` on its own), and the body's fields in order with each
+   * value's type, plus the values that must match exactly.
+   */
+  const observe = async (res: Response) => {
+    const body = (await res.json()) as SignUpBody;
+    const typeOf = (value: unknown) =>
+      value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+    return {
+      shape: {
+        status: res.status,
+        headers: [...res.headers.entries()].map(([name, value]) =>
+          name === "content-length" ? [name, "<length>"] : [name, value],
+        ),
+        setCookie: res.headers.getSetCookie(),
+        bodyFields: Object.keys(body).map((key) => [key, typeOf(body[key as keyof SignUpBody])]),
+        userFields: Object.entries(body.user).map(([key, value]) => [key, typeOf(value)]),
+        emailVerified: body.user["emailVerified"],
+        name: body.user["name"],
+        attributes: body.user["attributes"],
+        needsEmailVerification: body.needsEmailVerification,
+        sameTimestamps: body.user["createdAt"] === body.user["updatedAt"],
+      },
+      id: body.user["id"],
+      email: body.user["email"],
+    };
+  };
+
+  // How sign-up finds VICTIM held by another user. The fixture's store holds
+  // the owner back until the sign-up for VICTIM reaches `createUser`, after
+  // its pre-check found the address free.
+  type Arrange = NonNullable<Parameters<typeof makeFixture>[0]>["emailPasswordStore"];
+  const takenAt: ReadonlyArray<{
+    readonly name: string;
+    readonly preCheck: boolean;
+    readonly store?: Arrange;
+  }> = [
+    { name: "the pre-check", preCheck: true },
+    {
+      name: "the claim, lost to a concurrent sign-up",
+      preCheck: false,
+      store: (base, state) => ({
+        ...base,
+        createUser: (input) =>
+          Effect.suspend(() => {
+            if (input.identifier?.value === VICTIM) {
+              state.claimEmail(state.createUser({}).id, VICTIM);
+            }
+            return base.createUser(input);
+          }),
+      }),
+    },
+    {
+      name: "a store reporting created: false",
+      preCheck: false,
+      store: (base, state) => ({
+        ...base,
+        createUser: (input) =>
+          input.identifier?.value === VICTIM
+            ? Effect.sync(() => {
+                const owner = state.createUser({});
+                state.claimEmail(owner.id, VICTIM);
+                return { user: owner, created: false };
+              })
+            : base.createUser(input),
+      }),
+    },
+  ];
+  const lifecycles: ReadonlyArray<AuthLifecycleConfig> = [{}, { requireEmailVerification: true }];
+  const cases = takenAt.flatMap((taken) =>
+    lifecycles.map((lifecycle) => ({
+      ...taken,
+      lifecycle,
+      verification: lifecycle.requireEmailVerification === true,
+    })),
+  );
+
+  it.each(cases)(
+    "an address found taken by $name answers as a fresh one does (requireEmailVerification: $verification)",
+    async ({ preCheck, store, lifecycle, verification }) => {
+      const fixture = makeFixture({
+        emailPassword: { antiEnumeration: true },
+        lifecycle,
+        emailPasswordStore: store,
+      });
+      const handler = handlerFor(fixture);
+
+      let fresh: Awaited<ReturnType<typeof observe>>;
+      if (preCheck) {
+        // The first sign-up for VICTIM is the fresh one; the second finds it taken.
+        fresh = await observe(await signUpAs(handler, VICTIM));
+      } else {
+        fresh = await observe(await signUpAs(handler, FRESH));
+      }
+      const taken = await observe(await signUpAs(handler, VICTIM));
+
+      expect(taken.shape).toEqual(fresh.shape);
+      expect(fresh.shape.status).toBe(200);
+      expect(fresh.shape.setCookie).toEqual([]);
+      expect(fresh.shape.userFields).toEqual([
+        ["id", "string"],
+        ["email", "string"],
+        ["emailVerified", "boolean"],
+        ["name", "string"],
+        ["createdAt", "number"],
+        ["updatedAt", "number"],
+        ["attributes", "object"],
+      ]);
+      expect(fresh.shape.emailVerified).toBe(false);
+      expect(fresh.shape.needsEmailVerification).toBe(verification);
+      expect(fresh.email).toBe(preCheck ? VICTIM : FRESH);
+      expect(taken.email).toBe(VICTIM);
+      expect(taken.id).not.toBe(fresh.id);
+      // A verification email goes out for each sign-up when verification is required.
+      expect(fixture.sentVerificationTokens).toHaveLength(verification ? 2 : 0);
+    },
+  );
+
+  it("the stand-in's id has the store's shape when the store mints one", async () => {
+    const minting = handlerFor(
+      makeFixture({
+        emailPassword: { antiEnumeration: true },
+        emailPasswordStore: (base, state) => ({
+          ...base,
+          newUserId: () => Effect.sync(state.nextUserId),
+        }),
+      }),
+    );
+    const fresh = await observe(await signUpAs(minting, VICTIM));
+    const taken = await observe(await signUpAs(minting, VICTIM));
+    expect(fresh.id).toBe("user-1");
+    expect(taken.id).toBe("user-2");
+    expect(taken.shape).toEqual(fresh.shape);
+
+    // Without the seam the stand-in's id is a random UUID, unlike this
+    // fixture's `user-N` ids: the residual `newUserId` closes.
+    const fallback = handlerFor(makeFixture({ emailPassword: { antiEnumeration: true } }));
+    await signUpAs(fallback, VICTIM);
+    expect((await observe(await signUpAs(fallback, VICTIM))).id).toMatch(UUID);
+  });
+});
 
 describe("HTTP auth protocol", () => {
   it("signs up, sets a session cookie, and returns the user", async () => {

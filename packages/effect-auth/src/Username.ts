@@ -15,6 +15,7 @@ import * as Errors from "./Errors.ts";
 import {
   EmailPasswordService,
   EmailPasswordStore,
+  isStandInSignUp,
   SecondFactorGate,
   type AuthResult,
 } from "./email/EmailPassword.ts";
@@ -83,6 +84,21 @@ export interface UsernameSignInInput {
 export class UsernameService extends Context.Service<
   UsernameService,
   {
+    /**
+     * Sign up with a username, email and password. A username already taken
+     * fails with `UsernameError` before anything else runs, so a username's
+     * availability is public. The rest is {@link EmailPasswordService}
+     * `signUp`, and the username is then claimed for the new user.
+     *
+     * Under `antiEnumeration` (on `EmailPasswordConfig`), a sign-up whose email
+     * another user holds gets the same answer as a fresh one, but its
+     * username is not claimed: the answer's user is a stand-in that no row
+     * backs, so the username stays free for a real sign-up rather than being
+     * held by a user that doesn't exist. It still fails with `UsernameError`
+     * if someone holds the username by then, as the claim would. A later
+     * request can tell the two apart, since only a fresh sign-up's username
+     * is taken afterwards.
+     */
     readonly signUp: (
       input: UsernameSignUpInput,
     ) => Effect.Effect<
@@ -199,6 +215,17 @@ export const make = (
             sessionAttributes: input.sessionAttributes,
           }),
         });
+
+        // Under anti-enumeration, an address another user holds gets a
+        // stand-in user no row backs. Claiming the username for it would squat
+        // the username on a user that doesn't exist, so the claim is skipped;
+        // the availability check stands in for the claim's own failure.
+        if (isStandInSignUp(result)) {
+          if ((yield* identifiers.getByValue("username", username)) !== null) {
+            return yield* new UsernameError({ message: "Username is already taken" });
+          }
+          return result;
+        }
 
         // Usernames carry no external proof-of-ownership, so the identifier
         // is created verified.

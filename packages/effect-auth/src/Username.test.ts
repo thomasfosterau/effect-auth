@@ -2,12 +2,15 @@ import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import { UsernameService, UsernameError, type UsernameConfig } from "./Username.ts";
 import {
+  type AuthResult,
+  type EmailPasswordConfig,
   EmailPasswordService,
   EmailPasswordStore,
   SecondFactorGate,
 } from "./email/EmailPassword.ts";
 import {
   IdentifierStore,
+  makeIdentifier,
   memoryIdentifierStore,
   type Identifier,
   type IdentifierType,
@@ -311,5 +314,232 @@ describe("UsernameService", () => {
     await run((svc) => svc.updateUsername(a.user.id, "franklin"));
     expect(findIdentifier("username", "franklin")?.userId).toBe(a.user.id);
     expect(findIdentifier("username", "frank")).toBeNull();
+  });
+});
+
+describe("UsernameService under anti-enumeration (#414)", () => {
+  beforeEach(() => {
+    usersById.clear();
+    identifierRecords.clear();
+    passwordHashes.clear();
+    sessions.clear();
+    seq = 0;
+  });
+
+  const PASSWORD = "password-123";
+
+  const claimEmail = (userId: string, email: string): void => {
+    const identifier = makeIdentifier({ userId, type: "email", value: email, verified: false });
+    identifierRecords.set(identifier.id, identifier);
+  };
+
+  /** A user who already holds `email`, created outside any sign-up. */
+  const seedOwner = (email: string): Types.User => {
+    const now = new Date();
+    const owner: Types.User = {
+      id: `owner-${++seq}`,
+      createdAt: now,
+      updatedAt: now,
+      attributes: {},
+    };
+    usersById.set(owner.id, owner);
+    claimEmail(owner.id, email);
+    return owner;
+  };
+
+  /**
+   * Run `f` against a `UsernameService` over an `EmailPasswordService` with
+   * `antiEnumeration`, its store and hasher replaceable.
+   */
+  const runAntiEnumeration = <A, E>(
+    f: (svc: typeof UsernameService.Service) => Effect.Effect<A, E, UsernameDeps>,
+    opts: {
+      readonly store?: typeof EmailPasswordStore.Service;
+      readonly hasher?: typeof PasswordHasher.Service;
+      readonly emailPassword?: EmailPasswordConfig;
+    } = {},
+  ) => {
+    const stores = Layer.mergeAll(
+      Layer.succeed(IdentifierStore)(identifierStore),
+      Layer.succeed(EmailPasswordStore)(opts.store ?? emailPasswordStore),
+      Layer.succeed(SessionStore)(sessionStore),
+      Layer.succeed(UserStore)(userStore),
+      Layer.succeed(PasswordHasher)(opts.hasher ?? hasher),
+      Hooks.Default,
+    );
+    const withSessions = Layer.mergeAll(
+      stores,
+      SessionService.layer(sessionConfig).pipe(Layer.provide(stores)),
+    );
+    const deps = Layer.mergeAll(
+      withSessions,
+      EmailPasswordService.layer(opts.emailPassword ?? { antiEnumeration: true }).pipe(
+        Layer.provide(withSessions),
+      ),
+    );
+    return Effect.runPromise(
+      Effect.gen(function* () {
+        const svc = yield* UsernameService;
+        return yield* f(svc);
+      }).pipe(
+        Effect.provide(Layer.mergeAll(UsernameService.layer().pipe(Layer.provide(deps)), deps)),
+      ),
+    );
+  };
+
+  // The ways sign-up finds the address held by another user. Each seeds the
+  // owner for `victim@example.com` and returns the store sign-up runs with.
+  const VICTIM = "victim@example.com";
+  const takenAddress: ReadonlyArray<{
+    readonly name: string;
+    readonly arrange: () => {
+      readonly owner: Types.User;
+      readonly store: typeof EmailPasswordStore.Service;
+    };
+  }> = [
+    {
+      name: "the pre-check",
+      arrange: () => ({ owner: seedOwner(VICTIM), store: emailPasswordStore }),
+    },
+    {
+      name: "a concurrent sign-up winning the claim",
+      arrange: () => {
+        let owner: Types.User | undefined;
+        return {
+          get owner() {
+            if (owner === undefined) throw new Error("the store never ran");
+            return owner;
+          },
+          store: {
+            ...emailPasswordStore,
+            createUser: (input) =>
+              Effect.gen(function* () {
+                if (input.identifier?.value === VICTIM) owner = seedOwner(VICTIM);
+                return yield* emailPasswordStore.createUser(input);
+              }),
+          },
+        };
+      },
+    },
+    {
+      name: "a store reporting created: false",
+      arrange: () => {
+        let owner: Types.User | undefined;
+        return {
+          get owner() {
+            if (owner === undefined) throw new Error("the store never ran");
+            return owner;
+          },
+          store: {
+            ...emailPasswordStore,
+            createUser: (input) =>
+              input.identifier?.value === VICTIM
+                ? Effect.sync(() => {
+                    owner = seedOwner(VICTIM);
+                    return { user: owner, created: false };
+                  })
+                : emailPasswordStore.createUser(input),
+          },
+        };
+      },
+    },
+  ];
+
+  it.each(takenAddress)(
+    "an address found taken by $name answers as a fresh sign-up does and claims no username",
+    async ({ arrange }) => {
+      const arranged = arrange();
+      const fresh = await runAntiEnumeration(
+        (svc) =>
+          svc.signUp({ username: "fresh_one", email: "fresh@example.com", password: PASSWORD }),
+        { store: arranged.store },
+      );
+      const taken = await runAntiEnumeration(
+        (svc) => svc.signUp({ username: "squat_me", email: VICTIM, password: PASSWORD }),
+        { store: arranged.store },
+      );
+      const owner = arranged.owner;
+
+      // The same answer: same fields, no session, the submitted address.
+      const shape = (result: AuthResult) => ({
+        keys: Object.keys(result).sort(),
+        userKeys: Object.keys(result.user).sort(),
+        session: result.session,
+        method: result.method,
+      });
+      expect(shape(taken)).toEqual(shape(fresh));
+      expect(fresh.identifier).toEqual({ type: "email", value: "fresh@example.com" });
+      expect(taken.identifier).toEqual({ type: "email", value: VICTIM });
+      expect(taken.user.id).not.toBe(owner.id);
+
+      // The fresh sign-up claims its username; the stand-in claims none, so
+      // neither the owner nor a phantom user holds "squat_me".
+      expect(findIdentifier("username", "fresh_one")?.userId).toBe(fresh.user.id);
+      expect(findIdentifier("username", "squat_me")).toBeNull();
+      expect(
+        [...identifierRecords.values()].filter((identifier) => identifier.userId === owner.id),
+      ).toEqual([expect.objectContaining({ type: "email", value: VICTIM })]);
+
+      // The username stays free for a real sign-up.
+      const later = await runAntiEnumeration((svc) =>
+        svc.signUp({ username: "squat_me", email: "later@example.com", password: PASSWORD }),
+      );
+      expect(findIdentifier("username", "squat_me")?.userId).toBe(later.user.id);
+    },
+  );
+
+  it("a username taken before sign-up fails the same way for a fresh or a taken address", async () => {
+    await runAntiEnumeration((svc) =>
+      svc.signUp({ username: "taken", email: "first@example.com", password: PASSWORD }),
+    );
+    seedOwner(VICTIM);
+    const fresh = await runAntiEnumeration((svc) =>
+      Effect.flip(
+        svc.signUp({ username: "Taken", email: "fresh@example.com", password: PASSWORD }),
+      ),
+    );
+    const taken = await runAntiEnumeration((svc) =>
+      Effect.flip(svc.signUp({ username: "Taken", email: VICTIM, password: PASSWORD })),
+    );
+    expect(fresh).toEqual(new UsernameError({ message: "Username is already taken" }));
+    expect(taken).toEqual(fresh);
+  });
+
+  it("a username taken during sign-up fails the same way for a fresh or a taken address", async () => {
+    // The hasher stands in for a concurrent sign-up: hashing runs after the
+    // username check on both paths, and it hands the username to someone else.
+    const rival = seedOwner("rival@example.com");
+    const racingHasher: typeof PasswordHasher.Service = {
+      ...hasher,
+      hash: (password) =>
+        Effect.sync(() => {
+          if (findIdentifier("username", "contested") === null) {
+            const identifier = makeIdentifier({
+              userId: rival.id,
+              type: "username",
+              value: "contested",
+              verified: true,
+            });
+            identifierRecords.set(identifier.id, identifier);
+          }
+        }).pipe(Effect.andThen(hasher.hash(password))),
+    };
+    seedOwner(VICTIM);
+    const fresh = await runAntiEnumeration(
+      (svc) =>
+        Effect.flip(
+          svc.signUp({ username: "contested", email: "fresh@example.com", password: PASSWORD }),
+        ),
+      { hasher: racingHasher },
+    );
+    identifierRecords.delete(findIdentifier("username", "contested")!.id);
+    const taken = await runAntiEnumeration(
+      (svc) =>
+        Effect.flip(svc.signUp({ username: "contested", email: VICTIM, password: PASSWORD })),
+      { hasher: racingHasher },
+    );
+    expect(fresh).toEqual(new UsernameError({ message: "Username is already taken" }));
+    expect(taken).toEqual(fresh);
+    expect(findIdentifier("username", "contested")?.userId).toBe(rival.id);
   });
 });
