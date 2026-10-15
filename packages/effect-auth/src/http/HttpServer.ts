@@ -4065,11 +4065,8 @@ const findEndpointRule = (
   method: string,
 ): EndpointRateLimitRule | undefined => rules.find((r) => matchesEndpointRule(r, pathname, method));
 
-/**
- * Thrown by {@link make} when `ipRateLimit` is configured with no client-address
- * source: no `trustedProxy`, and no `allowMissingClientIp` opt-out (#358). The
- * class lives in `Errors.ts`, which the OIDC layer also uses (#388).
- */
+// The class lives in Errors.ts, shared with the OIDC layer (#388); its TSDoc
+// says when each of them raises it.
 export { ClientAddressConfigError } from "../Errors.ts";
 
 /**

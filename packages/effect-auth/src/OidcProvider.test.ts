@@ -40,6 +40,7 @@ import {
   type OidcClient,
   type OidcConsent,
   type OidcDynamicRegistrationConfig,
+  type OidcProviderConfig,
   type OidcToken,
   OidcProviderService,
 } from "./OidcProvider.ts";
@@ -768,6 +769,29 @@ describe("OidcProviderService dynamic client registration", () => {
     expect(custom.dynamicRegistration?.policy).toBe(policy);
     expect(custom.dynamicRegistration?.skipConsent).toBe(true);
     expect(custom.dynamicRegistration?.management).toBe(true);
+  });
+
+  it("mcpProviderPreset fails the layer build without a client-address source", async () => {
+    // The preset always enables registration, so an MCP provider declares an
+    // address source or opts out (#388).
+    const { layer } = setup();
+    const build = (config: OidcProviderConfig) =>
+      Effect.scoped(Layer.build(OidcProviderService.layer(config).pipe(Layer.provide(layer))));
+
+    const err = await Effect.runPromise(Effect.flip(build(mcpProviderPreset(baseConfig))));
+    expect(err).toBeInstanceOf(ClientAddressConfigError);
+    expect(err.message).toContain("dynamicRegistration.trustedProxy");
+
+    await expect(
+      Effect.runPromise(
+        build(
+          mcpProviderPreset({
+            ...baseConfig,
+            dynamicRegistration: { trustedProxy: ClientIP.cloudflare },
+          }),
+        ),
+      ),
+    ).resolves.toBeDefined();
   });
 });
 
