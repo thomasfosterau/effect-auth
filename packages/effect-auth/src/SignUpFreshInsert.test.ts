@@ -57,6 +57,8 @@ const makeWorld = (type: IdentifierType, value: string) => {
   const identifierRecords = new Map<string, Identifier>();
   const identifiers = memoryIdentifierStore(identifierRecords);
   const sessionsFor: string[] = [];
+  /** Memberships a flow writes after its create (SCIM), recorded per world. */
+  const members: Member[] = [];
   let writes = 0;
 
   /**
@@ -106,6 +108,7 @@ const makeWorld = (type: IdentifierType, value: string) => {
     base,
     createUser,
     identifierRecords,
+    members,
     sessionsFor,
     writes: () => writes,
   };
@@ -225,8 +228,6 @@ interface Case {
   /** Writes the flow makes after a create, beyond the identifier and session. */
   readonly extraWrites?: (world: World) => ReadonlyArray<unknown>;
 }
-
-const members: Member[] = [];
 
 const cases: ReadonlyArray<Case> = [
   {
@@ -402,7 +403,7 @@ const cases: ReadonlyArray<Case> = [
       const orgs = new Proxy(
         {
           getMember: () => Effect.succeed(null),
-          createMember: (member: Member) => Effect.sync(() => (members.push(member), member)),
+          createMember: (member: Member) => Effect.sync(() => (world.members.push(member), member)),
         },
         {
           get: (target, property) =>
@@ -435,7 +436,7 @@ const cases: ReadonlyArray<Case> = [
         }).pipe(Effect.provide(layer)),
       );
     },
-    extraWrites: () => members,
+    extraWrites: (world) => world.members,
   },
 ];
 
@@ -443,7 +444,6 @@ describe("a store whose createUser reports created: false", () => {
   it.each(cases)(
     "$flow fails and writes nothing to the existing user",
     async ({ flow, type, value, run, extraWrites }) => {
-      members.length = 0;
       const world = makeWorld(type, value);
 
       const tag = await run(world);

@@ -455,15 +455,17 @@ call inserted the user. Core treats an address already on the row as the new
 user's own only when `created` is `true`. A writer that finds or creates on the
 address, and returns a user who already existed, must report `created: false`;
 sign-up then fails as the address being in use (`EmailInUseError` for email and
-password sign-up) and writes nothing to that user, so it cannot set a password
+password sign-up, or, with `antiEnumeration`, the same no-session answer as any
+duplicate) and writes nothing to that user, so it cannot set a password
 on, link an account to, or verify someone else's account.
 
 When the user already exists, the writer must not modify that row. Core sees
 `created` only after the write, so `onConflictDoUpdate` has already copied the
 caller's fields onto someone else's account. Use a plain `INSERT`, as below,
-and let the unique index on `email` fail (core maps that failure to the address
-being in use), or `onConflictDoNothing()` followed by a select of the existing
-row, reported as `created: false`. Never `onConflictDoUpdate`. A plain `INSERT`
+and let the unique index on `email` fail (the writer fails with `AuthError`;
+core then reports the address in use when it finds it held), or
+`onConflictDoNothing()` followed by a select of the existing row, reported as
+`created: false`. If that select finds no row (for example under a REPEATABLE READ snapshot that predates the conflicting insert), fail with `AuthError` rather than return an invented user. Never `onConflictDoUpdate`. A plain `INSERT`
 always reports `true`.
 
 On a `NOT NULL` `email` column the row can't be inserted without the address,

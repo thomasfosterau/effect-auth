@@ -61,9 +61,10 @@ export interface NewUserIdentifier {
  * When the user already exists, the writer must not modify that row: core sees
  * the flag only after the write, so an `INSERT … ON CONFLICT DO UPDATE` has
  * already copied the caller's fields onto someone else's account. Use a plain
- * `INSERT` and let the unique index on the address fail (core maps that failure
- * to the address being taken), or `INSERT … ON CONFLICT DO NOTHING` followed by
- * a select of the existing row, reported as `created: false`. Never
+ * `INSERT` and let the unique index on the address fail (the writer fails with
+ * `AuthError`; core then reports the address taken when it finds it held), or
+ * `INSERT … ON CONFLICT DO NOTHING` followed by a select of the existing row,
+ * reported as `created: false`. If that select finds no row (for example under a REPEATABLE READ snapshot that predates the conflicting insert), fail with `AuthError` rather than return an invented user. Never
  * `ON CONFLICT DO UPDATE`.
  */
 export interface CreateUserResult {
