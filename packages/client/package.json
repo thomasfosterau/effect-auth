@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Browser client for effect-auth: a typed, dependency-free client over the auth HTTP contract with an observable session store.",
   "keywords": [
     "auth",
