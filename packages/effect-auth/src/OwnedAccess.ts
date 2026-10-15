@@ -239,7 +239,7 @@ const anonymousPrincipal = Entity.entity(Entity.ref("Anonymous", "anonymous"));
  * viewer read this row", never "may they update or delete it".
  */
 const readAction = Entity.ref("Action", "read");
-const readScopeOf = Policy.eq(readAction);
+const readActionScope = Policy.eq(readAction);
 
 /**
  * Build the owned-material read access.
@@ -259,24 +259,24 @@ export const make = <Id, User extends Guard.ViewerShape, Rung extends string>(
   const policies: ReadonlyArray<Policy.DeclarativePolicy> = [
     Policy.permit({
       id: "owned:public",
-      action: readScopeOf,
+      action: readActionScope,
       resource: resourceScope,
       when: Condition.and(Condition.eq(attr("visibility"), Condition.lit("public")), notDraft),
     }),
     Policy.permit({
       id: "owned:owner",
-      action: readScopeOf,
+      action: readActionScope,
       resource: resourceScope,
       when: Condition.eq(Condition.principal, attr("owner")),
     }),
     Policy.roleAtLeast(guards.ladder, viewPrivate, {
       id: "owned:view-private",
-      action: readScopeOf,
+      action: readActionScope,
       resource: resourceScope,
     }),
     Policy.permit({
       id: "owned:follower",
-      action: readScopeOf,
+      action: readActionScope,
       resource: resourceScope,
       when: Condition.and(
         Condition.eq(attr("visibility"), Condition.lit("followers")),
