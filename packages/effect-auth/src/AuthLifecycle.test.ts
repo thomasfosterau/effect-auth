@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
-import { Context, Crypto, Effect } from "effect";
+import { Context, Crypto, Effect, Layer } from "effect";
 import { Hooks } from "./Hooks.ts";
+import { AuthError, EmailVerificationError } from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as AuthLifecycle from "./AuthLifecycle.ts";
 import {
   type EmailVerification,
+  type EmailVerificationConfig,
   EmailVerificationStore,
   EmailVerificationService,
 } from "./email/EmailVerification.ts";
@@ -163,7 +165,15 @@ const sessionConfig: SessionConfig = {
   },
 };
 
-const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) => {
+const makeTestContext = async (
+  emailPasswordConfig: EmailPasswordConfig = {},
+  options: {
+    /** Replaces the verification `sendEmail`, which by default records into `sentEmails`. */
+    readonly sendEmail?: EmailVerificationConfig["sendEmail"] | undefined;
+    /** The `Hooks` the verification service runs. Default `Hooks.Default`. */
+    readonly hooks?: Layer.Layer<Hooks> | undefined;
+  } = {},
+) => {
   const hasher = Password.pbkdf2Hasher({ iterations: 1000 });
 
   const cryptoContext = Context.make(Crypto.Crypto, PlatformCrypto.instance);
@@ -181,13 +191,15 @@ const makeTestContext = async (emailPasswordConfig: EmailPasswordConfig = {}) =>
   const emailVerificationService = await Effect.runPromise(
     Effect.provide(
       EmailVerificationModule.make({
-        sendEmail: (email, token) =>
-          Effect.sync(() => {
-            sentEmails.push({ email, token });
-          }),
+        sendEmail:
+          options.sendEmail ??
+          ((email, token) =>
+            Effect.sync(() => {
+              sentEmails.push({ email, token });
+            })),
       }),
       Context.merge(Context.make(EmailVerificationStore, emailVerificationStore), cryptoContext),
-    ).pipe(Effect.provide(Hooks.Default)),
+    ).pipe(Effect.provide(options.hooks ?? Hooks.Default)),
   );
 
   const emailPasswordService = await Effect.runPromise(
@@ -481,5 +493,185 @@ describe("AuthLifecycleService", () => {
     expect(result.needsEmailVerification).toBe(false);
     expect(result.session).toBeDefined();
     expect(result.user.id).toBe(user.id);
+  });
+});
+
+describe("AuthLifecycleService.signUp for a held address under antiEnumeration (#422)", () => {
+  const HELD = "held@example.com";
+  const FRESH = "fresh@example.com";
+  const PASSWORD = "strong-password-123";
+
+  beforeEach(() => {
+    users.clear();
+    identifierRecords.clear();
+    passwordHashes.clear();
+    sessions.clear();
+    verifications.clear();
+    sentEmails.splice(0, sentEmails.length);
+  });
+
+  /** The address's holder: a user who signed up with HELD earlier. */
+  const seedHolder = (verified: boolean): User => {
+    const holder: User = {
+      id: "user-holder",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(holder.id, holder);
+    addEmailIdentifier(holder.id, HELD, verified);
+    return holder;
+  };
+
+  /** A fresh sign-up for FRESH, then one for HELD, through one service. */
+  const signUpFreshThenHeld = (
+    config: AuthLifecycle.AuthLifecycleConfig,
+    context: Awaited<ReturnType<typeof makeTestContext>>,
+  ) =>
+    Effect.gen(function* () {
+      const service = yield* AuthLifecycle.make(config);
+      const fresh = yield* service.signUp({ email: FRESH, password: PASSWORD, name: "Probe" });
+      const held = yield* service.signUp({ email: HELD, password: PASSWORD, name: "Probe" });
+      return { fresh, held };
+    }).pipe(Effect.provide(context), Effect.provide(Hooks.Default));
+
+  /** A `Hooks` layer recording the user id each verification hook sees. */
+  const recordingVerificationHooks = (calls: Array<readonly [string, string]>) =>
+    Layer.effect(
+      Hooks,
+      Effect.gen(function* () {
+        const base = yield* Hooks;
+        return {
+          ...base,
+          beforeCreateVerification: (args) =>
+            Effect.sync(() => void calls.push(["before", args.userId])).pipe(Effect.as(args)),
+          afterCreateVerification: (args) =>
+            Effect.sync(() => void calls.push(["after", args.userId])).pipe(Effect.as(args)),
+        } satisfies typeof Hooks.Service;
+      }),
+    ).pipe(Layer.provide(Hooks.Default));
+
+  it.each([
+    { holder: "verified", verified: true },
+    { holder: "unverified", verified: false },
+  ])(
+    "the $holder holder gets the existing-account notice, and no verification record or link",
+    async ({ verified }) => {
+      const holder = seedHolder(verified);
+      const hookCalls: Array<readonly [string, string]> = [];
+      const context = await makeTestContext(
+        { antiEnumeration: true },
+        { hooks: recordingVerificationHooks(hookCalls) },
+      );
+      const notices: string[] = [];
+
+      const { fresh, held } = await Effect.runPromise(
+        signUpFreshThenHeld(
+          {
+            requireEmailVerification: true,
+            sendExistingAccountNotice: (email) => Effect.sync(() => void notices.push(email)),
+          },
+          context,
+        ),
+      );
+
+      // The held address is answered by a stand-in no row backs, in the shape
+      // a fresh sign-up gets.
+      expect(held.user.id).not.toBe(holder.id);
+      expect(users.has(held.user.id)).toBe(false);
+      expect(Object.keys(held)).toEqual(Object.keys(fresh));
+      expect(held.identifier).toEqual({ type: "email", value: HELD });
+      expect(held.needsEmailVerification).toBe(true);
+      expect(fresh.needsEmailVerification).toBe(true);
+      expect(held.session).toBeUndefined();
+      expect(fresh.session).toBeUndefined();
+
+      // One verification record, for the fresh user; none for the stand-in.
+      const records = [...verifications.values()];
+      expect(records.map((record) => [record.userId, record.email])).toEqual([
+        [fresh.user.id, FRESH],
+      ]);
+      expect(records.every((record) => users.has(record.userId))).toBe(true);
+      // The verification hooks never see the stand-in's id.
+      expect(hookCalls).toEqual([
+        ["before", fresh.user.id],
+        ["after", fresh.user.id],
+      ]);
+
+      // The holder gets the notice and no link; the fresh address gets its link.
+      expect(notices).toEqual([HELD]);
+      expect(sentEmails.map((sent) => sent.email)).toEqual([FRESH]);
+
+      // That link verifies the fresh user.
+      const verifiedResult = await Effect.runPromise(
+        Effect.gen(function* () {
+          const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
+          return yield* service.verifyEmail({ token: sentEmails[0]!.token });
+        }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+      );
+      expect(verifiedResult.user.id).toBe(fresh.user.id);
+    },
+  );
+
+  it("without sendExistingAccountNotice, the holder is sent nothing", async () => {
+    seedHolder(true);
+    const context = await makeTestContext({ antiEnumeration: true });
+
+    const { held } = await Effect.runPromise(
+      signUpFreshThenHeld({ requireEmailVerification: true }, context),
+    );
+
+    expect(held.needsEmailVerification).toBe(true);
+    expect(sentEmails.map((sent) => sent.email)).toEqual([FRESH]);
+    expect([...verifications.values()].map((record) => record.email)).toEqual([FRESH]);
+  });
+
+  it("with verification off, neither sign-up sends anything", async () => {
+    seedHolder(true);
+    const context = await makeTestContext({ antiEnumeration: true });
+    const notices: string[] = [];
+
+    await Effect.runPromise(
+      signUpFreshThenHeld(
+        { sendExistingAccountNotice: (email) => Effect.sync(() => void notices.push(email)) },
+        context,
+      ),
+    );
+
+    expect(notices).toEqual([]);
+    expect(sentEmails).toEqual([]);
+    expect(verifications.size).toBe(0);
+  });
+
+  it("a failed notice fails the sign-up as a failed verification send does", async () => {
+    seedHolder(true);
+    const context = await makeTestContext(
+      { antiEnumeration: true },
+      {
+        sendEmail: () =>
+          Effect.fail(new EmailVerificationError({ message: "provider down (verification)" })),
+      },
+    );
+
+    const errors = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* AuthLifecycle.make({
+          requireEmailVerification: true,
+          sendExistingAccountNotice: () =>
+            Effect.fail(new AuthError({ message: "provider down (notice)" })),
+        });
+        const fresh = yield* Effect.flip(service.signUp({ email: FRESH, password: PASSWORD }));
+        const held = yield* Effect.flip(service.signUp({ email: HELD, password: PASSWORD }));
+        return { fresh, held };
+      }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+    );
+
+    const describeError = (error: { readonly _tag: string; readonly message: string }) => ({
+      tag: error._tag,
+      message: error.message.replace(FRESH, "<address>").replace(HELD, "<address>"),
+    });
+    expect(describeError(errors.held)).toEqual(describeError(errors.fresh));
+    expect(errors.held._tag).toBe("EmailVerificationError");
+    expect(errors.held.message).toBe(`Failed to send verification email to ${HELD}`);
   });
 });

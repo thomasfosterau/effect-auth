@@ -90,6 +90,7 @@ describe("emailCallbacks", () => {
       }),
     );
     await Effect.runPromise(cb.sendSecondFactorOtp(user(), "654321"));
+    await Effect.runPromise(cb.sendExistingAccountNotice("e@example.com"));
 
     await flushDispatched();
 
@@ -101,6 +102,7 @@ describe("emailCallbacks", () => {
       { to: "new@example.com", purpose: "change-email", params: { token: "tok-4" } },
       { to: "alice@example.com", purpose: "delete-account", params: { token: "tok-5" } },
       { to: "alice@example.com", purpose: "second-factor-otp", params: { otp: "654321" } },
+      { to: "e@example.com", purpose: "existing-account", params: {} },
     ]);
   });
 

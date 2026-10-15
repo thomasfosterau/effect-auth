@@ -129,6 +129,10 @@ interface Fixture {
   readonly seedUnverifiedEmailUser: (user: Types.User, email: string) => void;
   /** Number of session-store `get` reads so far (for the cookie-cache tests). */
   readonly sessionStoreReads: () => number;
+  /** The email-verification records stored so far. */
+  readonly verificationRecords: () => ReadonlyArray<EmailVerification>;
+  /** Whether a user row with this id exists. */
+  readonly userExists: (userId: string) => boolean;
 }
 
 /**
@@ -605,6 +609,8 @@ const makeFixture = (
     registerPhone,
     seedUnverifiedEmailUser,
     sessionStoreReads: () => sessionStoreReads,
+    verificationRecords: () => [...verifications.values()],
+    userExists: (userId) => usersById.has(userId),
   };
 };
 
@@ -799,18 +805,27 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
       }),
     },
   ];
-  const lifecycles: ReadonlyArray<AuthLifecycleConfig> = [{}, { requireEmailVerification: true }];
+  // With verification on, the address's holder gets the existing-account
+  // notice when one is configured, and nothing otherwise (#422).
+  const lifecycles = [
+    { verification: false, notice: false },
+    { verification: true, notice: true },
+    { verification: true, notice: false },
+  ];
   const cases = takenAt.flatMap((taken) =>
-    lifecycles.map((lifecycle) => ({
-      ...taken,
-      lifecycle,
-      verification: lifecycle.requireEmailVerification === true,
-    })),
+    lifecycles.map((lifecycle) => ({ ...taken, ...lifecycle })),
   );
 
   it.each(cases)(
-    "an address found taken by $name answers as a fresh one does (requireEmailVerification: $verification)",
-    async ({ preCheck, store, lifecycle, verification }) => {
+    "an address found taken by $name answers as a fresh one does (requireEmailVerification: $verification, notice: $notice)",
+    async ({ preCheck, store, verification, notice }) => {
+      const notices: string[] = [];
+      const lifecycle: AuthLifecycleConfig = {
+        ...(verification && { requireEmailVerification: true }),
+        ...(notice && {
+          sendExistingAccountNotice: (email: string) => Effect.sync(() => void notices.push(email)),
+        }),
+      };
       const fixture = makeFixture({
         emailPassword: { antiEnumeration: true },
         lifecycle,
@@ -844,8 +859,19 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
       expect(fresh.email).toBe(preCheck ? VICTIM : FRESH);
       expect(taken.email).toBe(VICTIM);
       expect(taken.id).not.toBe(fresh.id);
-      // A verification email goes out for each sign-up when verification is required.
-      expect(fixture.sentVerificationTokens).toHaveLength(verification ? 2 : 0);
+
+      // Only the fresh sign-up gets a verification record and link, and both
+      // name a real user; the stand-in gets neither, so VICTIM's holder is
+      // never sent a link that can't verify (#422).
+      const records = fixture.verificationRecords();
+      expect(records.map((record) => [record.userId, record.email])).toEqual(
+        verification ? [[fresh.id, fresh.email]] : [],
+      );
+      expect(records.every((record) => fixture.userExists(record.userId))).toBe(true);
+      expect(fixture.sentVerificationTokens.map((token) => hashToken(token))).toEqual(
+        records.map((record) => record.token),
+      );
+      expect(notices).toEqual(verification && notice ? [VICTIM] : []);
     },
   );
 

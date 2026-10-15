@@ -110,11 +110,22 @@ export interface EmailPasswordConfig {
    * look alike.
    *
    * What still differs: the time a response takes (a fresh sign-up also
-   * creates the user, claims the address and stores the hash), the
-   * `afterSignUp` hooks (they run for a fresh sign-up only), and anything a
-   * later request observes. Signing in with the submitted password succeeds
+   * creates the user, claims the address and stores the hash), what a fresh
+   * sign-up also does when email verification is on (it stores a
+   * verification record, runs the `beforeCreateVerification` and
+   * `afterCreateVerification` hooks, and sends the verification email; see
+   * below), the `afterSignUp` hooks (they run for a fresh sign-up only), and
+   * anything a later request observes. Signing in with the submitted password succeeds
    * only for a fresh sign-up, and a username sign-up's username is claimed
    * only for a fresh sign-up (see `UsernameService.signUp`).
+   *
+   * With email verification on, `AuthLifecycleService.signUp` stores a
+   * verification record and sends the verification email for a fresh sign-up
+   * only (and runs the `beforeCreateVerification` and
+   * `afterCreateVerification` hooks for it alone). For an address another
+   * user holds it stores nothing and sends
+   * `AuthLifecycleConfig.sendExistingAccountNotice` to the address when that
+   * is set, since a verification link for the stand-in could never verify.
    *
    * Default `false`: a duplicate fails with `EmailInUseError`.
    */
@@ -198,6 +209,42 @@ export interface AuthResult {
    */
   readonly rememberMe?: boolean;
 }
+
+/**
+ * Whether `result`, an answer from {@link EmailPasswordService.signUp} for the
+ * submitted address `email`, is the anti-enumeration stand-in (see
+ * {@link EmailPasswordConfig.antiEnumeration}) rather than a fresh sign-up.
+ * Internal: the `email` subpath doesn't export it.
+ *
+ * The stores tell the two apart: a fresh sign-up's user holds the address, a
+ * stand-in's does not. Asking them rather than recognising the result object
+ * holds when a decorated `EmailPasswordService` copies the result, and both
+ * answers pay the same read.
+ *
+ * This expects the identifier store to read its own writes. A store whose
+ * reads lag (a cache of negative lookups, say) can report no holder for the
+ * address a fresh sign-up has just claimed, so a missing holder falls back to
+ * the user store: the stand-in's id is never stored, so a user found under it
+ * is a real sign-up.
+ *
+ * A decorator must keep `identifier` on the result: without it this reads the
+ * address as submitted, before any hook rewrote it.
+ */
+export const answeredByStandIn = (
+  identifiers: typeof IdentifierStore.Service,
+  users: typeof UserStore.Service,
+  result: AuthResult,
+  email: string,
+): Effect.Effect<boolean, Errors.AuthError> =>
+  Effect.gen(function* () {
+    const holder = yield* identifiers.getByValue(
+      "email",
+      result.identifier?.value ?? normalizeEmail(email),
+    );
+    return holder !== null
+      ? holder.userId !== result.user.id
+      : (yield* users.get(result.user.id)) === null;
+  });
 
 /** Input to {@link EmailPasswordService.changePassword}. */
 export interface ChangePasswordInput {

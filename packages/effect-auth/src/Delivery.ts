@@ -81,6 +81,7 @@ import { getPhoneNumber } from "./PhoneOtp.ts";
  */
 export type DeliveryPurpose =
   | "email-verification"
+  | "existing-account"
   | "magic-link"
   | `email-otp:${EmailOtpPurpose}`
   | "password-reset"
@@ -135,8 +136,10 @@ export class SmsSender extends Context.Service<
  * Dispatch a send on its own detached fiber instead of awaiting it inline.
  *
  * Every delivery flow (verification email, magic link, OTP, ...) sends on
- * only one of its branches — e.g. sign-up's fresh-registration branch mails
- * a token, its duplicate-registration branch does not. Awaiting the vendor
+ * only one of its branches, or sends a different message on each. E.g.
+ * sign-up's fresh-registration branch mails a verification link, while its
+ * duplicate-registration branch mails the optional existing-account notice
+ * (and nothing when that is unset). Awaiting the vendor
  * round-trip inline before answering the caller makes that difference in
  * work itself a timing oracle, exactly the asymmetry `EmailPasswordConfig`'s
  * `antiEnumeration` mode closes at the response-body level. `forkDetach`
@@ -183,6 +186,14 @@ export const emailCallbacks = (
       "email-verification",
       sender.send({ to, purpose: "email-verification", params: { token } }),
     ),
+
+  /**
+   * `AuthLifecycleConfig.sendExistingAccountNotice`: tells an address's holder
+   * that someone tried to sign up with it. It carries no token, so `params`
+   * is empty.
+   */
+  sendExistingAccountNotice: (to: string) =>
+    dispatch("existing-account", sender.send({ to, purpose: "existing-account", params: {} })),
 
   /** `MagicLinkConfig.sendMagicLink` */
   sendMagicLink: (email: string, token: string) =>
