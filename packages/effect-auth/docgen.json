@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/@effect/docgen/schema.json",
-  "exclude": ["src/**/*.test.ts"],
+  "exclude": ["src/**/*.test.ts", "src/HooksClientAddress.ts"],
   "enforceVersion": false,
   "enforceDescriptions": false,
   "enforceExamples": false,

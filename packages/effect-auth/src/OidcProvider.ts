@@ -376,9 +376,8 @@ export interface OidcDynamicRegistrationConfig {
   /**
    * Accept that registrations may have no client address, so `trustedProxy` can
    * be omitted. This opts out of the build-time check only. The limit still
-   * runs: when a `RateLimiter` is in `services`, a registration with no address
-   * is refused with `429`, and is never counted under a shared bucket. Default
-   * `false`.
+   * runs: a registration with no address is refused with `429`, and is never
+   * counted under a shared bucket. Default `false`.
    */
   readonly allowMissingClientIp?: boolean | undefined;
 }
