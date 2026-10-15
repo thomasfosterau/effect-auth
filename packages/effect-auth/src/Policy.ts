@@ -24,6 +24,20 @@
  * permit cannot grant, and an erroring forbid DENIES (Cedar skips erroring
  * policies, which fails open for forbids). Errors are recorded in the trace.
  *
+ * ## System principals are reached only by name
+ *
+ * A system principal (`System::"<name>"`, see the `System` module) is allowed
+ * only by a permit that names it. The kernel enforces this, not each policy
+ * author: a permit applies to a system principal only when its principal scope
+ * names the `System` type (`eq`/`in` a `System::"…"` reference, or
+ * `is("System")`). A permit scoped `any` (the default of {@link permit},
+ * {@link permission}, {@link action} and {@link roleAtLeast}) or scoped to
+ * another type or to a role (`in Role::"…"`) never matches one, and neither
+ * does a {@link CustomPolicy} permit, whose predicate the kernel cannot see
+ * into. Forbids are not narrowed: an unscoped forbid binds a system principal
+ * like everyone else. For every other principal, scopes match as documented on
+ * {@link Scope}.
+ *
  * @module policy
  */
 import { Data, Effect, Schema } from "effect";
@@ -70,6 +84,11 @@ export const request = (input: {
  * `any` matches everything; `eq` one entity; `in` an entity and its
  * transitive descendants (hierarchy membership, reflexive); `is` every
  * entity of a type.
+ *
+ * One exception, in a permit's principal position: a system principal
+ * (`System::"<name>"`) is matched only by a scope that names the `System` type,
+ * so `any`, `is("User")` and `in(Role::"…")` do not reach it (see the module
+ * docs).
  */
 export const Scope = Schema.Union([
   Schema.TaggedStruct("any", {}),
@@ -87,6 +106,36 @@ export const eq = (ref: Entity.EntityRef): Scope => ({ _tag: "eq", ref });
 export const inScope = (ref: Entity.EntityRef): Scope => ({ _tag: "in", ref });
 /** Scope matching any entity of the given type. */
 export const isType = (entityType: string): Scope => ({ _tag: "is", entityType });
+
+/**
+ * Whether a principal scope names system principals: an `eq`/`in` scope on a
+ * `System::"…"` reference, or `is("System")`. Only such a scope lets a permit
+ * reach a system principal.
+ */
+const namesSystem = (scope: Scope): boolean => {
+  switch (scope._tag) {
+    case "any":
+      return false;
+    case "eq":
+    case "in":
+      return scope.ref.type === Entity.systemType;
+    case "is":
+      return scope.entityType === Entity.systemType;
+  }
+};
+
+/**
+ * Whether a permit is barred from a request's principal: the principal is a
+ * system principal and the permit cannot name it (a custom permit, or a
+ * declarative one whose principal scope does not name `System`). The single
+ * place the kernel keeps system principals default-deny under unscoped permits.
+ */
+const permitBarredFromSystem = (
+  principal: Entity.EntityRef,
+  principalScope: Scope | undefined,
+): boolean =>
+  principal.type === Entity.systemType &&
+  (principalScope === undefined || !namesSystem(principalScope));
 
 const scopeMatches = (slice: Entity.EntitySlice, scope: Scope, ref: Entity.EntityRef): boolean => {
   switch (scope._tag) {
@@ -164,7 +213,11 @@ const makeDeclarative = (effect: PolicyEffect, options: MakeOptions): Declarativ
   ...(options.description !== undefined ? { description: options.description } : {}),
 });
 
-/** Build a declarative permit policy (scopes default to `any`). */
+/**
+ * Build a declarative permit policy (scopes default to `any`). A permit whose
+ * principal scope is `any` does not reach a system principal: name it with
+ * `System.grant`, `eq(System.ref(…))` or `isType("System")`.
+ */
 export const permit = (options: MakeOptions): DeclarativePolicy =>
   makeDeclarative("permit", options);
 
@@ -175,7 +228,9 @@ export const forbid = (options: MakeOptions): DeclarativePolicy =>
 /**
  * Build a custom (opaque) policy from an arbitrary Effect predicate. The
  * predicate decides whether the policy *matches* the request; `effect`
- * (default `"permit"`) decides what a match means.
+ * (default `"permit"`) decides what a match means. A custom permit never
+ * reaches a system principal (the kernel cannot see whether its predicate
+ * names one); grant a system principal with a declarative `System.grant`.
  */
 export const custom = <E = never, R = never>(options: {
   readonly id: string;
@@ -197,6 +252,8 @@ export const custom = <E = never, R = never>(options: {
  * Bridge from the flat `PermissionRef` world: a permit for action
  * `Action::"<action>"` on resources of type `<resource>`. `"*"` wildcards
  * map to `any` scopes, so existing admin/API-key grants translate directly.
+ * The principal scope is `any`, which does not reach a system principal, so
+ * even `{ action: "*", resource: "*" }` grants a system principal nothing.
  */
 export const permission = (
   ref: PermissionRef,
@@ -227,7 +284,8 @@ export const role = (
 
 /**
  * A permit for one named action (`Action::"<actionId>"`), optionally
- * narrowed further.
+ * narrowed further. The principal scope defaults to `any`, which does not
+ * reach a system principal.
  */
 export const action = (
   actionId: string,
@@ -270,7 +328,9 @@ export const roleAtLeastCondition = <Rung extends string>(
 /**
  * The ordered-ladder bridge into the kernel: a permit for every principal
  * holding `min` (a rung, or a named axis) or a more privileged rung,
- * optionally narrowed to an action/resource scope.
+ * optionally narrowed to an action/resource scope. The principal scope
+ * defaults to `any`, which does not reach a system principal, whatever `role`
+ * attribute the resolver gives it.
  *
  * Because it is an ordinary declarative policy, a ladder comparison is
  * storable in a `PolicyStore` and validated against an `AuthorizationModel`
@@ -367,7 +427,10 @@ const evaluateDeclarative = (
   req: PolicyRequest,
   policy: DeclarativePolicy,
 ): PolicyOutcome => {
+  const barred =
+    policy.effect === "permit" && permitBarredFromSystem(req.principal, policy.principal);
   const applies =
+    !barred &&
     scopeMatches(slice, policy.principal, req.principal) &&
     scopeMatches(slice, policy.action, req.action) &&
     scopeMatches(slice, policy.resource, req.resource);
@@ -407,7 +470,9 @@ export const decidePure = (
  * Decide over a mixed policy set (declarative + custom). Custom predicate
  * failures never escape: they become `error` outcomes, treated fail-closed
  * by {@link Decision} combination. Only the custom policies' requirements
- * (`R`) remain.
+ * (`R`) remain. A custom permit is `not-matched` for a system principal
+ * without running its predicate (see the module docs); a custom forbid runs
+ * as usual.
  */
 export const decide = <E, R>(
   policies: ReadonlyArray<Policy<E, R>>,
@@ -417,6 +482,15 @@ export const decide = <E, R>(
   Effect.forEach(policies, (policy): Effect.Effect<PolicyOutcome, never, R> => {
     if (policy._tag === "DeclarativePolicy") {
       return Effect.succeed(evaluateDeclarative(slice, req, policy));
+    }
+    // A custom permit cannot name a system principal in a way the kernel can
+    // see, so it never reaches one; its predicate is not run for it.
+    if (policy.effect === "permit" && permitBarredFromSystem(req.principal, undefined)) {
+      return Effect.succeed<PolicyOutcome>({
+        policyId: policy.id,
+        effect: policy.effect,
+        result: "not-matched",
+      });
     }
     return policy.predicate(req, slice).pipe(
       Effect.map((matched): PolicyOutcome => ({

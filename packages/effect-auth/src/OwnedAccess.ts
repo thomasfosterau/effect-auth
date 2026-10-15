@@ -207,7 +207,9 @@ export interface OwnedAccess<Id> {
   /**
    * The declarative policies {@link OwnedAccess.canView} decides. The row is
    * the resource (`owner`, `visibility`, `draft` attributes); the follow fact
-   * is `context.follows`.
+   * is `context.follows`. Their principal scopes are unscoped (`any`), which
+   * the kernel never lets reach a system principal (`System::"<name>"`), so
+   * handing them to an `Authorizer` grants a job nothing.
    */
   readonly policies: ReadonlyArray<Policy.DeclarativePolicy>;
 }

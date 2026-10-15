@@ -18,14 +18,24 @@ A system principal is the entity `System::"<name>"`. The library reserves the en
 - `System.ref(name)` builds the reference. An empty name is a construction error.
 - `System.provide(name)` and `System.layer(name)` provide it as `Authorizer.CurrentPrincipal`,
   with no session and no user. A job runtime needs nothing else.
-- `System.grant(name, { id, action, resource, when? })` writes the only way a system principal
-  is allowed anything: a permit scoped to `System::"<name>"`, naming one action and one resource
-  scope. `action` and `resource` are required, so a grant always states what it allows.
+- `System.grant(name, { id, action, resource, when? })` writes the grant a system principal is
+  allowed by: a permit scoped to `System::"<name>"`, naming one action and one resource scope.
+  `action` and `resource` are required, so a grant always states what it allows. A hand-written
+  declarative permit whose principal scope names the `System` type (`Policy.isType("System")` for
+  every job, say) is also explicit, and rule 1 lets it match; nothing else does.
 - `System.declaration` is the model entry a deployment adds so that grants validate.
 
 The rules, stated once:
 
-1. **Denied by default.** A system principal is allowed nothing that no policy names.
+1. **Denied by default.** A system principal is allowed nothing that no policy names. The kernel
+   enforces this, not each policy author: a permit reaches a system principal only when its
+   principal scope names the `System` type (`eq` or `in` a `System::"…"` reference, or
+   `is("System")`). A permit scoped `any`, to another type, or to a role (`in Role::"…"`) never
+   matches one, and neither does a `Policy.custom` permit, whose predicate the kernel cannot see
+   into. That covers every unscoped permit the library ships or a helper defaults to (the
+   `OwnedAccess` policies, `Policy.permission`, `Policy.action`, `Policy.roleAtLeast`) and every
+   such permit written later. Forbids are not narrowed: an unscoped forbid binds a system principal
+   like everyone else.
 2. **Granted explicitly.** It is allowed exactly what a policy grants, and each grant is data:
    stored, validated against the `AuthorizationModel`, and named in a decision trace by its
    policy id.
@@ -34,12 +44,22 @@ The rules, stated once:
    it as a viewer's principal type, and the rung and owner policies that Guard builds are scoped
    to the viewer's type, so they cannot match a system entity, whatever attributes the resolver
    gives it.
-5. **Audited by name.** Every decision about a system principal is logged with
-   `System::"<name>"` and its determining policy ids: allows at info, denies at warning. A
-   denial's error message names it too. Decisions about human principals are not logged by this
-   module, so nothing changes for them.
+5. **Audited by name.** Every decision about a system principal, by `Authorizer` or by a
+   `protectedField` guard, is logged with `System::"<name>"` and its determining policy ids: allows
+   at info, denies at warning. A denial's error message names it too. Decisions about human
+   principals are not logged by this module, so nothing changes for them.
+6. **No roles.** Role assignment is for users. `Rbac` refuses `"System"` as its principal type, and
+   rule 1 keeps a role permit from matching a system principal whatever parents a resolver gives
+   it, so a role change can never widen what a job may do. A job is granted with `System.grant`.
 
 ## The alternatives we rejected
+
+**Scope each library-shipped permit to the human viewer type** instead of the kernel rule in
+rule 1. It closes the permits the library ships today, but not the next unscoped permit, nor one an
+application writes with `Policy.permit`'s default: every one would have to remember to exclude
+system principals, and the first that forgot would grant jobs what it grants users. The kernel rule
+holds for all of them at once. It changes nothing for any other principal, because it applies only
+when the request's principal is a system principal.
 
 **A short-circuit: "system is allowed everything", or allowed an axis set without a policy.**
 This is the shape a system principal would take if it were a flag rather than an entity. It is a

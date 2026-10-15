@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Exit, Logger, Option } from "effect";
+import { Context, Effect, Exit, Logger, Option, Result, Schema } from "effect";
 import * as Condition from "./Condition.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Authorizer from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
 import * as Guard from "./Guard.ts";
 import * as Ladder from "./Ladder.ts";
+import * as OwnedAccess from "./OwnedAccess.ts";
 import * as Policy from "./Policy.ts";
+import { protectedField } from "./Protected.ts";
+import * as Rbac from "./Rbac.ts";
 import * as System from "./System.ts";
 
 interface AppUser {
@@ -365,6 +368,357 @@ describe("decisions about a system principal are audited by name", () => {
         Effect.provide(Authorizer.Authorizer.layer({ policies: [], model })),
       ),
     );
+    expect(records.some((record) => record.text.includes("authorization.decision"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Default deny under every library-shipped policy set and helper default (#377)
+// ---------------------------------------------------------------------------
+
+/** Every action a probe asks about: reads, writes, and one no policy mentions. */
+const everyAction = ["read", "update", "delete", "invoice:charge", "owned:purge"] as const;
+
+/**
+ * Decide `action` on `resource` as `principal` under `policies`, with no model
+ * (library policy sets name attributes and types a test model need not
+ * declare) and `resolved` as the entity graph.
+ */
+const decideAs = (
+  principal: Entity.EntityRef,
+  policies: ReadonlyArray<Policy.Policy>,
+  action: string,
+  resource: Entity.EntityRef,
+  resolved: ReadonlyArray<Entity.Entity> = [],
+  context: Readonly<Record<string, Entity.AttributeValue>> = {},
+): Promise<boolean> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const authorizer = yield* Authorizer.Authorizer;
+      return yield* authorizer.check({ action, resource, context });
+    }).pipe(
+      Authorizer.CurrentPrincipal.provide(principal),
+      Effect.provide(Authorizer.Authorizer.layer({ policies })),
+      Effect.provideService(Authorizer.EntityResolver, Authorizer.memoryEntityResolver(resolved)),
+    ),
+  );
+
+/** The actions in {@link everyAction} that `principal` is allowed on `resource`. */
+const allowedActions = async (
+  principal: Entity.EntityRef,
+  policies: ReadonlyArray<Policy.Policy>,
+  resource: Entity.EntityRef,
+  resolved: ReadonlyArray<Entity.Entity> = [],
+  context: Readonly<Record<string, Entity.AttributeValue>> = {},
+): Promise<ReadonlyArray<string>> => {
+  const allowed: string[] = [];
+  for (const action of everyAction) {
+    if (await decideAs(principal, policies, action, resource, resolved, context)) {
+      allowed.push(action);
+    }
+  }
+  return allowed;
+};
+
+/** The system principal as the resolver sees it: a top rung, so rung conditions would hold. */
+const billingAsAdmin = Entity.entity(billing, { attributes: { role: "admin" } });
+const aliceAsAdmin = Entity.entity(alice, { attributes: { role: "admin" } });
+
+describe("a system principal is denied under every library policy set with no grant (#377)", () => {
+  const owned = OwnedAccess.make({ guards, viewPrivate: Axes.corpusWrite });
+
+  /** An owned row with the given visibility, owned by `owner`. */
+  const ownedRow = (
+    id: string,
+    owner: Entity.EntityRef,
+    visibility: OwnedAccess.Visibility,
+    draft = false,
+  ) =>
+    Entity.entity(Entity.ref("Owned", id), {
+      attributes: { owner: Entity.entityValue(owner), visibility, draft },
+    });
+
+  it("OwnedAccess.policies: no action on a public, followers, private or draft row", async () => {
+    // Every arm's condition holds for the system principal: the row is public,
+    // it is the owner, it holds the viewPrivate rung, and it follows the owner.
+    for (const [visibility, draft] of [
+      ["public", false],
+      ["followers", false],
+      ["private", false],
+      ["public", true],
+    ] as const) {
+      const ownedBySystem = ownedRow("by-system", billing, visibility, draft);
+      expect(
+        await allowedActions(
+          billing,
+          owned.policies,
+          ownedBySystem.ref,
+          [ownedBySystem, billingAsAdmin],
+          { follows: true },
+        ),
+      ).toEqual([]);
+    }
+  });
+
+  it("OwnedAccess.policies: a user's decisions are unchanged", async () => {
+    const publicRow = ownedRow("public", Entity.ref("User", "carol"), "public");
+    const privateRow = ownedRow("private", Entity.ref("User", "carol"), "private");
+    const bob = Entity.entity(Entity.ref("User", "bob"), { attributes: { role: "user" } });
+    // `owned:public` is action-agnostic for users, as before.
+    expect(await allowedActions(bob.ref, owned.policies, publicRow.ref, [publicRow, bob])).toEqual(
+      everyAction,
+    );
+    expect(
+      await allowedActions(bob.ref, owned.policies, privateRow.ref, [privateRow, bob]),
+    ).toEqual([]);
+    expect(
+      await allowedActions(alice, owned.policies, privateRow.ref, [privateRow, aliceAsAdmin]),
+    ).toEqual(everyAction);
+  });
+
+  it("Guard policies: neither the rung nor the owner policy reaches it", async () => {
+    const ownedBySystem = ownedRow("by-system", billing, "private");
+    const guardPolicies = [
+      ...guards.policies.roleAtLeast("user"),
+      ...guards.policies.ownerOrRole("user"),
+    ];
+    expect(
+      await allowedActions(billing, guardPolicies, ownedBySystem.ref, [
+        ownedBySystem,
+        billingAsAdmin,
+      ]),
+    ).toEqual([]);
+    expect(
+      await allowedActions(alice, guardPolicies, ownedBySystem.ref, [ownedBySystem, aliceAsAdmin]),
+    ).toEqual(everyAction);
+  });
+
+  it("Rbac: a role permit never reaches it, even when a resolver gives it the role", async () => {
+    const config = {
+      userRoles: { alice: ["admin"] },
+      rolePermissions: { admin: [{ resource: "*", action: "*" }] },
+    };
+    const policies = Rbac.policies(config);
+    // An application resolver that (wrongly) makes the system principal an admin.
+    const systemAdmin = Entity.entity(billing, { parents: [Rbac.roleRef("admin")] });
+    const resolved = [...Rbac.entities(config), systemAdmin];
+    expect(await allowedActions(billing, policies, invoice, resolved)).toEqual([]);
+    expect(await allowedActions(alice, policies, invoice, resolved)).toEqual(everyAction);
+  });
+
+  it("Rbac refuses System as the principal type", () => {
+    const config = {
+      userRoles: { "billing-cron": ["admin"] },
+      rolePermissions: { admin: [{ resource: "*", action: "*" }] },
+      principalType: "System",
+    };
+    expect(() => Rbac.entities(config)).toThrow(/reserved for system principals/);
+    expect(() => Rbac.model(config)).toThrow(/reserved for system principals/);
+    expect(() => Rbac.layer(config)).toThrow(/reserved for system principals/);
+  });
+
+  it('Policy.permission({ action: "*", resource: "*" }) is not an allow-all for it', async () => {
+    const everything = [Policy.permission({ action: "*", resource: "*" })];
+    expect(await allowedActions(billing, everything, invoice)).toEqual([]);
+    expect(await allowedActions(alice, everything, invoice)).toEqual(everyAction);
+  });
+
+  it("Policy.action's default principal scope does not reach it", async () => {
+    const charge = [Policy.action("invoice:charge")];
+    expect(await allowedActions(billing, charge, invoice)).toEqual([]);
+    expect(await allowedActions(alice, charge, invoice)).toEqual(["invoice:charge"]);
+  });
+
+  it("Policy.roleAtLeast's default principal scope does not reach it, whatever its role", async () => {
+    const ladder = [Policy.roleAtLeast(Roles, "user")];
+    expect(await allowedActions(billing, ladder, invoice, [billingAsAdmin])).toEqual([]);
+    expect(await allowedActions(alice, ladder, invoice, [aliceAsAdmin])).toEqual(everyAction);
+  });
+
+  it("a bare Policy.permit and a Policy.custom permit do not reach it", async () => {
+    const bare = [Policy.permit({ id: "everything" })];
+    const custom = [
+      Policy.custom({ id: "always", predicate: () => Effect.succeed(true) }) as Policy.Policy,
+    ];
+    expect(await allowedActions(billing, bare, invoice)).toEqual([]);
+    expect(await allowedActions(billing, custom, invoice)).toEqual([]);
+    expect(await allowedActions(alice, bare, invoice)).toEqual(everyAction);
+    expect(await allowedActions(alice, custom, invoice)).toEqual(everyAction);
+  });
+
+  it("protectedField: an unscoped policy neither shows nor accepts the field", async () => {
+    const View = Schema.Struct({
+      id: Schema.String,
+      secret: protectedField(Schema.String, {
+        policies: Policy.permission({ action: "*", resource: "*" }),
+        action: "account:read-secret",
+        resource: invoice,
+      }),
+    });
+    const value = { id: "a-1", secret: "s3cret" };
+    const as = <A, E>(
+      effect: Effect.Effect<A, E, Authorizer.CurrentPrincipal>,
+      who: Entity.EntityRef,
+    ) => Effect.runPromise(effect.pipe(Authorizer.CurrentPrincipal.provide(who)));
+    expect(await as(Schema.encodeEffect(View)(value), billing)).toEqual({ id: "a-1" });
+    const refused = await as(Effect.result(Schema.decodeUnknownEffect(View)(value)), billing);
+    expect(Result.isFailure(refused)).toBe(true);
+    expect(await as(Schema.encodeEffect(View)(value), alice)).toEqual(value);
+  });
+});
+
+describe("with an explicit grant, a system principal gets exactly that (#377)", () => {
+  const owned = OwnedAccess.make({ guards, viewPrivate: Axes.corpusWrite });
+  const row = Entity.entity(Entity.ref("Owned", "row-1"), {
+    attributes: { owner: Entity.entityValue(billing), visibility: "public", draft: false },
+  });
+  const purge = System.grant("billing-cron", {
+    id: "billing-cron:purge-owned",
+    action: "owned:purge",
+    resource: Policy.isType("Owned"),
+  });
+
+  it("beside every library policy set, only the granted action is allowed", async () => {
+    const policies = [
+      ...owned.policies,
+      ...guards.policies.ownerOrRole("user"),
+      ...Rbac.policies({
+        userRoles: {},
+        rolePermissions: { admin: [{ resource: "*", action: "*" }] },
+      }),
+      Policy.permission({ action: "*", resource: "*" }),
+      Policy.action("delete"),
+      Policy.roleAtLeast(Roles, "user"),
+      purge,
+    ];
+    const resolved = [
+      row,
+      Entity.entity(billing, { attributes: { role: "admin" }, parents: [Rbac.roleRef("admin")] }),
+    ];
+    expect(await allowedActions(billing, policies, row.ref, resolved, { follows: true })).toEqual([
+      "owned:purge",
+    ]);
+    // Another system principal gets nothing from billing's grant.
+    expect(await allowedActions(retry, policies, row.ref, [row])).toEqual([]);
+  });
+
+  it("a permit scoped to the System type, or to a group of system principals, reaches it", async () => {
+    const anyJob = Policy.permit({
+      id: "jobs:read",
+      principal: Policy.isType(System.entityType),
+      action: Policy.eq(Entity.ref("Action", "read")),
+    });
+    const jobs = Entity.ref(System.entityType, "jobs");
+    const groupJobs = Policy.permit({
+      id: "jobs-group:update",
+      principal: Policy.inScope(jobs),
+      action: Policy.eq(Entity.ref("Action", "update")),
+    });
+    const inGroup = Entity.entity(billing, { parents: [jobs] });
+    expect(await allowedActions(billing, [anyJob, groupJobs], invoice, [inGroup])).toEqual([
+      "read",
+      "update",
+    ]);
+    expect(await allowedActions(retry, [anyJob, groupJobs], invoice)).toEqual(["read"]);
+    expect(await allowedActions(alice, [anyJob, groupJobs], invoice)).toEqual([]);
+  });
+
+  it("an unscoped forbid still binds it, declarative or custom", async () => {
+    const charge = [chargeInvoices];
+    expect(await decideAs(billing, charge, "invoice:charge", invoice)).toBe(true);
+    const freeze = Policy.forbid({
+      id: "freeze",
+      action: Policy.eq(Entity.ref("Action", "invoice:charge")),
+    });
+    expect(await decideAs(billing, [...charge, freeze], "invoice:charge", invoice)).toBe(false);
+    const customFreeze = Policy.custom({
+      id: "custom-freeze",
+      effect: "forbid",
+      predicate: () => Effect.succeed(true),
+    }) as Policy.Policy;
+    expect(await decideAs(billing, [...charge, customFreeze], "invoice:charge", invoice)).toBe(
+      false,
+    );
+  });
+
+  it("protectedField: a grant for the field's action shows and accepts it", async () => {
+    const View = Schema.Struct({
+      id: Schema.String,
+      secret: protectedField(Schema.String, {
+        policies: [
+          Policy.permission({ action: "*", resource: "*" }),
+          System.grant("billing-cron", {
+            id: "billing-cron:read-secret",
+            action: "account:read-secret",
+            resource: Policy.isType("Invoice"),
+          }),
+        ],
+        action: "account:read-secret",
+        resource: invoice,
+      }),
+    });
+    const value = { id: "a-1", secret: "s3cret" };
+    const as = <A, E>(
+      effect: Effect.Effect<A, E, Authorizer.CurrentPrincipal>,
+      who: Entity.EntityRef,
+    ) => Effect.runPromise(effect.pipe(Authorizer.CurrentPrincipal.provide(who)));
+    expect(await as(Schema.encodeEffect(View)(value), billing)).toEqual(value);
+    expect(await as(Schema.decodeUnknownEffect(View)(value), billing)).toEqual(value);
+    expect(await as(Schema.encodeEffect(View)(value), retry)).toEqual({ id: "a-1" });
+  });
+});
+
+describe("protectedField decisions about a system principal are audited by name (#377)", () => {
+  const field = (policies: ReadonlyArray<Policy.Policy>) =>
+    Schema.Struct({
+      secret: protectedField(Schema.String, {
+        policies,
+        action: "invoice:charge",
+        resource: invoice,
+      }),
+    });
+
+  const encodeLogged = (policies: ReadonlyArray<Policy.Policy>, who: Entity.EntityRef) =>
+    captureLogs(
+      Schema.encodeEffect(field(policies))({ secret: "s" }).pipe(
+        Authorizer.CurrentPrincipal.provide(who),
+      ),
+    );
+
+  it("an allow is logged at info with the granting policy", async () => {
+    const records = await encodeLogged([chargeInvoices], billing);
+    const decision = records.find((record) => record.text.includes("authorization.decision"));
+    expect(decision?.level).toBe("Info");
+    expect(decision?.text).toContain('System::\\"billing-cron\\"');
+    expect(decision?.text).toContain("billing-cron:charge-invoices");
+  });
+
+  it("a denial is logged at warning", async () => {
+    const records = await encodeLogged(
+      [Policy.permission({ action: "*", resource: "*" })],
+      billing,
+    );
+    const decision = records.find((record) => record.text.includes("authorization.decision"));
+    expect(decision?.level).toBe("Warn");
+    expect(decision?.text).toContain("default-deny");
+  });
+
+  it("a resolver failure denies and is logged at warning", async () => {
+    const records = await captureLogs(
+      Schema.encodeEffect(field([chargeInvoices]))({ secret: "s" }).pipe(
+        Authorizer.CurrentPrincipal.provide(billing),
+        Effect.provideService(Authorizer.EntityResolver, {
+          resolve: () => Effect.fail(new Authorizer.PolicyValidationError({ message: "down" })),
+        }),
+      ),
+    );
+    const decision = records.find((record) => record.text.includes("authorization.decision"));
+    expect(decision?.level).toBe("Warn");
+    expect(decision?.text).toContain("resolver-error");
+  });
+
+  it("a human's field decision is not logged", async () => {
+    const records = await encodeLogged([chargeInvoices], alice);
     expect(records.some((record) => record.text.includes("authorization.decision"))).toBe(false);
   });
 });

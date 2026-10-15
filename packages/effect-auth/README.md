@@ -196,20 +196,27 @@ await Effect.runPromise(chargeInvoices);
 
 The rules a system principal follows:
 
-- **Denied by default.** Only a policy that names `System::"<name>"` can allow it anything. There is no
-  allow-all for system principals.
+- **Denied by default.** Only a permit whose principal scope names the `System` type can allow it
+  anything: `System.grant`, `Policy.eq(System.ref(…))` or `Policy.isType("System")`. The kernel
+  enforces this for every policy set, so a permit with no principal scope (`Policy.permit` without
+  `principal`, `Policy.permission`, even `{ action: "*", resource: "*" }`, `Policy.action`,
+  `Policy.roleAtLeast`, the `OwnedAccess` policies), a role permit (`Rbac`, `Policy.role`) and a
+  `Policy.custom` permit never match one. There is no allow-all for system principals.
 - **Named by a grant.** `System.grant` takes one action and one resource scope, so a job is granted what it
   needs and nothing wider. A wider grant is several grants, each with its own id.
 - **Not a user.** `System` is a reserved entity type. `Guard.make` refuses it as a viewer's
   principal type, and a user policy (`Policy.isType("User")`, or `Policy.eq(User::"…")`) never
   matches a system principal, nor does a system grant match a user with the same name.
-- **Named in the audit.** `Authorizer` logs every decision about a system principal with
-  `System::"<name>"` and the policies that decided it (allows at info, denials at warning), and a
-  denial's error message names it.
+- **No roles.** Role assignment is for users. `Rbac` refuses `"System"` as its principal type, and
+  a role permit never matches a system principal, whatever parents a resolver gives it, so a role
+  change cannot widen what a job may do.
+- **Named in the audit.** `Authorizer` and `Auth.protectedField` log every decision about a system
+  principal with `System::"<name>"` and the policies that decided it (allows at info, denials at
+  warning), and a denial's error message names it.
 
-A permit whose principal scope is `any` still reaches a system principal, so scope user policies
-to users. A forbid whose condition reads a user attribute errors for a system principal, and an
-erroring forbid denies, so scope forbids the same way. See
+Forbids are not narrowed: an unscoped forbid binds a system principal like everyone else. A forbid
+whose condition reads a user attribute therefore errors for a system principal, and an erroring
+forbid denies, so scope such forbids to users (`Policy.isType("User")`). See
 [ADR 0019](../../docs/adr/0019-system-principals.md).
 
 ## Passwords
