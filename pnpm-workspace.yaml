@@ -29,10 +29,10 @@ catalog:
   # the Effect-monorepo docgen (runs on `effect` and `@effect/platform-node`,
   # which the `effect` override keeps on the singleton); it reads the existing
   # docgen.json.
-  "@effect/docgen": ^4.0.0
-  "@effect/language-service": ^0.87.3
-  "@effect/sql-pg": 4.0.0
-  "@effect/sql-pglite": 4.0.0
+  "@effect/docgen": ^4.0.4
+  "@effect/language-service": ^0.87.4
+  "@effect/sql-pg": 4.0.4
+  "@effect/sql-pglite": 4.0.4
   # Effect Language Service as a native (TypeScript-Go) binary: the TS7 side of
   # the 6/7 split (see `typescript` below). `effect-tsgo patch --typescript`
   # (the root `prepare` script) overwrites the native `tsc` binary with an
@@ -75,7 +75,7 @@ catalog:
   # alias so one test suite exercises both driver shapes.
   drizzle-orm: ^0.45.4
   drizzle-orm-effect: npm:drizzle-orm@1.0.0-rc.5-ab785fc
-  effect: 4.0.0
+  effect: 4.0.4
   # `vp exec effect-solutions …` — the Effect pattern guides AGENTS.md requires
   # consulting before writing Effect code.
   effect-solutions: ^0.5.3
