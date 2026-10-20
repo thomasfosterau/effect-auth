@@ -53,7 +53,7 @@ catalog:
   "@electric-sql/pglite": ^0.5.9
   "@node-saml/node-saml": ^5.1.0
   "@solidjs/testing-library": ^0.8.10
-  "@sveltejs/package": ^3.0.0
+  "@sveltejs/package": ^3.0.1
   "@sveltejs/vite-plugin-svelte": ^7.3.1
   "@testing-library/react": ^16.3.3
   "@testing-library/svelte": ^5.4.2
@@ -81,15 +81,15 @@ catalog:
   effect-solutions: ^0.5.3
   hash-wasm: ^4.12.0
   jsdom: ^30.1.2
-  react: ^19.3.0
-  react-dom: ^19.3.0
+  react: ^19.3.1
+  react-dom: ^19.3.1
   # `scripts/check-dist.ts`: derives each packed package's `effect` floor from
   # its peer range and checks a requested version against that range, with the
   # same semantics npm and pnpm apply to peers.
   semver: ^7.8.5
   solid-js: ^1.9.17
   svelte: ^5.57.2
-  svelte-check: ^4.7.6
+  svelte-check: ^4.7.7
   tsx: ^4.23.15
   # TypeScript 6/7 side by side. TS7 is the native Go compiler and ships no JS
   # compiler API until 7.1, so everything that `require("typescript")` stays on
@@ -107,7 +107,7 @@ catalog:
   vite-plus: 0.3.3
   vite: npm:@voidzero-dev/vite-plus-core@0.3.3
   vitest: 4.1.11
-  vue: ^3.5.43
+  vue: ^3.5.44
   vue-tsc: ^3.3.13
   xml-crypto: ^6.3.3
 
