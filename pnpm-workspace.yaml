@@ -50,7 +50,7 @@ catalog:
   # warning, which fails `tsc`. Read the `components` table in
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping any of them.
   "@effect/tsgo": 0.47.2
-  "@electric-sql/pglite": ^0.5.9
+  "@electric-sql/pglite": ^0.5.10
   "@node-saml/node-saml": ^5.1.0
   "@solidjs/testing-library": ^0.8.10
   "@sveltejs/package": ^3.0.1
