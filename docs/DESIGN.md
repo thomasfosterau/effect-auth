@@ -76,7 +76,7 @@ const app = Effect.gen(function* () {
 3. `export const SessionManager = SessionManagerTag` — bare ergonomic alias
    (**68** such dual exports, one per tag; only `Hooks` has none);
 4. `SessionService.make(config)` (Effect) + `export const SessionManagerLayer =
-(config) => Layer.effect(...)` (standalone const).
+   (config) => Layer.effect(...)` (standalone const).
 
 **Problem.** Two names for every service (`XServiceTag` vs `X`) double the API
 reference, confuse autocompletion, and match no Effect v4 codebase. The layer
@@ -261,9 +261,9 @@ inconsistencies: `AuthError` → 409 in `signUp` but → 500 in `signIn`
 3. **Stable codes:** every domain error carries a stable, documented, append-only
    `code` field (e.g. `"PASSWORD_TOO_SHORT"`, `"EMAIL_IN_USE"`) sourced from the
    `ErrorCode` const object in `Errors.ts`. Existing errors expose it via a `get
-code()` getter (no construction-site changes); new errors take `code` as a
+   code()` getter (no construction-site changes); new errors take `code` as a
    constructor field (enabling union variants like `PASSWORD_TOO_SHORT |
-PASSWORD_TOO_LONG` on `PasswordPolicyError`). HTTP response bodies surface the
+   PASSWORD_TOO_LONG` on `PasswordPolicyError`). HTTP response bodies surface the
    code via an optional `code` field on all non-500 schemas.
 4. **HTTP mapping:** target state is a single documented table (tag → status)
    applied uniformly. `AuthError` → **500**; `RateLimitError` → **429** (via
@@ -272,11 +272,11 @@ PASSWORD_TOO_LONG` on `PasswordPolicyError`). HTTP response bodies surface the
    `UserBannedError` → **403**; `EmailInUseError` → **409**;
    `InvalidCredentialsError` → **401** (anti-enumeration: uniform "Invalid email
    or password" message). Session-validation ban failures use `code:
-"USER_BANNED"` on the 401 response (clients detect via `code`; a full 403
+   "USER_BANNED"` on the 401 response (clients detect via `code`; a full 403
    upgrade would require updating all ~80 endpoint declarations and is deferred).
 5. **Pluggable i18n:** a `Messages` service (`@effect-auth/Messages`) maps
    `(code, locale?, params?) → string`. The `resolveMessage(code, fallback,
-params?)` helper in HTTP handlers falls back to the error's own `.message`
+   params?)` helper in HTTP handlers falls back to the error's own `.message`
    when the service is absent (uses `Effect.serviceOption`). English defaults ship
    in `Messages.Default`; override via `Layer.succeed(Auth.Messages, { resolve: ... })`.
 6. **Honest unions:** public service methods keep precise unions; `HookError`

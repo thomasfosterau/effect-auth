@@ -7,7 +7,7 @@ Organizations: member deactivation, verified domains, JIT provisioning, invitati
 
 - **Member status.** `Member.status` (`"active" | "inactive"`, absent means active) with
   `deactivateMember` / `reactivateMember` (`member:update`, `POST
-/organization/:organizationId/members/:userId/{deactivate,reactivate}`). An inactive member keeps
+  /organization/:organizationId/members/:userId/{deactivate,reactivate}`). An inactive member keeps
   its row, its team memberships and its role — parked in `previousRole` while the row is demoted to
   the organization's default role — and is treated as a non-member by every permission check,
   including the `OrganizationEntities` policy projection. Only an owner may deactivate an owner, and
