@@ -80,11 +80,11 @@ await Effect.runPromise(Effect.provide(program, layer));
 - `X` is both the value you `yield*` and the tag you provide with
   `Layer.succeed(Auth.X)(impl)`. There is no separate `XShape` interface — an
   implementation's type is `typeof X.Service` (`const store: typeof
-Auth.SessionStore.Service = {...}`).
+  Auth.SessionStore.Service = {...}`).
 - Store/hook/session dependencies are resolved **once, at Layer construction**
   (`Auth.X.layer(config)`), not threaded through every method call — method
   signatures on the returned service carry only the error channel (`R =
-never`). Callers wire store layers into the service layer instead of
+  never`). Callers wire store layers into the service layer instead of
   providing stores per call.
 - `SessionService.layer` composes `PlatformCrypto.layer` (the default
   `Crypto.Crypto` implementation) internally, so consumers don't provide
