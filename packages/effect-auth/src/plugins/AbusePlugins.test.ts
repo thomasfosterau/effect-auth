@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Crypto, Effect, Layer, Redacted, Result } from "effect";
+import { Crypto, Effect, Layer, Redacted } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { Hooks } from "../Hooks.ts";
 import { HaveIBeenPwnedPlugin } from "../password/HaveIBeenPwned.ts";
@@ -24,11 +24,15 @@ const stubHttpClient = (respond: (url: string) => Response) =>
 const capturingHttpClient = (onRequest: (req: Request) => void, respond: () => Response) =>
   Layer.succeed(
     HttpClient.HttpClient,
-    HttpClient.make((request) => {
-      const webReq = Result.getOrThrow(HttpClientRequest.toWebResult(request));
-      onRequest(webReq);
-      return Effect.succeed(HttpClientResponse.fromWeb(request, respond()));
-    }),
+    HttpClient.make((request) =>
+      HttpClientRequest.toWeb(request).pipe(
+        Effect.orDie,
+        Effect.map((webReq) => {
+          onRequest(webReq);
+          return HttpClientResponse.fromWeb(request, respond());
+        }),
+      ),
+    ),
   );
 
 const drive = <A, E>(

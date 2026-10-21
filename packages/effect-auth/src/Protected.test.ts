@@ -92,14 +92,14 @@ describe("protectedField – write-side guard on decode", () => {
   it("succeeds and passes the value through for a privileged principal", async () => {
     const result = await decodeAs(alice, { id: "u-1", email: "alice@example.com" });
     expect(result._tag).toBe("Success");
-    expect(Result.getOrThrow(result)).toEqual({ id: "u-1", email: "alice@example.com" });
+    expect(Result.getOrUndefined(result)).toEqual({ id: "u-1", email: "alice@example.com" });
   });
 
   it("an absent field decodes fine for everyone", async () => {
     for (const principal of [alice, bob]) {
       const result = await decodeAs(principal, { id: "u-1" });
       expect(result._tag).toBe("Success");
-      expect(Result.getOrThrow(result)).toEqual({ id: "u-1" });
+      expect(Result.getOrUndefined(result)).toEqual({ id: "u-1" });
     }
   });
 });

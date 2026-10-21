@@ -31,7 +31,6 @@
 
 import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
-import { randomUUID } from "node:crypto";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // ---------------------------------------------------------------------------
@@ -157,7 +156,7 @@ const userQueries = (sql: SqlClient.SqlClient) => {
     Effect.gen(function* () {
       const now = new Date();
       const user: Auth.User = {
-        id: randomUUID(),
+        id: globalThis.crypto.randomUUID(),
         createdAt: now,
         updatedAt: now,
         attributes: input.attributes ?? {},

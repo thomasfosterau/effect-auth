@@ -27,6 +27,9 @@ catalogs:
     '@electric-sql/pglite':
       specifier: ^0.5.10
       version: 0.5.10
+    '@mpsuesser/oxlint-plugin-effect':
+      specifier: ^0.6.0
+      version: 0.6.0
     '@node-saml/node-saml':
       specifier: ^5.1.0
       version: 5.1.0
@@ -165,6 +168,9 @@ importers:
       '@effect/tsgo':
         specifier: 'catalog:'
         version: 0.53.5
+      '@mpsuesser/oxlint-plugin-effect':
+        specifier: 'catalog:'
+        version: 0.6.0
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.5
@@ -1436,6 +1442,9 @@ packages:
   '@manypkg/tools@2.1.2':
     resolution: {integrity: sha512-6QEf6yqFbETdwGITKq57aYoPfX/3K8XFNwsAlx0C1M7o8cb79sv1M3w+tWuWvIcSbNqrLF7OD7YpZMVVz335hQ==}
     engines: {node: '>=20.0.0'}
+
+  '@mpsuesser/oxlint-plugin-effect@0.6.0':
+    resolution: {integrity: sha512-q0QNOQxvOU/FLBsJI5qpAmnX7g8xzhfgKDzesDliqD1YIj18DBxal2x3IZIcjMupZf5uVhv8hu9p1p4PKF1teA==}
 
   '@mrleebo/prisma-ast@0.13.1':
     resolution: {integrity: sha512-XyroGQXcHrZdvmrGJvsA9KNeOOgGMg1Vg9OlheUsBOSKznLMDl+YChxbkboRHvtFYJEMRYmlV3uoo/njCw05iw==}
@@ -3096,6 +3105,11 @@ packages:
     resolution: {integrity: sha512-T0ix8GhtxyKVfUFEcvdNDt3YGqlwkFHbD4/5bgFUDgFmxhI/cSRAeJ87/Sz//Cq8Eam6JX/e23RkoFO71P7aAA==}
     engines: {node: '>=20'}
     hasBin: true
+
+  effect-oxlint@0.4.0:
+    resolution: {integrity: sha512-IA3ihFKGK0JoZVSPPgPP58988jj4PZ5/asFOhaSYHwDyRRRbkBJn7FX8RiPi++MFpXQvb+3fQpKdPzOvUK9xPQ==}
+    peerDependencies:
+      effect: 4.0.0
 
   effect-solutions@0.5.3:
     resolution: {integrity: sha512-JIG7XV0gJF5eVV+9un5Yp7MEFMGNfuTYxbiV/HzS80zH/9qx9ZOoXd6Mlw0FXdbC41LGcpWYZJG3MnzxYawEWg==}
@@ -5222,6 +5236,12 @@ snapshots:
       tinyglobby: 0.2.17
       yaml: 2.9.0
 
+  '@mpsuesser/oxlint-plugin-effect@0.6.0':
+    dependencies:
+      '@oxlint/plugins': 1.88.0
+      effect: 4.0.0
+      effect-oxlint: 0.4.0(effect@4.0.0)
+
   '@mrleebo/prisma-ast@0.13.1':
     dependencies:
       chevrotain: 10.5.0
@@ -6357,6 +6377,11 @@ snapshots:
       commander: 14.0.3
       minimatch: 10.2.6
       semver: 7.8.5
+
+  effect-oxlint@0.4.0(effect@4.0.0):
+    dependencies:
+      '@oxlint/plugins': 1.88.0
+      effect: 4.0.0
 
   effect-solutions@0.5.3:
     dependencies:
