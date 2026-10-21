@@ -52,6 +52,7 @@ catalog:
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping any of them.
   "@effect/tsgo": 0.53.5
   "@electric-sql/pglite": ^0.5.10
+  "@mpsuesser/oxlint-plugin-effect": ^0.6.0
   "@node-saml/node-saml": ^5.1.0
   "@solidjs/testing-library": ^0.8.10
   "@sveltejs/package": ^3.0.1

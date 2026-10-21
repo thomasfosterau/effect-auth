@@ -29,6 +29,7 @@ A new package picks an archetype, gets a `vite.config.ts` that declares its task
 - **Optional properties are `?: T | undefined`.** `exactOptionalPropertyTypes` is on (`tsconfig.base.json`), so a bare `?: T` rejects a caller that forwards its own optional value.
 - **Relative imports carry the `.ts` extension** (`rewriteRelativeImportExtensions`).
 - **Tests import from `vite-plus/test`**, never `vitest`; lint (`vite-plus/prefer-vite-plus-imports`) rejects the direct import.
+- **Lint runs `@mpsuesser/oxlint-plugin-effect` (`effect/*` rules) with every rule listed explicitly** in the root `vite.config.ts`, each `error` or `off` with its reason; tests, `testing/`, scripts and configs are overridden off for the platform-service rules. Turning a deferred rule on (#438) means fixing its findings in the same PR.
 - **Services are `Context.Service` classes with a static `layer`**, and dependencies are resolved at layer construction so service methods carry `R = never`.
 - **Errors follow [DESIGN.md](docs/DESIGN.md) D4:** domain errors are `Data.TaggedError`; HTTP-boundary errors in `http/HttpApiSchema.ts` are `Schema.TaggedError` classes with a status. HTTP is `effect/http-api`.
 - **Secrets are compared with `constantTimeHashEqual` / `timingSafeEqualBytes`** (`src/TokenHash.ts`) and randomness comes from the `Crypto.Crypto` service (default `PlatformCrypto.layer`); direct `node:crypto` use stays corralled in `password/Password.ts`, `TokenHash.ts` and `Cipher.ts`.

@@ -3310,6 +3310,8 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
           Symbol.for("@thomasfosterau/effect-auth/Hooks/clientAddressKeyed"),
           {
             get: () => {
+              // The getter runs when the handler reads the hook, outside this generator.
+              // oxlint-disable-next-line effect/throw-in-effect-gen
               throw boom;
             },
           },
@@ -3667,6 +3669,8 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
           Symbol.for("@thomasfosterau/effect-auth/Hooks/clientAddressKeyed"),
           {
             get: () => {
+              // The getter runs when the handler reads the hook, outside this generator.
+              // oxlint-disable-next-line effect/throw-in-effect-gen
               throw boom;
             },
           },

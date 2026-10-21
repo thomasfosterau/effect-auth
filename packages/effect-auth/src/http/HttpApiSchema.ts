@@ -16,6 +16,7 @@ import type * as Types from "../Types.ts";
 
 /** Arbitrary JSON attributes bag. */
 export const Attributes = Schema.Record(Schema.String, Schema.Unknown);
+export type Attributes = typeof Attributes.Type;
 
 /** Public view of a login-handle identifier (timestamps as epoch millis). */
 export const IdentifierView = Schema.Struct({
@@ -737,6 +738,7 @@ export const ApiKeyRateLimit = Schema.Struct({
   maxRequests: Schema.Number,
   windowMs: Schema.Number,
 });
+export type ApiKeyRateLimit = typeof ApiKeyRateLimit.Type;
 
 /** Public view of an API key (never includes the plaintext or hash). */
 export const ApiKeyView = Schema.Struct({
