@@ -708,8 +708,9 @@ const isAllowedDynamicRedirectUri = (uri: string, extraSchemes: readonly string[
  *
  * ```ts
  * import assert from "node:assert/strict"
- * import { Redacted } from "effect"
- * import { mcpProviderPreset, OidcProviderService } from "@thomasfosterau/effect-auth"
+ * import { Effect, Layer, Redacted } from "effect"
+ * import { JwtService, mcpProviderPreset, OidcProviderService } from "@thomasfosterau/effect-auth"
+ * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
  * const config = mcpProviderPreset({
  *   issuer: "https://mcp.example.com/api/auth",
@@ -724,10 +725,26 @@ const isAllowedDynamicRedirectUri = (uri: string, extraSchemes: readonly string[
  * assert.equal(config.requirePKCE, true)
  * assert.equal(config.dynamicRegistration?.management, true)
  *
- * // The provider layer. Building it also needs the app's OIDC client, code,
- * // token and consent stores, plus its user, identifier and JWT services, so the
- * // layer is constructed here and not built.
- * export const oidcLayer = OidcProviderService.layer(config)
+ * // The provider layer. It needs the app's OIDC client, code, token and consent
+ * // stores and its user and identifier stores (here the in-memory reference
+ * // stores), plus a JWT service for ID tokens.
+ * export const oidcLayer = OidcProviderService.layer(config).pipe(
+ *   Layer.provideMerge(JwtService.layer({ issuer: config.issuer })),
+ *   Layer.provideMerge(Testing.memoryStores),
+ * )
+ *
+ * // A client registers, and the provider stores it.
+ * const program = Effect.gen(function* () {
+ *   const provider = yield* OidcProviderService
+ *   const { client, clientSecret } = yield* provider.registerClient({
+ *     name: "Claude",
+ *     redirectUris: ["https://claude.ai/api/mcp/auth_callback"],
+ *   })
+ *   assert.equal(client.name, "Claude")
+ *   assert.ok(clientSecret !== undefined)
+ * })
+ *
+ * await Effect.runPromise(program.pipe(Effect.provide(oidcLayer)))
  * ```
  *
  * Everything is overridable: the spread order keeps whatever the caller passes,

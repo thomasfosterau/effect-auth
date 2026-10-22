@@ -272,6 +272,8 @@ await Effect.runPromise(
 
 The store-contract conformance suites (`sessionStoreConformance`, `userStoreConformance`, `identifierStoreConformance`, `apiKeyStoreConformance`) check a bring-your-own store against the semantics its contract states. Each suite is a list of cases, and each case is an `Effect` that fails with `ConformanceError` on a mismatch. The suites import no test runner. Register the cases with your own, as the [bring-your-own-store guide](../../docs/guides/byo-stores.md#7-check-your-store-against-the-contract) shows.
 
+`memoryStores` is a layer of in-memory reference stores: sessions, users (one table shared by `UserStore`, `EmailPasswordStore`, `OAuthUserStore` and `OAuthAccountStore.hasPassword`), identifiers, TOTP and OTP second factors, trusted devices, JWT keys, OAuth accounts, the four OIDC provider stores, and the `KeyValueStore`-backed token stores over an in-memory `KeyValueStore`. Each build starts empty. It lets a test or a demo build `SessionService`, `EmailPasswordService`, `MultiFactorService`, `OAuthService`, `JwtService` or `OidcProviderService` with no database. Each store is also exported on its own (`memorySessionStore()`, `memoryUserStore(table)`, …).
+
 ## Passwords
 
 ```typescript

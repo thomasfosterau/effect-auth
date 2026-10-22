@@ -48,3 +48,22 @@ export {
   sessionStoreConformance,
   userStoreConformance,
 } from "./StoreConformance.ts";
+export {
+  type MemoryStores,
+  type MemoryUserTable,
+  layer as memoryStores,
+  memoryEmailPasswordStore,
+  memoryJwtKeyStore,
+  memoryMultiFactorStore,
+  memoryOAuthAccountStore,
+  memoryOAuthUserStore,
+  memoryOidcClientStore,
+  memoryOidcCodeStore,
+  memoryOidcConsentStore,
+  memoryOidcTokenStore,
+  memoryOtpSecondFactorStore,
+  memorySessionStore,
+  memoryTrustedDeviceStore,
+  memoryUserStore,
+  memoryUserTable,
+} from "./MemoryStores.ts";
