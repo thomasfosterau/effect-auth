@@ -21,6 +21,7 @@ import {
   SignUpForm,
   useAuthClient,
 } from "./index.ts";
+import type { AuthSuccess, StatusResponse } from "./index.ts";
 
 /**
  * The forms only ever touch a handful of client methods, so the tests stand a
@@ -28,12 +29,19 @@ import {
  * matters is "this method, with this payload", which a recorded call states
  * directly.
  */
-const stub = (methods: Record<string, unknown>): AuthClient => methods as unknown as AuthClient;
+/** A member as a stub may supply it: a method as is, a namespace as any subset of its members. */
+type StubOf<T> = T extends (...args: infer A) => infer R
+  ? (...args: A) => R
+  : { readonly [K in keyof T]?: StubOf<T[K]> };
+
+/** Any subset of the client's members; the code under test touches only the ones a test supplies. */
+type ClientStub = StubOf<AuthClient>;
+const stub = (methods: ClientStub): AuthClient => methods as AuthClient;
 
 /** A recording stand-in for one client method. */
 const spy = <T,>(result: () => Promise<T>) => {
-  const calls: unknown[] = [];
-  const fn = (payload?: unknown): Promise<T> => {
+  const calls: Array<object | undefined> = [];
+  const fn = (payload?: object): Promise<T> => {
     calls.push(payload);
     return result();
   };
@@ -41,7 +49,7 @@ const spy = <T,>(result: () => Promise<T>) => {
 };
 
 const resolving = <T,>(value: T) => spy(() => Promise.resolve(value));
-const rejecting = (error: unknown) => spy(() => Promise.reject(error));
+const rejecting = (error: Error) => spy(() => Promise.reject(error));
 
 /** A promise whose settlement the test controls, for asserting pending state. */
 const deferred = <T,>() => {
@@ -52,8 +60,11 @@ const deferred = <T,>() => {
   return { promise, settle };
 };
 
-const SUCCESS = { user: { id: "u1" }, needsEmailVerification: false };
-const STATUS = { status: "ok" };
+const SUCCESS: AuthSuccess = {
+  user: { id: "u1", createdAt: 0, updatedAt: 0, attributes: {} },
+  needsEmailVerification: false,
+};
+const STATUS: StatusResponse = { status: true };
 
 /** Submit the rendered form directly, bypassing browser constraint validation. */
 const submit = (container: HTMLElement): void => {

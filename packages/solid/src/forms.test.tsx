@@ -16,18 +16,25 @@ const EMAIL = "alice@solid.test";
 const PW = "password-123";
 
 const now = Date.now();
-const authSuccess = {
+const authSuccess: AuthSuccess = {
   user: { id: "user-1", email: EMAIL, createdAt: now, updatedAt: now, attributes: {} },
   needsEmailVerification: false,
-} as unknown as AuthSuccess;
-const ok = { status: true } as unknown as StatusResponse;
+};
+const ok: StatusResponse = { status: true };
 
 /**
  * Only the handful of methods a given form touches are stubbed; the components
  * never reach for anything else on the client, and a stand-in object keeps
  * each assertion about one call and one payload.
  */
-const stub = (methods: object): AuthClient => methods as unknown as AuthClient;
+/** A member as a stub may supply it: a method as is, a namespace as any subset of its members. */
+type StubOf<T> = T extends (...args: infer A) => infer R
+  ? (...args: A) => R
+  : { readonly [K in keyof T]?: StubOf<T[K]> };
+
+/** Any subset of the client's members; the code under test touches only the ones a test supplies. */
+type ClientStub = StubOf<AuthClient>;
+const stub = (methods: ClientStub): AuthClient => methods as AuthClient;
 
 /** A promise plus the handles to settle it, for driving the pending state. */
 const deferred = <T,>() => {
@@ -58,7 +65,7 @@ describe("SignInForm", () => {
     const { container } = render(() => (
       <SignInForm
         client={stub({
-          signIn: (payload: unknown) => {
+          signIn: (payload: object) => {
             calls.push(payload);
             return Promise.resolve(authSuccess);
           },
@@ -82,7 +89,7 @@ describe("SignInForm", () => {
     const { container } = render(() => (
       <SignInForm
         client={stub({
-          signInUsername: (payload: unknown) => {
+          signInUsername: (payload: object) => {
             calls.push(payload);
             return Promise.resolve(authSuccess);
           },
@@ -186,7 +193,7 @@ describe("SignUpForm", () => {
     const { container } = render(() => (
       <SignUpForm
         client={stub({
-          signUp: (payload: unknown) => {
+          signUp: (payload: object) => {
             calls.push(payload);
             return Promise.resolve(authSuccess);
           },
@@ -210,7 +217,7 @@ describe("SignUpForm", () => {
     const { container } = render(() => (
       <SignUpForm
         client={stub({
-          signUp: (payload: unknown) => {
+          signUp: (payload: object) => {
             calls.push(payload);
             return Promise.resolve(authSuccess);
           },
@@ -264,7 +271,7 @@ describe("PasswordResetRequestForm", () => {
     const { container } = render(() => (
       <PasswordResetRequestForm
         client={stub({
-          passwordResetRequest: (payload: unknown) => {
+          passwordResetRequest: (payload: object) => {
             calls.push(payload);
             return Promise.resolve(ok);
           },
@@ -318,7 +325,7 @@ describe("PasswordResetConfirmForm", () => {
     const { container } = render(() => (
       <PasswordResetConfirmForm
         client={stub({
-          passwordResetConfirm: (payload: unknown) => {
+          passwordResetConfirm: (payload: object) => {
             calls.push(payload);
             return Promise.resolve(ok);
           },
@@ -403,7 +410,7 @@ describe("MagicLinkForm", () => {
       <MagicLinkForm
         client={stub({
           magicLink: {
-            send: (payload: unknown) => {
+            send: (payload: object) => {
               calls.push(payload);
               return Promise.resolve(ok);
             },
@@ -460,11 +467,11 @@ describe("EmailOtpForm", () => {
       <EmailOtpForm
         client={stub({
           emailOtp: {
-            send: (payload: unknown) => {
+            send: (payload: object) => {
               sends.push(payload);
               return Promise.resolve(ok);
             },
-            signIn: (payload: unknown) => {
+            signIn: (payload: object) => {
               verifications.push(payload);
               return Promise.resolve(authSuccess);
             },

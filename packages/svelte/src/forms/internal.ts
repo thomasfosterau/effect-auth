@@ -110,6 +110,8 @@ export const mergeLabels = <T extends Record<string, string>>(
 ): T => {
   if (overrides === undefined) return defaults;
   const merged = { ...defaults };
+  // SAFETY: `overrides` is a `Partial<T>`, so its own keys are label keys of
+  // `T`; whatever is copied is a defined `string`, which every key of `T` holds.
   for (const key of Object.keys(overrides) as Array<keyof T>) {
     const value = overrides[key];
     if (value !== undefined) merged[key] = value;

@@ -569,14 +569,21 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     if (!response.ok) {
       let message = response.statusText || `HTTP ${response.status}`;
       if (isJson(response)) {
+        // SAFETY: a JSON error body from the auth server is an HTTP-boundary
+        // error encoding, whose `message`, when present, is a string; a body
+        // that fails to parse becomes `null`.
         const parsed = (await response.json().catch(() => null)) as { message?: string } | null;
         if (parsed?.message !== undefined) message = parsed.message;
       }
       throw new AuthClientError(response.status, message);
     }
     if (response.status === 204 || !isJson(response)) {
+      // SAFETY: endpoints that answer 204 or a non-JSON body are requested
+      // with `T = void`, so `undefined` is their success value.
       return undefined as T;
     }
+    // SAFETY: each call site names as `T` the success type the HTTP contract
+    // declares for that endpoint, which is what the server encodes.
     return (await response.json()) as T;
   };
 
@@ -597,46 +604,44 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     void refetch();
   };
   const onVisibilityChange = (): void => {
-    if (typeof document !== "undefined" && document.visibilityState === "visible") {
+    if (globalThis.document !== undefined && document.visibilityState === "visible") {
       void refetch();
     }
   };
 
   const setState = (next: SessionState, broadcast = true): void => {
     state = next;
-    for (const listener of listeners) listener();
+    listeners.forEach((listener) => listener());
     if (broadcast && broadcastChannel !== undefined) {
       broadcastChannel.postMessage({ data: next.data });
     }
   };
 
-  const getSession = async (): Promise<Auth.Http.SessionWithUserView | null> => {
-    try {
-      return await request<Auth.Http.SessionWithUserView>("GET", "/session");
-    } catch (error) {
+  const getSession = (): Promise<Auth.Http.SessionWithUserView | null> =>
+    request<Auth.Http.SessionWithUserView>("GET", "/session").catch((error) => {
       if (error instanceof AuthClientError && error.status === 401) return null;
       throw error;
-    }
-  };
+    });
 
   const refetch = async (): Promise<void> => {
     const seq = ++refetchSeq;
     setState({ ...state, isPending: true });
-    try {
-      const data = await getSession();
-      if (seq !== refetchSeq) return;
-      setState({ data, isPending: false, error: null });
-    } catch (error) {
-      if (seq !== refetchSeq) return;
-      setState({
-        data: state.data,
-        isPending: false,
-        error:
-          error instanceof AuthClientError
-            ? error
-            : new AuthClientError(0, error instanceof Error ? error.message : String(error)),
+    await getSession()
+      .then((data) => {
+        if (seq !== refetchSeq) return;
+        setState({ data, isPending: false, error: null });
+      })
+      .catch((error) => {
+        if (seq !== refetchSeq) return;
+        setState({
+          data: state.data,
+          isPending: false,
+          error:
+            error instanceof AuthClientError
+              ? error
+              : new AuthClientError(0, error instanceof Error ? error.message : String(error)),
+        });
       });
-    }
   };
 
   const startRefresh = (): void => {
@@ -651,17 +656,17 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     }
 
     if (cfg.onFocus) {
-      if (typeof window !== "undefined") {
+      if (globalThis.window !== undefined) {
         window.addEventListener("focus", onFocus);
       }
-      if (typeof document !== "undefined") {
+      if (globalThis.document !== undefined) {
         document.addEventListener("visibilitychange", onVisibilityChange);
       }
     }
 
     if (cfg.crossTab) {
-      if (typeof BroadcastChannel !== "undefined") {
-        const channelName = typeof cfg.crossTab === "string" ? cfg.crossTab : "effect-auth-session";
+      if (globalThis.BroadcastChannel !== undefined) {
+        const channelName = cfg.crossTab === true ? "effect-auth-session" : cfg.crossTab;
         broadcastChannel = new BroadcastChannel(channelName);
         broadcastChannel.onmessage = (
           event: MessageEvent<{ data: Auth.Http.SessionWithUserView | null }>,
@@ -681,10 +686,10 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       intervalId = undefined;
     }
 
-    if (typeof window !== "undefined") {
+    if (globalThis.window !== undefined) {
       window.removeEventListener("focus", onFocus);
     }
-    if (typeof document !== "undefined") {
+    if (globalThis.document !== undefined) {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     }
 
@@ -1104,6 +1109,8 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     extend: <TExtension extends object>(
       plugin: AuthClientPlugin<TExtension>,
     ): AuthClient & TExtension =>
+      // SAFETY: the fresh object receives every own property of `self` (an
+      // `AuthClient`) and then of the plugin's `TExtension`, so it is both.
       Object.assign(Object.create(null), self, plugin.install(pluginContext)) as AuthClient &
         TExtension,
   };

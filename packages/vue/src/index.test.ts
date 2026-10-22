@@ -7,11 +7,20 @@ const PW = "password-123";
 
 type SessionList = Awaited<ReturnType<AuthClient["listSessions"]>>;
 
-const json = (body: unknown): Response =>
+const json = (body: object): Response =>
   new Response(JSON.stringify(body), {
     status: 200,
     headers: { "content-type": "application/json" },
   });
+
+/** A member as a stub may supply it: a method as is, a namespace as any subset of its members. */
+type StubOf<T> = T extends (...args: infer A) => infer R
+  ? (...args: A) => R
+  : { readonly [K in keyof T]?: StubOf<T[K]> };
+
+/** Any subset of the client's members; the code under test touches only the ones a test supplies. */
+type ClientStub = StubOf<AuthClient>;
+const stub = (methods: ClientStub): AuthClient => methods as AuthClient;
 
 /**
  * A client backed by a stand-in server covering only the endpoints these
@@ -152,7 +161,7 @@ describe("vue useListSessions", () => {
     let resolveDelayed!: (sessions: SessionList) => void;
     let callCount = 0;
 
-    const fakeClient = {
+    const fakeClient = stub({
       listSessions: (): Promise<SessionList> => {
         callCount++;
         if (callCount === 2) {
@@ -162,7 +171,7 @@ describe("vue useListSessions", () => {
         }
         return Promise.resolve([]);
       },
-    } as unknown as AuthClient;
+    });
 
     const { data, isPending, dispose } = useListSessions(fakeClient);
     await nextTick(); // initial fetch settles: []
@@ -172,7 +181,14 @@ describe("vue useListSessions", () => {
     refetch();
     dispose();
 
-    const stale = { id: "stale" } as unknown as SessionList[number];
+    const stale: SessionList[number] = {
+      id: "stale",
+      userId: "user-1",
+      expiresAt: 0,
+      createdAt: 0,
+      lastActivityAt: 0,
+      attributes: {},
+    };
     resolveDelayed([stale]);
     await nextTick();
 

@@ -57,7 +57,7 @@ export const useSession = (client: AuthClient): UseSessionResult => {
         "Call .dispose() on the returned ref to avoid a subscription leak.",
     );
   }
-  return Object.assign(stateRef, { dispose: unsubscribe }) as UseSessionResult;
+  return Object.assign(stateRef, { dispose: unsubscribe });
 };
 
 /** The refs returned by {@link useListSessions}. */

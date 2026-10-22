@@ -8,7 +8,7 @@
  *
  * @module argon2/common
  */
-import { Effect } from "effect";
+import { Effect, Predicate, String as Str } from "effect";
 import { HashingError } from "@thomasfosterau/effect-auth";
 
 /** PHC/`parseAlgorithm` identifier for the hashes this package produces. */
@@ -100,13 +100,13 @@ export const isWithinMaxLength = (password: string): boolean =>
 
 /** Fails unless `password` is a non-empty string. */
 export const requireNonEmptyPassword = (password: string): Effect.Effect<void, HashingError> =>
-  typeof password === "string" && password.length > 0
+  Predicate.isString(password) && Str.isNonEmpty(password)
     ? Effect.void
     : Effect.fail(new HashingError({ message: "Password must be a non-empty string" }));
 
 /** Fails unless `hash` is a non-empty string. */
 export const requireNonEmptyHash = (hash: string): Effect.Effect<void, HashingError> =>
-  typeof hash === "string" && hash.length > 0
+  Predicate.isString(hash) && Str.isNonEmpty(hash)
     ? Effect.void
     : Effect.fail(new HashingError({ message: "Hash must be a non-empty string" }));
 

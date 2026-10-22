@@ -17,7 +17,7 @@
  *
  * @module argon2/argon2
  */
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer, Option, Record as Rec } from "effect";
 import { argon2d, argon2i, argon2id } from "hash-wasm";
 import { HashingError, Password } from "@thomasfosterau/effect-auth";
 import {
@@ -53,20 +53,15 @@ const decodeBase64 = (value: string): Uint8Array => {
   // PHC uses the standard base64 alphabet with the padding stripped; `atob`
   // tolerates the missing padding and is available on every target runtime.
   const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 };
 
 /** Constant-time comparison; `node:crypto.timingSafeEqual` is not portable to Workers. */
 const timingSafeEqual = (a: Uint8Array, b: Uint8Array): boolean => {
   if (a.length !== b.length) return false;
-  let difference = 0;
-  for (let index = 0; index < a.length; index += 1) {
-    difference |= a[index]! ^ b[index]!;
-  }
+  // Every byte is visited regardless of where the first mismatch is; the
+  // lengths are equal, so `b[index]` is always defined.
+  const difference = a.reduce((acc, byte, index) => acc | (byte ^ (b[index] ?? 0)), 0);
   return difference === 0;
 };
 
@@ -105,14 +100,9 @@ const parseHash = (hash: string): Effect.Effect<ParsedHash, HashingError> =>
     if (segments.length !== 6 || segments[0] !== "") {
       return invalidHash("expected $argon2<variant>$v=19$m=...,t=...,p=...$salt$hash");
     }
-    const [, variant, version, parameters, salt, digest] = segments as [
-      string,
-      string,
-      string,
-      string,
-      string,
-      string,
-    ];
+    // The length check above guarantees all six segments exist, so the
+    // defaults are never used.
+    const [, variant = "", version = "", parameters = "", salt = "", digest = ""] = segments;
 
     if (!isVariant(variant)) {
       return invalidHash(`unsupported variant "${variant}"`);
@@ -121,14 +111,23 @@ const parseHash = (hash: string): Effect.Effect<ParsedHash, HashingError> =>
       return invalidHash(`unsupported version "${version}" (only v=19 is supported)`);
     }
 
-    const costs: Record<string, number> = {};
-    for (const parameter of parameters.split(",")) {
+    const pairs = Arr.map(parameters.split(","), (parameter) => {
       const [name, value] = parameter.split("=");
-      if (name === undefined || value === undefined) {
-        return invalidHash(`malformed parameter "${parameter}"`);
-      }
-      costs[name] = parsePositiveInt(value);
+      return { parameter, name, value };
+    });
+    const malformed = Arr.findFirst(
+      pairs,
+      ({ name, value }) => name === undefined || value === undefined,
+    );
+    if (Option.isSome(malformed)) {
+      return invalidHash(`malformed parameter "${malformed.value.parameter}"`);
     }
+    const costs: Record<string, number> = Rec.fromEntries(
+      Arr.map(pairs, ({ name = "", value }): readonly [string, number] => [
+        name,
+        parsePositiveInt(value),
+      ]),
+    );
     const memoryCost = costs["m"] ?? Number.NaN;
     const timeCost = costs["t"] ?? Number.NaN;
     const parallelism = costs["p"] ?? Number.NaN;

@@ -15,7 +15,17 @@ const EMAIL = "alice@solid.test";
 const signedOut: SessionState = { data: null, isPending: true, error: null };
 
 const signedIn = (email: string): SessionState => ({
-  data: { user: { email } } as unknown as NonNullable<SessionState["data"]>,
+  data: {
+    session: {
+      id: "session-1",
+      userId: "user-1",
+      expiresAt: 0,
+      createdAt: 0,
+      lastActivityAt: 0,
+      attributes: {},
+    },
+    user: { id: "user-1", email, createdAt: 0, updatedAt: 0, attributes: {} },
+  },
   isPending: false,
   error: null,
 });
@@ -48,7 +58,14 @@ const makeStore = () => {
   };
 };
 
-const stub = (methods: object): AuthClient => methods as unknown as AuthClient;
+/** A member as a stub may supply it: a method as is, a namespace as any subset of its members. */
+type StubOf<T> = T extends (...args: infer A) => infer R
+  ? (...args: A) => R
+  : { readonly [K in keyof T]?: StubOf<T[K]> };
+
+/** Any subset of the client's members; the code under test touches only the ones a test supplies. */
+type ClientStub = StubOf<AuthClient>;
+const stub = (methods: ClientStub): AuthClient => methods as AuthClient;
 
 describe("createSession", () => {
   it("tracks the store and re-renders when it emits", () => {
@@ -131,7 +148,16 @@ describe("createListSessions", () => {
     const client = stub({
       listSessions: () => {
         calls += 1;
-        return Promise.resolve([{ id: `session-${calls}` }]);
+        return Promise.resolve([
+          {
+            id: `session-${calls}`,
+            userId: "user-1",
+            expiresAt: 0,
+            createdAt: 0,
+            lastActivityAt: 0,
+            attributes: {},
+          },
+        ]);
       },
     });
 
