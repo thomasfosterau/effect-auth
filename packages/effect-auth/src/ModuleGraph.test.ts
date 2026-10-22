@@ -97,14 +97,14 @@ describe("the testing subpath", () => {
   const testingDir = path.resolve(import.meta.dirname, "testing");
   const testingEntry = path.join(testingDir, "index.ts");
 
-  it("is not reachable from the root barrel", () => {
-    const { files } = walkModuleGraph(entryFile);
+  it("is not reachable from the root barrel", async () => {
+    const { files } = await walkModuleGraph(entryFile);
     const reached = [...files].filter((file) => file.startsWith(`${testingDir}${path.sep}`));
     expect(reached).toEqual([]);
   });
 
-  it("does not reach the HTTP tier", () => {
-    const { files, externalSpecifiers } = walkModuleGraph(testingEntry);
+  it("does not reach the HTTP tier", async () => {
+    const { files, externalSpecifiers } = await walkModuleGraph(testingEntry);
     const httpDir = path.resolve(import.meta.dirname, "http");
 
     expect([...files].filter((file) => file.startsWith(`${httpDir}${path.sep}`))).toEqual([]);
@@ -112,8 +112,8 @@ describe("the testing subpath", () => {
     expect(reachesModule(externalSpecifiers, "effect-jsonapi")).toBe(false);
   });
 
-  it("does not import the test runner", () => {
-    const { externalSpecifiers } = walkModuleGraph(testingEntry);
+  it("does not import the test runner", async () => {
+    const { externalSpecifiers } = await walkModuleGraph(testingEntry);
     expect(reachesModule(externalSpecifiers, "vite-plus")).toBe(false);
     expect(reachesModule(externalSpecifiers, "vitest")).toBe(false);
   });
