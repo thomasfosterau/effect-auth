@@ -8,18 +8,19 @@ Archetype **Core** (`.fallowrc.json` zone `core`, which may import only `ladder`
 
 Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `UserStore`, `Identifier`, `TrustedDevice`, `SessionContext`, `SessionResolution`, `SessionCookies`), the authorization kernel (`Entity`, `Condition`, `Policy`, `AuthorizationModel`, `PolicyStore`, `Authorizer`, `Rbac`, `Permission`, `System`, `Guard`, `OwnedAccess`, `Cacheability`, `Protected`, `OrganizationEntities`, `Ladder`, `LadderSchema`) and the unclustered features (`Organization`, `Admin`, `ApiKey`, `Jwt`, `OidcProvider`, `Sso`, `Saml`, `Scim`, `Delivery`, `KeyValueStores`, `RateLimit`, …). Lowercase cluster directories each have an `index.ts` barrel, a subpath export and a root namespace:
 
-| Subpath         | Directory      | Root namespace     |
-| --------------- | -------------- | ------------------ |
-| `.`             | `src/index.ts` | `Auth`             |
-| `./email`       | `email/`       | `Auth.Email`       |
-| `./password`    | `password/`    | `Auth.Password`    |
-| `./multifactor` | `multifactor/` | `Auth.MultiFactor` |
-| `./oauth`       | `oauth/`       | `Auth.OAuth`       |
-| `./plugins`     | `plugins/`     | `Auth.Plugins`     |
-| `./http`        | `http/`        | `Auth.Http`        |
-| `./ladder`      | `Ladder.ts`    | `Auth.Ladder`      |
+| Subpath         | Directory          | Root namespace                    |
+| --------------- | ------------------ | --------------------------------- |
+| `.`             | `src/index.ts`     | `Auth`                            |
+| `./email`       | `email/`           | `Auth.Email`                      |
+| `./password`    | `password/`        | `Auth.Password`                   |
+| `./multifactor` | `multifactor/`     | `Auth.MultiFactor`                |
+| `./oauth`       | `oauth/`           | `Auth.OAuth`                      |
+| `./plugins`     | `plugins/`         | `Auth.Plugins`                    |
+| `./http`        | `http/`            | `Auth.Http`                       |
+| `./ladder`      | `Ladder.ts`        | `Auth.Ladder`                     |
+| `./testing`     | `testing/index.ts` | — (not re-exported from the root) |
 
-`src/testing/` is test support, not exported. A new cluster module is exported from its `index.ts`; a new subpath needs a `package.json` `exports` entry and a `.fallowrc.json` `entry`.
+`src/testing/` holds the `./testing` subpath (`runAs`, `runAsViewer`), which the root barrel never re-exports and which must not load the HTTP tier (`ModuleGraph.test.ts`); its other modules are internal test support. A new cluster module is exported from its `index.ts`; a new subpath needs a `package.json` `exports` entry and a `.fallowrc.json` `entry`.
 
 ## Invariants
 

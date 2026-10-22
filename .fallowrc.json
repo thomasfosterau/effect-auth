@@ -9,6 +9,7 @@
     "packages/effect-auth/src/password/index.ts",
     "packages/effect-auth/src/plugins/index.ts",
     "packages/effect-auth/src/multifactor/index.ts",
+    "packages/effect-auth/src/testing/index.ts",
     "packages/client/src/index.ts",
     "packages/client/src/testing/fixture.ts",
     "packages/{alchemy,argon2,drizzle,react,resend,saml,solid,sql,svelte,twilio,vue}/src/index.ts",
