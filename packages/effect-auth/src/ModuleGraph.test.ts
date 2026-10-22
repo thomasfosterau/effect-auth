@@ -23,6 +23,7 @@ const extractSpecifiers = (source: string): string[] =>
   [...source.matchAll(SPECIFIER_PATTERN)].map((match) => match[1]);
 
 interface ModuleGraph {
+  readonly files: ReadonlySet<string>;
   readonly externalSpecifiers: ReadonlySet<string>;
 }
 
@@ -49,7 +50,7 @@ const walkModuleGraph = (entry: string): ModuleGraph => {
     }
   }
 
-  return { externalSpecifiers };
+  return { files: visited, externalSpecifiers };
 };
 
 const reachesModule = (externalSpecifiers: ReadonlySet<string>, moduleName: string): boolean =>
@@ -82,5 +83,31 @@ describe("the ladder subpath", () => {
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\/\/.*$/gm, "");
     expect(extractSpecifiers(code)).toEqual([]);
+  });
+});
+
+describe("the testing subpath", () => {
+  const testingDir = path.resolve(import.meta.dirname, "testing");
+  const testingEntry = path.join(testingDir, "index.ts");
+
+  it("is not reachable from the root barrel", () => {
+    const { files } = walkModuleGraph(entryFile);
+    const reached = [...files].filter((file) => file.startsWith(`${testingDir}${path.sep}`));
+    expect(reached).toEqual([]);
+  });
+
+  it("does not reach the HTTP tier", () => {
+    const { files, externalSpecifiers } = walkModuleGraph(testingEntry);
+    const httpDir = path.resolve(import.meta.dirname, "http");
+
+    expect([...files].filter((file) => file.startsWith(`${httpDir}${path.sep}`))).toEqual([]);
+    expect(reachesModule(externalSpecifiers, "effect/http-api")).toBe(false);
+    expect(reachesModule(externalSpecifiers, "effect-jsonapi")).toBe(false);
+  });
+
+  it("does not import the test runner", () => {
+    const { externalSpecifiers } = walkModuleGraph(testingEntry);
+    expect(reachesModule(externalSpecifiers, "vite-plus")).toBe(false);
+    expect(reachesModule(externalSpecifiers, "vitest")).toBe(false);
   });
 });

@@ -2,7 +2,8 @@
  * Test helpers shared by the passwordless suites (`MagicLink.test.ts`,
  * `PhoneOtp.test.ts`, `email/EmailOtp.test.ts`).
  *
- * Never published (`tsconfig.json` excludes `src/testing/`).
+ * Never published (`tsconfig.json` excludes this file; the rest of `src/testing/`
+ * is the public `./testing` subpath).
  */
 import { Crypto, Effect } from "effect";
 import { vi } from "vite-plus/test";

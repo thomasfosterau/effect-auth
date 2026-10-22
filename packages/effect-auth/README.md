@@ -220,6 +220,29 @@ whose condition reads a user attribute therefore errors for a system principal, 
 forbid denies, so scope such forbids to users (`Policy.isType("User")`). See
 [ADR 0019](../../docs/adr/0019-system-principals.md).
 
+## Testing
+
+`@thomasfosterau/effect-auth/testing` runs an Effect as a fixture principal in one call, so an app tests its own guards and policies without HTTP. It is not re-exported from the package root and does not load the HTTP tier.
+
+```ts
+import { Effect } from "effect";
+import * as Testing from "@thomasfosterau/effect-auth/testing";
+
+// As this library's User: the session context the required-auth middleware provides
+// (CurrentSession, CurrentUser, MaybeCurrentSession, CurrentPrincipal, CurrentCredential).
+await Effect.runPromise(program.pipe(Testing.runAs(ada)));
+await Effect.runPromise(program.pipe(Testing.runAs(ada, { credentialClass: "machine" })));
+// Anonymous: MaybeCurrentSession as none, and nothing else.
+await Effect.runPromise(program.pipe(Testing.runAs(null)));
+
+// As the app's own viewer (the service handed to Guard.make), plus the same session context.
+await Effect.runPromise(
+  requireModerator.pipe(Testing.runAsViewer(CurrentViewer, { id: "u-1", role: "moderator" })),
+);
+```
+
+`layerAs` / `viewerLayerAs` return the same context as a `Layer`. The fixture session is minted from the `Clock` and expires 24 hours later.
+
 ## Passwords
 
 ```typescript
@@ -652,6 +675,7 @@ Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in:
 | `@thomasfosterau/effect-auth/plugins`     | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization  |
 | `@thomasfosterau/effect-auth/http`        | `Auth.Http`        | The HTTP contract, the mountable handler, the typed Effect client, `AuthMiddleware`                                |
 | `@thomasfosterau/effect-auth/ladder`      | —                  | An ordered role ladder for browser UX gates; imports nothing, not even `effect`                                    |
+| `@thomasfosterau/effect-auth/testing`     | —                  | Test helpers: run an Effect as a fixture principal (`runAs`, `runAsViewer`); not reachable from the root           |
 
 Errors are tagged (`Data.TaggedError`) and carry a stable `code`; the shared ones are flat root exports: `AuthError` (infrastructure failure only), `InvalidCredentialsError`, `SessionNotFoundError`, `SessionExpiredError`, `UserNotFoundError`, `PermissionDeniedError`, `HashingError`, `ChallengeNotFoundError`, `ChallengeExpiredError`, `CredentialNotFoundError`, `WebAuthnVerificationError`, `OAuthStateNotFoundError`, `OAuthStateExpiredError`, `OAuthProviderError`, `RateLimitError`, `EmailVerificationError`, `MagicLinkError`, `PasswordResetError`, and more. The HTTP API maps them to status codes (`RateLimitError` → 429, `AuthError` → 500).
 

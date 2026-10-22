@@ -196,6 +196,12 @@ whole surface; the per-cluster subpaths (`effect-auth/email`, `/http`,
 `/oauth`, `/password`, `/plugins`, `/multifactor`) exist for
 consumers who want a narrower import.
 
+`effect-auth/testing` is the one subpath with no root namespace: server-side
+test helpers (`runAs`, `runAsViewer`, over `SessionContext`), kept off the
+root barrel so a production import never loads them. `ModuleGraph.test.ts`
+checks that the root does not reach it and that it does not reach the HTTP
+tier.
+
 ## Stores
 
 Users persist state by implementing plain store interfaces (DESIGN.md D3):

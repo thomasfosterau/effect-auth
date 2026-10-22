@@ -59,6 +59,10 @@
     "./multifactor": {
       "types": "./dist/multifactor/index.d.ts",
       "import": "./dist/multifactor/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
     }
   },
   "publishConfig": {
