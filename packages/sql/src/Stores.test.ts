@@ -1,5 +1,5 @@
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Data, Effect, Layer, Order, Predicate, Schema, Stream } from "effect";
+import { Array as Arr, Clock, Data, Effect, Layer, Order, Predicate, Schema, Stream } from "effect";
 import { SqlClient, SqlConnection, SqlError, Statement } from "effect/sql";
 import { Reactivity } from "effect/reactivity";
 import Database from "better-sqlite3";
@@ -767,6 +767,51 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.deleted).toBeNull();
       expect(result.missingIncrement._tag).toBe("AuthError");
       expect(result.user.name).toBe("OTP User");
+    });
+
+    it("purgeExpired deletes expired magic links and email OTPs and keeps live ones", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis;
+          const links = yield* Auth.MagicLinkStore;
+          const otps = yield* Auth.Email.EmailOtpStore;
+          const link = (token: string, expiresAt: number): Auth.MagicLinkToken => ({
+            token,
+            email: `${token}@example.com`,
+            createdAt: now - 600_000,
+            expiresAt,
+          });
+          const otp = (email: string, expiresAt: number): Auth.Email.EmailOtpRecord => ({
+            email,
+            otpHash: "hash",
+            purpose: "sign-in",
+            attempts: 0,
+            createdAt: now - 600_000,
+            expiresAt,
+          });
+          yield* links.create(link("stale-1", now - 60_000));
+          yield* links.create(link("stale-2", now - 1));
+          yield* links.create(link("live", now + 300_000));
+          yield* otps.upsert(otp("stale@example.com", now - 60_000));
+          yield* otps.upsert(otp("live@example.com", now + 300_000));
+          const purged = yield* Sql.purgeExpired;
+          const again = yield* Sql.purgeExpired;
+          return {
+            purged,
+            again,
+            stale: yield* links.get("stale-1"),
+            live: yield* links.get("live"),
+            staleOtp: yield* otps.get("stale@example.com", "sign-in"),
+            liveOtp: yield* otps.get("live@example.com", "sign-in"),
+          };
+        }),
+      );
+      expect(result.purged).toEqual({ magicLinks: 2, emailOtps: 1 });
+      expect(result.again).toEqual({ magicLinks: 0, emailOtps: 0 });
+      expect(result.stale).toBeNull();
+      expect(result.live?.token).toBe("live");
+      expect(result.staleOtp).toBeNull();
+      expect(result.liveOtp?.email).toBe("live@example.com");
     });
 
     it("MultiFactorStore and PendingMultiFactorStore roundtrip incl. lastUsedCounter", async () => {

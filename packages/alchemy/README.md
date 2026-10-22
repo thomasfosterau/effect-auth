@@ -240,6 +240,7 @@ export default Cloudflare.Worker(
 
 - `layer(db): Layer<AuthStores>` — every effect-auth-sql store over a D1 binding (`AuthStores` is that store set).
 - `migrate(db): Effect<void, AuthError>` — the effect-auth-sql DDL against a D1 binding.
+- `purgeExpired(db): Effect<PurgeExpiredResult, AuthError>` — effect-auth-sql's `purgeExpired` against a D1 binding: deletes the expired magic-link and email-OTP rows. Nothing else deletes them, so call it from a cron trigger's `scheduled` handler.
 - `AuthSchema(id, props?)` — the Alchemy resource (`AuthSchemaProps`: `database?`, `dropOnDelete?`; attributes `AuthSchemaAttributes`), type `AUTH_SCHEMA_TYPE`.
 - `AuthSchemaProvider(options)` — its provider layer, given `{ database }` or `{ databases: { name: db } }` (`AuthSchemaProviderOptions`); `DEFAULT_DATABASE` is the single-database name.
 - `UnknownDatabaseError` — a resource named a database the provider does not hold.

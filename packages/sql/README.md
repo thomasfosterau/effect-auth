@@ -89,6 +89,8 @@ Not covered yet: the stores added to the core later (one-time tokens, trusted de
 
 Storage format: instants are epoch milliseconds in `BIGINT` columns (past 2038 on every engine), booleans `0`/`1`, attribute bags JSON `TEXT`, binary values (WebAuthn challenges and public keys) base64 `TEXT`. Token columns (`auth_sessions.id`, the magic-link, verification and reset tokens, `auth_api_keys.key_hash`) hold the SHA-256 digest the service layer computed: the database never sees a raw bearer token.
 
+- `purgeExpired: Effect<PurgeExpiredResult, Auth.AuthError, SqlClient>` — deletes the `auth_magic_links` and `auth_email_otps` rows whose `expires_at` has passed (read from the `Clock`) and reports how many went from each. No store deletes them on its own: a code or link nobody redeems stays until a later send for the same address replaces it, and the sends that hide whether an account exists write one for any address, so without a purge those tables grow with every distinct address a caller tries. Schedule it from the host: a cron trigger on Workers, a timer or job on a long-lived server. The services already refuse an expired row, so a purge changes no outcome.
+
 Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, so they are atomic without a transaction. Multi-step writes (`ChallengeStore.create`, `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`) run inside `sql.withTransaction`.
 
 ## Authorization
