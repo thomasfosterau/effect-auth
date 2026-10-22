@@ -13,6 +13,7 @@ import {
 import * as Admin from "./Admin.ts";
 import * as Ladder from "./Ladder.ts";
 import { Hooks } from "./Hooks.ts";
+import { AuthError } from "./Errors.ts";
 import {
   IdentifierStore,
   makeIdentifier,
@@ -629,6 +630,73 @@ describe("AdminService", () => {
     if (result.duplicate._tag === "Failure") {
       expect(result.duplicate.failure._tag).toBe("AdminError");
     }
+  });
+
+  it("createUser: normalises each extra identifier for its type before it is claimed (#408)", async () => {
+    const testContext = await makeTestContext();
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    seedUser("user-1", "taken@example.com");
+
+    const result = await runService(
+      testContext,
+      { normalizePhoneNumber: (raw) => Effect.succeed(raw.replace(/[^+0-9]/g, "")) },
+      (service) =>
+        Effect.gen(function* () {
+          const created = yield* service.createUser(admin, {
+            email: "dana@example.com",
+            identifiers: [
+              { type: "email", value: "  Dana.Work@Example.COM " },
+              { type: "username", value: " DanaD " },
+              { type: "phone", value: " +61 (400) 000-000 " },
+            ],
+          });
+          // A case variant of an address another user holds is that address.
+          const duplicate = yield* Effect.result(
+            service.createUser(admin, {
+              email: "erin@example.com",
+              identifiers: [{ type: "email", value: "Taken@Example.com" }],
+            }),
+          );
+          return { created, duplicate };
+        }),
+    );
+
+    const values = Array.from(identifiers.values())
+      .filter((identifier) => identifier.userId === result.created.id)
+      .map((identifier) => [identifier.type, identifier.value]);
+    expect(values).toEqual([
+      ["email", "dana@example.com"],
+      ["email", "dana.work@example.com"],
+      ["username", "danad"],
+      ["phone", "+61400000000"],
+    ]);
+    expect(result.duplicate._tag).toBe("Failure");
+  });
+
+  it("createUser: a failing phone normaliser writes nothing (#408)", async () => {
+    const testContext = await makeTestContext();
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    const usersBefore = users.size;
+
+    const result = await runService(
+      testContext,
+      { normalizePhoneNumber: () => Effect.fail(new AuthError({ message: "not E.164" })) },
+      (service) =>
+        Effect.result(
+          service.createUser(admin, {
+            email: "frank@example.com",
+            identifiers: [{ type: "phone", value: "not a number" }],
+          }),
+        ),
+    );
+
+    expect(result._tag).toBe("Failure");
+    expect(users.size).toBe(usersBefore);
+    expect(
+      Array.from(identifiers.values()).some(
+        (identifier) => identifier.value === "frank@example.com",
+      ),
+    ).toBe(false);
   });
 
   it("createUser: refuses when the store's writer returns the existing owner, and leaves the owner untouched (#380)", async () => {
