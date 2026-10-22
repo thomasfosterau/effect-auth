@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import { Hooks, type HookError } from "../Hooks.ts";
 import {
@@ -83,7 +83,9 @@ describe("AccountLockoutPlugin", () => {
 
     // Simulate the window elapsing by moving the lock into the past.
     const key = "lockout:user@example.com";
-    const rec = h.records.get(key)!;
+    const rec = h.records.get(key);
+    assert(rec !== undefined, "the lock is recorded");
+
     h.records.set(key, { ...rec, lockedUntil: Date.now() - 1 });
 
     // Now allowed again (counter reset to a fresh streak).

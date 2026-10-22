@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
+import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect, Redacted } from "effect";
 import { AuthError } from "./Errors.ts";
 import type { SecondFactorGate } from "./email/EmailPassword.ts";
@@ -107,9 +107,12 @@ describe("TrustedDeviceService", () => {
       // Flip a character in the HMAC (last segment), ensuring it actually changes
       const parts = cookieValue.split(".");
       const lastIdx = parts.length - 1;
-      const lastChar = parts[lastIdx]!.slice(-1);
+      const lastPart = parts[lastIdx];
+      assert(lastPart !== undefined);
+      const lastChar = lastPart.slice(-1);
       const newChar = lastChar === "0" ? "1" : "0";
-      parts[lastIdx] = parts[lastIdx]!.slice(0, -1) + newChar;
+      parts[lastIdx] = lastPart.slice(0, -1) + newChar;
+
       const tampered = parts.join(".");
       return yield* service.verify(tampered);
     }).pipe(Effect.provide(storeCtx));

@@ -344,7 +344,9 @@ describe("SessionService", () => {
 
       // Manually age the session's lastActivityAt beyond the updateAge threshold.
       const tokenHash = hashToken(rawToken);
-      const stored = sessions.get(tokenHash)!;
+      const stored = sessions.get(tokenHash);
+      assert(stored !== undefined, "the session is stored");
+
       sessions.set(tokenHash, {
         ...stored,
         lastActivityAt: new Date(stored.lastActivityAt.getTime() - 200),

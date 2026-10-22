@@ -319,7 +319,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
           if (team.organizationId !== id) continue;
           teams.delete(teamId);
           for (let i = teamMembers.length - 1; i >= 0; i--) {
-            if (teamMembers[i]!.teamId === teamId) teamMembers.splice(i, 1);
+            if (teamMembers[i]?.teamId === teamId) teamMembers.splice(i, 1);
           }
         }
       }),
@@ -365,7 +365,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       Effect.sync(() => {
         teams.delete(teamId);
         for (let i = teamMembers.length - 1; i >= 0; i--) {
-          if (teamMembers[i]!.teamId === teamId) teamMembers.splice(i, 1);
+          if (teamMembers[i]?.teamId === teamId) teamMembers.splice(i, 1);
         }
       }),
     listTeams: (organizationId) =>
@@ -495,11 +495,11 @@ export const makeCookieJarFetch = (
     }
     const response = await handler(request);
     for (const setCookie of response.headers.getSetCookie()) {
-      const [pair] = setCookie.split(";");
-      const eq = (pair ?? "").indexOf("=");
+      const [pair = ""] = setCookie.split(";");
+      const eq = pair.indexOf("=");
       if (eq <= 0) continue;
-      const name = pair!.slice(0, eq).trim();
-      const value = pair!.slice(eq + 1).trim();
+      const name = pair.slice(0, eq).trim();
+      const value = pair.slice(eq + 1).trim();
       if (value === "" || setCookie.toLowerCase().includes("max-age=0")) {
         jar.delete(name);
       } else {

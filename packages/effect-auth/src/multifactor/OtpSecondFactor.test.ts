@@ -9,6 +9,13 @@ import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import type { Session, SessionConfig, User } from "../Types.ts";
 
+// The `index`th item a test double recorded; a missing one fails the test.
+const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
+  const item = items[index];
+  assert(item !== undefined, `expected a recorded item at index ${index}`);
+  return item;
+};
+
 // ---------------------------------------------------------------------------
 // In-memory stores
 // ---------------------------------------------------------------------------
@@ -138,13 +145,13 @@ describe("OtpSecondFactorService", () => {
     expect(challenge.token).toBeDefined();
     expect(challenge.expiresAt).toBeGreaterThan(Date.now());
     expect(sentOtps).toHaveLength(1);
-    expect(sentOtps[0]!.user.id).toBe(testUser.id);
-    expect(sentOtps[0]!.otp).toMatch(/^\d{6}$/);
+    expect(recorded(sentOtps).user.id).toBe(testUser.id);
+    expect(recorded(sentOtps).otp).toMatch(/^\d{6}$/);
     // Only the hash is stored
     const stored = otpRecords.get(challenge.token);
-    expect(stored).toBeDefined();
-    expect(stored!.otpHash).not.toBe(sentOtps[0]!.otp);
-    expect(stored!.attempts).toBe(0);
+    assert(stored !== undefined, "the challenge stored an OTP record");
+    expect(stored.otpHash).not.toBe(recorded(sentOtps).otp);
+    expect(stored.attempts).toBe(0);
   });
 
   it("verify with the correct OTP creates a session", async () => {
@@ -159,7 +166,7 @@ describe("OtpSecondFactorService", () => {
           }),
       });
       const challenge = yield* service.begin(testUser);
-      return yield* service.verify(challenge.token, sentOtps[0]!.otp);
+      return yield* service.verify(challenge.token, recorded(sentOtps).otp);
     });
 
     const result = await Effect.runPromise(
@@ -184,8 +191,8 @@ describe("OtpSecondFactorService", () => {
           }),
       });
       const challenge = yield* service.begin(testUser);
-      yield* service.verify(challenge.token, sentOtps[0]!.otp);
-      return yield* Effect.result(service.verify(challenge.token, sentOtps[0]!.otp));
+      yield* service.verify(challenge.token, recorded(sentOtps).otp);
+      return yield* Effect.result(service.verify(challenge.token, recorded(sentOtps).otp));
     });
 
     const result = await Effect.runPromise(
@@ -273,7 +280,7 @@ describe("OtpSecondFactorService", () => {
       });
       const challenge = yield* service.begin(testUser);
       yield* Effect.sleep("5 millis");
-      return yield* Effect.result(service.verify(challenge.token, sentOtps[0]!.otp));
+      return yield* Effect.result(service.verify(challenge.token, recorded(sentOtps).otp));
     });
 
     const result = await Effect.runPromise(
@@ -307,7 +314,7 @@ describe("OtpSecondFactorService", () => {
       Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
     );
 
-    expect(sentOtps[0]!.otp).toMatch(/^\d{8}$/);
+    expect(recorded(sentOtps).otp).toMatch(/^\d{8}$/);
   });
 
   it("OTP-second-factor full sign-in round-trip", async () => {
@@ -328,7 +335,7 @@ describe("OtpSecondFactorService", () => {
       expect(sentOtps).toHaveLength(1);
 
       // Step 2: verify with the delivered OTP
-      const result = yield* service.verify(challenge.token, sentOtps[0]!.otp, {
+      const result = yield* service.verify(challenge.token, recorded(sentOtps).otp, {
         sessionAttributes: { device: "mobile" },
       });
 

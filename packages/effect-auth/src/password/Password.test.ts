@@ -130,7 +130,7 @@ describe("PasswordHasher", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("HashingError");
-    expect(hasher.needsRehash!(malformed)).toBe(true);
+    expect(hasher.needsRehash?.(malformed)).toBe(true);
   });
 
   it("should fail cleanly on negative iterations", async () => {
@@ -160,7 +160,7 @@ describe("PasswordHasher", () => {
     const h = Password.pbkdf2Hasher({ iterations: CURRENT_ITERATIONS });
     const current = await Effect.runPromise(h.hash("pw"));
     expect(current.hash.startsWith(`pbkdf2-sha256$${CURRENT_ITERATIONS}$`)).toBe(true);
-    expect(h.needsRehash!(current.hash)).toBe(false);
+    expect(h.needsRehash?.(current.hash)).toBe(false);
 
     // Simulate a hash produced with old params (fewer iterations, 64-byte key).
     const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
@@ -178,7 +178,7 @@ describe("PasswordHasher", () => {
     );
     const oldKey = Buffer.from(bits);
     const oldHash = `pbkdf2-sha256$${OLD_ITERATIONS}$${Buffer.from(salt).toString("hex")}$${oldKey.toString("hex")}`;
-    expect(h.needsRehash!(oldHash)).toBe(true);
+    expect(h.needsRehash?.(oldHash)).toBe(true);
 
     // Old hash must still verify correctly (uses stored key length).
     const valid = await Effect.runPromise(h.verify("pw", oldHash));
@@ -353,16 +353,16 @@ describe("scrypt stored parameter limits", () => {
 
   it("needsRehash flags a stored r or p below the configured value and keeps a stronger one", () => {
     const hasher = scryptHasher({ cost: 1024, blockSize: 8, parallelization: 2 });
-    expect(hasher.needsRehash!(stored("1024", "4", "2"))).toBe(true);
-    expect(hasher.needsRehash!(stored("1024", "8", "1"))).toBe(true);
-    expect(hasher.needsRehash!(stored("1024", "8", "2"))).toBe(false);
-    expect(hasher.needsRehash!(stored("1024", "16", "4"))).toBe(false);
+    expect(hasher.needsRehash?.(stored("1024", "4", "2"))).toBe(true);
+    expect(hasher.needsRehash?.(stored("1024", "8", "1"))).toBe(true);
+    expect(hasher.needsRehash?.(stored("1024", "8", "2"))).toBe(false);
+    expect(hasher.needsRehash?.(stored("1024", "16", "4"))).toBe(false);
   });
 
   it("needsRehash flags a stored hash that verify would refuse", () => {
     const hasher = scryptHasher({ cost: 1024 });
     for (const [, hash] of refused) {
-      expect(hasher.needsRehash!(hash)).toBe(true);
+      expect(hasher.needsRehash?.(hash)).toBe(true);
     }
   });
 });

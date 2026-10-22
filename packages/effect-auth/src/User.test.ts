@@ -85,9 +85,9 @@ describe("UserService", () => {
       Effect.provide(program, Context.make(IdentifierStore, identifiers)),
     );
 
-    expect(result).not.toBeNull();
-    expect(result!.user.id).toBe("user-1");
-    expect(result!.identifier.value).toBe("user@example.com");
+    assert(result !== null, "the identifier resolves to its user");
+    expect(result.user.id).toBe("user-1");
+    expect(result.identifier.value).toBe("user@example.com");
   });
 
   it("should merge attributes when updating user", async () => {
@@ -119,7 +119,7 @@ describe("UserService", () => {
     expect(error._tag).toBe("InvalidInputError");
     expect(error).toMatchObject({ field: "role" });
     // Nothing was written — not even the harmless half of the update.
-    expect(users.get("user-1")!.attributes).toEqual({ role: "member" });
+    expect(users.get("user-1")?.attributes).toEqual({ role: "member" });
   });
 
   it("refuses every configured server-only attribute, and can be opted out of", async () => {
@@ -150,7 +150,8 @@ describe("UserService", () => {
     const program = Effect.gen(function* () {
       const store = yield* IdentifierStore;
       const identifier = yield* store.getByValue("email", "user@example.com");
-      yield* store.setVerified(identifier!.id, new Date());
+      assert(identifier !== null, "the email identifier exists");
+      yield* store.setVerified(identifier.id, new Date());
       return yield* store.getByValue("email", "user@example.com");
     });
 
@@ -158,8 +159,8 @@ describe("UserService", () => {
       Effect.provide(program, Context.make(IdentifierStore, identifiers)),
     );
 
-    expect(result!.verified).toBe(true);
-    expect(result!.verifiedAt).toBeInstanceOf(Date);
+    expect(result?.verified).toBe(true);
+    expect(result?.verifiedAt).toBeInstanceOf(Date);
   });
 
   it("should delete user", async () => {

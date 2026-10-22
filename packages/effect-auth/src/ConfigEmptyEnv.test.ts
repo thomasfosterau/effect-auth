@@ -87,11 +87,14 @@ describe("empty environment variables", () => {
     expect(oauth._tag).toBe("Success");
     expect(mf._tag).toBe("Success");
     assert(Exit.isSuccess(jwt));
-    expect(Redacted.value(jwt.value.encryptPrivateKey!.secret)).toBe("j");
+    assert(jwt.value.encryptPrivateKey !== undefined);
+    expect(Redacted.value(jwt.value.encryptPrivateKey.secret)).toBe("j");
     assert(Exit.isSuccess(oauth));
-    expect(Redacted.value(oauth.value.encryptTokens!.secret)).toBe("o");
+    assert(oauth.value.encryptTokens !== undefined);
+    expect(Redacted.value(oauth.value.encryptTokens.secret)).toBe("o");
     assert(Exit.isSuccess(mf));
-    expect(Redacted.value(mf.value.encryptSecret!.secret)).toBe("s3cret");
+    assert(mf.value.encryptSecret !== undefined);
+    expect(Redacted.value(mf.value.encryptSecret.secret)).toBe("s3cret");
   });
 
   describe("optionalSecret probe", () => {
@@ -156,7 +159,9 @@ describe("empty environment variables", () => {
 
       const mf = multiFactorConfig.pipe(Config.nested("APP"));
       const ok = await run(mf, env({ APP_TWO_FACTOR_ISSUER: "Acme", [`APP_${N}`]: "s3cret" }));
-      expect(Exit.isSuccess(ok) && Redacted.value(ok.value.encryptSecret!.secret)).toBe("s3cret");
+      assert(Exit.isSuccess(ok) && ok.value.encryptSecret !== undefined);
+      expect(Redacted.value(ok.value.encryptSecret.secret)).toBe("s3cret");
+
       const none = await run(mf, env({ APP_TWO_FACTOR_ISSUER: "Acme" }));
       expect(Exit.isSuccess(none) && none.value.encryptSecret).toBeUndefined();
       const bad = await run(mf, env({ APP_TWO_FACTOR_ISSUER: "Acme", [`APP_${N}`]: "" }));

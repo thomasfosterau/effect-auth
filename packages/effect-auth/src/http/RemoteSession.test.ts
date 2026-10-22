@@ -98,8 +98,10 @@ describe("RemoteSession session reads", () => {
     expect(resolved.session.expiresAt.getTime()).toBe(NOW + 3_600_000);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toBe("https://auth.internal/api/auth/session");
-    expect(calls[0]!.method).toBe("GET");
+    const call = calls[0];
+    assert(call !== undefined);
+    expect(call.url).toBe("https://auth.internal/api/auth/session");
+    expect(call.method).toBe("GET");
   });
 
   it("the resolved session runs gated code through SessionContext", async () => {
@@ -136,9 +138,11 @@ describe("RemoteSession session reads", () => {
       ),
     );
 
-    expect(calls[0]!.headers["content-type"]).toBeUndefined();
-    expect(calls[0]!.headers["content-length"]).toBeUndefined();
-    expect(calls[0]!.headers["cookie"]).toBe("__Host-conduit_session=raw-token");
+    const call = calls[0];
+    assert(call !== undefined);
+    expect(call.headers["content-type"]).toBeUndefined();
+    expect(call.headers["content-length"]).toBeUndefined();
+    expect(call.headers["cookie"]).toBe("__Host-conduit_session=raw-token");
   });
 
   it("forwards the caller's identity and origin, so CSRF and rate limits see the browser", async () => {
@@ -156,9 +160,11 @@ describe("RemoteSession session reads", () => {
       ),
     );
 
-    expect(calls[0]!.headers["origin"]).toBe("https://app.example.com");
-    expect(calls[0]!.headers["cf-connecting-ip"]).toBe("203.0.113.4");
-    expect(calls[0]!.headers["accept-language"]).toBe("en-AU");
+    const call = calls[0];
+    assert(call !== undefined);
+    expect(call.headers["origin"]).toBe("https://app.example.com");
+    expect(call.headers["cf-connecting-ip"]).toBe("203.0.113.4");
+    expect(call.headers["accept-language"]).toBe("en-AU");
   });
 
   it("carries the Set-Cookie lines that keep the cookie cache refreshing", async () => {
@@ -205,7 +211,9 @@ describe("RemoteSession session reads", () => {
       prefix: "/auth",
     });
     await Effect.runPromise(client.read(inbound(withSession)));
-    expect(calls[0]!.url).toBe("https://auth.svc.local/auth/session");
+    const call = calls[0];
+    assert(call !== undefined);
+    expect(call.url).toBe("https://auth.svc.local/auth/session");
   });
 });
 
@@ -280,7 +288,9 @@ describe("RemoteSession.resolveAtEdge", () => {
 
     expect(result.outcome).toBe("resolved");
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.headers["x-api-key"]).toBe("key_live_1");
+    const call = calls[0];
+    assert(call !== undefined);
+    expect(call.headers["x-api-key"]).toBe("key_live_1");
     // And it is carried as a machine credential, so the policy kernel sees the
     // same class the HTTP middleware would have provided.
     expect(result.credentialClass).toBe("machine");
@@ -323,11 +333,13 @@ describe("RemoteSession relay", () => {
 
     // No app-authored header handling: the body, content-type and origin all
     // arrived, and the raw Set-Cookie came back untouched.
-    expect(calls[0]!.url).toBe("https://auth.internal/api/auth/sign-in");
-    expect(calls[0]!.method).toBe("POST");
-    expect(calls[0]!.headers["content-type"]).toBe("application/json");
-    expect(calls[0]!.headers["origin"]).toBe("https://app.example.com");
-    expect(Schema.decodeUnknownSync(SignInBody)(calls[0]!.body).email).toBe("user@example.com");
+    const call = calls[0];
+    assert(call !== undefined);
+    expect(call.url).toBe("https://auth.internal/api/auth/sign-in");
+    expect(call.method).toBe("POST");
+    expect(call.headers["content-type"]).toBe("application/json");
+    expect(call.headers["origin"]).toBe("https://app.example.com");
+    expect(Schema.decodeUnknownSync(SignInBody)(call.body).email).toBe("user@example.com");
 
     expect(response.status).toBe(200);
     expect(response.headers.getSetCookie()).toStrictEqual([
@@ -441,6 +453,8 @@ describe("RemoteSession.layerFetcher", () => {
 
     expect(response.status).toBe(200);
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toBe("https://auth.internal/api/auth/session");
+    const call = calls[0];
+    assert(call !== undefined);
+    expect(call.url).toBe("https://auth.internal/api/auth/session");
   });
 });

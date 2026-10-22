@@ -37,6 +37,13 @@ import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
 
+// The `index`th item a test double recorded; a missing one fails the test.
+const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
+  const item = items[index];
+  assert(item !== undefined, `expected a recorded item at index ${index}`);
+  return item;
+};
+
 const users = new Map<string, User>();
 const identifierRecords = new Map<string, Identifier>();
 const otpRecords = new Map<string, EmailOtpRecord>();
@@ -234,7 +241,7 @@ describe("EmailOtpService", () => {
     await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentOtps.length).toBe(1);
-    const sent = sentOtps[0]!;
+    const sent = recorded(sentOtps);
     expect(sent.email).toBe("new@example.com");
     expect(sent.purpose).toBe("sign-in");
     expect(sent.otp).toMatch(/^\d{6}$/);
@@ -264,7 +271,9 @@ describe("EmailOtpService", () => {
     expect(sentOtps[0]?.otp).toMatch(/^\d{8}$/);
     // One active OTP per email + purpose: only the latest hash remains.
     expect(otpRecords.size).toBe(1);
-    expect(otpRecords.get("repeat@example.com:sign-in")?.otpHash).toBe(hashToken(sentOtps[1]!.otp));
+    expect(otpRecords.get("repeat@example.com:sign-in")?.otpHash).toBe(
+      hashToken(recorded(sentOtps, 1).otp),
+    );
   });
 
   it("should sign in a new user with a valid OTP, creating a verified email identifier and session", async () => {
@@ -273,7 +282,7 @@ describe("EmailOtpService", () => {
     const program = Effect.gen(function* () {
       const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("  Fresh@Example.COM ", "sign-in");
-      return yield* service.signIn("fresh@example.com", sentOtps[0]!.otp, {
+      return yield* service.signIn("fresh@example.com", recorded(sentOtps).otp, {
         sessionAttributes: { device: "test" },
       });
     });
@@ -312,7 +321,7 @@ describe("EmailOtpService", () => {
     const program = Effect.gen(function* () {
       const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("known@example.com", "sign-in");
-      return yield* service.signIn("known@example.com", sentOtps[0]!.otp);
+      return yield* service.signIn("known@example.com", recorded(sentOtps).otp);
     });
 
     const result = await Effect.runPromise(
@@ -345,7 +354,7 @@ describe("EmailOtpService", () => {
     const program = Effect.gen(function* () {
       const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("victim@example.com", "sign-in");
-      return yield* service.signIn("victim@example.com", sentOtps[0]!.otp);
+      return yield* service.signIn("victim@example.com", recorded(sentOtps).otp);
     });
 
     const result = await Effect.runPromise(
@@ -371,7 +380,7 @@ describe("EmailOtpService", () => {
     const program = Effect.gen(function* () {
       const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("victim@example.com", "sign-in");
-      return yield* service.signIn("victim@example.com", sentOtps[0]!.otp);
+      return yield* service.signIn("victim@example.com", recorded(sentOtps).otp);
     });
 
     await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
@@ -385,7 +394,7 @@ describe("EmailOtpService", () => {
     const program = Effect.gen(function* () {
       const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("once@example.com", "sign-in");
-      const otp = sentOtps[0]!.otp;
+      const otp = recorded(sentOtps).otp;
       yield* service.signIn("once@example.com", otp);
       return yield* Effect.result(service.signIn("once@example.com", otp));
     });
@@ -442,7 +451,9 @@ describe("EmailOtpService", () => {
       const second = yield* Effect.result(service.signIn("guess@example.com", "000001"));
       const third = yield* Effect.result(service.signIn("guess@example.com", "000002"));
       // Record has been deleted; even the real OTP no longer works.
-      const real = yield* Effect.result(service.signIn("guess@example.com", sentOtps[0]!.otp));
+      const real = yield* Effect.result(
+        service.signIn("guess@example.com", recorded(sentOtps).otp),
+      );
 
       return { first, second, third, real };
     });
@@ -469,7 +480,7 @@ describe("EmailOtpService", () => {
       const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("fumble@example.com", "sign-in");
       yield* Effect.result(service.signIn("fumble@example.com", "000000"));
-      return yield* service.signIn("fumble@example.com", sentOtps[0]!.otp);
+      return yield* service.signIn("fumble@example.com", recorded(sentOtps).otp);
     });
 
     const result = await Effect.runPromise(
@@ -565,7 +576,11 @@ describe("EmailOtpService", () => {
     const program = Effect.gen(function* () {
       const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("verify@example.com", "email-verification");
-      return yield* service.check("verify@example.com", sentOtps[0]!.otp, "email-verification");
+      return yield* service.check(
+        "verify@example.com",
+        recorded(sentOtps).otp,
+        "email-verification",
+      );
     });
 
     const result = await Effect.runPromise(
@@ -585,7 +600,7 @@ describe("EmailOtpService", () => {
       const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
       yield* service.send("scoped@example.com", "email-verification");
       // A code issued for email-verification must not sign the user in.
-      return yield* Effect.result(service.signIn("scoped@example.com", sentOtps[0]!.otp));
+      return yield* Effect.result(service.signIn("scoped@example.com", recorded(sentOtps).otp));
     });
 
     const result = await Effect.runPromise(
@@ -651,7 +666,9 @@ describe("EmailOtpService", () => {
     expect(sentOtps.length).toBe(1);
     expect(otpRecords.size).toBe(1);
     // The new record has a fresh hash, not the seeded one.
-    expect(otpRecords.get("user@example.com:sign-in")?.otpHash).toBe(hashToken(sentOtps[0]!.otp));
+    expect(otpRecords.get("user@example.com:sign-in")?.otpHash).toBe(
+      hashToken(recorded(sentOtps).otp),
+    );
   });
 
   it("should scope the cooldown to each purpose independently", async () => {
@@ -980,12 +997,14 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
             sendVerificationOtp: recordingSend,
           });
           yield* service.send("member@example.com", purpose);
-          const stored = otpRecords.get(recordKey("member@example.com", purpose))!;
+          const stored = otpRecords.get(recordKey("member@example.com", purpose));
+          assert(stored !== undefined, "send stored the OTP record");
+
           otpRecords.set(recordKey("member@example.com", purpose), {
             ...stored,
             attempts: maxAttempts,
           });
-          const otp = sentOtps[0]!.otp;
+          const otp = recorded(sentOtps).otp;
           const result =
             purpose === "sign-in"
               ? yield* Effect.result(service.signIn("member@example.com", otp))

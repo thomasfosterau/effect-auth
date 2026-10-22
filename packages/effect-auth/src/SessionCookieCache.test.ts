@@ -25,6 +25,22 @@ const mustEncode = (...args: Parameters<typeof encodeSessionCacheCookie>): strin
   return cookie;
 };
 
+/** Resolve, failing the test when the config leaves the cache off. */
+const mustResolve = (...args: Parameters<typeof resolveSessionCache>): ResolvedSessionCache => {
+  const resolved = resolveSessionCache(...args);
+  assert(resolved !== undefined, "resolveSessionCache left the cache off");
+  return resolved;
+};
+
+/** Decode, failing the test when the cookie is rejected. */
+const mustDecode = (
+  ...args: Parameters<typeof decodeSessionCacheCookie>
+): Types.SessionWithUser => {
+  const decoded = decodeSessionCacheCookie(...args);
+  assert(decoded !== null, "decodeSessionCacheCookie rejected the cookie");
+  return decoded;
+};
+
 const now = Date.now();
 
 const makeSession = (overrides?: Partial<Types.Session>): Types.Session => ({
@@ -54,18 +70,17 @@ describe("resolveSessionCache", () => {
   });
 
   it("resolves with defaults when enabled", () => {
-    const result = resolveSessionCache({ enabled: true, secret: Redacted.make(SECRET) });
-    expect(result).not.toBeUndefined();
-    expect(result!.maxAge).toBe(5 * 60 * 1000);
+    const result = mustResolve({ enabled: true, secret: Redacted.make(SECRET) });
+    expect(result.maxAge).toBe(5 * 60 * 1000);
   });
 
   it("uses custom maxAge", () => {
-    const result = resolveSessionCache({
+    const result = mustResolve({
       enabled: true,
       secret: Redacted.make(SECRET),
       maxAge: 60_000,
     });
-    expect(result!.maxAge).toBe(60_000);
+    expect(result.maxAge).toBe(60_000);
   });
 
   it("rejects an empty secret", () => {
@@ -88,21 +103,20 @@ describe("resolveSessionCache", () => {
 describe("encode/decode round-trip", () => {
   it("decodes a freshly encoded cookie", () => {
     const cookie = mustEncode(value, cache, now, SESSION_ID);
-    const result = decodeSessionCacheCookie(cookie, cache, now, SESSION_ID);
-    expect(result).not.toBeNull();
-    expect(result!.session.id).toBe(SESSION_ID);
-    expect(result!.user.id).toBe("user_1");
-    expect(result!.user.attributes["plan"]).toBe("pro");
+    const result = mustDecode(cookie, cache, now, SESSION_ID);
+    expect(result.session.id).toBe(SESSION_ID);
+    expect(result.user.id).toBe("user_1");
+    expect(result.user.attributes["plan"]).toBe("pro");
   });
 
   it("preserves Date fields", () => {
     const cookie = mustEncode(value, cache, now, SESSION_ID);
-    const result = decodeSessionCacheCookie(cookie, cache, now, SESSION_ID);
-    expect(result!.session.expiresAt).toBeInstanceOf(Date);
-    expect(result!.session.createdAt).toBeInstanceOf(Date);
-    expect(result!.session.lastActivityAt).toBeInstanceOf(Date);
-    expect(result!.user.createdAt).toBeInstanceOf(Date);
-    expect(result!.user.updatedAt).toBeInstanceOf(Date);
+    const result = mustDecode(cookie, cache, now, SESSION_ID);
+    expect(result.session.expiresAt).toBeInstanceOf(Date);
+    expect(result.session.createdAt).toBeInstanceOf(Date);
+    expect(result.session.lastActivityAt).toBeInstanceOf(Date);
+    expect(result.user.createdAt).toBeInstanceOf(Date);
+    expect(result.user.updatedAt).toBeInstanceOf(Date);
   });
 
   it("preserves optional user fields", () => {
@@ -111,9 +125,9 @@ describe("encode/decode round-trip", () => {
       user: makeUser({ name: "Alice", image: "https://example.com/alice.png" }),
     };
     const cookie = mustEncode(withExtras, cache, now, SESSION_ID);
-    const result = decodeSessionCacheCookie(cookie, cache, now, SESSION_ID);
-    expect(result!.user.name).toBe("Alice");
-    expect(result!.user.image).toBe("https://example.com/alice.png");
+    const result = mustDecode(cookie, cache, now, SESSION_ID);
+    expect(result.user.name).toBe("Alice");
+    expect(result.user.image).toBe("https://example.com/alice.png");
   });
 });
 
@@ -203,7 +217,7 @@ describe("session-binding (sid)", () => {
 
 describe("cache epoch (#194)", () => {
   const withVersion = (version: string): ResolvedSessionCache =>
-    resolveSessionCache({ enabled: true, secret: Redacted.make(SECRET), version })!;
+    mustResolve({ enabled: true, secret: Redacted.make(SECRET), version });
 
   it("rejects every cookie issued under another epoch", () => {
     const cookie = mustEncode(value, withVersion("2026-10"), now, SESSION_ID);
@@ -249,11 +263,11 @@ describe("server-only attributes (#194)", () => {
 });
 
 describe("encryption (#194)", () => {
-  const encrypted = resolveSessionCache({
+  const encrypted = mustResolve({
     enabled: true,
     secret: Redacted.make(SECRET),
     encrypt: true,
-  })!;
+  });
 
   it("round-trips, and the browser cannot read the payload", () => {
     const cookie = mustEncode(value, encrypted, now, SESSION_ID);

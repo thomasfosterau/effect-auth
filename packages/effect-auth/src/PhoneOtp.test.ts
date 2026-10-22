@@ -35,6 +35,13 @@ import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
 /** The no-op hooks, with the detached sends run in place so a test reads them on return. */
 const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
 
+// The `index`th item a test double recorded; a missing one fails the test.
+const recorded = <A>(items: ReadonlyArray<A>, index = 0): A => {
+  const item = items[index];
+  assert(item !== undefined, `expected a recorded item at index ${index}`);
+  return item;
+};
+
 // --- in-memory state ---------------------------------------------------------
 const users = new Map<string, Types.User>();
 const identifierRecords = new Map<string, Identifier>();
@@ -201,7 +208,7 @@ describe("PhoneOtpService", () => {
     await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentOtps).toHaveLength(1);
-    const otp = sentOtps[0]!.otp;
+    const otp = recorded(sentOtps).otp;
     expect(otp).toMatch(/^\d{6}$/);
     const record = records.get("+15551230000:sign-in");
     expect(record?.otpHash).toBe(hashToken(otp));
@@ -214,7 +221,7 @@ describe("PhoneOtpService", () => {
       Effect.gen(function* () {
         const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
         yield* service.send("+15551231111", "sign-in");
-        return yield* service.signIn("+15551231111", sentOtps[0]!.otp, {
+        return yield* service.signIn("+15551231111", recorded(sentOtps).otp, {
           sessionAttributes: { device: "cli" },
         });
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
@@ -241,7 +248,7 @@ describe("PhoneOtpService", () => {
       Effect.gen(function* () {
         const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
         yield* service.send("+15551232222", "sign-in");
-        return yield* service.signIn("+15551232222", sentOtps[0]!.otp);
+        return yield* service.signIn("+15551232222", recorded(sentOtps).otp);
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
 
@@ -255,7 +262,7 @@ describe("PhoneOtpService", () => {
       Effect.gen(function* () {
         const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
         yield* service.send("+15551233333", "sign-in");
-        const otp = sentOtps[0]!.otp;
+        const otp = recorded(sentOtps).otp;
         yield* service.signIn("+15551233333", otp);
         return yield* Effect.result(service.signIn("+15551233333", otp));
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
@@ -292,7 +299,7 @@ describe("PhoneOtpService", () => {
         const a = yield* Effect.result(service.signIn("+15551235555", "000000"));
         const b = yield* Effect.result(service.signIn("+15551235555", "000001"));
         const c = yield* Effect.result(service.signIn("+15551235555", "000002"));
-        const real = yield* Effect.result(service.signIn("+15551235555", sentOtps[0]!.otp));
+        const real = yield* Effect.result(service.signIn("+15551235555", recorded(sentOtps).otp));
         return [a._tag, b._tag, c._tag, real._tag];
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
@@ -324,7 +331,7 @@ describe("PhoneOtpService", () => {
       Effect.gen(function* () {
         const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
         yield* service.send("+15551237777", "phone-verification");
-        return yield* service.verifyPhoneNumber(created.id, "+15551237777", sentOtps[0]!.otp);
+        return yield* service.verifyPhoneNumber(created.id, "+15551237777", recorded(sentOtps).otp);
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
     expect(updated.id).toBe(created.id);
@@ -342,7 +349,7 @@ describe("PhoneOtpService", () => {
           normalizePhoneNumber: (raw) => Effect.succeed(raw.replace(/[^\d+]/g, "")),
         });
         yield* service.send("+1 (555) 123-8888", "sign-in");
-        return yield* service.signIn("+15551238888", sentOtps[0]!.otp);
+        return yield* service.signIn("+15551238888", recorded(sentOtps).otp);
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
     expect(await phoneNumberOf(result.user.id)).toBe("+15551238888");
@@ -398,7 +405,7 @@ describe("PhoneOtpService", () => {
     expect(sentOtps).toHaveLength(1);
     expect(records.has("+15559990002:sign-in")).toBe(true);
     // The new record has a fresh hash, not the seeded one.
-    expect(records.get("+15559990002:sign-in")?.otpHash).toBe(hashToken(sentOtps[0]!.otp));
+    expect(records.get("+15559990002:sign-in")?.otpHash).toBe(hashToken(recorded(sentOtps).otp));
   });
 
   it("does not apply the cooldown when resendCooldown is not configured", async () => {
@@ -653,10 +660,12 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
           sendOtp: recordingSend,
         });
         yield* service.send(member, "sign-in");
-        const stored = records.get(key(member, "sign-in"))!;
+        const stored = records.get(key(member, "sign-in"));
+        assert(stored !== undefined, "send stored the OTP record");
+
         records.set(key(member, "sign-in"), { ...stored, attempts: maxAttempts });
         return {
-          answer: observable(yield* Effect.result(service.signIn(member, sentOtps[0]!.otp))),
+          answer: observable(yield* Effect.result(service.signIn(member, recorded(sentOtps).otp))),
           record: recordOf(member)(),
         };
       }),

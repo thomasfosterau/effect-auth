@@ -323,7 +323,8 @@ describe("HttpMiddleware.optionalLayer", () => {
   it("valid session cookie → Option.some with session and user", async () => {
     const { maybeCell, effect } = runOptional(makeWebRequest({ cookie: RAW_TOKEN }));
     await Effect.runPromise(effect);
-    expect(Option.isSome(maybeCell.value!)).toBe(true);
+    assert(maybeCell.value !== undefined, "the handler ran");
+    expect(Option.isSome(maybeCell.value)).toBe(true);
     const resolved = (maybeCell.value as Option.Some<Types.SessionWithUser>).value;
     expect(resolved.session.id).toBe(RAW_TOKEN);
     expect(resolved.user.id).toBe(USER_ID);
@@ -334,7 +335,8 @@ describe("HttpMiddleware.optionalLayer", () => {
       makeWebRequest({ authorization: `Bearer ${RAW_TOKEN}` }),
     );
     await Effect.runPromise(effect);
-    expect(Option.isSome(maybeCell.value!)).toBe(true);
+    assert(maybeCell.value !== undefined, "the handler ran");
+    expect(Option.isSome(maybeCell.value)).toBe(true);
     const resolved = (maybeCell.value as Option.Some<Types.SessionWithUser>).value;
     expect(resolved.user.id).toBe(USER_ID);
   });
@@ -342,14 +344,16 @@ describe("HttpMiddleware.optionalLayer", () => {
   it("no session token → Option.none (unauthenticated, no failure)", async () => {
     const { maybeCell, effect } = runOptional(makeWebRequest());
     await Effect.runPromise(effect);
-    expect(Option.isNone(maybeCell.value!)).toBe(true);
+    assert(maybeCell.value !== undefined, "the handler ran");
+    expect(Option.isNone(maybeCell.value)).toBe(true);
   });
 
   it("invalid session token → Option.none (not a failure)", async () => {
     const { maybeCell, effect } = runOptional(makeWebRequest({ cookie: "bad-token-xyz" }));
     const exit = await Effect.runPromiseExit(effect);
     expect(Exit.isSuccess(exit)).toBe(true);
-    expect(Option.isNone(maybeCell.value!)).toBe(true);
+    assert(maybeCell.value !== undefined, "the handler ran");
+    expect(Option.isNone(maybeCell.value)).toBe(true);
   });
 
   // `CurrentPrincipal` is conditional here — present only when a session
@@ -374,7 +378,8 @@ describe("HttpMiddleware.optionalLayer", () => {
   it("valid session → CurrentPrincipal is in context", async () => {
     const { principalCell, effect } = runOptionalPrincipal(makeWebRequest({ cookie: RAW_TOKEN }));
     await Effect.runPromise(effect);
-    expect(Option.isSome(principalCell.value!)).toBe(true);
+    assert(principalCell.value !== undefined, "the handler ran");
+    expect(Option.isSome(principalCell.value)).toBe(true);
     expect((principalCell.value as Option.Some<Entity.EntityRef>).value).toEqual(
       Entity.ref("User", USER_ID),
     );
@@ -384,7 +389,8 @@ describe("HttpMiddleware.optionalLayer", () => {
     const { principalCell, effect } = runOptionalPrincipal(makeWebRequest());
     const exit = await Effect.runPromiseExit(effect);
     expect(Exit.isSuccess(exit)).toBe(true);
-    expect(Option.isNone(principalCell.value!)).toBe(true);
+    assert(principalCell.value !== undefined, "the handler ran");
+    expect(Option.isNone(principalCell.value)).toBe(true);
   });
 });
 

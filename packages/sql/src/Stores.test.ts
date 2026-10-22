@@ -292,8 +292,9 @@ const storeContract = (engine: StoreEngine): void => {
           yield* store.create({ ...session, id: "sess-2" });
           yield* store.create({ ...session, id: "sess-3", userId: "user-2" });
           const loaded = yield* store.get("sess-1");
+          assert(loaded !== null, "the session was created");
           const updated = yield* store.update({
-            ...loaded!,
+            ...loaded,
             lastActivityAt: new Date(now.getTime() + 1000),
             attributes: { device: "phone" },
           });
@@ -636,9 +637,10 @@ const storeContract = (engine: StoreEngine): void => {
 
           const emailPassword = yield* Auth.Email.EmailPasswordStore;
           const user = yield* makeUser("haspw@example.com");
-          const noPassword = yield* store.hasPassword!(user.id);
+          assert(store.hasPassword !== undefined, "the SQL store implements hasPassword");
+          const noPassword = yield* store.hasPassword(user.id);
           yield* emailPassword.setPasswordHash(user.id, "hash");
-          const withPassword = yield* store.hasPassword!(user.id);
+          const withPassword = yield* store.hasPassword(user.id);
           return { loaded, updated, linked, afterUnlink, deleted, noPassword, withPassword };
         }),
       );
@@ -663,7 +665,8 @@ const storeContract = (engine: StoreEngine): void => {
           });
           const loaded = yield* store.getUser(created.id);
           const missing = yield* Effect.flip(store.getUser("nope"));
-          const renamed = yield* store.updateUser!(created.id, { name: "Renamed" });
+          assert(store.updateUser !== undefined, "the SQL store implements updateUser");
+          const renamed = yield* store.updateUser(created.id, { name: "Renamed" });
           return { created, loaded, missing, renamed };
         }),
       );
@@ -1011,6 +1014,7 @@ const storeContract = (engine: StoreEngine): void => {
             ada,
             email("user-ada", "ada-new@example.com", true),
           );
+          assert(replaced !== null, "the first replace succeeds");
           const afterReplace = {
             listed: yield* store.listByUser("user-ada"),
             old: yield* store.getByValue("email", "ada@example.com"),
@@ -1019,10 +1023,10 @@ const storeContract = (engine: StoreEngine): void => {
           // A value another user holds: the INSERT is refused by the unique
           // index and the transaction rolls back, so the user keeps their address.
           const takenRaw = yield* Effect.flip(
-            store.replace(replaced!, email("user-ada", "grace@example.com")),
+            store.replace(replaced, email("user-ada", "grace@example.com")),
           );
           const taken = yield* Effect.flip(
-            Auth.replaceIdentifier(store, replaced!, email("user-ada", "grace@example.com")),
+            Auth.replaceIdentifier(store, replaced, email("user-ada", "grace@example.com")),
           );
           // `from` is no longer held: null, and nothing is written.
           const stale = yield* store.replace(ada, email("user-ada", "ada-other@example.com"));
@@ -1031,10 +1035,10 @@ const storeContract = (engine: StoreEngine): void => {
           );
           // Another user's replacement, or one reusing `from`'s id, is refused outright.
           const wrongUser = yield* Effect.flip(
-            store.replace(replaced!, email("user-grace", "x@example.com")),
+            store.replace(replaced, email("user-grace", "x@example.com")),
           );
           const sameId = yield* Effect.flip(
-            store.replace(replaced!, { ...email("user-ada", "y@example.com"), id: replaced!.id }),
+            store.replace(replaced, { ...email("user-ada", "y@example.com"), id: replaced.id }),
           );
           return {
             replaced,
@@ -1080,6 +1084,7 @@ const storeContract = (engine: StoreEngine): void => {
           const store = yield* Auth.IdentifierStore;
           const ada = yield* store.create(email("ada@example.com"));
           const first = yield* store.replace(ada, email("ada-a@example.com"));
+          assert(first !== null, "the first replace succeeds");
           const second = yield* store.replace(ada, email("ada-b@example.com"));
           // A double submit of the same change: the second claim is refused by
           // the unique index (this user already holds the value), and
@@ -1090,7 +1095,7 @@ const storeContract = (engine: StoreEngine): void => {
           // The guard is the whole record, not just the id: the held row with a
           // value it no longer has is not released.
           const staleValue = yield* store.replace(
-            { ...first!, value: "ada@example.com" },
+            { ...first, value: "ada@example.com" },
             email("ada-c@example.com"),
           );
           return {

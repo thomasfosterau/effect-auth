@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Array as Arr, Effect, Layer, Order, Schema } from "effect";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
 import { EmailPasswordService } from "./email/EmailPassword.ts";
@@ -165,7 +165,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
       Effect.sync(() => {
         teams.delete(teamId);
         for (let i = teamMembers.length - 1; i >= 0; i--) {
-          if (teamMembers[i]!.teamId === teamId) teamMembers.splice(i, 1);
+          if (teamMembers[i]?.teamId === teamId) teamMembers.splice(i, 1);
         }
       }),
     listTeams: (organizationId: string) =>
@@ -451,7 +451,9 @@ describe("ScimService — users", () => {
     expect((patchErr as ScimError).status).toBe(404);
     const deleteErr = await fx.run(Effect.flip(fx.service.deactivateUser(fx.b.connection, ada.id)));
     expect((deleteErr as ScimError).status).toBe(404);
-    expect(Scim.isScimDeactivated(fx.usersById.get(ada.id)!)).toBe(false);
+    const stored = fx.usersById.get(ada.id);
+    assert(stored !== undefined, "ada is still stored");
+    expect(Scim.isScimDeactivated(stored)).toBe(false);
   });
 
   it("finds a user by the one filter Okta and Entra actually send", async () => {

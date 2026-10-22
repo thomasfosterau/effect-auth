@@ -3,7 +3,7 @@
  * against deliberately broken ones, which they must fail. effect-auth-sql runs
  * the same suites over SQLite and PostgreSQL (`packages/sql/src/Stores.test.ts`).
  */
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { Effect, Layer, Result } from "effect";
 import { KeyValueStore } from "effect/persistence";
 import * as ApiKey from "../ApiKey.ts";
@@ -84,7 +84,9 @@ describe("the suites share one store", () => {
     const suite = Testing.sessionStoreConformance({
       seedUser: (user) => Effect.sync(() => void seeded.push(user.id)),
     });
-    const listing = suite.cases.find((testCase) => testCase.name.startsWith("listByUserId"))!;
+    const listing = suite.cases.find((testCase) => testCase.name.startsWith("listByUserId"));
+    assert(listing !== undefined, "the suite has a listByUserId case");
+
     await Effect.runPromise(
       listing.run.pipe(Effect.provide(Layer.succeed(SessionStore, sessionStore()))),
     );

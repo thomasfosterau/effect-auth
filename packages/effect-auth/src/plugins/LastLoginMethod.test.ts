@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import { composePlugins, Hooks } from "../Hooks.ts";
 import * as LastLoginMethod from "./LastLoginMethod.ts";
@@ -99,10 +99,11 @@ describe("LastLoginMethodPlugin", () => {
     expect(signedUp.method).toBe("email-password");
     expect(signedIn.method).toBe("email-password");
     // ...and the plugin persisted it onto both stored sessions.
-    expect(sessions.get(hashToken(signedUp.session!.id))?.attributes["method"]).toBe(
+    assert(signedUp.session !== undefined && signedIn.session !== undefined, "both issue sessions");
+    expect(sessions.get(hashToken(signedUp.session.id))?.attributes["method"]).toBe(
       "email-password",
     );
-    expect(sessions.get(hashToken(signedIn.session!.id))?.attributes["method"]).toBe(
+    expect(sessions.get(hashToken(signedIn.session.id))?.attributes["method"]).toBe(
       "email-password",
     );
   });

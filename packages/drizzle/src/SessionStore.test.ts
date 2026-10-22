@@ -10,7 +10,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
 import { conformance } from "./testing/Conformance.ts";
@@ -127,7 +127,9 @@ describe("SessionStore", () => {
     );
 
     expect(result.expired?.expiresAt).toEqual(at(-60_000));
-    expect(result.expired?.expiresAt.getTime()).toBeLessThan(result.future!.expiresAt.getTime());
+    assert(result.future !== null, "the future session is stored");
+    expect(result.expired?.expiresAt.getTime()).toBeLessThan(result.future.expiresAt.getTime());
+
     expect(result.future?.expiresAt).toEqual(at(86_400_000));
   });
 

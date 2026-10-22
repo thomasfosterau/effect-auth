@@ -110,12 +110,6 @@ export default defineConfig({
         rules: { "effect/avoid-ts-ignore": "off" },
       },
       {
-        // Ported-code allowance for tests only (sources are at zero): the
-        // `!` on fixture lookups (270; #443).
-        files: ["**/*.test.ts", "**/*.test.tsx", "**/testing/**"],
-        rules: { "effect/avoid-non-null-assertion": "warn" },
-      },
-      {
         // Plain Node tooling that runs no Effect (the dist smoke test and the
         // task-graph builders): native loops, `.length`, `JSON`, `Error`,
         // `try`/`catch` and synchronous `fs` are the idiom there.

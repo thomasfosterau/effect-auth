@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { Effect, Layer, Redacted } from "effect";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
 import { Hooks } from "../Hooks.ts";
@@ -135,15 +135,18 @@ describe("memoryStores", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const { user } = yield* emailPassword.createUser({ name: "Ada" });
-        const before = yield* accounts.hasPassword!(user.id);
+        assert(accounts.hasPassword !== undefined, "the memory store implements hasPassword");
+        assert(oauthUsers.updateUser !== undefined, "the memory store implements updateUser");
+        const before = yield* accounts.hasPassword(user.id);
         yield* emailPassword.setPasswordHash(user.id, "hash");
         return {
           user,
           before,
-          after: yield* accounts.hasPassword!(user.id),
+          after: yield* accounts.hasPassword(user.id),
           viaOAuth: yield* oauthUsers.getUser(user.id),
           viaUserStore: yield* Testing.memoryUserStore(shared).get(user.id),
-          renamed: yield* oauthUsers.updateUser!(user.id, { name: "Ada L." }),
+          renamed: yield* oauthUsers.updateUser(user.id, { name: "Ada L." }),
+
           cleared: yield* emailPassword
             .clearPasswordHash(user.id)
             .pipe(Effect.andThen(emailPassword.getPasswordHash(user.id))),

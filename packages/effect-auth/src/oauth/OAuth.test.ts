@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Crypto, Effect, Layer, Predicate, Redacted, Schema } from "effect";
 import { AuthError, OAuthLastCredentialError, OAuthEmailMismatchError } from "../Errors.ts";
 import * as Cipher from "../Cipher.ts";
@@ -270,7 +270,8 @@ describe("OAuth token exchange", () => {
       async (calls) => {
         const result = await Effect.runPromise(SpotifyProvider(CLIENT).exchangeCode("the-code"));
         expect(result.access_token).toBe("at");
-        const call = calls[0]!;
+        const [call] = calls;
+        assert(call !== undefined, "the provider called fetch");
         const expected = `Basic ${Buffer.from(`${CLIENT.clientId}:${Redacted.value(CLIENT.clientSecret)}`).toString("base64")}`;
         expect(call.headers.get("authorization")).toBe(expected);
         expect(call.body).not.toContain("client_secret");
@@ -285,7 +286,8 @@ describe("OAuth token exchange", () => {
       () => json(token),
       async (calls) => {
         await Effect.runPromise(GitLabProvider(CLIENT).exchangeCode("the-code", "verifier"));
-        const call = calls[0]!;
+        const [call] = calls;
+        assert(call !== undefined, "the provider called fetch");
         expect(call.headers.get("authorization")).toBeNull();
         expect(call.body).toContain("client_secret=secret-xyz");
         expect(call.body).toContain("code_verifier=verifier");
@@ -304,7 +306,7 @@ describe("OAuth profile mapping", () => {
         const info = await Effect.runPromise(
           provider.getProfile({ access_token: "at", token_type: "bearer" }),
         );
-        expect(calls[0]!.method).toBe(method);
+        expect(calls[0]?.method).toBe(method);
         return info;
       },
     );
@@ -944,7 +946,8 @@ describe("OAuthService encryptTokens", () => {
     // Returned access token must be plaintext.
     expect(newAccessToken).toBe(NEW_ACCESS);
     // Stored access token must be encrypted (not the raw plaintext).
-    const updated = stored.get("github:gh-1")!;
+    const updated = stored.get("github:gh-1");
+    assert(updated !== undefined, "the account is stored");
     expect(updated.accessToken).not.toBe(NEW_ACCESS);
     // And it must decrypt to the new plaintext access token.
     expect(await Effect.runPromise(cipher.decrypt(updated.accessToken))).toBe(NEW_ACCESS);
@@ -985,7 +988,7 @@ describe("OAuthService encryptTokens", () => {
 
     expect(newAccessToken).toBe(NEW_ACCESS);
     // Without encryption the stored token is the raw string.
-    expect(stored.get("github:gh-1")!.accessToken).toBe(NEW_ACCESS);
+    expect(stored.get("github:gh-1")?.accessToken).toBe(NEW_ACCESS);
   });
 
   it("accepts a custom TokenCipher via { cipher }", async () => {
