@@ -92,6 +92,14 @@ Whether Guard's viewer gates should also admit a system principal, and how the e
 a system principal never performs, so it has no event to record for one. The decision log of
 `Authorizer` carries the system identity instead. Both are left for a follow-up issue.
 
+Both were decided in #362. The viewer gates stay user-only. A separate gate,
+`Guard.requireSystem`, admits a system principal that a policy grants the action, decides it
+through `Authorizer`, and yields its `EntityRef`. An operation either may perform asks the user
+gate when a viewer is signed in and the system gate otherwise. The `Hooks` layer gains an
+`afterWrite` event that the application fires with `recordWrite` after a write, naming the acting
+principal, user or system. The `Audit` plugin logs it as `auth.write`, so the `Authorizer` decision
+log is not the only audit trail for unattended writes.
+
 Read scopes for background reads (#203) are also out of scope here. A system principal's read
 scope is an explicit grant with the same shape as a write grant, so a read scope can reuse this
 decision once #203 settles its own.

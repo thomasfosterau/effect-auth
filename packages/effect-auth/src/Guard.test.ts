@@ -12,12 +12,13 @@
  * every viewer.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Exit, Layer, Option } from "effect";
+import { Context, Effect, Exit, Layer, Logger, Option } from "effect";
 import * as Authorizer from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
 import * as Guard from "./Guard.ts";
 import * as Ladder from "./Ladder.ts";
-import type * as Policy from "./Policy.ts";
+import * as Policy from "./Policy.ts";
+import * as System from "./System.ts";
 import * as SessionContext from "./SessionContext.ts";
 import type * as Types from "./Types.ts";
 
@@ -359,5 +360,61 @@ describe("the errors", () => {
     const Http = await import("./http/HttpApiSchema.ts");
     expect(Http.Unauthorized).toBe(Guard.Unauthorized);
     expect(Http.Forbidden).toBe(Guard.Forbidden);
+  });
+});
+
+describe("requireSystem (#362)", () => {
+  const page = Entity.ref("Page", "p-1");
+  const policies = [
+    System.grant("translation-pipeline", {
+      id: "translation-pipeline:write-pages",
+      action: "page:write",
+      resource: Policy.isType("Page"),
+    }),
+    // An unscoped permit never reaches a system principal.
+    Policy.permit({ id: "everyone:read", action: Policy.eq(Entity.ref("Action", "page:read")) }),
+  ];
+  const authorizer = Authorizer.Authorizer.layer({ policies });
+  const gate = (action: string) => Guard.requireSystem({ action, resource: page });
+
+  const run = <A, E>(effect: Effect.Effect<A, E, Authorizer.Authorizer>) =>
+    Effect.runPromiseExit(effect.pipe(Effect.provide(authorizer)));
+
+  it("admits a granted system principal and yields its ref", async () => {
+    const exit = await run(gate("page:write").pipe(System.provide("translation-pipeline")));
+    expect(exit).toEqual(Exit.succeed(System.ref("translation-pipeline")));
+  });
+
+  it("refuses a system principal no policy grants the action with Forbidden", async () => {
+    expect(tagOf(await run(gate("page:write").pipe(System.provide("billing-cron"))))).toBe(
+      "Forbidden",
+    );
+    expect(tagOf(await run(gate("page:read").pipe(System.provide("translation-pipeline"))))).toBe(
+      "Forbidden",
+    );
+  });
+
+  it("refuses a missing principal, and a user principal, with Unauthorized", async () => {
+    expect(tagOf(await run(gate("page:write")))).toBe("Unauthorized");
+    expect(
+      tagOf(
+        await run(
+          gate("page:read").pipe(Authorizer.CurrentPrincipal.provide(Entity.ref("User", "u-1"))),
+        ),
+      ),
+    ).toBe("Unauthorized");
+  });
+
+  it("logs the decision with the system principal's name", async () => {
+    const records: Array<string> = [];
+    const collector = Logger.make((options) => void records.push(JSON.stringify(options.message)));
+    await Effect.runPromise(
+      gate("page:write").pipe(
+        System.provide("translation-pipeline"),
+        Effect.provide(Layer.merge(authorizer, Logger.layer([collector]))),
+      ),
+    );
+    expect(records.some((record) => record.includes("authorization.decision"))).toBe(true);
+    expect(records.some((record) => record.includes("translation-pipeline"))).toBe(true);
   });
 });

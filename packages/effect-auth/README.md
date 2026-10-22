@@ -220,6 +220,15 @@ whose condition reads a user attribute therefore errors for a system principal, 
 forbid denies, so scope such forbids to users (`Policy.isType("User")`). See
 [ADR 0019](../../docs/adr/0019-system-principals.md).
 
+`Guard`'s viewer gates (`requireUser`, `requireRoleAtLeast`, `requireOwnerOrRole`) admit users
+only. For an operation a job may also perform, `Auth.Guard.requireSystem({ action, resource })` is
+the system gate: it admits the current principal when it is a system principal a policy grants the
+action (decided by the `Authorizer` in context, so the decision is logged), and yields its
+`EntityRef`. Ask the user gate when a viewer is signed in (`guards.isSignedIn`) and the system gate
+otherwise; the `Guard` module docs have the full example. After the write, report it with
+`Auth.recordWrite({ principal, action, resource })`, naming whichever principal passed:
+`AuditPlugin` logs it as `auth.write`, so unattended writes are audited alongside a person's.
+
 ## Testing
 
 `@thomasfosterau/effect-auth/testing` runs an Effect as a fixture principal in one call, so an app tests its own guards and policies without HTTP. It is not re-exported from the package root and does not load the HTTP tier.

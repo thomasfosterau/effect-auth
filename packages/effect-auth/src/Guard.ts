@@ -43,6 +43,73 @@
  * predicate (`canViewOwned`, `hasRoleAtLeast`) and turn `false` into the same
  * not-found they return for a missing id — never into `Forbidden`.
  *
+ * ### Users and system principals
+ *
+ * The kit's gates admit a viewer and nothing else: a background job has no
+ * viewer, so it cannot pass them. {@link requireSystem} is the gate for a job:
+ * it admits the {@link Authorizer.CurrentPrincipal} when that is a system
+ * principal (`System::"<name>"`) a policy grants the action, decides it through
+ * the `Authorizer` (so the decision is logged with the job's name), and yields
+ * its `EntityRef`. An operation either may perform asks which it has: the user
+ * gate when a viewer is signed in, the system gate otherwise. Report the write
+ * with `recordWrite`, naming whichever principal passed, and `AuditPlugin`
+ * logs it.
+ *
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { Context, Effect, Layer, Option, Result } from "effect"
+ * import * as Auth from "@thomasfosterau/effect-auth"
+ *
+ * interface AppUser { readonly id: string; readonly role: string }
+ * class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser>>()(
+ *   "@app/CurrentViewer",
+ * ) {}
+ *
+ * const Roles = Auth.Ladder.make(["user", "contributor"])
+ * const guards = Auth.Guard.make({ ladder: Roles, viewer: CurrentViewer })
+ * const requireContributor = guards.requireRoleAtLeast("contributor")
+ *
+ * // The translation pipeline may write pages, and nothing else.
+ * const AuthorizerLive = Auth.Authorizer.layer({
+ *   policies: [
+ *     Auth.System.grant("translation-pipeline", {
+ *       id: "translation-pipeline:write-pages",
+ *       action: "page:write",
+ *       resource: Auth.Policy.isType("Page"),
+ *     }),
+ *   ],
+ * })
+ *
+ * const writePage = (id: string) =>
+ *   Effect.gen(function* () {
+ *     const resource = Auth.Entity.ref("Page", id)
+ *     const actor = (yield* guards.isSignedIn)
+ *       ? guards.principal(yield* requireContributor).ref
+ *       : yield* Auth.Guard.requireSystem({ action: "page:write", resource })
+ *     // ...the write itself...
+ *     yield* Auth.recordWrite({ principal: actor, action: "page:write", resource })
+ *     return Auth.Entity.formatRef(actor)
+ *   })
+ *
+ * const anonymous = Layer.succeed(CurrentViewer, Option.none())
+ * const ada = Layer.succeed(CurrentViewer, Option.some({ id: "u-1", role: "contributor" }))
+ *
+ * const program = Effect.gen(function* () {
+ *   assert.equal(yield* writePage("p-1").pipe(Effect.provide(ada)), 'User::"u-1"')
+ *   assert.equal(
+ *     yield* writePage("p-1").pipe(Auth.System.provide("translation-pipeline"), Effect.provide(anonymous)),
+ *     'System::"translation-pipeline"',
+ *   )
+ *   // A job no policy grants is refused.
+ *   const refused = yield* Effect.result(
+ *     writePage("p-1").pipe(Auth.System.provide("billing-cron"), Effect.provide(anonymous)),
+ *   )
+ *   assert.ok(Result.isFailure(refused))
+ * }).pipe(Effect.provide(Layer.merge(AuthorizerLive, Auth.Hooks.Default)))
+ *
+ * await Effect.runPromise(program)
+ * ```
+ *
  * ### "Signed in" is not a rung
  *
  * `requireUser` asks whether a viewer exists and compares no rung. It is
@@ -92,7 +159,9 @@
  * @module guard
  */
 import { Context, Effect, Option, Schema } from "effect";
+import * as Authorizer from "./Authorizer.ts";
 import * as Condition from "./Condition.ts";
+import type * as Errors from "./Errors.ts";
 import * as Entity from "./Entity.ts";
 import type * as Ladder from "./Ladder.ts";
 import * as Policy from "./Policy.ts";
@@ -426,3 +495,41 @@ export const make = <Id, User extends ViewerShape, Rung extends string>(
     policies: { roleAtLeast, ownerOrRole },
   };
 };
+
+/**
+ * The system gate: the {@link Authorizer.CurrentPrincipal} when it is a system
+ * principal (`System::"<name>"`, provided by `System.provide` or
+ * `System.layer`) and the `Authorizer`'s policies grant it `input.action` on
+ * `input.resource`. Yields the principal's `EntityRef`, since a job has no user
+ * to yield.
+ *
+ * Fails with {@link Unauthorized} when there is no current principal or it is
+ * not a system principal (a user goes through the kit's user gates), and with
+ * {@link Forbidden} when no policy grants the system principal the action. The
+ * decision is the `Authorizer`'s, so it runs every policy, stored ones
+ * included, and is logged as `authorization.decision` with the principal's
+ * name. The module docs show it composed with a user gate.
+ *
+ * @since 1.0.0
+ * @category gates
+ */
+export const requireSystem = (
+  input: Authorizer.AuthorizeInput,
+): Effect.Effect<
+  Entity.EntityRef,
+  Unauthorized | Forbidden | Errors.AuthError,
+  Authorizer.Authorizer
+> =>
+  Effect.gen(function* () {
+    const current = yield* Effect.serviceOption(Authorizer.CurrentPrincipal);
+    if (Option.isNone(current) || current.value.type !== Entity.systemType) {
+      return yield* new Unauthorized({ message: "Unauthorized" });
+    }
+    const principal = current.value;
+    const authorizer = yield* Authorizer.Authorizer;
+    const allowed = yield* authorizer
+      .check(input)
+      .pipe(Authorizer.CurrentPrincipal.provide(principal));
+    if (!allowed) return yield* new Forbidden({ message: "Forbidden" });
+    return principal;
+  });
