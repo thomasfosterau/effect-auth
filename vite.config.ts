@@ -66,7 +66,7 @@ export default defineConfig({
       // stay reported; a new site is a defect, not headroom. Once a rule's
       // count reaches zero its line is deleted, so it is back at the preset's
       // `error`. Counts (sources / tests) and the remaining sites:
-      // #ALLOWANCE_ISSUE.
+      // #443.
       // `Date.now()` / `new Date()` → `Clock` / `DateTime` changes how expiry
       // logic sees time under `TestClock` (189 / 480).
       "effect/use-clock-service": "warn",
@@ -111,7 +111,7 @@ export default defineConfig({
       },
       {
         // Ported-code allowance for tests only (sources are at zero): the
-        // `!` on fixture lookups (265; #ALLOWANCE_ISSUE).
+        // `!` on fixture lookups (265; #443).
         files: ["**/*.test.ts", "**/*.test.tsx", "**/testing/**"],
         rules: { "effect/avoid-non-null-assertion": "warn" },
       },
