@@ -692,7 +692,9 @@ export const make = (
  * only requires `MultiFactorService` itself:
  *
  * ```ts
- * import { Layer } from "effect"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer } from "effect"
+ * import { Hooks, SessionService } from "@thomasfosterau/effect-auth"
  * import { EmailPasswordService } from "@thomasfosterau/effect-auth/email"
  * import {
  *   MultiFactorGateLayer,
@@ -700,21 +702,43 @@ export const make = (
  *   type MultiFactorStore,
  *   type PendingMultiFactorStore,
  * } from "@thomasfosterau/effect-auth/multifactor"
+ * import { PasswordHasher } from "@thomasfosterau/effect-auth/password"
+ * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
  * // The app's MultiFactorStore / PendingMultiFactorStore adapters, passed in.
- * // Building these services connects them to the app's database, so this
- * // composes the graph and does not build it.
  * export const makeServices = (
  *   multiFactorStores: Layer.Layer<MultiFactorStore | PendingMultiFactorStore>,
  * ) =>
  *   Layer.mergeAll(
  *     EmailPasswordService.layer(),
+ *     // provideMerge keeps MultiFactorService in the output for enrollment and verification.
  *     MultiFactorGateLayer.pipe(
- *       Layer.provide(
+ *       Layer.provideMerge(
  *         MultiFactorService.layer({ issuer: "MyApp" }).pipe(Layer.provide(multiFactorStores)),
  *       ),
  *     ),
  *   )
+ *
+ * // Built here over the in-memory reference stores; an app passes its own.
+ * const services = makeServices(Testing.memoryStores).pipe(
+ *   Layer.provideMerge(
+ *     SessionService.layer({ sessionExpiresIn: { activePeriod: 86_400_000, idlePeriod: 3_600_000 } }),
+ *   ),
+ *   Layer.provideMerge(Layer.mergeAll(Testing.memoryStores, PasswordHasher.layer(), Hooks.Default)),
+ * )
+ *
+ * const program = Effect.gen(function* () {
+ *   const emailPassword = yield* EmailPasswordService
+ *   const credentials = { email: "ada@example.com", password: "correct horse battery staple" }
+ *   yield* emailPassword.signUp(credentials)
+ *   // Not enrolled in TOTP: the gate lets the sign-in straight through to a session.
+ *   const signedIn = yield* emailPassword.signIn(credentials)
+ *   assert.equal(signedIn.secondFactor, undefined)
+ *   assert.equal(signedIn.session?.userId, signedIn.user.id)
+ *   assert.equal(yield* (yield* MultiFactorService).isEnabled(signedIn.user.id), false)
+ * })
+ *
+ * await Effect.runPromise(program.pipe(Effect.provide(services)))
  * ```
  */
 export const MultiFactorGateLayer: Layer.Layer<SecondFactorGate, never, MultiFactorService> =

@@ -356,17 +356,25 @@ export const gate = (
  * a TOTP challenge is started via `MultiFactorService`.
  *
  * ```ts
- * import { Layer, Redacted } from "effect"
- * import { TrustedDeviceService, type TrustedDeviceStore, TrustedDeviceWithMultiFactorGateLayer } from "@thomasfosterau/effect-auth"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer, Redacted } from "effect"
+ * import {
+ *   Hooks,
+ *   SessionService,
+ *   TrustedDeviceService,
+ *   type TrustedDeviceStore,
+ *   TrustedDeviceWithMultiFactorGateLayer,
+ * } from "@thomasfosterau/effect-auth"
  * import { EmailPasswordService } from "@thomasfosterau/effect-auth/email"
  * import {
  *   MultiFactorService,
  *   type MultiFactorStore,
  *   type PendingMultiFactorStore,
  * } from "@thomasfosterau/effect-auth/multifactor"
+ * import { PasswordHasher } from "@thomasfosterau/effect-auth/password"
+ * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
- * // The app's storage adapters, passed in. Building these services connects them
- * // to the app's database, so this composes the graph and does not build it.
+ * // The app's storage adapters, passed in.
  * export const makeServices = (
  *   trustedDeviceStore: Layer.Layer<TrustedDeviceStore>,
  *   multiFactorStores: Layer.Layer<MultiFactorStore | PendingMultiFactorStore>,
@@ -384,6 +392,26 @@ export const gate = (
  *       ),
  *     ),
  *   )
+ *
+ * // Built here over the in-memory reference stores; an app passes its own.
+ * const services = makeServices(Testing.memoryStores, Testing.memoryStores).pipe(
+ *   Layer.provideMerge(
+ *     SessionService.layer({ sessionExpiresIn: { activePeriod: 86_400_000, idlePeriod: 3_600_000 } }),
+ *   ),
+ *   Layer.provideMerge(Layer.mergeAll(Testing.memoryStores, PasswordHasher.layer(), Hooks.Default)),
+ * )
+ *
+ * const program = Effect.gen(function* () {
+ *   const emailPassword = yield* EmailPasswordService
+ *   const credentials = { email: "ada@example.com", password: "correct horse battery staple" }
+ *   yield* emailPassword.signUp(credentials)
+ *   // No device cookie and no TOTP enrollment: sign-in goes straight to a session.
+ *   const signedIn = yield* emailPassword.signIn(credentials)
+ *   assert.equal(signedIn.secondFactor, undefined)
+ *   assert.equal(signedIn.session?.userId, signedIn.user.id)
+ * })
+ *
+ * await Effect.runPromise(program.pipe(Effect.provide(services)))
  * ```
  *
  * Remember to call `TrustedDeviceService.revokeAll` whenever the user changes

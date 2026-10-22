@@ -271,7 +271,9 @@ export const make = (
  * `OtpSecondFactorService.verify(pendingToken, otp)` to redeem it.
  *
  * ```ts
- * import { Layer } from "effect"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer } from "effect"
+ * import { Hooks, SessionService } from "@thomasfosterau/effect-auth"
  * import { EmailPasswordService } from "@thomasfosterau/effect-auth/email"
  * import {
  *   OtpSecondFactorGateLayer,
@@ -279,22 +281,50 @@ export const make = (
  *   type OtpSecondFactorConfig,
  *   type OtpSecondFactorStore,
  * } from "@thomasfosterau/effect-auth/multifactor"
+ * import { PasswordHasher } from "@thomasfosterau/effect-auth/password"
+ * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
- * // The app's store adapter and OTP delivery callback, passed in. Building these
- * // services connects them to the app's database and mailer, so this composes the
- * // graph and does not build it.
+ * // The app's store adapter and OTP delivery callback, passed in.
  * export const makeServices = (
  *   otpSecondFactorStore: Layer.Layer<OtpSecondFactorStore>,
  *   sendOtp: OtpSecondFactorConfig["sendOtp"],
  * ) =>
  *   Layer.mergeAll(
  *     EmailPasswordService.layer(),
+ *     // provideMerge keeps OtpSecondFactorService in the output, for `verify`.
  *     OtpSecondFactorGateLayer.pipe(
- *       Layer.provide(
+ *       Layer.provideMerge(
  *         OtpSecondFactorService.layer({ sendOtp }).pipe(Layer.provide(otpSecondFactorStore)),
  *       ),
  *     ),
  *   )
+ *
+ * // Built here over the in-memory reference stores and a sender that records
+ * // the code; an app passes its own adapters and mailer.
+ * const sent: Array<string> = []
+ * const sendOtp: OtpSecondFactorConfig["sendOtp"] = (_user, otp) => Effect.sync(() => void sent.push(otp))
+ * const services = makeServices(Testing.memoryStores, sendOtp).pipe(
+ *   Layer.provideMerge(
+ *     SessionService.layer({ sessionExpiresIn: { activePeriod: 86_400_000, idlePeriod: 3_600_000 } }),
+ *   ),
+ *   Layer.provideMerge(Layer.mergeAll(Testing.memoryStores, PasswordHasher.layer(), Hooks.Default)),
+ * )
+ *
+ * const program = Effect.gen(function* () {
+ *   const emailPassword = yield* EmailPasswordService
+ *   const credentials = { email: "ada@example.com", password: "correct horse battery staple" }
+ *   yield* emailPassword.signUp(credentials)
+ *   // Every sign-in now stops at a second factor, and the code goes out.
+ *   const signedIn = yield* emailPassword.signIn(credentials)
+ *   assert.equal(signedIn.session, undefined)
+ *   const challenge = signedIn.secondFactor
+ *   assert.ok(challenge !== undefined && sent.length === 1)
+ *   // The code that was sent redeems the challenge for a session.
+ *   const verified = yield* (yield* OtpSecondFactorService).verify(challenge.token, sent[0]!)
+ *   assert.equal(verified.session.userId, signedIn.user.id)
+ * })
+ *
+ * await Effect.runPromise(program.pipe(Effect.provide(services)))
  * ```
  */
 export const OtpSecondFactorGateLayer: Layer.Layer<
@@ -333,8 +363,14 @@ export const OtpSecondFactorGateLayer: Layer.Layer<
  * and the user must verify it with `OtpSecondFactorService.verify`.
  *
  * ```ts
- * import { Layer, Redacted } from "effect"
- * import { TrustedDeviceService, type TrustedDeviceStore } from "@thomasfosterau/effect-auth"
+ * import assert from "node:assert/strict"
+ * import { Effect, Layer, Redacted } from "effect"
+ * import {
+ *   Hooks,
+ *   SessionService,
+ *   TrustedDeviceService,
+ *   type TrustedDeviceStore,
+ * } from "@thomasfosterau/effect-auth"
  * import { EmailPasswordService } from "@thomasfosterau/effect-auth/email"
  * import {
  *   OtpSecondFactorService,
@@ -342,10 +378,10 @@ export const OtpSecondFactorGateLayer: Layer.Layer<
  *   type OtpSecondFactorConfig,
  *   type OtpSecondFactorStore,
  * } from "@thomasfosterau/effect-auth/multifactor"
+ * import { PasswordHasher } from "@thomasfosterau/effect-auth/password"
+ * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
- * // The app's storage adapters and OTP delivery callback, passed in. Building
- * // these services connects them to the app's database and mailer, so this
- * // composes the graph and does not build it.
+ * // The app's storage adapters and OTP delivery callback, passed in.
  * export const makeServices = (
  *   trustedDeviceStore: Layer.Layer<TrustedDeviceStore>,
  *   otpSecondFactorStore: Layer.Layer<OtpSecondFactorStore>,
@@ -359,11 +395,39 @@ export const OtpSecondFactorGateLayer: Layer.Layer<
  *           Layer.provide(trustedDeviceStore),
  *         ),
  *       ),
- *       Layer.provide(
+ *       // provideMerge keeps OtpSecondFactorService in the output, for `verify`.
+ *       Layer.provideMerge(
  *         OtpSecondFactorService.layer({ sendOtp }).pipe(Layer.provide(otpSecondFactorStore)),
  *       ),
  *     ),
  *   )
+ *
+ * // Built here over the in-memory reference stores and a sender that records
+ * // the code; an app passes its own adapters and mailer.
+ * const sent: Array<string> = []
+ * const sendOtp: OtpSecondFactorConfig["sendOtp"] = (_user, otp) => Effect.sync(() => void sent.push(otp))
+ * const services = makeServices(Testing.memoryStores, Testing.memoryStores, sendOtp).pipe(
+ *   Layer.provideMerge(
+ *     SessionService.layer({ sessionExpiresIn: { activePeriod: 86_400_000, idlePeriod: 3_600_000 } }),
+ *   ),
+ *   Layer.provideMerge(Layer.mergeAll(Testing.memoryStores, PasswordHasher.layer(), Hooks.Default)),
+ * )
+ *
+ * const program = Effect.gen(function* () {
+ *   const emailPassword = yield* EmailPasswordService
+ *   const credentials = { email: "ada@example.com", password: "correct horse battery staple" }
+ *   yield* emailPassword.signUp(credentials)
+ *   // No trusted-device cookie: the sign-in stops at a second factor, and the code goes out.
+ *   const signedIn = yield* emailPassword.signIn(credentials)
+ *   assert.equal(signedIn.session, undefined)
+ *   const challenge = signedIn.secondFactor
+ *   assert.ok(challenge !== undefined && sent.length === 1)
+ *   // The code that was sent redeems the challenge for a session.
+ *   const verified = yield* (yield* OtpSecondFactorService).verify(challenge.token, sent[0]!)
+ *   assert.equal(verified.session.userId, signedIn.user.id)
+ * })
+ *
+ * await Effect.runPromise(program.pipe(Effect.provide(services)))
  * ```
  */
 export const TrustedDeviceWithOtpSecondFactorGateLayer: Layer.Layer<

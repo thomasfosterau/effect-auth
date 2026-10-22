@@ -41,9 +41,17 @@ export interface TokenCipher {
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer, Redacted } from "effect"
- * import { aes256GcmCipher, JwtService } from "@thomasfosterau/effect-auth"
+ * import {
+ *   aes256GcmCipher,
+ *   Hooks,
+ *   JwtKeyStore,
+ *   JwtService,
+ *   SessionService,
+ * } from "@thomasfosterau/effect-auth"
  * import { MultiFactorService } from "@thomasfosterau/effect-auth/multifactor"
  * import { GoogleProvider, OAuthService } from "@thomasfosterau/effect-auth/oauth"
+ * import { PasswordHasher } from "@thomasfosterau/effect-auth/password"
+ * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
  * // The app's OAuth provider list (see OAuthService.layer).
  * const providers = {
@@ -64,19 +72,32 @@ export interface TokenCipher {
  * // OAuth tokens at rest
  * const oauthLayer = OAuthService.layer(providers, { encryptTokens: { cipher } })
  *
- * // The three services with the cipher wired in. Building them also needs the
- * // app's persistence stores, which are not part of this example.
- * export const services = Layer.mergeAll(jwtLayer, totpLayer, oauthLayer)
+ * // The three services with the cipher wired in, over the app's persistence
+ * // stores: here the in-memory reference stores.
+ * export const services = Layer.mergeAll(jwtLayer, totpLayer, oauthLayer).pipe(
+ *   Layer.provideMerge(
+ *     SessionService.layer({ sessionExpiresIn: { activePeriod: 86_400_000, idlePeriod: 3_600_000 } }),
+ *   ),
+ *   Layer.provideMerge(Layer.mergeAll(Testing.memoryStores, PasswordHasher.layer(), Hooks.Default)),
+ * )
  *
- * // The cipher itself round-trips, and tampering is detected by the GCM tag.
  * const program = Effect.gen(function* () {
+ *   // The cipher itself round-trips, and tampering is detected by the GCM tag.
  *   const sealed = yield* cipher.encrypt("refresh-token-123")
  *   assert.notEqual(sealed, "refresh-token-123")
  *   assert.equal(yield* cipher.decrypt(sealed), "refresh-token-123")
  *   assert.ok(yield* Effect.isFailure(cipher.decrypt(`${sealed.slice(0, -2)}AA`)))
+ *
+ *   // A signed JWT verifies, and the signing key's private half is stored sealed.
+ *   const jwt = yield* JwtService
+ *   const now = new Date()
+ *   const { token } = yield* jwt.sign({ id: "u-1", createdAt: now, updatedAt: now, attributes: {} })
+ *   assert.equal((yield* jwt.verify(token))["sub"], "u-1")
+ *   const [key] = yield* (yield* JwtKeyStore).list()
+ *   assert.ok(key !== undefined && !key.privateKeyPem.includes("PRIVATE KEY"))
  * })
  *
- * await Effect.runPromise(program)
+ * await Effect.runPromise(program.pipe(Effect.provide(services)))
  * ```
  */
 export const aes256GcmCipher = (secret: string): TokenCipher => {
