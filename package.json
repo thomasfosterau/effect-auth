@@ -38,7 +38,6 @@
     "@typescript/native": "catalog:",
     "@vitest/coverage-istanbul": "catalog:",
     "effect": "catalog:",
-    "effect-solutions": "catalog:",
     "fallow": "catalog:",
     "semver": "catalog:",
     "tsx": "catalog:",
@@ -48,7 +47,8 @@
     "vitest": "catalog:"
   },
   "engines": {
-    "node": "^20.19.0 || ^22.18.0 || >=24.11.0"
+    "node": ">=22",
+    "pnpm": ">=11"
   },
   "packageManager": "pnpm@11.11.0"
 }

@@ -31,7 +31,6 @@
     "@types/node",
     "@typescript/native",
     "@vitest/coverage-istanbul",
-    "effect-solutions",
     "fallow",
     "svelte-check",
     "tsx",
