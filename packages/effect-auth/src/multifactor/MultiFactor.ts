@@ -12,7 +12,7 @@
  * @module multi-factor
  */
 
-import { Config, Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
+import { Array as Arr, Config, Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
 import type { TokenCipher } from "../Cipher.ts";
@@ -28,6 +28,7 @@ import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
 import { anyEmailValue, IdentifierStore } from "../Identifier.ts";
 import { SessionService } from "../SessionService.ts";
+import { randomBase64UrlToken } from "../RandomToken.ts";
 
 /**
  * Two-factor error
@@ -317,18 +318,14 @@ export const hashBackupCode = (code: string): string => hashToken(normalizeBacku
  */
 const findBackupCodeIndex = (hashes: readonly string[], candidateHash: string): number => {
   const candidate = Buffer.from(candidateHash, "hex");
-  let match = -1;
-  for (let i = 0; i < hashes.length; i++) {
-    const stored = Buffer.from(hashes[i], "hex");
-    if (
-      stored.length === candidate.length &&
+  return Arr.reduce(hashes, -1, (match, hash, i) => {
+    const stored = Buffer.from(hash, "hex");
+    return stored.length === candidate.length &&
       timingSafeEqualBytes(stored, candidate) &&
       match === -1
-    ) {
-      match = i;
-    }
-  }
-  return match;
+      ? i
+      : match;
+  });
 };
 
 /**
@@ -372,12 +369,7 @@ export const make = (
      * Generate a cryptographically secure pending-challenge token
      */
     const generatePendingToken = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(32).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate pending token", cause }),
-        ),
-      );
+      randomBase64UrlToken(crypto, "Failed to generate pending token");
 
     /**
      * Generate a single plaintext backup code: 10 crypto-random hex characters
@@ -469,6 +461,7 @@ export const make = (
 
         const backupCodes = yield* Effect.all(
           Array.from({ length: backupCodeCount }, () => generateBackupCode()),
+          { concurrency: 1 },
         );
 
         const record: MultiFactorRecord = {
@@ -671,6 +664,7 @@ export const make = (
 
         const backupCodes = yield* Effect.all(
           Array.from({ length: backupCodeCount }, () => generateBackupCode()),
+          { concurrency: 1 },
         );
 
         yield* store.upsert({

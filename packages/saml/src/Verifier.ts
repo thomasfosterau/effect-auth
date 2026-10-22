@@ -4,7 +4,15 @@
  *
  * @module saml/verifier
  */
-import { Effect, Layer } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  Record as Rec,
+  String as Str,
+} from "effect";
 import { SAML, ValidateInResponseTo, generateServiceProviderMetadata } from "@node-saml/node-saml";
 import type { Profile } from "@node-saml/node-saml";
 import {
@@ -37,7 +45,7 @@ const fail = (message: string, cause?: unknown): Effect.Effect<never, SamlError>
   Effect.fail(new SamlError({ message, ...(cause !== undefined && { cause }) }));
 
 const messageOf = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : String(cause);
+  Predicate.isError(cause) ? cause.message : String(cause);
 
 // -----------------------------------------------------------------------------
 // Pre-flight checks on the raw document
@@ -58,14 +66,12 @@ const ENCRYPTED_ELEMENT = /<[A-Za-z0-9_.-]*:?Encrypted(Assertion|ID|Attribute)\b
 /** Collect the `Algorithm` of every element with the given local name. */
 const algorithmsOf = (xml: string, localName: string): ReadonlyArray<string> => {
   const element = new RegExp(`<[A-Za-z0-9_.-]*:?${localName}\\b[^>]*>`, "g");
-  const out: string[] = [];
-  for (const match of xml.matchAll(element)) {
+  return Arr.map(Arr.fromIterable(xml.matchAll(element)), (match) => {
     const attribute = /\bAlgorithm\s*=\s*("([^"]*)"|'([^']*)')/.exec(match[0]);
     // An element with no parsable Algorithm is recorded as "" so it fails the
     // allow-list below rather than slipping through unexamined.
-    out.push(attribute?.[2] ?? attribute?.[3] ?? "");
-  }
-  return out;
+    return attribute?.[2] ?? attribute?.[3] ?? "";
+  });
 };
 
 /** Digest strength named by an XML-DSig algorithm URI, or `null` if unrecognised. */
@@ -91,34 +97,58 @@ const checkAlgorithms = (
   allowed: ReadonlyArray<SamlSignatureAlgorithm>,
 ): Effect.Effect<void, SamlError> => {
   const floor = Math.min(...allowed.map((name) => namedStrength[name]));
-  for (const localName of ["SignatureMethod", "DigestMethod"]) {
-    for (const uri of algorithmsOf(xml, localName)) {
-      if (/hmac/i.test(uri)) {
-        return fail(`Refusing HMAC ${localName} "${uri}": SAML signatures must be asymmetric`);
-      }
-      const strength = strengthOf(uri);
-      if (strength === null) {
-        return fail(`Unrecognised ${localName} algorithm "${uri}"`);
-      }
-      if (strength < floor) {
-        return fail(
-          `${localName} "${uri}" is weaker than the configured minimum (${allowed.join(", ")})`,
-        );
-      }
+  /** Why `uri` is unacceptable as a `localName`, or none when it is fine. */
+  const problemOf = (localName: string, uri: string): Option.Option<string> => {
+    if (/hmac/i.test(uri)) {
+      return Option.some(`Refusing HMAC ${localName} "${uri}": SAML signatures must be asymmetric`);
     }
-  }
-  return Effect.void;
+    const strength = strengthOf(uri);
+    if (strength === null) {
+      return Option.some(`Unrecognised ${localName} algorithm "${uri}"`);
+    }
+    if (strength < floor) {
+      return Option.some(
+        `${localName} "${uri}" is weaker than the configured minimum (${allowed.join(", ")})`,
+      );
+    }
+    return Option.none();
+  };
+  // The first offending method, in document order, signature methods first.
+  const methods = Arr.flatMap(["SignatureMethod", "DigestMethod"], (localName) =>
+    Arr.map(algorithmsOf(xml, localName), (uri) => ({ localName, uri })),
+  );
+  return Option.match(
+    Arr.findFirst(methods, ({ localName, uri }) => problemOf(localName, uri)),
+    { onNone: () => Effect.void, onSome: (message) => fail(message) },
+  );
 };
 
 // -----------------------------------------------------------------------------
 // Reading the verified assertion
 // -----------------------------------------------------------------------------
 
-type XmlNode = { readonly $?: Record<string, string | undefined> } & Record<string, unknown>;
+/** An element's attributes, as xml2js puts them under `$`. */
+type XmlAttributes = Readonly<Record<string, string | undefined>>;
+
+/** What xml2js puts under an element name: text, a child element, or a list of either. */
+type XmlValue = string | XmlNode | ReadonlyArray<XmlValue>;
+
+interface XmlNode {
+  readonly $?: XmlAttributes;
+  readonly [name: string]: XmlValue | XmlAttributes | undefined;
+}
+
+const isXmlNode = (value: XmlValue | XmlAttributes | undefined): value is XmlNode =>
+  Predicate.isObject(value);
+
+/** Text-only elements (and stray nested lists) carry no attributes or children. */
+const emptyNode: XmlNode = {};
+
+const asNode = (value: XmlValue): XmlNode => (isXmlNode(value) ? value : emptyNode);
 
 const children = (node: XmlNode | undefined, name: string): ReadonlyArray<XmlNode> => {
   const value = node?.[name];
-  return Array.isArray(value) ? (value as ReadonlyArray<XmlNode>) : [];
+  return Array.isArray(value) ? Arr.map(value, asNode) : [];
 };
 
 /**
@@ -127,8 +157,10 @@ const children = (node: XmlNode | undefined, name: string): ReadonlyArray<XmlNod
  */
 const firstChild = (node: XmlNode | undefined, name: string): XmlNode | undefined => {
   const value = node?.[name];
-  if (Array.isArray(value)) return value[0] as XmlNode | undefined;
-  return typeof value === "object" && value !== null ? (value as XmlNode) : undefined;
+  if (Array.isArray(value)) {
+    return Option.getOrUndefined(Option.map(Arr.head(value), asNode));
+  }
+  return isXmlNode(value) ? value : undefined;
 };
 
 /** Attribute names IdPs commonly use for an email address. */
@@ -153,31 +185,29 @@ const NAME_KEYS = [
 ];
 
 /** Narrow node-saml's loose attribute bag to strings and string arrays. */
-const normalizeAttributes = (
-  raw: unknown,
-): Readonly<Record<string, string | ReadonlyArray<string>>> => {
-  if (typeof raw !== "object" || raw === null) return {};
-  const out: Record<string, string | ReadonlyArray<string>> = {};
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value === "string") out[key] = value;
-    else if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
-      out[key] = value as ReadonlyArray<string>;
-    }
-  }
-  return out;
+type AttributeValue = string | ReadonlyArray<string>;
+
+const isAttributeValue = <A>(value: A): value is A & AttributeValue =>
+  Predicate.isString(value) || (Array.isArray(value) && value.every(Predicate.isString));
+
+/** Narrow node-saml's loose `attributes` bag to strings and string arrays. */
+const normalizeAttributes = (profile: Profile): Readonly<Record<string, AttributeValue>> => {
+  const raw = profile["attributes"];
+  return Predicate.isObject(raw) ? Rec.filter(raw, isAttributeValue) : {};
 };
 
+/** The value itself, or an array's first element, when it is a non-empty string. */
+const firstNonEmpty = (value: AttributeValue | undefined): Option.Option<string> =>
+  Option.filter(
+    Option.fromUndefinedOr(Predicate.isString(value) ? value : value?.[0]),
+    Str.isNonEmpty,
+  );
+
 const pick = (
-  attributes: Readonly<Record<string, string | ReadonlyArray<string>>>,
+  attributes: Readonly<Record<string, AttributeValue>>,
   keys: ReadonlyArray<string>,
-): string | undefined => {
-  for (const key of keys) {
-    const value = attributes[key];
-    if (typeof value === "string" && value !== "") return value;
-    if (Array.isArray(value) && typeof value[0] === "string" && value[0] !== "") return value[0];
-  }
-  return undefined;
-};
+): string | undefined =>
+  Option.getOrUndefined(Arr.findFirst(keys, (key) => firstNonEmpty(attributes[key])));
 
 const parseInstant = (value: string | undefined): number | undefined => {
   if (value === undefined) return undefined;
@@ -203,17 +233,21 @@ interface SubjectConfirmation {
 
 const readSubjectConfirmation = (assertion: XmlNode): SubjectConfirmation => {
   const subject = firstChild(assertion, "Subject");
-  for (const confirmation of children(subject, "SubjectConfirmation")) {
-    const data = firstChild(confirmation, "SubjectConfirmationData");
-    if (data?.$ === undefined) continue;
-    const notOnOrAfter = parseInstant(data.$["NotOnOrAfter"]);
-    return {
-      ...(data.$["Recipient"] !== undefined && { recipient: data.$["Recipient"] }),
-      ...(data.$["InResponseTo"] !== undefined && { inResponseTo: data.$["InResponseTo"] }),
-      ...(notOnOrAfter !== undefined && { notOnOrAfter }),
-    };
-  }
-  return {};
+  // The first confirmation that carries `SubjectConfirmationData` attributes.
+  const attributes = Arr.findFirst(children(subject, "SubjectConfirmation"), (confirmation) =>
+    Option.fromUndefinedOr(firstChild(confirmation, "SubjectConfirmationData")?.$),
+  );
+  return Option.match(attributes, {
+    onNone: (): SubjectConfirmation => ({}),
+    onSome: (data): SubjectConfirmation => {
+      const notOnOrAfter = parseInstant(data["NotOnOrAfter"]);
+      return {
+        ...(data["Recipient"] !== undefined && { recipient: data["Recipient"] }),
+        ...(data["InResponseTo"] !== undefined && { inResponseTo: data["InResponseTo"] }),
+        ...(notOnOrAfter !== undefined && { notOnOrAfter }),
+      };
+    },
+  });
 };
 
 // -----------------------------------------------------------------------------
@@ -222,7 +256,7 @@ const readSubjectConfirmation = (assertion: XmlNode): SubjectConfirmation => {
 
 const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError> =>
   Effect.gen(function* () {
-    if (input.idpCertificates.length === 0) {
+    if (Arr.isReadonlyArrayEmpty(input.idpCertificates)) {
       return yield* fail("No IdP certificate configured: there is nothing to verify against");
     }
     const clockSkewMs = input.clockSkewMs ?? defaultClockSkewMs;
@@ -291,6 +325,9 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
     if (getAssertion === undefined) {
       return yield* fail("SAML response carried no verified assertion");
     }
+    // SAFETY: node-saml builds `getAssertion()` from xml2js's parse of the
+    // verified assertion, so it is xml2js output: element names mapping to
+    // text, child elements or lists of them, and attributes under `$`.
     const assertion = firstChild(getAssertion() as XmlNode, "Assertion");
     if (assertion === undefined) {
       return yield* fail("Verified SAML content contained no Assertion");
@@ -322,17 +359,26 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
     // `Destination` sits on the Response element, which is only authenticated
     // when the whole response is signed. Checking it regardless costs nothing
     // and closes the endpoint-substitution hole for deployments that do sign.
-    for (const match of xml.matchAll(/\bDestination\s*=\s*("([^"]*)"|'([^']*)')/g)) {
-      const destination = match[2] ?? match[3] ?? "";
-      if (destination !== "" && destination !== input.acsUrl) {
-        return yield* fail(`SAML response Destination "${destination}" is not this SP's ACS URL`);
-      }
+    const foreignDestination = Arr.findFirst(
+      Arr.fromIterable(xml.matchAll(/\bDestination\s*=\s*("([^"]*)"|'([^']*)')/g)),
+      (match) => {
+        const destination = match[2] ?? match[3] ?? "";
+        return destination !== "" && destination !== input.acsUrl
+          ? Option.some(destination)
+          : Option.none();
+      },
+    );
+    if (Option.isSome(foreignDestination)) {
+      return yield* fail(
+        `SAML response Destination "${foreignDestination.value}" is not this SP's ACS URL`,
+      );
     }
 
     // Prefer the signed `InResponseTo` over the Response attribute, and reject
     // a document where the two disagree.
-    const responseInResponseTo =
-      typeof profile["inResponseTo"] === "string" ? profile["inResponseTo"] : undefined;
+    const responseInResponseTo = Predicate.isString(profile["inResponseTo"])
+      ? profile["inResponseTo"]
+      : undefined;
     if (
       confirmation.inResponseTo !== undefined &&
       responseInResponseTo !== undefined &&
@@ -345,7 +391,7 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
       return yield* fail("SAML response does not answer the expected AuthnRequest");
     }
 
-    const attributes = normalizeAttributes(profile["attributes"]);
+    const attributes = normalizeAttributes(profile);
     // An emailAddress-format NameID *is* the email claim; plenty of IdPs send
     // nothing else. It is inside the signature either way.
     const nameIdEmail =

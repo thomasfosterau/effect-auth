@@ -10,8 +10,8 @@
  * covered with a recording `fetch` instead.
  */
 import * as Auth from "@thomasfosterau/effect-auth";
-import { Effect } from "effect";
-import { describe, expect, it } from "vite-plus/test";
+import { Array as Arr, Effect, Order, Predicate, Schema } from "effect";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { AuthClientError, SecondFactorChallengeError, createAuthClient } from "./Client.ts";
 import {
   makeCookieJarFetch,
@@ -21,6 +21,21 @@ import {
 
 const PW = "password-123";
 const BASE = "http://client.test";
+
+const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
+/** What `promise` rejected with, asserted to be an instance of `type`. */
+const rejectionOf = <E>(
+  promise: Promise<unknown>,
+  type: abstract new (...args: never) => E,
+): Promise<E> =>
+  promise.then(
+    () => assert.fail("expected the promise to reject"),
+    (error) =>
+      error instanceof type
+        ? error
+        : assert.fail(`expected a ${type.name} rejection, got ${String(error)}`),
+  );
 
 /**
  * A server plus a `browser()` factory: every call returns a client with its
@@ -34,7 +49,7 @@ const withServer = (options?: ServerFixtureOptions) => {
 };
 
 /** A `fetch` that records the calls it saw and answers with `body`. */
-const recordingFetch = (body: unknown) => {
+const recordingFetch = (body: Schema.Json) => {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   const fetchImpl: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input as RequestInfo, init);
@@ -43,7 +58,7 @@ const recordingFetch = (body: unknown) => {
       path: new URL(request.url).pathname,
       body: request.body === null ? undefined : ((await request.json()) as unknown),
     });
-    return new Response(JSON.stringify(body), {
+    return new Response(toJson(body), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -65,7 +80,12 @@ describe("identifiers", () => {
     // A username handle is registered by the app, not over HTTP.
     server.registerUsername(user.id, "ids-user");
     const both = await client.identifiers.list();
-    expect(both.map((i) => i.value).sort()).toEqual(["ids-user", "ids@client.test"]);
+    expect(
+      Arr.sort(
+        both.map((i) => i.value),
+        Order.String,
+      ),
+    ).toEqual(["ids-user", "ids@client.test"]);
 
     const username = both.find((i) => i.type === "username")!;
     await client.identifiers.delete(username.id);
@@ -77,7 +97,7 @@ describe("identifiers", () => {
     await client.signUp({ email: "solo@client.test", password: PW });
     const [only] = await client.identifiers.list();
 
-    const error = await client.identifiers.delete(only!.id).catch((e: unknown) => e);
+    const error = await rejectionOf(client.identifiers.delete(only!.id), AuthClientError);
     expect(error).toBeInstanceOf(AuthClientError);
     expect((error as AuthClientError).status).toBe(400);
   });
@@ -162,10 +182,15 @@ describe("multi-session", () => {
     expect((await client.getSession())?.user.id).toBe(second.user.id);
 
     const list = await client.multiSession.list();
-    expect(list.map((entry) => entry.user.email).sort()).toEqual([
-      "a@client.test",
-      "b@client.test",
-    ]);
+    expect(
+      Arr.sort(
+        Arr.filter(
+          list.map((entry) => entry.user.email),
+          Predicate.isString,
+        ),
+        Order.String,
+      ),
+    ).toEqual(["a@client.test", "b@client.test"]);
 
     const firstEntry = list.find((entry) => entry.user.id === first.user.id)!;
     expect(await client.multiSession.setActive({ sessionId: firstEntry.session.id })).toEqual({
@@ -233,10 +258,10 @@ describe("multi-factor challenge continuation", () => {
     // Backup codes are single-use: a fresh challenge rejects the same code.
     await client.signOut();
     const again = await client.signIn({ email: "backup@client.test", password: PW });
-    const replay = await client.multiFactor
-      .continueChallenge(again)
-      .verifyBackupCode(enrollment.backupCodes[0]!)
-      .catch((e: unknown) => e);
+    const replay = await rejectionOf(
+      client.multiFactor.continueChallenge(again).verifyBackupCode(enrollment.backupCodes[0]!),
+      AuthClientError,
+    );
     expect(replay).toBeInstanceOf(AuthClientError);
     expect((replay as AuthClientError).status).toBe(401);
   });
@@ -246,11 +271,9 @@ describe("multi-factor challenge continuation", () => {
     const plain = await client.signUp({ email: "nochallenge@client.test", password: PW });
 
     expect(() => client.multiFactor.continueChallenge(plain)).toThrow(SecondFactorChallengeError);
-    try {
-      client.multiFactor.continueChallenge(plain);
-    } catch (error) {
-      expect((error as SecondFactorChallengeError).reason).toBe("missing");
-    }
+    expect(() => client.multiFactor.continueChallenge(plain)).toThrow(
+      expect.objectContaining({ reason: "missing" }),
+    );
   });
 
   it("rejects an expired challenge without issuing a request", async () => {
@@ -263,7 +286,7 @@ describe("multi-factor challenge continuation", () => {
     });
     expect(challenge.isExpired()).toBe(true);
 
-    const error = await challenge.verifyTotp("123456").catch((e: unknown) => e);
+    const error = await rejectionOf(challenge.verifyTotp("123456"), SecondFactorChallengeError);
     expect(error).toBeInstanceOf(SecondFactorChallengeError);
     expect((error as SecondFactorChallengeError).reason).toBe("expired");
     expect(calls).toHaveLength(0);
@@ -401,9 +424,10 @@ describe("organizations", () => {
 
     // Dropping the definition removes the granted permission again.
     await owner.organization.deleteRole(org.id, "member");
-    const denied = await teammate.organization
-      .createTeam(org.id, { name: "Growth" })
-      .catch((e: unknown) => e);
+    const denied = await rejectionOf(
+      teammate.organization.createTeam(org.id, { name: "Growth" }),
+      AuthClientError,
+    );
     expect(denied).toBeInstanceOf(AuthClientError);
     expect((denied as AuthClientError).status).toBe(403);
 
@@ -432,9 +456,10 @@ describe("organizations", () => {
     });
 
     // Inactive members are non-members for authorization...
-    const denied = await staff.organization
-      .createTeam(org.id, { name: "Nope" })
-      .catch((e: unknown) => e);
+    const denied = await rejectionOf(
+      staff.organization.createTeam(org.id, { name: "Nope" }),
+      AuthClientError,
+    );
     expect(denied).toBeInstanceOf(AuthClientError);
     expect((denied as AuthClientError).status).toBe(403);
     // ...but the row is still on the organization.
@@ -449,9 +474,10 @@ describe("organizations", () => {
     );
 
     // The last active owner cannot be deactivated.
-    const lastOwner = await owner.organization
-      .deactivateMember(org.id, (await owner.getSession())!.user.id)
-      .catch((e: unknown) => e);
+    const lastOwner = await rejectionOf(
+      owner.organization.deactivateMember(org.id, (await owner.getSession())!.user.id),
+      AuthClientError,
+    );
     expect(lastOwner).toBeInstanceOf(AuthClientError);
     expect((lastOwner as AuthClientError).status).toBe(403);
   });
@@ -477,9 +503,10 @@ describe("organizations", () => {
     expect(member.status).toBe("active");
 
     // A role no map defines is refused.
-    const unknown = await owner.organization
-      .setDefaultRole(org.id, { role: "auditor" })
-      .catch((e: unknown) => e);
+    const unknown = await rejectionOf(
+      owner.organization.setDefaultRole(org.id, { role: "auditor" }),
+      AuthClientError,
+    );
     expect(unknown).toBeInstanceOf(AuthClientError);
     expect((unknown as AuthClientError).status).toBe(403);
   });
@@ -502,9 +529,10 @@ describe("organizations", () => {
     expect(await owner.organization.listInvitations(org.id)).toHaveLength(1);
 
     await owner.organization.cancelInvitation(invitation.id);
-    const canceled = await owner.organization
-      .resendInvitation(invitation.id)
-      .catch((e: unknown) => e);
+    const canceled = await rejectionOf(
+      owner.organization.resendInvitation(invitation.id),
+      AuthClientError,
+    );
     expect(canceled).toBeInstanceOf(AuthClientError);
     expect((canceled as AuthClientError).status).toBe(403);
   });
@@ -541,9 +569,10 @@ describe("organizations", () => {
     const rival = browser();
     await rival.signUp({ email: "rival@client.test", password: PW });
     const other = await rival.organization.create({ name: "Globex", slug: "globex" });
-    const conflict = await rival.organization
-      .addDomain(other.id, { domain: "acme.test" })
-      .catch((e: unknown) => e);
+    const conflict = await rejectionOf(
+      rival.organization.addDomain(other.id, { domain: "acme.test" }),
+      AuthClientError,
+    );
     expect(conflict).toBeInstanceOf(AuthClientError);
     expect((conflict as AuthClientError).status).toBe(403);
 
@@ -559,7 +588,7 @@ describe("organizations", () => {
     const { client } = withServer();
     await client.signUp({ email: "noorg@client.test", password: PW });
 
-    const error = await client.organization.list().catch((e: unknown) => e);
+    const error = await rejectionOf(client.organization.list(), AuthClientError);
     expect(error).toBeInstanceOf(AuthClientError);
     expect((error as AuthClientError).status).toBe(404);
   });

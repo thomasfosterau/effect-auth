@@ -16,7 +16,7 @@
  *
  * @module authorization-model
  */
-import { Schema } from "effect";
+import { Array as Arr, Match, Predicate, Record as Rec, Result, Schema } from "effect";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import type { DeclarativePolicy, Scope } from "./Policy.ts";
@@ -67,16 +67,13 @@ export const make = (model: Model): Model => model;
  * action policies (action groups) work without hand-maintaining them.
  */
 export const actionEntities = (model: Model): ReadonlyArray<Entity.Entity> => {
-  const groups = new Set<string>();
-  for (const decl of Object.values(model.actions)) {
-    for (const group of decl.memberOf ?? []) groups.add(group);
-  }
-  const declared = Object.entries(model.actions).map(([id, decl]) =>
+  const groups = Arr.dedupe(Arr.flatMap(Rec.values(model.actions), (decl) => decl.memberOf ?? []));
+  const declared = Rec.toEntries(model.actions).map(([id, decl]) =>
     Entity.entity(Entity.ref("Action", id), {
       parents: (decl.memberOf ?? []).map((group) => Entity.ref("Action", group)),
     }),
   );
-  const groupEntities = [...groups]
+  const groupEntities = groups
     .filter((group) => !(group in model.actions))
     .map((group) => Entity.entity(Entity.ref("Action", group)));
   return [...declared, ...groupEntities];
@@ -98,7 +95,7 @@ const knownEntityType = (model: Model, type: string): boolean =>
 const knownActionId = (model: Model, id: string): boolean => {
   if (id in model.actions) return true;
   // Action groups referenced via memberOf are legal `in` targets.
-  return Object.values(model.actions).some((decl) => (decl.memberOf ?? []).includes(id));
+  return Arr.some(Rec.values(model.actions), (decl) => (decl.memberOf ?? []).includes(id));
 };
 
 const validateScope = (
@@ -106,106 +103,83 @@ const validateScope = (
   policy: DeclarativePolicy,
   slot: "principal" | "action" | "resource",
   scope: Scope,
-  issues: ValidationIssue[],
-): void => {
-  switch (scope._tag) {
-    case "any":
-      return;
-    case "is": {
-      if (!knownEntityType(model, scope.entityType)) {
-        issues.push({
-          policyId: policy.id,
-          message: `${slot} scope names undeclared entity type "${scope.entityType}"`,
-        });
-      }
-      return;
-    }
-    case "eq":
-    case "in": {
-      const ref = scope.ref;
-      if (!knownEntityType(model, ref.type)) {
-        issues.push({
+): ReadonlyArray<ValidationIssue> => {
+  const validateRef = (ref: Entity.EntityRef): ReadonlyArray<ValidationIssue> => {
+    if (!knownEntityType(model, ref.type)) {
+      return [
+        {
           policyId: policy.id,
           message: `${slot} scope names undeclared entity type "${ref.type}"`,
-        });
-        return;
-      }
-      if (slot === "action") {
-        if (ref.type !== "Action") {
-          issues.push({
+        },
+      ];
+    }
+    if (slot === "action") {
+      if (ref.type !== "Action") {
+        return [
+          {
             policyId: policy.id,
             message: `action scope must reference Action entities (got "${ref.type}")`,
-          });
-        } else if (!knownActionId(model, ref.id)) {
-          issues.push({
+          },
+        ];
+      } else if (!knownActionId(model, ref.id)) {
+        return [
+          {
             policyId: policy.id,
             message: `action scope names undeclared action "${ref.id}"`,
-          });
-        }
+          },
+        ];
       }
-      return;
     }
-  }
+    return [];
+  };
+  return Match.valueTags(scope, {
+    any: (): ReadonlyArray<ValidationIssue> => [],
+    is: ({ entityType }): ReadonlyArray<ValidationIssue> =>
+      knownEntityType(model, entityType)
+        ? []
+        : [
+            {
+              policyId: policy.id,
+              message: `${slot} scope names undeclared entity type "${entityType}"`,
+            },
+          ],
+    eq: ({ ref }) => validateRef(ref),
+    in: ({ ref }) => validateRef(ref),
+  });
 };
 
-const collectConditionRefs = (condition: Condition.Condition, out: Entity.EntityRef[]): void => {
-  const fromOperand = (operand: Condition.Operand): void => {
-    if (operand._tag === "Lit" && Entity.isEntityValue(operand.value)) {
-      out.push(operand.value.__entity);
-    }
-  };
-  switch (condition._tag) {
-    case "And":
-    case "Or":
-      for (const inner of condition.conditions) collectConditionRefs(inner, out);
-      return;
-    case "Not":
-      collectConditionRefs(condition.condition, out);
-      return;
-    case "Eq":
-    case "Compare":
-    case "In":
-      fromOperand(condition.left);
-      fromOperand(condition.right);
-      return;
-    case "Contains":
-      fromOperand(condition.collection);
-      fromOperand(condition.value);
-      return;
-    case "Has":
-      return;
-  }
-};
+/** The operands a condition compares, in evaluation order (`Has` has none). */
+const conditionOperands = (condition: Condition.Condition): ReadonlyArray<Condition.Operand> =>
+  Match.valueTags(condition, {
+    And: ({ conditions }) => Arr.flatMap(conditions, conditionOperands),
+    Or: ({ conditions }) => Arr.flatMap(conditions, conditionOperands),
+    Not: (not) => conditionOperands(not.condition),
+    Eq: ({ left, right }): ReadonlyArray<Condition.Operand> => [left, right],
+    Compare: ({ left, right }): ReadonlyArray<Condition.Operand> => [left, right],
+    In: ({ left, right }): ReadonlyArray<Condition.Operand> => [left, right],
+    Contains: ({ collection, value }): ReadonlyArray<Condition.Operand> => [collection, value],
+    Has: (): ReadonlyArray<Condition.Operand> => [],
+  });
 
-const collectAttrOperands = (condition: Condition.Condition, out: Condition.Attr[]): void => {
-  const fromOperand = (operand: Condition.Operand): void => {
-    if (operand._tag === "Attr") out.push(operand);
-  };
-  switch (condition._tag) {
-    case "And":
-    case "Or":
-      for (const inner of condition.conditions) collectAttrOperands(inner, out);
-      return;
-    case "Not":
-      collectAttrOperands(condition.condition, out);
-      return;
-    case "Eq":
-    case "Compare":
-    case "In":
-      fromOperand(condition.left);
-      fromOperand(condition.right);
-      return;
-    case "Contains":
-      fromOperand(condition.collection);
-      fromOperand(condition.value);
-      return;
-    case "Has":
-      return;
-  }
-};
+const conditionRefs = (condition: Condition.Condition): ReadonlyArray<Entity.EntityRef> =>
+  Arr.filterMap(conditionOperands(condition), (operand) =>
+    Predicate.isTagged(operand, "Lit") && Entity.isEntityValue(operand.value)
+      ? Result.succeed(operand.value.__entity)
+      : Result.failVoid,
+  );
+
+const attrOperands = (condition: Condition.Condition): ReadonlyArray<Condition.Attr> =>
+  Arr.filter(conditionOperands(condition), (operand): operand is Condition.Attr =>
+    Predicate.isTagged(operand, "Attr"),
+  );
 
 const pinnedType = (scope: Scope): string | null =>
-  scope._tag === "is" ? scope.entityType : scope._tag === "eq" ? scope.ref.type : null;
+  Match.valueTags(scope, {
+    is: ({ entityType }): string | null => entityType,
+    eq: ({ ref }): string | null => ref.type,
+    any: (): string | null => null,
+    in: (): string | null => null,
+  });
 
 /**
  * When a policy pins its principal or resource to one declared type whose
@@ -219,25 +193,23 @@ const validateAttributes = (
   model: Model,
   policy: DeclarativePolicy,
   condition: Condition.Condition,
-  issues: ValidationIssue[],
-): void => {
-  const attrs: Condition.Attr[] = [];
-  collectAttrOperands(condition, attrs);
-  for (const slot of ["principal", "resource"] as const) {
+): ReadonlyArray<ValidationIssue> => {
+  const attrs = attrOperands(condition);
+  return Arr.flatMap(["principal", "resource"] as const, (slot) => {
     const type = pinnedType(policy[slot]);
     const fields = type === null ? undefined : model.entities[type]?.attributes?.fields;
-    if (fields === undefined) continue;
-    for (const attr of attrs) {
-      if (attr.of !== slot) continue;
+    if (fields === undefined) return [];
+    return Arr.filterMap(attrs, (attr) => {
+      if (attr.of !== slot) return Result.failVoid;
       const [head] = attr.path;
-      if (head !== undefined && !(head in fields)) {
-        issues.push({
-          policyId: policy.id,
-          message: `condition reads ${slot}.${attr.path.join(".")}, but "${type}" declares no attribute "${head}"`,
-        });
-      }
-    }
-  }
+      return head !== undefined && !(head in fields)
+        ? Result.succeed({
+            policyId: policy.id,
+            message: `condition reads ${slot}.${attr.path.join(".")}, but "${type}" declares no attribute "${head}"`,
+          })
+        : Result.failVoid;
+    });
+  });
 };
 
 /**
@@ -247,25 +219,31 @@ const validateAttributes = (
 const validateAppliesTo = (
   model: Model,
   policy: DeclarativePolicy,
-  issues: ValidationIssue[],
-): void => {
-  if (policy.action._tag !== "eq" || policy.action.ref.type !== "Action") return;
+): ReadonlyArray<ValidationIssue> => {
+  if (policy.action._tag !== "eq" || policy.action.ref.type !== "Action") return [];
   const actionId = policy.action.ref.id;
   const decl = model.actions[actionId];
-  if (decl === undefined) return;
+  if (decl === undefined) return [];
 
-  const check = (slot: "principal" | "resource", scope: Scope, allowed: ReadonlyArray<string>) => {
-    const pinned =
-      scope._tag === "is" ? scope.entityType : scope._tag === "eq" ? scope.ref.type : null;
-    if (pinned !== null && !allowed.includes(pinned)) {
-      issues.push({
-        policyId: policy.id,
-        message: `action "${actionId}" does not apply to ${slot} type "${pinned}" (appliesTo: ${allowed.join(", ")})`,
-      });
-    }
+  const check = (
+    slot: "principal" | "resource",
+    scope: Scope,
+    allowed: ReadonlyArray<string>,
+  ): ReadonlyArray<ValidationIssue> => {
+    const pinned = pinnedType(scope);
+    return pinned !== null && !allowed.includes(pinned)
+      ? [
+          {
+            policyId: policy.id,
+            message: `action "${actionId}" does not apply to ${slot} type "${pinned}" (appliesTo: ${allowed.join(", ")})`,
+          },
+        ]
+      : [];
   };
-  check("principal", policy.principal, decl.appliesTo.principal);
-  check("resource", policy.resource, decl.appliesTo.resource);
+  return [
+    ...check("principal", policy.principal, decl.appliesTo.principal),
+    ...check("resource", policy.resource, decl.appliesTo.resource),
+  ];
 };
 
 /**
@@ -280,26 +258,23 @@ const validateAppliesTo = (
 export const validatePolicies = (
   model: Model,
   policies: ReadonlyArray<DeclarativePolicy>,
-): ReadonlyArray<ValidationIssue> => {
-  const issues: ValidationIssue[] = [];
-  for (const policy of policies) {
-    validateScope(model, policy, "principal", policy.principal, issues);
-    validateScope(model, policy, "action", policy.action, issues);
-    validateScope(model, policy, "resource", policy.resource, issues);
-    validateAppliesTo(model, policy, issues);
-    if (policy.when !== undefined) {
-      validateAttributes(model, policy, policy.when, issues);
-      const refs: Entity.EntityRef[] = [];
-      collectConditionRefs(policy.when, refs);
-      for (const ref of refs) {
-        if (!knownEntityType(model, ref.type)) {
-          issues.push({
-            policyId: policy.id,
-            message: `condition references undeclared entity type "${ref.type}"`,
-          });
-        }
-      }
-    }
-  }
-  return issues;
-};
+): ReadonlyArray<ValidationIssue> =>
+  Arr.flatMap(policies, (policy) => [
+    ...validateScope(model, policy, "principal", policy.principal),
+    ...validateScope(model, policy, "action", policy.action),
+    ...validateScope(model, policy, "resource", policy.resource),
+    ...validateAppliesTo(model, policy),
+    ...(policy.when === undefined
+      ? []
+      : [
+          ...validateAttributes(model, policy, policy.when),
+          ...Arr.filterMap(conditionRefs(policy.when), (ref) =>
+            knownEntityType(model, ref.type)
+              ? Result.failVoid
+              : Result.succeed({
+                  policyId: policy.id,
+                  message: `condition references undeclared entity type "${ref.type}"`,
+                }),
+          ),
+        ]),
+  ]);

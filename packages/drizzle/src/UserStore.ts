@@ -17,11 +17,17 @@
  */
 
 import { eq, inArray } from "drizzle-orm";
-import { Effect, Exit, Layer, Request, RequestResolver } from "effect";
+import { Effect, Layer, Record as Rec, Request, RequestResolver } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
-import { resolveSchema, type SchemaInput, type UserColumns, type UserSchema } from "./Columns.ts";
+import {
+  type PromotedValue,
+  resolveSchema,
+  type SchemaInput,
+  type UserColumns,
+  type UserSchema,
+} from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { makeQuery } from "./internal.ts";
+import { completeById, makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 // ---------------------------------------------------------------------------
@@ -35,23 +41,24 @@ type UserRow = DrizzleSelected<UserColumns>;
  * Where a promoted attribute's column lands in the projection. Prefixed so it
  * cannot collide with a store field of the same name (`name`, `image`, …).
  */
-const promotedKey = (attribute: string): string => `promoted:${attribute}`;
+const promotedKey = (attribute: string): PromotedKey => `promoted:${attribute}`;
+
+type PromotedKey = `promoted:${string}`;
+
+/** The promoted entries of a user read, under their {@link promotedKey}s. */
+type PromotedFields = { readonly [key: PromotedKey]: PromotedValue | undefined };
 
 /**
  * The projection a user read selects: the mapped store fields, plus one entry
  * per promoted attribute column.
  *
- * The cast widens the selection to the row type the store reads back; the
- * promoted entries ride along under {@link promotedKey}s the row type does not
- * name, and {@link makeToUser} reads them back out.
+ * The promoted entries ride along under {@link promotedKey}s the row type does
+ * not name, and {@link makeToUser} reads them back out.
  */
-const selection = (users: UserSchema): UserColumns => {
-  const fields: Record<string, unknown> = { ...users.columns };
-  for (const [attribute, column] of Object.entries(users.promoted)) {
-    fields[promotedKey(attribute)] = column;
-  }
-  return fields as UserColumns;
-};
+const selection = (users: UserSchema): UserColumns => ({
+  ...users.columns,
+  ...Rec.mapKeys(users.promoted, promotedKey),
+});
 
 /**
  * Row → `Auth.User`. A promoted column is the sole authority for its attribute:
@@ -62,14 +69,21 @@ const makeToUser =
   (users: UserSchema) =>
   (row: UserRow): Auth.User => {
     // A users table with no mapped attribute bag reads back `undefined` here.
-    const bag = (row.attributes ?? {}) as Readonly<Record<string, unknown>>;
-    const attributes: Record<string, unknown> = { ...bag };
-    const promoted = row as unknown as Readonly<Record<string, unknown>>;
-    for (const attribute of Object.keys(users.promoted)) {
-      const value = promoted[promotedKey(attribute)];
-      if (value === null || value === undefined) delete attributes[attribute];
-      else attributes[attribute] = value;
-    }
+    // SAFETY: `UserColumns.attributes` is a `NullableColumn<Record<string, unknown>>`;
+    // only its being an optional field blurs the projected type.
+    const bag = (row.attributes ?? {}) as Auth.Attributes;
+    // SAFETY: `selection` projects each promoted column under its `promotedKey`, and
+    // `AuthSchemaSpec` only admits promoted columns that read back as a `PromotedValue`.
+    const promotedFields = row as UserRow & PromotedFields;
+    const promoted = Rec.map(
+      users.promoted,
+      (_column, attribute) => promotedFields[promotedKey(attribute)],
+    );
+    const attributes = Rec.filter(
+      { ...bag, ...promoted },
+      (value, attribute) =>
+        !(Rec.has(users.promoted, attribute) && (value === null || value === undefined)),
+    );
     return {
       id: row.id,
       createdAt: row.createdAt,
@@ -152,17 +166,13 @@ export const makeResolver = (
     const toUser = makeToUser(users);
 
     return RequestResolver.make<UserRequest>((entries) =>
-      Effect.gen(function* () {
-        const ids = Array.from(new Set(entries.map((entry) => entry.request.id)));
-        const rows = yield* query("user.getMany", (db) =>
-          db.select(projection).from(table).where(inArray(column.id, ids)).execute(),
-        );
-
-        const byId = new Map(rows.map((row) => [row.id, row]));
-        for (const entry of entries) {
-          const row = byId.get(entry.request.id);
-          entry.completeUnsafe(Exit.succeed(row === undefined ? null : toUser(row)));
-        }
-      }),
+      completeById(
+        entries,
+        (ids) =>
+          query("user.getMany", (db) =>
+            db.select(projection).from(table).where(inArray(column.id, ids)).execute(),
+          ),
+        toUser,
+      ),
     );
   });

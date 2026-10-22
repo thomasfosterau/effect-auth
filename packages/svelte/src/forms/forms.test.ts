@@ -14,10 +14,10 @@ const EMAIL = "alice@svelte.test";
 const PW = "password-123";
 
 const now = Date.now();
-const authSuccess = {
+const authSuccess: AuthSuccess = {
   user: { id: "user-1", email: EMAIL, createdAt: now, updatedAt: now, attributes: {} },
   needsEmailVerification: false,
-} as unknown as AuthSuccess;
+};
 const ok: StatusResponse = { status: true };
 
 /**
@@ -25,7 +25,14 @@ const ok: StatusResponse = { status: true };
  * about the components, and the client package has its own suite for the
  * requests themselves.
  */
-const stub = (methods: object): AuthClient => methods as unknown as AuthClient;
+/** A member as a stub may supply it: a method as is, a namespace as any subset of its members. */
+type StubOf<T> = T extends (...args: infer A) => infer R
+  ? (...args: A) => R
+  : { readonly [K in keyof T]?: StubOf<T[K]> };
+
+/** Any subset of the client's members; the code under test touches only the ones a test supplies. */
+type ClientStub = StubOf<AuthClient>;
+const stub = (methods: ClientStub): AuthClient => methods as AuthClient;
 
 /** Put a client in Svelte context, the way `setAuthClient` does. */
 const withClient = (client: AuthClient) => new Map<unknown, unknown>([[authClientKey, client]]);
@@ -54,7 +61,7 @@ describe("SignInForm", () => {
     const calls: unknown[] = [];
     const seen: AuthSuccess[] = [];
     const client = stub({
-      signIn: (payload: unknown) => {
+      signIn: (payload: object) => {
         calls.push(payload);
         return Promise.resolve(authSuccess);
       },
@@ -91,7 +98,7 @@ describe("SignInForm", () => {
   it('switches to signInUsername under variant="username"', async () => {
     const calls: unknown[] = [];
     const client = stub({
-      signInUsername: (payload: unknown) => {
+      signInUsername: (payload: object) => {
         calls.push(payload);
         return Promise.resolve(authSuccess);
       },
@@ -117,7 +124,7 @@ describe("SignInForm", () => {
     const { container } = render(SignInForm, {
       props: {
         client: stub({ signIn: () => Promise.reject(failure) }),
-        onError: (e: unknown) => seen.push(e),
+        onError: (e: Error) => seen.push(e),
       },
     });
 
@@ -185,7 +192,7 @@ describe("SignUpForm", () => {
   it("omits a blank name and trims a filled one", async () => {
     const calls: unknown[] = [];
     const client = stub({
-      signUp: (payload: unknown) => {
+      signUp: (payload: object) => {
         calls.push(payload);
         return Promise.resolve(authSuccess);
       },
@@ -225,7 +232,7 @@ describe("PasswordResetRequestForm", () => {
     const calls: unknown[] = [];
     const seen: StatusResponse[] = [];
     const client = stub({
-      passwordResetRequest: (payload: unknown) => {
+      passwordResetRequest: (payload: object) => {
         calls.push(payload);
         return Promise.resolve(ok);
       },
@@ -250,7 +257,7 @@ describe("PasswordResetConfirmForm", () => {
   it("submits the token with the new password once the entries match", async () => {
     const calls: unknown[] = [];
     const client = stub({
-      passwordResetConfirm: (payload: unknown) => {
+      passwordResetConfirm: (payload: object) => {
         calls.push(payload);
         return Promise.resolve(ok);
       },
@@ -307,7 +314,7 @@ describe("MagicLinkForm", () => {
     const calls: unknown[] = [];
     const client = stub({
       magicLink: {
-        send: (payload: unknown) => {
+        send: (payload: object) => {
           calls.push(payload);
           return Promise.resolve(ok);
         },
@@ -331,7 +338,7 @@ describe("MagicLinkForm", () => {
     const { container } = render(MagicLinkForm, {
       props: {
         client: stub({ magicLink: { send: () => Promise.reject(failure) } }),
-        onError: (cause: unknown) => seen.push(cause),
+        onError: (cause: Error) => seen.push(cause),
       },
     });
 
@@ -345,11 +352,11 @@ describe("EmailOtpForm", () => {
   const otpClient = (calls: unknown[]) =>
     stub({
       emailOtp: {
-        send: (payload: unknown) => {
+        send: (payload: object) => {
           calls.push(["send", payload]);
           return Promise.resolve(ok);
         },
-        signIn: (payload: unknown) => {
+        signIn: (payload: object) => {
           calls.push(["signIn", payload]);
           return Promise.resolve(authSuccess);
         },

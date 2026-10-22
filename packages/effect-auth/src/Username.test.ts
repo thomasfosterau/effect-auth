@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
+import { Array as Arr, Effect, Layer, Order } from "effect";
 import { UsernameService, UsernameError, type UsernameConfig } from "./Username.ts";
 import {
   type AuthResult,
@@ -421,7 +421,7 @@ describe("UsernameService under anti-enumeration (#414)", () => {
         let owner: Types.User | undefined;
         return {
           get owner() {
-            if (owner === undefined) throw new Error("the store never ran");
+            assert(owner !== undefined, "the store never ran");
             return owner;
           },
           store: {
@@ -441,7 +441,7 @@ describe("UsernameService under anti-enumeration (#414)", () => {
         let owner: Types.User | undefined;
         return {
           get owner() {
-            if (owner === undefined) throw new Error("the store never ran");
+            assert(owner !== undefined, "the store never ran");
             return owner;
           },
           store: {
@@ -476,8 +476,8 @@ describe("UsernameService under anti-enumeration (#414)", () => {
 
       // The same answer: same fields, no session, the submitted address.
       const shape = (result: AuthResult) => ({
-        keys: Object.keys(result).sort(),
-        userKeys: Object.keys(result.user).sort(),
+        keys: Arr.sort(Object.keys(result), Order.String),
+        userKeys: Arr.sort(Object.keys(result.user), Order.String),
         session: result.session,
         method: result.method,
       });

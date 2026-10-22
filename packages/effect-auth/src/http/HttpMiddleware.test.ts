@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vite-plus/test";
-import { Effect, Exit, Layer, Option, Redacted } from "effect";
+import { assert, describe, it, expect } from "vite-plus/test";
+import { Array as Arr, Effect, Exit, Layer, Option, Redacted } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
+import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import type * as Types from "../Types.ts";
 import { SessionService } from "../SessionService.ts";
 import { Hooks } from "../Hooks.ts";
@@ -76,14 +77,49 @@ const cell = <T>(): Cell<T> => ({ value: undefined });
 
 /**
  * `HttpApiMiddleware.Service` types its scheme handlers against the whole
- * `HttpApi` surface, which these unit tests deliberately do not build — so the
- * handlers are invoked through an `any` cast. Re-annotating the *result* keeps
- * the effect's requirements honest (the middleware leaves `SessionService`,
- * `Hooks` and — on the cookie path — `HttpServerRequest` to be provided below)
- * instead of letting `any` swallow them.
+ * `HttpApi` surface, which these unit tests deliberately do not build: the
+ * handlers are called with a stand-in endpoint and group, which they ignore.
+ * Their result also requires everything `HttpRouter.Provided` names, of which
+ * the middleware reads only `HttpServerRequest`, so the result is narrowed to
+ * that. The narrowed type keeps the effect's requirements honest (the
+ * middleware leaves `SessionService`, `Hooks` and — on the cookie path —
+ * `HttpServerRequest` to be provided below).
  */
 type MiddlewareResult<A, R> = Effect.Effect<A, unknown, R>;
 type PerRequestServices = SessionService | Hooks;
+
+/**
+ * The endpoint and group a middleware is told it wraps. The middleware never
+ * reads them, so one stand-in pair serves every call; `HttpApi.reflect` hands
+ * them over typed as the middleware's options expect.
+ */
+const standIn = ((): {
+  readonly endpoint: HttpApiEndpoint.Top;
+  readonly group: HttpApiGroup.Top;
+} => {
+  const pairs: Array<{ readonly endpoint: HttpApiEndpoint.Top; readonly group: HttpApiGroup.Top }> =
+    [];
+  HttpApi.reflect(
+    HttpApi.make("standIn").add(
+      HttpApiGroup.make("standIn").add(HttpApiEndpoint.get("standIn", "/")),
+    ),
+    {
+      onGroup: () => undefined,
+      onEndpoint: ({ endpoint, group }) => pairs.push({ endpoint, group }),
+    },
+  );
+  return Option.match(Arr.head(pairs), {
+    onNone: () => assert.fail("HttpApi.reflect reported no endpoint"),
+    onSome: (pair) => pair,
+  });
+})();
+
+/** What a test handler may read: whatever `AuthMiddleware` provides. */
+type AuthHandler = Effect.Effect<
+  typeof ok,
+  never,
+  CurrentSession | CurrentUser | CurrentPrincipal | MaybeCurrentSession
+>;
 
 // ---------------------------------------------------------------------------
 // AuthMiddleware – conduit_session handler
@@ -92,16 +128,13 @@ type PerRequestServices = SessionService | Hooks;
 describe("HttpMiddleware.layer – conduit_session handler", () => {
   const authLayer = HttpMiddleware.layer({ secure: false });
 
-  const runCookiePath = (
-    request: HttpServerRequest.HttpServerRequest,
-    handler: Effect.Effect<typeof ok, never, CurrentSession | CurrentUser>,
-  ) =>
+  const runCookiePath = (request: HttpServerRequest.HttpServerRequest, handler: AuthHandler) =>
     Effect.gen(function* () {
       const svc = yield* AuthMiddleware;
-      const applied: MiddlewareResult<
-        typeof ok,
-        PerRequestServices | HttpServerRequest.HttpServerRequest
-      > = (svc.conduit_session as any)(handler, undefined);
+      const applied = svc.conduit_session(handler, {
+        ...standIn,
+        credential: Redacted.make(""),
+      }) as MiddlewareResult<typeof ok, PerRequestServices | HttpServerRequest.HttpServerRequest>;
       return yield* applied.pipe(
         Effect.provideService(HttpServerRequest.HttpServerRequest, request),
       );
@@ -128,15 +161,13 @@ describe("HttpMiddleware.layer – conduit_session handler", () => {
   });
 
   it("no session cookie → Unauthorized failure", async () => {
-    const exit = await Effect.runPromiseExit(
-      runCookiePath(makeWebRequest(), Effect.succeed(ok) as any),
-    );
+    const exit = await Effect.runPromiseExit(runCookiePath(makeWebRequest(), Effect.succeed(ok)));
     expect(Exit.isFailure(exit)).toBe(true);
   });
 
   it("invalid session cookie → Unauthorized failure", async () => {
     const exit = await Effect.runPromiseExit(
-      runCookiePath(makeWebRequest({ cookie: "bad-token-xyz" }), Effect.succeed(ok) as any),
+      runCookiePath(makeWebRequest({ cookie: "bad-token-xyz" }), Effect.succeed(ok)),
     );
     expect(Exit.isFailure(exit)).toBe(true);
   });
@@ -149,7 +180,7 @@ describe("HttpMiddleware.layer – conduit_session handler", () => {
     });
 
     const exit = await Effect.runPromiseExit(
-      runCookiePath(makeWebRequest({ cookie: RAW_TOKEN }), handler as any),
+      runCookiePath(makeWebRequest({ cookie: RAW_TOKEN }), handler),
     );
 
     expect(Exit.isSuccess(exit)).toBe(true);
@@ -180,10 +211,11 @@ describe("HttpMiddleware.layer – conduit_session handler", () => {
         resource: Entity.ref("User", "someone-else"),
       });
       return ok;
-    }).pipe(Effect.provide(authorizerLayer));
+      // The policy layer cannot fail to build here; were it to, the test fails all the same.
+    }).pipe(Effect.provide(authorizerLayer), Effect.orDie);
 
     const exit = await Effect.runPromiseExit(
-      runCookiePath(makeWebRequest({ cookie: RAW_TOKEN }), handler as any),
+      runCookiePath(makeWebRequest({ cookie: RAW_TOKEN }), handler),
     );
 
     expect(Exit.isSuccess(exit)).toBe(true);
@@ -214,20 +246,13 @@ describe("HttpMiddleware.layer – conduit_session handler", () => {
 describe("HttpMiddleware.layer – bearer handler", () => {
   const authLayer = HttpMiddleware.layer({ secure: false });
 
-  const runBearerPath = (
-    token: string,
-    handler: Effect.Effect<typeof ok, never, CurrentSession | CurrentUser>,
-  ) =>
+  const runBearerPath = (token: string, handler: AuthHandler) =>
     Effect.gen(function* () {
       const svc = yield* AuthMiddleware;
-      const applied: MiddlewareResult<typeof ok, PerRequestServices> = (svc.bearer as any)(
-        handler,
-        {
-          credential: Redacted.make(token),
-          endpoint: undefined,
-          group: undefined,
-        },
-      );
+      const applied = svc.bearer(handler, {
+        ...standIn,
+        credential: Redacted.make(token),
+      }) as MiddlewareResult<typeof ok, PerRequestServices>;
       return yield* applied;
     }).pipe(Effect.provide(Layer.mergeAll(authLayer, baseLayer)));
 
@@ -254,21 +279,19 @@ describe("HttpMiddleware.layer – bearer handler", () => {
       return ok;
     });
 
-    const exit = await Effect.runPromiseExit(runBearerPath(RAW_TOKEN, handler as any));
+    const exit = await Effect.runPromiseExit(runBearerPath(RAW_TOKEN, handler));
 
     expect(Exit.isSuccess(exit)).toBe(true);
     expect(principalCell.value).toEqual(Entity.ref("User", USER_ID));
   });
 
   it("invalid Bearer token → Unauthorized failure", async () => {
-    const exit = await Effect.runPromiseExit(
-      runBearerPath("bad-token-xyz", Effect.succeed(ok) as any),
-    );
+    const exit = await Effect.runPromiseExit(runBearerPath("bad-token-xyz", Effect.succeed(ok)));
     expect(Exit.isFailure(exit)).toBe(true);
   });
 
   it("empty Bearer token → Unauthorized failure", async () => {
-    const exit = await Effect.runPromiseExit(runBearerPath("", Effect.succeed(ok) as any));
+    const exit = await Effect.runPromiseExit(runBearerPath("", Effect.succeed(ok)));
     expect(Exit.isFailure(exit)).toBe(true);
   });
 });
@@ -288,10 +311,10 @@ describe("HttpMiddleware.optionalLayer", () => {
     });
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
-      const applied: MiddlewareResult<
+      const applied = svc(handler, standIn) as MiddlewareResult<
         typeof ok,
         PerRequestServices | HttpServerRequest.HttpServerRequest
-      > = (svc as any)(handler, undefined);
+      >;
       yield* applied.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
     }).pipe(Effect.provide(Layer.mergeAll(optionalLayer, baseLayer)));
     return { maybeCell, effect };
@@ -339,10 +362,10 @@ describe("HttpMiddleware.optionalLayer", () => {
     });
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
-      const applied: MiddlewareResult<
+      const applied = svc(handler, standIn) as MiddlewareResult<
         typeof ok,
         PerRequestServices | HttpServerRequest.HttpServerRequest
-      > = (svc as any)(handler, undefined);
+      >;
       yield* applied.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
     }).pipe(Effect.provide(Layer.mergeAll(optionalLayer, baseLayer)));
     return { principalCell, effect };
@@ -396,10 +419,10 @@ describe("MaybeCurrentSession is provided by both middlewares", () => {
 
     const effect = Effect.gen(function* () {
       const svc = yield* AuthMiddleware;
-      const applied: MiddlewareResult<
-        typeof ok,
-        PerRequestServices | HttpServerRequest.HttpServerRequest
-      > = (svc.conduit_session as any)(handler, undefined);
+      const applied = svc.conduit_session(handler, {
+        ...standIn,
+        credential: Redacted.make(""),
+      }) as MiddlewareResult<typeof ok, PerRequestServices | HttpServerRequest.HttpServerRequest>;
       yield* applied.pipe(
         Effect.provideService(
           HttpServerRequest.HttpServerRequest,
@@ -421,10 +444,10 @@ describe("MaybeCurrentSession is provided by both middlewares", () => {
 
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
-      const applied: MiddlewareResult<
+      const applied = svc(handler, standIn) as MiddlewareResult<
         typeof ok,
         PerRequestServices | HttpServerRequest.HttpServerRequest
-      > = (svc as any)(handler, undefined);
+      >;
       yield* applied.pipe(
         Effect.provideService(HttpServerRequest.HttpServerRequest, makeWebRequest()),
       );

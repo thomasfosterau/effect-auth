@@ -1,9 +1,16 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Redacted } from "effect";
+import { Data, Effect, Predicate, Redacted, Schema } from "effect";
 import { EmailSender, type EmailMessage } from "@thomasfosterau/effect-auth";
 import { defaultRender, layer, resendEmailSender } from "./index.ts";
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
+
+const UnknownJson = Schema.fromJsonString(Schema.Unknown);
+const toJson = Schema.encodeSync(UnknownJson);
+const fromJson = Schema.decodeUnknownSync(UnknownJson);
+
+/** What the failing stub `fetch` rejects with. */
+class NetworkDown extends Data.TaggedError("NetworkDown") {}
 
 interface CapturedRequest {
   readonly url: string;
@@ -20,7 +27,7 @@ const stubFetch = (
   const fetchStub = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const request = { url: String(input), init: init ?? {} };
     calls.push(request);
-    return typeof response === "function" ? response(request) : response;
+    return Predicate.isFunction(response) ? response(request) : response;
   }) as typeof fetch;
   return { fetch: fetchStub, calls };
 };
@@ -96,9 +103,7 @@ describe("defaultRender", () => {
 
 describe("resendEmailSender", () => {
   it("posts to Resend with a Bearer auth header and the rendered payload", async () => {
-    const { fetch, calls } = stubFetch(
-      new Response(JSON.stringify({ id: "email_1" }), { status: 200 }),
-    );
+    const { fetch, calls } = stubFetch(new Response(toJson({ id: "email_1" }), { status: 200 }));
     const sender = resendEmailSender({ ...baseConfig, fetch });
 
     await run(
@@ -117,7 +122,7 @@ describe("resendEmailSender", () => {
     expect(headers.get("Authorization")).toBe("Bearer re_test_key");
     expect(headers.get("Content-Type")).toBe("application/json");
 
-    const body = JSON.parse(request!.init.body as string);
+    const body = fromJson(request!.init.body as string);
     expect(body).toEqual({
       from: "App <noreply@example.com>",
       to: "user@example.com",
@@ -138,7 +143,7 @@ describe("resendEmailSender", () => {
       sender.send({ to: "user@example.com", purpose: "magic-link", params: { token: "t" } }),
     );
 
-    const body = JSON.parse(calls[0]!.init.body as string);
+    const body = fromJson(calls[0]!.init.body as string);
     expect(body).toEqual({
       from: "App <noreply@example.com>",
       to: "user@example.com",
@@ -159,7 +164,7 @@ describe("resendEmailSender", () => {
 
   it("never leaks the API key onto a failure", async () => {
     const { fetch } = stubFetch(
-      new Response(JSON.stringify({ message: "invalid `to` field" }), { status: 422 }),
+      new Response(toJson({ message: "invalid `to` field" }), { status: 422 }),
     );
     const sender = resendEmailSender({ ...baseConfig, fetch });
 
@@ -170,12 +175,12 @@ describe("resendEmailSender", () => {
     );
 
     expect(err._tag).toBe("AuthError");
-    expect(JSON.stringify(err)).not.toContain("re_test_key");
+    expect(toJson(err)).not.toContain("re_test_key");
   });
 
   it("maps a 4xx response to an AuthError carrying status and body", async () => {
     const { fetch } = stubFetch(
-      new Response(JSON.stringify({ message: "invalid `to` field", name: "validation_error" }), {
+      new Response(toJson({ message: "invalid `to` field", name: "validation_error" }), {
         status: 422,
       }),
     );
@@ -207,7 +212,7 @@ describe("resendEmailSender", () => {
 
   it("maps a network failure to an AuthError", async () => {
     const failingFetch = (async () => {
-      throw new Error("network down");
+      throw new NetworkDown();
     }) as typeof fetch;
     const sender = resendEmailSender({ ...baseConfig, fetch: failingFetch });
 

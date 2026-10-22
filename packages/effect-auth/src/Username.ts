@@ -10,7 +10,7 @@
  * anti-enumeration error and the same `SecondFactorGate` seam as
  * email/password sign-in.
  */
-import { Context, Data, Effect, Layer, Option } from "effect";
+import { Array as Arr, Context, Data, Effect, Layer, Option } from "effect";
 import * as Errors from "./Errors.ts";
 import {
   answeredByStandIn,
@@ -27,10 +27,12 @@ import {
   primaryEmail,
 } from "./Identifier.ts";
 import { UserStore } from "./UserStore.ts";
-import { MultiAlgorithmVerifier, PasswordHasher } from "./password/Password.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import { makeDecoyHash, verifyPasswordOrDecoy } from "./password/DecoyVerify.ts";
 import { normalizeUsername } from "./utils.ts";
 import { SessionService } from "./SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
+import type * as Types from "./Types.ts";
 
 /** Raised for invalid or already-taken usernames. */
 export class UsernameError extends Data.TaggedError("UsernameError")<{
@@ -61,15 +63,15 @@ export interface UsernameSignUpInput {
   readonly email: string;
   readonly password: string;
   readonly name?: string;
-  readonly attributes?: Record<string, unknown>;
-  readonly sessionAttributes?: Record<string, unknown>;
+  readonly attributes?: Types.Attributes;
+  readonly sessionAttributes?: Types.Attributes;
 }
 
 /** Input to {@link UsernameService.signIn}. */
 export interface UsernameSignInInput {
   readonly username: string;
   readonly password: string;
-  readonly sessionAttributes?: Record<string, unknown>;
+  readonly sessionAttributes?: Types.Attributes;
   /**
    * When `false`, the session cookie is emitted without `Max-Age`/`Expires`
    * (a browser-session cookie). See `SignInInput.rememberMe` for details.
@@ -142,7 +144,7 @@ export class UsernameService extends Context.Service<
 
 const DEFAULT_CHARSET = /^[a-zA-Z0-9_.]+$/;
 
-export const make = (
+const make = (
   config: UsernameConfig = {},
 ): Effect.Effect<
   typeof UsernameService.Service,
@@ -170,13 +172,7 @@ export const make = (
 
     // Cached decoy hash — computed on first signIn call so that unknown-username
     // attempts always perform the same hashing work as known-username ones.
-    let cachedDecoyHash: string | undefined;
-    const getDecoyHash: Effect.Effect<string, Errors.HashingError> = Effect.gen(function* () {
-      if (cachedDecoyHash !== undefined) return cachedDecoyHash;
-      const result = yield* passwordHasher.hash("effect-auth-decoy");
-      cachedDecoyHash = result.hash;
-      return cachedDecoyHash;
-    });
+    const getDecoyHash = makeDecoyHash(passwordHasher, "UsernameService.getDecoyHash");
 
     const validate = (raw: string): Effect.Effect<string, UsernameError> =>
       Effect.gen(function* () {
@@ -265,16 +261,12 @@ export const make = (
         const passwordHash =
           user !== null ? yield* emailPasswordStore.getPasswordHash(user.id) : null;
         // Always verify against a real or decoy hash so timing is constant
-        // regardless of whether the account exists.  Route through
-        // MultiAlgorithmVerifier when present so that a hasher switch does not
-        // lock out existing users.
-        const hashToVerify = passwordHash ?? (yield* getDecoyHash);
-        const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
-        const verifyEffect = Option.isSome(multiVerifier)
-          ? multiVerifier.value.verify(input.password, hashToVerify)
-          : passwordHasher.verify(input.password, hashToVerify);
-        const isValid = yield* verifyEffect.pipe(
-          Effect.catchTag("HashingError", () => Effect.succeed(false)),
+        // regardless of whether the account exists.
+        const isValid = yield* verifyPasswordOrDecoy(
+          passwordHasher,
+          input.password,
+          passwordHash,
+          getDecoyHash,
         );
         if (user === null || passwordHash === null || !isValid) {
           return yield* invalid();
@@ -293,7 +285,7 @@ export const make = (
         const handle = { type: "username" as const, value: username };
 
         // Silently upgrade the stored hash when the current hasher considers it outdated.
-        if (passwordHasher.needsRehash?.(passwordHash!)) {
+        if (passwordHasher.needsRehash?.(passwordHash)) {
           yield* passwordHasher.hash(input.password).pipe(
             Effect.flatMap((newHash) => emailPasswordStore.setPasswordHash(user.id, newHash.hash)),
             Effect.ignore,
@@ -338,11 +330,11 @@ export const make = (
 
         // Replace any previous username identifier, then claim the new one.
         const current = yield* identifiers.listByUser(userId);
-        for (const id of current) {
-          if (id.type === "username") {
-            yield* identifiers.delete(id.id);
-          }
-        }
+        yield* Effect.forEach(
+          Arr.filter(current, (id) => id.type === "username"),
+          (id) => identifiers.delete(id.id),
+          { concurrency: 1, discard: true },
+        );
         yield* claimIdentifier(
           identifiers,
           makeIdentifier({ userId, type: "username", value: username, verified: true }),

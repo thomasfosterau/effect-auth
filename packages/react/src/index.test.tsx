@@ -7,7 +7,7 @@ import { useListSessions, useSession } from "./index.ts";
 const EMAIL = "alice@react.test";
 const PW = "password-123";
 
-const json = (body: unknown): Response =>
+const json = (body: object): Response =>
   new Response(JSON.stringify(body), {
     status: 200,
     headers: { "content-type": "application/json" },

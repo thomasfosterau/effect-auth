@@ -148,7 +148,7 @@ const program = Effect.gen(function* () {
 console.log(await Effect.runPromise(Effect.provide(program, AuthorizationLive)));
 ```
 
-Because the output is `DeclarativePolicy` data, a rule authored this way is storable, traceable, validatable against an `AuthorizationModel`, and enforceable at the data boundary with `Auth.protectedField`. Mix it with hand-written policies by composing `Auth.Rbac.policies(...)` into your own `Auth.Authorizer.layer({ policies })`. Migrating from the removed `RoleStore` / `AuthorizationPolicy` API? See [docs/guides/authorization-kernel-migration.md](../../docs/guides/authorization-kernel-migration.md).
+Because the output is `DeclarativePolicy` data, a rule authored this way is storable, traceable, validatable against an `AuthorizationModel`, and enforceable at the data boundary with `Auth.protectedField`. Mix it with hand-written policies by composing `Auth.Rbac.policies(...)` into your own `Auth.Authorizer.layer({ policies })`. Migrating from the removed `RoleStore` / `AuthorizationPolicy` API? See [docs/guides/authorization-kernel-migration.md](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/authorization-kernel-migration.md).
 
 ### System principals
 
@@ -218,7 +218,7 @@ The rules a system principal follows:
 Forbids are not narrowed: an unscoped forbid binds a system principal like everyone else. A forbid
 whose condition reads a user attribute therefore errors for a system principal, and an erroring
 forbid denies, so scope such forbids to users (`Policy.isType("User")`). See
-[ADR 0019](../../docs/adr/0019-system-principals.md).
+[ADR 0019](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/adr/0019-system-principals.md).
 
 `Guard`'s viewer gates (`requireUser`, `requireRoleAtLeast`, `requireOwnerOrRole`) admit users
 only. For an operation a job may also perform, `Auth.Guard.requireSystem({ action, resource })` is
@@ -270,7 +270,7 @@ await Effect.runPromise(
 
 `expectRefusesAnonymous`, `expectRefusesBelow` and `expectAllowsOwner` check one case each.
 
-The store-contract conformance suites (`sessionStoreConformance`, `userStoreConformance`, `identifierStoreConformance`, `apiKeyStoreConformance`) check a bring-your-own store against the semantics its contract states. Each suite is a list of cases, and each case is an `Effect` that fails with `ConformanceError` on a mismatch. The suites import no test runner. Register the cases with your own, as the [bring-your-own-store guide](../../docs/guides/byo-stores.md#7-check-your-store-against-the-contract) shows.
+The store-contract conformance suites (`sessionStoreConformance`, `userStoreConformance`, `identifierStoreConformance`, `apiKeyStoreConformance`) check a bring-your-own store against the semantics its contract states. Each suite is a list of cases, and each case is an `Effect` that fails with `ConformanceError` on a mismatch. The suites import no test runner. Register the cases with your own, as the [bring-your-own-store guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/byo-stores.md#7-check-your-store-against-the-contract) shows.
 
 `memoryStores` is a layer of in-memory reference stores: sessions, users (one table shared by `UserStore`, `EmailPasswordStore`, `OAuthUserStore` and `OAuthAccountStore.hasPassword`), identifiers, TOTP and OTP second factors, trusted devices, JWT keys, OAuth accounts, the four OIDC provider stores, and the `KeyValueStore`-backed token stores over an in-memory `KeyValueStore`. Each build starts empty. It lets a test or a demo build `SessionService`, `EmailPasswordService`, `MultiFactorService`, `OAuthService`, `JwtService` or `OidcProviderService` with no database. Each store is also exported on its own (`memorySessionStore()`, `memoryUserStore(table)`, …).
 
@@ -696,26 +696,45 @@ Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in:
 
 `import * as Auth from "@thomasfosterau/effect-auth"` reaches the whole surface. Each cluster is also a subpath export for a narrower import:
 
-| Entry                                     | Root namespace     | Contents                                                                                                           |
-| ----------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `@thomasfosterau/effect-auth`             | `Auth`             | Sessions, users, identifiers, hooks, errors, the authorization kernel, organizations, admin, API keys, JWT, SSO, … |
-| `@thomasfosterau/effect-auth/email`       | `Auth.Email`       | Email and password sign-in, email verification, email OTP                                                          |
-| `@thomasfosterau/effect-auth/password`    | `Auth.Password`    | `PasswordHasher` (PBKDF2, scrypt), password reset, `HaveIBeenPwnedPlugin`                                          |
-| `@thomasfosterau/effect-auth/multifactor` | `Auth.MultiFactor` | TOTP and backup codes, the OTP second factor, WebAuthn, and the OTP primitives                                     |
-| `@thomasfosterau/effect-auth/oauth`       | `Auth.OAuth`       | `OAuthService`, provider presets, `provider` for custom ones, `generateState`, `generatePKCE`                      |
-| `@thomasfosterau/effect-auth/plugins`     | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization  |
-| `@thomasfosterau/effect-auth/http`        | `Auth.Http`        | The HTTP contract, the mountable handler, the typed Effect client, `AuthMiddleware`                                |
-| `@thomasfosterau/effect-auth/ladder`      | —                  | An ordered role ladder for browser UX gates; imports nothing, not even `effect`                                    |
-| `@thomasfosterau/effect-auth/testing`     | —                  | Test helpers: run as a fixture principal, fixture users, guard assertions, store conformance suites                |
+| Entry                                     | Root namespace     | Contents                                                                                                                                                                              |
+| ----------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@thomasfosterau/effect-auth`             | `Auth`             | Sessions, users, identifiers, hooks, errors, the authorization kernel, organizations, admin, API keys, JWT, SSO, …                                                                    |
+| `@thomasfosterau/effect-auth/email`       | `Auth.Email`       | Email and password sign-in, email verification, email OTP                                                                                                                             |
+| `@thomasfosterau/effect-auth/password`    | `Auth.Password`    | `PasswordHasher` (PBKDF2, scrypt), password reset, `HaveIBeenPwnedPlugin`                                                                                                             |
+| `@thomasfosterau/effect-auth/multifactor` | `Auth.MultiFactor` | TOTP and backup codes, the OTP second factor, WebAuthn, and the OTP primitives                                                                                                        |
+| `@thomasfosterau/effect-auth/oauth`       | `Auth.OAuth`       | `OAuthService`, provider presets, `provider` for custom ones, `generateState`, `generatePKCE`                                                                                         |
+| `@thomasfosterau/effect-auth/plugins`     | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization                                                                     |
+| `@thomasfosterau/effect-auth/http`        | `Auth.Http`        | The HTTP contract, the mountable handler (`make`, `makeAsync`), the typed Effect client, `AuthMiddleware`, the authorization middleware, `RemoteSession` (auth as a separate service) |
+| `@thomasfosterau/effect-auth/ladder`      | —                  | An ordered role ladder for browser UX gates; imports nothing, not even `effect`                                                                                                       |
+| `@thomasfosterau/effect-auth/testing`     | —                  | Test helpers: run as a fixture principal, fixture users, guard assertions, store conformance suites                                                                                   |
+
+The package root also carries these namespaces, each a module whose member names are too generic to sit flat:
+
+| Namespace                                                                                     | Contents                                                                                                                                     |
+| --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Auth.Entity`, `Auth.Condition`, `Auth.Policy`, `Auth.AuthorizationModel`, `Auth.PolicyStore` | The policy kernel: entity references, conditions, declarative and custom policies, `decide`, model validation, stored policies and templates |
+| `Auth.Rbac`                                                                                   | Role/permission configuration compiled to kernel policies and the principal → role entity graph                                              |
+| `Auth.System`                                                                                 | Non-human principals: `declaration`, `provide`, `grant`, `ref`                                                                               |
+| `Auth.Guard`                                                                                  | Zero-IO gates, predicates and capability hooks over a resolved viewer (`Unauthorized` / `Forbidden` are also flat)                           |
+| `Auth.OwnedAccess`                                                                            | Owned-material visibility: `make` (per-row `canView`, per-request `readScope`), the `IsFollower` seam                                        |
+| `Auth.Cacheability`                                                                           | Whether a representation may be served from a viewer-less cache                                                                              |
+| `Auth.Ladder`, `Auth.LadderSchema`                                                            | The ordered role ladder and its rungs as a `Schema`                                                                                          |
+| `Auth.OrganizationEntities`                                                                   | Organizations, members and roles as kernel entities                                                                                          |
+| `Auth.SessionContext`                                                                         | Layers and accessors for an already-resolved session (`CurrentSession`, `CurrentUser`, `MaybeCurrentSession` are also flat)                  |
+| `Auth.SessionResolution`                                                                      | Session resolution at an app's own edge: `hasSessionCredential`, `resolve`, `resolveFailOpen`                                                |
+| `Auth.SessionCookies`                                                                         | Cookie naming shared by the middleware and the edge predicates                                                                               |
+| `Auth.TrustedDevice`                                                                          | Trusted-device `make` / `gate` (the store, service and config are also flat)                                                                 |
+
+Flat root exports beyond those also include the delivery seams (`EmailSender`, `SmsSender`, `emailCallbacks`, `smsCallbacks`), identifiers (`IdentifierStore`, `memoryIdentifierStore`, `claimIdentifier`, `replaceIdentifier`), `KeyValueStore`-backed layers for the short-lived stores (`OAuthStateStoreKV`, `ChallengeStoreKV`, `RateLimitStoreKV`, …), the SAML seam (`SamlVerifier`, `SamlReplayStore`), `ClientIP`, the observability counters and record helpers, and the token primitives `hashToken`, `constantTimeHashEqual` and `timingSafeEqualBytes`.
 
 Errors are tagged (`Data.TaggedError`) and carry a stable `code`; the shared ones are flat root exports: `AuthError` (infrastructure failure only), `InvalidCredentialsError`, `SessionNotFoundError`, `SessionExpiredError`, `UserNotFoundError`, `PermissionDeniedError`, `HashingError`, `ChallengeNotFoundError`, `ChallengeExpiredError`, `CredentialNotFoundError`, `WebAuthnVerificationError`, `OAuthStateNotFoundError`, `OAuthStateExpiredError`, `OAuthProviderError`, `RateLimitError`, `EmailVerificationError`, `MagicLinkError`, `PasswordResetError`, and more. The HTTP API maps them to status codes (`RateLimitError` → 429, `AuthError` → 500).
 
 ## Further reading
 
-- [The three-library boundary](../../docs/BOUNDARY.md): how this library relates to effect-jsonapi and legation.
-- [Architecture](../../docs/ARCHITECTURE.md), including the security model; [design decisions](../../docs/DESIGN.md) and [ADRs](../../docs/adr/README.md).
-- Guides: [bring your own store](../../docs/guides/byo-stores.md), [the browser client](../../docs/guides/client.md), [MCP provider](../../docs/guides/mcp-provider.md), [SCIM](../../docs/guides/scim.md), [auth as a separate service](../../docs/guides/split-auth-service.md), [rate limits and sessions on Durable Objects](../../docs/guides/workers-durable-objects.md), [migrating from Better Auth](../../docs/guides/better-auth-migration.md).
-- [Observability](../../docs/OBSERVABILITY.md): spans and metrics.
+- [The three-library boundary](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/BOUNDARY.md): how this library relates to effect-jsonapi and legation.
+- [Architecture](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/ARCHITECTURE.md), including the security model; [design decisions](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/DESIGN.md) and [ADRs](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/adr/README.md).
+- Guides: [bring your own store](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/byo-stores.md), [the browser client](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/client.md), [MCP provider](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/mcp-provider.md), [SCIM](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/scim.md), [auth as a separate service](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/split-auth-service.md), [rate limits and sessions on Durable Objects](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/workers-durable-objects.md), [migrating from Better Auth](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/better-auth-migration.md).
+- [Observability](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/OBSERVABILITY.md): spans and metrics.
 
 ## License
 

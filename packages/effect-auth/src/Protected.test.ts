@@ -33,10 +33,12 @@ const UserView = Schema.Struct({
 const withPrincipal = <A, E, R>(effect: Effect.Effect<A, E, R>, principal: Entity.EntityRef) =>
   effect.pipe(CurrentPrincipal.provide(principal), Effect.provide(resolverLayer));
 
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const encodeAs = (principal: Entity.EntityRef, value: typeof UserView.Type) =>
   Effect.runPromise(withPrincipal(Schema.encodeEffect(UserView)(value), principal));
 
-const decodeAs = (principal: Entity.EntityRef, input: unknown) =>
+const decodeAs = (principal: Entity.EntityRef, input: typeof UserView.Encoded) =>
   Effect.runPromise(
     Effect.result(withPrincipal(Schema.decodeUnknownEffect(UserView)(input), principal)),
   );
@@ -83,7 +85,7 @@ describe("protectedField – write-side guard on decode", () => {
         bob,
       ),
     );
-    const rendered = JSON.stringify(exit);
+    const rendered = encodeJson(exit);
     expect(rendered).toContain("Authorization denied");
     expect(rendered).toContain('User::\\"bob\\"');
     expect(rendered).toContain('Action::\\"user:read-email\\"');

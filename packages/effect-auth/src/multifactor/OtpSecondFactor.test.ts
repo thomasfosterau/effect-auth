@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect } from "effect";
+import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
+import { Context, Crypto, Effect, Result } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { OtpSecondFactorStore, type OtpSecondFactorRecord } from "./OtpSecondFactor.ts";
@@ -193,9 +193,8 @@ describe("OtpSecondFactorService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OtpSecondFactorError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("OtpSecondFactorError");
   });
 
   it("verify with a wrong OTP fails and increments attempts", async () => {
@@ -218,9 +217,8 @@ describe("OtpSecondFactorService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OtpSecondFactorError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("OtpSecondFactorError");
     // Attempt counter incremented, record still present
     const stored = Array.from(otpRecords.values())[0];
     expect(stored?.attempts).toBe(1);
@@ -255,10 +253,9 @@ describe("OtpSecondFactorService", () => {
     expect(r2._tag).toBe("Failure");
     // Third attempt exhausts limit and deletes the record
     expect(r3._tag).toBe("Failure");
-    if (r3._tag === "Failure") {
-      expect(r3.failure._tag).toBe("OtpSecondFactorError");
-      expect((r3.failure as any).message).toContain("attempts");
-    }
+    assert(Result.isFailure(r3));
+    expect(r3.failure._tag).toBe("OtpSecondFactorError");
+    expect(r3.failure.message).toContain("attempts");
     expect(otpRecords.size).toBe(0);
   });
 
@@ -284,10 +281,9 @@ describe("OtpSecondFactorService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OtpSecondFactorError");
-      expect((result.failure as any).message).toContain("expired");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("OtpSecondFactorError");
+    expect(result.failure.message).toContain("expired");
     // Expired pending record must be eagerly deleted
     expect(otpRecords.size).toBe(0);
   });

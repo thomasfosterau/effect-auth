@@ -16,7 +16,7 @@
  * anonymous user and the freshly-created user; the `linkAccount` config
  * callback migrates any data, then the anonymous user is deleted.
  */
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, MutableHashSet } from "effect";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
 import { SessionService } from "./SessionService.ts";
@@ -94,7 +94,7 @@ export class AnonymousService extends Context.Service<
 export const isAnonymousUser = (user: Types.User): boolean =>
   user.attributes["isAnonymous"] === true;
 
-export const make = (
+const make = (
   config: AnonymousConfig = {},
 ): Effect.Effect<typeof AnonymousService.Service, never, AnonymousUserStore | SessionService> =>
   Effect.gen(function* () {
@@ -104,12 +104,12 @@ export const make = (
     // Tracks IDs currently being linked (single-flight) and already linked
     // (idempotency). Both are needed: inFlight prevents concurrent races;
     // done prevents re-running a completed migration on a second call.
-    const inFlight = new Set<string>();
-    const done = new Set<string>();
+    const inFlight = MutableHashSet.empty<string>();
+    const done = MutableHashSet.empty<string>();
 
     return {
       signInAnonymous: Effect.fn("AnonymousService.signInAnonymous")(function* (
-        sessionAttributes?: Record<string, unknown>,
+        sessionAttributes?: Types.Attributes,
       ) {
         const user = yield* store.createAnonymousUser();
         const session = yield* sessionManager.createSession(user.id, sessionAttributes);
@@ -136,13 +136,13 @@ export const make = (
         }
 
         // Idempotent: already successfully linked.
-        if (done.has(anonymousUser.id)) return;
+        if (MutableHashSet.has(done, anonymousUser.id)) return;
 
         // Single-flight: another fiber is already migrating this user.
-        if (inFlight.has(anonymousUser.id)) return;
+        if (MutableHashSet.has(inFlight, anonymousUser.id)) return;
 
-        inFlight.add(anonymousUser.id);
-        try {
+        MutableHashSet.add(inFlight, anonymousUser.id);
+        yield* Effect.gen(function* () {
           if (config.linkAccount !== undefined) {
             yield* config.linkAccount({ anonymousUser, newUser });
           }
@@ -150,10 +150,10 @@ export const make = (
           yield* sessionManager.invalidateUserSessions(anonymousUser.id);
           yield* store.deleteUser(anonymousUser.id);
 
-          done.add(anonymousUser.id);
-        } finally {
-          inFlight.delete(anonymousUser.id);
-        }
+          MutableHashSet.add(done, anonymousUser.id);
+        }).pipe(
+          Effect.ensuring(Effect.sync(() => MutableHashSet.remove(inFlight, anonymousUser.id))),
+        );
       }),
     };
   });

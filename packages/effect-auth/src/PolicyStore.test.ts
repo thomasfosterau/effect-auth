@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Policy from "./Policy.ts";
 import * as PolicyStore from "./PolicyStore.ts";
+
+const Json = Schema.fromJsonString(Schema.Unknown);
 
 const alice = Entity.ref("User", "alice");
 const bob = Entity.ref("User", "bob");
@@ -303,7 +305,7 @@ describe("document format", () => {
     const document = PolicyStore.policyDocument(policy);
 
     const encoded = await run(PolicyStore.encodePolicyDocument(document));
-    const json = JSON.parse(JSON.stringify(encoded)) as unknown;
+    const json = Schema.decodeUnknownSync(Json)(Schema.encodeSync(Json)(encoded));
     const decoded = await run(PolicyStore.decodePolicyDocument(json));
 
     expect(decoded).toEqual(document);
@@ -313,7 +315,7 @@ describe("document format", () => {
   it("roundtrips a template document through JSON, slots and all", async () => {
     const document = PolicyStore.templateDocument(shareTemplate);
     const encoded = await run(PolicyStore.encodeTemplateDocument(document));
-    const json = JSON.parse(JSON.stringify(encoded)) as unknown;
+    const json = Schema.decodeUnknownSync(Json)(Schema.encodeSync(Json)(encoded));
     const decoded = await run(PolicyStore.decodeTemplateDocument(json));
     expect(decoded).toEqual(document);
     expect(decoded.template.principal).toEqual(PolicyStore.eqSlot);

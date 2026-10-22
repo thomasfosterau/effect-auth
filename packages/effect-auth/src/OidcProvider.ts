@@ -17,8 +17,23 @@
  *
  * @module oidc-provider
  */
-import { Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Crypto,
+  Data,
+  Effect,
+  HashMap,
+  Layer,
+  MutableHashMap,
+  Option,
+  Predicate,
+  Record as Rec,
+  Redacted,
+  String as Str,
+} from "effect";
 import { AuthError } from "./Errors.ts";
+import { randomBase64UrlToken } from "./RandomToken.ts";
 import { JwtService } from "./Jwt.ts";
 import * as Obs from "./Observability.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -651,29 +666,39 @@ const secretEquals = (a: string, b: string): boolean =>
 /** Append query parameters to a URL that may already carry a query string. */
 const buildRedirect = (base: string, params: Record<string, string | undefined>): string => {
   const url = new URL(base);
-  for (const [key, value] of Object.entries(params)) {
+  Rec.toEntries(params).forEach(([key, value]) => {
     if (value !== undefined) url.searchParams.set(key, value);
-  }
+  });
   return url.toString();
 };
 
 const parseScopes = (scope: string | undefined): readonly string[] =>
-  (scope ?? "").split(" ").filter((s) => s.length > 0);
+  (scope ?? "").split(" ").filter(Str.isNonEmpty);
 
 /** Scopes clients may request when `allowedScopes` isn't configured. */
 export const DEFAULT_OIDC_SCOPES = ["openid", "profile", "email", "offline_access"] as const;
+
+/** A claim value released by the userinfo endpoint and the id_token profile claims. */
+type OidcClaimValue = string | number | boolean;
+
+const isTokenEndpointAuthMethod = (method: string): method is OidcTokenEndpointAuthMethod =>
+  OIDC_TOKEN_ENDPOINT_AUTH_METHODS.some((supported) => supported === method);
+
+const allowRegistration: OidcRegistrationDisposition = { allow: true };
 
 /**
  * Validates that a redirect URI is either https or loopback http.
  * Blocks javascript:, data:, and non-loopback http URIs (RFC 8252 §7.3).
  */
+/** `new URL(uri)`, or `None` when the URL constructor throws. */
+const parseUrl: (uri: string) => Option.Option<URL> = Option.liftThrowable(
+  (uri: string) => new URL(uri),
+);
+
 const isAllowedRedirectUri = (uri: string): boolean => {
-  let parsed: URL;
-  try {
-    parsed = new URL(uri);
-  } catch {
-    return false;
-  }
+  const result = parseUrl(uri);
+  if (Option.isNone(result)) return false;
+  const parsed = result.value;
   if (parsed.protocol === "https:") return true;
   if (parsed.protocol === "http:") {
     const h = parsed.hostname;
@@ -689,12 +714,9 @@ const isAllowedRedirectUri = (uri: string): boolean => {
  * component (RFC 6749 §3.1.2).
  */
 const isAllowedDynamicRedirectUri = (uri: string, extraSchemes: readonly string[]): boolean => {
-  let parsed: URL;
-  try {
-    parsed = new URL(uri);
-  } catch {
-    return false;
-  }
+  const result = parseUrl(uri);
+  if (Option.isNone(result)) return false;
+  const parsed = result.value;
   if (parsed.hash !== "") return false;
   const scheme = parsed.protocol.slice(0, -1).toLowerCase();
   if (extraSchemes.some((s) => s.toLowerCase() === scheme)) return true;
@@ -799,19 +821,19 @@ export const make = (
      * was already rotated; presenting it again means a stolen token is in play.
      * Entries are pruned once their absolute expiry passes.
      */
-    const consumedRefreshTokens = new Map<
+    const consumedRefreshTokens = MutableHashMap.empty<
       string,
       { familyId: string; absoluteExpiresAt: number }
     >();
     const pruneConsumed = () => {
       const now = Date.now();
-      for (const [hash, entry] of consumedRefreshTokens) {
-        if (now > entry.absoluteExpiresAt) consumedRefreshTokens.delete(hash);
-      }
+      Arr.fromIterable(consumedRefreshTokens)
+        .filter(([, entry]) => now > entry.absoluteExpiresAt)
+        .forEach(([hash]) => MutableHashMap.remove(consumedRefreshTokens, hash));
     };
 
     /** Trusted config clients, normalized to the stored shape (secret hashed). */
-    const trustedClients = new Map<string, OidcClient>(
+    const trustedClients = HashMap.fromIterable<string, OidcClient>(
       (config.trustedClients ?? []).map((c) => [
         c.clientId,
         {
@@ -840,11 +862,7 @@ export const make = (
     const jwt = yield* JwtService;
     const crypto = yield* Crypto.Crypto;
 
-    const randomToken = (): Effect.Effect<string, AuthError> =>
-      crypto.randomBytes(32).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError((cause) => new AuthError({ message: "Failed to generate token", cause })),
-      );
+    const randomToken = (): Effect.Effect<string, AuthError> => randomBase64UrlToken(crypto);
 
     const randomClientId = (): Effect.Effect<string, AuthError> =>
       crypto.randomBytes(16).pipe(
@@ -865,8 +883,8 @@ export const make = (
 
     const getClient = (clientId: string) =>
       Effect.gen(function* () {
-        const trusted = trustedClients.get(clientId);
-        if (trusted !== undefined) return trusted;
+        const trusted = HashMap.get(trustedClients, clientId);
+        if (Option.isSome(trusted)) return trusted.value;
         return yield* clientStore.getByClientId(clientId);
       });
 
@@ -895,7 +913,7 @@ export const make = (
     const claimsFor = (
       user: Types.User,
       scopes: readonly string[],
-    ): Effect.Effect<Record<string, unknown>, AuthError> =>
+    ): Effect.Effect<Record<string, OidcClaimValue>, AuthError> =>
       Effect.gen(function* () {
         const email = scopes.includes("email")
           ? anyEmail(yield* identifierStore.listByUser(user.id))
@@ -1058,10 +1076,9 @@ export const make = (
           description: "A valid initial access token is required to register a client",
         });
         if (token === undefined) return yield* invalid;
-        const ok =
-          typeof required === "function"
-            ? yield* required(token)
-            : secretEquals(token, Redacted.value(required));
+        const ok = Predicate.isFunction(required)
+          ? yield* required(token)
+          : secretEquals(token, Redacted.value(required));
         if (!ok) return yield* invalid;
       });
 
@@ -1077,43 +1094,50 @@ export const make = (
         const invalid = (description: string) =>
           new OidcRegistrationError({ error: "invalid_client_metadata", description });
 
-        if (metadata.redirectUris.length === 0) {
+        if (Arr.isReadonlyArrayEmpty(metadata.redirectUris)) {
           return yield* new OidcRegistrationError({
             error: "invalid_redirect_uri",
             description: "At least one redirect_uri is required",
           });
         }
         const extraSchemes = dcr?.allowedRedirectUriSchemes ?? [];
-        for (const uri of metadata.redirectUris) {
-          if (!isAllowedDynamicRedirectUri(uri, extraSchemes)) {
-            return yield* new OidcRegistrationError({
-              error: "invalid_redirect_uri",
-              description: `redirect_uri must be https, loopback http, or a registered private-use scheme, without a fragment: ${uri}`,
-            });
-          }
+        const badUri = Arr.findFirst(
+          metadata.redirectUris,
+          (uri) => !isAllowedDynamicRedirectUri(uri, extraSchemes),
+        );
+        if (Option.isSome(badUri)) {
+          return yield* new OidcRegistrationError({
+            error: "invalid_redirect_uri",
+            description: `redirect_uri must be https, loopback http, or a registered private-use scheme, without a fragment: ${badUri.value}`,
+          });
         }
 
         // RFC 7591 §2: omitted `token_endpoint_auth_method` means client_secret_basic.
         const authMethod = metadata.tokenEndpointAuthMethod ?? "client_secret_basic";
-        if (!(OIDC_TOKEN_ENDPOINT_AUTH_METHODS as readonly string[]).includes(authMethod)) {
+        if (!isTokenEndpointAuthMethod(authMethod)) {
           return yield* invalid(`Unsupported token_endpoint_auth_method: ${authMethod}`);
         }
 
         const grantTypes = metadata.grantTypes ?? ["authorization_code"];
-        for (const grant of grantTypes) {
-          if (!(OIDC_DYNAMIC_GRANT_TYPES as readonly string[]).includes(grant)) {
-            return yield* invalid(`Unsupported grant_type: ${grant}`);
-          }
+        const badGrant = Arr.findFirst(
+          grantTypes,
+          (grant) => !OIDC_DYNAMIC_GRANT_TYPES.some((supported) => supported === grant),
+        );
+        if (Option.isSome(badGrant)) {
+          return yield* invalid(`Unsupported grant_type: ${badGrant.value}`);
         }
         if (!grantTypes.includes("authorization_code")) {
           return yield* invalid("grant_types must include authorization_code");
         }
 
         const responseTypes = metadata.responseTypes ?? ["code"];
-        for (const responseType of responseTypes) {
-          if (!(OIDC_DYNAMIC_RESPONSE_TYPES as readonly string[]).includes(responseType)) {
-            return yield* invalid(`Unsupported response_type: ${responseType}`);
-          }
+        const badResponseType = Arr.findFirst(
+          responseTypes,
+          (responseType) =>
+            !OIDC_DYNAMIC_RESPONSE_TYPES.some((supported) => supported === responseType),
+        );
+        if (Option.isSome(badResponseType)) {
+          return yield* invalid(`Unsupported response_type: ${badResponseType.value}`);
         }
         // RFC 7591 §2: the two lists must agree — authorization_code needs `code`.
         if (!responseTypes.includes("code")) {
@@ -1122,9 +1146,8 @@ export const make = (
 
         const scope = metadata.scope ?? dcr?.defaultScope ?? allowedScopes.join(" ");
         const scopes = parseScopes(scope);
-        for (const s of scopes) {
-          if (!allowedScopes.includes(s)) return yield* invalid(`Unsupported scope: ${s}`);
-        }
+        const badScope = Arr.findFirst(scopes, (s) => !allowedScopes.includes(s));
+        if (Option.isSome(badScope)) return yield* invalid(`Unsupported scope: ${badScope.value}`);
         if (!scopes.includes("openid")) {
           return yield* invalid("scope must include openid");
         }
@@ -1135,7 +1158,7 @@ export const make = (
 
         return {
           redirectUris: metadata.redirectUris,
-          tokenEndpointAuthMethod: authMethod as OidcTokenEndpointAuthMethod,
+          tokenEndpointAuthMethod: authMethod,
           grantTypes,
           responseTypes,
           clientName: metadata.clientName ?? "Dynamic Client",
@@ -1146,10 +1169,11 @@ export const make = (
     /** Run the registration policy and turn its verdict into a disposition. */
     const applyRegistrationPolicy = (metadata: NormalizedOidcClientMetadata) =>
       Effect.gen(function* () {
-        if (dcr?.policy === undefined) return { allow: true } as OidcRegistrationDisposition;
+        if (dcr?.policy === undefined) return allowRegistration;
         const verdict = yield* dcr.policy(metadata);
-        const disposition: OidcRegistrationDisposition =
-          typeof verdict === "boolean" ? { allow: verdict } : verdict;
+        const disposition: OidcRegistrationDisposition = Predicate.isBoolean(verdict)
+          ? { allow: verdict }
+          : verdict;
         if (!disposition.allow) {
           return yield* new OidcRegistrationError({
             // RFC 7591 §3.2.2 has no generic refusal code: a policy that
@@ -1193,7 +1217,7 @@ export const make = (
      * registration is enabled, and otherwise at the admin-gated
      * `/oauth2/register` — which is all this provider offers to advertise.
      */
-    const authorizationServerMetadata = (): Record<string, unknown> => ({
+    const authorizationServerMetadata = (): Record<string, string | ReadonlyArray<string>> => ({
       issuer: config.issuer,
       authorization_endpoint: `${config.issuer}/oauth2/authorize`,
       token_endpoint: `${config.issuer}/oauth2/token`,
@@ -1309,17 +1333,16 @@ export const make = (
         input: RegisterOidcClientInput,
         registrarUserId?: string,
       ) {
-        if (input.redirectUris.length === 0) {
+        if (Arr.isReadonlyArrayEmpty(input.redirectUris)) {
           return yield* new OidcProviderError({
             message: "At least one redirect URI is required",
           });
         }
-        for (const uri of input.redirectUris) {
-          if (!isAllowedRedirectUri(uri)) {
-            return yield* new OidcProviderError({
-              message: `Redirect URI must be https or loopback http: ${uri}`,
-            });
-          }
+        const badUri = Arr.findFirst(input.redirectUris, (uri) => !isAllowedRedirectUri(uri));
+        if (Option.isSome(badUri)) {
+          return yield* new OidcProviderError({
+            message: `Redirect URI must be https or loopback http: ${badUri.value}`,
+          });
         }
         const type = input.type ?? "web";
         const clientSecret = type === "web" ? yield* randomToken() : undefined;
@@ -1354,7 +1377,7 @@ export const make = (
         clientId: string,
         input: UpdateOidcClientInput,
       ) {
-        if (trustedClients.has(clientId)) {
+        if (HashMap.has(trustedClients, clientId)) {
           return yield* new OidcProviderError({
             message: "Trusted clients are configured statically and cannot be updated",
           });
@@ -1525,7 +1548,7 @@ export const make = (
               userId,
               clientId: pending.clientId,
               // Accumulate scopes across grants so consent is asked once per scope.
-              scopes: [...new Set([...(existing?.scopes ?? []), ...pending.scopes])],
+              scopes: Arr.dedupe([...(existing?.scopes ?? []), ...pending.scopes]),
               createdAt: existing?.createdAt ?? now,
               updatedAt: now,
             });
@@ -1638,7 +1661,9 @@ export const make = (
               record.clientId !== client.clientId
             ) {
               // Check if this hash was already consumed — if so, it's a reuse attack.
-              const consumed = consumedRefreshTokens.get(presentedHash);
+              const consumed = Option.getOrUndefined(
+                MutableHashMap.get(consumedRefreshTokens, presentedHash),
+              );
               if (consumed !== undefined) {
                 // Revoke the entire family to protect the user (RFC 6819 §6.1).
                 yield* Effect.gen(function* () {
@@ -1661,7 +1686,10 @@ export const make = (
             const absoluteExpiresAt = record.absoluteExpiresAt ?? record.expiresAt;
 
             // Record as consumed for reuse detection.
-            consumedRefreshTokens.set(presentedHash, { familyId, absoluteExpiresAt });
+            MutableHashMap.set(consumedRefreshTokens, presentedHash, {
+              familyId,
+              absoluteExpiresAt,
+            });
 
             // Absolute (non-sliding) lifetime check.
             if (Date.now() > absoluteExpiresAt) {

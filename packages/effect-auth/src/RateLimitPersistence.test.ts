@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer } from "effect";
 import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
 import * as RateLimitPersistence from "./RateLimitPersistence.ts";
 import { RateLimiter, RateLimitStore, RateLimitPresets } from "./RateLimit.ts";
@@ -75,9 +75,11 @@ describe("RateLimitPersistence.rateLimiterPersistenceLayer", () => {
     const result = await run(
       Effect.gen(function* () {
         const rl = yield* RateLimiter;
-        for (let i = 0; i < 5; i++) {
-          yield* rl.consumeToken("login:user", RateLimitPresets.login);
-        }
+        yield* Effect.forEach(
+          Arr.range(1, 5),
+          () => rl.consumeToken("login:user", RateLimitPresets.login),
+          { concurrency: 1, discard: true },
+        );
         return yield* Effect.catch(rl.consumeToken("login:user", RateLimitPresets.login), (e) =>
           Effect.succeed(e),
         );

@@ -15,12 +15,14 @@
   },
   "type": "module",
   "scripts": {
-    "prepare": "vp config --no-agent && effect-tsgo patch --typescript",
+    "prepare": "vp config --no-agent && effect-tsgo patch --typescript --oxlint",
     "build": "vp run -r build",
     "check": "vp run -r check && vp run check:scripts",
     "docs": "vp run --filter @thomasfosterau/effect-auth docs",
     "check:dist": "tsx scripts/check-dist.ts",
     "check:scripts": "tsc -p tsconfig.scripts.json",
+    "fallow": "fallow --summary",
+    "fallow:audit": "fallow audit",
     "changeset": "changeset",
     "version": "changeset version && pnpm install --lockfile-only",
     "release": "pnpm -r --filter \"./packages/*\" publish --access public --no-git-checks && changeset tag"
@@ -34,8 +36,9 @@
     "@types/node": "catalog:",
     "@types/semver": "catalog:",
     "@typescript/native": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
     "effect": "catalog:",
-    "effect-solutions": "catalog:",
+    "fallow": "catalog:",
     "semver": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",
@@ -44,7 +47,8 @@
     "vitest": "catalog:"
   },
   "engines": {
-    "node": "^20.19.0 || ^22.18.0 || >=24.11.0"
+    "node": ">=22",
+    "pnpm": ">=11"
   },
   "packageManager": "pnpm@11.11.0"
 }

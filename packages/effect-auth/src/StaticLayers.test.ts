@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Predicate } from "effect";
 import * as Auth from "./index.ts";
 
 /**
@@ -8,7 +8,7 @@ import * as Auth from "./index.ts";
  */
 describe("static service layers", () => {
   it("exposes a static layer constructor on every primary service", () => {
-    const services: ReadonlyArray<[string, { readonly layer: (...args: never[]) => unknown }]> = [
+    const services: ReadonlyArray<[string, { readonly layer: (...args: never[]) => Layer.Any }]> = [
       ["SessionService", Auth.SessionService],
       ["RateLimiter", Auth.RateLimiter],
       ["UserService", Auth.UserService],
@@ -35,7 +35,7 @@ describe("static service layers", () => {
       ["OidcProviderService", Auth.OidcProviderService],
     ];
     for (const [name, service] of services) {
-      expect(typeof service.layer, `${name}.layer`).toBe("function");
+      expect(Predicate.isFunction(service.layer), `${name}.layer`).toBe(true);
     }
   });
 

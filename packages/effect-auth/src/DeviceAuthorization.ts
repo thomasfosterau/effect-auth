@@ -14,6 +14,7 @@ import type * as Types from "./Types.ts";
 import { SessionService } from "./SessionService.ts";
 import type { HookError } from "./Hooks.ts";
 import { hashToken } from "./TokenHash.ts";
+import { randomBase64UrlToken } from "./RandomToken.ts";
 
 /** Lifecycle status of a device authorization request. */
 export type DeviceAuthorizationStatus = "pending" | "approved" | "denied";
@@ -186,14 +187,13 @@ const randomCode = (
   length: number,
   alphabet: string,
 ): Effect.Effect<string> =>
-  Effect.gen(function* () {
-    let out = "";
-    for (let i = 0; i < length; i++) {
-      const index = yield* crypto.randomIntBetween(0, alphabet.length, { halfOpen: true });
-      out += alphabet[index];
-    }
-    return out;
-  });
+  Effect.replicateEffect(
+    Effect.map(crypto.randomIntBetween(0, alphabet.length, { halfOpen: true }), (index) =>
+      alphabet.charAt(index),
+    ),
+    length,
+    { concurrency: 1 },
+  ).pipe(Effect.map((chars) => chars.join("")));
 
 /** Format a raw code as two dash-separated halves, e.g. `BDWM-HQPK`. */
 const formatUserCode = (raw: string): string => {
@@ -205,7 +205,7 @@ const formatUserCode = (raw: string): string => {
 export const normalizeUserCode = (code: string): string =>
   code.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-export const make = (
+const make = (
   config: DeviceAuthorizationConfig,
 ): Effect.Effect<
   typeof DeviceAuthorizationService.Service,
@@ -223,12 +223,7 @@ export const make = (
     const crypto = yield* Crypto.Crypto;
 
     const generateDeviceCode = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(32).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate device code", cause }),
-        ),
-      );
+      randomBase64UrlToken(crypto, "Failed to generate device code");
 
     return {
       begin: Effect.fn("DeviceAuthorizationService.begin")(function* (options?: {

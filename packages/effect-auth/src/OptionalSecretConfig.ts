@@ -53,7 +53,15 @@
  * @internal
  */
 
-import { Config, ConfigProvider, Option, Redacted, Schema } from "effect";
+import {
+  Array as Arr,
+  Config,
+  ConfigProvider,
+  Option,
+  Redacted,
+  Schema,
+  String as Str,
+} from "effect";
 
 const setButEmpty = (name: string) =>
   Config.fail(
@@ -67,18 +75,20 @@ const setButEmpty = (name: string) =>
  * not a `Record`). The key set is collected per evaluation: the schema is built
  * inside `flatMap`, so concurrent evaluations never share state.
  */
-const recordKeys = (path: ConfigProvider.Path): Config.Config<ReadonlySet<string>> =>
+const noKeys: ReadonlyArray<string> = [];
+
+const recordKeys = (path: ConfigProvider.Path): Config.Config<ReadonlyArray<string>> =>
   Config.flatMap(Config.succeed(undefined), () => {
-    const seen = new Set<string>();
+    const seen: Array<string> = [];
     const key = Schema.String.check(
       Schema.makeFilter((k: string) => {
-        seen.add(k);
+        seen.push(k);
         return true;
       }),
     );
     return Config.schema(Schema.Record(key, Schema.UndefinedOr(Schema.String)), path).pipe(
-      Config.map((): ReadonlySet<string> => seen),
-      Config.withDefault(new Set<string>() as ReadonlySet<string>),
+      Config.map((): ReadonlyArray<string> => seen),
+      Config.withDefault(noKeys),
     );
   });
 
@@ -99,10 +109,10 @@ const hasArrayChildren = (path: ConfigProvider.Path): Config.Config<boolean> =>
  * that `fromEnv` builds.
  */
 const isPresentButEmpty = (name: string): Config.Config<boolean> => {
-  const segments = name.split("_");
+  const segments = Str.split(name, "_");
   const candidates: ReadonlyArray<readonly [ConfigProvider.Path, string]> = [
     [[], name],
-    [segments.slice(0, -1), segments[segments.length - 1]!],
+    [Arr.initNonEmpty(segments), Arr.lastNonEmpty(segments)],
   ];
   return Config.all(
     candidates.map(([parent, key]) =>
@@ -112,7 +122,8 @@ const isPresentButEmpty = (name: string): Config.Config<boolean> => {
         hasArrayChildren([...parent, key]),
       ]).pipe(
         Config.map(
-          ([siblings, below, belowArray]) => siblings.has(key) && below.size === 0 && !belowArray,
+          ([siblings, below, belowArray]) =>
+            Arr.contains(siblings, key) && Arr.isReadonlyArrayEmpty(below) && !belowArray,
         ),
       ),
     ),

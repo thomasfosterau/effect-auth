@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import * as Cipher from "./Cipher.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
@@ -143,14 +143,16 @@ const memoryOtpStore = <R extends { readonly purpose: string; readonly attempts:
   };
 };
 
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 // --- Google One Tap: a fake Google signing the credential --------------------
 
 const ONE_TAP_CLIENT = "client-1.apps.googleusercontent.com";
 const ONE_TAP_JWKS = "https://fake-google.test/fresh-insert/certs";
 const oneTapKeys = Cipher.generateJwsKeyPair("ES256");
 
-const b64 = (value: unknown): string =>
-  Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+const b64 = (value: Schema.Json): string =>
+  Buffer.from(encodeJson(value), "utf8").toString("base64url");
 
 const signGoogleCredential = (nonce: string): string => {
   const header = { alg: "ES256", kid: "k1", typ: "JWT" };
@@ -174,21 +176,24 @@ const signGoogleCredential = (nonce: string): string => {
 };
 
 /** Answer the JWKS request with the fake Google's key while `thunk` runs. */
-const withGoogleJwks = async <A>(thunk: () => Promise<A>): Promise<A> => {
+const withGoogleJwks = <A>(thunk: () => Promise<A>): Promise<A> => {
   const original = globalThis.fetch;
   const jwks = { keys: [{ ...oneTapKeys.publicKeyJwk, kid: "k1", alg: "ES256" }] };
   globalThis.fetch = (() =>
     Promise.resolve(
-      new Response(JSON.stringify(jwks), { headers: { "content-type": "application/json" } }),
+      new Response(encodeJson(jwks), { headers: { "content-type": "application/json" } }),
     )) as typeof fetch;
-  try {
-    return await thunk();
-  } finally {
+  return new Promise<A>((resolve) => resolve(thunk())).finally(() => {
     globalThis.fetch = original;
-  }
+  });
 };
 
 // --- SSO: a SAML connection with a stub verifier ------------------------------
+
+/** The assertion fields a case overrides, as the stub reads them from the body. */
+const decodeAssertionOverrides = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ inResponseTo: Schema.optionalKey(Schema.String) })),
+);
 
 /** Reads the assertion straight out of the base64 body (no XML, no crypto). */
 const stubSamlVerifier = (requests: SamlAuthnRequestInput[]): typeof SamlVerifier.Service => ({
@@ -198,9 +203,9 @@ const stubSamlVerifier = (requests: SamlAuthnRequestInput[]): typeof SamlVerifie
   },
   verify: (input) =>
     Effect.sync(() => {
-      const overrides = JSON.parse(
+      const overrides = decodeAssertionOverrides(
         Buffer.from(input.samlResponse, "base64").toString("utf8"),
-      ) as Partial<SamlAssertion>;
+      );
       return {
         id: "_assertion-1",
         issuer: input.idpEntityId,
@@ -387,7 +392,7 @@ const cases: ReadonlyArray<Case> = [
           });
           const start = yield* sso.signIn({ email: EMAIL });
           const inResponseTo = requests[0]?.requestId ?? "";
-          const response = Buffer.from(JSON.stringify({ inResponseTo }), "utf8").toString("base64");
+          const response = Buffer.from(encodeJson({ inResponseTo }), "utf8").toString("base64");
           const error = yield* Effect.flip(
             sso.handleSamlCallback(provider.id, response, start.state),
           );
@@ -403,18 +408,39 @@ const cases: ReadonlyArray<Case> = [
     run: (world) => {
       // SCIM reads and writes memberships after the create; any other
       // organization call dies.
-      const orgs = new Proxy(
-        {
-          getMember: () => Effect.succeed(null),
-          createMember: (member: Member) => Effect.sync(() => (world.members.push(member), member)),
-        },
-        {
-          get: (target, property) =>
-            property in target
-              ? target[property as keyof typeof target]
-              : () => Effect.die(`unused: ${String(property)}`),
-        },
-      ) as unknown as typeof OrganizationStore.Service;
+      const unused = (name: string) => () => Effect.die(`unused: ${name}`);
+      const orgs: typeof OrganizationStore.Service = {
+        getMember: () => Effect.succeed(null),
+        createMember: (member: Member) => Effect.sync(() => (world.members.push(member), member)),
+        createOrganization: unused("createOrganization"),
+        getOrganizationById: unused("getOrganizationById"),
+        getOrganizationBySlug: unused("getOrganizationBySlug"),
+        updateOrganization: unused("updateOrganization"),
+        deleteOrganization: unused("deleteOrganization"),
+        updateMember: unused("updateMember"),
+        deleteMember: unused("deleteMember"),
+        listMembersByOrganization: unused("listMembersByOrganization"),
+        listMembersByUser: unused("listMembersByUser"),
+        countMembersByOrganization: unused("countMembersByOrganization"),
+        createInvitation: unused("createInvitation"),
+        getInvitation: unused("getInvitation"),
+        updateInvitation: unused("updateInvitation"),
+        listInvitationsByOrganization: unused("listInvitationsByOrganization"),
+        listInvitationsByEmail: unused("listInvitationsByEmail"),
+        createTeam: unused("createTeam"),
+        getTeam: unused("getTeam"),
+        updateTeam: unused("updateTeam"),
+        deleteTeam: unused("deleteTeam"),
+        listTeams: unused("listTeams"),
+        addTeamMember: unused("addTeamMember"),
+        removeTeamMember: unused("removeTeamMember"),
+        listTeamMembers: unused("listTeamMembers"),
+        listTeamsForMember: unused("listTeamsForMember"),
+        upsertOrgRole: unused("upsertOrgRole"),
+        getOrgRole: unused("getOrgRole"),
+        listOrgRoles: unused("listOrgRoles"),
+        deleteOrgRole: unused("deleteOrgRole"),
+      };
       const layer = Layer.mergeAll(
         world.base,
         Layer.succeed(Scim.ScimConnectionStore)(Scim.memoryScimConnectionStore()),

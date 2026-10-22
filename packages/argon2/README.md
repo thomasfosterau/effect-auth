@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-auth-argon2
 
-Argon2id `PasswordHasher` for [`@thomasfosterau/effect-auth`](../effect-auth) — OWASP's first-choice password hashing algorithm, as an Effect `Layer`.
+Argon2id `PasswordHasher` for [`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth) — OWASP's first-choice password hashing algorithm, as an Effect `Layer`.
 
 Core effect-auth ships only dependency-free hashers (PBKDF2, scrypt) because Web Crypto has no Argon2 and Node's `crypto.argon2` (24.7+, experimental) is Node-only. This package fills that gap with a pure WebAssembly backend ([`hash-wasm`](https://github.com/Daninet/hash-wasm), MIT): no native module, no post-install step, and no `node:` imports, so it runs unchanged on Node, Bun, Deno, Cloudflare Workers, and browsers.
 
@@ -12,10 +12,12 @@ Hashes are standard PHC strings (`$argon2id$v=19$m=...,t=...,p=...$salt$hash`), 
 pnpm add @thomasfosterau/effect-auth-argon2 @thomasfosterau/effect-auth effect
 ```
 
+`effect` (`>=4.0.0-rc.118`) is a peer dependency; `hash-wasm` comes along as a dependency.
+
 ## Usage
 
 ```ts
-import { Effect, Layer } from "effect";
+import { Layer } from "effect";
 import { argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2";
 
 // Make Argon2id the hasher for new passwords, in place of PasswordHasher.layer()
@@ -90,7 +92,8 @@ Package root (`@thomasfosterau/effect-auth-argon2`):
 - `ARGON2ID` — the `"argon2id"` PHC algorithm identifier.
 - `Argon2Options`, `Argon2Profile` — cost parameter types.
 - `defaultProfile`, `serverProfile`, `resolveOptions(options?)`.
-- `SALT_LENGTH`, `HASH_LENGTH`, `MAX_PASSWORD_BYTES`.
+- `SALT_LENGTH` (16 bytes), `HASH_LENGTH` (32 bytes), `MAX_PASSWORD_BYTES` (1024 UTF-8 bytes: `hash` refuses a longer password with a `HashingError`, `verify` reads one as `false` without running the KDF).
+- Input guards the hasher applies, exported for other hashers to share: `isWithinMaxLength(password)`, `requireNonEmptyPassword(password)`, `requireNonEmptyHash(hash)`, `requireHashablePassword(password)` (the `require*` guards fail with `HashingError`; `isWithinMaxLength` returns a boolean).
 
 ## License
 

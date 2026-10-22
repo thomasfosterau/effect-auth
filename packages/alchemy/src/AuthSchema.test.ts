@@ -1,5 +1,15 @@
-import { describe, it, expect } from "vite-plus/test";
-import { Effect, FileSystem, Layer, Path, PlatformError } from "effect";
+import { assert, describe, it, expect } from "vite-plus/test";
+import {
+  Array as Arr,
+  Effect,
+  FileSystem,
+  Layer,
+  Order,
+  Path,
+  PlatformError,
+  Predicate,
+  Schema,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { AdoptPolicy } from "alchemy/AdoptPolicy";
@@ -55,6 +65,18 @@ const platform = Layer.mergeAll(
 );
 
 const STACK = "effect-auth-alchemy-test";
+
+/** Every auth table, sorted by name. */
+const sortedTableNames = Arr.sort(authTableNames, Order.String);
+
+/** What a deploy resolves to: the `AuthSchema` attributes, or nothing. */
+const DeployOutput = Schema.UndefinedOr(
+  Schema.Struct({
+    tables: Schema.Array(Schema.String),
+    statements: Schema.Number,
+    appliedAt: Schema.Number,
+  }),
+);
 const STAGE = "test";
 
 /**
@@ -96,7 +118,7 @@ const makeEngine = (
     /** The engine's persisted state, so another engine can pick it up. */
     store,
     /** `alchemy deploy` for one program. */
-    deploy: <A>(program: Effect.Effect<A, never, never>): Promise<unknown> =>
+    deploy: <A>(program: Effect.Effect<A, never, never>): Promise<typeof DeployOutput.Type> =>
       withRuntime(
         program.pipe(
           makeStack({ name: STACK, providers, state } as never) as never,
@@ -106,10 +128,11 @@ const makeEngine = (
               Effect.provide(compiled.services),
             ),
           ),
-        ) as unknown as Effect.Effect<unknown, unknown, never>,
+          Effect.flatMap(Schema.decodeUnknownEffect(DeployOutput)),
+        ) as Effect.Effect<typeof DeployOutput.Type, unknown, never>,
       ),
     /** `alchemy destroy`: apply an empty plan, so every resource is deleted. */
-    destroy: (): Promise<unknown> =>
+    destroy: (): Promise<void> =>
       withRuntime(
         Plan.make({
           name: STACK,
@@ -135,7 +158,7 @@ const makeEngine = (
               actions: {},
             } as never),
           ),
-        ) as Effect.Effect<unknown, unknown, never>,
+        ) as Effect.Effect<void, unknown, never>,
       ),
   };
 };
@@ -173,8 +196,8 @@ describe("AuthSchema resource", () => {
     const provider = await Effect.runPromise(
       AuthSchema.Provider.pipe(Effect.provide(AuthSchemaProvider({ database: makeTestD1() }))),
     );
-    expect(typeof provider.reconcile).toBe("function");
-    expect(typeof provider.delete).toBe("function");
+    expect(Predicate.isFunction(provider.reconcile)).toBe(true);
+    expect(Predicate.isFunction(provider.delete)).toBe(true);
     expect(await Effect.runPromise(provider.list())).toEqual([]);
   });
 
@@ -190,12 +213,9 @@ describe("AuthSchema resource", () => {
     const engine = makeEngine({ database });
     const program = AuthSchema("auth-schema");
 
-    const created = (await engine.deploy(program as never)) as {
-      tables: readonly string[];
-      statements: number;
-      appliedAt: number;
-    };
-    expect(created.tables).toEqual([...authTableNames].sort());
+    const created = await engine.deploy(program as never);
+    assert(created !== undefined);
+    expect(created.tables).toEqual(sortedTableNames);
     expect(created.statements).toBeGreaterThan(0);
     expect(created.appliedAt).toBeGreaterThan(0);
 
@@ -203,11 +223,11 @@ describe("AuthSchema resource", () => {
     await insertUser(database);
     await engine.deploy(program as never);
     expect(await countUsers(database)).toBe(1);
-    expect(await tablesIn(database)).toEqual([...authTableNames].sort());
+    expect(await tablesIn(database)).toEqual(sortedTableNames);
 
     // Teardown leaves the tables alone unless `dropOnDelete` is set.
     await engine.destroy();
-    expect(await tablesIn(database)).toEqual([...authTableNames].sort());
+    expect(await tablesIn(database)).toEqual(sortedTableNames);
     expect(await countUsers(database)).toBe(1);
   });
 
@@ -217,7 +237,7 @@ describe("AuthSchema resource", () => {
     const program = AuthSchema("auth-schema", { dropOnDelete: true });
 
     await engine.deploy(program as never);
-    expect(await tablesIn(database)).toEqual([...authTableNames].sort());
+    expect(await tablesIn(database)).toEqual(sortedTableNames);
 
     await engine.destroy();
     expect(await tablesIn(database)).toEqual([]);
@@ -233,12 +253,12 @@ describe("AuthSchema resource", () => {
     });
 
     await engine.deploy(program as never);
-    expect(await tablesIn(primary)).toEqual([...authTableNames].sort());
-    expect(await tablesIn(tenants)).toEqual([...authTableNames].sort());
+    expect(await tablesIn(primary)).toEqual(sortedTableNames);
+    expect(await tablesIn(tenants)).toEqual(sortedTableNames);
 
     // Only the resource that opted in loses its tables.
     await engine.destroy();
-    expect(await tablesIn(primary)).toEqual([...authTableNames].sort());
+    expect(await tablesIn(primary)).toEqual(sortedTableNames);
     expect(await tablesIn(tenants)).toEqual([]);
   });
 
@@ -254,6 +274,6 @@ describe("AuthSchema resource", () => {
     // tables (and the state row) alone.
     const detached = makeEngine({ databases: {} }, engine.store);
     await expect(detached.destroy()).rejects.toThrow(/UnknownDatabaseError/);
-    expect(await tablesIn(database)).toEqual([...authTableNames].sort());
+    expect(await tablesIn(database)).toEqual(sortedTableNames);
   });
 });

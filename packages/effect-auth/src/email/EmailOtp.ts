@@ -19,6 +19,7 @@ import {
 } from "../UserStore.ts";
 import type { HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { randomBase64UrlToken } from "../RandomToken.ts";
 import { SessionService } from "../SessionService.ts";
 import { EmailPasswordStore } from "./EmailPassword.ts";
 import { proveAddress } from "../FirstProof.ts";
@@ -273,26 +274,16 @@ export const hashOtp = hashToken;
  * `randomIntBetween` draw per digit — no modulo bias).
  */
 export const generateOtp = (crypto: Crypto.Crypto, length: number): Effect.Effect<string> =>
-  Effect.gen(function* () {
-    let otp = "";
-    for (let i = 0; i < length; i++) {
-      const digit = yield* crypto.randomIntBetween(0, 10, { halfOpen: true });
-      otp += digit.toString();
-    }
-    return otp;
-  });
+  Effect.replicateEffect(crypto.randomIntBetween(0, 10, { halfOpen: true }), length, {
+    concurrency: 1,
+  }).pipe(Effect.map((digits) => digits.join("")));
 
 /**
  * The secret behind an unknown address's marker record: 32 random bytes,
  * base64url-encoded. It is hashed into the marker record and then discarded.
  */
 const generateMarkerSecret = (crypto: Crypto.Crypto): Effect.Effect<string, Errors.AuthError> =>
-  crypto.randomBytes(32).pipe(
-    Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-    Effect.mapError(
-      (cause) => new Errors.AuthError({ message: "Failed to generate OTP marker", cause }),
-    ),
-  );
+  randomBase64UrlToken(crypto, "Failed to generate OTP marker");
 
 /**
  * Create an email OTP service

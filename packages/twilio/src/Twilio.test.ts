@@ -1,9 +1,14 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Redacted } from "effect";
+import { Data, Effect, Predicate, Redacted, Schema } from "effect";
 import { SmsSender, type SmsMessage } from "@thomasfosterau/effect-auth";
 import { defaultRender, layer, twilioSmsSender } from "./index.ts";
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
+
+const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+/** What the failing stub `fetch` rejects with. */
+class NetworkDown extends Data.TaggedError("NetworkDown") {}
 
 interface CapturedRequest {
   readonly url: string;
@@ -20,7 +25,7 @@ const stubFetch = (
   const fetchStub = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const request = { url: String(input), init: init ?? {} };
     calls.push(request);
-    return typeof response === "function" ? response(request) : response;
+    return Predicate.isFunction(response) ? response(request) : response;
   }) as typeof fetch;
   return { fetch: fetchStub, calls };
 };
@@ -31,7 +36,7 @@ const baseConfig = {
   from: "+15551234567",
 };
 
-const twilioSuccessBody = JSON.stringify({ sid: "SM1234", status: "queued" });
+const twilioSuccessBody = toJson({ sid: "SM1234", status: "queued" });
 
 describe("defaultRender", () => {
   it("uses a purpose-keyed lead-in and includes the OTP", () => {
@@ -108,7 +113,7 @@ describe("twilioSmsSender", () => {
 
   it("never leaks the auth token onto a failure", async () => {
     const { fetch } = stubFetch(
-      new Response(JSON.stringify({ code: 21211, message: "Invalid 'To' Phone Number" }), {
+      new Response(toJson({ code: 21211, message: "Invalid 'To' Phone Number" }), {
         status: 400,
       }),
     );
@@ -119,12 +124,12 @@ describe("twilioSmsSender", () => {
     );
 
     expect(err._tag).toBe("AuthError");
-    expect(JSON.stringify(err)).not.toContain("test-auth-token");
+    expect(toJson(err)).not.toContain("test-auth-token");
   });
 
   it("maps a 4xx response to an AuthError with Twilio's error code and message", async () => {
     const { fetch } = stubFetch(
-      new Response(JSON.stringify({ code: 21211, message: "Invalid 'To' Phone Number" }), {
+      new Response(toJson({ code: 21211, message: "Invalid 'To' Phone Number" }), {
         status: 400,
       }),
     );
@@ -154,7 +159,7 @@ describe("twilioSmsSender", () => {
 
   it("maps a network failure to an AuthError", async () => {
     const failingFetch = (async () => {
-      throw new Error("network down");
+      throw new NetworkDown();
     }) as typeof fetch;
     const sender = twilioSmsSender({ ...baseConfig, fetch: failingFetch });
 

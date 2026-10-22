@@ -156,7 +156,9 @@ describe("SessionContext.anonymousLayer", () => {
   });
 
   it("currentUserOption is None and isAuthenticated is false", async () => {
-    const program = Effect.all([SessionContext.currentUserOption, SessionContext.isAuthenticated]);
+    const program = Effect.all([SessionContext.currentUserOption, SessionContext.isAuthenticated], {
+      concurrency: 1,
+    });
     const [user, authenticated] = await Effect.runPromise(
       program.pipe(Effect.provide(SessionContext.anonymousLayer)),
     );

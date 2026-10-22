@@ -12,7 +12,7 @@
  *
  * @module plugins/hibp
  */
-import { Crypto, Effect } from "effect";
+import { Array as Arr, Crypto, Effect, Option } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import type { SignUpInput } from "../email/EmailPassword.ts";
 import { makePlugin, type ResetPasswordArgs } from "../Hooks.ts";
@@ -56,13 +56,12 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
           const suffix = hash.slice(5);
           return yield* client.execute(HttpClientRequest.get(`${RANGE_URL}/${prefix}`)).pipe(
             Effect.flatMap((response) => response.text),
-            Effect.map((body) => {
-              for (const line of body.split("\n")) {
+            Effect.map((body) =>
+              Arr.findFirst(body.split("\n"), (line) => {
                 const [suf, count] = line.trim().split(":");
-                if (suf === suffix) return Number(count) || 0;
-              }
-              return 0;
-            }),
+                return suf === suffix ? Option.some(Number(count) || 0) : Option.none();
+              }).pipe(Option.getOrElse(() => 0)),
+            ),
             Effect.catch(() =>
               failClosed
                 ? Effect.fail(new AuthError({ message: "Password breach check is unavailable" }))

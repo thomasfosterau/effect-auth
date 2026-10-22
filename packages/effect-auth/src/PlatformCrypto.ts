@@ -19,7 +19,11 @@ const digest = (
 ): Effect.Effect<Uint8Array, PlatformError.PlatformError> =>
   Effect.tryPromise({
     try: async () =>
-      new Uint8Array(await globalThis.crypto.subtle.digest(algorithm, data as NodeJS.BufferSource)),
+      new Uint8Array(
+        // SAFETY: `subtle.digest` reads any `Uint8Array` view; the lib type only
+        // narrows the backing buffer, and a rejected buffer surfaces via `catch`.
+        await globalThis.crypto.subtle.digest(algorithm, data as NodeJS.BufferSource),
+      ),
     catch: (cause) =>
       PlatformError.badArgument({
         module: "Crypto",

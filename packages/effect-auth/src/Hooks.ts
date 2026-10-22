@@ -42,7 +42,7 @@
  *
  * @module hooks
  */
-import { Context, Effect, Layer } from "effect";
+import { Array as Arr, Context, Effect, Layer } from "effect";
 import type * as Errors from "./Errors.ts";
 import type { AuthResult, SignInInput, SignUpInput } from "./email/EmailPassword.ts";
 import type { EntityRef } from "./Entity.ts";
@@ -271,22 +271,41 @@ export interface MakePluginOptions {
 }
 
 /**
- * The set of hook keys that are `after*` taps. Isolation (`isolateTaps: true`)
- * applies exclusively to these — `before*` transforms are never eligible for
- * isolation regardless of plugin options.
+ * Wrap one hook point: when the plugin provides `pluginFn`, call `innerFn`
+ * first and pipe its output into the plugin's function; otherwise keep
+ * `innerFn` as is. When `isolate` is set, the plugin's failures are logged and
+ * swallowed and the inner output flows on unchanged.
  */
-const AFTER_HOOK_KEYS: ReadonlySet<string> = new Set([
-  "afterSignUp",
-  "afterSignIn",
-  "afterSignOut",
-  "afterCreateSession",
-  "afterValidateSession",
-  "afterRequestPasswordReset",
-  "afterResetPassword",
-  "afterCreateVerification",
-  "afterVerifyEmail",
-  "afterWrite",
-]);
+const wrapHook = <V>(
+  key: keyof typeof Hooks.Service,
+  innerFn: Transform<V>,
+  pluginFn: Transform<V> | undefined,
+  isolate: boolean,
+): Transform<V> => {
+  if (pluginFn === undefined) {
+    return innerFn;
+  }
+  return (value) =>
+    innerFn(value).pipe(
+      Effect.flatMap((innerOut) => {
+        const ran = pluginFn(innerOut);
+        // before* transforms: failures are the deny mechanism — never swallow
+        // them, even when isolateTaps is set.
+        if (!isolate) {
+          return ran;
+        }
+        // after* taps with isolateTaps: true — log and swallow errors so a
+        // tap failure doesn't abort the auth operation.
+        return ran.pipe(
+          Effect.catch((error) =>
+            Effect.logError(`[effect-auth/hooks] '${key}' failed (isolated)`, error).pipe(
+              Effect.as(innerOut),
+            ),
+          ),
+        );
+      }),
+    );
+};
 
 /**
  * Wrap an inner implementation with a plugin's hooks. For each hook the plugin
@@ -303,40 +322,90 @@ const wrapHooks = (
   impls: PluginImpls,
   options: MakePluginOptions,
 ): typeof Hooks.Service => {
-  const innerRecord = inner as unknown as Record<string, Transform<unknown>>;
-  const result: Record<string, Transform<unknown>> = { ...innerRecord };
-
-  for (const key of Object.keys(impls) as Array<keyof typeof Hooks.Service>) {
-    const pluginFn = impls[key] as Transform<unknown> | undefined;
-    if (pluginFn === undefined) {
-      continue;
-    }
-    const innerFn = innerRecord[key as string]!;
-    const isTap = AFTER_HOOK_KEYS.has(key as string);
-
-    result[key as string] = (value: unknown) =>
-      innerFn(value).pipe(
-        Effect.flatMap((innerOut: unknown) => {
-          const ran = pluginFn(innerOut);
-          // before* transforms: failures are the deny mechanism — never swallow
-          // them, even when isolateTaps is set.
-          if (!isTap || !options.isolateTaps) {
-            return ran;
-          }
-          // after* taps with isolateTaps: true — log and swallow errors so a
-          // tap failure doesn't abort the auth operation.
-          return ran.pipe(
-            Effect.catch((error) =>
-              Effect.logError(`[effect-auth/hooks] '${String(key)}' failed (isolated)`, error).pipe(
-                Effect.as(innerOut),
-              ),
-            ),
-          );
-        }),
-      );
-  }
-
-  return result as unknown as typeof Hooks.Service;
+  const isolateTaps = Boolean(options.isolateTaps);
+  // The spread keeps `inner`'s symbol-keyed records (`HooksClientAddress.ts`).
+  return {
+    ...inner,
+    beforeSignUp: wrapHook("beforeSignUp", inner.beforeSignUp, impls.beforeSignUp, false),
+    afterSignUp: wrapHook("afterSignUp", inner.afterSignUp, impls.afterSignUp, isolateTaps),
+    beforeSignIn: wrapHook("beforeSignIn", inner.beforeSignIn, impls.beforeSignIn, false),
+    afterSignIn: wrapHook("afterSignIn", inner.afterSignIn, impls.afterSignIn, isolateTaps),
+    beforeSignOut: wrapHook("beforeSignOut", inner.beforeSignOut, impls.beforeSignOut, false),
+    afterSignOut: wrapHook("afterSignOut", inner.afterSignOut, impls.afterSignOut, isolateTaps),
+    beforeCreateSession: wrapHook(
+      "beforeCreateSession",
+      inner.beforeCreateSession,
+      impls.beforeCreateSession,
+      false,
+    ),
+    afterCreateSession: wrapHook(
+      "afterCreateSession",
+      inner.afterCreateSession,
+      impls.afterCreateSession,
+      isolateTaps,
+    ),
+    beforeValidateSession: wrapHook(
+      "beforeValidateSession",
+      inner.beforeValidateSession,
+      impls.beforeValidateSession,
+      false,
+    ),
+    afterValidateSession: wrapHook(
+      "afterValidateSession",
+      inner.afterValidateSession,
+      impls.afterValidateSession,
+      isolateTaps,
+    ),
+    beforeRequestPasswordReset: wrapHook(
+      "beforeRequestPasswordReset",
+      inner.beforeRequestPasswordReset,
+      impls.beforeRequestPasswordReset,
+      false,
+    ),
+    afterRequestPasswordReset: wrapHook(
+      "afterRequestPasswordReset",
+      inner.afterRequestPasswordReset,
+      impls.afterRequestPasswordReset,
+      isolateTaps,
+    ),
+    beforeResetPassword: wrapHook(
+      "beforeResetPassword",
+      inner.beforeResetPassword,
+      impls.beforeResetPassword,
+      false,
+    ),
+    afterResetPassword: wrapHook(
+      "afterResetPassword",
+      inner.afterResetPassword,
+      impls.afterResetPassword,
+      isolateTaps,
+    ),
+    beforeCreateVerification: wrapHook(
+      "beforeCreateVerification",
+      inner.beforeCreateVerification,
+      impls.beforeCreateVerification,
+      false,
+    ),
+    afterCreateVerification: wrapHook(
+      "afterCreateVerification",
+      inner.afterCreateVerification,
+      impls.afterCreateVerification,
+      isolateTaps,
+    ),
+    beforeVerifyEmail: wrapHook(
+      "beforeVerifyEmail",
+      inner.beforeVerifyEmail,
+      impls.beforeVerifyEmail,
+      false,
+    ),
+    afterVerifyEmail: wrapHook(
+      "afterVerifyEmail",
+      inner.afterVerifyEmail,
+      impls.afterVerifyEmail,
+      isolateTaps,
+    ),
+    afterWrite: wrapHook("afterWrite", inner.afterWrite, impls.afterWrite, isolateTaps),
+  };
 };
 
 /**
@@ -444,17 +513,17 @@ export function makePlugin(
  */
 export const composePlugins = <RIn = never>(
   plugins: ReadonlyArray<Layer.Layer<Hooks, never, RIn | Hooks>>,
-): Layer.Layer<Hooks, never, RIn | Hooks> => {
-  if (plugins.length === 0) {
+): Layer.Layer<Hooks, never, RIn | Hooks> =>
+  Arr.match(plugins, {
     // Identity passthrough: requires Hooks, provides Hooks unchanged.
-    return Layer.effect(Hooks, Hooks);
-  }
-  return plugins.reduce((acc, plugin) => plugin.pipe(Layer.provide(acc))) as Layer.Layer<
-    Hooks,
-    never,
-    RIn | Hooks
-  >;
-};
+    onEmpty: () => Layer.effect(Hooks, Hooks),
+    onNonEmpty: (nonEmpty) =>
+      Arr.reduce(
+        Arr.tailNonEmpty(nonEmpty),
+        Arr.headNonEmpty(nonEmpty),
+        (acc, plugin): Layer.Layer<Hooks, never, RIn | Hooks> => plugin.pipe(Layer.provide(acc)),
+      ),
+  });
 
 /**
  * Fire the `afterWrite` hook for a write the application made: call it after

@@ -10,7 +10,7 @@
  */
 
 import * as crypto from "node:crypto";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { AuthError } from "./Errors.ts";
 
 /**
@@ -115,18 +115,24 @@ export const aes256GcmCipher = (secret: string): TokenCipher => {
         catch: (cause) => new AuthError({ message: `Encryption failed: ${String(cause)}` }),
       }),
     decrypt: (ciphertext) =>
-      Effect.try({
-        try: () => {
-          const buf = Buffer.from(ciphertext, "base64url");
-          if (buf.length < 29) throw new Error("ciphertext too short");
-          const iv = buf.subarray(0, 12);
-          const tag = buf.subarray(12, 28);
-          const encrypted = buf.subarray(28);
-          const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-          decipher.setAuthTag(tag);
-          return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
-        },
-        catch: (cause) => new AuthError({ message: `Decryption failed: ${String(cause)}` }),
+      Effect.suspend(() => {
+        const buf = Buffer.from(ciphertext, "base64url");
+        if (buf.length < 29) {
+          return Effect.fail(
+            new AuthError({ message: "Decryption failed: Error: ciphertext too short" }),
+          );
+        }
+        return Effect.try({
+          try: () => {
+            const iv = buf.subarray(0, 12);
+            const tag = buf.subarray(12, 28);
+            const encrypted = buf.subarray(28);
+            const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+            decipher.setAuthTag(tag);
+            return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+          },
+          catch: (cause) => new AuthError({ message: `Decryption failed: ${String(cause)}` }),
+        });
       }),
   };
 };
@@ -181,17 +187,17 @@ export const aes256GcmSeal = (key: Uint8Array, plaintext: string): string => {
  *
  * @internal
  */
-export const aes256GcmOpen = (key: Uint8Array, sealed: string): string | null => {
-  try {
-    const buf = Buffer.from(sealed, "base64url");
-    if (buf.length < 29) return null;
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, buf.subarray(0, 12));
-    decipher.setAuthTag(buf.subarray(12, 28));
-    return Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString("utf8");
-  } catch {
-    return null;
-  }
-};
+export const aes256GcmOpen = (key: Uint8Array, sealed: string): string | null =>
+  Result.getOrElse(
+    Result.try((): string | null => {
+      const buf = Buffer.from(sealed, "base64url");
+      if (buf.length < 29) return null;
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, buf.subarray(0, 12));
+      decipher.setAuthTag(buf.subarray(12, 28));
+      return Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString("utf8");
+    }),
+    () => null,
+  );
 
 // ---------------------------------------------------------------------------
 // JWS (JSON Web Signature) asymmetric primitives — used by Jwt.ts and
@@ -214,7 +220,7 @@ export const generateJwsKeyPair = (
       : crypto.generateKeyPairSync("ed25519");
 
   return {
-    publicKeyJwk: publicKey.export({ format: "jwk" }) as Record<string, unknown>,
+    publicKeyJwk: { ...publicKey.export({ format: "jwk" }) },
     privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
   };
 };
@@ -246,6 +252,8 @@ export const verifyJws = (
   signature: Uint8Array,
   jwk: Record<string, unknown>,
 ): boolean => {
+  // SAFETY: `jwk` is a JSON Web Key object (from a JWKS or a stored key pair);
+  // `createPublicKey` validates its members and throws on a malformed key.
   const key = crypto.createPublicKey({ key: jwk as crypto.webcrypto.JsonWebKey, format: "jwk" });
   if (algorithm === "RS256") return crypto.verify("sha256", data, key, signature);
   if (algorithm === "ES256")

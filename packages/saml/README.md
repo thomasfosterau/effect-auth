@@ -1,16 +1,16 @@
 # @thomasfosterau/effect-auth-saml
 
 SAML 2.0 service-provider support for
-[`@thomasfosterau/effect-auth`](../effect-auth), as an Effect `Layer`.
+[`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth), as an Effect `Layer`.
 
 Core effect-auth declares the `SamlVerifier` contract but implements none of it:
 XML canonicalisation, XML-DSig verification and DEFLATE are not things a
 dependency-free core can carry. This package is the implementation, over
 [`@node-saml/node-saml`](https://github.com/node-saml/node-saml) — the same
 split as `PasswordHasher` (core) and
-[`@thomasfosterau/effect-auth-argon2`](../argon2) (adapter).
+[`@thomasfosterau/effect-auth-argon2`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/argon2) (adapter).
 
-The **flow** stays in core's `SSO` module — domain routing, one-time use of the
+The **flow** stays in core's `SsoService` — domain routing, one-time use of the
 `AuthnRequest` and the assertion, issuer pinning, user provisioning, sessions.
 Only the XML job lives here.
 
@@ -19,6 +19,8 @@ Only the XML job lives here.
 ```sh
 pnpm add @thomasfosterau/effect-auth-saml @thomasfosterau/effect-auth effect
 ```
+
+`effect` (`>=4.0.0-rc.118`) is a peer dependency; `@node-saml/node-saml` comes along as a dependency. node-saml needs Node APIs, so on Cloudflare Workers this package requires the `nodejs_compat` flag at least.
 
 ## Usage
 
@@ -38,26 +40,45 @@ const ssoLayer = SsoService.layer().pipe(Layer.provide(samlSupport));
 Register a connection, then start and finish sign-ins:
 
 ```ts
-Effect.gen(function* () {
-  const sso = yield* SsoService;
+import { Effect } from "effect";
+import { SsoService } from "@thomasfosterau/effect-auth";
 
-  const provider = yield* sso.registerSamlProvider(adminUserId, {
-    protocol: "saml",
-    domain: "acme.test",
-    entityId: "https://idp.acme.test/metadata", // the IdP's Issuer
-    ssoUrl: "https://idp.acme.test/sso", // HTTP-Redirect binding
-    idpCertificates: [pemFromTheIdP], // pinned; rotation-ready
-    spEntityId: "https://app.test/saml/metadata",
-    acsUrl: "https://app.test/api/auth/sso/saml/acs",
-    organizationId: "org-1",
+// Register once (admin-gated), with the IdP's signing certificate(s) pinned.
+const register = (adminUserId: string, idpCertificatePem: string) =>
+  Effect.gen(function* () {
+    const sso = yield* SsoService;
+    return yield* sso.registerSamlProvider(adminUserId, {
+      protocol: "saml",
+      domain: "acme.test",
+      entityId: "https://idp.acme.test/metadata", // the IdP's Issuer
+      ssoUrl: "https://idp.acme.test/sso", // HTTP-Redirect binding
+      idpCertificates: [idpCertificatePem], // pinned; rotation-ready
+      spEntityId: "https://app.test/saml/metadata",
+      acsUrl: "https://app.test/api/auth/sso/saml/acs",
+      organizationId: "org-1",
+    });
   });
 
-  // Redirect the browser to `url`; the IdP echoes `state` back as RelayState.
-  const { url, state } = yield* sso.signIn({ email: "worker@acme.test" });
+// Start: redirect the browser to `url`; the IdP echoes `state` back as RelayState.
+const start = (email: string) =>
+  Effect.gen(function* () {
+    const sso = yield* SsoService;
+    return yield* sso.signIn({ email });
+  });
 
-  // …then, at the ACS endpoint:
-  return yield* sso.handleSamlCallback(provider.id, SAMLResponse, RelayState);
-});
+// Finish, at the ACS endpoint: verify the posted SAMLResponse and issue a session.
+const finish = (providerId: string, samlResponse: string, relayState: string) =>
+  Effect.gen(function* () {
+    const sso = yield* SsoService;
+    const { user, session, isNewUser } = yield* sso.handleSamlCallback(
+      providerId,
+      samlResponse,
+      relayState,
+    );
+    return { userId: user.id, sessionToken: session.id, isNewUser };
+  });
+
+export { register, start, finish };
 ```
 
 `memorySamlReplayStore` is single-process. Behind more than one instance,
@@ -104,6 +125,14 @@ than a clear refusal.
 5.1.0 is the release that fixed the July 2025 signature-scope vulnerabilities
 (CVE-2025-54419, CVE-2025-54369), where a crafted document could get profile
 data read from bytes the signature did not cover.
+
+## API
+
+- `layer: Layer<SamlVerifier>` — core's `SamlVerifier`, for the layer stack that builds `SsoService` (together with a `SamlReplayStore`).
+- `verifier` — the same implementation as a plain object (`verify`, `buildAuthnRequest`, `spMetadataXml`), for a call site with no Effect context, such as a metadata script.
+- `EMAIL_NAMEID_FORMAT` — the `emailAddress` NameID format, the default for `AuthnRequest`s and SP metadata.
+
+Every failure is core's `SamlError`. The input and output types (`SamlVerifyInput`, `SamlAssertion`, `SamlAuthnRequestInput`, `SamlMetadataInput`, `SamlSignatureAlgorithm`) and the defaults `defaultSignatureAlgorithms` (SHA-256, SHA-512) and `defaultClockSkewMs` (3 minutes) are exported by `@thomasfosterau/effect-auth`.
 
 ## License
 

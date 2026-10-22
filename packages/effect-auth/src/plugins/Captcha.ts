@@ -12,7 +12,7 @@
  *
  * @module plugins/captcha
  */
-import { Effect, Redacted } from "effect";
+import { Array as Arr, Effect, Predicate, Redacted } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
 import { makePlugin, type PluginImpls } from "../Hooks.ts";
@@ -44,7 +44,7 @@ export interface CaptchaConfig {
  * (or a stub) to satisfy the client.
  */
 export const CaptchaPlugin = (config: CaptchaConfig) => {
-  const endpoints = new Set<CaptchaEndpoint>(config.endpoints ?? ["signUp", "signIn"]);
+  const endpoints: readonly CaptchaEndpoint[] = config.endpoints ?? ["signUp", "signIn"];
   const url = VERIFY_URLS[config.provider];
 
   return makePlugin(
@@ -67,7 +67,7 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
             )
             .pipe(
               Effect.flatMap((response) => response.json),
-              Effect.map((body) => (body as { success?: boolean }).success === true),
+              Effect.map((body) => Predicate.hasProperty(body, "success") && body.success === true),
               Effect.catch(() => Effect.succeed(false)),
             );
           if (!success) {
@@ -76,10 +76,10 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
         });
 
       const impls: PluginImpls = {
-        ...(endpoints.has("signUp") && {
+        ...(Arr.contains(endpoints, "signUp") && {
           beforeSignUp: (input: SignUpInput) => verify(input.captchaToken).pipe(Effect.as(input)),
         }),
-        ...(endpoints.has("signIn") && {
+        ...(Arr.contains(endpoints, "signIn") && {
           beforeSignIn: (input: SignInInput) => verify(input.captchaToken).pipe(Effect.as(input)),
         }),
       };

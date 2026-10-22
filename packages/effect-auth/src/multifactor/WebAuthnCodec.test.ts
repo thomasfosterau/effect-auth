@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
+import { Schema } from "effect";
 import {
   AttestationObjectParseError,
   AuthenticatorDataParseError,
@@ -313,8 +314,10 @@ describe("COSE public keys", () => {
 
 // --- clientDataJSON ----------------------------------------------------------
 
-const encodeJson = (value: unknown): Uint8Array =>
-  new Uint8Array(Buffer.from(JSON.stringify(value), "utf8"));
+const encodeJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
+const encodeJson = (value: Schema.Json): Uint8Array =>
+  new Uint8Array(Buffer.from(encodeJsonString(value), "utf8"));
 
 describe("parseClientDataJSON", () => {
   it("parses a registration client data blob", () => {

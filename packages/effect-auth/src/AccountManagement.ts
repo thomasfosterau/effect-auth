@@ -12,9 +12,10 @@
  * value (tokens are high-entropy random), anti-enumeration at the HTTP layer
  * (see `HttpServer.ts`), and session invalidation on sensitive changes.
  */
-import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { Array as Arr, Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { randomBase64UrlToken } from "./RandomToken.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 import { SessionService } from "./SessionService.ts";
@@ -188,7 +189,7 @@ export class AccountManagementService extends Context.Service<
     Layer.effect(AccountManagementService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
-export const make = (
+const make = (
   config: AccountManagementConfig,
 ): Effect.Effect<
   typeof AccountManagementService.Service,
@@ -207,12 +208,7 @@ export const make = (
     const crypto = yield* Crypto.Crypto;
 
     const generateToken = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(32).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate token", cause }),
-        ),
-      );
+      randomBase64UrlToken(crypto);
 
     return {
       requestEmailChange: Effect.fn("AccountManagementService.requestEmailChange")(function* (
@@ -360,11 +356,14 @@ export const make = (
         // failed release converges instead of leaving a previous address
         // behind. The replaced identifier is skipped: it is gone, and a store
         // that keeps one email per user reuses its id for the new address.
-        for (const id of held) {
-          if (id.type === "email" && id.value !== newEmail && id.id !== replaced) {
-            yield* identifiers.delete(id.id);
-          }
-        }
+        yield* Effect.forEach(
+          Arr.filter(
+            held,
+            (id) => id.type === "email" && id.value !== newEmail && id.id !== replaced,
+          ),
+          (id) => identifiers.delete(id.id),
+          { concurrency: 1, discard: true },
+        );
 
         const updated = yield* users.update({
           ...user,

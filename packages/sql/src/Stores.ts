@@ -29,7 +29,7 @@
  * bearer token.
  */
 
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer, Order, Record as Rec, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
 
@@ -40,15 +40,25 @@ import * as Auth from "@thomasfosterau/effect-auth";
 const toBase64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64");
 const fromBase64 = (text: string): Uint8Array => new Uint8Array(Buffer.from(text, "base64"));
 
-const encodeAttributes = (attributes: Record<string, unknown>): string =>
-  JSON.stringify(attributes);
+const AttributesJson = Schema.fromJsonString(Auth.Attributes);
+const StringListJson = Schema.fromJsonString(Schema.Array(Schema.String));
+const PermissionsJson = Schema.fromJsonString(
+  Schema.Record(Schema.String, Schema.Array(Schema.String)),
+);
+
+const encodeAttributes = Schema.encodeSync(AttributesJson);
+const decodeAttributesJson = Schema.decodeSync(AttributesJson);
+const encodeStringList = Schema.encodeSync(StringListJson);
+const decodeStringList = Schema.decodeSync(StringListJson);
+const encodePermissions = Schema.encodeSync(PermissionsJson);
+const decodePermissions = Schema.decodeSync(PermissionsJson);
 
 const decodeAttributes = (
   text: string | null,
   label: string,
-): Effect.Effect<Record<string, unknown>, Auth.AuthError> =>
+): Effect.Effect<Auth.Attributes, Auth.AuthError> =>
   Effect.try({
-    try: () => (text == null ? {} : (JSON.parse(text) as Record<string, unknown>)),
+    try: () => (text == null ? {} : decodeAttributesJson(text)),
     catch: (cause) =>
       new Auth.AuthError({ message: `${label}: attributes JSON parse failed`, cause }),
   });
@@ -149,7 +159,7 @@ const userQueries = (sql: SqlClient.SqlClient) => {
     input: {
       readonly name?: string;
       readonly image?: string;
-      readonly attributes?: Record<string, unknown>;
+      readonly attributes?: Auth.Attributes;
     },
     label: string,
   ): Effect.Effect<Auth.CreateUserResult, Auth.AuthError> =>
@@ -221,8 +231,7 @@ export const makeSessionStore: Effect.Effect<
   typeof Auth.SessionStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   return {
     create: (session) =>
       asVoid(
@@ -252,7 +261,9 @@ export const makeSessionStore: Effect.Effect<
         sql<SessionRow>`SELECT * FROM auth_sessions WHERE user_id = ${userId}`,
       ).pipe(
         Effect.flatMap((rows) =>
-          Effect.all(rows.map((row) => rowToSession(row, "session.listByUserId"))),
+          Effect.forEach(rows, (row) => rowToSession(row, "session.listByUserId"), {
+            concurrency: 1,
+          }),
         ),
       ),
   } satisfies typeof Auth.SessionStore.Service;
@@ -263,8 +274,7 @@ export const makeUserStore: Effect.Effect<
   typeof Auth.UserStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
   return {
     get: (userId) => users.findById(userId, "user.get"),
@@ -280,8 +290,7 @@ export const makeUserServiceStore: Effect.Effect<
   typeof Auth.UserServiceStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
   return {
     get: (userId) => users.findById(userId, "userService.get"),
@@ -304,8 +313,7 @@ export const makeEmailPasswordStore: Effect.Effect<
   typeof Auth.Email.EmailPasswordStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
   return {
     createUser: (input) => users.create(input, "emailPassword.createUser"),
@@ -325,8 +333,7 @@ export const makePasswordResetUserStore: Effect.Effect<
   typeof Auth.Password.PasswordResetUserStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
   return {
     setPasswordHash: (userId, hash) =>
@@ -370,8 +377,7 @@ export const makeRbacEntityResolver: Effect.Effect<
   typeof Auth.EntityResolver.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const rolesFor = (userId: string) =>
     sql<RoleRow>`SELECT role FROM auth_user_roles WHERE user_id = ${userId}`.pipe(
       Effect.map((rows) => rows.map((row) => row.role)),
@@ -382,10 +388,13 @@ export const makeRbacEntityResolver: Effect.Effect<
       refs: ReadonlyArray<Auth.Entity.EntityRef>,
     ) {
       const users = refs.filter((ref) => ref.type === Auth.Rbac.DefaultPrincipalType);
-      return yield* Effect.forEach(users, (ref) =>
-        Effect.map(rolesFor(ref.id), (roles) =>
-          Auth.Entity.entity(ref, { parents: roles.map(Auth.Rbac.roleRef) }),
-        ),
+      return yield* Effect.forEach(
+        users,
+        (ref) =>
+          Effect.map(rolesFor(ref.id), (roles) =>
+            Auth.Entity.entity(ref, { parents: roles.map(Auth.Rbac.roleRef) }),
+          ),
+        { concurrency: 1 },
       );
     }),
   } satisfies typeof Auth.EntityResolver.Service;
@@ -404,20 +413,18 @@ export const readRbacPolicies: Effect.Effect<
   ReadonlyArray<Auth.Policy.DeclarativePolicy>,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  const rows =
-    yield* sql<RolePermissionRow>`SELECT role, resource, action FROM auth_role_permissions`.pipe(
-      Effect.orDie,
-    );
-  const rolePermissions = new Map<string, { resource: string; action: string }[]>();
-  for (const row of rows) {
-    const permissions = rolePermissions.get(row.role) ?? [];
-    permissions.push({ resource: row.resource, action: row.action });
-    rolePermissions.set(row.role, permissions);
-  }
-  return Auth.Rbac.policies({ userRoles: {}, rolePermissions });
-});
+> = SqlClient.SqlClient.use((sql) =>
+  sql<RolePermissionRow>`SELECT role, resource, action FROM auth_role_permissions`.pipe(
+    Effect.orDie,
+    Effect.map((rows) => {
+      const rolePermissions = Rec.map(
+        Arr.groupBy(rows, (row) => row.role),
+        (grants) => grants.map((row) => ({ resource: row.resource, action: row.action })),
+      );
+      return Auth.Rbac.policies({ userRoles: {}, rolePermissions });
+    }),
+  ),
+);
 
 // ---------------------------------------------------------------------------
 // RateLimitStore
@@ -440,9 +447,7 @@ export const makeRateLimitStore: Effect.Effect<
   typeof Auth.RateLimitStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-
+> = SqlClient.SqlClient.useSync((sql) => {
   const readEntry = (key: string, label: string) =>
     firstRow(label, sql<RateLimitRow>`SELECT * FROM auth_rate_limits WHERE key = ${key}`).pipe(
       Effect.map((row) => (row ? rowToRateLimit(row) : null)),
@@ -513,8 +518,7 @@ export const makeEmailVerificationStore: Effect.Effect<
   typeof Auth.Email.EmailVerificationStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   return {
     create: (verification) =>
       asVoid(
@@ -560,8 +564,7 @@ export const makeChallengeStore: Effect.Effect<
   typeof Auth.MultiFactor.ChallengeStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const withTx = makeTx(sql);
   return {
     create: (challenge) =>
@@ -617,9 +620,7 @@ const rowToCredential = (
       counter: row.counter,
       createdAt: row.created_at,
       ...(row.name != null ? { name: row.name } : {}),
-      ...(row.transports != null
-        ? { transports: JSON.parse(row.transports) as readonly string[] }
-        : {}),
+      ...(row.transports != null ? { transports: decodeStringList(row.transports) } : {}),
     }),
     catch: (cause) => new Auth.AuthError({ message: "credential decode failed", cause }),
   });
@@ -629,9 +630,7 @@ export const makeCredentialStore: Effect.Effect<
   typeof Auth.MultiFactor.CredentialStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-
+> = SqlClient.SqlClient.useSync((sql) => {
   const getById = (credentialId: string, label: string) =>
     firstRow(
       label,
@@ -643,7 +642,7 @@ export const makeCredentialStore: Effect.Effect<
       asVoid(
         "credential.create",
         sql`INSERT INTO auth_webauthn_credentials (id, user_id, public_key, algorithm, counter, created_at, name, transports)
-              VALUES (${credential.id}, ${credential.userId}, ${toBase64(credential.publicKey)}, ${credential.algorithm}, ${credential.counter}, ${credential.createdAt}, ${credential.name ?? null}, ${credential.transports ? JSON.stringify(credential.transports) : null})`,
+              VALUES (${credential.id}, ${credential.userId}, ${toBase64(credential.publicKey)}, ${credential.algorithm}, ${credential.counter}, ${credential.createdAt}, ${credential.name ?? null}, ${credential.transports ? encodeStringList(credential.transports) : null})`,
       ).pipe(Effect.as(credential)),
     get: (credentialId) => getById(credentialId, "credential.get"),
     // The credential `id` IS the base64url-encoded WebAuthn credential ID, so
@@ -653,7 +652,7 @@ export const makeCredentialStore: Effect.Effect<
       asVoid(
         "credential.update",
         sql`UPDATE auth_webauthn_credentials
-              SET user_id = ${credential.userId}, public_key = ${toBase64(credential.publicKey)}, algorithm = ${credential.algorithm}, counter = ${credential.counter}, created_at = ${credential.createdAt}, name = ${credential.name ?? null}, transports = ${credential.transports ? JSON.stringify(credential.transports) : null}
+              SET user_id = ${credential.userId}, public_key = ${toBase64(credential.publicKey)}, algorithm = ${credential.algorithm}, counter = ${credential.counter}, created_at = ${credential.createdAt}, name = ${credential.name ?? null}, transports = ${credential.transports ? encodeStringList(credential.transports) : null}
               WHERE id = ${credential.id}`,
       ).pipe(Effect.as(credential)),
     delete: (credentialId) =>
@@ -665,7 +664,11 @@ export const makeCredentialStore: Effect.Effect<
       allRows(
         "credential.listByUserId",
         sql<CredentialRow>`SELECT * FROM auth_webauthn_credentials WHERE user_id = ${userId}`,
-      ).pipe(Effect.flatMap((rows) => Effect.all(rows.map((row) => rowToCredential(row))))),
+      ).pipe(
+        Effect.flatMap((rows) =>
+          Effect.forEach(rows, (row) => rowToCredential(row), { concurrency: 1 }),
+        ),
+      ),
   } satisfies typeof Auth.MultiFactor.CredentialStore.Service;
 });
 
@@ -698,8 +701,7 @@ export const makeOAuthStateStore: Effect.Effect<
   typeof Auth.OAuth.OAuthStateStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const withTx = makeTx(sql);
   return {
     create: (state) =>
@@ -763,8 +765,7 @@ export const makeOAuthAccountStore: Effect.Effect<
   typeof Auth.OAuth.OAuthAccountStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
 
   const read = (provider: string, providerId: string, label: string) =>
@@ -827,8 +828,7 @@ export const makeOAuthUserStore: Effect.Effect<
   typeof Auth.OAuth.OAuthUserStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
   return {
     getUser: (userId) => users.requireById(userId, "oauthUser.getUser"),
@@ -880,8 +880,7 @@ export const makePasswordResetStore: Effect.Effect<
   typeof Auth.Password.PasswordResetStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   return {
     create: (reset) =>
       asVoid(
@@ -927,8 +926,7 @@ export const makeMagicLinkStore: Effect.Effect<
   typeof Auth.MagicLinkStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   return {
     create: (token) =>
       asVoid(
@@ -958,8 +956,7 @@ export const makeMagicLinkUserStore: Effect.Effect<
   typeof Auth.MagicLinkUserStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
   return {
     createUser: (input) => users.create(input, "magicLinkUser.createUser"),
@@ -981,6 +978,8 @@ interface EmailOtpRow {
 
 const rowToEmailOtp = (row: EmailOtpRow): Auth.Email.EmailOtpRecord => ({
   email: row.email,
+  // SAFETY: `purpose` is only ever written from an `EmailOtpRecord`'s `purpose`
+  // (see `upsert`), so every stored value is an `EmailOtpPurpose`.
   purpose: row.purpose as Auth.Email.EmailOtpPurpose,
   otpHash: row.otp_hash,
   attempts: row.attempts,
@@ -993,8 +992,7 @@ export const makeEmailOtpStore: Effect.Effect<
   typeof Auth.Email.EmailOtpStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const withTx = makeTx(sql);
 
   const read = (email: string, purpose: Auth.Email.EmailOtpPurpose, label: string) =>
@@ -1054,8 +1052,7 @@ export const makeEmailOtpUserStore: Effect.Effect<
   typeof Auth.Email.EmailOtpUserStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
   return {
     createUser: (input) => users.create(input, "emailOtpUser.createUser"),
@@ -1082,7 +1079,7 @@ const rowToMultiFactor = (
     try: () => ({
       userId: row.user_id,
       secret: row.secret,
-      backupCodes: JSON.parse(row.backup_codes) as readonly string[],
+      backupCodes: decodeStringList(row.backup_codes),
       verified: row.verified !== 0,
       createdAt: row.created_at,
       ...(row.last_used_counter != null ? { lastUsedCounter: row.last_used_counter } : {}),
@@ -1095,9 +1092,7 @@ export const makeMultiFactorStore: Effect.Effect<
   typeof Auth.MultiFactor.MultiFactorStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-
+> = SqlClient.SqlClient.useSync((sql) => {
   const read = (userId: string, label: string) =>
     firstRow(label, sql<MultiFactorRow>`SELECT * FROM auth_multi_factor WHERE user_id = ${userId}`);
 
@@ -1111,10 +1106,10 @@ export const makeMultiFactorStore: Effect.Effect<
       asVoid(
         "multiFactor.upsert",
         sql`INSERT INTO auth_multi_factor (user_id, secret, backup_codes, verified, created_at, last_used_counter)
-              VALUES (${record.userId}, ${record.secret}, ${JSON.stringify(record.backupCodes)}, ${record.verified ? 1 : 0}, ${record.createdAt}, ${record.lastUsedCounter ?? null})
+              VALUES (${record.userId}, ${record.secret}, ${encodeStringList(record.backupCodes)}, ${record.verified ? 1 : 0}, ${record.createdAt}, ${record.lastUsedCounter ?? null})
               ON CONFLICT(user_id) DO UPDATE SET
                 secret = ${record.secret},
-                backup_codes = ${JSON.stringify(record.backupCodes)},
+                backup_codes = ${encodeStringList(record.backupCodes)},
                 verified = ${record.verified ? 1 : 0},
                 created_at = ${record.createdAt},
                 last_used_counter = ${record.lastUsedCounter ?? null}`,
@@ -1145,8 +1140,7 @@ export const makePendingMultiFactorStore: Effect.Effect<
   typeof Auth.MultiFactor.PendingMultiFactorStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   return {
     create: (pending) =>
       asVoid(
@@ -1184,6 +1178,8 @@ interface IdentifierRow {
 const rowToIdentifier = (row: IdentifierRow): Auth.Identifier => ({
   id: row.id,
   userId: row.user_id,
+  // SAFETY: `type` is only ever written from an `Identifier`'s `type` (see
+  // `insert`), so every stored value is an `IdentifierType`.
   type: row.type as Auth.IdentifierType,
   value: row.value,
   verified: row.verified !== 0,
@@ -1196,8 +1192,7 @@ export const makeIdentifierStore: Effect.Effect<
   typeof Auth.IdentifierStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const withTx = makeTx(sql);
 
   const insert = (identifier: Auth.Identifier, label: string) =>
@@ -1247,7 +1242,7 @@ export const makeIdentifierStore: Effect.Effect<
               readonly id: string;
             }>`DELETE FROM auth_identifiers WHERE id = ${from.id} AND user_id = ${from.userId} AND type = ${from.type} AND value = ${from.value} RETURNING id`,
           );
-          if (released.length > 0) return to;
+          if (Arr.isReadonlyArrayNonEmpty(released)) return to;
           // `from` was not held: take the claim back. A DELETE rather than a
           // ROLLBACK, so D1, where a ROLLBACK does nothing, ends unchanged too.
           yield* asVoid(
@@ -1301,8 +1296,7 @@ export const makeAccountLockoutStore: Effect.Effect<
   typeof Auth.Plugins.AccountLockoutStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   return {
     get: (key) =>
       firstRow(
@@ -1386,10 +1380,8 @@ const rowToApiKey = (row: ApiKeyRow): Effect.Effect<Auth.ApiKey, Auth.AuthError>
       enabled: row.enabled !== 0,
       ...(row.expires_at != null ? { expiresAt: row.expires_at } : {}),
       ...(row.last_used_at != null ? { lastUsedAt: row.last_used_at } : {}),
-      ...(row.permissions != null
-        ? { permissions: JSON.parse(row.permissions) as Record<string, readonly string[]> }
-        : {}),
-      metadata: row.metadata != null ? (JSON.parse(row.metadata) as Record<string, unknown>) : {},
+      ...(row.permissions != null ? { permissions: decodePermissions(row.permissions) } : {}),
+      metadata: row.metadata != null ? decodeAttributesJson(row.metadata) : {},
       ...(row.remaining != null ? { remaining: row.remaining } : {}),
       ...(row.refill_amount != null ? { refillAmount: row.refill_amount } : {}),
       ...(row.refill_interval != null ? { refillInterval: row.refill_interval } : {}),
@@ -1414,9 +1406,7 @@ export const makeApiKeyStore: Effect.Effect<
   typeof Auth.ApiKeyStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-
+> = SqlClient.SqlClient.useSync((sql) => {
   const getById = (id: string, label: string) =>
     firstRow(label, sql<ApiKeyRow>`SELECT * FROM auth_api_keys WHERE id = ${id}`).pipe(
       Effect.flatMap((row) => (row ? rowToApiKey(row) : Effect.succeed(null))),
@@ -1427,7 +1417,7 @@ export const makeApiKeyStore: Effect.Effect<
       asVoid(
         "apiKey.create",
         sql`INSERT INTO auth_api_keys (id, name, prefix, start, key_hash, user_id, enabled, expires_at, last_used_at, permissions, metadata, remaining, refill_amount, refill_interval, refill_max, last_refill_at, rate_limit_max_requests, rate_limit_window_ms, created_at, updated_at)
-              VALUES (${apiKey.id}, ${apiKey.name ?? null}, ${apiKey.prefix ?? null}, ${apiKey.start}, ${apiKey.keyHash}, ${apiKey.userId}, ${apiKey.enabled ? 1 : 0}, ${apiKey.expiresAt ?? null}, ${apiKey.lastUsedAt ?? null}, ${apiKey.permissions ? JSON.stringify(apiKey.permissions) : null}, ${encodeAttributes(apiKey.metadata)}, ${apiKey.remaining ?? null}, ${apiKey.refillAmount ?? null}, ${apiKey.refillInterval ?? null}, ${apiKey.refillMax ?? null}, ${apiKey.lastRefillAt ?? null}, ${apiKey.rateLimit?.maxRequests ?? null}, ${apiKey.rateLimit?.windowMs ?? null}, ${apiKey.createdAt}, ${apiKey.updatedAt})`,
+              VALUES (${apiKey.id}, ${apiKey.name ?? null}, ${apiKey.prefix ?? null}, ${apiKey.start}, ${apiKey.keyHash}, ${apiKey.userId}, ${apiKey.enabled ? 1 : 0}, ${apiKey.expiresAt ?? null}, ${apiKey.lastUsedAt ?? null}, ${apiKey.permissions ? encodePermissions(apiKey.permissions) : null}, ${encodeAttributes(apiKey.metadata)}, ${apiKey.remaining ?? null}, ${apiKey.refillAmount ?? null}, ${apiKey.refillInterval ?? null}, ${apiKey.refillMax ?? null}, ${apiKey.lastRefillAt ?? null}, ${apiKey.rateLimit?.maxRequests ?? null}, ${apiKey.rateLimit?.windowMs ?? null}, ${apiKey.createdAt}, ${apiKey.updatedAt})`,
       ).pipe(Effect.as(apiKey)),
     get: (id) => getById(id, "apiKey.get"),
     getByHash: (keyHash) =>
@@ -1447,7 +1437,7 @@ export const makeApiKeyStore: Effect.Effect<
               enabled = ${apiKey.enabled ? 1 : 0},
               expires_at = ${apiKey.expiresAt ?? null},
               last_used_at = ${apiKey.lastUsedAt ?? null},
-              permissions = ${apiKey.permissions ? JSON.stringify(apiKey.permissions) : null},
+              permissions = ${apiKey.permissions ? encodePermissions(apiKey.permissions) : null},
               metadata = ${encodeAttributes(apiKey.metadata)},
               remaining = ${apiKey.remaining ?? null},
               refill_amount = ${apiKey.refillAmount ?? null},
@@ -1464,7 +1454,11 @@ export const makeApiKeyStore: Effect.Effect<
       allRows(
         "apiKey.listByUserId",
         sql<ApiKeyRow>`SELECT * FROM auth_api_keys WHERE user_id = ${userId}`,
-      ).pipe(Effect.flatMap((rows) => Effect.all(rows.map((row) => rowToApiKey(row))))),
+      ).pipe(
+        Effect.flatMap((rows) =>
+          Effect.forEach(rows, (row) => rowToApiKey(row), { concurrency: 1 }),
+        ),
+      ),
   } satisfies typeof Auth.ApiKeyStore.Service;
 });
 
@@ -1476,13 +1470,18 @@ interface UserRowWithEmail extends UserRow {
   readonly primary_email: string | null;
 }
 
+/** Orders by `email` with `localeCompare`, the order `listUsers` pages in. */
+const byEmail: Order.Order<{ readonly email: string }> = Order.make((a, b) => {
+  const compared = a.email.localeCompare(b.email);
+  return compared < 0 ? -1 : compared > 0 ? 1 : 0;
+});
+
 /** `Auth.AdminUserStore` over the `auth_users` and `auth_identifiers` tables; requires `SqlClient`. */
 export const makeAdminUserStore: Effect.Effect<
   typeof Auth.AdminUserStore.Service,
   never,
   SqlClient.SqlClient
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+> = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
 
   return {
@@ -1502,17 +1501,19 @@ export const makeAdminUserStore: Effect.Effect<
             ) AS primary_email
             FROM auth_users u`,
         );
-        const decorated = yield* Effect.all(
-          rows.map((row) =>
+        const decorated = yield* Effect.forEach(
+          rows,
+          (row) =>
             rowToUser(row, "adminUser.listUsers").pipe(
               Effect.map((user) => ({ user, email: row.primary_email ?? "" })),
             ),
-          ),
+          { concurrency: 1 },
         );
         const search = query.searchEmail?.toLowerCase();
-        const matching = decorated
-          .filter(({ email }) => (search ? email.toLowerCase().includes(search) : true))
-          .sort((a, b) => a.email.localeCompare(b.email));
+        const matching = Arr.sort(
+          decorated.filter(({ email }) => (search ? email.toLowerCase().includes(search) : true)),
+          byEmail,
+        );
         const offset = query.offset ?? 0;
         const limit = query.limit ?? matching.length;
         return {

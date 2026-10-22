@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer, Order, Schema } from "effect";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
 import { EmailPasswordService } from "./email/EmailPassword.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";
@@ -372,10 +372,12 @@ describe("ScimService — users", () => {
       }),
     );
     expect(resource.userName).toBe("ada@acme.test");
-    expect(resource.emails.map((e) => e.value).sort()).toEqual([
-      "ada.l@acme.test",
-      "ada@acme.test",
-    ]);
+    expect(
+      Arr.sort(
+        resource.emails.map((e) => e.value),
+        Order.String,
+      ),
+    ).toEqual(["ada.l@acme.test", "ada@acme.test"]);
     expect(resource.emails.filter((e) => e.primary === true)).toHaveLength(1);
     // The store was handed the userName, and only it, to create the user
     // with (#380); the extra address is claimed afterwards.
@@ -570,10 +572,12 @@ describe("ScimService — users", () => {
     // Without the pin, the older `ada.old@` identifier would take over as the
     // "primary" (earliest verified) email and userName would silently regress.
     expect(patched.userName).toBe("ada.new@acme.test");
-    expect(patched.emails.map((e) => e.value).sort()).toEqual([
-      "ada.new@acme.test",
-      "ada.old@acme.test",
-    ]);
+    expect(
+      Arr.sort(
+        patched.emails.map((e) => e.value),
+        Order.String,
+      ),
+    ).toEqual(["ada.new@acme.test", "ada.old@acme.test"]);
   });
 
   it("adds and removes emails, but never the one userName resolves to", async () => {
@@ -585,10 +589,12 @@ describe("ScimService — users", () => {
         { op: "add", path: "emails", value: [{ value: "ada.work@acme.test" }] },
       ]),
     );
-    expect(added.emails.map((e) => e.value).sort()).toEqual([
-      "ada.work@acme.test",
-      "ada@acme.test",
-    ]);
+    expect(
+      Arr.sort(
+        added.emails.map((e) => e.value),
+        Order.String,
+      ),
+    ).toEqual(["ada.work@acme.test", "ada@acme.test"]);
 
     const removed = await fx.run(
       fx.service.patchUser(fx.a.connection, ada.id, [
@@ -651,10 +657,12 @@ describe("ScimService — users", () => {
       }),
     );
     expect(profileOnly.displayName).toBe("Ada L.");
-    expect(profileOnly.emails.map((e) => e.value).sort()).toEqual([
-      "ada.alt@acme.test",
-      "ada@acme.test",
-    ]);
+    expect(
+      Arr.sort(
+        profileOnly.emails.map((e) => e.value),
+        Order.String,
+      ),
+    ).toEqual(["ada.alt@acme.test", "ada@acme.test"]);
     // externalId is absent from the PUT body, so it is cleared.
     expect(profileOnly.externalId).toBeUndefined();
 
@@ -724,7 +732,12 @@ describe("ScimService — groups", () => {
     );
 
     expect(group.displayName).toBe("Engineering");
-    expect(group.members.map((m) => m.value).sort()).toEqual([ada.id, grace.id].sort());
+    expect(
+      Arr.sort(
+        group.members.map((m) => m.value),
+        Order.String,
+      ),
+    ).toEqual(Arr.sort([ada.id, grace.id], Order.String));
     expect(fx.teams.get(group.id)?.organizationId).toBe(ORG_A);
     expect(fx.teamMembers).toHaveLength(2);
   });
@@ -943,6 +956,8 @@ const makeHttpFixture = async (config: Scim.ScimConfig = {}) => {
   };
 };
 
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const scimReq = (
   method: string,
   path: string,
@@ -954,7 +969,7 @@ const scimReq = (
       ...(options.body !== undefined ? { "content-type": "application/scim+json" } : {}),
       ...(options.token !== undefined ? { authorization: `Bearer ${options.token}` } : {}),
     },
-    ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+    ...(options.body !== undefined ? { body: encodeJson(options.body) } : {}),
   });
 
 interface ScimUserBody {
@@ -1056,7 +1071,12 @@ describe("HTTP SCIM endpoints", () => {
     expect(conflict.status).toBe("409");
     expect(conflict.scimType).toBe("uniqueness");
     // The body is RFC 7644 §3.12 verbatim — no repo-specific members.
-    expect(Object.keys(conflict).sort()).toEqual(["detail", "schemas", "scimType", "status"]);
+    expect(Arr.sort(Object.keys(conflict), Order.String)).toEqual([
+      "detail",
+      "schemas",
+      "scimType",
+      "status",
+    ]);
 
     // 4. The filter now finds them.
     const found = await fx.handler(

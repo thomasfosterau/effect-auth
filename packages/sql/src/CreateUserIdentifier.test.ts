@@ -62,8 +62,11 @@ describe("effect-auth-sql: createUser ignores the identifier", () => {
             identifier: identifierFor("admin@example.com"),
           }),
         ];
-        const held = [];
-        for (const { user } of created) held.push(...(yield* identifiers.listByUser(user.id)));
+        const held = (yield* Effect.forEach(
+          created,
+          ({ user }) => identifiers.listByUser(user.id),
+          { concurrency: 1 },
+        )).flat();
         return { created, held };
       }),
     );

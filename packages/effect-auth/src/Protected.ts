@@ -71,7 +71,7 @@
  *
  * @module protected
  */
-import { Effect, Option, Schema, SchemaGetter, SchemaIssue } from "effect";
+import { Array as Arr, Effect, Option, Predicate, Schema, SchemaGetter, SchemaIssue } from "effect";
 import {
   auditSystemDecision,
   CurrentPrincipal,
@@ -131,14 +131,11 @@ export interface ProtectedFieldOptions<E = unknown> {
 // ---------------------------------------------------------------------------
 
 const toActionRef = (action: string | Entity.EntityRef): Entity.EntityRef =>
-  typeof action === "string" ? Entity.ref("Action", action) : action;
+  Predicate.isString(action) ? Entity.ref("Action", action) : action;
 
 const toPolicies = <E>(
   policies: Policy.Policy<E, never> | ReadonlyArray<Policy.Policy<E, never>>,
-): ReadonlyArray<Policy.Policy<E, never>> =>
-  Array.isArray(policies)
-    ? (policies as ReadonlyArray<Policy.Policy<E, never>>)
-    : [policies as Policy.Policy<E, never>];
+): ReadonlyArray<Policy.Policy<E, never>> => Arr.ensure(policies);
 
 /**
  * Build the {@link Policy.PolicyRequest} a protected field asks. The principal

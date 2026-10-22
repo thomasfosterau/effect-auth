@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer } from "effect";
 import { KeyValueStore } from "effect/persistence";
 import {
   IdentifierStore,
@@ -262,7 +262,7 @@ const replaceStores: ReadonlyArray<readonly [string, () => Layer.Layer<Identifie
   ["IdentifierStoreKV", testLayer],
 ];
 
-for (const [label, makeLayer] of replaceStores) {
+Arr.forEach(replaceStores, ([label, makeLayer]) => {
   const runOn = <A, E>(effect: Effect.Effect<A, E, IdentifierStore>): Promise<A> =>
     Effect.runPromise(effect.pipe(Effect.provide(makeLayer())) as Effect.Effect<A, E>);
   const email = (userId: string, value: string, verified = false) =>
@@ -370,7 +370,7 @@ for (const [label, makeLayer] of replaceStores) {
       ]);
     });
   });
-}
+});
 
 // ---------------------------------------------------------------------------
 // primaryEmail helper

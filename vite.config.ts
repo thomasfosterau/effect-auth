@@ -1,3 +1,5 @@
+import { recommended } from "@effect/tsgo/oxlint-presets";
+import effect from "@mpsuesser/oxlint-plugin-effect";
 import { defineConfig } from "vite-plus";
 
 // Code outside the published libraries' runtime: tests, test fixtures, build
@@ -17,61 +19,27 @@ export default defineConfig({
   },
   fmt: {},
   lint: {
-    jsPlugins: [
-      { name: "vite-plus", specifier: "vite-plus/oxlint-plugin" },
-      { name: "effect", specifier: "@mpsuesser/oxlint-plugin-effect" },
-    ],
+    // `@effect/tsgo`'s preset needs the Effect-patched oxlint (the root
+    // `prepare` script runs `effect-tsgo patch --typescript --oxlint`). Its
+    // rules are type-aware, so with `typeAware: false` below only the
+    // syntactic ones report.
+    extends: [recommended, effect.configs.recommended],
+    jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
     rules: {
       "vite-plus/prefer-vite-plus-imports": "error",
 
-      // @mpsuesser/oxlint-plugin-effect. Every rule of its recommended preset
-      // is listed, so a plugin upgrade that adds one enables nothing until it
-      // is listed here. Rules that are off are tracked in #438.
-
-      // On: Effect v4 correctness and the platform services.
-      "effect/avoid-mutable-state": "error",
-      "effect/avoid-node-imports": "error",
-      "effect/avoid-option-getorthrow": "error",
-      "effect/avoid-platform-coupling": "error",
-      "effect/avoid-process-env": "error",
-      "effect/avoid-schema-suffix": "error",
-      "effect/avoid-yield-ref": "error",
-      "effect/context-tag-extends": "error",
-      "effect/effect-run-in-body": "error",
-      "effect/maybe-prefix-requires-option": "error",
-      "effect/no-effect-ignore-then-as": "error",
-      "effect/no-module-mocking": "error",
-      "effect/no-opaque-instance-fields": "error",
-      "effect/no-reflect-apply": "error",
-      "effect/no-reflect-get": "error",
-      "effect/no-unknown-type-aliases": "error",
-      "effect/no-widen-then-assert": "error",
-      "effect/prefer-array-fromoption-over-option-match-empty": "error",
-      "effect/prefer-duration-constructors": "error",
-      "effect/prefer-redacted-config": "error",
-      "effect/require-schema-type-alias": "error",
-      "effect/throw-in-effect-gen": "error",
-      "effect/use-command-executor-service": "error",
-      "effect/use-console-service": "error",
-      "effect/use-filesystem-service": "error",
-      "effect/use-http-client-service": "error",
-      "effect/use-path-service": "error",
-      "effect/use-random-service": "error",
-      "effect/use-temp-file-scoped": "error",
-      "effect/vm-in-wrong-file": "error",
-
-      // Off: they contradict a documented convention.
+      // ---- Effect preset: rules this codebase's conventions cut across ----
       // DESIGN.md D4: domain errors are `Data.TaggedError`.
       "effect/avoid-data-tagged-error": "off",
       // Vendor adapters and the client use plain `fetch` to stay Workers-safe.
       "effect/avoid-native-fetch": "off",
-      // The React binding is built on hooks.
-      "effect/avoid-react-hooks": "off",
       // Optional properties are `?: T | undefined`, and a conditional spread
       // is how a value is omitted under `exactOptionalPropertyTypes`.
       "effect/prefer-option-over-null": "off",
       "effect/no-conditional-empty-object-spread": "off",
-      // Imports are `import { Effect } from "effect"` throughout.
+      // Imports are `import { Effect } from "effect"` throughout, and
+      // `prefer-namespace-imports` hard-codes abbreviations (`Arr`, `P`, …)
+      // with no options.
       "effect/no-barrel-imports": "off",
       "effect/prefer-namespace-imports": "off",
       // Exported `make*` constructors are the composition style here.
@@ -81,8 +49,6 @@ export default defineConfig({
       "effect/no-shape-in-symbol-names": "off",
       "effect/no-object-parameters": "off",
       "effect/no-known-value-widening": "off",
-      // Type tests assert rejections with `@ts-expect-error`.
-      "effect/avoid-ts-ignore": "off",
       // `string & {}` (literal autocomplete) and `{} extends …` are type-level idioms.
       "effect/avoid-object-type": "off",
       // The remaining blanket catches fail closed on purpose (CAPTCHA,
@@ -90,35 +56,38 @@ export default defineConfig({
       "effect/effect-catchall-default": "off",
       // The only `makeFilter` calls probe config keys; they are not reusable checks.
       "effect/require-filter-metadata": "off",
+      // An awareness prompt, not a defect rule: it fires on every `as`,
+      // including the narrowings the DOM, Fetch and framework types
+      // structurally require. Stays visible as a warning.
+      "effect/casting-awareness": "warn",
 
-      // Off for now: worth adopting, but each is a large refactor (#438).
-      "effect/avoid-any": "off",
-      "effect/avoid-direct-json": "off",
-      "effect/avoid-direct-tag-checks": "off",
-      "effect/avoid-expect-in-if": "off",
-      "effect/avoid-native-object-helpers": "off",
-      "effect/avoid-non-null-assertion": "off",
-      "effect/avoid-sync-fs": "off",
-      "effect/avoid-try-catch": "off",
-      "effect/avoid-untagged-errors": "off",
-      "effect/casting-awareness": "off",
-      "effect/effect-promise-vs-trypromise": "off",
-      "effect/imperative-loops": "off",
-      "effect/no-chained-type-assertions": "off",
-      "effect/no-length-comparison": "off",
-      "effect/no-runtime-typeof": "off",
-      "effect/no-unknown-parameters": "off",
-      "effect/no-unknown-returns": "off",
-      "effect/no-unsafe-dictionary-type": "off",
-      "effect/prefer-arr-match": "off",
-      "effect/prefer-arr-sort": "off",
-      "effect/prefer-effect-fn": "off",
-      "effect/prefer-effect-is": "off",
-      "effect/prefer-match-over-switch": "off",
-      "effect/require-effect-concurrency": "off",
-      "effect/require-safety-comment-for-type-assertion": "off",
-      "effect/use-clock-service": "off",
-      "effect/yield-in-for-loop": "off",
+      // ---- Effect preset: ported-code allowances --------------------------
+      // Code that predates the preset. Each rule sits at `warn` so its sites
+      // stay reported; a new site is a defect, not headroom. Once a rule's
+      // count reaches zero its line is deleted, so it is back at the preset's
+      // `error`. Counts (sources / tests) and the remaining sites:
+      // #443.
+      // `Date.now()` / `new Date()` → `Clock` / `DateTime` changes how expiry
+      // logic sees time under `TestClock` (182 / 499).
+      "effect/use-clock-service": "warn",
+      // Test fixtures' casts, plus the one unvalidated `JWT_ALGORITHM` cast
+      // (1 / 599).
+      "effect/require-safety-comment-for-type-assertion": "warn",
+      // Published types say `Record<string, unknown>` (session and user
+      // attributes, metadata, JWT claims, drizzle column types); narrowing
+      // them is an API change (60 / 0).
+      "effect/no-unsafe-dictionary-type": "warn",
+      // Public guards, decoders and error callbacks over genuinely unknown
+      // input (16 / 4, and 1 / 1 for `no-unknown-returns`).
+      "effect/no-unknown-parameters": "warn",
+      "effect/no-unknown-returns": "warn",
+      // Exported `Map` parameters and `ReadonlyMap` results (10 / 284).
+      "effect/avoid-native-object-helpers": "warn",
+      // Two unbounded scheduler loops in `HttpServer.ts` (2 / 206).
+      "effect/imperative-loops": "warn",
+      // Exported Effect *values* built with `Effect.gen`, where `Effect.fn`
+      // would change the public type (12 / 183).
+      "effect/prefer-effect-fn": "warn",
     },
     overrides: [
       {
@@ -136,6 +105,74 @@ export default defineConfig({
         },
       },
       {
+        // Type tests assert rejections with an expect-error directive.
+        files: ["**/*.test.ts", "**/*.test.tsx"],
+        rules: { "effect/avoid-ts-ignore": "off" },
+      },
+      {
+        // Ported-code allowance for tests only (sources are at zero): the
+        // `!` on fixture lookups (270; #443).
+        files: ["**/*.test.ts", "**/*.test.tsx", "**/testing/**"],
+        rules: { "effect/avoid-non-null-assertion": "warn" },
+      },
+      {
+        // Plain Node tooling that runs no Effect (the dist smoke test and the
+        // task-graph builders): native loops, `.length`, `JSON`, `Error`,
+        // `try`/`catch` and synchronous `fs` are the idiom there.
+        files: ["**/scripts/**", "vite.tasks.ts", "**/vite.config.ts"],
+        rules: {
+          "effect/avoid-direct-json": "off",
+          "effect/avoid-native-object-helpers": "off",
+          "effect/avoid-sync-fs": "off",
+          "effect/avoid-try-catch": "off",
+          "effect/avoid-untagged-errors": "off",
+          "effect/imperative-loops": "off",
+          "effect/no-length-comparison": "off",
+          "effect/no-runtime-typeof": "off",
+          "effect/prefer-arr-match": "off",
+          "effect/prefer-arr-sort": "off",
+          "effect/prefer-effect-is": "off",
+        },
+      },
+      {
+        // Code that imports nothing from `effect`: the framework bindings peer
+        // only their framework (AGENTS.md), the browser client's runtime is
+        // plain `fetch` with no Effect in the bundle (`Client.ts`), and
+        // `./ladder` imports nothing at all because browser bundles load it
+        // (`ModuleGraph.test.ts`). The
+        // rules that steer to an `effect` module (`Array`, `Predicate`,
+        // `Match`, `HashSet`, `Schema`, `Clock`) have no satisfiable fix
+        // there, and the bindings throw plain `Error`s to framework code that
+        // has no typed error channel.
+        files: [
+          "packages/{react,svelte,solid,vue}/src/**",
+          "packages/client/src/Client.ts",
+          "packages/effect-auth/src/Ladder.ts",
+        ],
+        rules: {
+          "effect/avoid-direct-json": "off",
+          "effect/avoid-direct-tag-checks": "off",
+          "effect/avoid-native-object-helpers": "off",
+          "effect/avoid-try-catch": "off",
+          "effect/avoid-untagged-errors": "off",
+          "effect/imperative-loops": "off",
+          "effect/no-length-comparison": "off",
+          "effect/no-runtime-typeof": "off",
+          "effect/prefer-arr-match": "off",
+          "effect/prefer-arr-sort": "off",
+          "effect/prefer-effect-is": "off",
+          "effect/prefer-match-over-switch": "off",
+          "effect/use-clock-service": "off",
+          "effect/use-console-service": "off",
+        },
+      },
+      {
+        // The React binding is built on hooks, and the Vue binding on Vue's
+        // `use*` composables, which the rule cannot tell apart from hooks.
+        files: ["packages/{react,vue}/src/**"],
+        rules: { "effect/avoid-react-hooks": "off" },
+      },
+      {
         // Direct `node:crypto` use is corralled in these three modules.
         files: [
           "packages/effect-auth/src/password/Password.ts",
@@ -149,16 +186,61 @@ export default defineConfig({
         files: ["packages/effect-auth/src/http/HttpServer.ts"],
         rules: { "effect/effect-run-in-body": "off" },
       },
-      {
-        // The framework bindings import no `effect`, so there is no Console service.
-        files: ["packages/{react,svelte,solid,vue}/src/**"],
-        rules: { "effect/use-console-service": "off" },
-      },
     ],
     // Type checking is owned by each package's `check` task (tsc / vue-tsc /
     // svelte-check), which understands the per-package NodeNext tsconfigs.
     // Keeping it out of lint avoids one cross-package program mis-resolving
     // per-package types (e.g. @types/node globals).
     options: { typeAware: false, typeCheck: false },
+  },
+  run: {
+    tasks: {
+      // Every package's unit suite under one Istanbul coverage map
+      // (`coverage/coverage-final.json`), which `fallow audit` reads for exact
+      // per-function CRAP scores (`health.coverage` in .fallowrc.json).
+      // Without it fallow estimates every function as uncovered, and any
+      // function with cyclomatic complexity ≥ 5 fails the gate on its own.
+      // Run it before `fallow audit` (the PreToolUse fallow gate never
+      // refreshes the map).
+      //
+      // One vitest process runs every package's suite (`test.projects`
+      // below), so no `{ from: "dependencies" }` edge builds the siblings a
+      // suite imports through `exports` (→ `dist/`): every package's `build`
+      // is named explicitly (cached, so a warm tree pays nothing), and a new
+      // package adds itself here. The alchemy runtime suite stays in its own
+      // `test:alchemy` task, as in `test:unit`.
+      "test:coverage": {
+        command:
+          "vp test run --coverage --exclude '**/node_modules/**' --exclude '**/dist/**' --exclude packages/alchemy/src/AuthSchema.test.ts",
+        dependsOn: [
+          "@thomasfosterau/effect-auth#build",
+          "@thomasfosterau/effect-auth-alchemy#build",
+          "@thomasfosterau/effect-auth-argon2#build",
+          "@thomasfosterau/effect-auth-client#build",
+          "@thomasfosterau/effect-auth-drizzle#build",
+          "@thomasfosterau/effect-auth-react#build",
+          "@thomasfosterau/effect-auth-resend#build",
+          "@thomasfosterau/effect-auth-saml#build",
+          "@thomasfosterau/effect-auth-solid#build",
+          "@thomasfosterau/effect-auth-sql#build",
+          "@thomasfosterau/effect-auth-svelte#build",
+          "@thomasfosterau/effect-auth-twilio#build",
+          "@thomasfosterau/effect-auth-vue#build",
+        ],
+        cache: false,
+      },
+    },
+  },
+  test: {
+    // One entry per package: each package's own vite.config.ts is a vitest
+    // project, so the root run and the root coverage map cover them all.
+    projects: ["packages/*/vite.config.ts"],
+    coverage: {
+      provider: "istanbul",
+      reporter: ["text-summary", "json-summary", "json"],
+      reportsDirectory: "./coverage",
+      include: ["packages/*/src/**/*.{ts,tsx,svelte,vue}"],
+      exclude: ["**/*.d.ts", "**/*.test.{ts,tsx}", "**/testing/**"],
+    },
   },
 });

@@ -52,7 +52,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
 
   const createUser = (input: {
     readonly name?: string;
-    readonly attributes?: Record<string, unknown>;
+    readonly attributes?: Auth.User["attributes"];
   }): Auth.User => {
     const now = new Date();
     const user: Auth.User = {

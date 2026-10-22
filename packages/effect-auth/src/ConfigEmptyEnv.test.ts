@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vite-plus/test";
-import { Cause, Config, Schema, ConfigProvider, Effect, type Exit, Redacted } from "effect";
+import { assert, describe, expect, it } from "vite-plus/test";
+import {
+  Array as Arr,
+  Cause,
+  Config,
+  Schema,
+  ConfigProvider,
+  Effect,
+  Exit,
+  Order,
+  Redacted,
+} from "effect";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
 import { jwtServiceConfig } from "./Jwt.ts";
 import { trustedDeviceConfig } from "./TrustedDevice.ts";
@@ -26,7 +36,7 @@ const resolve = <A, E>(config: Config.Config<A>, env: Record<string, string>) =>
 
 describe("empty environment variables", () => {
   const failureMessage = (exit: Exit.Exit<unknown, unknown>) =>
-    exit._tag === "Failure" ? String(Cause.squash(exit.cause)) : "";
+    Exit.isFailure(exit) ? String(Cause.squash(exit.cause)) : "";
 
   const jwtEnv = { JWT_ISSUER: "https://issuer.test" };
   const mfEnv = { TWO_FACTOR_ISSUER: "Acme" };
@@ -61,9 +71,12 @@ describe("empty environment variables", () => {
     const oauth = await resolve(oauthServiceOptionsConfig, {});
     const mf = await resolve(multiFactorConfig, mfEnv);
     for (const exit of [jwt, oauth, mf]) expect(exit._tag).toBe("Success");
-    if (jwt._tag === "Success") expect(jwt.value.encryptPrivateKey).toBeUndefined();
-    if (oauth._tag === "Success") expect(oauth.value.encryptTokens).toBeUndefined();
-    if (mf._tag === "Success") expect(mf.value.encryptSecret).toBeUndefined();
+    assert(Exit.isSuccess(jwt));
+    expect(jwt.value.encryptPrivateKey).toBeUndefined();
+    assert(Exit.isSuccess(oauth));
+    expect(oauth.value.encryptTokens).toBeUndefined();
+    assert(Exit.isSuccess(mf));
+    expect(mf.value.encryptSecret).toBeUndefined();
   });
 
   it("a non-empty secret enables encryption", async () => {
@@ -73,12 +86,12 @@ describe("empty environment variables", () => {
     expect(jwt._tag).toBe("Success");
     expect(oauth._tag).toBe("Success");
     expect(mf._tag).toBe("Success");
-    if (jwt._tag === "Success")
-      expect(Redacted.value(jwt.value.encryptPrivateKey!.secret)).toBe("j");
-    if (oauth._tag === "Success")
-      expect(Redacted.value(oauth.value.encryptTokens!.secret)).toBe("o");
-    if (mf._tag === "Success")
-      expect(Redacted.value(mf.value.encryptSecret!.secret)).toBe("s3cret");
+    assert(Exit.isSuccess(jwt));
+    expect(Redacted.value(jwt.value.encryptPrivateKey!.secret)).toBe("j");
+    assert(Exit.isSuccess(oauth));
+    expect(Redacted.value(oauth.value.encryptTokens!.secret)).toBe("o");
+    assert(Exit.isSuccess(mf));
+    expect(Redacted.value(mf.value.encryptSecret!.secret)).toBe("s3cret");
   });
 
   describe("optionalSecret probe", () => {
@@ -88,7 +101,7 @@ describe("empty environment variables", () => {
     const env = (e: Record<string, string>, opts?: { preserveEmptyStrings?: boolean }) =>
       ConfigProvider.fromEnv({ env: e, ...opts });
     const value = (exit: Exit.Exit<Redacted.Redacted | undefined, unknown>) =>
-      exit._tag === "Success" ? (exit.value ? Redacted.value(exit.value) : undefined) : "FAILED";
+      Exit.isSuccess(exit) ? (exit.value ? Redacted.value(exit.value) : undefined) : "FAILED";
 
     it.each([
       [{ [`${N}_FILE`]: "/run/secrets/x" }],
@@ -143,11 +156,9 @@ describe("empty environment variables", () => {
 
       const mf = multiFactorConfig.pipe(Config.nested("APP"));
       const ok = await run(mf, env({ APP_TWO_FACTOR_ISSUER: "Acme", [`APP_${N}`]: "s3cret" }));
-      expect(ok._tag === "Success" && Redacted.value(ok.value.encryptSecret!.secret)).toBe(
-        "s3cret",
-      );
+      expect(Exit.isSuccess(ok) && Redacted.value(ok.value.encryptSecret!.secret)).toBe("s3cret");
       const none = await run(mf, env({ APP_TWO_FACTOR_ISSUER: "Acme" }));
-      expect(none._tag === "Success" && none.value.encryptSecret).toBeUndefined();
+      expect(Exit.isSuccess(none) && none.value.encryptSecret).toBeUndefined();
       const bad = await run(mf, env({ APP_TWO_FACTOR_ISSUER: "Acme", [`APP_${N}`]: "" }));
       expect(bad._tag).toBe("Failure");
     });
@@ -162,7 +173,7 @@ describe("empty environment variables", () => {
       );
       const probe = Config.schema(Schema.Record(key, Schema.UndefinedOr(Schema.String)), ["P"]);
       await Effect.runPromise(probe.parse(env({ P_A: "1", P_B: "", P_C_D: "2" })));
-      expect([...seen].sort()).toEqual(["A", "B", "C"]);
+      expect(Arr.sort([...seen], Order.String)).toEqual(["A", "B", "C"]);
     });
 
     it("preserveEmptyStrings: an empty value is a failure", async () => {
@@ -188,6 +199,7 @@ describe("empty environment variables", () => {
       TRUSTED_DEVICE_MAX_AGE_MS: "",
     });
     expect(exit._tag).toBe("Success");
-    if (exit._tag === "Success") expect(exit.value.maxAge).toBe(30 * 24 * 60 * 60 * 1000);
+    assert(Exit.isSuccess(exit));
+    expect(exit.value.maxAge).toBe(30 * 24 * 60 * 60 * 1000);
   });
 });

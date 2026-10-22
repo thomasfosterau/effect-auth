@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Predicate, Schema } from "effect";
 import { AuthError, UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -50,25 +50,25 @@ import {
 } from "./Saml.ts";
 import type * as Types from "./Types.ts";
 
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /** Swap `globalThis.fetch` for a route handler while `thunk` runs. */
-const withFetch = async <A>(
-  routes: Record<string, unknown>,
+const withFetch = <A>(
+  routes: Readonly<Record<string, Schema.Json>>,
   thunk: () => Promise<A>,
 ): Promise<A> => {
   const original = globalThis.fetch;
   globalThis.fetch = ((input: string | URL | Request) => {
-    const url = typeof input === "string" ? input : input.toString();
+    const url = Predicate.isString(input) ? input : input.toString();
     const key = Object.keys(routes).find((k) => url.startsWith(k));
     const body = key ? routes[key] : { error: "no route" };
     return Promise.resolve(
-      new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } }),
+      new Response(encodeJson(body), { headers: { "content-type": "application/json" } }),
     );
   }) as typeof fetch;
-  try {
-    return await thunk();
-  } finally {
+  return new Promise<A>((resolve) => resolve(thunk())).finally(() => {
     globalThis.fetch = original;
-  }
+  });
 };
 
 const makeStores = (
@@ -561,7 +561,28 @@ const ACME_SAML = {
 
 /** Encode the assertion the stub verifier should "find" in this response. */
 const samlResponse = (assertion: Partial<SamlAssertion>): string =>
-  Buffer.from(JSON.stringify(assertion), "utf8").toString("base64");
+  Buffer.from(encodeJson(assertion), "utf8").toString("base64");
+
+/** The {@link SamlAssertion} fields a test overrides, read back out of the body. */
+const decodeAssertionOverrides = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      id: Schema.optionalKey(Schema.String),
+      issuer: Schema.optionalKey(Schema.String),
+      nameId: Schema.optionalKey(Schema.String),
+      nameIdFormat: Schema.optionalKey(Schema.String),
+      email: Schema.optionalKey(Schema.String),
+      displayName: Schema.optionalKey(Schema.String),
+      attributes: Schema.optionalKey(
+        Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Array(Schema.String)])),
+      ),
+      sessionIndex: Schema.optionalKey(Schema.String),
+      inResponseTo: Schema.optionalKey(Schema.String),
+      notOnOrAfter: Schema.optionalKey(Schema.Number),
+      relayState: Schema.optionalKey(Schema.String),
+    }),
+  ),
+);
 
 /**
  * A stub {@link SamlVerifier} standing in for the XML/crypto implementation:
@@ -580,7 +601,7 @@ const stubSamlVerifier = (requests: SamlAuthnRequestInput[]): typeof SamlVerifie
   verify: (input) =>
     Effect.sync(() => {
       const decoded = Buffer.from(input.samlResponse, "base64").toString("utf8");
-      const overrides = JSON.parse(decoded) as Partial<SamlAssertion>;
+      const overrides = decodeAssertionOverrides(decoded);
       return {
         id: "_assertion-1",
         issuer: input.idpEntityId,
@@ -913,7 +934,7 @@ const makeHttpFixture = () => {
   const members: Member[] = [];
   let userSeq = 0;
 
-  const seedUser = (email: string, attributes: Record<string, unknown> = {}): string => {
+  const seedUser = (email: string, attributes: Types.Attributes = {}): string => {
     const id = `u${++userSeq}`;
     const now = new Date();
     const user: Types.User = {
@@ -1077,14 +1098,14 @@ const makeHttpFixture = () => {
   };
 };
 
-const post = (path: string, body: unknown, sessionId?: string): Request =>
+const post = (path: string, body: Schema.Json, sessionId?: string): Request =>
   new Request(`http://test${path}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
     },
-    body: JSON.stringify(body),
+    body: encodeJson(body),
   });
 
 const REGISTER_BODY = {
@@ -1111,7 +1132,7 @@ describe("HTTP SSO endpoints", () => {
     // Admin registers the connection (secret is never echoed back).
     const registered = await fx.handler(post("/sso/register", REGISTER_BODY, adminSid));
     expect(registered.status).toBe(200);
-    const provider = (await registered.json()) as Record<string, unknown>;
+    const provider = (await registered.json()) as Schema.JsonObject;
     expect(provider["domain"]).toBe("acme.test");
     expect(provider).not.toHaveProperty("clientSecret");
 
@@ -1175,7 +1196,7 @@ describe("HTTP SSO endpoints — SAML", () => {
 
     const registered = await fx.handler(post("/sso/register", SAML_REGISTER_BODY, adminSid));
     expect(registered.status).toBe(200);
-    const provider = (await registered.json()) as Record<string, unknown>;
+    const provider = (await registered.json()) as Schema.JsonObject;
     expect(provider["protocol"]).toBe("saml");
     expect(provider["entityId"]).toBe(SAML_IDP);
     expect(provider["idpCertificates"]).toEqual(SAML_REGISTER_BODY.idpCertificates);
@@ -1192,7 +1213,7 @@ describe("HTTP SSO endpoints — SAML", () => {
 
     const registered = await fx.handler(post("/sso/register", REGISTER_BODY, adminSid));
     expect(registered.status).toBe(200);
-    const provider = (await registered.json()) as Record<string, unknown>;
+    const provider = (await registered.json()) as Schema.JsonObject;
     expect(provider["protocol"]).toBe("oidc");
     expect(provider["issuer"]).toBe("https://idp.acme.test");
     expect(provider).not.toHaveProperty("clientSecret");

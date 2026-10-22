@@ -5,7 +5,19 @@
  * and related data structures.
  */
 
-import { Config, Context, Crypto, Effect, Layer, Redacted } from "effect";
+import {
+  Array as Arr,
+  Config,
+  Context,
+  Crypto,
+  Data,
+  Effect,
+  Layer,
+  Predicate,
+  Record as Rec,
+  Redacted,
+  Schema,
+} from "effect";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
 import * as Obs from "../Observability.ts";
@@ -367,16 +379,51 @@ export const generateNonce = (): Effect.Effect<string, never, Crypto.Crypto> =>
     );
   });
 
-const decodeJwtSegment = (segment: string): Record<string, unknown> =>
-  JSON.parse(Buffer.from(segment, "base64url").toString("utf8")) as Record<string, unknown>;
+/** Decodes a JWT segment's JSON object; throws on invalid JSON or a non-object. */
+const decodeJwtSegmentJson = Schema.decodeSync(Schema.fromJsonString(Schema.JsonObject));
 
-/** A single JSON Web Key from a provider's JWKS document. */
-interface ProviderJwk {
-  readonly kid?: string;
-  readonly alg?: string;
-  readonly kty?: string;
-  readonly [key: string]: unknown;
-}
+const decodeJwtSegment = (segment: string): Schema.JsonObject =>
+  decodeJwtSegmentJson(Buffer.from(segment, "base64url").toString("utf8"));
+
+/** Serializes a JSON value, as `JSON.stringify` does. */
+const encodeJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
+/** A provider's JWKS document: its `keys` are JSON Web Keys. */
+const ProviderJwks = Schema.Struct({ keys: Schema.optional(Schema.Array(Schema.JsonObject)) });
+
+const decodeProviderJwks = Schema.decodeUnknownEffect(ProviderJwks);
+
+/** A rejected read of a response body; {@link readText} and {@link readBody} die with its cause. */
+class ResponseBodyError extends Data.TaggedError("ResponseBodyError")<{
+  readonly cause: unknown;
+}> {}
+
+/** Turns a failed body read back into a defect carrying the original rejection. */
+const dieWithCause = <A>(self: Effect.Effect<A, ResponseBodyError>): Effect.Effect<A> =>
+  self.pipe(Effect.catch((error) => Effect.die(error.cause)));
+
+/** A response body as text. A failed read is a defect. */
+const readText = (response: Response): Effect.Effect<string> =>
+  Effect.tryPromise({
+    try: () => response.text(),
+    catch: (cause) => new ResponseBodyError({ cause }),
+  }).pipe(dieWithCause);
+
+/** A response body parsed as JSON, unchecked. A failed read or an invalid body is a defect. */
+const readBody = (response: Response) =>
+  Effect.tryPromise({
+    try: () => response.json(),
+    catch: (cause) => new ResponseBodyError({ cause }),
+  }).pipe(dieWithCause);
+
+const decodeJson = Schema.decodeUnknownEffect(Schema.Json);
+
+/** A response body parsed as JSON. A failed read or an invalid body is a defect. */
+const readJson = (response: Response): Effect.Effect<Schema.Json> =>
+  readBody(response).pipe(Effect.flatMap(decodeJson), Effect.orDie);
+
+/** Whether a JSON value is an object (not an array or `null`). */
+const isJsonObject = (json: Schema.Json): json is Schema.JsonObject => Predicate.isObject(json);
 
 /**
  * Verify and decode an OIDC `id_token` (compact JWS) against a provider's
@@ -394,18 +441,109 @@ export const verifyIdToken = (
     readonly now?: number;
   },
 ): Effect.Effect<Record<string, unknown>, OAuthProviderError> =>
+  verifyIdTokenClaims(idToken, params);
+
+type IdTokenParams = Parameters<typeof verifyIdToken>[1];
+
+/** The three segments of a compact JWS, or `undefined` when it has another shape. */
+const splitIdToken = (idToken: string): readonly [string, string, string] | undefined => {
+  const [headerSeg, payloadSeg, signatureSeg, ...rest] = idToken.split(".");
+  return headerSeg === undefined ||
+    payloadSeg === undefined ||
+    signatureSeg === undefined ||
+    Arr.isReadonlyArrayNonEmpty(rest)
+    ? undefined
+    : [headerSeg, payloadSeg, signatureSeg];
+};
+
+/**
+ * Fetch the provider's JWKS and pick the key for the header's `kid` (or the
+ * only key when the document holds just one).
+ */
+const fetchIdTokenJwk = (
+  params: IdTokenParams,
+  header: Schema.JsonObject,
+): Effect.Effect<Schema.JsonObject, OAuthProviderError> =>
+  Effect.gen(function* () {
+    const response = yield* Effect.tryPromise({
+      try: () => fetch(params.jwksEndpoint, { headers: { Accept: "application/json" } }),
+      catch: (cause) =>
+        new OAuthProviderError({
+          message: `Failed to fetch JWKS for ${params.provider}`,
+          provider: params.provider,
+          cause,
+        }),
+    });
+    if (!response.ok) {
+      return yield* new OAuthProviderError({
+        message: `JWKS request failed with status ${response.status}`,
+        provider: params.provider,
+      });
+    }
+    const jwks = yield* readJson(response).pipe(
+      Effect.flatMap(decodeProviderJwks),
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: `Invalid JWKS document for ${params.provider}`,
+            provider: params.provider,
+            cause,
+          }),
+      ),
+    );
+    const keys = jwks.keys ?? [];
+    const kid = header["kid"];
+    const jwk = keys.find((k) => k["kid"] === kid) ?? (keys.length === 1 ? keys[0] : undefined);
+    if (!jwk) {
+      return yield* new OAuthProviderError({
+        message: "No matching JWKS key for id_token",
+        provider: params.provider,
+      });
+    }
+    return jwk;
+  });
+
+/** The first id_token claim check (`iss`, `aud`, `exp`, `nonce`) the payload fails, if any. */
+const idTokenClaimFailure = (
+  payload: Schema.JsonObject,
+  params: IdTokenParams,
+): string | undefined => {
+  if (params.issuer !== undefined && payload["iss"] !== params.issuer) {
+    return "id_token issuer mismatch";
+  }
+  if (params.audience !== undefined) {
+    const aud = payload["aud"];
+    const ok = aud === params.audience || (Array.isArray(aud) && aud.includes(params.audience));
+    if (!ok) return "id_token audience mismatch";
+  }
+  const nowSec = (params.now ?? Date.now()) / 1000;
+  const exp = payload["exp"];
+  if (Predicate.isNumber(exp) && nowSec > exp) {
+    return "id_token expired";
+  }
+  if (params.nonce !== undefined && payload["nonce"] !== params.nonce) {
+    return "id_token nonce mismatch";
+  }
+  return undefined;
+};
+
+/** {@link verifyIdToken}, with the claims typed as the JSON object they are. */
+const verifyIdTokenClaims = (
+  idToken: string,
+  params: IdTokenParams,
+): Effect.Effect<Schema.JsonObject, OAuthProviderError> =>
   Effect.gen(function* () {
     const fail = (message: string) =>
       new OAuthProviderError({ message, provider: params.provider });
 
-    const parts = idToken.split(".");
-    if (parts.length !== 3) {
+    const segments = splitIdToken(idToken);
+    if (segments === undefined) {
       return yield* fail("Malformed id_token");
     }
-    const [headerSeg, payloadSeg, signatureSeg] = parts as [string, string, string];
+    const [headerSeg, payloadSeg, signatureSeg] = segments;
 
     const { header, payload } = yield* Effect.try({
-      try: (): { header: Record<string, unknown>; payload: Record<string, unknown> } => ({
+      try: (): { header: Schema.JsonObject; payload: Schema.JsonObject } => ({
         header: decodeJwtSegment(headerSeg),
         payload: decodeJwtSegment(payloadSeg),
       }),
@@ -422,27 +560,7 @@ export const verifyIdToken = (
       return yield* fail(`Unsupported id_token algorithm: ${String(alg)}`);
     }
 
-    const response = yield* Effect.tryPromise({
-      try: () => fetch(params.jwksEndpoint, { headers: { Accept: "application/json" } }),
-      catch: (cause) =>
-        new OAuthProviderError({
-          message: `Failed to fetch JWKS for ${params.provider}`,
-          provider: params.provider,
-          cause,
-        }),
-    });
-    if (!response.ok) {
-      return yield* fail(`JWKS request failed with status ${response.status}`);
-    }
-    const jwks = (yield* Effect.promise(() => response.json())) as {
-      keys?: readonly ProviderJwk[];
-    };
-    const keys = jwks.keys ?? [];
-    const kid = header["kid"];
-    const jwk = keys.find((k) => k.kid === kid) ?? (keys.length === 1 ? keys[0] : undefined);
-    if (!jwk) {
-      return yield* fail("No matching JWKS key for id_token");
-    }
+    const jwk = yield* fetchIdTokenJwk(params, header);
 
     const verified = yield* Effect.try({
       try: () => {
@@ -461,38 +579,88 @@ export const verifyIdToken = (
       return yield* fail("Invalid id_token signature");
     }
 
-    if (params.issuer !== undefined && payload["iss"] !== params.issuer) {
-      return yield* fail("id_token issuer mismatch");
-    }
-    if (params.audience !== undefined) {
-      const aud = payload["aud"];
-      const ok = aud === params.audience || (Array.isArray(aud) && aud.includes(params.audience));
-      if (!ok) {
-        return yield* fail("id_token audience mismatch");
-      }
-    }
-    const nowSec = (params.now ?? Date.now()) / 1000;
-    if (typeof payload["exp"] === "number" && nowSec > payload["exp"]) {
-      return yield* fail("id_token expired");
-    }
-    if (params.nonce !== undefined && payload["nonce"] !== params.nonce) {
-      return yield* fail("id_token nonce mismatch");
+    const failure = idTokenClaimFailure(payload, params);
+    if (failure !== undefined) {
+      return yield* fail(failure);
     }
 
     return payload;
   });
 
 /** Map OIDC id_token / userinfo claims to {@link OAuthUserInfo}. */
-const claimsToUserInfo = (claims: Record<string, unknown>): OAuthUserInfo => ({
-  ...claims,
-  id: String(claims["sub"] ?? claims["id"] ?? ""),
-  ...(typeof claims["email"] === "string" && { email: claims["email"] }),
-  ...(typeof claims["email_verified"] === "boolean" && {
-    email_verified: claims["email_verified"],
+const claimsToUserInfo = (claims: Schema.JsonObject): OAuthUserInfo => {
+  const { email, email_verified, name, picture } = claims;
+  return {
+    ...claims,
+    id: String(claims["sub"] ?? claims["id"] ?? ""),
+    ...(Predicate.isString(email) && { email }),
+    ...(Predicate.isBoolean(email_verified) && { email_verified }),
+    ...(Predicate.isString(name) && { name }),
+    ...(Predicate.isString(picture) && { picture }),
+  };
+};
+
+/**
+ * An account record holding the provider profile (`email`, `name`,
+ * `picture` when present) and the tokens just issued, stamped updated now.
+ */
+const profileAccount = (
+  base: {
+    readonly id: string;
+    readonly userId: string;
+    readonly provider: string;
+    readonly createdAt: number;
+  },
+  tokens: OAuthTokenResponse,
+  userInfo: OAuthUserInfo,
+): OAuthAccount => ({
+  id: base.id,
+  userId: base.userId,
+  provider: base.provider,
+  providerId: userInfo.id,
+  ...(userInfo.email && { email: userInfo.email }),
+  ...(userInfo.name && { name: userInfo.name }),
+  ...(userInfo.picture && { picture: userInfo.picture }),
+  accessToken: tokens.access_token,
+  ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
+  ...(tokens.expires_in && {
+    expiresAt: Date.now() + tokens.expires_in * 1000,
   }),
-  ...(typeof claims["name"] === "string" && { name: claims["name"] }),
-  ...(typeof claims["picture"] === "string" && { picture: claims["picture"] }),
+  createdAt: base.createdAt,
+  updatedAt: Date.now(),
 });
+
+/**
+ * `fetch` a provider endpoint, failing with `fetchFailure` when the request
+ * cannot be sent and with `statusFailure` plus the response text on a non-2xx
+ * answer.
+ */
+const fetchProviderOk = (
+  provider: string,
+  url: string,
+  init: RequestInit,
+  failures: { readonly fetchFailure: string; readonly statusFailure: string },
+): Effect.Effect<Response, OAuthProviderError> =>
+  Effect.gen(function* () {
+    const response = yield* Effect.tryPromise({
+      try: () => fetch(url, init),
+      catch: (cause) =>
+        new OAuthProviderError({
+          message: failures.fetchFailure,
+          provider,
+          cause,
+        }),
+    });
+
+    if (!response.ok) {
+      const errorText = yield* readText(response);
+      return yield* new OAuthProviderError({
+        message: `${failures.statusFailure}: ${errorText}`,
+        provider,
+      });
+    }
+    return response;
+  });
 
 /**
  * Create an OAuth provider
@@ -506,40 +674,38 @@ export const provider = (
 
   const getUserInfo = (accessToken: string): Effect.Effect<OAuthUserInfo, OAuthProviderError> =>
     Effect.gen(function* () {
-      if (!config.userInfoEndpoint) {
+      const userInfoEndpoint = config.userInfoEndpoint;
+      if (!userInfoEndpoint) {
         return yield* new OAuthProviderError({
           message: `Provider ${name} does not have a user info endpoint`,
           provider: name,
         });
       }
 
-      const response = yield* Effect.tryPromise({
-        try: () =>
-          fetch(config.userInfoEndpoint!, {
-            method: config.userInfoMethod ?? "GET",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              Accept: "application/json",
-              ...config.userInfoHeaders,
-            },
-          }),
-        catch: (cause) =>
-          new OAuthProviderError({
-            message: `Failed to get user info from ${name}`,
-            provider: name,
-            cause,
-          }),
-      });
+      const response = yield* fetchProviderOk(
+        name,
+        userInfoEndpoint,
+        {
+          method: config.userInfoMethod ?? "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+            ...config.userInfoHeaders,
+          },
+        },
+        {
+          fetchFailure: `Failed to get user info from ${name}`,
+          statusFailure: "User info request failed",
+        },
+      );
 
-      if (!response.ok) {
-        const errorText = yield* Effect.promise(() => response.text());
+      const data = yield* readJson(response);
+      if (!isJsonObject(data)) {
         return yield* new OAuthProviderError({
-          message: `User info request failed: ${errorText}`,
+          message: `User info response from ${name} is not a JSON object`,
           provider: name,
         });
       }
-
-      const data = (yield* Effect.promise(() => response.json())) as Record<string, unknown>;
 
       return mapProfile(data);
     });
@@ -588,9 +754,9 @@ export const provider = (
         if (nonce) {
           params.set("nonce", nonce);
         }
-        for (const [key, value] of Object.entries(config.authorizationParams ?? {})) {
-          params.set(key, value);
-        }
+        Arr.forEach(Rec.toEntries(config.authorizationParams ?? {}), ([key, value]) =>
+          params.set(key, value),
+        );
 
         const url = `${config.authorizationEndpoint}?${params.toString()}`;
 
@@ -618,38 +784,31 @@ export const provider = (
           params.set("code_verifier", codeVerifier);
         }
 
-        const response = yield* Effect.tryPromise({
-          try: () =>
-            fetch(config.tokenEndpoint, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-                Accept: "application/json",
-                ...(useBasic && {
-                  Authorization: `Basic ${Buffer.from(
-                    `${config.clientId}:${Redacted.value(config.clientSecret)}`,
-                  ).toString("base64")}`,
-                }),
-              },
-              body: params.toString(),
-            }),
-          catch: (cause) =>
-            new OAuthProviderError({
-              message: `Failed to exchange code with ${name}`,
-              provider: name,
-              cause,
-            }),
-        });
+        const response = yield* fetchProviderOk(
+          name,
+          config.tokenEndpoint,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              Accept: "application/json",
+              ...(useBasic && {
+                Authorization: `Basic ${Buffer.from(
+                  `${config.clientId}:${Redacted.value(config.clientSecret)}`,
+                ).toString("base64")}`,
+              }),
+            },
+            body: params.toString(),
+          },
+          {
+            fetchFailure: `Failed to exchange code with ${name}`,
+            statusFailure: "Token exchange failed",
+          },
+        );
 
-        if (!response.ok) {
-          const errorText = yield* Effect.promise(() => response.text());
-          return yield* new OAuthProviderError({
-            message: `Token exchange failed: ${errorText}`,
-            provider: name,
-          });
-        }
-
-        const data = (yield* Effect.promise(() => response.json())) as OAuthTokenResponse;
+        // SAFETY: unvalidated, as before: a 2xx token endpoint answers with an
+        // RFC 6749 section 5.1 access token response, which this shape describes.
+        const data = (yield* readBody(response)) as OAuthTokenResponse;
 
         return data;
       }),
@@ -671,7 +830,7 @@ export const provider = (
               provider: name,
             });
           }
-          const claims = yield* verifyIdToken(tokens.id_token, {
+          const claims = yield* verifyIdTokenClaims(tokens.id_token, {
             provider: name,
             jwksEndpoint: config.jwksEndpoint,
             ...(config.issuer !== undefined && { issuer: config.issuer }),
@@ -955,6 +1114,71 @@ export const make = (
         return { stateEntry, tokens, userInfo };
       });
 
+    /** Store fresh tokens on an account a callback found already linked. */
+    const refreshCallbackAccount = (existingAccount: OAuthAccount, tokens: OAuthTokenResponse) =>
+      Effect.gen(function* () {
+        const plainExisting = yield* decryptAccount(existingAccount);
+        const updatedAccount: OAuthAccount = {
+          ...plainExisting,
+          accessToken: tokens.access_token,
+          ...(tokens.refresh_token && {
+            refreshToken: tokens.refresh_token,
+          }),
+          ...(tokens.expires_in && {
+            expiresAt: Date.now() + tokens.expires_in * 1000,
+          }),
+          updatedAt: Date.now(),
+        };
+        yield* accountStore.update(yield* encryptAccount(updatedAccount));
+
+        return {
+          account: updatedAccount,
+          isNewUser: false,
+        } satisfies OAuthCallbackResult;
+      });
+
+    /**
+     * Create the account for a callback whose provider identity is new.
+     * Without `linkToUserId` the account is unlinked (empty `userId`): the
+     * caller links it to a user after creating the user record in their
+     * database.
+     */
+    const createCallbackAccount = (
+      provider: string,
+      tokens: OAuthTokenResponse,
+      userInfo: OAuthUserInfo,
+      options: { linkToUserId?: string } | undefined,
+    ) =>
+      Effect.gen(function* () {
+        const newAccountId = yield* randomAccountId();
+        const newAccount = profileAccount(
+          {
+            id: newAccountId,
+            userId: options?.linkToUserId ?? "",
+            provider,
+            createdAt: Date.now(),
+          },
+          tokens,
+          userInfo,
+        );
+
+        yield* accountStore.create(yield* encryptAccount(newAccount));
+
+        return {
+          account: newAccount,
+          isNewUser: true,
+          ...(options?.linkToUserId
+            ? {
+                user: {
+                  id: newAccount.userId,
+                  ...(userInfo.email && { email: userInfo.email }),
+                  ...(userInfo.name && { name: userInfo.name }),
+                },
+              }
+            : {}),
+        } satisfies OAuthCallbackResult;
+      });
+
     return {
       generateAuthorizationUrl: Effect.fn("OAuthService.generateAuthorizationUrl")(
         (provider: string, options?: { scopes?: readonly string[]; returnTo?: string }) =>
@@ -997,105 +1221,15 @@ export const make = (
         code: string,
         options?: { linkToUserId?: string },
       ) {
-        // Verify state
-        const stateEntry = yield* stateStore.get(state);
-        if (stateEntry === null) {
-          return yield* new OAuthStateNotFoundError({
-            message: "OAuth state not found or expired",
-            state,
-          });
-        }
+        // Verify and consume the state, exchange the code and fetch the
+        // profile (userinfo endpoint or verified OIDC id_token).
+        const { stateEntry, tokens, userInfo } = yield* resolveCallback(state, code);
 
-        // Check expiration
-        if (Date.now() > stateEntry.expiresAt) {
-          yield* stateStore.delete(state);
-          return yield* new OAuthStateExpiredError({
-            message: "OAuth state expired",
-            state,
-          });
-        }
-
-        const providerInstance = providers[stateEntry.provider];
-        if (!providerInstance) {
-          return yield* new OAuthProviderError({
-            message: `Provider ${stateEntry.provider} not found`,
-            provider: stateEntry.provider,
-          });
-        }
-
-        // Exchange code for tokens
-        const tokens = yield* providerInstance.exchangeCode(code, stateEntry.codeVerifier);
-
-        // Get user info (userinfo endpoint or verified OIDC id_token)
-        const userInfo = yield* providerInstance.getProfile(tokens, {
-          ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
-        });
-
-        // Clean up state
-        yield* stateStore.delete(state);
-
-        // Check if account exists
         const existingAccount = yield* accountStore.get(stateEntry.provider, userInfo.id);
-
         if (existingAccount) {
-          // Update existing account
-          const plainExisting = yield* decryptAccount(existingAccount);
-          const updatedAccount: OAuthAccount = {
-            ...plainExisting,
-            accessToken: tokens.access_token,
-            ...(tokens.refresh_token && {
-              refreshToken: tokens.refresh_token,
-            }),
-            ...(tokens.expires_in && {
-              expiresAt: Date.now() + tokens.expires_in * 1000,
-            }),
-            updatedAt: Date.now(),
-          };
-          yield* accountStore.update(yield* encryptAccount(updatedAccount));
-
-          return {
-            account: updatedAccount,
-            isNewUser: false,
-          } satisfies OAuthCallbackResult;
+          return yield* refreshCallbackAccount(existingAccount, tokens);
         }
-
-        // Create new account
-        // Note: For new accounts without linkToUserId, we create an unlinked account
-        // with empty userId. The caller should link it to a user after creating
-        // the user record in their database.
-        const newAccountId = yield* randomAccountId();
-        const newAccount: OAuthAccount = {
-          id: newAccountId,
-          userId: options?.linkToUserId ?? "",
-          provider: stateEntry.provider,
-          providerId: userInfo.id,
-          ...(userInfo.email && { email: userInfo.email }),
-          ...(userInfo.name && { name: userInfo.name }),
-          ...(userInfo.picture && { picture: userInfo.picture }),
-          accessToken: tokens.access_token,
-          ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
-          ...(tokens.expires_in && {
-            expiresAt: Date.now() + tokens.expires_in * 1000,
-          }),
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-
-        yield* accountStore.create(yield* encryptAccount(newAccount));
-
-        return {
-          account: newAccount,
-          isNewUser: true,
-          ...(options?.linkToUserId
-            ? {
-                user: {
-                  id: newAccount.userId,
-                  ...(userInfo.email && { email: userInfo.email }),
-                  ...(userInfo.name && { name: userInfo.name }),
-                },
-              }
-            : {}),
-        } satisfies OAuthCallbackResult;
+        return yield* createCallbackAccount(stateEntry.provider, tokens, userInfo, options);
       }),
 
       signInWithCallback: Effect.fn("OAuthService.signInWithCallback")(
@@ -1309,22 +1443,16 @@ export const make = (
 
         // Create or update the account linked to this user
         const accountId = existingAccount?.id ?? (yield* randomAccountId());
-        const account: OAuthAccount = {
-          id: accountId,
-          userId,
-          provider,
-          providerId: userInfo.id,
-          ...(userInfo.email && { email: userInfo.email }),
-          ...(userInfo.name && { name: userInfo.name }),
-          ...(userInfo.picture && { picture: userInfo.picture }),
-          accessToken: tokens.access_token,
-          ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
-          ...(tokens.expires_in && {
-            expiresAt: Date.now() + tokens.expires_in * 1000,
-          }),
-          createdAt: existingAccount?.createdAt ?? Date.now(),
-          updatedAt: Date.now(),
-        };
+        const account = profileAccount(
+          {
+            id: accountId,
+            userId,
+            provider,
+            createdAt: existingAccount?.createdAt ?? Date.now(),
+          },
+          tokens,
+          userInfo,
+        );
 
         if (existingAccount) {
           yield* accountStore.update(yield* encryptAccount(account));
@@ -1400,6 +1528,14 @@ export const make = (
             }
 
             const plainAccount = yield* decryptAccount(account);
+            // decryptAccount keeps the refresh token checked above; this only narrows it.
+            const refreshToken = plainAccount.refreshToken;
+            if (refreshToken === undefined) {
+              return yield* new OAuthNoRefreshTokenError({
+                message: `No refresh token available for ${provider}`,
+                provider,
+              });
+            }
 
             const providerInstance = providers[provider];
             if (!providerInstance) {
@@ -1415,7 +1551,7 @@ export const make = (
             const params = new URLSearchParams({
               [rConfig.clientIdParam ?? "client_id"]: rConfig.clientId,
               grant_type: "refresh_token",
-              refresh_token: plainAccount.refreshToken!,
+              refresh_token: refreshToken,
             });
             if (!rUseBasic) {
               params.set("client_secret", Redacted.value(rConfig.clientSecret));
@@ -1444,14 +1580,16 @@ export const make = (
             });
 
             if (!response.ok) {
-              const errorText = yield* Effect.promise(() => response.text());
+              const errorText = yield* readText(response);
               return yield* new OAuthProviderError({
                 message: `Token refresh failed: ${errorText}`,
                 provider,
               });
             }
 
-            const data = (yield* Effect.promise(() => response.json())) as OAuthTokenResponse;
+            // SAFETY: unvalidated, as before: a 2xx token endpoint answers with an
+            // RFC 6749 section 5.1 access token response, which this shape describes.
+            const data = (yield* readBody(response)) as OAuthTokenResponse;
 
             // Update account with new tokens
             const updatedAccount: OAuthAccount = {
@@ -1560,7 +1698,7 @@ export interface OAuthClientConfig {
 }
 
 /** Coerce a value to `string` — returns `undefined` for non-strings. */
-export const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+export const str = (v: unknown): string | undefined => (Predicate.isString(v) ? v : undefined);
 
 /**
  * Safely traverse a nested object by a chain of keys. Returns `undefined`
@@ -1572,7 +1710,7 @@ export const str = (v: unknown): string | undefined => (typeof v === "string" ? 
 export const nested = (v: unknown, ...path: string[]): unknown =>
   path.reduce<unknown>(
     (acc, key) =>
-      acc && typeof acc === "object" ? (acc as Record<string, unknown>)[key] : undefined,
+      Predicate.isObjectOrArray(acc) && Predicate.hasProperty(acc, key) ? acc[key] : undefined,
     v,
   );
 
@@ -1677,8 +1815,8 @@ export const appleClientSecret = (params: {
         aud: "https://appleid.apple.com",
         sub: params.clientId,
       };
-      const encode = (obj: unknown): string =>
-        Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
+      const encode = (obj: Schema.Json): string =>
+        Buffer.from(encodeJsonString(obj), "utf8").toString("base64url");
       const signingInput = `${encode(header)}.${encode(payload)}`;
       const signature = Buffer.from(
         Cipher.signJws("ES256", Buffer.from(signingInput), Redacted.value(params.privateKey)),
@@ -1726,6 +1864,8 @@ export const TwitterProvider = (config: OAuthClientConfig): OAuthProvider =>
       scopes: ["users.read", "tweet.read"],
       tokenAuthMethod: "basic",
       mapProfile: (raw) => {
+        // SAFETY: Twitter's users/me answers `{ data: user }`, the user an object;
+        // a missing envelope falls back to the (object) payload itself.
         const data = (raw["data"] ?? raw) as Record<string, unknown>;
         return profile(data, {
           id: data["id"],
@@ -1876,6 +2016,8 @@ export const NotionProvider = (config: OAuthClientConfig): OAuthProvider =>
       tokenAuthMethod: "basic",
       authorizationParams: { owner: "user" },
       mapProfile: (raw) => {
+        // SAFETY: Notion's users/me carries the user object at bot.owner.user;
+        // without it, the (object) payload itself is the user.
         const user = (nested(raw, "bot", "owner", "user") ?? raw) as Record<string, unknown>;
         return profile(raw, {
           id: user["id"] ?? raw["id"],
@@ -1939,6 +2081,8 @@ export const TikTokProvider = (config: OAuthClientConfig): OAuthProvider =>
         "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url",
       scopes: ["user.info.basic"],
       mapProfile: (raw) => {
+        // SAFETY: TikTok's user/info carries the user object at data.user;
+        // without it, the (object) payload itself is the user.
         const user = (nested(raw, "data", "user") ?? raw) as Record<string, unknown>;
         return profile(user, {
           id: user["open_id"] ?? user["id"],
@@ -1976,6 +2120,8 @@ export const KickProvider = (config: OAuthClientConfig): OAuthProvider =>
       scopes: ["user:read"],
       mapProfile: (raw) => {
         const data = raw["data"];
+        // SAFETY: Kick's users endpoint answers `{ data: [user] }`, each user an
+        // object; without the array, the (object) payload itself is the user.
         const user = (Array.isArray(data) ? data[0] : raw) as Record<string, unknown>;
         return profile(user, {
           id: user["user_id"] ?? user["id"],
@@ -2040,7 +2186,13 @@ export const discoverOAuthEndpoints = (
         provider: issuerUrl,
       });
     }
-    const doc = (yield* Effect.promise(() => response.json())) as Record<string, unknown>;
+    const doc = yield* readJson(response);
+    if (!isJsonObject(doc)) {
+      return yield* new OAuthProviderError({
+        message: "OIDC discovery document is not a JSON object",
+        provider: issuerUrl,
+      });
+    }
     const authorization = str(doc["authorization_endpoint"]);
     const token = str(doc["token_endpoint"]);
     if (!authorization || !token) {

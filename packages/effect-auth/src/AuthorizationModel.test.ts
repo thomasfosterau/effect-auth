@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
+import { Array as Arr, Order } from "effect";
 import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";
 import * as Policy from "./Policy.ts";
@@ -209,6 +210,11 @@ describe("validatePolicies", () => {
     const bad1 = Policy.permit({ id: "bad-1", principal: Policy.isType("Robot") });
     const bad2 = Policy.permit({ id: "bad-2", resource: Policy.isType("Alien") });
     const issues = AuthorizationModel.validatePolicies(baseModel, [good, bad1, bad2]);
-    expect(issues.map((i) => i.policyId).sort()).toEqual(["bad-1", "bad-2"]);
+    expect(
+      Arr.sort(
+        issues.map((i) => i.policyId),
+        Order.String,
+      ),
+    ).toEqual(["bad-1", "bad-2"]);
   });
 });

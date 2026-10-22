@@ -13,7 +13,7 @@
  * E.164 normalization is application policy: the default `normalizePhoneNumber`
  * only trims whitespace. Apps should plug a real E.164 normalizer via config.
  */
-import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { Array as Arr, Context, Crypto, Data, Effect, Layer, Order } from "effect";
 import * as Errors from "./Errors.ts";
 import { claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
 import {
@@ -27,6 +27,7 @@ import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { type HookError } from "./Hooks.ts";
 import { SessionService } from "./SessionService.ts";
+import { randomBase64UrlToken } from "./RandomToken.ts";
 
 /** Error raised by phone OTP verification failures. */
 export class PhoneOtpError extends Data.TaggedError("PhoneOtpError")<{
@@ -240,9 +241,10 @@ export const getPhoneNumber = (
   userId: string,
 ): Effect.Effect<string | null, Errors.AuthError> =>
   Effect.map(identifierStore.listByUser(userId), (all) => {
-    const phones = all
-      .filter((id) => id.type === "phone")
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    const phones = Arr.sort(
+      all.filter((id) => id.type === "phone"),
+      Order.mapInput(Order.Number, (id: (typeof all)[number]) => id.createdAt.getTime()),
+    );
     return (phones.find((id) => id.verified) ?? phones[0])?.value ?? null;
   });
 
@@ -268,28 +270,25 @@ export const make = (
 
     /** Generate a numeric OTP with crypto-secure, unbiased randomness. */
     const generateOtp = (length: number): Effect.Effect<string> =>
-      Effect.gen(function* () {
-        let otp = "";
-        for (let i = 0; i < length; i++) {
-          const digit = yield* crypto.randomIntBetween(0, 10, { halfOpen: true });
-          otp += digit.toString();
-        }
-        return otp;
-      });
+      Effect.map(
+        Effect.replicateEffect(
+          crypto.randomIntBetween(0, 10, { halfOpen: true }),
+          // The iteration count of `for (let i = 0; i < length; i++)`.
+          Math.max(0, Math.ceil(length)),
+          { concurrency: 1 },
+        ),
+        (digits) => digits.map((digit) => digit.toString()).join(""),
+      );
 
     /**
      * The secret behind an unknown number's marker record: 32 random bytes,
      * base64url-encoded. It is hashed into the marker record and then
      * discarded.
      */
-    const generateMarkerSecret: Effect.Effect<string, Errors.AuthError> = crypto
-      .randomBytes(32)
-      .pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate OTP marker", cause }),
-        ),
-      );
+    const generateMarkerSecret: Effect.Effect<string, Errors.AuthError> = randomBase64UrlToken(
+      crypto,
+      "Failed to generate OTP marker",
+    );
 
     const normalize = (raw: string): Effect.Effect<string, Errors.AuthError> =>
       config.normalizePhoneNumber !== undefined

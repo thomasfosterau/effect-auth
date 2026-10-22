@@ -282,6 +282,9 @@ export class DrizzleDatabase extends Context.Service<DrizzleDatabase, DrizzleHan
  * just checked.
  */
 const toHandle = (db: object | Effect.Effect<object>): DrizzleHandle => ({
+  // SAFETY: the callers' overloads have checked `db` is (an Effect of) a drizzle
+  // PostgreSQL, SQLite or MySQL handle, each of which implements `AuthDatabase`
+  // at runtime; only the dialect table brands keep the types from lining up.
   database: Effect.isEffect(db)
     ? (db as Effect.Effect<AuthDatabase>)
     : Effect.succeed(db as AuthDatabase),

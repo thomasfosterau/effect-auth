@@ -41,17 +41,36 @@ runs:
         node-version: ${{ inputs.node-version }}
         cache: pnpm
 
+    # Retried: pnpm's linker can race itself when a package with a build
+    # script resolves twice and both copies build — a transient ENOENT on the
+    # rename of a `_tmp_<pid>_<hex>` staging directory, seen on cold-store runs
+    # elsewhere in this library family. Every attempt keeps `--frozen-lockfile`,
+    # so a deterministic failure (lockfile drift, a policy violation) still
+    # fails all three.
     - name: Install dependencies
       shell: bash
       env:
         IGNORE_SCRIPTS: ${{ inputs.ignore-scripts }}
       run: |
+        flags="--frozen-lockfile"
         if [ "$IGNORE_SCRIPTS" = "true" ]; then
-          pnpm install --frozen-lockfile --ignore-scripts
+          flags="$flags --ignore-scripts"
+        fi
+        for attempt in 1 2 3; do
+          if pnpm install $flags; then
+            break
+          fi
+          if [ "$attempt" -eq 3 ]; then
+            echo "::error::pnpm install failed after 3 attempts"
+            exit 1
+          fi
+          delay=$((attempt * 15))
+          echo "::warning::pnpm install failed (attempt ${attempt}/3); retrying in ${delay}s"
+          sleep "$delay"
+        done
+        if [ "$IGNORE_SCRIPTS" = "true" ]; then
           # The one lifecycle script that does run: ours. See the header.
           pnpm run prepare
-        else
-          pnpm install --frozen-lockfile
         fi
 
     - name: Expose the local bins

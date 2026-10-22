@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Array as Arr, Context, Effect, HashSet, Layer, Option, Record as Rec } from "effect";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
 
@@ -67,7 +67,7 @@ export class UserService extends Context.Service<
      */
     readonly updateUserAttributes: (
       userId: string,
-      attributes: Record<string, unknown>,
+      attributes: Types.Attributes,
     ) => Effect.Effect<
       Types.User,
       Errors.AuthError | Errors.UserNotFoundError | Errors.InvalidInputError
@@ -113,7 +113,7 @@ export const make = (
   Effect.gen(function* () {
     const store = yield* UserServiceStore;
     const serverOnlyAttributes = config?.serverOnlyAttributes ?? DEFAULT_SERVER_ONLY_ATTRIBUTES;
-    const serverOnly = new Set(serverOnlyAttributes);
+    const serverOnly = HashSet.fromIterable(serverOnlyAttributes);
 
     return {
       serverOnlyAttributes,
@@ -121,9 +121,11 @@ export const make = (
 
       updateUserAttributes: Effect.fn("UserService.updateUserAttributes")(function* (
         userId: string,
-        attributes: Record<string, unknown>,
+        attributes: Types.Attributes,
       ) {
-        const refused = Object.keys(attributes).find((key) => serverOnly.has(key));
+        const refused = Option.getOrUndefined(
+          Arr.findFirst(Rec.keys(attributes), (key) => HashSet.has(serverOnly, key)),
+        );
         if (refused !== undefined) {
           return yield* new Errors.InvalidInputError({
             message: `"${refused}" is a server-only attribute and cannot be set here`,

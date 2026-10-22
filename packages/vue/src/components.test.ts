@@ -15,21 +15,30 @@ import {
 } from "./components.ts";
 
 /** A stand-in client exposing only the branch the component under test calls. */
-const stub = <T extends Record<string, unknown>>(shape: T): T & AuthClient =>
-  shape as unknown as T & AuthClient;
+/** A member as a stub may supply it: a method as is, a namespace as any subset of its members. */
+type StubOf<T> = T extends (...args: infer A) => infer R
+  ? (...args: A) => R
+  : { readonly [K in keyof T]?: StubOf<T[K]> };
 
-const AUTH_SUCCESS = {
-  user: { id: "user-1", email: "alice@vue.test" },
+/** Any subset of the client's members; the code under test touches only the ones a test supplies. */
+type ClientStub = StubOf<AuthClient>;
+const stub = <T extends ClientStub>(shape: T): T & AuthClient => shape as T & AuthClient;
+
+const AUTH_SUCCESS: AuthSuccess = {
+  user: { id: "user-1", email: "alice@vue.test", createdAt: 0, updatedAt: 0, attributes: {} },
   needsEmailVerification: false,
-} as unknown as AuthSuccess;
+};
 
-const STATUS = { status: "ok" } as unknown as StatusResponse;
+const STATUS: StatusResponse = { status: true };
+
+/** The prop values these tests pass: flags, strings, a client, label maps. */
+type PropValue = string | boolean | AuthClient | Readonly<Record<string, string>>;
 
 /** Mount with the client handed down through `provide`, as an app would. */
 const withClient = (
   component: Component,
   client: AuthClient,
-  props: Record<string, unknown> = {},
+  props: Readonly<Record<string, PropValue>> = {},
 ) =>
   mount(component, {
     props,

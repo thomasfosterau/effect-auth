@@ -32,4 +32,4 @@ import type * as Ladder from "./Ladder.ts";
  * @category schemas
  */
 export const rung = <Rung extends string>(ladder: Ladder.Ladder<Rung>): Schema.Codec<Rung> =>
-  Schema.Literals(ladder.rungs) as unknown as Schema.Codec<Rung>;
+  Schema.Literals(ladder.rungs);

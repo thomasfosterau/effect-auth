@@ -9,6 +9,13 @@
  * stores, policies, tests, or plain application code.
  */
 
+import { Data } from "effect";
+
+/** Thrown by {@link parsePermission} for a malformed permission string. */
+class InvalidPermissionStringError extends Data.TaggedError("InvalidPermissionStringError")<{
+  readonly message: string;
+}> {}
+
 /**
  * A permission reference: a resource paired with an action.
  *
@@ -56,23 +63,23 @@ export const parsePermission = (input: string): PermissionRef => {
   const separator = trimmed.indexOf(":");
 
   if (separator === -1) {
-    throw new Error(
-      `parsePermission: invalid permission string "${input}" — must be in "resource:action" format`,
-    );
+    throw new InvalidPermissionStringError({
+      message: `parsePermission: invalid permission string "${input}" — must be in "resource:action" format`,
+    });
   }
 
   const resource = trimmed.slice(0, separator).trim();
   const action = trimmed.slice(separator + 1).trim();
 
   if (resource === "") {
-    throw new Error(
-      `parsePermission: invalid permission string "${input}" — resource must not be empty`,
-    );
+    throw new InvalidPermissionStringError({
+      message: `parsePermission: invalid permission string "${input}" — resource must not be empty`,
+    });
   }
   if (action === "") {
-    throw new Error(
-      `parsePermission: invalid permission string "${input}" — action must not be empty (use "*" to match all)`,
-    );
+    throw new InvalidPermissionStringError({
+      message: `parsePermission: invalid permission string "${input}" — action must not be empty (use "*" to match all)`,
+    });
   }
 
   return { resource, action };

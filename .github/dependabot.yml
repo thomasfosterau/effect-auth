@@ -1,24 +1,37 @@
-# Dependabot version-update configuration (the library standard's, via
-# effect-jsonapi / effect-drizzle-ext).
+# Dependabot version updates. The `npm` ecosystem at `/` reads the pnpm
+# workspace and its catalogs (pnpm-workspace.yaml), so one entry covers every
+# package under packages/*.
 #
-# `groups` collect dependencies that MUST move together: the Effect 4 release
-# line is a lockstep-versioned singleton set (effect plus the @effect/sql-*
-# drivers pinned to the same exact version); the vitest toolchain is pinned to
-# vite-plus's exact versions, so its *version* updates are ignored while
-# SECURITY updates stay enabled (the ignore is scoped to the
-# `version-update:semver-*` update types; a bare `dependency-name` ignore would
-# block security updates too) — bump vite-plus, vite and vitest together by
-# hand in pnpm-workspace.yaml.
+# Groups collect the sets that MUST move together, so a lockstep set arrives as
+# one PR and can never drift apart. Dependabot puts a dependency in the FIRST
+# group that matches, so the groups run specific → general and `exclude-patterns`
+# keeps a package out of a broader group that would otherwise claim it:
 #
-# The TypeScript set's version updates are ignored the same way (security
-# updates stay enabled): `@effect/tsgo`, `typescript` (the TS6 alias) and
-# `@typescript/native` (TS7) pin to each other, since `effect-tsgo patch`
-# matches the native tsc and oxlint by gitHead / version and hard-errors on any
-# pairing it has no artifact for, so a Dependabot PR that moves one alone goes
-# red. They move by hand as a set together with vite-plus, after checking the
-# `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs. For the
-# same reason `@effect/tsgo` is excluded from the `effect` group's `@effect/*`
-# pattern.
+# - `toolchain`: `@effect/tsgo` patches the native `tsc` (`@typescript/native`)
+#   and the oxlint that `vite-plus` pins, and hard-errors at install on any
+#   pairing it has no artifact for; `vite`, `vitest` and `@vitest/*` must equal
+#   what `vite-plus` bundles; the oxlint plugin runs inside that oxlint. Check
+#   the `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
+#   before merging one of these PRs (the catalog comments say why).
+# - `effect`: the Effect 4 release line is a lockstep singleton set (`effect`
+#   plus the `@effect/*` packages pinned to the same release).
+# - one group per framework family, the storage peers and Changesets.
+# - `minor-and-patch`: everything else's minor and patch updates in one PR, so
+#   PR volume stays low; a major outside a lockstep set stays its own PR.
+#
+# Ignored version updates (security updates stay enabled, because each ignore
+# is scoped to `version-update:*` types):
+# - `typescript` majors: it is the TS6 alias (`npm:@typescript/typescript6`)
+#   that every JS-API consumer `require`s; Dependabot proposes TS7 there, which
+#   breaks them (AGENTS.md, "TypeScript is split 6/7").
+# - `drizzle-orm-effect`: the commit-suffixed drizzle 1.0 prerelease is pinned
+#   to what the applications run; it moves with them, not with npm's `latest`.
+#
+# The transitive advisory floors in pnpm-workspace.yaml's `overrides` are not
+# dependencies Dependabot can bump; they are raised by hand (AGENTS.md).
+#
+# `cooldown` mirrors pnpm 11's default `minimumReleaseAge` (one day), with
+# `@thomasfosterau/*` exempt as `minimumReleaseAgeExclude` exempts it.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -37,71 +50,82 @@ updates:
       exclude:
         - "@thomasfosterau/*"
     groups:
+      toolchain:
+        applies-to: version-updates
+        patterns:
+          - "vite-plus"
+          - "vite"
+          - "vitest"
+          - "@vitest/*"
+          - "oxlint"
+          - "oxfmt"
+          - "oxlint-tsgolint"
+          - "@effect/tsgo"
+          - "@typescript/native"
+          - "typescript"
+          - "@typescript/typescript6"
+          - "@mpsuesser/oxlint-plugin-effect"
       effect:
+        applies-to: version-updates
         patterns:
           - "effect"
           - "@effect/*"
         exclude-patterns:
           - "@effect/tsgo"
-      frameworks:
+      svelte:
+        applies-to: version-updates
+        patterns:
+          - "svelte"
+          - "@sveltejs/*"
+          - "svelte-check"
+          - "svelte2tsx"
+          - "@testing-library/svelte"
+      react:
+        applies-to: version-updates
         patterns:
           - "react"
           - "react-dom"
           - "@types/react"
           - "@types/react-dom"
-          - "svelte"
-          - "svelte-check"
-          - "@sveltejs/*"
+          - "@testing-library/react"
+      vue:
+        applies-to: version-updates
+        patterns:
           - "vue"
+          - "@vue/*"
           - "vue-tsc"
           - "@vitejs/plugin-vue"
+      solid:
+        applies-to: version-updates
+        patterns:
           - "solid-js"
+          - "@solidjs/*"
           - "vite-plugin-solid"
+      drizzle:
+        applies-to: version-updates
+        patterns:
+          - "drizzle-orm"
+          - "drizzle-kit"
+      alchemy:
+        applies-to: version-updates
+        patterns:
+          - "alchemy"
+          - "wrangler"
+          - "@cloudflare/*"
+      changesets:
+        applies-to: version-updates
+        patterns:
+          - "@changesets/*"
+      minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     ignore:
-      - dependency-name: "@effect/tsgo"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
       - dependency-name: "typescript"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "@typescript/native"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "vite"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "vitest"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "vite-plus"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      # The commit-suffixed drizzle 1.0 prerelease is pinned to what the
-      # applications run; it moves with them, not with npm's `latest`.
+        update-types: ["version-update:semver-major"]
       - dependency-name: "drizzle-orm-effect"
         update-types:
           [
@@ -120,5 +144,10 @@ updates:
     labels:
       - "dependencies"
     commit-message:
-      prefix: "ci"
-      include: "scope"
+      prefix: "chore"
+    cooldown:
+      default-days: 1
+    groups:
+      github-actions:
+        patterns:
+          - "*"

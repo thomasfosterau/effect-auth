@@ -74,7 +74,7 @@
  *
  * @module session-context
  */
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Effect, Layer, Option, Predicate } from "effect";
 import { CurrentCredential, CurrentPrincipal, type CredentialClass } from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
 import * as Errors from "./Errors.ts";
@@ -466,15 +466,15 @@ export const requireCurrentSession: Effect.Effect<
 export const viewerLayer = <Id, User>(
   viewer: Context.Key<Id, Option.Option<User>>,
   user: User | Option.Option<User> | null | undefined,
-): Layer.Layer<Id> =>
-  Layer.succeed(
-    viewer,
-    user === null || user === undefined
-      ? Option.none()
-      : Option.isOption(user)
-        ? (user as Option.Option<User>)
-        : Option.some(user as User),
-  );
+): Layer.Layer<Id> => {
+  if (user === null || user === undefined) return Layer.succeed(viewer, Option.none());
+  if (Option.isOption(user)) {
+    // SAFETY: `Option.isOption` held, so `user` is the `Option<User>` arm of the union.
+    return Layer.succeed(viewer, user as Option.Option<User>);
+  }
+  // SAFETY: not null/undefined and not an `Option`, so `user` is the bare `User` arm.
+  return Layer.succeed(viewer, Option.some(user as User));
+};
 
 /**
  * Provide an application-declared viewer service from the resolved session
@@ -519,5 +519,5 @@ export const withRole =
   (attribute = "role") =>
   (resolved: Types.SessionWithUser): Option.Option<UserWithRole> => {
     const role = resolved.user.attributes[attribute];
-    return Option.some({ ...resolved.user, role: typeof role === "string" ? role : "" });
+    return Option.some({ ...resolved.user, role: Predicate.isString(role) ? role : "" });
   };

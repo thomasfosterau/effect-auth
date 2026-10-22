@@ -52,7 +52,16 @@
  *
  * @module remote-session
  */
-import { Data, Effect, Layer, Option, Schema } from "effect";
+import {
+  Array as Arr,
+  Data,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  Record as Rec,
+  Schema,
+} from "effect";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import { spanNames } from "../Observability.ts";
 import * as SessionResolution from "../SessionResolution.ts";
@@ -79,10 +88,24 @@ export interface Fetcher {
 /** A bare fetch function, or an object carrying one. */
 export type FetcherLike = Fetcher | ((request: Request) => Promise<Response>);
 
+/** A promise that rejected; {@link promiseOrDie} dies with its `cause`. */
+class PromiseRejection extends Data.TaggedError("PromiseRejection")<{
+  readonly cause: unknown;
+}> {}
+
+/**
+ * Run a promise whose rejection is a defect, as `Effect.promise` does: the
+ * defect is the rejection value itself.
+ */
+const promiseOrDie = <A>(evaluate: () => Promise<A>): Effect.Effect<A> =>
+  Effect.tryPromise({ try: evaluate, catch: (cause) => new PromiseRejection({ cause }) }).pipe(
+    Effect.catchTag("PromiseRejection", (rejection) => Effect.die(rejection.cause)),
+  );
+
 const asFetch =
   (fetcher: FetcherLike) =>
   (request: Request): Promise<Response> =>
-    typeof fetcher === "function" ? fetcher(request) : fetcher.fetch(request);
+    Predicate.isFunction(fetcher) ? fetcher(request) : fetcher.fetch(request);
 
 /**
  * An `HttpClient` layer backed by an arbitrary fetch-alike instead of
@@ -200,11 +223,11 @@ export const forwardedHeaders = (inbound: Request | Headers, policy?: HeaderPoli
   const source = inbound instanceof Headers ? inbound : inbound.headers;
   const out = new Headers();
   const names = policy?.forward ?? defaultForwardedHeaders;
-  for (const name of [...names, ...(policy?.also ?? [])]) {
+  [...names, ...(policy?.also ?? [])].forEach((name) => {
     const value = source.get(name);
     if (value !== null) out.set(name, value);
-  }
-  for (const [name, value] of Object.entries(policy?.set ?? {})) out.set(name, value);
+  });
+  Rec.toEntries(policy?.set ?? {}).forEach(([name, value]) => out.set(name, value));
   return out;
 };
 
@@ -398,7 +421,7 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
         headers: forwardedHeaders(request, options.headers),
       });
 
-      const response = yield* Effect.promise(() => send(outbound));
+      const response = yield* promiseOrDie(() => send(outbound));
       const setCookie = response.headers.getSetCookie();
 
       // 401 is "ran, nobody was signed in" — an expected answer, not a fault.
@@ -413,6 +436,8 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       }
 
       const body = yield* Effect.tryPromise({
+        // SAFETY: widening `json()`'s `any` to `unknown` only drops trust in the
+        // body; `decodeView` parses it next.
         try: () => response.json() as Promise<unknown>,
         catch: (cause) =>
           new RemoteSessionError({ message: "Session read body was not JSON", cause }),
@@ -438,9 +463,9 @@ export const make = (options: RemoteSessionOptions): RemoteSessionClient => {
       const contentType = hasBody ? request.headers.get("content-type") : null;
       if (contentType !== null) headers.set("content-type", contentType);
 
-      const body = hasBody ? yield* Effect.promise(() => request.arrayBuffer()) : undefined;
+      const body = hasBody ? yield* promiseOrDie(() => request.arrayBuffer()) : undefined;
 
-      const response = yield* Effect.promise(() =>
+      const response = yield* promiseOrDie(() =>
         send(
           new Request(new URL(target, baseUrl).toString(), {
             method: request.method,
@@ -471,7 +496,7 @@ export const relayResponse = (
   inbound: SessionResolution.CredentialPresence,
 ): Response => {
   const cookies = upstream.headers.getSetCookie();
-  if (cookies.length === 0) return upstream;
+  if (Arr.isReadonlyArrayEmpty(cookies)) return upstream;
 
   // A key-bearing caller is not a browser. The mixed case — a request carrying
   // both a cookie and a key — is excluded too: the key is its credential, so
@@ -650,9 +675,9 @@ export const resolveAtEdgeFailOpen = (
  * @category constructors
  */
 export const withSetCookie = (response: Response, setCookie: ReadonlyArray<string>): Response => {
-  if (setCookie.length === 0) return response;
+  if (Arr.isReadonlyArrayEmpty(setCookie)) return response;
   const headers = new Headers(response.headers);
-  for (const cookie of setCookie) headers.append("set-cookie", cookie);
+  setCookie.forEach((cookie) => headers.append("set-cookie", cookie));
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,

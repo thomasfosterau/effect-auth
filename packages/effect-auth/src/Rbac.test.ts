@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect } from "effect";
+import { Array as Arr, Effect, Order, Predicate } from "effect";
 import * as Rbac from "./Rbac.ts";
 import * as Authorizer from "./Authorizer.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
@@ -43,13 +43,14 @@ describe("RBAC as policy-kernel sugar", () => {
       const built = Rbac.policies(config);
 
       expect(built).toHaveLength(3);
-      expect(built.every((policy) => policy._tag === "DeclarativePolicy")).toBe(true);
+      expect(built.every((policy) => Predicate.isTagged(policy, "DeclarativePolicy"))).toBe(true);
       expect(built.every((policy) => policy.effect === "permit")).toBe(true);
-      expect(built.map((policy) => policy.id).sort()).toEqual([
-        "rbac:admin:*:*",
-        "rbac:editor:posts:update",
-        "rbac:viewer:posts:read",
-      ]);
+      expect(
+        Arr.sort(
+          built.map((policy) => policy.id),
+          Order.String,
+        ),
+      ).toEqual(["rbac:admin:*:*", "rbac:editor:posts:update", "rbac:viewer:posts:read"]);
     });
 
     it("scopes a permission to its role, action and resource type", () => {
@@ -173,8 +174,12 @@ describe("RBAC as policy-kernel sugar", () => {
     it("declares every non-wildcard resource type and action", () => {
       const declared = Rbac.model(config);
 
-      expect(Object.keys(declared.entities).sort()).toEqual(["Role", "User", "posts"]);
-      expect(Object.keys(declared.actions).sort()).toEqual(["read", "update"]);
+      expect(Arr.sort(Object.keys(declared.entities), Order.String)).toEqual([
+        "Role",
+        "User",
+        "posts",
+      ]);
+      expect(Arr.sort(Object.keys(declared.actions), Order.String)).toEqual(["read", "update"]);
       expect(declared.actions["read"]).toEqual({
         appliesTo: { principal: ["User"], resource: ["posts"] },
       });
@@ -252,11 +257,12 @@ describe("RBAC as policy-kernel sugar", () => {
       const decision = await Effect.runPromise(decide(config, "viewer-user", "posts", "read"));
 
       expect(decision.outcomes).toHaveLength(3);
-      expect(decision.outcomes.map((outcome) => outcome.result).sort()).toEqual([
-        "matched",
-        "not-matched",
-        "not-matched",
-      ]);
+      expect(
+        Arr.sort(
+          decision.outcomes.map((outcome) => outcome.result),
+          Order.String,
+        ),
+      ).toEqual(["matched", "not-matched", "not-matched"]);
     });
   });
 

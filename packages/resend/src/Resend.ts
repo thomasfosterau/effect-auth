@@ -9,7 +9,7 @@
  *
  * @module resend/resend
  */
-import { Effect, Layer, Redacted } from "effect";
+import { Array as Arr, Data, Effect, Layer, Match, Redacted, Schema } from "effect";
 import { AuthError, EmailSender, type EmailMessage } from "@thomasfosterau/effect-auth";
 
 // ---------------------------------------------------------------------------
@@ -23,26 +23,19 @@ export interface RenderedEmail {
   readonly text?: string;
 }
 
-const purposeSubject = (purpose: EmailMessage["purpose"]): string => {
-  switch (purpose) {
-    case "email-verification":
-      return "Verify your email address";
-    case "magic-link":
-      return "Your sign-in link";
-    case "password-reset":
-      return "Reset your password";
-    case "change-email":
-      return "Confirm your new email address";
-    case "delete-account":
-      return "Confirm account deletion";
-    case "second-factor-otp":
-      return "Your verification code";
-    case "existing-account":
-      return "Someone tried to sign up with your email address";
-    default:
-      return purpose.startsWith("email-otp:") ? "Your verification code" : "Action required";
-  }
-};
+const purposeSubject = (purpose: EmailMessage["purpose"]): string =>
+  Match.value(purpose).pipe(
+    Match.when("email-verification", () => "Verify your email address"),
+    Match.when("magic-link", () => "Your sign-in link"),
+    Match.when("password-reset", () => "Reset your password"),
+    Match.when("change-email", () => "Confirm your new email address"),
+    Match.when("delete-account", () => "Confirm account deletion"),
+    Match.when("second-factor-otp", () => "Your verification code"),
+    Match.when("existing-account", () => "Someone tried to sign up with your email address"),
+    Match.orElse((other) =>
+      other.startsWith("email-otp:") ? "Your verification code" : "Action required",
+    ),
+  );
 
 // The `"existing-account"` notice carries no params: it only tells the
 // address's holder that a sign-up was attempted with it.
@@ -74,7 +67,10 @@ export const defaultRender = (message: EmailMessage): RenderedEmail => {
   if (url !== undefined) lines.push(`Continue here: ${url}`);
   else if (token !== undefined) lines.push(`Your token: ${token}`);
 
-  return { subject, text: lines.length > 0 ? lines.join("\n\n") : "Please continue in the app." };
+  return {
+    subject,
+    text: Arr.isReadonlyArrayNonEmpty(lines) ? lines.join("\n\n") : "Please continue in the app.",
+  };
 };
 
 // ---------------------------------------------------------------------------
@@ -99,6 +95,24 @@ export interface ResendEmailSenderConfig {
 }
 
 const DEFAULT_BASE_URL = "https://api.resend.com";
+
+/** Reading a non-2xx response's body failed; raised as a defect. */
+class ResponseBodyError extends Data.TaggedError("ResponseBodyError")<{
+  readonly cause: unknown;
+}> {}
+
+/** The JSON body of Resend's `POST /emails`. */
+const ResendPayloadJson = Schema.fromJsonString(
+  Schema.Struct({
+    from: Schema.String,
+    to: Schema.String,
+    subject: Schema.String,
+    html: Schema.optionalKey(Schema.String),
+    text: Schema.optionalKey(Schema.String),
+  }),
+);
+
+const encodePayload = Schema.encodeSync(ResendPayloadJson);
 
 // ---------------------------------------------------------------------------
 // Sender
@@ -130,7 +144,7 @@ export const resendEmailSender = (config: ResendEmailSenderConfig): typeof Email
     Effect.gen(function* () {
       const rendered = render(message);
 
-      const payload: Record<string, unknown> = {
+      const payload: typeof ResendPayloadJson.Type = {
         from: config.from,
         to: message.to,
         subject: rendered.subject,
@@ -146,13 +160,16 @@ export const resendEmailSender = (config: ResendEmailSenderConfig): typeof Email
               Authorization: `Bearer ${Redacted.value(config.apiKey)}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify(payload),
+            body: encodePayload(payload),
           }),
         catch: (cause) => new AuthError({ message: "Failed to reach Resend API", cause }),
       });
 
       if (!response.ok) {
-        const body = yield* Effect.promise(() => response.text());
+        const body = yield* Effect.tryPromise({
+          try: () => response.text(),
+          catch: (cause) => new ResponseBodyError({ cause }),
+        }).pipe(Effect.orDie);
         return yield* new AuthError({
           message: `Resend API request failed with status ${response.status}`,
           cause: { status: response.status, body },

@@ -37,15 +37,14 @@ export default async function setup(project: TestProject): Promise<() => Promise
   // template is unpacked into every instance's filesystem, and the WAL file is
   // a large part of its bytes. No test reads WAL, so nothing observable changes (#324).
   const client = await PGlite.create({ initDbStartParams: ["--wal-segsize=1"] });
-  try {
+  const migrateAndDump = async (): Promise<void> => {
     for (const statement of migrationStatements()) {
       await client.exec(statement);
     }
     const dump = await client.dumpDataDir("none");
     await writeFile(template, new Uint8Array(await dump.arrayBuffer()));
-  } finally {
-    await client.close();
-  }
+  };
+  await migrateAndDump().finally(() => client.close());
 
   project.provide("pgliteTemplate", template);
   return () => rm(directory, { recursive: true, force: true });

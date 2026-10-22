@@ -1,7 +1,7 @@
 # @thomasfosterau/effect-auth-twilio
 
 `SmsSender` adapter for
-[`@thomasfosterau/effect-auth`](../effect-auth) backed by
+[`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth) backed by
 [Twilio](https://www.twilio.com)'s Messages API. Talks to
 `POST /2010-04-01/Accounts/:sid/Messages.json` with plain `fetch` — **no
 Twilio SDK dependency**, so the runtime footprint is just core `effect-auth`
@@ -13,9 +13,11 @@ and `effect`.
 pnpm add @thomasfosterau/effect-auth-twilio @thomasfosterau/effect-auth effect
 ```
 
+`effect` (`>=4.0.0-rc.118`) is a peer dependency. The sender needs only a global `fetch`. On Cloudflare Workers, enable the `nodejs_compat` flag: core effect-auth uses `node:crypto`, and this package builds its Basic-auth header with `Buffer`.
+
 ## Usage
 
-Wire it through core's [`Delivery`](../effect-auth/src/Delivery.ts) module so
+Wire it through core's [`Delivery`](https://github.com/thomasfosterau/effect-auth/blob/trunk/packages/effect-auth/src/Delivery.ts) module so
 every feature's `sendOtp` callback is derived in one line:
 
 ```ts
@@ -24,7 +26,7 @@ import { SmsSender, smsCallbacks, IdentifierStore } from "@thomasfosterau/effect
 import { layer as twilioLayer } from "@thomasfosterau/effect-auth-twilio";
 
 // Resolve secrets through Config, then build the layer from the resolved config.
-const SmsLayer = Layer.unwrapEffect(
+const SmsLayer = Layer.unwrap(
   Effect.gen(function* () {
     const accountSid = yield* Config.String("TWILIO_ACCOUNT_SID");
     const authToken = yield* Config.Redacted("TWILIO_AUTH_TOKEN");
@@ -75,6 +77,9 @@ This exists so the adapter works out of the box and in tests. **Real
 applications should supply their own `render`** for branded, localized copy:
 
 ```ts
+import { Redacted } from "effect";
+import { layer as twilioLayer } from "@thomasfosterau/effect-auth-twilio";
+
 twilioLayer({
   accountSid: "...",
   authToken: Redacted.make("..."),
@@ -88,6 +93,11 @@ twilioLayer({
 Pass `fetch` to inject a stub, and `baseUrl` to point at a local server:
 
 ```ts
+import { Redacted } from "effect";
+import { twilioSmsSender } from "@thomasfosterau/effect-auth-twilio";
+
+const myFetchStub: typeof fetch = async () => new Response(null, { status: 201 });
+
 twilioSmsSender({
   accountSid: "AC...",
   authToken: Redacted.make("test"),

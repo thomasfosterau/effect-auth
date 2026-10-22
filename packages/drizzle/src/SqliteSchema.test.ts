@@ -77,7 +77,7 @@ const withDatabase = async <A>(
   names?: Parameters<typeof defineTables>[0],
 ): Promise<A> => {
   const client = new Database(":memory:");
-  try {
+  const migrateAndUse = async (): Promise<A> => {
     for (const statement of migrationStatements(names)) {
       client.exec(statement);
     }
@@ -88,9 +88,8 @@ const withDatabase = async <A>(
       names === undefined ? tables : defineTables(names),
       client,
     );
-  } finally {
-    client.close();
-  }
+  };
+  return await migrateAndUse().finally(() => client.close());
 };
 
 /** Run a program against all three stores on a fresh SQLite database. */
@@ -155,23 +154,25 @@ const seedUser = (
   activeTables: Tables,
   row: Partial<Tables["users"]["$inferInsert"]> = {},
 ): Effect.Effect<string> =>
-  Effect.promise(async () => {
-    const id = row.id ?? "user-1";
-    await db
-      .insert(activeTables.users)
-      .values({
-        id,
-        name: null,
-        image: null,
-        passwordHash: null,
-        attributes: {},
-        createdAt: at(0),
-        updatedAt: at(0),
-        ...row,
-      })
-      .execute();
-    return id;
-  });
+  Effect.orDie(
+    Effect.tryPromise(async () => {
+      const id = row.id ?? "user-1";
+      await db
+        .insert(activeTables.users)
+        .values({
+          id,
+          name: null,
+          image: null,
+          passwordHash: null,
+          attributes: {},
+          createdAt: at(0),
+          updatedAt: at(0),
+          ...row,
+        })
+        .execute();
+      return id;
+    }),
+  );
 
 // ---------------------------------------------------------------------------
 // Sessions

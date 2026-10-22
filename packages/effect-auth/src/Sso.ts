@@ -28,7 +28,7 @@
  *
  * @module sso
  */
-import { Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
+import { Array as Arr, Context, Crypto, Data, Effect, Layer, Option, Redacted } from "effect";
 import { AuthError } from "./Errors.ts";
 import { IdentifierStore } from "./Identifier.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
@@ -424,16 +424,16 @@ export const make = (
      * The cost is that "not installed" is a runtime error — but only on a code
      * path that a SAML connection had to be registered to reach.
      */
-    const requireSaml = Effect.gen(function* () {
+    const requireSaml = Effect.fn("SsoService.requireSaml")(function* () {
       const verifier = yield* Effect.serviceOption(SamlVerifier);
-      if (verifier._tag === "None") {
+      if (Option.isNone(verifier)) {
         return yield* new SsoError({
           message:
             "SAML support is not installed: provide the SamlVerifier layer from @thomasfosterau/effect-auth-saml",
         });
       }
       const replay = yield* Effect.serviceOption(SamlReplayStore);
-      if (replay._tag === "None") {
+      if (Option.isNone(replay)) {
         return yield* new SsoError({
           message: "SAML support is not installed: provide a SamlReplayStore layer",
         });
@@ -469,20 +469,25 @@ export const make = (
       signInEmail: string,
     ) {
       const organizations = yield* Effect.serviceOption(OrganizationService);
-      if (organizations._tag === "None") return;
+      if (Option.isNone(organizations)) return;
 
       const identifiers = yield* IdentifierStore;
       const owned = yield* identifiers.listByUser(userId);
       // The sign-in address is IdP-attested; the rest must carry their own
       // proof, or a self-asserted alias would be a free ticket into a tenant.
-      const proven = new Set<string>([signInEmail]);
-      for (const identifier of owned) {
-        if (identifier.type === "email" && identifier.verified) proven.add(identifier.value);
-      }
+      const proven = Arr.dedupe([
+        signInEmail,
+        ...Arr.map(
+          Arr.filter(owned, (identifier) => identifier.type === "email" && identifier.verified),
+          (identifier) => identifier.value,
+        ),
+      ]);
 
-      for (const address of proven) {
-        yield* organizations.value.provisionJitMembership(userId, address);
-      }
+      yield* Effect.forEach(
+        proven,
+        (address) => organizations.value.provisionJitMembership(userId, address),
+        { concurrency: 1, discard: true },
+      );
     });
 
     /**
@@ -539,7 +544,7 @@ export const make = (
       // Provision organization membership on first login when configured.
       if (isNewUser && provider.organizationId !== undefined) {
         const orgStore = yield* Effect.serviceOption(OrganizationStore);
-        if (orgStore._tag === "Some") {
+        if (Option.isSome(orgStore)) {
           const existing = yield* orgStore.value.getMember(provider.organizationId, user.id);
           if (existing === null) {
             const organization =
@@ -671,19 +676,21 @@ export const make = (
         registrarUserId: string,
         input: RegisterSamlProviderInput,
       ) {
-        if (input.idpCertificates.length === 0) {
+        if (Arr.isReadonlyArrayEmpty(input.idpCertificates)) {
           return yield* new SsoError({
             message:
               "idpCertificates must not be empty: the IdP's signing certificate is the only trust anchor for a SAML connection",
           });
         }
-        for (const [label, value] of [
-          ["ssoUrl", input.ssoUrl],
-          ["acsUrl", input.acsUrl],
-        ] as const) {
-          if (!URL.canParse(value)) {
-            return yield* new SsoError({ message: `${label} must be an absolute URL` });
-          }
+        const invalidUrl = Arr.findFirst(
+          [
+            ["ssoUrl", input.ssoUrl],
+            ["acsUrl", input.acsUrl],
+          ] as const,
+          ([, value]) => !URL.canParse(value),
+        );
+        if (Option.isSome(invalidUrl)) {
+          return yield* new SsoError({ message: `${invalidUrl.value[0]} must be an absolute URL` });
         }
         if (input.entityId.trim() === "" || input.spEntityId.trim() === "") {
           return yield* new SsoError({ message: "entityId and spEntityId are required" });
@@ -731,7 +738,7 @@ export const make = (
         const provider = yield* resolveProvider(selector);
 
         if (provider.protocol === "saml") {
-          const { verifier, replay } = yield* requireSaml;
+          const { verifier, replay } = yield* requireSaml();
           const relayState = yield* randomId();
           const requestId = yield* randomMessageId();
           const request = yield* verifier
@@ -840,7 +847,7 @@ export const make = (
         relayState?: string,
       ) {
         const provider = yield* requireSamlProvider(providerId);
-        const { verifier, replay } = yield* requireSaml;
+        const { verifier, replay } = yield* requireSaml();
 
         // The verifier owns the XML/crypto checklist (signature over pinned
         // certificates, single assertion, audience, Destination/Recipient,
@@ -931,7 +938,7 @@ export const make = (
 
       samlMetadata: Effect.fn("SsoService.samlMetadata")(function* (providerId: string) {
         const provider = yield* requireSamlProvider(providerId);
-        const { verifier } = yield* requireSaml;
+        const { verifier } = yield* requireSaml();
         return yield* verifier
           .spMetadataXml({
             spEntityId: provider.spEntityId,

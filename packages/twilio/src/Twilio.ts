@@ -10,22 +10,20 @@
  *
  * @module twilio/twilio
  */
-import { Effect, Layer, Redacted } from "effect";
+import { Data, Effect, Layer, Match, Option, Redacted, Schema } from "effect";
 import { AuthError, SmsSender, type SmsMessage } from "@thomasfosterau/effect-auth";
 
 // ---------------------------------------------------------------------------
 // Default renderer
 // ---------------------------------------------------------------------------
 
-const purposeLead = (purpose: SmsMessage["purpose"]): string => {
-  switch (purpose) {
-    case "second-factor-otp":
-      return "Your verification code";
-    default:
-      if (purpose.startsWith("phone-otp:")) return "Your verification code";
-      return "Message";
-  }
-};
+const purposeLead = (purpose: SmsMessage["purpose"]): string =>
+  Match.value(purpose).pipe(
+    Match.when("second-factor-otp", () => "Your verification code"),
+    Match.orElse((other) =>
+      other.startsWith("phone-otp:") ? "Your verification code" : "Message",
+    ),
+  );
 
 /**
  * The built-in renderer: a purpose-keyed lead-in (e.g. "Your verification
@@ -66,28 +64,41 @@ export interface TwilioSmsSenderConfig {
 
 const DEFAULT_BASE_URL = "https://api.twilio.com";
 
-interface TwilioErrorBody {
-  readonly code?: number;
-  readonly message?: string;
-}
+/** Reading a non-2xx response's body failed; raised as a defect. */
+class ResponseBodyError extends Data.TaggedError("ResponseBodyError")<{
+  readonly cause: unknown;
+}> {}
 
-const isTwilioErrorBody = (value: unknown): value is TwilioErrorBody =>
-  typeof value === "object" && value !== null;
+/**
+ * Twilio's `{ code, message }` error body. The fields are left untyped so any
+ * JSON object is accepted and its `code`/`message` are rendered as they are.
+ */
+const TwilioErrorBodyJson = Schema.fromJsonString(
+  Schema.Struct({
+    code: Schema.optionalKey(Schema.Unknown),
+    message: Schema.optionalKey(Schema.Unknown),
+  }),
+);
+
+const decodeTwilioErrorBody = Schema.decodeUnknownOption(TwilioErrorBodyJson);
 
 /** Parse Twilio's `{ code, message }` error body, when present, into readable text. */
-const describeTwilioError = (status: number, bodyText: string): string => {
-  try {
-    const parsed: unknown = JSON.parse(bodyText);
-    if (isTwilioErrorBody(parsed) && (parsed.code !== undefined || parsed.message !== undefined)) {
-      const code = parsed.code !== undefined ? `code ${parsed.code}` : `status ${status}`;
-      const message = parsed.message ?? "no message";
-      return `${code}: ${message}`;
-    }
-  } catch {
-    // Not JSON — fall through to the raw body.
-  }
-  return `status ${status}: ${bodyText}`;
-};
+const describeTwilioError = (status: number, bodyText: string): string =>
+  Option.match(
+    // Not JSON (or not an object) — fall through to the raw body.
+    Option.filter(
+      decodeTwilioErrorBody(bodyText),
+      (parsed) => parsed.code !== undefined || parsed.message !== undefined,
+    ),
+    {
+      onNone: () => `status ${status}: ${bodyText}`,
+      onSome: (parsed) => {
+        const code = parsed.code !== undefined ? `code ${String(parsed.code)}` : `status ${status}`;
+        const message = parsed.message ?? "no message";
+        return `${code}: ${String(message)}`;
+      },
+    },
+  );
 
 // ---------------------------------------------------------------------------
 // Sender
@@ -136,7 +147,10 @@ export const twilioSmsSender = (config: TwilioSmsSenderConfig): typeof SmsSender
       });
 
       if (!response.ok) {
-        const bodyText = yield* Effect.promise(() => response.text());
+        const bodyText = yield* Effect.tryPromise({
+          try: () => response.text(),
+          catch: (cause) => new ResponseBodyError({ cause }),
+        }).pipe(Effect.orDie);
         return yield* new AuthError({
           message: `Twilio API request failed (${describeTwilioError(response.status, bodyText)})`,
           cause: { status: response.status, body: bodyText },

@@ -12,7 +12,7 @@ import { count, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
 import { readFile } from "node:fs/promises";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
 import { defineUsers, layer } from "./SingleTableIdentifierStore.ts";
@@ -48,8 +48,9 @@ const ada: Auth.NewUserIdentifier = {
 const region = async (file: string): Promise<string> => {
   const source = await readFile(new URL(file, import.meta.url), "utf8");
   const match = /\/\/ README:begin\n([\s\S]*?)\/\/ README:end\n/.exec(source);
-  if (match?.[1] === undefined) throw new Error(`${file} has no README region`);
-  return match[1];
+  const body = match?.[1];
+  assert(body !== undefined, `${file} has no README region`);
+  return body;
 };
 
 describe("README: sign-up writer examples", () => {

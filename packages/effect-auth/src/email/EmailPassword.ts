@@ -2,7 +2,8 @@ import { Context, Effect, Layer, Option } from "effect";
 import * as Errors from "../Errors.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import { IdentifierStore, resolveUserByIdentifier, type IdentifierType } from "../Identifier.ts";
-import { MultiAlgorithmVerifier, PasswordHasher } from "../password/Password.ts";
+import { PasswordHasher } from "../password/Password.ts";
+import { makeDecoyHash, verifyPasswordOrDecoy } from "../password/DecoyVerify.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 import { SessionService } from "../SessionService.ts";
@@ -391,13 +392,7 @@ export const make = (
 
     // Cached decoy hash — computed on first signIn call so that unknown-user
     // attempts always perform the same hashing work as known-user ones.
-    let cachedDecoyHash: string | undefined;
-    const getDecoyHash: Effect.Effect<string, Errors.HashingError> = Effect.gen(function* () {
-      if (cachedDecoyHash !== undefined) return cachedDecoyHash;
-      const result = yield* passwordHasher.hash("effect-auth-decoy");
-      cachedDecoyHash = result.hash;
-      return cachedDecoyHash;
-    });
+    const getDecoyHash = makeDecoyHash(passwordHasher, "getDecoyHash");
 
     // The answer to a sign-up for an address another user holds, however the
     // flow finds that out (the pre-check, a lost insert race, or a store that
@@ -546,19 +541,15 @@ export const make = (
           const user = resolvedUser?.user ?? null;
           const passwordHash = user !== null ? yield* store.getPasswordHash(user.id) : null;
           // Always verify against a real or decoy hash so timing is constant
-          // regardless of whether the account exists.  Route through
-          // MultiAlgorithmVerifier when present so that a hasher switch does not
-          // lock out existing users.  Convert HashingError to false so sign-in
-          // always returns InvalidCredentialsError and never a 500.
-          const hashToVerify = passwordHash ?? (yield* getDecoyHash);
-          const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
-          const verifyEffect = Option.isSome(multiVerifier)
-            ? multiVerifier.value.verify(input.password, hashToVerify)
-            : passwordHasher.verify(input.password, hashToVerify);
-          const isValid = yield* verifyEffect.pipe(
-            Effect.catchTag("HashingError", () => Effect.succeed(false)),
+          // regardless of whether the account exists.
+          const isValid = yield* verifyPasswordOrDecoy(
+            passwordHasher,
+            input.password,
+            passwordHash,
+            getDecoyHash,
           );
-          if (user === null || passwordHash === null || !isValid) {
+          // `user` is null exactly when `resolvedUser` is; checking both narrows both.
+          if (resolvedUser === null || user === null || passwordHash === null || !isValid) {
             return yield* new Errors.InvalidCredentialsError({
               message: "Invalid email or password",
             });
@@ -568,21 +559,21 @@ export const make = (
           // it outdated (e.g. iteration count raised, algorithm switched).  A
           // failure here must never abort sign-in — the user is already
           // authenticated at this point.
-          if (passwordHasher.needsRehash?.(passwordHash!)) {
+          if (passwordHasher.needsRehash?.(passwordHash)) {
             yield* passwordHasher.hash(input.password).pipe(
               Effect.flatMap((newHash) => store.setPasswordHash(user.id, newHash.hash)),
               Effect.ignore,
             );
           }
 
-          if (resolved.requireEmailVerification && !resolvedUser!.identifier.verified) {
+          if (resolved.requireEmailVerification && !resolvedUser.identifier.verified) {
             return yield* new Errors.EmailNotVerifiedError({
               message: "Email must be verified before sign-in",
               email,
             });
           }
 
-          const handle = { type: "email" as const, value: resolvedUser!.identifier.value };
+          const handle = { type: "email" as const, value: resolvedUser.identifier.value };
 
           // Second factor: when a gate is present and required for this user,
           // return a challenge instead of a session.

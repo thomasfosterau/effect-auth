@@ -1,4 +1,4 @@
-import { Crypto, Effect } from "effect";
+import { Array as Arr, Crypto, Data, Effect, Option, Predicate, String as Str } from "effect";
 import * as Cipher from "../Cipher.ts";
 import * as Errors from "../Errors.ts";
 import { timingSafeEqualBytes } from "../TokenHash.ts";
@@ -55,6 +55,25 @@ export interface OtpUriParams {
   readonly algorithm?: "sha1" | "sha256" | "sha512";
 }
 
+/** A character outside the RFC 4648 base32 alphabet; the `cause` of a failed {@link decodeBase32}. */
+class InvalidBase32CharacterError extends Data.TaggedError("InvalidBase32CharacterError")<{
+  readonly message: string;
+}> {}
+
+/** An {@link OtpUriParams} that {@link generateOtpUri} cannot encode. */
+class OtpUriError extends Data.TaggedError("OtpUriError")<{
+  readonly message: string;
+}> {}
+
+const base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+/**
+ * Split a string of `0`/`1` digits into consecutive groups of `size` bits; the
+ * last group is shorter when `bits.length` is not a multiple of `size`.
+ */
+const bitGroups = (bits: string, size: number): ReadonlyArray<string> =>
+  Arr.map(Arr.chunksOf(bits.split(""), size), (group) => group.join(""));
+
 /**
  * Generate cryptographically secure random bytes for OTP secret
  * @param length - Number of bytes to generate (default: 20)
@@ -86,63 +105,49 @@ export const generateSecret = (
  * Used for encoding OTP secrets
  */
 export const encodeBase32 = (buffer: Buffer): string => {
-  const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  let bits = 0;
-  let value = 0;
-  let output = "";
-
-  for (let i = 0; i < buffer.length; i++) {
-    value = (value << 8) | buffer[i];
-    bits += 8;
-
-    while (bits >= 5) {
-      output += base32Chars[(value >>> (bits - 5)) & 31];
-      bits -= 5;
-    }
-  }
-
-  if (bits > 0) {
-    output += base32Chars[(value << (5 - bits)) & 31];
-  }
-
-  return output;
+  // Each byte contributes 8 bits; every 5 bits is one character, and a final
+  // partial group is right-padded with zero bits.
+  const bits = Arr.map(Arr.fromIterable(buffer), (byte) => byte.toString(2).padStart(8, "0")).join(
+    "",
+  );
+  return Arr.map(bitGroups(bits, 5), (group) =>
+    base32Alphabet.charAt(parseInt(group.padEnd(5, "0"), 2)),
+  ).join("");
 };
 
 /**
  * Decode base32 string to bytes (RFC 4648)
  */
 export const decodeBase32 = (base32: string): Effect.Effect<Buffer, Errors.HashingError> =>
-  Effect.try({
-    try: () => {
-      const base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-      const cleanBase32 = base32.toUpperCase().replace(/[=\s]/g, "");
-
-      let bits = 0;
-      let value = 0;
-      const output: number[] = [];
-
-      for (let i = 0; i < cleanBase32.length; i++) {
-        const idx = base32Chars.indexOf(cleanBase32[i]);
-        if (idx === -1) {
-          throw new Error(`Invalid base32 character: ${cleanBase32[i]}`);
-        }
-
-        value = (value << 5) | idx;
-        bits += 5;
-
-        if (bits >= 8) {
-          output.push((value >>> (bits - 8)) & 255);
-          bits -= 8;
-        }
-      }
-
-      return Buffer.from(output);
-    },
-    catch: (error) =>
-      new Errors.HashingError({
-        message: "Failed to decode base32 string",
-        cause: error,
-      }),
+  Effect.suspend(() => {
+    // UTF-16 code units, so an invalid character is reported as it was indexed.
+    const chars = base32.toUpperCase().replace(/[=\s]/g, "").split("");
+    return Option.match(
+      Arr.findFirst(chars, (char) => base32Alphabet.indexOf(char) === -1),
+      {
+        onSome: (char) =>
+          Effect.fail(
+            new Errors.HashingError({
+              message: "Failed to decode base32 string",
+              cause: new InvalidBase32CharacterError({
+                message: `Invalid base32 character: ${char}`,
+              }),
+            }),
+          ),
+        onNone: () => {
+          // Each character contributes 5 bits; every complete 8 bits is one
+          // byte, and trailing bits short of a byte are dropped.
+          const bits = Arr.map(chars, (char) =>
+            base32Alphabet.indexOf(char).toString(2).padStart(5, "0"),
+          ).join("");
+          const bytes = Arr.map(
+            Arr.filter(bitGroups(bits, 8), (group) => group.length === 8),
+            (group) => parseInt(group, 2),
+          );
+          return Effect.succeed(Buffer.from(bytes));
+        },
+      },
+    );
   });
 
 /**
@@ -178,9 +183,9 @@ export const generateHotp = (
     const algorithm = config?.algorithm ?? "sha1";
 
     // Validate and decode secret if it's a string
-    if (typeof secret === "string") {
+    if (Predicate.isString(secret)) {
       const trimmed = secret.trim();
-      if (trimmed.length === 0) {
+      if (Str.isEmpty(trimmed)) {
         return yield* new Errors.HashingError({
           message: "Secret must be a non-empty string",
         });
@@ -188,10 +193,10 @@ export const generateHotp = (
     }
 
     // Decode secret if it's a string
-    const secretBuffer = typeof secret === "string" ? yield* decodeBase32(secret) : secret;
+    const secretBuffer = Predicate.isString(secret) ? yield* decodeBase32(secret) : secret;
 
     // Validate buffer is not empty
-    if (secretBuffer.length === 0) {
+    if (secretBuffer.byteLength === 0) {
       return yield* new Errors.HashingError({
         message: "Secret buffer cannot be empty",
       });
@@ -234,7 +239,7 @@ export const verifyHotp = (
 ): Effect.Effect<boolean, Errors.HashingError> =>
   Effect.gen(function* () {
     // Validate token: must be a non-empty string of digits
-    if (!token || token.length === 0 || !/^\d+$/u.test(token)) {
+    if (!token || Str.isEmpty(token) || !/^\d+$/u.test(token)) {
       return false;
     }
 
@@ -307,25 +312,27 @@ export const verifyTotp = (
     const currentTime = Math.floor(Date.now() / 1000);
     const currentCounter = Math.floor(currentTime / period);
 
-    // Check current time step and adjacent steps within window
-    for (let i = -window; i <= window; i++) {
-      const counter = currentCounter + i;
-      const hotpConfig: HotpConfig = {
-        ...(config?.digits !== undefined && { digits: config.digits }),
-        ...(config?.algorithm !== undefined && { algorithm: config.algorithm }),
-      };
-      const expectedToken = yield* generateHotp(secret, counter, hotpConfig);
+    const hotpConfig: HotpConfig = {
+      ...(config?.digits !== undefined && { digits: config.digits }),
+      ...(config?.algorithm !== undefined && { algorithm: config.algorithm }),
+    };
 
-      // Timing-safe comparison
-      if (token.length === expectedToken.length) {
-        const isValid = timingSafeEqualBytes(Buffer.from(token), Buffer.from(expectedToken));
-        if (isValid) {
-          return counter;
-        }
-      }
-    }
+    // Check current time step and adjacent steps within window, in order,
+    // stopping at the first match
+    const matched = yield* Effect.findFirst(
+      Arr.range(currentCounter - window, currentCounter + window),
+      (counter) =>
+        generateHotp(secret, counter, hotpConfig).pipe(
+          // Timing-safe comparison
+          Effect.map(
+            (expectedToken) =>
+              token.length === expectedToken.length &&
+              timingSafeEqualBytes(Buffer.from(token), Buffer.from(expectedToken)),
+          ),
+        ),
+    );
 
-    return null;
+    return Option.getOrNull(matched);
   });
 
 /**
@@ -339,16 +346,16 @@ export const generateOtpUri = (params: OtpUriParams): string => {
   const { type, label, issuer, secret, counter, period, digits, algorithm } = params;
 
   // Validate secret is a valid base32 string
-  if (typeof secret !== "string") {
-    throw new Error("Secret must be a string");
+  if (!Predicate.isString(secret)) {
+    throw new OtpUriError({ message: "Secret must be a string" });
   }
   const trimmed = secret.trim();
-  if (trimmed.length === 0) {
-    throw new Error("Secret cannot be empty");
+  if (Str.isEmpty(trimmed)) {
+    throw new OtpUriError({ message: "Secret cannot be empty" });
   }
   // Allow only Base32 characters A-Z and 2-7 (case-insensitive), with optional padding
   if (!/^[A-Z2-7]+=*$/i.test(trimmed)) {
-    throw new Error("Invalid Base32 secret provided to generateOtpUri");
+    throw new OtpUriError({ message: "Invalid Base32 secret provided to generateOtpUri" });
   }
 
   // Normalize secret for URI (trim, uppercase, and remove padding)
@@ -356,7 +363,7 @@ export const generateOtpUri = (params: OtpUriParams): string => {
 
   // Validate that counter is provided for HOTP
   if (type === "hotp" && counter === undefined) {
-    throw new Error("Counter parameter is required for HOTP URIs");
+    throw new OtpUriError({ message: "Counter parameter is required for HOTP URIs" });
   }
 
   // Encode label and issuer for URI

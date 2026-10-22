@@ -30,24 +30,24 @@ export default async function setup(project: TestProject): Promise<() => Promise
   const directory = await mkdtemp(join(tmpdir(), "effect-auth-sql-pglite-"));
   const template = join(directory, "migrated.tar");
 
-  try {
+  const build = async (): Promise<void> => {
     // A 1 MB WAL segment (initdb's minimum) instead of the 16 MB default: the
     // template is unpacked into every instance's filesystem, and no test reads WAL.
     const client = await PGlite.create({ initDbStartParams: ["--wal-segsize=1"] });
-    try {
+    const migrateAndDump = async (): Promise<void> => {
       for (const statement of schemaStatements) {
         await client.exec(statement);
       }
       const dump = await client.dumpDataDir("none");
       await writeFile(template, new Uint8Array(await dump.arrayBuffer()));
-    } finally {
-      await client.close();
-    }
-  } catch (error) {
+    };
+    await migrateAndDump().finally(() => client.close());
+  };
+  await build().catch(async (error) => {
     // No teardown is returned on failure, so remove the directory here.
     await rm(directory, { recursive: true, force: true });
     throw error;
-  }
+  });
 
   project.provide("pgliteTemplate", template);
   return () => rm(directory, { recursive: true, force: true });

@@ -1,9 +1,25 @@
-import { describe, it, expect, vi } from "vite-plus/test";
+import { assert, describe, it, expect, vi } from "vite-plus/test";
+import { Predicate, Schema } from "effect";
 import { createAuthClient, AuthClientError, definePlugin } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
 
 const EMAIL = "alice@client.test";
 const PW = "password-123";
+
+const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
+/** What `promise` rejected with, asserted to be an instance of `type`. */
+const rejectionOf = <E>(
+  promise: Promise<unknown>,
+  type: abstract new (...args: never) => E,
+): Promise<E> =>
+  promise.then(
+    () => assert.fail("expected the promise to reject"),
+    (error) =>
+      error instanceof type
+        ? error
+        : assert.fail(`expected a ${type.name} rejection, got ${String(error)}`),
+  );
 
 const makeClient = () => {
   const server = makeServerFixture();
@@ -33,7 +49,10 @@ describe("createAuthClient", () => {
     await client.signUp({ email: EMAIL, password: PW });
     await client.signOut();
 
-    const err = await client.signIn({ email: EMAIL, password: "wrong" }).catch((e: unknown) => e);
+    const err = await rejectionOf(
+      client.signIn({ email: EMAIL, password: "wrong" }),
+      AuthClientError,
+    );
     expect(err).toBeInstanceOf(AuthClientError);
     expect((err as AuthClientError).status).toBe(401);
 
@@ -98,7 +117,7 @@ describe("createAuthClient", () => {
 
   it("answers 404 feature errors for unconfigured optional modules", async () => {
     const { client } = makeClient();
-    const err = await client.magicLink.send({ email: EMAIL }).catch((e: unknown) => e);
+    const err = await rejectionOf(client.magicLink.send({ email: EMAIL }), AuthClientError);
     expect(err).toBeInstanceOf(AuthClientError);
     expect((err as AuthClientError).status).toBe(404);
   });
@@ -123,7 +142,7 @@ describe("session store correctness", () => {
       fetch: (input, init?) => {
         if (injectError && String(input).endsWith("/session")) {
           return Promise.resolve(
-            new Response(JSON.stringify({ message: "Service Unavailable" }), {
+            new Response(toJson({ message: "Service Unavailable" }), {
               status: 503,
               headers: { "content-type": "application/json" },
             }),
@@ -164,7 +183,7 @@ describe("session store correctness", () => {
             return new Promise<Response>((resolve) => {
               firstResolve = () =>
                 resolve(
-                  new Response(JSON.stringify({ message: "Internal Server Error" }), {
+                  new Response(toJson({ message: "Internal Server Error" }), {
                     status: 500,
                     headers: { "content-type": "application/json" },
                   }),
@@ -307,20 +326,20 @@ describe("JSON response detection", () => {
 
   it("parses a body whose content-type carries parameters", async () => {
     const client = clientReturning(() =>
-      respond(JSON.stringify([{ id: "s1" }]), "application/json; charset=utf-8"),
+      respond(toJson([{ id: "s1" }]), "application/json; charset=utf-8"),
     );
     expect(await client.listSessions()).toEqual([{ id: "s1" }]);
   });
 
   it("reads the server's message from a `+json` suffix media type", async () => {
     const client = clientReturning(() =>
-      respond(JSON.stringify({ message: "Session expired" }), "application/problem+json", {
+      respond(toJson({ message: "Session expired" }), "application/problem+json", {
         status: 400,
         statusText: "Bad Request",
       }),
     );
 
-    const error = await client.listSessions().catch((e: unknown) => e);
+    const error = await rejectionOf(client.listSessions(), AuthClientError);
     expect(error).toBeInstanceOf(AuthClientError);
     expect((error as AuthClientError).message).toBe("Session expired");
   });
@@ -334,19 +353,19 @@ describe("JSON response detection", () => {
     // A `text/plain` body must not be read as JSON just because a header
     // parameter happens to spell out `application/json`.
     const client = clientReturning(() =>
-      respond(JSON.stringify({ message: "leaked" }), "text/plain; note=application/json", {
+      respond(toJson({ message: "leaked" }), "text/plain; note=application/json", {
         status: 400,
         statusText: "Bad Request",
       }),
     );
 
-    const error = await client.listSessions().catch((e: unknown) => e);
+    const error = await rejectionOf(client.listSessions(), AuthClientError);
     expect((error as AuthClientError).message).toBe("Bad Request");
   });
 
   it("treats a missing content-type as non-JSON", async () => {
     const client = clientReturning(() => {
-      const response = new Response(JSON.stringify([{ id: "s1" }]), { status: 200 });
+      const response = new Response(toJson([{ id: "s1" }]), { status: 200 });
       response.headers.delete("content-type");
       return response;
     });
@@ -367,10 +386,10 @@ describe("plugin extension", () => {
     }));
 
     const extended = client.extend(sessionPlugin);
-    expect(typeof extended.sessionCount).toBe("function");
+    expect(Predicate.isFunction(extended.sessionCount)).toBe(true);
     expect(await extended.sessionCount()).toBe(1);
     // Core methods are still present.
-    expect(typeof extended.signOut).toBe("function");
+    expect(Predicate.isFunction(extended.signOut)).toBe(true);
   });
 
   it("plugin receives mutating context that refreshes the session store", async () => {

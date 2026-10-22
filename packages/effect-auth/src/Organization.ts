@@ -43,7 +43,7 @@
  * @module organization
  */
 
-import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { Array as Arr, Context, Crypto, Data, Effect, Layer, Option, Order, Result } from "effect";
 import { IdentifierStore } from "./Identifier.ts";
 import * as Errors from "./Errors.ts";
 import { parsePermission, permissionMatches } from "./Permission.ts";
@@ -306,9 +306,10 @@ export const memoryOrganizationDomainStore = (
     Effect.sync(() => [...records.values()].find((record) => record.domain === domain) ?? null),
   listByOrganization: (organizationId) =>
     Effect.sync(() =>
-      [...records.values()]
-        .filter((record) => record.organizationId === organizationId)
-        .sort((a, b) => a.createdAt - b.createdAt),
+      Arr.sort(
+        [...records.values()].filter((record) => record.organizationId === organizationId),
+        Order.mapInput(Order.Number, (record: OrganizationDomain) => record.createdAt),
+      ),
     ),
   update: (domain) => Effect.sync(() => (records.set(domain.id, domain), domain)),
   delete: (domainId) => Effect.sync(() => void records.delete(domainId)),
@@ -1091,11 +1092,10 @@ export const make = (
      */
     const grantSatisfies = (granted: string, requested: string): boolean => {
       if (granted === requested) return true;
-      try {
-        return permissionMatches(parsePermission(granted), parsePermission(requested));
-      } catch {
-        return false;
-      }
+      return Result.getOrElse(
+        Result.try(() => permissionMatches(parsePermission(granted), parsePermission(requested))),
+        () => false,
+      );
     };
 
     /**
@@ -1181,8 +1181,8 @@ export const make = (
       });
 
     /** Resolve the domain store, explaining its absence when it is not wired. */
-    const requireDomainStore = Effect.gen(function* () {
-      if (domainStoreOption._tag === "None") {
+    const requireDomainStore = Effect.fn("requireDomainStore")(function* () {
+      if (Option.isNone(domainStoreOption)) {
         return yield* new OrganizationError({
           message: "Organization domains are not enabled: provide an OrganizationDomainStore layer",
         });
@@ -1292,6 +1292,19 @@ export const make = (
           return yield* new OrganizationError({ message: "Domain not found" });
         }
         return domain;
+      });
+
+    /**
+     * Load a domain claim the actor may manage: domains must be enabled, the
+     * actor must hold `domain:manage` in the organization, and the claim must
+     * belong to it.
+     */
+    const getManagedDomain = (actorUserId: string, organizationId: string, domainId: string) =>
+      Effect.gen(function* () {
+        const domainStore = yield* requireDomainStore();
+        yield* requireMemberPermission(actorUserId, organizationId, "domain:manage");
+        const domain = yield* getDomainOrFail(domainStore, organizationId, domainId);
+        return { domainStore, domain };
       });
 
     /**
@@ -1405,9 +1418,11 @@ export const make = (
 
         // Release the organization's domain claims first: they are globally
         // unique, so leaving them behind would squat those domains forever.
-        if (domainStoreOption._tag === "Some") {
+        if (Option.isSome(domainStoreOption)) {
           const claims = yield* domainStoreOption.value.listByOrganization(organizationId);
-          yield* Effect.forEach(claims, (claim) => domainStoreOption.value.delete(claim.id));
+          yield* Effect.forEach(claims, (claim) => domainStoreOption.value.delete(claim.id), {
+            concurrency: 1,
+          });
         }
 
         yield* store.deleteOrganization(organizationId);
@@ -1425,8 +1440,10 @@ export const make = (
         userId: string,
       ) {
         const memberships = yield* store.listMembersByUser(userId);
-        const organizations = yield* Effect.forEach(memberships, (membership) =>
-          store.getOrganizationById(membership.organizationId),
+        const organizations = yield* Effect.forEach(
+          memberships,
+          (membership) => store.getOrganizationById(membership.organizationId),
+          { concurrency: 1 },
         );
         return organizations.filter(
           (organization): organization is Organization => organization !== null,
@@ -1614,7 +1631,9 @@ export const make = (
         yield* store.deleteMember(target.id);
         // Cascade: leaving the organization also leaves all of its teams.
         const teams = yield* store.listTeamsForMember(organizationId, memberUserId);
-        yield* Effect.forEach(teams, (team) => store.removeTeamMember(team.id, memberUserId));
+        yield* Effect.forEach(teams, (team) => store.removeTeamMember(team.id, memberUserId), {
+          concurrency: 1,
+        });
       }),
 
       updateMemberRole: Effect.fn("OrganizationService.updateMemberRole")(function* (
@@ -1835,7 +1854,7 @@ export const make = (
         actorUserId: string,
         organizationId: string,
       ) {
-        const domainStore = yield* requireDomainStore;
+        const domainStore = yield* requireDomainStore();
         yield* requireMembership(actorUserId, organizationId);
         return yield* domainStore.listByOrganization(organizationId);
       }),
@@ -1845,7 +1864,7 @@ export const make = (
         organizationId: string,
         input: AddOrganizationDomainInput,
       ) {
-        const domainStore = yield* requireDomainStore;
+        const domainStore = yield* requireDomainStore();
         yield* requireMemberPermission(actorUserId, organizationId, "domain:manage");
         yield* getOrganizationOrFail(organizationId);
 
@@ -1886,9 +1905,11 @@ export const make = (
         organizationId: string,
         domainId: string,
       ) {
-        const domainStore = yield* requireDomainStore;
-        yield* requireMemberPermission(actorUserId, organizationId, "domain:manage");
-        const domain = yield* getDomainOrFail(domainStore, organizationId, domainId);
+        const { domainStore, domain } = yield* getManagedDomain(
+          actorUserId,
+          organizationId,
+          domainId,
+        );
         yield* domainStore.delete(domain.id);
       }),
 
@@ -1897,9 +1918,11 @@ export const make = (
         organizationId: string,
         domainId: string,
       ) {
-        const domainStore = yield* requireDomainStore;
-        yield* requireMemberPermission(actorUserId, organizationId, "domain:manage");
-        const domain = yield* getDomainOrFail(domainStore, organizationId, domainId);
+        const { domainStore, domain } = yield* getManagedDomain(
+          actorUserId,
+          organizationId,
+          domainId,
+        );
 
         if (domain.verificationState === "verified") return domain;
 
@@ -1912,7 +1935,7 @@ export const make = (
           });
         }
 
-        if (domainVerifierOption._tag === "None") {
+        if (Option.isNone(domainVerifierOption)) {
           return yield* new OrganizationError({
             message:
               "DNS domain verification is not available: provide a DomainVerifier layer, or claim the domain with the 'manual' strategy",
@@ -1934,7 +1957,7 @@ export const make = (
         userId: string,
         email: string,
       ) {
-        if (domainStoreOption._tag === "None") return null;
+        if (Option.isNone(domainStoreOption)) return null;
 
         const domain = yield* domainStoreOption.value.getByDomain(domainOfEmail(email));
         // Only a *verified* claim carries authority; a pending one is just a

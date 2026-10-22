@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-auth-alchemy
 
-Cloudflare **D1** support for [`@thomasfosterau/effect-auth`](../effect-auth) on
+Cloudflare **D1** support for [`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth) on
 [Alchemy v2](https://v2.alchemy.run) — the TypeScript-native, Effect-based
 Infrastructure-as-Code toolkit — covering both sides of the deploy:
 
@@ -19,7 +19,7 @@ own:
 | `AuthSchema` | The Alchemy resource + provider that reconciles the schema on deploy. |
 
 Every store, statement and DDL comes from
-[`@thomasfosterau/effect-auth-sql`](../sql), which implements the effect-auth
+[`@thomasfosterau/effect-auth-sql`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/sql), which implements the effect-auth
 storage interfaces against `SqlClient` and is shared with every other SQL
 deployment. D1 is SQLite, so the same tables and the same queries apply.
 
@@ -38,12 +38,18 @@ on `effect ^4.0.0`; the other effect-auth packages accept `effect`
 ## Storage layers
 
 ```ts
-import { Effect, Layer } from "effect";
+import { Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as AuthD1 from "@thomasfosterau/effect-auth-alchemy";
 
-const AppLayer = (db: AuthD1.D1Database) =>
-  Auth.SessionManagerLayer(sessionConfig).pipe(Layer.provideMerge(AuthD1.layer(db)));
+const sessionConfig: Auth.SessionConfig = {
+  sessionExpiresIn: { activePeriod: 30 * 86_400_000, idlePeriod: 14 * 86_400_000 },
+};
+
+export const AppLayer = (db: AuthD1.D1Database) =>
+  Auth.SessionService.layer(sessionConfig).pipe(
+    Layer.provideMerge(Layer.mergeAll(AuthD1.layer(db), Auth.Hooks.Default)),
+  );
 ```
 
 `AuthD1.layer(db)` provides every store `@thomasfosterau/effect-auth-sql`
@@ -57,12 +63,14 @@ For a subset, provide `D1Client.layer({ db })` and pick the per-store layers
 from `@thomasfosterau/effect-auth-sql` directly:
 
 ```ts
+import { Layer } from "effect";
 import * as Sql from "@thomasfosterau/effect-auth-sql";
-import { D1Client } from "@thomasfosterau/effect-auth-alchemy";
+import { D1Client, type D1Database } from "@thomasfosterau/effect-auth-alchemy";
 
-Layer.mergeAll(Sql.SessionStoreLayer, Sql.UserStoreLayer).pipe(
-  Layer.provide(D1Client.layer({ db })),
-);
+export const SessionStores = (db: D1Database) =>
+  Layer.mergeAll(Sql.SessionStoreLayer, Sql.UserStoreLayer).pipe(
+    Layer.provide(D1Client.layer({ db })),
+  );
 ```
 
 `D1Database` is a structural type covering just what the client calls, so the
@@ -162,8 +170,11 @@ providers: Layer.mergeAll(
 ```
 
 ```ts
-yield * AuthSchema("primary-auth", { database: "primary" });
-yield * AuthSchema("tenant-auth", { database: "tenants", dropOnDelete: true });
+// The stack's program:
+Effect.gen(function* () {
+  yield* AuthSchema("primary-auth", { database: "primary" });
+  yield* AuthSchema("tenant-auth", { database: "tenants", dropOnDelete: true });
+});
 ```
 
 `database` in props is the _name_ of a registered binding. Omit it (the
@@ -175,9 +186,9 @@ instead:
 
 ```ts
 import { Effect } from "effect";
-import { migrate } from "@thomasfosterau/effect-auth-alchemy";
+import { migrate, type D1Database } from "@thomasfosterau/effect-auth-alchemy";
 
-await Effect.runPromise(migrate(db));
+export const migrateAuth = (db: D1Database) => Effect.runPromise(migrate(db));
 ```
 
 > `alchemy` is a **required peer dependency**. The resource, provider and
@@ -190,27 +201,50 @@ await Effect.runPromise(migrate(db));
 import * as Cloudflare from "alchemy/Cloudflare";
 import { Effect } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
+import * as Auth from "@thomasfosterau/effect-auth";
 import * as AuthD1 from "@thomasfosterau/effect-auth-alchemy";
 
 const AuthD1Database = Cloudflare.D1.Database("auth");
 
+// Your auth routes, using effect-auth services over the D1 stores.
+const handle = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const users = yield* Auth.UserStore;
+  const user = yield* users.get(new URL(request.url).searchParams.get("id") ?? "");
+  return HttpServerResponse.text(user === null ? "unknown" : user.id);
+}).pipe(
+  // A store failure is an `AuthError`; answer it rather than leak it.
+  Effect.catchTag("AuthError", () =>
+    Effect.succeed(HttpServerResponse.text("unavailable", { status: 503 })),
+  ),
+);
+
 export default Cloudflare.Worker(
   "api",
+  { main: import.meta.url },
   Effect.gen(function* () {
-    // Bind the database, then take the raw D1 handle the stores need.
+    // Bind the database at init; resolve the raw D1 handle per request.
     const client = yield* Cloudflare.D1.QueryDatabase(AuthD1Database);
-    const db = yield* client.raw;
 
     return {
       fetch: Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        // ... your auth routes, using effect-auth services ...
-        return HttpServerResponse.text("ok");
-      }).pipe(Effect.provide(AuthD1.layer(db))),
+        const db = yield* client.raw;
+        return yield* handle.pipe(Effect.provide(AuthD1.layer(db)));
+      }),
     };
-  }),
+  }).pipe(Effect.provide(Cloudflare.D1.QueryDatabaseBinding)),
 );
 ```
+
+## API
+
+- `layer(db): Layer<AuthStores>` — every effect-auth-sql store over a D1 binding (`AuthStores` is that store set).
+- `migrate(db): Effect<void, AuthError>` — the effect-auth-sql DDL against a D1 binding.
+- `AuthSchema(id, props?)` — the Alchemy resource (`AuthSchemaProps`: `database?`, `dropOnDelete?`; attributes `AuthSchemaAttributes`), type `AUTH_SCHEMA_TYPE`.
+- `AuthSchemaProvider(options)` — its provider layer, given `{ database }` or `{ databases: { name: db } }` (`AuthSchemaProviderOptions`); `DEFAULT_DATABASE` is the single-database name.
+- `UnknownDatabaseError` — a resource named a database the provider does not hold.
+- `authTableNames` — the tables the schema owns, derived from effect-auth-sql's DDL.
+- `D1Client` — `make({ db })` / `layer({ db })` (a `SqlClient` over the binding) and the structural `D1Database`, `D1PreparedStatement`, `D1Result` types; `D1Database` is also exported at the root.
 
 ## Notes
 

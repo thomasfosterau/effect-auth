@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-auth-sql
 
-Driver-agnostic SQL storage layers for effect-auth, built on effect/sql.
+Driver-agnostic SQL storage for [`@thomasfosterau/effect-auth`](https://www.npmjs.com/package/@thomasfosterau/effect-auth), built on `effect/sql`: one `Layer` that implements the core's store contracts over any `SqlClient`, plus the DDL that creates their tables.
 
 ## Install
 
@@ -8,7 +8,7 @@ Driver-agnostic SQL storage layers for effect-auth, built on effect/sql.
 pnpm add @thomasfosterau/effect-auth-sql @thomasfosterau/effect-auth effect
 ```
 
-`effect` is a peer dependency (`>=4.0.0-rc.118`). Add a `SqlClient` driver for a supported dialect (see [Dialects](#dialects)) alongside it, at the same version as `effect`.
+`effect` (`>=4.0.0-rc.118`) is a peer dependency. Add a `SqlClient` driver for a [supported dialect](#dialects) at the same version as `effect` (for example `@effect/sql-pg`); this package bundles none.
 
 ## Usage
 
@@ -34,23 +34,94 @@ export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
 };
 ```
 
+`AuthSql.layer` provides every store below at once, so any service built over them (`EmailPasswordService`, `OAuthService`, `WebAuthnService`, `MagicLinkService`, `MultiFactorService`, `ApiKeyService`, `AdminService`, …) has persistence once it is composed on top.
+
+## Stores
+
+`layer` is `Layer<…every store…, never, SqlClient>`. Each store is also available on its own, as an `Effect` that builds it (`make<Name>`) and as a `Layer` (`<Name>Layer`), for wiring a subset:
+
+| Store (core tag)                           | Constructor / layer                                            | Table                       |
+| ------------------------------------------ | -------------------------------------------------------------- | --------------------------- |
+| `Auth.SessionStore`                        | `makeSessionStore` / `SessionStoreLayer`                       | `auth_sessions`             |
+| `Auth.UserStore`                           | `makeUserStore` / `UserStoreLayer`                             | `auth_users`                |
+| `Auth.UserServiceStore`                    | `makeUserServiceStore` / `UserServiceStoreLayer`               | `auth_users`                |
+| `Auth.IdentifierStore`                     | `makeIdentifierStore` / `IdentifierStoreLayer`                 | `auth_identifiers`          |
+| `Auth.Email.EmailPasswordStore`            | `makeEmailPasswordStore` / `EmailPasswordStoreLayer`           | `auth_users`                |
+| `Auth.Email.EmailVerificationStore`        | `makeEmailVerificationStore` / `EmailVerificationStoreLayer`   | `auth_email_verifications`  |
+| `Auth.Email.EmailOtpStore`                 | `makeEmailOtpStore` / `EmailOtpStoreLayer`                     | `auth_email_otps`           |
+| `Auth.Email.EmailOtpUserStore`             | `makeEmailOtpUserStore` / `EmailOtpUserStoreLayer`             | `auth_users`                |
+| `Auth.Password.PasswordResetStore`         | `makePasswordResetStore` / `PasswordResetStoreLayer`           | `auth_password_resets`      |
+| `Auth.Password.PasswordResetUserStore`     | `makePasswordResetUserStore` / `PasswordResetUserStoreLayer`   | `auth_users`                |
+| `Auth.MagicLinkStore`                      | `makeMagicLinkStore` / `MagicLinkStoreLayer`                   | `auth_magic_links`          |
+| `Auth.MagicLinkUserStore`                  | `makeMagicLinkUserStore` / `MagicLinkUserStoreLayer`           | `auth_users`                |
+| `Auth.RateLimitStore`                      | `makeRateLimitStore` / `RateLimitStoreLayer`                   | `auth_rate_limits`          |
+| `Auth.MultiFactor.ChallengeStore`          | `makeChallengeStore` / `ChallengeStoreLayer`                   | `auth_webauthn_challenges`  |
+| `Auth.MultiFactor.CredentialStore`         | `makeCredentialStore` / `CredentialStoreLayer`                 | `auth_webauthn_credentials` |
+| `Auth.MultiFactor.MultiFactorStore`        | `makeMultiFactorStore` / `MultiFactorStoreLayer`               | `auth_multi_factor`         |
+| `Auth.MultiFactor.PendingMultiFactorStore` | `makePendingMultiFactorStore` / `PendingMultiFactorStoreLayer` | `auth_pending_multi_factor` |
+| `Auth.OAuth.OAuthStateStore`               | `makeOAuthStateStore` / `OAuthStateStoreLayer`                 | `auth_oauth_states`         |
+| `Auth.OAuth.OAuthAccountStore`             | `makeOAuthAccountStore` / `OAuthAccountStoreLayer`             | `auth_oauth_accounts`       |
+| `Auth.OAuth.OAuthUserStore`                | `makeOAuthUserStore` / `OAuthUserStoreLayer`                   | `auth_users`                |
+| `Auth.Plugins.AccountLockoutStore`         | `makeAccountLockoutStore` / `AccountLockoutStoreLayer`         | `auth_account_lockouts`     |
+| `Auth.ApiKeyStore`                         | `makeApiKeyStore` / `ApiKeyStoreLayer`                         | `auth_api_keys`             |
+| `Auth.AdminUserStore`                      | `makeAdminUserStore` / `AdminUserStoreLayer`                   | `auth_users`                |
+
+```typescript
+import { Layer } from "effect";
+import type { SqlClient } from "effect/sql";
+import * as AuthSql from "@thomasfosterau/effect-auth-sql";
+
+// Only sessions, users and identifiers, on top of an existing `SqlClient` layer.
+export const coreStores = (SqlLive: Layer.Layer<SqlClient.SqlClient>) =>
+  Layer.mergeAll(
+    AuthSql.SessionStoreLayer,
+    AuthSql.UserStoreLayer,
+    AuthSql.IdentifierStoreLayer,
+  ).pipe(Layer.provide(SqlLive));
+```
+
+Not covered yet: the stores added to the core later (one-time tokens, trusted devices, phone OTP, organizations, the OIDC provider, SSO, device authorization). Implement those contracts yourself for now. (The core's `KeyValueStore`-backed layers, `OAuthStateStoreKV`, `ChallengeStoreKV`, `RateLimitStoreKV` and the rest, cover only the short-lived stores, not these.)
+
+## Schema and migration
+
+- `schemaStatements: readonly string[]` — the ordered DDL, one statement per entry, every one `CREATE TABLE IF NOT EXISTS` or `CREATE [UNIQUE] INDEX IF NOT EXISTS` over `auth_`-prefixed tables, so they live beside your own.
+- `migrate: Effect<void, Auth.AuthError, SqlClient>` — runs `schemaStatements` through the ambient `SqlClient`. Safe on every deploy and every cold start.
+
+Storage format: instants are epoch milliseconds in `BIGINT` columns (past 2038 on every engine), booleans `0`/`1`, attribute bags JSON `TEXT`, binary values (WebAuthn challenges and public keys) base64 `TEXT`. Token columns (`auth_sessions.id`, the magic-link, verification and reset tokens, `auth_api_keys.key_hash`) hold the SHA-256 digest the service layer computed: the database never sees a raw bearer token.
+
+Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, so they are atomic without a transaction. Multi-step writes (`ChallengeStore.create`, `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`) run inside `sql.withTransaction`.
+
+## Authorization
+
+Role data lives in two tables, `auth_user_roles` (user → role) and `auth_role_permissions` (role → `resource` / `action`), but `layer` does not wire authorization: an `EntityResolver` is one slot the application composes, not a store.
+
+- `makeRbacEntityResolver` / `RbacEntityResolverLayer` — an `Auth.EntityResolver` that answers `User::"<id>"` references with a `Role::"<role>"` parent per assigned role. It answers only `User` references and adds no role-to-role edges, so compose it with your own resolver when policies name other entities.
+- `readRbacPolicies: Effect<ReadonlyArray<Auth.Policy.DeclarativePolicy>, never, SqlClient>` — reads `auth_role_permissions` and compiles it with `Auth.Rbac.policies`, the same policies a hand-written `Auth.Rbac` configuration produces.
+
+```typescript
+import { Effect, Layer } from "effect";
+import type { SqlClient } from "effect/sql";
+import * as Auth from "@thomasfosterau/effect-auth";
+import * as AuthSql from "@thomasfosterau/effect-auth-sql";
+
+export const authorization = (SqlLive: Layer.Layer<SqlClient.SqlClient>) =>
+  Layer.unwrap(
+    Effect.map(AuthSql.readRbacPolicies, (policies) => Auth.Authorizer.layer({ policies })),
+  ).pipe(Layer.provide(AuthSql.RbacEntityResolverLayer), Layer.provide(SqlLive));
+```
+
+Policies are read once, when the layer is built; re-read them behind a `PolicyStore` if role edits must apply without a restart.
+
 ## Dialects
 
-- **SQLite:** supported. The package's test suite runs its stores over `better-sqlite3`.
-- **Cloudflare D1:** supported. D1 is SQLite. `@thomasfosterau/effect-auth-alchemy` wires it, and its suite runs these stores over a SQLite-backed D1 shim.
-- **PostgreSQL:** supported. The same store suite also runs over PostgreSQL through PGlite (`@effect/sql-pglite`).
-- **MySQL:** not supported (#260). MySQL has no `ON CONFLICT` clause, so the upserts and counters fail. For MySQL, use [`@thomasfosterau/effect-auth-drizzle`](../drizzle) with its MySQL tables (`Drizzle.MySql`). That package covers only `SessionStore`, `UserStore` and `IdentifierStore`, and its MySQL suite runs against `drizzle-orm/mysql-proxy`, not a MySQL server.
+- **SQLite:** supported. The test suite runs every store over `better-sqlite3`.
+- **Cloudflare D1:** supported. D1 is SQLite; [`@thomasfosterau/effect-auth-alchemy`](https://www.npmjs.com/package/@thomasfosterau/effect-auth-alchemy) wires it, and its suite runs these stores over a SQLite-backed D1 shim. D1 has no transactions, so there the multi-step writes are not atomic (see that package's README).
+- **PostgreSQL:** supported. The same suite runs over PostgreSQL through PGlite (`@effect/sql-pglite`).
+- **MySQL:** not supported ([#260](https://github.com/thomasfosterau/effect-auth/issues/260)). MySQL has no `ON CONFLICT` clause, so the upserts and counters fail. For MySQL, use [`@thomasfosterau/effect-auth-drizzle`](https://www.npmjs.com/package/@thomasfosterau/effect-auth-drizzle) with its MySQL tables (`Drizzle.MySql`). That package covers only `SessionStore`, `UserStore` and `IdentifierStore`, and its MySQL suite runs against `drizzle-orm/mysql-proxy`, not a MySQL server.
 
-## API
+## Errors
 
-- `layer` provides every SQL-backed store at once on top of the ambient `SqlClient`: sessions, users, identifiers, email and password, password reset, email verification, email OTP, magic links, rate limits, WebAuthn challenges and credentials, OAuth state, accounts and users, multi-factor and pending multi-factor, account lockout, API keys and admin.
-- Each store also has its own `make*Store` effect and `*StoreLayer` (for example `makeSessionStore` / `SessionStoreLayer`), for wiring a subset.
-- `migrate` runs `schemaStatements`, the ordered `CREATE TABLE IF NOT EXISTS` DDL for the `auth_`-prefixed tables.
-- Authorization isn't bundled: wire `RbacEntityResolverLayer` and `readRbacPolicies` into an `Authorizer` yourself.
-
-Stores added to the core later (one-time tokens, trusted devices, phone OTP, organizations, the OIDC provider, SSO, device authorization) aren't covered yet: use the `KeyValueStore`-backed layers from the core, or your own.
-
-Storage format: dates are epoch milliseconds (`BIGINT`), booleans `0`/`1`, attribute bags JSON `TEXT`, binary values base64 `TEXT`. Token columns hold the SHA-256 digest computed by the service layer; the database never sees a raw bearer token. Upserts and counters use single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, which SQLite and PostgreSQL both accept (see [Dialects](#dialects)); MySQL is not supported (#260).
+Every store method fails only with `Auth.AuthError` (an infrastructure failure, the driver's error kept as `cause`); a lookup that finds nothing returns `null`, and the core services turn that into their typed errors. A unique-index violation (an identifier, an OAuth account, an API key hash) is an `AuthError` too, which the core resolves into the domain error (`IdentifierTakenError`, …).
 
 ## License
 

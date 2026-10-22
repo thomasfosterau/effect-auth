@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Effect, Context, Crypto } from "effect";
+import { Array as Arr, Effect, Context, Crypto, Data, Order, Schema } from "effect";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { base64UrlDecode, ChallengeStore, CredentialStore } from "./WebAuthn.ts";
 import * as WebAuthn from "./WebAuthn.ts";
@@ -298,9 +298,10 @@ describe("WebAuthn Service", () => {
         },
       ];
 
-      for (const cred of credentials) {
-        yield* mockCredentialStore.create(cred);
-      }
+      yield* Effect.forEach(credentials, (cred) => mockCredentialStore.create(cred), {
+        concurrency: 1,
+        discard: true,
+      });
 
       const userCredentials = yield* mockCredentialStore.listByUserId(testUser.id);
       expect(userCredentials.length).toBe(2);
@@ -385,7 +386,12 @@ describe("WebAuthn Service", () => {
 
       const list = yield* service.listCredentials(testUser.id);
       expect(list.length).toBe(2);
-      expect(list.map((c) => c.id).sort()).toEqual(["cred-a", "cred-b"]);
+      expect(
+        Arr.sort(
+          list.map((c) => c.id),
+          Order.String,
+        ),
+      ).toEqual(["cred-a", "cred-b"]);
     });
     await Effect.runPromise(Effect.provide(program, dependencies));
   });
@@ -608,13 +614,24 @@ const getRpIdHash = async (): Promise<Uint8Array> => {
   return rpIdHashCache;
 };
 
+/** `signAssertion` rejected; a test-setup failure, surfaced as a defect. */
+class SignAssertionError extends Data.TaggedError("SignAssertionError")<{
+  readonly cause: unknown;
+}> {}
+
+const encodeClientDataJSON = Schema.encodeSync(
+  Schema.fromJsonString(
+    Schema.Struct({ type: Schema.String, challenge: Schema.String, origin: Schema.String }),
+  ),
+);
+
 const clientDataJSON = (
   type: "webauthn.create" | "webauthn.get",
   challenge: Uint8Array,
 ): Uint8Array =>
   new Uint8Array(
     Buffer.from(
-      JSON.stringify({
+      encodeClientDataJSON({
         type,
         challenge: Buffer.from(challenge).toString("base64url"),
         origin: "https://example.com",
@@ -733,9 +750,10 @@ describe.each<{ name: string; alg: Alg }>([
       const auth = yield* service.generateAuthenticationChallenge(testUser.id);
       const authenticatorData = concatBytes(rpIdHash, new Uint8Array([0x05]), signCounter(1));
       const clientData = clientDataJSON("webauthn.get", auth.challenge);
-      const signature = yield* Effect.promise(() =>
-        signAssertion(alg, privateKey, authenticatorData, clientData),
-      );
+      const signature = yield* Effect.tryPromise({
+        try: () => signAssertion(alg, privateKey, authenticatorData, clientData),
+        catch: (cause) => new SignAssertionError({ cause }),
+      }).pipe(Effect.orDie);
       const result = yield* service.verifyAuthentication(auth.challenge, {
         credentialId,
         authenticatorData,
@@ -769,9 +787,10 @@ describe.each<{ name: string; alg: Alg }>([
       const authenticatorData = concatBytes(rpIdHash, new Uint8Array([0x05]), signCounter(1));
       const clientData = clientDataJSON("webauthn.get", auth.challenge);
       // Sign with an unrelated private key.
-      const signature = yield* Effect.promise(() =>
-        signAssertion(alg, wrong.privateKey, authenticatorData, clientData),
-      );
+      const signature = yield* Effect.tryPromise({
+        try: () => signAssertion(alg, wrong.privateKey, authenticatorData, clientData),
+        catch: (cause) => new SignAssertionError({ cause }),
+      }).pipe(Effect.orDie);
       return yield* Effect.flip(
         service.verifyAuthentication(auth.challenge, {
           credentialId,
@@ -811,9 +830,10 @@ describe.each<{ name: string; alg: Alg }>([
 
       const authenticatorData = concatBytes(rpIdHash, new Uint8Array([0x05]), signCounter(1));
       const clientData = clientDataJSON("webauthn.get", auth.challenge);
-      const signature = yield* Effect.promise(() =>
-        signAssertion(alg, privateKey, authenticatorData, clientData),
-      );
+      const signature = yield* Effect.tryPromise({
+        try: () => signAssertion(alg, privateKey, authenticatorData, clientData),
+        catch: (cause) => new SignAssertionError({ cause }),
+      }).pipe(Effect.orDie);
       const result = yield* service.verifyAuthentication(auth.challenge, {
         credentialId,
         authenticatorData,
@@ -851,9 +871,10 @@ describe.each<{ name: string; alg: Alg }>([
       const auth = yield* service.generateAuthenticationChallenge("other-user-999");
       const authenticatorData = concatBytes(rpIdHash, new Uint8Array([0x05]), signCounter(1));
       const clientData = clientDataJSON("webauthn.get", auth.challenge);
-      const signature = yield* Effect.promise(() =>
-        signAssertion(alg, otherKey.privateKey, authenticatorData, clientData),
-      );
+      const signature = yield* Effect.tryPromise({
+        try: () => signAssertion(alg, otherKey.privateKey, authenticatorData, clientData),
+        catch: (cause) => new SignAssertionError({ cause }),
+      }).pipe(Effect.orDie);
       return yield* Effect.flip(
         service.verifyAuthentication(auth.challenge, {
           credentialId,
@@ -934,9 +955,10 @@ describe("WebAuthn algorithm support", () => {
       const auth = yield* service.generateAuthenticationChallenge(testUser.id);
       const authenticatorData = new Uint8Array(36); // one byte short of the minimum
       const clientData = clientDataJSON("webauthn.get", auth.challenge);
-      const signature = yield* Effect.promise(() =>
-        signAssertion(-7, privateKey, authenticatorData, clientData),
-      );
+      const signature = yield* Effect.tryPromise({
+        try: () => signAssertion(-7, privateKey, authenticatorData, clientData),
+        catch: (cause) => new SignAssertionError({ cause }),
+      }).pipe(Effect.orDie);
       return yield* Effect.flip(
         service.verifyAuthentication(auth.challenge, {
           credentialId,

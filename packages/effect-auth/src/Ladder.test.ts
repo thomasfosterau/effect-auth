@@ -33,7 +33,10 @@ describe("Ladder.make", () => {
   });
 
   it("refuses an empty ladder and a duplicate rung", () => {
-    expect(() => Ladder.make([] as unknown as ["x"])).toThrow(/at least one rung/);
+    // Non-empty by type, emptied at runtime: the input an untyped caller can pass.
+    const emptied: [string, ...Array<string>] = ["x"];
+    emptied.pop();
+    expect(() => Ladder.make(emptied)).toThrow(/at least one rung/);
     expect(() => Ladder.make(["user", "admin", "user"])).toThrow(/duplicate rung "user"/);
   });
 
@@ -192,8 +195,8 @@ describe("Policy.roleAtLeast", () => {
       resource: Policy.isType("Taxon"),
     });
     expect(policy.id).toBe("ladder:moderate");
-    const decoded = Schema.decodeUnknownSync(Policy.DeclarativePolicy)(
-      JSON.parse(JSON.stringify(policy)),
+    const decoded = Schema.decodeSync(Schema.fromJsonString(Policy.DeclarativePolicy))(
+      Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(policy),
     );
     expect(decide(decoded, "moderator").allowed).toBe(true);
     expect(decide(decoded, "contributor").allowed).toBe(false);

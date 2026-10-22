@@ -14,6 +14,7 @@
  * @module webauthn-codec
  */
 
+import { Array as Arr, Data, Match, Option, Predicate, Result, Schema } from "effect";
 import { sha256 } from "../Cipher.ts";
 import { timingSafeEqualBytes } from "../TokenHash.ts";
 
@@ -43,6 +44,20 @@ export class CBORParseError extends Error {
     this.name = "CBORParseError";
   }
 }
+
+/**
+ * Thrown by the {@link COSEPublicKey} accessors, {@link decodeCOSEPublicKey}
+ * and the base64url decoder for input they reject.
+ */
+class CodecError extends Data.TaggedError("CodecError")<{ readonly message: string }> {}
+
+/** The indices `0, 1, …, count - 1` (empty when `count` is 0). */
+const indices = (count: number): ReadonlyArray<number> =>
+  Array.from({ length: count }, (_, index) => index);
+
+/** Big-endian unsigned integer from bytes. */
+const bigIntFromBytes = (bytes: Uint8Array): bigint =>
+  Arr.reduce(bytes, 0n, (value, byte) => (value << 8n) | BigInt(byte));
 
 /**
  * Maximum nesting depth. CTAP2 attestation objects nest at most three levels
@@ -85,11 +100,7 @@ const readArgument = (
   if (data.byteLength < offset + 1 + size) {
     throw new CBORParseError("Insufficient bytes");
   }
-  let value = 0n;
-  for (let i = 0; i < size; i++) {
-    value = (value << 8n) | BigInt(data[offset + 1 + i]!);
-  }
-  return [value, offset + 1 + size];
+  return [bigIntFromBytes(data.subarray(offset + 1, offset + 1 + size)), offset + 1 + size];
 };
 
 /** Read a definite length/count argument as a bounded JS number. */
@@ -110,78 +121,78 @@ const decodeItem = (
   depth: number,
 ): readonly [CBORValue, number] => {
   if (depth > MAX_CBOR_DEPTH) throw new CBORParseError("Maximum depth exceeded");
-  if (data.byteLength < offset + 1) throw new CBORParseError("Insufficient bytes");
+  // `offset` is a non-negative integer, so this is `data.byteLength < offset + 1`.
+  const head = data[offset];
+  if (head === undefined) throw new CBORParseError("Insufficient bytes");
 
-  const head = data[offset]!;
   const majorType = head >> 5;
   const additionalInformation = head & 0x1f;
 
-  switch (majorType) {
-    case 0: {
+  return Match.value(majorType).pipe(
+    Match.withReturnType<readonly [CBORValue, number]>(),
+    Match.when(0, () => {
       const [value, next] = readArgument(data, offset, additionalInformation);
-      return [narrowInteger(value), next];
-    }
-    case 1: {
+      return [narrowInteger(value), next] as const;
+    }),
+    Match.when(1, () => {
       const [value, next] = readArgument(data, offset, additionalInformation);
-      return [narrowInteger(-1n - value), next];
-    }
-    case 2:
-    case 3: {
+      return [narrowInteger(-1n - value), next] as const;
+    }),
+    Match.whenOr(2, 3, () => {
       const [length, start] = readLength(data, offset, additionalInformation);
       if (data.byteLength < start + length) throw new CBORParseError("Insufficient bytes");
       const bytes = data.slice(start, start + length);
-      if (majorType === 2) return [bytes, start + length];
-      try {
-        return [utf8.decode(bytes), start + length];
-      } catch {
-        throw new CBORParseError("Invalid UTF-8 text string");
-      }
-    }
-    case 4: {
+      if (majorType === 2) return [bytes, start + length] as const;
+      const text = Result.getOrThrowWith(
+        Result.try(() => utf8.decode(bytes)),
+        () => new CBORParseError("Invalid UTF-8 text string"),
+      );
+      return [text, start + length] as const;
+    }),
+    Match.when(4, () => {
       const [count, start] = readLength(data, offset, additionalInformation);
       const elements: CBORValue[] = [];
-      let cursor = start;
-      for (let i = 0; i < count; i++) {
+      const end = Arr.reduce(indices(count), start, (cursor) => {
         const [element, next] = decodeItem(data, cursor, depth + 1);
         elements.push(element);
-        cursor = next;
-      }
-      return [elements, cursor];
-    }
-    case 5: {
+        return next;
+      });
+      return [elements, end] as const;
+    }),
+    Match.when(5, () => {
       const [count, start] = readLength(data, offset, additionalInformation);
+      // A native `Map`: `CBORMap` is a public `ReadonlyMap`, and callers
+      // recognise a decoded map with `instanceof Map`.
       const entries = new Map<string, CBORValue>();
-      let cursor = start;
-      for (let i = 0; i < count; i++) {
+      const end = Arr.reduce(indices(count), start, (cursor) => {
         const [key, afterKey] = decodeItem(data, cursor, depth + 1);
-        const stringifiedKey =
-          typeof key === "string"
-            ? key
-            : typeof key === "number" || typeof key === "bigint"
-              ? key.toString()
-              : null;
+        const stringifiedKey = Predicate.isString(key)
+          ? key
+          : Predicate.isNumber(key) || Predicate.isBigInt(key)
+            ? key.toString()
+            : null;
         if (stringifiedKey === null) throw new CBORParseError("Unsupported map key type");
         if (entries.has(stringifiedKey)) throw new CBORParseError("Duplicate map key");
         const [value, afterValue] = decodeItem(data, afterKey, depth + 1);
         entries.set(stringifiedKey, value);
-        cursor = afterValue;
-      }
-      return [entries, cursor];
-    }
-    case 6: {
+        return afterValue;
+      });
+      return [entries, end] as const;
+    }),
+    Match.when(6, () => {
       // Tagged value — the tag itself carries no meaning for WebAuthn, so the
       // tagged value is returned directly.
       const [, start] = readArgument(data, offset, additionalInformation);
       return decodeItem(data, start, depth + 1);
-    }
-    default: {
-      if (additionalInformation === 20) return [false, offset + 1];
-      if (additionalInformation === 21) return [true, offset + 1];
-      if (additionalInformation === 22) return [null, offset + 1];
-      if (additionalInformation === 23) return [undefined, offset + 1];
+    }),
+    Match.orElse(() => {
+      if (additionalInformation === 20) return [false, offset + 1] as const;
+      if (additionalInformation === 21) return [true, offset + 1] as const;
+      if (additionalInformation === 22) return [null, offset + 1] as const;
+      if (additionalInformation === 23) return [undefined, offset + 1] as const;
       throw new CBORParseError("Unsupported simple value, float, or break");
-    }
-  }
+    }),
+  );
 };
 
 /**
@@ -213,13 +224,9 @@ export const coseAlgorithmES256 = -7;
 export const coseAlgorithmEdDSA = -8;
 /** COSE algorithm identifier for RSASSA-PKCS1-v1_5 w/ SHA-256. */
 export const coseAlgorithmRS256 = -257;
-/** COSE elliptic-curve identifier for P-256. */
-export const coseEllipticCurveP256 = 1;
-/** COSE elliptic-curve identifier for Ed25519. */
-export const coseEllipticCurveEd25519 = 6;
 
 /** COSE key types (`kty`), as their registered integer values. */
-export const COSEKeyType = {
+const COSEKeyType = {
   OKP: 1,
   EC2: 2,
   RSA: 3,
@@ -245,13 +252,6 @@ export interface COSEOKPPublicKey {
   readonly x: Uint8Array;
 }
 
-/** Big-endian unsigned integer from bytes. */
-const bigIntFromBytes = (bytes: Uint8Array): bigint => {
-  let value = 0n;
-  for (const byte of bytes) value = (value << 8n) | BigInt(byte);
-  return value;
-};
-
 /**
  * A COSE_Key map, validated lazily: each accessor checks only the parameters
  * that key type requires and throws otherwise.
@@ -262,11 +262,11 @@ export class COSEPublicKey {
   /** The `kty` parameter (label 1). */
   type(): number {
     const value = this.decoded.get("1");
-    if (typeof value !== "number") {
-      throw new Error("Invalid or missing parameter 'kty'");
+    if (!Predicate.isNumber(value)) {
+      throw new CodecError({ message: "Invalid or missing parameter 'kty'" });
     }
     if (value !== 1 && value !== 2 && value !== 3 && value !== 4 && value !== 5 && value !== 6) {
-      throw new Error(`Unknown 'kty' value '${value}'`);
+      throw new CodecError({ message: `Unknown 'kty' value '${value}'` });
     }
     return value;
   }
@@ -274,8 +274,8 @@ export class COSEPublicKey {
   /** Whether an `alg` parameter (label 3) is present and well-formed. */
   isAlgorithmDefined(): boolean {
     if (!this.decoded.has("3")) return false;
-    if (typeof this.decoded.get("3") !== "number") {
-      throw new Error("Invalid parameter 'alg'");
+    if (!Predicate.isNumber(this.decoded.get("3"))) {
+      throw new CodecError({ message: "Invalid parameter 'alg'" });
     }
     return true;
   }
@@ -283,8 +283,8 @@ export class COSEPublicKey {
   /** The `alg` parameter (label 3), e.g. {@link coseAlgorithmES256}. */
   algorithm(): number {
     const value = this.decoded.get("3");
-    if (typeof value !== "number") {
-      throw new Error("Invalid or missing parameter 'alg'");
+    if (!Predicate.isNumber(value)) {
+      throw new CodecError({ message: "Invalid or missing parameter 'alg'" });
     }
     return value;
   }
@@ -292,19 +292,19 @@ export class COSEPublicKey {
   /** Interpret the key as an EC2 (P-256) public key. */
   ec2(): COSEEC2PublicKey {
     if (this.type() !== COSEKeyType.EC2) {
-      throw new Error("Expected an elliptic curve public key");
+      throw new CodecError({ message: "Expected an elliptic curve public key" });
     }
     const curve = this.decoded.get("-1");
-    if (typeof curve !== "number") {
-      throw new Error("Invalid or missing parameter 'crv'");
+    if (!Predicate.isNumber(curve)) {
+      throw new CodecError({ message: "Invalid or missing parameter 'crv'" });
     }
     const xBytes = this.decoded.get("-2");
     if (!(xBytes instanceof Uint8Array) || xBytes.byteLength !== 32) {
-      throw new Error("Invalid or missing parameter 'x'");
+      throw new CodecError({ message: "Invalid or missing parameter 'x'" });
     }
     const yBytes = this.decoded.get("-3");
     if (!(yBytes instanceof Uint8Array) || yBytes.byteLength !== 32) {
-      throw new Error("Invalid or missing parameter 'y'");
+      throw new CodecError({ message: "Invalid or missing parameter 'y'" });
     }
     return { curve, x: bigIntFromBytes(xBytes), y: bigIntFromBytes(yBytes) };
   }
@@ -312,15 +312,15 @@ export class COSEPublicKey {
   /** Interpret the key as a 2048-bit RSA public key. */
   rsa(): COSERSAPublicKey {
     if (this.type() !== COSEKeyType.RSA) {
-      throw new Error("Expected an RSA public key");
+      throw new CodecError({ message: "Expected an RSA public key" });
     }
     const nBytes = this.decoded.get("-1");
     if (!(nBytes instanceof Uint8Array) || nBytes.byteLength !== 256) {
-      throw new Error("Invalid or missing parameter 'n'");
+      throw new CodecError({ message: "Invalid or missing parameter 'n'" });
     }
     const eBytes = this.decoded.get("-2");
     if (!(eBytes instanceof Uint8Array) || eBytes.byteLength !== 3) {
-      throw new Error("Invalid or missing parameter 'e'");
+      throw new CodecError({ message: "Invalid or missing parameter 'e'" });
     }
     return { n: bigIntFromBytes(nBytes), e: bigIntFromBytes(eBytes) };
   }
@@ -328,18 +328,18 @@ export class COSEPublicKey {
   /** Interpret the key as an OKP (Ed25519) public key. */
   okp(): COSEOKPPublicKey {
     if (this.type() !== COSEKeyType.OKP) {
-      throw new Error("Expected an octet key pair public key");
+      throw new CodecError({ message: "Expected an octet key pair public key" });
     }
     const curve = this.decoded.get("-1");
-    if (typeof curve !== "number") {
-      throw new Error("Invalid or missing parameter 'curve'");
+    if (!Predicate.isNumber(curve)) {
+      throw new CodecError({ message: "Invalid or missing parameter 'curve'" });
     }
     const x = this.decoded.get("-2");
     if (!(x instanceof Uint8Array)) {
-      throw new Error("Invalid or missing parameter 'x'");
+      throw new CodecError({ message: "Invalid or missing parameter 'x'" });
     }
     if (this.decoded.has("-4")) {
-      throw new Error("Unexpected parameter 'd'");
+      throw new CodecError({ message: "Unexpected parameter 'd'" });
     }
     return { curve, x };
   }
@@ -350,15 +350,12 @@ export class COSEPublicKey {
  * bytes consumed (attested credential data may be followed by extensions).
  */
 export const decodeCOSEPublicKey = (data: Uint8Array): readonly [COSEPublicKey, number] => {
-  let decoded: CBORValue;
-  let size: number;
-  try {
-    [decoded, size] = decodeCBOR(data);
-  } catch {
-    throw new Error("Failed to decode CBOR");
-  }
+  const [decoded, size] = Result.getOrThrowWith(
+    Result.try(() => decodeCBOR(data)),
+    () => new CodecError({ message: "Failed to decode CBOR" }),
+  );
   if (!(decoded instanceof Map)) {
-    throw new Error("Invalid CBOR map");
+    throw new CodecError({ message: "Invalid CBOR map" });
   }
   return [new COSEPublicKey(decoded), size];
 };
@@ -377,7 +374,7 @@ export const ClientDataType = {
 export type ClientDataType = (typeof ClientDataType)[keyof typeof ClientDataType];
 
 /** The `status` member of `clientDataJSON.tokenBinding`. */
-export const TokenBindingStatus = {
+const TokenBindingStatus = {
   Supported: 0,
   Present: 1,
 } as const;
@@ -417,102 +414,110 @@ const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
  * `Buffer.from(s, "base64")` would.
  */
 const decodeBase64urlIgnorePadding = (encoded: string): Uint8Array => {
-  let end = encoded.length;
-  while (end > 0 && encoded[end - 1] === "=") end--;
-  if (encoded.length - end > 2) throw new Error("Invalid padding");
-  const body = encoded.slice(0, end);
-  if (body.length % 4 === 1) throw new Error("Invalid length");
+  const body = encoded.replace(/=+$/u, "");
+  if (encoded.length - body.length > 2) throw new CodecError({ message: "Invalid padding" });
+  if (body.length % 4 === 1) throw new CodecError({ message: "Invalid length" });
 
-  const out = new Uint8Array(Math.floor((body.length * 3) / 4));
-  let outIndex = 0;
-  let buffer = 0;
-  let bits = 0;
-  for (const char of body) {
+  // Code points, as `for…of` iterated them; every valid one is a single unit.
+  const sextets = Arr.map(Arr.fromIterable(body), (char) => {
     const index = BASE64URL_ALPHABET.indexOf(char);
-    if (index < 0) throw new Error("Invalid character");
-    buffer = (buffer << 6) | index;
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      out[outIndex++] = (buffer >> bits) & 0xff;
-    }
-  }
+    if (index < 0) throw new CodecError({ message: "Invalid character" });
+    return index;
+  });
+  // Each character contributes 6 bits; every complete 8 bits is one byte.
+  const bits = Arr.map(sextets, (sextet) => sextet.toString(2).padStart(6, "0")).join("");
+  const octets = Arr.chunksOf(bits.split(""), 8);
+  const remainder = bits.length % 8;
   // Any remaining bits must be zero padding.
-  if (bits > 0 && (buffer & ((1 << bits) - 1)) !== 0) throw new Error("Invalid padding bits");
-  return out.subarray(0, outIndex);
+  if (remainder > 0 && bits.slice(bits.length - remainder).includes("1")) {
+    throw new CodecError({ message: "Invalid padding bits" });
+  }
+  return Uint8Array.from(
+    Arr.map(
+      Arr.filter(octets, (octet) => octet.length === 8),
+      (octet) => parseInt(octet.join(""), 2),
+    ),
+  );
+};
+
+/** `JSON.parse`, as a schema: any JSON value. */
+const decodeJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+
+/** Decode a base64url string property, throwing `message` when it is not one. */
+const base64urlProperty = (value: object, key: string, message: string): Uint8Array => {
+  const raw = Predicate.hasProperty(value, key) ? value[key] : undefined;
+  if (!Predicate.isString(raw)) {
+    throw new ClientDataParseError(message);
+  }
+  return Result.getOrThrowWith(
+    Result.try(() => decodeBase64urlIgnorePadding(raw)),
+    () => new ClientDataParseError(message),
+  );
+};
+
+/** The ceremony `type` of the client data. */
+const clientDataType = (parsed: object): ClientDataType => {
+  const rawType = Predicate.hasProperty(parsed, "type") ? parsed.type : undefined;
+  if (rawType === "webauthn.get") return ClientDataType.Get;
+  if (rawType === "webauthn.create") return ClientDataType.Create;
+  throw new ClientDataParseError("Missing or invalid property 'type'");
+};
+
+/** The optional `crossOrigin` flag, `false` when absent. */
+const clientDataCrossOrigin = (parsed: object): boolean => {
+  if (!Predicate.hasProperty(parsed, "crossOrigin")) return false;
+  if (!Predicate.isBoolean(parsed.crossOrigin)) {
+    throw new ClientDataParseError("Invalid property 'crossOrigin'");
+  }
+  return parsed.crossOrigin;
+};
+
+/** The `tokenBinding.status` value. */
+const tokenBindingStatus = (raw: object): TokenBindingStatus => {
+  const rawStatus = Predicate.hasProperty(raw, "status") ? raw.status : undefined;
+  if (rawStatus === "present") return TokenBindingStatus.Present;
+  if (rawStatus === "supported") return TokenBindingStatus.Supported;
+  throw new ClientDataParseError("Missing or invalid property 'tokenBinding.status'");
+};
+
+/** The optional `tokenBinding` member, `null` when absent. */
+const clientDataTokenBinding = (parsed: object): TokenBinding | null => {
+  if (!Predicate.hasProperty(parsed, "tokenBinding")) return null;
+  const raw = parsed.tokenBinding;
+  // Any non-null object, arrays included.
+  if (!Predicate.isObjectOrArray(raw)) {
+    throw new ClientDataParseError("Invalid property 'tokenBinding'");
+  }
+  const id = base64urlProperty(raw, "id", "Missing or invalid property 'tokenBinding.id'");
+  const status = tokenBindingStatus(raw);
+  return { id, status };
 };
 
 /** Parse and validate the `clientDataJSON` a client returns. */
 export function parseClientDataJSON(encoded: Uint8Array): ClientData {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(encoded));
-  } catch {
+  const parsed = Option.getOrThrowWith(
+    decodeJsonOption(new TextDecoder().decode(encoded)),
+    () => new ClientDataParseError("Invalid client data JSON"),
+  );
+  // Any non-null object, arrays included.
+  if (!Predicate.isObjectOrArray(parsed)) {
     throw new ClientDataParseError("Invalid client data JSON");
   }
-  if (parsed === null || typeof parsed !== "object") {
-    throw new ClientDataParseError("Invalid client data JSON");
-  }
-  const record = parsed as Record<string, unknown>;
 
-  let type: ClientDataType;
-  if (record["type"] === "webauthn.get") {
-    type = ClientDataType.Get;
-  } else if (record["type"] === "webauthn.create") {
-    type = ClientDataType.Create;
-  } else {
-    throw new ClientDataParseError("Missing or invalid property 'type'");
-  }
+  const type = clientDataType(parsed);
+  const challenge = base64urlProperty(
+    parsed,
+    "challenge",
+    "Missing or invalid property 'challenge'",
+  );
 
-  if (typeof record["challenge"] !== "string") {
-    throw new ClientDataParseError("Missing or invalid property 'challenge'");
-  }
-  let challenge: Uint8Array;
-  try {
-    challenge = decodeBase64urlIgnorePadding(record["challenge"]);
-  } catch {
-    throw new ClientDataParseError("Missing or invalid property 'challenge'");
-  }
-
-  const origin = record["origin"];
-  if (typeof origin !== "string") {
+  const origin = Predicate.hasProperty(parsed, "origin") ? parsed.origin : undefined;
+  if (!Predicate.isString(origin)) {
     throw new ClientDataParseError("Missing or invalid property 'origin'");
   }
 
-  let crossOrigin = false;
-  if ("crossOrigin" in record) {
-    if (typeof record["crossOrigin"] !== "boolean") {
-      throw new ClientDataParseError("Invalid property 'crossOrigin'");
-    }
-    crossOrigin = record["crossOrigin"];
-  }
-
-  let tokenBinding: TokenBinding | null = null;
-  if ("tokenBinding" in record) {
-    const raw = record["tokenBinding"];
-    if (raw === null || typeof raw !== "object") {
-      throw new ClientDataParseError("Invalid property 'tokenBinding'");
-    }
-    const rawBinding = raw as Record<string, unknown>;
-    if (typeof rawBinding["id"] !== "string") {
-      throw new ClientDataParseError("Missing or invalid property 'tokenBinding.id'");
-    }
-    let id: Uint8Array;
-    try {
-      id = decodeBase64urlIgnorePadding(rawBinding["id"]);
-    } catch {
-      throw new ClientDataParseError("Missing or invalid property 'tokenBinding.id'");
-    }
-    let status: TokenBindingStatus;
-    if (rawBinding["status"] === "present") {
-      status = TokenBindingStatus.Present;
-    } else if (rawBinding["status"] === "supported") {
-      status = TokenBindingStatus.Supported;
-    } else {
-      throw new ClientDataParseError("Missing or invalid property 'tokenBinding.status'");
-    }
-    tokenBinding = { id, status };
-  }
+  const crossOrigin = clientDataCrossOrigin(parsed);
+  const tokenBinding = clientDataTokenBinding(parsed);
 
   return { type, challenge, origin, crossOrigin, tokenBinding };
 }
@@ -558,12 +563,13 @@ export class AuthenticatorData {
   }
 }
 
-const bigEndianUint16 = (data: Uint8Array, offset: number): number =>
-  (data[offset]! << 8) | data[offset + 1]!;
+/** A big-endian view over `data`'s own bytes; reads past its end throw `RangeError`. */
+const view = (data: Uint8Array): DataView =>
+  new DataView(data.buffer, data.byteOffset, data.byteLength);
 
-const bigEndianUint32 = (data: Uint8Array, offset: number): number =>
-  data[offset]! * 0x1000000 +
-  ((data[offset + 1]! << 16) | (data[offset + 2]! << 8) | data[offset + 3]!);
+const bigEndianUint16 = (data: Uint8Array, offset: number): number => view(data).getUint16(offset);
+
+const bigEndianUint32 = (data: Uint8Array, offset: number): number => view(data).getUint32(offset);
 
 /** Parse the authenticator data blob returned by an authenticator. */
 export function parseAuthenticatorData(encoded: Uint8Array): AuthenticatorData {
@@ -571,7 +577,7 @@ export function parseAuthenticatorData(encoded: Uint8Array): AuthenticatorData {
     throw new AuthenticatorDataParseError("Insufficient bytes");
   }
   const relyingPartyIdHash = encoded.slice(0, 32);
-  const flags = encoded[32]!;
+  const flags = view(encoded).getUint8(32);
   const userPresent = (flags & 0x01) === 1;
   const userVerified = ((flags >> 2) & 0x01) === 1;
   const signatureCounter = bigEndianUint32(encoded, 33);
@@ -588,12 +594,10 @@ export function parseAuthenticatorData(encoded: Uint8Array): AuthenticatorData {
       throw new AuthenticatorDataParseError("Insufficient bytes");
     }
     const id = encoded.slice(55, 55 + credentialIdLength);
-    let publicKey: COSEPublicKey;
-    try {
-      [publicKey] = decodeCOSEPublicKey(encoded.slice(55 + credentialIdLength));
-    } catch {
-      throw new AuthenticatorDataParseError("Failed to parse public key");
-    }
+    const [publicKey] = Result.getOrThrowWith(
+      Result.try(() => decodeCOSEPublicKey(encoded.slice(55 + credentialIdLength))),
+      () => new AuthenticatorDataParseError("Failed to parse public key"),
+    );
     credential = { authenticatorAAGUID, id, publicKey };
   }
 
@@ -611,7 +615,7 @@ export function parseAuthenticatorData(encoded: Uint8Array): AuthenticatorData {
 // ---------------------------------------------------------------------------
 
 /** Attestation statement formats defined by the WebAuthn registry. */
-export const AttestationStatementFormat = {
+const AttestationStatementFormat = {
   Packed: 0,
   TPM: 1,
   AndroidKey: 2,
@@ -657,18 +661,16 @@ export class AttestationObjectParseError extends Error {
 
 /** Parse the CBOR attestation object returned during registration. */
 export function parseAttestationObject(encoded: Uint8Array): AttestationObject {
-  let decoded: CBORValue;
-  try {
-    decoded = decodeCBORNoLeftoverBytes(encoded);
-  } catch {
-    throw new AttestationObjectParseError("Invalid CBOR data");
-  }
+  const decoded = Result.getOrThrowWith(
+    Result.try(() => decodeCBORNoLeftoverBytes(encoded)),
+    () => new AttestationObjectParseError("Invalid CBOR data"),
+  );
   if (!(decoded instanceof Map)) {
     throw new AttestationObjectParseError("Invalid CBOR data");
   }
 
   const fmt = decoded.get("fmt");
-  if (typeof fmt !== "string") {
+  if (!Predicate.isString(fmt)) {
     throw new AttestationObjectParseError("Invalid or missing property 'fmt'");
   }
   const attStmt = decoded.get("attStmt");

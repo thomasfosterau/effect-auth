@@ -43,7 +43,7 @@
  * Without `encrypt`, the cookie is signed but NOT encrypted: session and user
  * data (including any PII in `attributes`) is readable by the browser.
  */
-import { Effect, Option, Redacted, Schema } from "effect";
+import { Data, Effect, Option, Redacted, Schema } from "effect";
 import * as Cipher from "./Cipher.ts";
 import { DEFAULT_SERVER_ONLY_ATTRIBUTES, UserService } from "./User.ts";
 import { timingSafeEqualBytes } from "./TokenHash.ts";
@@ -88,6 +88,11 @@ export interface ResolvedSessionCache {
 
 const MIN_SECRET_LENGTH = 32;
 
+/** The session cache is enabled with an HMAC secret that is too short. */
+class SessionCacheConfigError extends Data.TaggedError("SessionCacheConfigError")<{
+  readonly message: string;
+}> {}
+
 /**
  * Validate a {@link SessionCacheConfig}: `undefined` when the cache is disabled, otherwise the resolved settings. Throws when the secret is shorter than 32 characters.
  */
@@ -96,9 +101,9 @@ export const resolveSessionCache = (
 ): ResolvedSessionCache | undefined => {
   if (!config?.enabled) return undefined;
   if (Redacted.value(config.secret).length < MIN_SECRET_LENGTH) {
-    throw new Error(
-      `SessionCookieCache: HMAC secret must be at least ${MIN_SECRET_LENGTH} characters`,
-    );
+    throw new SessionCacheConfigError({
+      message: `SessionCookieCache: HMAC secret must be at least ${MIN_SECRET_LENGTH} characters`,
+    });
   }
   return {
     maxAge: config.maxAge ?? 5 * 60 * 1000,
@@ -173,6 +178,11 @@ export const sessionCacheGateAttributes: Effect.Effect<ReadonlySet<string>> = Ef
 const holdsGateAttribute = (user: Types.User, gate: ReadonlySet<string>): boolean =>
   Object.keys(user.attributes).some((key) => gate.has(key));
 
+// `Schema.Unknown` passes the payload through untouched, so encoding is exactly
+// `JSON.stringify`; decoding parses and validates in one step.
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const decodePayloadJson = Schema.decodeUnknownOption(Schema.fromJsonString(SerializedPayload));
+
 /**
  * Serialize + sign a `SessionWithUser` into the cache cookie value. Returns
  * `undefined`, and nothing should be cached, when the user holds one of the
@@ -205,7 +215,7 @@ export const encodeSessionCacheCookie = (
       updatedAt: u.updatedAt.getTime(),
     },
   };
-  const json = JSON.stringify(payload);
+  const json = encodeJson(payload);
   const encoded =
     cache.encryptionKey === undefined
       ? b64url(new TextEncoder().encode(json))
@@ -241,14 +251,7 @@ export const decodeSessionCacheCookie = (
       : Cipher.aes256GcmOpen(cache.encryptionKey, encoded.slice(ENCRYPTED_PREFIX.length));
   if (json === null) return null;
 
-  let raw: unknown;
-  try {
-    raw = JSON.parse(json);
-  } catch {
-    return null;
-  }
-
-  const parsed = Schema.decodeUnknownOption(SerializedPayload)(raw);
+  const parsed = decodePayloadJson(json);
   if (Option.isNone(parsed)) return null;
 
   const payload = parsed.value;

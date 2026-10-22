@@ -176,6 +176,57 @@ describe("fail-closed error semantics", () => {
       value: true,
     });
   });
+
+  describe("isIn", () => {
+    const eng = Entity.ref("Team", "eng");
+    const acme = Entity.ref("Org", "acme");
+    const s = Entity.slice([
+      Entity.entity(alice, { parents: [eng] }),
+      Entity.entity(eng, { parents: [acme] }),
+    ]);
+    const request = requestFor(alice, readDoc, doc1, { label: "x" });
+
+    it("is true when the left entity descends from the right one", () => {
+      const condition = Condition.isIn(Condition.principal, Condition.entityLit(acme));
+      expect(Condition.evaluate(s, request, condition)).toEqual({ ok: true, value: true });
+    });
+
+    it("is false when the left entity is outside the right one", () => {
+      const condition = Condition.isIn(
+        Condition.principal,
+        Condition.entityLit(Entity.ref("Org", "other")),
+      );
+      expect(Condition.evaluate(s, request, condition)).toEqual({ ok: true, value: false });
+    });
+
+    it("errors when either operand is not an entity", () => {
+      expect(
+        Condition.evaluate(s, request, Condition.isIn(Condition.principal, Condition.lit("acme"))),
+      ).toEqual({ ok: false, error: { message: "in requires entity operands" } });
+      expect(
+        Condition.evaluate(s, request, Condition.isIn(Condition.lit(1), Condition.entityLit(acme))),
+      ).toEqual({ ok: false, error: { message: "in requires entity operands" } });
+    });
+
+    it("propagates an operand's evaluation error", () => {
+      const missingLeft = Condition.isIn(
+        Condition.attr("context", "missing"),
+        Condition.entityLit(acme),
+      );
+      const missingRight = Condition.isIn(
+        Condition.principal,
+        Condition.attr("context", "missing"),
+      );
+      expect(Condition.evaluate(s, request, missingLeft)).toEqual({
+        ok: false,
+        error: { message: 'attribute "context.missing" is absent' },
+      });
+      expect(Condition.evaluate(s, request, missingRight)).toEqual({
+        ok: false,
+        error: { message: 'attribute "context.missing" is absent' },
+      });
+    });
+  });
 });
 
 describe("custom policies", () => {
@@ -285,7 +336,8 @@ describe("declarative policies are data", () => {
     });
 
     const encoded = await Effect.runPromise(Schema.encodeEffect(Policy.DeclarativePolicy)(policy));
-    const json = JSON.parse(JSON.stringify(encoded)) as unknown;
+    const Json = Schema.fromJsonString(Schema.Unknown);
+    const json = Schema.decodeUnknownSync(Json)(Schema.encodeSync(Json)(encoded));
     const decoded = await Effect.runPromise(
       Schema.decodeUnknownEffect(Policy.DeclarativePolicy)(json),
     );

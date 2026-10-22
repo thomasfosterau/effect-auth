@@ -1,5 +1,17 @@
-import { describe, it, expect } from "vite-plus/test";
-import { Cause, Effect, Exit, FileSystem, Layer, Path, Schema } from "effect";
+import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
+import {
+  Array as Arr,
+  Cause,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Predicate,
+  Schema,
+  Types,
+} from "effect";
 import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Entity from "../Entity.ts";
@@ -50,6 +62,32 @@ const authorizerLayer = Authorizer.layer({ policies: [ownerPolicy] }).pipe(
 
 const ok = HttpServerResponse.empty({ status: 200 });
 
+/**
+ * The endpoint and group a middleware is told it wraps. The middleware never
+ * reads them, so one stand-in pair serves every call; `HttpApi.reflect` hands
+ * them over typed as the middleware's options expect.
+ */
+const standIn = ((): {
+  readonly endpoint: HttpApiEndpoint.Top;
+  readonly group: HttpApiGroup.Top;
+} => {
+  const pairs: Array<{ readonly endpoint: HttpApiEndpoint.Top; readonly group: HttpApiGroup.Top }> =
+    [];
+  HttpApi.reflect(
+    HttpApi.make("standIn").add(
+      HttpApiGroup.make("standIn").add(HttpApiEndpoint.get("standIn", "/")),
+    ),
+    {
+      onGroup: () => undefined,
+      onEndpoint: ({ endpoint, group }) => pairs.push({ endpoint, group }),
+    },
+  );
+  return Option.match(Arr.head(pairs), {
+    onNone: () => assert.fail("HttpApi.reflect reported no endpoint"),
+    onSome: (pair) => pair,
+  });
+})();
+
 const makeWebRequest = (headers: Record<string, string> = {}) =>
   HttpServerRequest.fromWeb(new Request("http://localhost/docs", { headers }));
 
@@ -69,15 +107,14 @@ const runGate = <Id extends string>(
   const request = options.request ?? makeWebRequest();
   const program = Effect.gen(function* () {
     const svc = yield* Guard;
-    // `HttpApiMiddleware.Service` types the wrapped handler against the whole
-    // `HttpApi` surface, which this unit test deliberately does not build —
-    // hence the `any` call. Re-annotating the result keeps what the middleware
-    // still needs from context visible instead of letting `any` erase it.
+    // The guard ignores which endpoint and group it wraps, so a stand-in pair
+    // fills the options this unit test, which builds no `HttpApi`, has none of.
+    // The annotation keeps what the middleware still needs from context visible.
     const applied: Effect.Effect<
       typeof ok,
-      S.Forbidden,
-      Authorizer | CurrentPrincipal | HttpServerRequest.HttpServerRequest
-    > = (svc as any)(Effect.succeed(ok), undefined);
+      Types.unhandled | S.Forbidden,
+      Authorizer | CurrentPrincipal | HttpRouter.Provided
+    > = svc(Effect.succeed(ok), standIn);
     return yield* applied.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
   }).pipe(
     Effect.provide(Layer.mergeAll(Guard.layer, options.overrideAuthorizerLayer ?? authorizerLayer)),
@@ -123,7 +160,7 @@ describe("makeAuthorizationMiddleware – deny path", () => {
     const Guard = makeAuthorizationMiddleware("Guard", { action: readDoc, resource: doc1 });
     const error = await Effect.runPromise(runGate(Guard, { principal: bob }).pipe(Effect.flip));
     expect(error._tag).toBe("Forbidden");
-    expect(typeof error.message).toBe("string");
+    expect(Predicate.isString(error.message)).toBe(true);
     expect(error).not.toHaveProperty("decision");
     expect(error).not.toHaveProperty("determining");
     expect(error).not.toHaveProperty("outcomes");
@@ -313,27 +350,21 @@ describe("makeAuthorizationMiddleware – served through an HttpApi", () => {
 
   it("the owner is served the handler for their own doc and refused another's with 403", async () => {
     const { handler, dispose } = serveDocs(alice);
-    try {
-      const own = await handler(new Request("http://localhost/docs/doc-1"));
-      expect(own.status).toBe(200);
-      const other = await handler(new Request("http://localhost/docs/doc-2"));
-      expect(other.status).toBe(403);
-      expect(await other.text()).toContain("default-deny");
-    } finally {
-      await dispose();
-    }
+    onTestFinished(dispose);
+    const own = await handler(new Request("http://localhost/docs/doc-1"));
+    expect(own.status).toBe(200);
+    const other = await handler(new Request("http://localhost/docs/doc-2"));
+    expect(other.status).toBe(403);
+    expect(await other.text()).toContain("default-deny");
   });
 
   it("the resource is read per request from the path: a different principal gets the reverse", async () => {
     const { handler, dispose } = serveDocs(bob);
-    try {
-      const denied = await handler(new Request("http://localhost/docs/doc-1"));
-      expect(denied.status).toBe(403);
-      const allowed = await handler(new Request("http://localhost/docs/doc-2"));
-      expect(allowed.status).toBe(200);
-    } finally {
-      await dispose();
-    }
+    onTestFinished(dispose);
+    const denied = await handler(new Request("http://localhost/docs/doc-1"));
+    expect(denied.status).toBe(403);
+    const allowed = await handler(new Request("http://localhost/docs/doc-2"));
+    expect(allowed.status).toBe(200);
   });
 });
 
@@ -382,13 +413,10 @@ describe("makeAuthorizationMiddleware – guard identity", () => {
       Layer.provide(platform),
     );
     const { handler, dispose } = HttpRouter.toWebHandler(app);
-    try {
-      // `alice` owns doc-1, the resource RequireDocRead guards, so the handler runs.
-      const response = await handler(new Request("http://localhost/docs/doc-1"));
-      expect(response.status).toBe(200);
-    } finally {
-      await dispose();
-    }
+    onTestFinished(dispose);
+    // `alice` owns doc-1, the resource RequireDocRead guards, so the handler runs.
+    const response = await handler(new Request("http://localhost/docs/doc-1"));
+    expect(response.status).toBe(200);
   });
 
   it("attaching RequireDocRead and providing only RequireDocWrite's layer is a type error, and the build names the missing guard", async () => {

@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-auth-solid
 
-Solid bindings for [`@thomasfosterau/effect-auth-client`](../client): reactive primitives over the client's observable session store, plus unstyled form components for the usual authentication screens.
+Solid bindings for [`@thomasfosterau/effect-auth-client`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/client): reactive primitives over the client's observable session store, plus unstyled form components for the usual authentication screens.
 
 ## Install
 
@@ -104,7 +104,15 @@ The components ship no CSS. Each element carries a stable class — `ea-form` pl
 
 A `class` prop is appended to the root `<form>`, and the `classes` prop replaces individual defaults (`classes={{ submit: "btn btn-primary" }}`) when a design system would rather not see the `ea-*` names at all.
 
-See [the client guide](../../docs/guides/client.md) for the rest of the client API.
+See [the client guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/client.md) for the rest of the client API.
+
+## API
+
+- `createSession(client)` / `useSession()` — a `SessionAccessor` (an accessor over `SessionState` with `dispose`).
+- `createListSessions(client)` / `useListSessions()` — `ListSessionsResult`: accessors `data`, `isPending`, `error`, plus `refetch` and `dispose`.
+- `AuthClientProvider` (`AuthClientProviderProps`), `AuthClientContext`, `useAuthClient()`.
+- Forms: `SignInForm`, `SignUpForm`, `PasswordResetRequestForm`, `PasswordResetConfirmForm`, `MagicLinkForm`, `EmailOtpForm`, each with its `*FormProps` and `*Labels` types.
+- Shared form types: `AuthFormBaseProps`, `AuthFormClasses`, `AuthSuccess`, `StatusResponse`.
 
 ## License
 

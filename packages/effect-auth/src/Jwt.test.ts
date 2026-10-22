@@ -1,12 +1,18 @@
-import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vite-plus/test";
+import { assert, describe, it, expect, beforeEach, beforeAll, afterAll } from "vite-plus/test";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { Context, Crypto, Effect, Redacted } from "effect";
+import { Context, Crypto, Effect, Redacted, Result, Schema } from "effect";
 import { generateKeyPair, JwtKeyStore, type JwtConfig, type JwtKeyPair } from "./Jwt.ts";
 import * as Jwt from "./Jwt.ts";
 import * as Cipher from "./Cipher.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type { User } from "./Types.ts";
+
+/** JSON text to and from a JSON object (a JOSE header or claims set). */
+const decodeJsonObject = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+);
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const keyPairs: JwtKeyPair[] = [];
 
@@ -64,8 +70,8 @@ describe("JwtService", () => {
     expect(result.payload["sub"]).toBe("user-1");
     expect(result.payload["iss"]).toBe("https://auth.example.com");
     expect(result.payload["aud"]).toBe("https://api.example.com");
-    expect(typeof result.payload["iat"]).toBe("number");
-    expect(typeof result.payload["exp"]).toBe("number");
+    expect(result.payload["iat"]).toBeTypeOf("number");
+    expect(result.payload["exp"]).toBeTypeOf("number");
   });
 
   it("should sign and verify a token with EdDSA", async () => {
@@ -106,11 +112,8 @@ describe("JwtService", () => {
 
         const [header, payload, signature] = token.split(".") as [string, string, string];
         const forgedPayload = Buffer.from(
-          JSON.stringify({
-            ...(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<
-              string,
-              unknown
-            >),
+          encodeJson({
+            ...decodeJsonObject(Buffer.from(payload, "base64url").toString("utf8")),
             sub: "attacker",
           }),
           "utf8",
@@ -121,10 +124,9 @@ describe("JwtService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JwtError");
-      expect(result.failure.message).toContain("signature");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("JwtError");
+    expect(result.failure.message).toContain("signature");
   });
 
   it("should reject malformed tokens", async () => {
@@ -147,10 +149,9 @@ describe("JwtService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JwtError");
-      expect(result.failure.message).toContain("expired");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("JwtError");
+    expect(result.failure.message).toContain("expired");
   });
 
   it("should reject tokens from a different issuer", async () => {
@@ -166,10 +167,9 @@ describe("JwtService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JwtError");
-      expect(result.failure.message).toContain("issuer");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("JwtError");
+    expect(result.failure.message).toContain("issuer");
   });
 
   it("should reject tokens with the wrong audience", async () => {
@@ -186,10 +186,9 @@ describe("JwtService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JwtError");
-      expect(result.failure.message).toContain("audience");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("JwtError");
+    expect(result.failure.message).toContain("audience");
   });
 
   it("should include definePayload and extra claims", async () => {
@@ -241,12 +240,12 @@ describe("JwtService", () => {
     expect(jwks.keys).toHaveLength(2);
 
     for (const key of jwks.keys) {
-      expect(typeof key["kid"]).toBe("string");
+      expect(key["kid"]).toBeTypeOf("string");
       expect(key["use"]).toBe("sig");
       expect(["ES256", "EdDSA"]).toContain(key["alg"]);
       // No private material in the JWKS
       expect(key["d"]).toBeUndefined();
-      expect(JSON.stringify(key)).not.toContain("PRIVATE KEY");
+      expect(encodeJson(key)).not.toContain("PRIVATE KEY");
     }
 
     const es256Key = jwks.keys.find((key) => key["alg"] === "ES256");
@@ -306,10 +305,9 @@ describe("JwtService — nbf validation", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JwtError");
-      expect(result.failure.message).toContain("not yet valid");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("JwtError");
+    expect(result.failure.message).toContain("not yet valid");
   });
 
   it("should accept a token with no nbf claim", async () => {
@@ -358,10 +356,9 @@ describe("JwtService — clock-skew leeway", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JwtError");
-      expect(result.failure.message).toContain("expired");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("JwtError");
+    expect(result.failure.message).toContain("expired");
   });
 
   it("should accept a not-yet-valid token when leeway covers the gap", async () => {
@@ -390,10 +387,9 @@ describe("JwtService — clock-skew leeway", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JwtError");
-      expect(result.failure.message).toContain("not yet valid");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("JwtError");
+    expect(result.failure.message).toContain("not yet valid");
   });
 });
 
@@ -553,7 +549,7 @@ describe("RemoteJwksVerifier", () => {
 
     server = createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(jwks));
+      res.end(encodeJson(jwks));
     });
 
     await new Promise<void>((resolve) => server.listen(0, () => resolve()));
@@ -585,8 +581,8 @@ describe("RemoteJwksVerifier", () => {
   it("should reject a tampered token", async () => {
     const [hdr, pay, sig] = signedToken.split(".") as [string, string, string];
     const forgedPay = Buffer.from(
-      JSON.stringify({
-        ...(JSON.parse(Buffer.from(pay, "base64url").toString("utf8")) as Record<string, unknown>),
+      encodeJson({
+        ...decodeJsonObject(Buffer.from(pay, "base64url").toString("utf8")),
         sub: "attacker",
       }),
     ).toString("base64url");
@@ -604,20 +600,16 @@ describe("RemoteJwksVerifier", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JwtError");
-      expect(result.failure.message).toContain("signature");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("JwtError");
+    expect(result.failure.message).toContain("signature");
   });
 
   it("should reject a token with an unknown kid", async () => {
     // Replace the kid in the header with one that doesn't exist in the JWKS.
     const [hdr, pay, sig] = signedToken.split(".") as [string, string, string];
-    const parsedHeader = JSON.parse(Buffer.from(hdr, "base64url").toString("utf8")) as Record<
-      string,
-      unknown
-    >;
-    const badHeader = Buffer.from(JSON.stringify({ ...parsedHeader, kid: "no-such-kid" })).toString(
+    const parsedHeader = decodeJsonObject(Buffer.from(hdr, "base64url").toString("utf8"));
+    const badHeader = Buffer.from(encodeJson({ ...parsedHeader, kid: "no-such-kid" })).toString(
       "base64url",
     );
 
@@ -634,10 +626,9 @@ describe("RemoteJwksVerifier", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JwtError");
-      expect(result.failure.message).toContain("kid");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("JwtError");
+    expect(result.failure.message).toContain("kid");
   });
 
   it("should reject a token with a future nbf via the remote verifier", async () => {
@@ -664,10 +655,9 @@ describe("RemoteJwksVerifier", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JwtError");
-      expect(result.failure.message).toContain("not yet valid");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("JwtError");
+    expect(result.failure.message).toContain("not yet valid");
   });
 
   it("should reuse the cache across multiple verify calls", async () => {
@@ -705,9 +695,8 @@ describe("RemoteJwksVerifier", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("JwtError");
-      expect(result.failure.message).toContain("issuer");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("JwtError");
+    expect(result.failure.message).toContain("issuer");
   });
 });

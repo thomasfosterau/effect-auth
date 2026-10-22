@@ -1,0 +1,138 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "packages/effect-auth/src/index.ts",
+    "packages/effect-auth/src/Ladder.ts",
+    "packages/effect-auth/src/email/index.ts",
+    "packages/effect-auth/src/http/index.ts",
+    "packages/effect-auth/src/oauth/index.ts",
+    "packages/effect-auth/src/password/index.ts",
+    "packages/effect-auth/src/plugins/index.ts",
+    "packages/effect-auth/src/multifactor/index.ts",
+    "packages/effect-auth/src/testing/index.ts",
+    "packages/client/src/index.ts",
+    "packages/client/src/testing/fixture.ts",
+    "packages/{alchemy,argon2,drizzle,react,resend,saml,solid,sql,svelte,twilio,vue}/src/index.ts",
+    "packages/*/src/testing/PgliteTemplate.setup.ts",
+    "packages/*/src/**/*.test.{ts,tsx}",
+    "packages/svelte/scripts/postbuild.mjs",
+    "packages/svelte/svelte.config.js",
+    "scripts/check-dist.ts",
+    "**/vite.config.ts",
+    "vite.tasks.ts"
+  ],
+  "ignorePatterns": ["**/dist/**", "**/docs/**", "**/coverage/**", "**/.reference/**"],
+  "ignoreDependencies": [
+    "@changesets/cli",
+    "@effect/docgen",
+    "@effect/language-service",
+    "@effect/tsgo",
+    "@mpsuesser/oxlint-plugin-effect",
+    "@sveltejs/package",
+    "@types/node",
+    "@typescript/native",
+    "@vitest/coverage-istanbul",
+    "fallow",
+    "svelte-check",
+    "tsx",
+    "typescript",
+    "vite",
+    "vite-plus",
+    "vitest"
+  ],
+  "rules": {
+    "unused-files": "error",
+    "unused-exports": "error",
+    "unused-types": "error",
+    "unused-dependencies": "error",
+    "unused-dev-dependencies": "warn",
+    "unused-enum-members": "error",
+    "unused-class-members": "warn",
+    "unresolved-imports": "error",
+    "unlisted-dependencies": "error",
+    "duplicate-exports": "off",
+    "circular-dependencies": "error",
+    "boundary-violation": "error",
+    "stale-suppressions": "warn"
+  },
+  "boundaries": {
+    "zones": [
+      {
+        "name": "ladder",
+        "patterns": ["packages/effect-auth/src/Ladder.ts"]
+      },
+      {
+        "name": "core",
+        "patterns": ["packages/effect-auth/**"]
+      },
+      {
+        "name": "storage-adapters",
+        "patterns": ["packages/sql/**", "packages/drizzle/**", "packages/alchemy/**"]
+      },
+      {
+        "name": "vendor-adapters",
+        "patterns": [
+          "packages/argon2/**",
+          "packages/resend/**",
+          "packages/twilio/**",
+          "packages/saml/**"
+        ]
+      },
+      {
+        "name": "client",
+        "patterns": ["packages/client/**"]
+      },
+      {
+        "name": "bindings",
+        "patterns": [
+          "packages/react/**",
+          "packages/svelte/**",
+          "packages/solid/**",
+          "packages/vue/**"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "from": "ladder",
+        "allow": []
+      },
+      {
+        "from": "core",
+        "allow": ["ladder"]
+      },
+      {
+        "from": "storage-adapters",
+        "allow": ["core", "ladder"]
+      },
+      {
+        "from": "vendor-adapters",
+        "allow": ["core", "ladder"]
+      },
+      {
+        "from": "client",
+        "allow": ["core", "ladder"]
+      },
+      {
+        "from": "bindings",
+        "allow": ["client"]
+      }
+    ]
+  },
+  "duplicates": {
+    "ignoredClones": [
+      "dup:dd241388:2",
+      "dup:0311d16d:2",
+      "dup:ceacb77f:2",
+      "dup:9b4cf9c1:2",
+      "dup:86e1ebad:2",
+      "dup:0ef59962:2"
+    ]
+  },
+  "health": {
+    "maxCyclomatic": 20,
+    "maxCognitive": 15,
+    "maxCrap": 30,
+    "coverage": "coverage/coverage-final.json"
+  }
+}

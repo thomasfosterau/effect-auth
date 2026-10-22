@@ -89,9 +89,9 @@ const run = (): Promise<Observed> => {
     let phase = "outside";
     const fibers: Array<{ readonly phase: string; readonly inTransaction: boolean }> = [];
     // Resolved per query, in the fiber that runs it — see the module docs.
-    const observedHandle = Effect.map(inTransaction, (transaction) => {
+    const observedHandle = Effect.map(inTransaction, (transaction): EffectDrizzleDatabase => {
       fibers.push({ phase, inTransaction: transaction });
-      return db as unknown as EffectDrizzleDatabase;
+      return db;
     });
 
     const stores = Layer.mergeAll(storesLayer(tables), Requests.layer(tables)).pipe(

@@ -18,7 +18,7 @@
  *
  * @module entity
  */
-import { Schema } from "effect";
+import { Array as Arr, MutableHashSet, Option, Predicate, Record as Rec, Schema } from "effect";
 
 // ---------------------------------------------------------------------------
 // Entity references
@@ -53,8 +53,10 @@ export const ref = (type: string, id: string): EntityRef => ({ type, id });
 export const refEquals = (a: EntityRef, b: EntityRef): boolean =>
   a.type === b.type && a.id === b.id;
 
+const encodeJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.String));
+
 /** Format a reference in Cedar display syntax: `User::"u1"`. */
-export const formatRef = (r: EntityRef): string => `${r.type}::${JSON.stringify(r.id)}`;
+export const formatRef = (r: EntityRef): string => `${r.type}::${encodeJsonString(r.id)}`;
 
 /** Stable map key for a reference. */
 export const refKey = (r: EntityRef): string => `${r.type}\u0000${r.id}`;
@@ -106,29 +108,48 @@ export const AttributeValue: Schema.Codec<AttributeValue> = Schema.Union([
 
 /** Narrow an {@link AttributeValue} to an entity value. */
 export const isEntityValue = (value: AttributeValue): value is EntityValue =>
-  typeof value === "object" &&
-  value !== null &&
-  !Array.isArray(value) &&
+  Predicate.isObject(value) &&
   "__entity" in value &&
-  typeof (value as EntityValue).__entity === "object";
+  // `typeof x === "object"`: an object, an array, or `null`.
+  (value.__entity === null || Predicate.isObjectOrArray(value.__entity));
+
+/** The `typeof` of an attribute value: `"object"` for `null`, arrays and records. */
+const typeName = (value: AttributeValue): string =>
+  Predicate.isString(value)
+    ? "string"
+    : Predicate.isNumber(value)
+      ? "number"
+      : Predicate.isBoolean(value)
+        ? "boolean"
+        : "object";
 
 /** Deep structural equality over {@link AttributeValue}s. */
 export const attributeValueEquals = (a: AttributeValue, b: AttributeValue): boolean => {
   if (a === b) return true;
-  if (typeof a !== typeof b) return false;
-  if (typeof a !== "object" || a === null || b === null) return false;
+  if (typeName(a) !== typeName(b)) return false;
+  if (!Predicate.isObjectOrArray(a) || b === null) return false;
   const arrayA = Array.isArray(a);
   const arrayB = Array.isArray(b);
   if (arrayA !== arrayB) return false;
   if (arrayA && arrayB) {
-    return a.length === b.length && a.every((item, i) => attributeValueEquals(item, b[i]!));
+    return (
+      a.length === b.length &&
+      Arr.every(Arr.zip(a, b), ([itemA, itemB]) => attributeValueEquals(itemA, itemB))
+    );
   }
+  // SAFETY: both are non-null, non-array objects of the AttributeValue domain:
+  // records (an entity value is a record holding `__entity`).
   const recordA = a as { readonly [key: string]: AttributeValue };
+  // SAFETY: as for `recordA`.
   const recordB = b as { readonly [key: string]: AttributeValue };
-  const keysA = Object.keys(recordA);
-  const keysB = Object.keys(recordB);
-  if (keysA.length !== keysB.length) return false;
-  return keysA.every((key) => key in recordB && attributeValueEquals(recordA[key]!, recordB[key]!));
+  const entriesA = Rec.toEntries(recordA);
+  if (entriesA.length !== Rec.keys(recordB).length) return false;
+  return Arr.every(
+    entriesA,
+    // SAFETY: `key in recordB` holds, so the read is defined.
+    ([key, valueA]) =>
+      key in recordB && attributeValueEquals(valueA, recordB[key] as AttributeValue),
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -189,7 +210,7 @@ export const getEntity = (s: EntitySlice, r: EntityRef): Entity | null =>
 export const getAttribute = (s: EntitySlice, r: EntityRef, name: string): AttributeValue | null => {
   const found = getEntity(s, r);
   if (found === null) return null;
-  return name in found.attributes ? found.attributes[name]! : null;
+  return name in found.attributes ? (found.attributes[name] ?? null) : null;
 };
 
 /**
@@ -200,19 +221,21 @@ export const getAttribute = (s: EntitySlice, r: EntityRef, name: string): Attrib
  */
 export const entityIn = (s: EntitySlice, child: EntityRef, ancestor: EntityRef): boolean => {
   if (refEquals(child, ancestor)) return true;
-  const visited = new Set<string>();
-  const queue: EntityRef[] = [child];
-  while (queue.length > 0) {
-    const current = queue.pop()!;
-    const key = refKey(current);
-    if (visited.has(key)) continue;
-    visited.add(key);
-    const found = s.entities.get(key);
-    if (found === undefined) continue;
-    for (const parent of found.parents) {
-      if (refEquals(parent, ancestor)) return true;
-      queue.push(parent);
-    }
-  }
-  return false;
+  const visited = MutableHashSet.empty<string>();
+  // Depth-first over a stack of pending refs. Each step pops one ref and emits
+  // whether one of its parents is `ancestor`; a hit empties the stack, ending
+  // the walk.
+  const steps = Arr.unfold([child], (queue) =>
+    Option.map(Option.fromUndefinedOr(queue.pop()), (current): readonly [boolean, EntityRef[]] => {
+      const key = refKey(current);
+      if (MutableHashSet.has(visited, key)) return [false, queue];
+      MutableHashSet.add(visited, key);
+      const found = s.entities.get(key);
+      if (found === undefined) return [false, queue];
+      if (found.parents.some((parent) => refEquals(parent, ancestor))) return [true, []];
+      queue.push(...found.parents);
+      return [false, queue];
+    }),
+  );
+  return steps.includes(true);
 };
