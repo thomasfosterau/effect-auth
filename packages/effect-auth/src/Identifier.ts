@@ -12,7 +12,7 @@
  * every flow that resolves "who owns this email/username/phone" goes through
  * the {@link IdentifierStore}.
  */
-import { Context, Data, Effect, Schema } from "effect";
+import { Array as Arr, Context, Data, Effect, Option, Order, Schema } from "effect";
 import * as Errors from "./Errors.ts";
 import * as Types from "./Types.ts";
 
@@ -173,15 +173,22 @@ export const UserWithIdentifiers = Schema.Struct({
 });
 export type UserWithIdentifiers = typeof UserWithIdentifiers.Type;
 
+/** Oldest identifier first. */
+const byCreatedAt: Order.Order<Identifier> = Order.mapInput(
+  Order.Date,
+  (identifier: Identifier) => identifier.createdAt,
+);
+
 /**
  * Return the first verified email identifier for a user, or `null` if none
  * exists. When the user has multiple verified email identifiers the one with
  * the earliest `createdAt` is considered primary.
  */
 export const primaryEmail = (identifiers: ReadonlyArray<Identifier>): Identifier | null => {
-  const verified = identifiers
-    .filter((id) => id.type === "email" && id.verified)
-    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const verified = Arr.sort(
+    identifiers.filter((id) => id.type === "email" && id.verified),
+    byCreatedAt,
+  );
   return verified[0] ?? null;
 };
 
@@ -200,9 +207,10 @@ export const primaryEmailValue = (identifiers: ReadonlyArray<Identifier>): strin
 export const anyEmail = (identifiers: ReadonlyArray<Identifier>): Identifier | null => {
   const primary = primaryEmail(identifiers);
   if (primary !== null) return primary;
-  const emails = identifiers
-    .filter((id) => id.type === "email")
-    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const emails = Arr.sort(
+    identifiers.filter((id) => id.type === "email"),
+    byCreatedAt,
+  );
   return emails[0] ?? null;
 };
 
@@ -369,19 +377,21 @@ export const replaceIdentifier = (
 export const memoryIdentifierStore = (
   records: Map<string, Identifier> = new Map(),
 ): typeof IdentifierStore.Service => {
-  const byValue = (type: IdentifierType, value: string): Identifier | null => {
-    for (const identifier of records.values()) {
-      if (identifier.type === type && identifier.value === value) return identifier;
-    }
-    return null;
-  };
+  const byValue = (type: IdentifierType, value: string): Identifier | null =>
+    Option.getOrNull(
+      Arr.findFirst(
+        records.values(),
+        (identifier) => identifier.type === type && identifier.value === value,
+      ),
+    );
   return {
     getByValue: (type, value) => Effect.sync(() => byValue(type, value)),
     listByUser: (userId) =>
       Effect.sync(() =>
-        Array.from(records.values())
-          .filter((identifier) => identifier.userId === userId)
-          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
+        Arr.sort(
+          Arr.filter(records.values(), (identifier) => identifier.userId === userId),
+          byCreatedAt,
+        ),
       ),
     create: (identifier) =>
       Effect.suspend(() => {
@@ -431,9 +441,9 @@ export const memoryIdentifierStore = (
     delete: (id) => Effect.sync(() => void records.delete(id)),
     deleteByUser: (userId) =>
       Effect.sync(() => {
-        for (const [id, identifier] of records.entries()) {
+        Arr.forEach(Arr.fromIterable(records.entries()), ([id, identifier]) => {
           if (identifier.userId === userId) records.delete(id);
-        }
+        });
       }),
   };
 };

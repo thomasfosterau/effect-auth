@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
-import * as fs from "node:fs";
+import { Array as Arr } from "effect";
+import { access, readFile } from "node:fs/promises";
 import * as path from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -22,29 +23,36 @@ const isRelativeSpecifier = (specifier: string): boolean =>
 const extractSpecifiers = (source: string): string[] =>
   [...source.matchAll(SPECIFIER_PATTERN)].map((match) => match[1]);
 
+/** Whether `file` exists (any access failure reads as absent, as `existsSync`). */
+const exists = (file: string): Promise<boolean> =>
+  access(file).then(
+    () => true,
+    () => false,
+  );
+
 interface ModuleGraph {
   readonly files: ReadonlySet<string>;
   readonly externalSpecifiers: ReadonlySet<string>;
 }
 
-const walkModuleGraph = (entry: string): ModuleGraph => {
+const walkModuleGraph = async (entry: string): Promise<ModuleGraph> => {
   const visited = new Set<string>();
   const externalSpecifiers = new Set<string>();
   const queue = [entry];
 
-  while (queue.length > 0) {
+  while (Arr.isArrayNonEmpty(queue)) {
     const file = queue.pop()!;
     if (visited.has(file)) continue;
     visited.add(file);
 
-    const source = fs.readFileSync(file, "utf8");
+    const source = await readFile(file, "utf8");
     for (const specifier of extractSpecifiers(source)) {
       if (!isRelativeSpecifier(specifier)) {
         externalSpecifiers.add(specifier);
         continue;
       }
       const resolved = path.resolve(path.dirname(file), specifier);
-      if (fs.existsSync(resolved) && !visited.has(resolved)) {
+      if ((await exists(resolved)) && !visited.has(resolved)) {
         queue.push(resolved);
       }
     }
@@ -63,8 +71,8 @@ describe("module graph", () => {
   // `export * as Http from "./http/index.ts"` — imports from
   // `effect/http-api`, which is exactly the coupling #205's HTTP-tier
   // restructure exists to remove. Un-skip once that lands.
-  it.skip("root barrel does not reach effect/http-api or effect-jsonapi", () => {
-    const { externalSpecifiers } = walkModuleGraph(entryFile);
+  it.skip("root barrel does not reach effect/http-api or effect-jsonapi", async () => {
+    const { externalSpecifiers } = await walkModuleGraph(entryFile);
 
     expect(reachesModule(externalSpecifiers, "effect/http-api")).toBe(false);
     expect(reachesModule(externalSpecifiers, "effect-jsonapi")).toBe(false);
@@ -74,12 +82,11 @@ describe("module graph", () => {
 describe("the ladder subpath", () => {
   // `@thomasfosterau/effect-auth/ladder` is imported by browser bundles for UX
   // gates, so it must not pull `effect` — or anything else — in with it.
-  it("imports nothing at all", () => {
+  it("imports nothing at all", async () => {
     const ladder = path.resolve(import.meta.dirname, "Ladder.ts");
     // Comments stripped first: the module's JSDoc `@example` imports it by
     // its own subpath, which is documentation, not an edge.
-    const code = fs
-      .readFileSync(ladder, "utf8")
+    const code = (await readFile(ladder, "utf8"))
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\/\/.*$/gm, "");
     expect(extractSpecifiers(code)).toEqual([]);

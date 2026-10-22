@@ -40,7 +40,7 @@
  * backend's intended use (best-effort rate limiting / attempt counting);
  * use a backend with atomic counters when strict enforcement is required.
  */
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer, Option, Order, Predicate, Schema } from "effect";
 import { KeyValueStore } from "effect/persistence";
 import * as Errors from "./Errors.ts";
 import { type EmailOtpPurpose, type EmailOtpRecord, EmailOtpStore } from "./email/EmailOtp.ts";
@@ -67,11 +67,20 @@ const toAuthError =
   (label: string) =>
   (cause: unknown): Errors.AuthError =>
     new Errors.AuthError({
-      message: `KeyValueStore ${label} failed${cause instanceof Error ? `: ${cause.message}` : ""}`,
+      message: `KeyValueStore ${label} failed${
+        Predicate.hasProperty(cause, "message") && Predicate.isString(cause.message)
+          ? `: ${cause.message}`
+          : ""
+      }`,
     });
 
 const toBase64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64");
 const fromBase64 = (text: string): Uint8Array => new Uint8Array(Buffer.from(text, "base64"));
+
+/** Any JSON value to and from its JSON text; record shapes are this module's own. */
+const JsonText = Schema.fromJsonString(Schema.Unknown);
+const decodeJsonText = Schema.decodeEffect(JsonText);
+const encodeJsonText = Schema.encodeSync(JsonText);
 
 /**
  * Small JSON codec over a raw {@link KeyValueStore.KeyValueStore}, mapping
@@ -84,19 +93,18 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
       Effect.flatMap((value) =>
         value === undefined
           ? Effect.succeed(null)
-          : Effect.try({
-              try: () => JSON.parse(value) as A,
-              catch: toAuthError(label),
-            }),
+          : decodeJsonText(value).pipe(
+              // SAFETY: every key is namespaced to one record shape and written
+              // only by `write` with a value of that shape, so the JSON under
+              // `key` round-trips to the `A` its caller wrote there.
+              Effect.map((parsed) => parsed as A),
+              Effect.mapError(toAuthError(label)),
+            ),
       ),
     );
 
-  const write = (
-    key: string,
-    value: unknown,
-    label: string,
-  ): Effect.Effect<void, Errors.AuthError> =>
-    kv.set(key, JSON.stringify(value)).pipe(Effect.mapError(toAuthError(label)));
+  const write = <A>(key: string, value: A, label: string): Effect.Effect<void, Errors.AuthError> =>
+    kv.set(key, encodeJsonText(value)).pipe(Effect.mapError(toAuthError(label)));
 
   const remove = (key: string, label: string): Effect.Effect<void, Errors.AuthError> =>
     kv.remove(key).pipe(Effect.mapError(toAuthError(label)));
@@ -128,7 +136,10 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
     readIndex(key, label).pipe(
       Effect.flatMap((entries) => {
         const next = entries.filter((existing) => existing !== entry);
-        return next.length === 0 ? remove(key, label) : write(key, next, label);
+        return Arr.match(next, {
+          onEmpty: () => remove(key, label),
+          onNonEmpty: (remaining) => write(key, remaining, label),
+        });
       }),
     );
 
@@ -330,7 +341,7 @@ export const emailVerificationStoreKV: Effect.Effect<
           tokens,
           (token) =>
             kv.remove(emailVerificationTokenKey(token), "emailVerification.deleteByUserId"),
-          { discard: true },
+          { concurrency: 1, discard: true },
         );
         yield* kv.remove(emailVerificationUserKey(userId), "emailVerification.deleteByUserId");
       }),
@@ -391,7 +402,7 @@ export const passwordResetStoreKV: Effect.Effect<
         yield* Effect.forEach(
           tokens,
           (token) => kv.remove(passwordResetTokenKey(token), "passwordReset.deleteByUserId"),
-          { discard: true },
+          { concurrency: 1, discard: true },
         );
         yield* kv.remove(passwordResetUserKey(userId), "passwordReset.deleteByUserId");
       }),
@@ -436,9 +447,10 @@ export const magicLinkStoreKV: Effect.Effect<
     getByEmail: (email) =>
       Effect.gen(function* () {
         const tokens = yield* kv.readIndex(magicLinkEmailKey(email), "magicLink.getByEmail");
-        if (tokens.length === 0) return null;
+        const first = Arr.head(tokens);
+        if (Option.isNone(first)) return null;
         return yield* kv.read<MagicLinkToken>(
-          magicLinkTokenKey(tokens[0]!),
+          magicLinkTokenKey(first.value),
           "magicLink.getByEmail",
         );
       }),
@@ -458,7 +470,7 @@ export const magicLinkStoreKV: Effect.Effect<
         yield* Effect.forEach(
           tokens,
           (token) => kv.remove(magicLinkTokenKey(token), "magicLink.deleteByEmail"),
-          { discard: true },
+          { concurrency: 1, discard: true },
         );
         yield* kv.remove(magicLinkEmailKey(email), "magicLink.deleteByEmail");
       }),
@@ -570,6 +582,11 @@ interface StoredIdentifier {
 }
 
 const identifierKey = (id: string) => `identifier:${id}`;
+/** Oldest identifier first. */
+const identifierByCreatedAt: Order.Order<Identifier> = Order.mapInput(
+  Order.Date,
+  (identifier: Identifier) => identifier.createdAt,
+);
 const identifierTypeValueKey = (type: IdentifierType, value: string) =>
   `identifier:type-value:${type}:${value}`;
 const identifierUserKey = (userId: string) => `identifier:user:${userId}`;
@@ -651,10 +668,10 @@ export const identifierStoreKV: Effect.Effect<
           (id) => kv.read<StoredIdentifier>(identifierKey(id), "identifier.listByUser"),
           { concurrency: "unbounded" },
         );
-        return records
-          .filter((r): r is StoredIdentifier => r != null)
-          .map(decodeIdentifier)
-          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+        return Arr.sort(
+          records.filter((r): r is StoredIdentifier => r != null).map(decodeIdentifier),
+          identifierByCreatedAt,
+        );
       }),
 
     // `(type, value)` is unique: a claimed pair is refused with `AuthError`, as
@@ -733,7 +750,7 @@ export const identifierStoreKV: Effect.Effect<
                 "identifier.deleteByUser",
               );
             }),
-          { discard: true },
+          { concurrency: 1, discard: true },
         );
         yield* kv.remove(identifierUserKey(userId), "identifier.deleteByUser");
       }),

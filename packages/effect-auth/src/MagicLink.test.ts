@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { Context, Crypto, Effect } from "effect";
+import { Array as Arr, Context, Crypto, Effect, Order, Predicate, Result } from "effect";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -484,9 +484,8 @@ describe("MagicLinkService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("MagicLinkError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("MagicLinkError");
     expect(magicLinkTokens.size).toBe(0);
     expect(sessions.size).toBe(0);
   });
@@ -507,9 +506,8 @@ describe("MagicLinkService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("MagicLinkError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("MagicLinkError");
     // Only the first verification created a session.
     expect(sessions.size).toBe(1);
   });
@@ -527,9 +525,8 @@ describe("MagicLinkService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("MagicLinkError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("MagicLinkError");
   });
 
   it("should not create users at verification when sign-up is disabled", async () => {
@@ -555,9 +552,8 @@ describe("MagicLinkService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("MagicLinkError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("MagicLinkError");
     expect(users.size).toBe(0);
     expect(identifierRecords.size).toBe(0);
     expect(sessions.size).toBe(0);
@@ -580,11 +576,10 @@ describe("MagicLinkService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("ResendTooSoonError");
-      expect((result.failure as { retryAfter: number }).retryAfter).toBeGreaterThan(0);
-      expect((result.failure as { retryAfter: number }).retryAfter).toBeLessThanOrEqual(60_000);
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("ResendTooSoonError");
+    expect((result.failure as { retryAfter: number }).retryAfter).toBeGreaterThan(0);
+    expect((result.failure as { retryAfter: number }).retryAfter).toBeLessThanOrEqual(60_000);
     // The original token is preserved — no replacement was issued.
     expect(sentLinks.length).toBe(1);
     expect(magicLinkTokens.size).toBe(1);
@@ -653,7 +648,9 @@ describe("MagicLinkService", () => {
         sendMagicLink: recordingSend,
       });
       const twice = (email: string) =>
-        Effect.all([Effect.result(service.send(email)), Effect.result(service.send(email))]);
+        Effect.all([Effect.result(service.send(email)), Effect.result(service.send(email))], {
+          concurrency: 1,
+        });
       return {
         known: yield* twice("member@example.com"),
         unknown: yield* twice("missing@example.com"),
@@ -675,18 +672,20 @@ describe("MagicLinkService", () => {
     ]);
     for (const result of [known[1], unknown[1]]) {
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure" && result.failure._tag === "ResendTooSoonError") {
-        expect(result.failure.retryAfter).toBeGreaterThan(0);
-        expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
-      }
+      assert(Result.isFailure(result));
+      assert(Predicate.isTagged(result.failure, "ResendTooSoonError"));
+      expect(result.failure.retryAfter).toBeGreaterThan(0);
+      expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
     }
     // Only the account holder is sent a link; the unknown email holds an
     // undelivered token as its cooldown marker.
     expect(sentLinks.map((link) => link.email)).toEqual(["member@example.com"]);
-    expect(Array.from(magicLinkTokens.values(), (token) => token.email).sort()).toEqual([
-      "member@example.com",
-      "missing@example.com",
-    ]);
+    expect(
+      Arr.sort(
+        Array.from(magicLinkTokens.values(), (token) => token.email),
+        Order.String,
+      ),
+    ).toEqual(["member@example.com", "missing@example.com"]);
     expect(users.size).toBe(1);
   });
 });

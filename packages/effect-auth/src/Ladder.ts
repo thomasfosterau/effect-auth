@@ -119,10 +119,7 @@ export type RungOf<L> = L extends Ladder<infer Rung> ? Rung : never;
  * @category guards
  */
 export const isAxis = (value: unknown): value is Axis =>
-  typeof value === "object" &&
-  value !== null &&
-  "_tag" in value &&
-  (value as { readonly _tag: unknown })._tag === "LadderAxis";
+  typeof value === "object" && value !== null && "_tag" in value && value._tag === "LadderAxis";
 
 /**
  * The lowest rung a rung-or-axis names.
@@ -203,6 +200,8 @@ export const make = <const Rungs extends readonly [string, ...Array<string>]>(
   const axes = <const Declared extends Readonly<Record<string, Rung>>>(
     declared: Declared,
   ): { readonly [K in keyof Declared]: Axis<Rung> } =>
+    // SAFETY: the entries map one-to-one over `declared`'s own keys, each to an
+    // `Axis<Rung>`, so the result has exactly the keys of `Declared`.
     Object.freeze(
       Object.fromEntries(Object.entries(declared).map(([name, min]) => [name, axis(name, min)])),
     ) as { readonly [K in keyof Declared]: Axis<Rung> };

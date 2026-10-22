@@ -53,7 +53,7 @@
  * @module messages
  */
 
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Effect, Layer, Option, Predicate, Schema } from "effect";
 import { ErrorCode } from "./Errors.ts";
 
 // ---------------------------------------------------------------------------
@@ -91,7 +91,11 @@ export class Messages extends Context.Service<
 // English default catalog
 // ---------------------------------------------------------------------------
 
-type Resolver = (params?: Record<string, unknown>) => string;
+/** Interpolation parameters, as `Messages.resolve` receives them. */
+const MessageParams = Schema.Record(Schema.String, Schema.Unknown);
+type MessageParams = typeof MessageParams.Type;
+
+type Resolver = (params?: MessageParams) => string;
 
 const catalog: Record<string, string | Resolver> = {
   [ErrorCode.AUTH_ERROR]: "An unexpected error occurred",
@@ -107,9 +111,9 @@ const catalog: Record<string, string | Resolver> = {
   [ErrorCode.EMAIL_VERIFICATION_ERROR]: "Email verification failed",
 
   [ErrorCode.PASSWORD_TOO_SHORT]: (p) =>
-    `Password must be at least ${(p?.minLength as number | undefined) ?? 8} characters`,
+    `Password must be at least ${p?.["minLength"] ?? 8} characters`,
   [ErrorCode.PASSWORD_TOO_LONG]: (p) =>
-    `Password must be at most ${(p?.maxLength as number | undefined) ?? 128} characters`,
+    `Password must be at most ${p?.["maxLength"] ?? 128} characters`,
   [ErrorCode.PASSWORD_ALREADY_SET]: "User already has a password; use changePassword instead",
   [ErrorCode.PWNED_PASSWORD]: "This password has appeared in a data breach; please choose another",
 
@@ -142,10 +146,10 @@ const catalog: Record<string, string | Resolver> = {
   [ErrorCode.PASSWORD_RESET_ERROR]: "Password reset failed",
 };
 
-function defaultResolve(code: string, _locale?: string, params?: Record<string, unknown>): string {
+function defaultResolve(code: string, _locale?: string, params?: MessageParams): string {
   const entry = catalog[code];
   if (entry === undefined) return code;
-  return typeof entry === "function" ? entry(params) : entry;
+  return Predicate.isFunction(entry) ? entry(params) : entry;
 }
 
 // ---------------------------------------------------------------------------

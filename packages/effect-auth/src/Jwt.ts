@@ -26,7 +26,19 @@
  * @module jwt
  */
 
-import { Config, Context, Crypto, Data, Deferred, Effect, Layer, Redacted, Ref } from "effect";
+import {
+  Config,
+  Context,
+  Crypto,
+  Data,
+  Deferred,
+  Effect,
+  Layer,
+  Predicate,
+  Redacted,
+  Ref,
+  Schema,
+} from "effect";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
 import * as Cipher from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
@@ -229,7 +241,26 @@ export const jwtServiceConfig = Config.all({
  * encoding is already unpadded, per RFC 7515).
  */
 const base64UrlEncode = (data: Buffer | string): string =>
-  (typeof data === "string" ? Buffer.from(data, "utf8") : data).toString("base64url");
+  (Predicate.isString(data) ? Buffer.from(data, "utf8") : data).toString("base64url");
+
+/** A decoded JSON object (a JOSE header, a claims set, or a JWK). */
+const JsonObject = Schema.Record(Schema.String, Schema.Unknown);
+type JsonObject = typeof JsonObject.Type;
+
+/** A JSON object to and from its JSON text. */
+const JsonObjectFromString = Schema.fromJsonString(JsonObject);
+const decodeJsonObject = Schema.decodeEffect(JsonObjectFromString);
+const encodeJsonObject = Schema.encodeSync(JsonObjectFromString);
+
+/** The part of a JWKS document (RFC 7517) remote verification reads. */
+const JwksDocument = Schema.Struct({ keys: Schema.Array(JsonObject) });
+const decodeJwksDocument = Schema.decodeUnknownEffect(JwksDocument);
+
+/** A JWKS endpoint answered with a non-2xx status. */
+class JwksHttpError extends Data.TaggedError("JwksHttpError")<{
+  readonly message: string;
+  readonly status: number;
+}> {}
 
 const base64UrlDecode = (segment: string): Buffer => Buffer.from(segment, "base64url");
 
@@ -287,7 +318,7 @@ const signBytes = (pair: JwtKeyPair, data: Buffer): Effect.Effect<Buffer, JwtErr
  * Verify `signature` over `data` against a public JWK.
  */
 const verifyBytesFromJwk = (
-  jwk: Record<string, unknown>,
+  jwk: JsonObject,
   algorithm: JwtAlgorithm,
   data: Buffer,
   signature: Buffer,
@@ -301,24 +332,16 @@ const verifyBytesFromJwk = (
       }),
   });
 
-const decodeJsonSegment = (
-  segment: string,
-  what: string,
-): Effect.Effect<Record<string, unknown>, JwtError> =>
-  Effect.try({
-    try: () => {
-      const parsed: unknown = JSON.parse(base64UrlDecode(segment).toString("utf8"));
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        throw new Error(`JWT ${what} is not a JSON object`);
-      }
-      return parsed as Record<string, unknown>;
-    },
-    catch: (error) =>
-      new JwtError({
-        message: `Malformed JWT ${what}`,
-        cause: error,
-      }),
-  });
+const decodeJsonSegment = (segment: string, what: string): Effect.Effect<JsonObject, JwtError> =>
+  decodeJsonObject(base64UrlDecode(segment).toString("utf8")).pipe(
+    Effect.mapError(
+      (error) =>
+        new JwtError({
+          message: `Malformed JWT ${what}`,
+          cause: error,
+        }),
+    ),
+  );
 
 /**
  * Create a JWT service
@@ -354,8 +377,8 @@ export const make = (
      * Concurrent first-call fibers are serialized through a Deferred so only
      * one key is generated regardless of concurrency.
      */
-    const getOrCreateActiveKey: Effect.Effect<JwtKeyPair, JwtError | Errors.AuthError> = Effect.gen(
-      function* () {
+    const getOrCreateActiveKey = Effect.fn("JwtService.getOrCreateActiveKey")(
+      function* (): Effect.fn.Return<JwtKeyPair, JwtError | Errors.AuthError> {
         const active = yield* store.getActive();
         if (active) {
           if (cipher === null) return active;
@@ -400,41 +423,40 @@ export const make = (
     );
 
     return {
-      sign: Effect.fn("JwtService.sign")(
-        (user: Types.User, extraClaims?: Record<string, unknown>) =>
-          Effect.gen(function* () {
-            const pair = yield* getOrCreateActiveKey;
+      sign: Effect.fn("JwtService.sign")((user: Types.User, extraClaims?: JsonObject) =>
+        Effect.gen(function* () {
+          const pair = yield* getOrCreateActiveKey();
 
-            const now = Date.now();
-            const iat = Math.floor(now / 1000);
-            const exp = Math.floor((now + expiresIn) / 1000);
+          const now = Date.now();
+          const iat = Math.floor(now / 1000);
+          const exp = Math.floor((now + expiresIn) / 1000);
 
-            const header = {
-              alg: pair.algorithm,
-              kid: pair.id,
-              typ: "JWT",
-            };
+          const header = {
+            alg: pair.algorithm,
+            kid: pair.id,
+            typ: "JWT",
+          };
 
-            const payload: Record<string, unknown> = {
-              iss: config.issuer,
-              ...(config.audience !== undefined && { aud: config.audience }),
-              sub: getSubject(user),
-              iat,
-              exp,
-              ...config.definePayload?.(user),
-              ...extraClaims,
-            };
+          const payload: JsonObject = {
+            iss: config.issuer,
+            ...(config.audience !== undefined && { aud: config.audience }),
+            sub: getSubject(user),
+            iat,
+            exp,
+            ...config.definePayload?.(user),
+            ...extraClaims,
+          };
 
-            const signingInput = `${base64UrlEncode(JSON.stringify(header))}.${base64UrlEncode(
-              JSON.stringify(payload),
-            )}`;
-            const signature = yield* signBytes(pair, Buffer.from(signingInput, "utf8"));
+          const signingInput = `${base64UrlEncode(encodeJsonObject(header))}.${base64UrlEncode(
+            encodeJsonObject(payload),
+          )}`;
+          const signature = yield* signBytes(pair, Buffer.from(signingInput, "utf8"));
 
-            return {
-              token: `${signingInput}.${base64UrlEncode(signature)}`,
-              expiresAt: exp * 1000,
-            } satisfies JwtSignResult;
-          }).pipe(Effect.withSpan(Obs.spanNames.tokenSign)),
+          return {
+            token: `${signingInput}.${base64UrlEncode(signature)}`,
+            expiresAt: exp * 1000,
+          } satisfies JwtSignResult;
+        }).pipe(Effect.withSpan(Obs.spanNames.tokenSign)),
       ),
 
       verify: Effect.fn("JwtService.verify")((token: string) =>
@@ -445,6 +467,7 @@ export const make = (
               message: "Malformed JWT: expected three dot-separated segments",
             });
           }
+          // SAFETY: the guard above returned unless `segments` has exactly three entries.
           const [headerSegment, payloadSegment, signatureSegment] = segments as [
             string,
             string,
@@ -482,14 +505,14 @@ export const make = (
           const payload = yield* decodeJsonSegment(payloadSegment, "payload");
 
           const exp = payload["exp"];
-          if (typeof exp !== "number" || Date.now() >= exp * 1000 + leewayMs) {
+          if (!Predicate.isNumber(exp) || Date.now() >= exp * 1000 + leewayMs) {
             return yield* new JwtError({
               message: "Token has expired",
             });
           }
 
           const nbf = payload["nbf"];
-          if (typeof nbf === "number" && Date.now() < nbf * 1000 - leewayMs) {
+          if (Predicate.isNumber(nbf) && Date.now() < nbf * 1000 - leewayMs) {
             return yield* new JwtError({
               message: "Token not yet valid",
             });
@@ -581,21 +604,34 @@ export class RemoteJwksVerifier extends Context.Service<
 }
 
 interface JwksCache {
-  readonly keys: readonly Record<string, unknown>[];
+  readonly keys: ReadonlyArray<JsonObject>;
   readonly fetchedAt: number;
 }
 
+/** Wrap any failure to fetch or read the JWKS document. */
+const jwksFetchError = (cause: unknown): JwtError =>
+  new JwtError({ message: "Failed to fetch JWKS", cause });
+
 const fetchJwks = (uri: string): Effect.Effect<JwksCache, JwtError> =>
   Effect.tryPromise({
-    try: () =>
-      fetch(uri, { headers: { Accept: "application/json" } })
-        .then((res) => {
-          if (!res.ok) throw new Error(`JWKS endpoint returned HTTP ${res.status}`);
-          return res.json() as Promise<{ keys: Record<string, unknown>[] }>;
-        })
-        .then((data) => ({ keys: data.keys, fetchedAt: Date.now() })),
-    catch: (error) => new JwtError({ message: "Failed to fetch JWKS", cause: error }),
-  });
+    try: () => fetch(uri, { headers: { Accept: "application/json" } }),
+    catch: jwksFetchError,
+  }).pipe(
+    Effect.flatMap((res) =>
+      res.ok
+        ? Effect.tryPromise({ try: () => res.json(), catch: jwksFetchError })
+        : Effect.fail(
+            jwksFetchError(
+              new JwksHttpError({
+                message: `JWKS endpoint returned HTTP ${res.status}`,
+                status: res.status,
+              }),
+            ),
+          ),
+    ),
+    Effect.flatMap((body) => decodeJwksDocument(body).pipe(Effect.mapError(jwksFetchError))),
+    Effect.map((data) => ({ keys: data.keys, fetchedAt: Date.now() })),
+  );
 
 /**
  * Create a {@link RemoteJwksVerifier} that fetches the JWKS at
@@ -615,9 +651,7 @@ export const remoteJwksVerifier = (
     type FetchDeferred = Deferred.Deferred<JwksCache, JwtError>;
     const pendingFetch = yield* Ref.make<FetchDeferred | null>(null);
 
-    const getKeys = (
-      forceRefresh: boolean,
-    ): Effect.Effect<readonly Record<string, unknown>[], JwtError> =>
+    const getKeys = (forceRefresh: boolean): Effect.Effect<ReadonlyArray<JsonObject>, JwtError> =>
       Effect.gen(function* () {
         if (!forceRefresh) {
           const cached = yield* Ref.get(cacheRef);
@@ -663,6 +697,7 @@ export const remoteJwksVerifier = (
               message: "Malformed JWT: expected three dot-separated segments",
             });
           }
+          // SAFETY: the guard above returned unless `segments` has exactly three entries.
           const [headerSegment, payloadSegment, signatureSegment] = segments as [
             string,
             string,
@@ -704,7 +739,7 @@ export const remoteJwksVerifier = (
 
           const validSignature = yield* verifyBytesFromJwk(
             matchedKey,
-            alg as JwtAlgorithm,
+            alg,
             Buffer.from(`${headerSegment}.${payloadSegment}`, "utf8"),
             base64UrlDecode(signatureSegment),
           );
@@ -716,12 +751,12 @@ export const remoteJwksVerifier = (
           const payload = yield* decodeJsonSegment(payloadSegment, "payload");
 
           const exp = payload["exp"];
-          if (typeof exp !== "number" || Date.now() >= exp * 1000 + leewayMs) {
+          if (!Predicate.isNumber(exp) || Date.now() >= exp * 1000 + leewayMs) {
             return yield* new JwtError({ message: "Token has expired" });
           }
 
           const nbf = payload["nbf"];
-          if (typeof nbf === "number" && Date.now() < nbf * 1000 - leewayMs) {
+          if (Predicate.isNumber(nbf) && Date.now() < nbf * 1000 - leewayMs) {
             return yield* new JwtError({ message: "Token not yet valid" });
           }
 

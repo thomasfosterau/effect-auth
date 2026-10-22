@@ -27,6 +27,9 @@ interface Recorded {
  * @internal
  */
 export const clientAddressKeyedPlugins = (hooks: typeof Hooks.Service): ReadonlyArray<string> =>
+  // SAFETY: `Recorded` only adds an optional symbol-keyed property that nothing
+  // but `recordClientAddressKeyed` writes, always as a string array; any other
+  // `Hooks` implementation lacks it and reads as `undefined`.
   (hooks as Recorded)[ClientAddressKeyed] ?? [];
 
 /**

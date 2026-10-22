@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vite-plus/test";
-import { Context, Crypto, Effect, Layer } from "effect";
+import { assert, describe, it, expect } from "vite-plus/test";
+import { Array as Arr, Context, Crypto, Effect, Layer, Result } from "effect";
 import { Hooks, composePlugins, makePlugin } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as Errors from "./Errors.ts";
@@ -157,9 +157,8 @@ describe("Hooks - tap error handling", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("AuthError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("AuthError");
   });
 });
 
@@ -186,9 +185,8 @@ describe("Hooks - before* transform isolation: isolateTaps must not swallow deni
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("RateLimitError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("RateLimitError");
   });
 
   it("before* deny under isolateTaps: true blocks later plugins too", async () => {
@@ -238,9 +236,8 @@ describe("Hooks - transform short-circuit", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("RateLimitError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("RateLimitError");
   });
 
   it("a failing earlier transform short-circuits before later ones run", async () => {
@@ -307,13 +304,20 @@ describe("RateLimitPlugin - dependency composition + short-circuit", () => {
 
     const program = Effect.gen(function* () {
       const hooks = yield* Hooks;
-      const outcomes: Array<string> = [];
       // login preset allows 5 requests per window.
-      for (let i = 0; i < 6; i++) {
-        const result = yield* Effect.result(hooks.beforeSignIn(signIn("rate@example.com")));
-        outcomes.push(result._tag === "Success" ? "ok" : result.failure._tag);
-      }
-      return outcomes;
+      return yield* Effect.forEach(
+        Arr.range(1, 6),
+        () =>
+          Effect.result(hooks.beforeSignIn(signIn("rate@example.com"))).pipe(
+            Effect.map(
+              Result.match({
+                onSuccess: (): string => "ok",
+                onFailure: (failure) => failure._tag,
+              }),
+            ),
+          ),
+        { concurrency: 1 },
+      );
     });
 
     const outcomes = await Effect.runPromise(program.pipe(Effect.provide(layer)));
