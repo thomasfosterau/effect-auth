@@ -25,3 +25,15 @@ export {
   fixtureUserIds,
   fixtureUsers,
 } from "./Users.ts";
+export {
+  type Access,
+  type GuardedOptions,
+  GuardExpectationError,
+  type GuardMismatch,
+  type RefusalOptions,
+  type RungOptions,
+  expectAllowsOwner,
+  expectGuarded,
+  expectRefusesAnonymous,
+  expectRefusesBelow,
+} from "./GuardExpectations.ts";
