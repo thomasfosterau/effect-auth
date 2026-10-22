@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import type { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as Testing from "@thomasfosterau/effect-auth/testing";
 import { migrate, schemaStatements } from "./Schema.ts";
 import * as Sql from "./Stores.ts";
 import { layer } from "./Stores.ts";
@@ -1340,6 +1341,28 @@ const storeContract = (engine: StoreEngine): void => {
       );
       expect(result).toBe(20);
     });
+
+    // The core's published conformance suites (`@thomasfosterau/effect-auth/testing`),
+    // over the same engine. Every case mints its own ids, so they share the database.
+    const seedUser = (user: Auth.User) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)
+          VALUES (${user.id}, ${user.name ?? null}, ${user.image ?? null}, ${null}, ${JSON.stringify(user.attributes)}, ${user.createdAt.getTime()}, ${user.updatedAt.getTime()})`;
+      });
+    const suites: ReadonlyArray<Testing.ConformanceSuite<SqlError.SqlError, StoreServices>> = [
+      Testing.sessionStoreConformance({ seedUser }),
+      Testing.userStoreConformance({ seedUser }),
+      Testing.identifierStoreConformance({ seedUser }),
+      Testing.apiKeyStoreConformance({ seedUser }),
+    ];
+    for (const suite of suites) {
+      describe(`${suite.contract} conformance`, () => {
+        for (const testCase of suite.cases) {
+          it(testCase.name, () => run(testCase.run));
+        }
+      });
+    }
   });
 };
 

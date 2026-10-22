@@ -37,3 +37,14 @@ export {
   expectRefusesAnonymous,
   expectRefusesBelow,
 } from "./GuardExpectations.ts";
+export {
+  ConformanceError,
+  type ConformanceCase,
+  type ConformanceOptions,
+  type ConformanceSuite,
+  type UserStoreConformanceOptions,
+  apiKeyStoreConformance,
+  identifierStoreConformance,
+  sessionStoreConformance,
+  userStoreConformance,
+} from "./StoreConformance.ts";

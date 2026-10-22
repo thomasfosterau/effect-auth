@@ -404,3 +404,32 @@ Prefer one of these over writing your own when it fits your stack:
 - **[`packages/alchemy`](../../packages/alchemy)** — the same store coverage as `packages/sql`, over Cloudflare D1 via Alchemy v2, plus the `AuthSchema` infrastructure resource that reconciles the D1 schema on every deploy. Good default if you're already on D1/Alchemy; same "not yet covered" list as above.
 - **[`packages/drizzle`](../../packages/drizzle)** — `SessionStore` + `UserStore` + `IdentifierStore` only, over `drizzle-orm` with PostgreSQL, SQLite, and MySQL table sets (native `jsonb`/`timestamptz` on Postgres, per-dialect mappings elsewhere) instead of `packages/sql`'s TEXT/epoch-ms codecs. Stands alone (doesn't wrap `packages/sql`) — reach for it when your app already models its schema in Drizzle and you want the auth tables in the same migration pipeline; reach for `packages/sql` instead when you need the other 40 contracts too.
 - **[`KeyValueStores.ts`](../../packages/effect-auth/src/KeyValueStores.ts)** — `KeyValueStore`-backed (from `effect/persistence`) defaults for the ephemeral/token-shaped stores: OAuth state, WebAuthn challenges, rate limits, verification/reset/magic-link tokens, email OTPs, pending multi-factor challenges, and Google One Tap nonces. A natural fit for Redis, Cloudflare KV, or an in-memory map — provide any `KeyValueStore` backend (`KeyValueStore.layerMemory`, `KeyValueStore.layerFileSystem`, `KeyValueStore.layerSql`, …) underneath. Its module doc documents a deliberate read-modify-write shortcut on `RateLimitStore.increment`/`EmailOtpStore.incrementAttempts` — fine for best-effort limiting, not for the §2 MUST-be-atomic tier.
+
+## 7. Check your store against the contract
+
+`@thomasfosterau/effect-auth/testing` publishes executable conformance suites for `SessionStore`, `UserStore`, `IdentifierStore` and `ApiKeyStore`: `sessionStoreConformance`, `userStoreConformance`, `identifierStoreConformance` and `apiKeyStoreConformance`. They check the conventions in §1 (misses are `null`, deletes of unknown ids are no-ops, `Date`s and `attributes` round-trip), `IdentifierStore`'s `(type, value)` uniqueness from §2, and every rule of `replace`. `packages/sql` runs them over SQLite and PostgreSQL, and the core runs them over `IdentifierStoreKV`.
+
+The module imports no test runner. A suite is a contract name and a list of cases. Each case is an `Effect` that succeeds when your store behaves and fails with a `ConformanceError` naming the contract, the case and the mismatch. A store that fails unexpectedly fails the case with its own `AuthError`. Register the cases with your own runner:
+
+```ts
+import { describe, it } from "vitest";
+import { Effect } from "effect";
+import * as Testing from "@thomasfosterau/effect-auth/testing";
+
+// Your stores' tables reference users: write the row before a case uses its id.
+const seedUser = (user: Auth.User) => insertUserRow(user);
+
+for (const suite of [
+  Testing.sessionStoreConformance({ seedUser }),
+  Testing.userStoreConformance({ seedUser }), // UserStore only reads, so seedUser is required
+  Testing.identifierStoreConformance({ seedUser }),
+]) {
+  describe(suite.contract, () => {
+    for (const testCase of suite.cases) {
+      it(testCase.name, () => Effect.runPromise(testCase.run.pipe(Effect.provide(MyStoresLayer))));
+    }
+  });
+}
+```
+
+Every case mints its own ids and values, so the cases can share one database and need no cleanup between them. The `IdentifierStore` suite uses email identifiers only, so a store that keeps one email on the user's own row passes it too. Leave out `seedUser` when none of your tables reference users.
