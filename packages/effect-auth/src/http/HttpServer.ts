@@ -805,8 +805,9 @@ const applyRegistrationRateLimit = (
  * raises, or `undefined` when the services are consistent with the options:
  *
  * - The `Hooks` include a plugin that keys on the client address
- *   (`IPRateLimitPlugin`) and there is no address source: no `trustedProxy`, and
- *   no `allowMissingClientIp: true`. A Web `Request` has no socket address.
+ *   (`IPRateLimitPlugin`), or the OIDC provider enables dynamic client
+ *   registration, and there is no address source: no `trustedProxy`, and no
+ *   `allowMissingClientIp: true`. A Web `Request` has no socket address.
  * - A limit is configured with no `RateLimiter`: `ipRateLimit`, dynamic client
  *   registration, or the device user-code limit (whenever the device service is
  *   present, unless it opted out with `allowMissingRateLimiter`).
@@ -832,10 +833,26 @@ const servicesConfigError = (
     }
   }
 
+  // The registration limit keys on the `ClientIP` this handler resolves from
+  // `trustedProxy`, so registration needs the same address source (#388, #398).
+  const oidc = Context.getOption(services, OidcProviderService);
+  if (
+    Option.isSome(oidc) &&
+    oidc.value.dynamicRegistration.enabled &&
+    options.trustedProxy === undefined &&
+    options.allowMissingClientIp !== true
+  ) {
+    return new ClientAddressConfigError({
+      message:
+        "Dynamic client registration (POST /register) is rate limited per client address, and a Web Request has none under Http.make or Http.makeAsync. " +
+        "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address, " +
+        "or set allowMissingClientIp: true to accept that address-less registrations are refused.",
+    });
+  }
+
   if (Option.isSome(Context.getOption(services, RateLimiter))) return undefined;
   const configured: Array<string> = [];
   if (options.ipRateLimit !== undefined) configured.push("ipRateLimit");
-  const oidc = Context.getOption(services, OidcProviderService);
   if (Option.isSome(oidc) && oidc.value.dynamicRegistration.enabled) {
     configured.push("the dynamic client registration limit (POST /register)");
   }
@@ -4322,8 +4339,7 @@ const findEndpointRule = (
   method: string,
 ): EndpointRateLimitRule | undefined => rules.find((r) => matchesEndpointRule(r, pathname, method));
 
-// The class lives in Errors.ts, shared with the OIDC layer (#388); its TSDoc
-// says when each of them raises it.
+// The class lives in Errors.ts; its TSDoc says when each check raises it.
 export { ClientAddressConfigError } from "../Errors.ts";
 
 // The class lives in Errors.ts with the other startup errors; `make` throws it
@@ -4449,12 +4465,11 @@ export interface AuthWebHandlerOptions {
    * behaviour for address-less requests, and prefer {@link trustedProxy}, which
    * gives every request an address when the edge provides one.
    *
-   * The dynamic client registration limit (`POST /register`) declares its
-   * address source on the OIDC provider (`dynamicRegistration.trustedProxy`, or
-   * `dynamicRegistration.allowMissingClientIp`), and the OIDC layer checks it
-   * when it builds; this option does not apply to it. A registration with no
-   * address is refused with `429` whatever this option says, and is never
-   * counted under a shared bucket.
+   * The same goes for the dynamic client registration limit (`POST /register`):
+   * with registration enabled in the `services`' `OidcProviderService` and
+   * neither option set, `make` throws `ClientAddressConfigError`. A
+   * registration with no address is refused with `429`, and is never counted
+   * under a shared bucket.
    */
   readonly allowMissingClientIp?: boolean | undefined;
   /**
@@ -4810,15 +4825,15 @@ const serve = (
  * build. It throws, so the app fails to start, when the configuration cannot be
  * served as written:
  *
- * - {@link ClientAddressConfigError}: `ipRateLimit`, or an `IPRateLimitPlugin`
- *   in the `services` `Hooks`, with neither `trustedProxy` nor
+ * - {@link ClientAddressConfigError}: `ipRateLimit`, an `IPRateLimitPlugin`
+ *   in the `services` `Hooks`, or dynamic client registration enabled in the
+ *   `services`' `OidcProviderService`, with neither `trustedProxy` nor
  *   `allowMissingClientIp: true`.
  * - `RateLimiterConfigError`: `ipRateLimit`, dynamic client registration or a
  *   `DeviceAuthorizationService` (without `allowMissingRateLimiter: true`) with
  *   no `RateLimiter` in `services`.
- * - Any failure of the `services` build itself, such as the OIDC layer's
- *   `ClientAddressConfigError`: the failure's error, or for a defect the defect
- *   itself, as `Effect.runSync` throws.
+ * - Any failure of the `services` build itself: the failure's error, or for a
+ *   defect the defect itself, as `Effect.runSync` throws.
  * - {@link ServicesBuildPendingError}, only with `strict: true`: the build had
  *   not finished when `make` had run it synchronously (below).
  *
@@ -4958,15 +4973,15 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  * so `services` is built once, and `dispose` releases it. The promise rejects,
  * so the app fails to start, with the error `make` would throw:
  *
- * - {@link ClientAddressConfigError}: `ipRateLimit`, or an `IPRateLimitPlugin`
- *   in the `services` `Hooks`, with neither `trustedProxy` nor
+ * - {@link ClientAddressConfigError}: `ipRateLimit`, an `IPRateLimitPlugin`
+ *   in the `services` `Hooks`, or dynamic client registration enabled in the
+ *   `services`' `OidcProviderService`, with neither `trustedProxy` nor
  *   `allowMissingClientIp: true`.
  * - `RateLimiterConfigError`: `ipRateLimit`, dynamic client registration or a
  *   `DeviceAuthorizationService` (without `allowMissingRateLimiter: true`) with
  *   no `RateLimiter` in `services`.
- * - Any failure of the `services` build itself, such as the OIDC layer's
- *   `ClientAddressConfigError`: the failure's error, or for a defect the defect
- *   itself, as `Effect.runPromise` rejects.
+ * - Any failure of the `services` build itself: the failure's error, or for a
+ *   defect the defect itself, as `Effect.runPromise` rejects.
  *
  * Before it rejects, `makeAsync` releases what the build acquired and waits
  * for every finalizer, asynchronous ones included. A finalizer that fails is

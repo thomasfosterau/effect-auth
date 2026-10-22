@@ -573,10 +573,9 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
  * - `Http.make` throws it synchronously when `ipRateLimit` is configured with no
  *   `trustedProxy` and no `allowMissingClientIp: true` (#358), and when the
  *   `Hooks` in `services` include `IPRateLimitPlugin` with neither of them
- *   (#389).
- * - `OidcProviderService.layer` (and `OidcProvider.make`) fails with it when
- *   `dynamicRegistration` is set with no `dynamicRegistration.trustedProxy` and
- *   no `dynamicRegistration.allowMissingClientIp: true` (#388).
+ *   (#389), and when the `services` include an `OidcProviderService` with
+ *   dynamic client registration enabled and there is neither of them (#388,
+ *   #398).
  *
  * `Http.makeAsync` rejects with the same errors `Http.make` throws, so the app
  * fails to start either way.

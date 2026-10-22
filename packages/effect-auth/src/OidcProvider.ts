@@ -18,11 +18,10 @@
  * @module oidc-provider
  */
 import { Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
-import { AuthError, ClientAddressConfigError } from "./Errors.ts";
+import { AuthError } from "./Errors.ts";
 import { JwtService } from "./Jwt.ts";
 import * as Obs from "./Observability.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import type { TrustedProxyConfig } from "./ClientIP.ts";
 import type { RateLimitConfig } from "./RateLimit.ts";
 import { UserStore } from "./UserStore.ts";
 import { anyEmail, IdentifierStore } from "./Identifier.ts";
@@ -362,25 +361,15 @@ export interface OidcDynamicRegistrationConfig {
    * `RateLimiterConfigError`, and `Http.makeAsync` rejects with it. The group
    * layers composed outside `Http.make` and `Http.makeAsync` refuse every
    * registration with `429`.
+   *
+   * The limit keys on the client address in the `ClientIP` service, which
+   * `Http.make` and `Http.makeAsync` resolve from their own `trustedProxy`.
+   * They fail at startup with `ClientAddressConfigError` when registration is
+   * enabled with neither `trustedProxy` nor their `allowMissingClientIp: true`.
+   * A registration with no address is refused with `429`, and is never counted
+   * under a shared bucket.
    */
   readonly rateLimit?: RateLimitConfig;
-  /**
-   * The client-address source the registration rate limit keys on. Declare the
-   * source passed to `Http.make` or `Http.makeAsync` as `trustedProxy` (for example
-   * `ClientIP.cloudflare`), so {@link OidcProviderService.layer} can check at
-   * build time that a limited registration has an address to key on. This layer
-   * does not resolve addresses itself. Without `trustedProxy`, or the
-   * {@link allowMissingClientIp} opt-out, the layer fails with
-   * `ClientAddressConfigError`.
-   */
-  readonly trustedProxy?: TrustedProxyConfig | undefined;
-  /**
-   * Accept that registrations may have no client address, so `trustedProxy` can
-   * be omitted. This opts out of the build-time check only. The limit still
-   * runs: a registration with no address is refused with `429`, and is never
-   * counted under a shared bucket. Default `false`.
-   */
-  readonly allowMissingClientIp?: boolean | undefined;
 }
 
 /**
@@ -720,7 +709,7 @@ const isAllowedDynamicRedirectUri = (uri: string, extraSchemes: readonly string[
  * ```ts
  * import assert from "node:assert/strict"
  * import { Redacted } from "effect"
- * import { ClientIP, mcpProviderPreset, OidcProviderService } from "@thomasfosterau/effect-auth"
+ * import { mcpProviderPreset, OidcProviderService } from "@thomasfosterau/effect-auth"
  *
  * const config = mcpProviderPreset({
  *   issuer: "https://mcp.example.com/api/auth",
@@ -728,8 +717,6 @@ const isAllowedDynamicRedirectUri = (uri: string, extraSchemes: readonly string[
  *   consentPage: "https://mcp.example.com/consent",
  *   dynamicRegistration: {
  *     initialAccessToken: Redacted.make("example-initial-access-token"),
- *     // The same address source as the app's Http.make `trustedProxy`.
- *     trustedProxy: ClientIP.cloudflare,
  *   },
  * })
  *
@@ -767,7 +754,7 @@ export const make = (
   config: OidcProviderConfig,
 ): Effect.Effect<
   typeof OidcProviderService.Service,
-  ClientAddressConfigError,
+  never,
   | OidcClientStore
   | OidcCodeStore
   | OidcConsentStore
@@ -778,23 +765,6 @@ export const make = (
   | Crypto.Crypto
 > =>
   Effect.gen(function* () {
-    // Build-time check (#388): dynamic registration is rate limited per client
-    // address. With no declared address source and no opt-out there is nothing
-    // to key the limit on, so fail here, not per request.
-    const registration = config.dynamicRegistration;
-    if (
-      registration !== undefined &&
-      registration.trustedProxy === undefined &&
-      registration.allowMissingClientIp !== true
-    ) {
-      return yield* new ClientAddressConfigError({
-        message:
-          "dynamicRegistration is rate limited per client address, and a Web Request has none unless the app declares a source. " +
-          "Set dynamicRegistration.trustedProxy to the source passed to Http.make or Http.makeAsync (for example ClientIP.cloudflare), " +
-          "or set dynamicRegistration.allowMissingClientIp: true to accept that address-less registrations are refused.",
-      });
-    }
-
     const codeExpiresIn = config.codeExpiresIn ?? 10 * 60 * 1000;
     const accessTokenExpiresIn = config.accessTokenExpiresIn ?? 60 * 60 * 1000;
     const refreshTokenExpiresIn = config.refreshTokenExpiresIn ?? 30 * 24 * 60 * 60 * 1000;

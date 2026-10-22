@@ -461,10 +461,7 @@ describe("OidcProviderService dynamic client registration", () => {
     );
     const config = {
       ...baseConfig,
-      // Registration is rate limited per client address, so the build needs a source (#388).
-      ...(dynamicRegistration !== undefined && {
-        dynamicRegistration: { trustedProxy: ClientIP.cloudflare, ...dynamicRegistration },
-      }),
+      ...(dynamicRegistration !== undefined && { dynamicRegistration }),
     };
     const service = Effect.runSync(OidcProvider.make(config).pipe(Effect.provide(layer)));
     return { stores, layer, service };
@@ -515,30 +512,10 @@ describe("OidcProviderService dynamic client registration", () => {
     return Effect.scoped(Layer.build(OidcProviderService.layer(config).pipe(Layer.provide(layer))));
   };
 
-  it("fails the layer build when registration has no client-address source and no opt-out", async () => {
-    const err = await Effect.runPromise(Effect.flip(buildProvider({})));
-    expect(err).toBeInstanceOf(ClientAddressConfigError);
-    expect(err.message).toContain("dynamicRegistration.trustedProxy");
-    expect(err.message).toContain("allowMissingClientIp");
-  });
-
-  it("fails the provider build the same way, before any request", () => {
-    const { layer } = setup();
-    const err = Effect.runSync(
-      Effect.flip(
-        OidcProvider.make({ ...baseConfig, dynamicRegistration: {} }).pipe(Effect.provide(layer)),
-      ),
-    );
-    expect(err).toBeInstanceOf(ClientAddressConfigError);
-  });
-
-  it("builds with a declared trustedProxy or with the allowMissingClientIp opt-out", async () => {
-    await expect(
-      Effect.runPromise(buildProvider({ trustedProxy: ClientIP.cloudflare })),
-    ).resolves.toBeDefined();
-    await expect(
-      Effect.runPromise(buildProvider({ allowMissingClientIp: true })),
-    ).resolves.toBeDefined();
+  it("builds with dynamic registration and no address source of its own (#398)", async () => {
+    // The registration limit reads the address from the ClientIP that Http.make
+    // provides, which checks the address source itself.
+    await expect(Effect.runPromise(buildProvider({}))).resolves.toBeDefined();
   });
 
   it("builds without dynamic registration, which needs no address source", async () => {
@@ -774,33 +751,22 @@ describe("OidcProviderService dynamic client registration", () => {
     expect(custom.dynamicRegistration?.management).toBe(true);
   });
 
-  it("mcpProviderPreset fails the layer build without a client-address source", async () => {
-    // The preset always enables registration, so an MCP provider declares an
-    // address source or opts out (#388).
+  it("mcpProviderPreset builds with no address source of its own (#398)", async () => {
     const { layer } = setup();
     const build = (config: OidcProviderConfig) =>
       Effect.scoped(Layer.build(OidcProviderService.layer(config).pipe(Layer.provide(layer))));
 
-    const err = await Effect.runPromise(Effect.flip(build(mcpProviderPreset(baseConfig))));
-    expect(err).toBeInstanceOf(ClientAddressConfigError);
-    expect(err.message).toContain("dynamicRegistration.trustedProxy");
-
-    await expect(
-      Effect.runPromise(
-        build(
-          mcpProviderPreset({
-            ...baseConfig,
-            dynamicRegistration: { trustedProxy: ClientIP.cloudflare },
-          }),
-        ),
-      ),
-    ).resolves.toBeDefined();
+    await expect(Effect.runPromise(build(mcpProviderPreset(baseConfig)))).resolves.toBeDefined();
   });
 });
 
 // -----------------------------------------------------------------------------
 // HTTP layer: full end-to-end flow
 // -----------------------------------------------------------------------------
+
+/** `Http.make`'s startup error for registration with no address source (#398). */
+const REGISTRATION_ADDRESS_ERROR =
+  /Dynamic client registration \(POST \/register\) is rate limited per client address/;
 
 /**
  * A web handler wired with the OIDC provider endpoints over in-memory stores.
@@ -813,10 +779,13 @@ const makeHttpFixture = (
     readonly rateLimit?: boolean;
     readonly trustedProxy?: TrustedProxyConfig;
     /**
-     * `false` leaves both `dynamicRegistration.trustedProxy` and its
-     * `allowMissingClientIp` opt-out unset, so the OIDC layer fails its build.
+     * `false` passes `Http.make` neither `trustedProxy` nor
+     * `allowMissingClientIp`, so a registration-enabled handler fails its
+     * startup check.
      */
     readonly declareRegistrationAddress?: boolean;
+    /** Pass `allowMissingClientIp: true` to `Http.make`. */
+    readonly allowMissingClientIp?: boolean;
     /**
      * Add a build step that waits on a promise, as a database connection does,
      * so the services finish building only after `Http.make` returns.
@@ -934,23 +903,18 @@ const makeHttpFixture = (
 
   // Registration is rate limited per client address and needs a RateLimiter (#389),
   // so a registration-enabled fixture gets Cloudflare's address source and a limiter
-  // unless it says otherwise. The declared source is the Http.make one (#388).
+  // unless it says otherwise. The source is Http.make's own (#388, #398).
   const registrationEnabled = options.dynamicRegistration !== undefined;
   const addressSource: TrustedProxyConfig | undefined =
-    options.trustedProxy ?? (registrationEnabled ? ClientIP.cloudflare : undefined);
+    options.declareRegistrationAddress === false
+      ? undefined
+      : (options.trustedProxy ?? (registrationEnabled ? ClientIP.cloudflare : undefined));
   const oidcServiceLayer = OidcProviderService.layer({
     issuer: ISSUER,
     loginPage: "http://idp.test/login",
     consentPage: "http://idp.test/consent",
     ...(options.dynamicRegistration !== undefined && {
-      dynamicRegistration: {
-        ...options.dynamicRegistration,
-        ...(options.declareRegistrationAddress === false
-          ? {}
-          : addressSource !== undefined
-            ? { trustedProxy: addressSource }
-            : { allowMissingClientIp: true }),
-      },
+      dynamicRegistration: options.dynamicRegistration,
     }),
   }).pipe(Layer.provide(oidcDeps));
 
@@ -1010,6 +974,7 @@ const makeHttpFixture = (
       services: limited ? withOidcLimiter : withOidc,
       cookie: { secure: false },
       ...(addressSource !== undefined && { trustedProxy: addressSource }),
+      ...(options.allowMissingClientIp === true && { allowMissingClientIp: true }),
     }).handler,
     handlerWithoutOidc: HttpServer.make({ services: withoutOidc, cookie: { secure: false } })
       .handler,
@@ -2150,19 +2115,32 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
     );
   });
 
-  it("throws the OIDC layer's ClientAddressConfigError from Http.make (#402)", () => {
-    // The OIDC layer fails its build when registration has no address source
-    // (#388). The build runs inside Http.make, which throws that failure, so the
-    // app fails to start rather than reject every request.
+  it("throws ClientAddressConfigError from Http.make when registration has no address source (#398)", () => {
+    // The registration limit keys on the ClientIP that Http.make resolves from
+    // its trustedProxy, so Http.make checks that source, and the app fails to
+    // start rather than refuse every registration.
     const make = () =>
       makeHttpFixture({ dynamicRegistration: {}, declareRegistrationAddress: false });
     expect(make).toThrow(ClientAddressConfigError);
-    expect(make).toThrow(/dynamicRegistration\.trustedProxy/);
+    expect(make).toThrow(REGISTRATION_ADDRESS_ERROR);
   });
 
-  it("rejects Http.makeAsync with the OIDC layer's ClientAddressConfigError when services build asynchronously (#400)", async () => {
-    // With an asynchronous build step, the OIDC layer's failure arrives after
-    // Http.make returns, so make cannot throw it: every request rejects with it.
+  it("builds with Http.make's allowMissingClientIp opt-out, and refuses address-less registrations (#398)", async () => {
+    const fx = makeHttpFixture({
+      dynamicRegistration: {},
+      declareRegistrationAddress: false,
+      allowMissingClientIp: true,
+    });
+
+    const res = await fx.handler(register({ "cf-connecting-ip": "203.0.113.9" }));
+
+    expect(res.status).toBe(429);
+    expect([...fx.rateLimitKeys]).toEqual([]);
+  });
+
+  it("rejects Http.makeAsync with ClientAddressConfigError when registration has no address source and services build asynchronously (#400)", async () => {
+    // With an asynchronous build step, the check runs only after Http.make
+    // returns, so make cannot throw it: every request rejects with it.
     const fx = makeHttpFixture({
       dynamicRegistration: {},
       declareRegistrationAddress: false,
@@ -2177,7 +2155,7 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
       cookie: { secure: false },
     });
     await expect(constructed).rejects.toThrow(ClientAddressConfigError);
-    await expect(constructed).rejects.toThrow(/dynamicRegistration\.trustedProxy/);
+    await expect(constructed).rejects.toThrow(REGISTRATION_ADDRESS_ERROR);
   });
 
   it("refuses registrations with 429 outside Http.make when no RateLimiter is in scope", async () => {
