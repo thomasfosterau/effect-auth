@@ -4,8 +4,8 @@
  *
  * `PGlite.create()` runs `initdb` inside the WASM module before it opens a
  * database: seconds of CPU on an idle machine, and on a loaded one enough to
- * exceed the 10 s hook timeout that a test file's `beforeAll` runs under
- * (Vitest's default; this package sets neither `hookTimeout` nor `testTimeout`).
+ * exceed the hook timeout that a test file's `beforeAll` runs under (this
+ * package's 30 s `hookTimeout`, #344).
  * Vitest applies no timeout to `globalSetup`, so that cost belongs here, in the
  * main process, and is paid once. A test file then starts each database from
  * this dump with {@link migratedPglite}, which skips `initdb` (and the
