@@ -848,7 +848,11 @@ export const make = (
 
     // --- Writes ------------------------------------------------------------
 
-    /** Claim an email for a user as IdP-verified, or report a SCIM conflict. */
+    /**
+     * Claim an email for a user as IdP-verified, or report a SCIM conflict:
+     * another user's address, or one this user cannot hold beside the ones it
+     * has (a store that keeps one email per user), is `409 uniqueness`.
+     */
     const claimEmail = (userId: string, email: string) =>
       claimIdentifier(
         identifiers,
@@ -861,9 +865,11 @@ export const make = (
           verifiedAt: new Date(),
         }),
       ).pipe(
-        Effect.catchTag("IdentifierTakenError", () =>
-          Effect.fail(conflict(`The email "${email}" is already in use`)),
-        ),
+        Effect.catchTags({
+          IdentifierTakenError: () =>
+            Effect.fail(conflict(`The email "${email}" is already in use`)),
+          IdentifierRefusedError: (error) => Effect.fail(conflict(error.message)),
+        }),
       );
 
     const writeAttributes = (user: Types.User, attributes: Types.Attributes) =>

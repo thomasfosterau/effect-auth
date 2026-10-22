@@ -412,9 +412,9 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
         }),
       );
 
-      expect(result.username._tag).toBe("AuthError");
+      expect(result.username._tag).toBe("IdentifierRefusedError");
       expect(result.username.message).toContain("email identifiers only");
-      expect(result.phone._tag).toBe("AuthError");
+      expect(result.phone._tag).toBe("IdentifierRefusedError");
       expect(result.usernameLookup).toBeNull();
       expect(result.phoneLookup).toBeNull();
       expect(result.listed.map((identifier) => identifier.type)).toEqual(["email"]);
@@ -430,7 +430,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
             store.create(emailFor(USER.ada, "ada@work.example.com")),
           );
           // claimIdentifier only reports IdentifierTakenError for an address
-          // another user holds; this refusal stays an AuthError.
+          // another user holds; this refusal passes through as it is.
           const claim = yield* Effect.flip(
             Auth.claimIdentifier(store, emailFor(USER.ada, "ada@work.example.com")),
           );
@@ -443,9 +443,9 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
         }),
       );
 
-      expect(result.second._tag).toBe("AuthError");
+      expect(result.second._tag).toBe("IdentifierRefusedError");
       expect(result.second.message).toContain("one email identifier per user");
-      expect(result.claim._tag).toBe("AuthError");
+      expect(result.claim._tag).toBe("IdentifierRefusedError");
       expect(result.listed.map((identifier) => identifier.value)).toEqual(["ada@example.com"]);
       expect(result.secondLookup).toBeNull();
     });
@@ -681,7 +681,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
         }),
       );
 
-      expect(result._tag).toBe("AuthError");
+      expect(result._tag).toBe("IdentifierRefusedError");
       expect(await harness.readUserRow(USER.ada)).toEqual({
         email: "ada@example.com",
         emailVerified: false,

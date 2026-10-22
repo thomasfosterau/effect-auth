@@ -25,6 +25,7 @@ import {
   IdentifierStore,
   makeIdentifier,
   primaryEmail,
+  refusalAuthError,
 } from "./Identifier.ts";
 import { UserStore } from "./UserStore.ts";
 import { PasswordHasher } from "./password/Password.ts";
@@ -237,9 +238,11 @@ const make = (
             verified: true,
           }),
         ).pipe(
-          Effect.catchTag("IdentifierTakenError", () =>
-            Effect.fail(new UsernameError({ message: "Username is already taken" })),
-          ),
+          Effect.catchTags({
+            IdentifierTakenError: () =>
+              Effect.fail(new UsernameError({ message: "Username is already taken" })),
+            IdentifierRefusedError: (error) => Effect.fail(refusalAuthError(error)),
+          }),
         );
 
         return result;
@@ -339,9 +342,11 @@ const make = (
           identifiers,
           makeIdentifier({ userId, type: "username", value: username, verified: true }),
         ).pipe(
-          Effect.catchTag("IdentifierTakenError", () =>
-            Effect.fail(new UsernameError({ message: "Username is already taken" })),
-          ),
+          Effect.catchTags({
+            IdentifierTakenError: () =>
+              Effect.fail(new UsernameError({ message: "Username is already taken" })),
+            IdentifierRefusedError: (error) => Effect.fail(refusalAuthError(error)),
+          }),
         );
       }),
     };
