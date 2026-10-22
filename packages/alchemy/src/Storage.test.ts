@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Order } from "effect";
+import { Array as Arr, Effect, Layer, Order, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
@@ -256,11 +256,12 @@ describe("D1-backed effect-auth storage", () => {
 // The core's published conformance suites (`@thomasfosterau/effect-auth/testing`),
 // over the D1 stores: a fresh database per case.
 describe("D1-backed effect-auth storage: conformance", () => {
+  const encodeAttributes = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
   const seedUser = (user: Auth.User) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* sql`INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)
-        VALUES (${user.id}, ${user.name ?? null}, ${user.image ?? null}, ${null}, ${JSON.stringify(user.attributes)}, ${user.createdAt.getTime()}, ${user.updatedAt.getTime()})`;
+        VALUES (${user.id}, ${user.name ?? null}, ${user.image ?? null}, ${null}, ${encodeAttributes(user.attributes)}, ${user.createdAt.getTime()}, ${user.updatedAt.getTime()})`;
     });
   for (const suite of [
     Testing.sessionStoreConformance({ seedUser }),

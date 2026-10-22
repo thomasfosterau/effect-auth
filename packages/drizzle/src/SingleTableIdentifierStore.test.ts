@@ -256,11 +256,11 @@ conformance(
   "single-table PostgreSQL",
   Testing.identifierStoreConformance({
     seedUser: (user) =>
-      Effect.promise(() =>
+      Effect.tryPromise(() =>
         drizzle(client)
           .insert(appUsers)
           .values({ userId: user.id, createdAt: user.createdAt, updatedAt: user.updatedAt }),
-      ),
+      ).pipe(Effect.orDie),
   }),
   (effect) => runWith(usersMapping, () => effect),
 );

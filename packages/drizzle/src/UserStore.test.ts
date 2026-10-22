@@ -122,7 +122,7 @@ conformance(
   "PostgreSQL",
   Testing.userStoreConformance({
     seedUser: (user) =>
-      Effect.promise(() =>
+      Effect.tryPromise(() =>
         drizzle(client)
           .insert(tables.users)
           .values({
@@ -135,7 +135,7 @@ conformance(
             updatedAt: user.updatedAt,
           })
           .execute(),
-      ),
+      ).pipe(Effect.orDie),
   }),
   (effect) => runWithDatabase(() => effect),
 );

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
+import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { EmailPasswordStore } from "./EmailPassword.ts";
 import { memoryEmailPasswordStore } from "../testing/MemoryStores.ts";
 import { Context, Crypto, Effect, Predicate, Result, Tracer } from "effect";
