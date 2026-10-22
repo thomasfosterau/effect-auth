@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
+import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
 import { Effect, Layer } from "effect";
 import { AuthError, UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
@@ -9,7 +10,7 @@ import { UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
-import { EmailPasswordService } from "./email/EmailPassword.ts";
+import { EmailPasswordService, EmailPasswordStore } from "./email/EmailPassword.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";
 import { PasswordResetService } from "./password/PasswordReset.ts";
@@ -126,6 +127,8 @@ const makeStores = (
     delete: (state: string) => Effect.sync(() => void states.delete(state)),
   };
 
+  const passwordHashes = new Map<string, string>();
+  const sessionsCleared: Array<string> = [];
   const sessionManager: typeof SessionService.Service = {
     createSession: (userId) =>
       Effect.succeed({
@@ -138,7 +141,7 @@ const makeStores = (
       }),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
-    invalidateUserSessions: () => Effect.void,
+    invalidateUserSessions: (userId) => Effect.sync(() => void sessionsCleared.push(userId)),
     listSessions: () => Effect.succeed([]),
     revokeOtherSessions: () => Effect.void,
     setSessionAttributes: () => Effect.die("unused"),
@@ -191,6 +194,9 @@ const makeStores = (
     Layer.succeed(IdentifierStore)(identifiers),
     Layer.succeed(UserStore)(coreUserStore),
     Layer.succeed(SessionService)(sessionManager),
+    Layer.succeed(EmailPasswordStore)(
+      memoryEmailPasswordStore({ users: new Map(), passwordHashes }),
+    ),
     Layer.succeed(OrganizationStore)(orgStore),
     Layer.succeed(OrganizationDomainStore)(domainStore),
     // The organization service is what SSO asks for JIT membership; wiring it
@@ -255,6 +261,8 @@ const makeStores = (
     organizations,
     seedOrganization,
     seedDomain,
+    passwordHashes,
+    sessionsCleared,
   };
 };
 
@@ -376,6 +384,36 @@ describe("SsoService", () => {
     };
     return { ...stores, signIn };
   };
+
+  it("clears a squatter's password and sessions when the IdP proves the address (#440)", async () => {
+    const fx = jitFixture();
+    // A squatter signed up with the address and a password they know; it was
+    // never verified.
+    const now = new Date();
+    fx.users.set("user-squat", {
+      id: "user-squat",
+      createdAt: now,
+      updatedAt: now,
+      attributes: {},
+    });
+    await Effect.runPromise(
+      fx.identifiers.create(
+        makeIdentifier({ userId: "user-squat", type: "email", value: "worker@acme.test" }),
+      ),
+    );
+    fx.passwordHashes.set("user-squat", "squatter-hash");
+
+    const result = await fx.signIn();
+
+    expect(result.isNewUser).toBe(false);
+    expect(result.user.id).toBe("user-squat");
+    expect(fx.passwordHashes.has("user-squat")).toBe(false);
+    expect(fx.sessionsCleared).toEqual(["user-squat"]);
+    const identifier = await Effect.runPromise(
+      fx.identifiers.getByValue("email", "worker@acme.test"),
+    );
+    expect(identifier?.verified).toBe(true);
+  });
 
   it("provisions JIT membership from a verified domain when the organization opts in", async () => {
     const fx = jitFixture();
@@ -990,6 +1028,7 @@ const makeHttpFixture = () => {
     UserService.layer().pipe(Layer.provide(Layer.succeed(UserServiceStore)(userServiceStore))),
     Layer.succeed(UserServiceStore)(userServiceStore),
     Layer.succeed(IdentifierStore)(identifierStore),
+    Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     Hooks.Default,
     Layer.succeed(AuthLifecycleService)(undefined as never),
     Layer.succeed(EmailPasswordService)(undefined as never),

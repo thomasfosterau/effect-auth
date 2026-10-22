@@ -10,6 +10,8 @@
  * session.
  */
 import { describe, expect, it } from "vite-plus/test";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
 import { Effect, Layer } from "effect";
 import * as Cipher from "./Cipher.ts";
 import { UserNotFoundError } from "./Errors.ts";
@@ -99,6 +101,7 @@ const makeWorld = (type: IdentifierType, value: string) => {
     Layer.succeed(IdentifierStore)(identifiers),
     Layer.succeed(UserStore)({ get: (userId) => Effect.sync(() => users.get(userId) ?? null) }),
     Layer.succeed(SessionService)(sessionManager),
+    Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     Hooks.Default,
     PlatformCrypto.layer,
   );

@@ -20,6 +20,8 @@ import {
 import type { HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService } from "../SessionService.ts";
+import { EmailPasswordStore } from "./EmailPassword.ts";
+import { proveAddress } from "../FirstProof.ts";
 import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
@@ -166,7 +168,14 @@ export interface EmailOtpCheckResult {
 }
 
 /**
- * Email OTP service
+ * Email OTP service.
+ *
+ * Requires `EmailOtpStore`, `EmailOtpUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore` and `Crypto`.
+ *
+ * Promoting an address held unverified to verified first clears the
+ * account's password and revokes its sessions, through `EmailPasswordStore`
+ * (#440): the account was created by a sign-up that proved nothing about the
+ * address, so its password may be someone else's.
  */
 export class EmailOtpService extends Context.Service<
   EmailOtpService,
@@ -293,7 +302,13 @@ export const make = (
 ): Effect.Effect<
   typeof EmailOtpService.Service,
   never,
-  EmailOtpStore | EmailOtpUserStore | IdentifierStore | UserStore | SessionService | Crypto.Crypto
+  | EmailOtpStore
+  | EmailOtpUserStore
+  | IdentifierStore
+  | UserStore
+  | SessionService
+  | EmailPasswordStore
+  | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
@@ -306,6 +321,7 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
+    const passwords = yield* EmailPasswordStore;
     const crypto = yield* Crypto.Crypto;
 
     /**
@@ -482,8 +498,10 @@ export const make = (
           );
           user = created.user;
         } else if (identifier !== null && !identifier.verified) {
-          // The OTP proves ownership — promote the identifier to verified.
-          yield* identifiers.setVerified(identifier.id, new Date());
+          // The OTP proves ownership — promote the identifier to verified,
+          // first clearing the password and sessions an earlier, unproven
+          // sign-up left on the account (#440).
+          yield* proveAddress({ identifiers, passwords, sessions: sessionManager }, identifier);
         }
 
         const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);

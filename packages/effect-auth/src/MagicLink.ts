@@ -20,6 +20,8 @@ import {
 import { type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { proveAddress } from "./FirstProof.ts";
 import { hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { normalizeEmail } from "./utils.ts";
@@ -126,7 +128,14 @@ export interface MagicLinkResult {
 }
 
 /**
- * Magic link service
+ * Magic link service.
+ *
+ * Requires `MagicLinkStore`, `MagicLinkUserStore`, `IdentifierStore`, `UserStore`, `SessionService`, `EmailPasswordStore` and `Crypto`.
+ *
+ * Promoting an address held unverified to verified first clears the
+ * account's password and revokes its sessions, through `EmailPasswordStore`
+ * (#440): the account was created by a sign-up that proved nothing about the
+ * address, so its password may be someone else's.
  */
 export class MagicLinkService extends Context.Service<
   MagicLinkService,
@@ -191,7 +200,13 @@ export const make = (
 ): Effect.Effect<
   typeof MagicLinkService.Service,
   never,
-  MagicLinkStore | MagicLinkUserStore | IdentifierStore | UserStore | SessionService | Crypto.Crypto
+  | MagicLinkStore
+  | MagicLinkUserStore
+  | IdentifierStore
+  | UserStore
+  | SessionService
+  | EmailPasswordStore
+  | Crypto.Crypto
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
@@ -202,6 +217,7 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
+    const passwords = yield* EmailPasswordStore;
     const crypto = yield* Crypto.Crypto;
 
     return {
@@ -323,8 +339,10 @@ export const make = (
           );
           user = created.user;
         } else if (identifier !== null && !identifier.verified) {
-          // The link proves ownership — promote the identifier to verified.
-          yield* identifiers.setVerified(identifier.id, new Date());
+          // The link proves ownership — promote the identifier to verified,
+          // first clearing the password and sessions an earlier, unproven
+          // sign-up left on the account (#440).
+          yield* proveAddress({ identifiers, passwords, sessions: sessionManager }, identifier);
         }
 
         const session = yield* sessionManager.createSession(user.id, options?.sessionAttributes);

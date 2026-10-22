@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
 import { Context, Crypto, Effect } from "effect";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -157,6 +159,10 @@ const sessionConfig: SessionConfig = {
   },
 };
 
+/** Password hashes, so a test can see a first proof clear one (#440). */
+const passwordHashes = new Map<string, string>();
+const emailPasswordStore = memoryEmailPasswordStore({ users: new Map(), passwordHashes });
+
 const makeTestContext = async () => {
   const sessionManager = await Effect.runPromise(
     Effect.provide(
@@ -169,7 +175,10 @@ const makeTestContext = async () => {
   );
 
   return Context.merge(
-    Context.make(SessionService, sessionManager),
+    Context.merge(
+      Context.make(SessionService, sessionManager),
+      Context.make(EmailPasswordStore, emailPasswordStore),
+    ),
     Context.merge(
       Context.merge(
         Context.make(MagicLinkStore, magicLinkStore),
@@ -197,6 +206,7 @@ describe("MagicLinkService", () => {
     identifierRecords.clear();
     magicLinkTokens.clear();
     sessions.clear();
+    passwordHashes.clear();
     sentLinks.splice(0, sentLinks.length);
     storeOps.length = 0;
     createdWith.length = 0;
@@ -394,6 +404,63 @@ describe("MagicLinkService", () => {
     // The verified link proves ownership: the previously unverified email
     // identifier is promoted to verified.
     expect(findEmailIdentifier("known@example.com")?.verified).toBe(true);
+  });
+
+  it("clears a squatter's password and sessions on the address's first proof (#440)", async () => {
+    const testContext = await makeTestContext();
+
+    // A squatter signed up with the address and a password they know, and
+    // holds a session; the address was never verified.
+    addUser({ id: "user-squat", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addEmailIdentifier("user-squat", "victim@example.com", false);
+    passwordHashes.set("user-squat", "squatter-hash");
+    const now = new Date();
+    sessions.set("squatter-session", {
+      id: "squatter-session",
+      userId: "user-squat",
+      expiresAt: new Date(now.getTime() + 3_600_000),
+      createdAt: now,
+      lastActivityAt: now,
+      attributes: {},
+    });
+
+    const program = Effect.gen(function* () {
+      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+      yield* service.send("victim@example.com");
+      return yield* service.verify(sentLinks[0]!.token);
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    // The holder of the address is signed in; the squatter's password and
+    // session are gone, so only the session just issued remains.
+    expect(result.user.id).toBe("user-squat");
+    expect(passwordHashes.has("user-squat")).toBe(false);
+    expect(sessions.has("squatter-session")).toBe(false);
+    expect([...sessions.values()].map((session) => session.userId)).toEqual(["user-squat"]);
+    expect(findEmailIdentifier("victim@example.com")?.verified).toBe(true);
+  });
+
+  it("keeps the password and sessions of an account whose address is already verified (#440)", async () => {
+    const testContext = await makeTestContext();
+
+    addUser({ id: "user-owner", createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addEmailIdentifier("user-owner", "victim@example.com", true);
+    passwordHashes.set("user-owner", "owner-hash");
+
+    const program = Effect.gen(function* () {
+      const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+      yield* service.send("victim@example.com");
+      return yield* service.verify(sentLinks[0]!.token);
+    });
+
+    await Effect.runPromise(
+      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+    );
+
+    expect(passwordHashes.get("user-owner")).toBe("owner-hash");
   });
 
   it("should reject expired tokens and delete them", async () => {

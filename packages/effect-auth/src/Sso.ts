@@ -31,6 +31,8 @@
 import { Context, Crypto, Data, Effect, Layer, Redacted } from "effect";
 import { AuthError } from "./Errors.ts";
 import { IdentifierStore } from "./Identifier.ts";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { proveAddress } from "./FirstProof.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -217,7 +219,13 @@ export interface SsoSignInSelector {
 /**
  * Enterprise single sign-on as a relying party: registers per-organization OIDC and SAML connections, routes an email to its connection by domain, and completes the callback.
  *
- * Requires `SsoProviderStore`.
+ * Requires `SsoProviderStore`. The callback methods resolve the rest from
+ * their context, as their types list, `EmailPasswordStore` among them.
+ *
+ * Promoting an address held unverified to verified first clears the
+ * account's password and revokes its sessions, through `EmailPasswordStore`
+ * (#440): the account was created by a sign-up that proved nothing about the
+ * address, so its password may be someone else's.
  */
 export class SsoService extends Context.Service<
   SsoService,
@@ -282,7 +290,13 @@ export class SsoService extends Context.Service<
     ) => Effect.Effect<
       SsoSignInResult,
       SsoError | AuthError | HookError,
-      OAuthStateStore | OAuthUserStore | IdentifierStore | UserStore | SessionService | Hooks
+      | OAuthStateStore
+      | OAuthUserStore
+      | IdentifierStore
+      | UserStore
+      | SessionService
+      | EmailPasswordStore
+      | Hooks
     >;
 
     /**
@@ -301,7 +315,7 @@ export class SsoService extends Context.Service<
     ) => Effect.Effect<
       SsoSignInResult,
       SsoError | AuthError | HookError,
-      OAuthUserStore | IdentifierStore | UserStore | SessionService | Hooks
+      OAuthUserStore | IdentifierStore | UserStore | SessionService | EmailPasswordStore | Hooks
     >;
 
     /**
@@ -489,6 +503,7 @@ export const make = (
       const identifiers = yield* IdentifierStore;
       const users = yield* UserStore;
       const sessionManager = yield* SessionService;
+      const passwords = yield* EmailPasswordStore;
 
       const email = profile.email.trim().toLowerCase();
 
@@ -516,7 +531,9 @@ export const make = (
         );
         user = created.user;
       } else if (identifier !== null && !identifier.verified) {
-        yield* identifiers.setVerified(identifier.id, new Date());
+        // The IdP verified the address: clear what an earlier, unproven
+        // sign-up left on the account before promoting it (#440).
+        yield* proveAddress({ identifiers, passwords, sessions: sessionManager }, identifier);
       }
 
       // Provision organization membership on first login when configured.
