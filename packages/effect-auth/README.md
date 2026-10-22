@@ -243,6 +243,8 @@ await Effect.runPromise(
 
 `layerAs` / `viewerLayerAs` return the same context as a `Layer`. The fixture session is minted from the `Clock` and expires 24 hours later.
 
+`fixtureUsers()` gives the canonical trio (`admin`, `member`, `otherMember` for cross-author checks) with fixed UUID ids (`fixtureUserIds`), so apps whose tables reference `users.id` as `uuid` can insert them as real rows; `fixtureUser({ role, name, id })` makes one more with a fresh random UUID. Roles live in `attributes.role`, where `isAdmin` and `SessionContext.withRole` read them; ids, roles and timestamps are overridable.
+
 ## Passwords
 
 ```typescript
@@ -675,7 +677,7 @@ Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in:
 | `@thomasfosterau/effect-auth/plugins`     | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization  |
 | `@thomasfosterau/effect-auth/http`        | `Auth.Http`        | The HTTP contract, the mountable handler, the typed Effect client, `AuthMiddleware`                                |
 | `@thomasfosterau/effect-auth/ladder`      | —                  | An ordered role ladder for browser UX gates; imports nothing, not even `effect`                                    |
-| `@thomasfosterau/effect-auth/testing`     | —                  | Test helpers: run an Effect as a fixture principal (`runAs`, `runAsViewer`); not reachable from the root           |
+| `@thomasfosterau/effect-auth/testing`     | —                  | Test helpers: run an Effect as a fixture principal (`runAs`, `runAsViewer`), UUID fixture users; not on the root   |
 
 Errors are tagged (`Data.TaggedError`) and carry a stable `code`; the shared ones are flat root exports: `AuthError` (infrastructure failure only), `InvalidCredentialsError`, `SessionNotFoundError`, `SessionExpiredError`, `UserNotFoundError`, `PermissionDeniedError`, `HashingError`, `ChallengeNotFoundError`, `ChallengeExpiredError`, `CredentialNotFoundError`, `WebAuthnVerificationError`, `OAuthStateNotFoundError`, `OAuthStateExpiredError`, `OAuthProviderError`, `RateLimitError`, `EmailVerificationError`, `MagicLinkError`, `PasswordResetError`, and more. The HTTP API maps them to status codes (`RateLimitError` → 429, `AuthError` → 500).
 
