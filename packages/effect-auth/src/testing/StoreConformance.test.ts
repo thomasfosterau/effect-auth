@@ -131,7 +131,11 @@ describe("a broken store fails its suite", () => {
       return Layer.succeed(SessionStore, {
         ...inner,
         create: (session) => (ids.add(session.id), inner.create(session)),
-        deleteByUserId: () => Effect.forEach([...ids], (id) => inner.delete(id), { discard: true }),
+        deleteByUserId: () =>
+          Effect.forEach([...ids], (id) => inner.delete(id), {
+            concurrency: 1,
+            discard: true,
+          }),
       });
     });
     expect(failed.map((failure) => failure.name)).toEqual([

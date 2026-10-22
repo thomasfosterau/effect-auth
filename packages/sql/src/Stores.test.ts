@@ -1,5 +1,5 @@
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Data, Effect, Layer, Order, Predicate, Stream } from "effect";
+import { Array as Arr, Data, Effect, Layer, Order, Predicate, Schema, Stream } from "effect";
 import { SqlClient, SqlConnection, SqlError, Statement } from "effect/sql";
 import { Reactivity } from "effect/reactivity";
 import Database from "better-sqlite3";
@@ -1366,11 +1366,12 @@ const storeContract = (engine: StoreEngine): void => {
 
     // The core's published conformance suites (`@thomasfosterau/effect-auth/testing`),
     // over the same engine. Every case mints its own ids, so they share the database.
+    const encodeAttributes = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
     const seedUser = (user: Auth.User) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* sql`INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)
-          VALUES (${user.id}, ${user.name ?? null}, ${user.image ?? null}, ${null}, ${JSON.stringify(user.attributes)}, ${user.createdAt.getTime()}, ${user.updatedAt.getTime()})`;
+          VALUES (${user.id}, ${user.name ?? null}, ${user.image ?? null}, ${null}, ${encodeAttributes(user.attributes)}, ${user.createdAt.getTime()}, ${user.updatedAt.getTime()})`;
       });
     const suites: ReadonlyArray<Testing.ConformanceSuite<SqlError.SqlError, StoreServices>> = [
       Testing.sessionStoreConformance({ seedUser }),

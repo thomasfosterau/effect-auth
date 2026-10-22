@@ -19,7 +19,7 @@
  *
  * @module testing
  */
-import { type Context, Data, Effect, Exit, Option } from "effect";
+import { Array as Arr, type Context, Data, Effect, Exit, Option, Predicate } from "effect";
 import * as Ladder from "../Ladder.ts";
 import type * as SessionContext from "../SessionContext.ts";
 import { runAsViewer, type ViewerFixture } from "./RunAs.ts";
@@ -77,10 +77,9 @@ const outcomeOf = <A, E>(exit: Exit.Exit<A, E>): string => {
   const error = Exit.findErrorOption(exit);
   if (Option.isNone(error)) return "defect";
   const value: unknown = error.value;
-  return typeof value === "object" &&
-    value !== null &&
-    "_tag" in value &&
-    typeof value._tag === "string"
+  return Predicate.isObjectOrArray(value) &&
+    Predicate.hasProperty(value, "_tag") &&
+    Predicate.isString(value._tag)
     ? value._tag
     : "failure";
 };
@@ -103,20 +102,23 @@ const check = <Id, User extends ViewerFixture, A, E, R>(
   GuardExpectationError,
   Exclude<R, Id | SessionContext.MaybeCurrentSession>
 > =>
-  Effect.forEach(cases, (expectation) =>
-    Effect.map(
-      Effect.exit(operation.pipe(runAsViewer(viewer, expectation.user))),
-      (exit): GuardMismatch | undefined => {
-        const actual = outcomeOf(exit);
-        return actual === expectation.expected
-          ? undefined
-          : { case: expectation.name, expected: expectation.expected, actual };
-      },
-    ),
+  Effect.forEach(
+    cases,
+    (expectation) =>
+      Effect.map(
+        Effect.exit(operation.pipe(runAsViewer(viewer, expectation.user))),
+        (exit): GuardMismatch | undefined => {
+          const actual = outcomeOf(exit);
+          return actual === expectation.expected
+            ? undefined
+            : { case: expectation.name, expected: expectation.expected, actual };
+        },
+      ),
+    { concurrency: 1 },
   ).pipe(
     Effect.flatMap((results) => {
-      const mismatches = results.filter((result) => result !== undefined);
-      return mismatches.length === 0
+      const mismatches = Arr.filter(results, Predicate.isNotUndefined);
+      return Arr.isReadonlyArrayEmpty(mismatches)
         ? Effect.void
         : Effect.fail(
             new GuardExpectationError({

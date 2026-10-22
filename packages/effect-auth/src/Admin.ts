@@ -21,7 +21,7 @@
  * @module admin
  */
 
-import { Context, Crypto, Data, Effect, Layer, Predicate, Record as Rec } from "effect";
+import { Context, Crypto, Data, Effect, Layer, Match, Predicate, Record as Rec } from "effect";
 import * as Errors from "./Errors.ts";
 import { Hooks, makePlugin, type HookError } from "./Hooks.ts";
 import { IdentifierStore, type IdentifierType } from "./Identifier.ts";
@@ -379,18 +379,17 @@ export const make = (
     const normalizeIdentifier = (
       type: IdentifierType,
       value: string,
-    ): Effect.Effect<string, Errors.AuthError> => {
-      switch (type) {
-        case "email":
-          return Effect.succeed(normalizeEmail(value));
-        case "username":
-          return Effect.succeed(normalizeUsername(value));
-        case "phone":
-          return config.normalizePhoneNumber !== undefined
+    ): Effect.Effect<string, Errors.AuthError> =>
+      Match.value(type).pipe(
+        Match.when("email", () => Effect.succeed(normalizeEmail(value))),
+        Match.when("username", () => Effect.succeed(normalizeUsername(value))),
+        Match.when("phone", () =>
+          config.normalizePhoneNumber !== undefined
             ? config.normalizePhoneNumber(value)
-            : Effect.succeed(value.trim());
-      }
-    };
+            : Effect.succeed(value.trim()),
+        ),
+        Match.exhaustive,
+      );
 
     const adminStore = yield* AdminUserStore;
     const userStore = yield* UserServiceStore;

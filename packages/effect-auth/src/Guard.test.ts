@@ -12,7 +12,7 @@
  * every viewer.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Exit, Layer, Logger, Option } from "effect";
+import { Context, Effect, Exit, Layer, Logger, Option, Schema } from "effect";
 import * as Authorizer from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
 import * as Guard from "./Guard.ts";
@@ -411,7 +411,8 @@ describe("requireSystem (#362)", () => {
 
   it("logs the decision with the system principal's name", async () => {
     const records: Array<string> = [];
-    const collector = Logger.make((options) => void records.push(JSON.stringify(options.message)));
+    const encodeJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+    const collector = Logger.make((options) => void records.push(encodeJson(options.message)));
     await Effect.runPromise(
       gate("page:write").pipe(
         System.provide("translation-pipeline"),

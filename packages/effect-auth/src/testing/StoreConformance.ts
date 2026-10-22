@@ -53,7 +53,7 @@
  *
  * @module testing
  */
-import { Data, Effect, Exit } from "effect";
+import { Array as Arr, Data, Effect, Exit, Option, Order, Predicate, Schema } from "effect";
 import * as ApiKey from "../ApiKey.ts";
 import type * as Errors from "../Errors.ts";
 import * as Identifier from "../Identifier.ts";
@@ -125,18 +125,21 @@ class Mismatch extends Data.TaggedError("Mismatch")<{ readonly message: string }
 const canonical = (value: unknown): unknown => {
   if (value instanceof Date) return { $date: value.getTime() };
   if (Array.isArray(value)) return value.map(canonical);
-  if (typeof value === "object" && value !== null) {
+  if (Predicate.isObjectOrArray(value)) {
     return Object.fromEntries(
-      Object.entries(value)
-        .filter(([, field]) => field !== undefined)
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-        .map(([key, field]) => [key, canonical(field)]),
+      Arr.sort(
+        Object.entries(value).filter(([, field]) => field !== undefined),
+        Order.mapInput(Order.String, ([key]: readonly [string, unknown]) => key),
+      ).map(([key, field]) => [key, canonical(field)]),
     );
   }
   return value;
 };
 
-const show = (value: unknown): string => JSON.stringify(canonical(value)) ?? String(value);
+const encodeJson = Schema.encodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+
+const show = (value: unknown): string =>
+  Option.getOrElse(encodeJson(canonical(value)), () => String(value));
 
 const expectEqual = (
   what: string,
@@ -166,10 +169,9 @@ const expectFailure = <A, E, R>(
     }
     const error = Exit.findErrorOption(exit);
     const actual =
-      error._tag === "Some" &&
-      typeof error.value === "object" &&
-      error.value !== null &&
-      "_tag" in error.value
+      Option.isSome(error) &&
+      Predicate.isObjectOrArray(error.value) &&
+      Predicate.hasProperty(error.value, "_tag")
         ? String(error.value._tag)
         : "a defect";
     return expectThat(`${what}: expected ${tag}, failed with ${actual}`, actual === tag);
@@ -237,7 +239,10 @@ const makeSession = (userId: string, offset = 0): Types.Session => ({
 });
 
 const sessionIds = (sessions: ReadonlyArray<Types.Session>): ReadonlyArray<string> =>
-  sessions.map((session) => session.id).sort();
+  Arr.sort(
+    sessions.map((session) => session.id),
+    Order.String,
+  );
 
 /**
  * The `SessionStore` contract: sessions round-trip with their `Date`s and
@@ -774,7 +779,10 @@ const makeApiKey = (userId: string, full = false): ApiKey.ApiKey => ({
 });
 
 const keyIds = (keys: ReadonlyArray<ApiKey.ApiKey>): ReadonlyArray<string> =>
-  keys.map((key) => key.id).sort();
+  Arr.sort(
+    keys.map((key) => key.id),
+    Order.String,
+  );
 
 /**
  * The `ApiKeyStore` contract: keys round-trip with every optional field, read
@@ -794,11 +802,16 @@ export const apiKeyStoreConformance = <E = never, R = never>(
         Effect.gen(function* () {
           const store = yield* ApiKey.ApiKeyStore;
           const userId = yield* newUser();
-          for (const key of [makeApiKey(userId, true), makeApiKey(userId)]) {
-            yield* expectEqual("create", yield* store.create(key), key);
-            yield* expectEqual("get", yield* store.get(key.id), key);
-            yield* expectEqual("getByHash", yield* store.getByHash(key.keyHash), key);
-          }
+          yield* Effect.forEach(
+            [makeApiKey(userId, true), makeApiKey(userId)],
+            (key) =>
+              Effect.gen(function* () {
+                yield* expectEqual("create", yield* store.create(key), key);
+                yield* expectEqual("get", yield* store.get(key.id), key);
+                yield* expectEqual("getByHash", yield* store.getByHash(key.keyHash), key);
+              }),
+            { concurrency: 1, discard: true },
+          );
         }),
     },
     {

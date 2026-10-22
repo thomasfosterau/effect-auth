@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "vite-plus/test";
-import { Context, Crypto, Effect, Layer } from "effect";
+import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
+import { Context, Crypto, Effect, Layer, Result } from "effect";
 import { Hooks } from "./Hooks.ts";
 import { AuthError, EmailVerificationError, InvalidCredentialsError } from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -855,8 +855,7 @@ describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hook
 
     const result = await signUp("alice+promo@example.com");
 
-    expect(result._tag).toBe("Success");
-    if (result._tag !== "Success") return;
+    assert(Result.isSuccess(result));
     expect(result.success.identifier).toEqual({ type: "email", value: "alice@example.com" });
     expect(sentEmails.map((sent) => sent.email)).toEqual(["alice@example.com"]);
     expect([...verifications.values()].map((v) => v.userId)).toEqual(["user-rewritten"]);
@@ -868,8 +867,7 @@ describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hook
 
     const result = await signUp("alice+promo@example.com");
 
-    expect(result._tag).toBe("Failure");
-    if (result._tag !== "Failure") return;
+    assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("EmailInUseError");
     expect(sentEmails).toEqual([]);
     expect(verifications.size).toBe(0);
