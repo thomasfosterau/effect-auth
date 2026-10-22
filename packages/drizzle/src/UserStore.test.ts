@@ -9,6 +9,8 @@ import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as Testing from "@thomasfosterau/effect-auth/testing";
+import { conformance } from "./testing/Conformance.ts";
 import { databaseLayer } from "./Database.ts";
 import { type Tables, tables } from "./PgSchema.ts";
 import { layer as userStoreLayer } from "./UserStore.ts";
@@ -111,3 +113,27 @@ describe("UserStore", () => {
     expect(result.missing).toBeNull();
   });
 });
+
+// The core's published UserStore suite: it writes its users straight into the
+// table, as the application's own user writer would.
+conformance(
+  "PostgreSQL",
+  Testing.userStoreConformance({
+    seedUser: (user) =>
+      Effect.promise(() =>
+        drizzle(client)
+          .insert(tables.users)
+          .values({
+            id: user.id,
+            name: user.name ?? null,
+            image: user.image ?? null,
+            passwordHash: null,
+            attributes: user.attributes,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt,
+          })
+          .execute(),
+      ),
+  }),
+  (effect) => runWithDatabase(() => effect),
+);

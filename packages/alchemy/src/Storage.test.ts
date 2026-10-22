@@ -2,6 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as Testing from "@thomasfosterau/effect-auth/testing";
 import { authTableNames } from "./AuthTables.ts";
 import * as D1Client from "./D1Client.ts";
 import { layer, migrate } from "./Storage.ts";
@@ -250,4 +251,27 @@ describe("D1-backed effect-auth storage", () => {
     );
     expect(loaded?.expiresAt.getTime()).toBe(farFuture);
   });
+});
+
+// The core's published conformance suites (`@thomasfosterau/effect-auth/testing`),
+// over the D1 stores: a fresh database per case.
+describe("D1-backed effect-auth storage: conformance", () => {
+  const seedUser = (user: Auth.User) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)
+        VALUES (${user.id}, ${user.name ?? null}, ${user.image ?? null}, ${null}, ${JSON.stringify(user.attributes)}, ${user.createdAt.getTime()}, ${user.updatedAt.getTime()})`;
+    });
+  for (const suite of [
+    Testing.sessionStoreConformance({ seedUser }),
+    Testing.userStoreConformance({ seedUser }),
+    Testing.identifierStoreConformance({ seedUser }),
+    Testing.apiKeyStoreConformance({ seedUser }),
+  ]) {
+    describe(suite.contract, () => {
+      for (const testCase of suite.cases) {
+        it(testCase.name, () => run(testCase.run));
+      }
+    });
+  }
 });

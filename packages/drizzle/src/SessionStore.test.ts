@@ -12,6 +12,8 @@ import { drizzle } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as Testing from "@thomasfosterau/effect-auth/testing";
+import { conformance } from "./testing/Conformance.ts";
 import { databaseLayer } from "./Database.ts";
 import { tables } from "./PgSchema.ts";
 import { layer as sessionStoreLayer } from "./SessionStore.ts";
@@ -181,3 +183,9 @@ describe("SessionStore", () => {
     expect(result.untouched.map((session) => session.id)).toEqual(["other"]);
   });
 });
+
+// The core's published SessionStore suite: every case mints its own ids, and
+// the sessions table has no foreign key to users, so nothing is seeded.
+conformance("PostgreSQL", Testing.sessionStoreConformance(), (effect) =>
+  runWithDatabase(() => effect),
+);

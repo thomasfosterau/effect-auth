@@ -31,6 +31,8 @@ import {
 } from "./Requests.ts";
 import { defineTables, migrationStatements, tables, type Tables } from "./SqliteSchema.ts";
 import { identifierStoreContract } from "./testing/IdentifierStoreContract.ts";
+import { conformance } from "./testing/Conformance.ts";
+import * as Testing from "@thomasfosterau/effect-auth/testing";
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -645,4 +647,16 @@ describe("SQLite / IdentifierStore contract", () => {
       ),
     seedUsers: async () => {},
   });
+
+  // The core's published IdentifierStore suite, over the same store.
+  conformance(
+    "IdentifierStore (multi-identifier) SQLite",
+    Testing.identifierStoreConformance(),
+    (effect) =>
+      Effect.runPromise(
+        effect.pipe(
+          Effect.provide(layer(tables).pipe(Layer.provide(databaseLayer(db)))),
+        ) as Effect.Effect<void>,
+      ),
+  );
 });

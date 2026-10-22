@@ -427,12 +427,16 @@ const email = (userId: string, verified = false): Identifier.Identifier =>
     now: at(),
   });
 
-/** What every identifier store reports faithfully, whatever else it derives. */
+/**
+ * What every identifier store reports faithfully, whatever else it derives. The
+ * `id` is not among them: a store that keeps the identifier on the user's own
+ * row reports the user's id, so every case works from the record as the store
+ * reports it (what `create` returns), never from the one it handed in.
+ */
 const identity = (identifier: Identifier.Identifier | null | undefined) =>
   identifier === null || identifier === undefined
     ? null
     : {
-        id: identifier.id,
         userId: identifier.userId,
         type: identifier.type,
         value: identifier.value,
@@ -462,12 +466,11 @@ export const identifierStoreConformance = <E = never, R = never>(
         Effect.gen(function* () {
           const store = yield* Identifier.IdentifierStore;
           const claim = email(yield* newUser());
-          yield* expectEqual("create", identity(yield* store.create(claim)), identity(claim));
-          yield* expectEqual(
-            "getByValue",
-            identity(yield* store.getByValue("email", claim.value)),
-            identity(claim),
-          );
+          const created = yield* store.create(claim);
+          yield* expectEqual("create", identity(created), identity(claim));
+          const found = yield* store.getByValue("email", claim.value);
+          yield* expectEqual("getByValue", identity(found), identity(claim));
+          yield* expectEqual("getByValue's id", found?.id, created.id);
           yield* expectEqual(
             "getByValue of an unclaimed value",
             yield* store.getByValue("email", `${uuid()}@example.test`),
@@ -528,8 +531,8 @@ export const identifierStoreConformance = <E = never, R = never>(
         Effect.gen(function* () {
           const store = yield* Identifier.IdentifierStore;
           const claim = email(yield* newUser());
-          yield* store.create(claim);
-          const verified = yield* store.setVerified(claim.id, at(1000));
+          const created = yield* store.create(claim);
+          const verified = yield* store.setVerified(created.id, at(1000));
           yield* expectEqual("setVerified", verified?.verified, true);
           yield* expectEqual(
             "getByValue after setVerified",
@@ -552,9 +555,9 @@ export const identifierStoreConformance = <E = never, R = never>(
           const otherId = yield* newUser();
           const gone = email(userId);
           const kept = email(otherId);
-          yield* store.create(gone);
+          const created = yield* store.create(gone);
           yield* store.create(kept);
-          yield* store.delete(gone.id);
+          yield* store.delete(created.id);
           yield* store.delete(uuid());
           yield* expectEqual(
             "getByValue of the deleted identifier",
@@ -596,8 +599,7 @@ export const identifierStoreConformance = <E = never, R = never>(
           const store = yield* Identifier.IdentifierStore;
           const userId = yield* newUser();
           const otherId = yield* newUser();
-          const from = email(userId);
-          yield* store.create(from);
+          const from = yield* store.create(email(userId));
           const to = email(userId, true);
           const replaced = yield* store.replace(from, to);
           yield* expectEqual(
@@ -638,9 +640,8 @@ export const identifierStoreConformance = <E = never, R = never>(
           const store = yield* Identifier.IdentifierStore;
           const userId = yield* newUser();
           const otherId = yield* newUser();
-          const from = email(userId, true);
+          const from = yield* store.create(email(userId, true));
           const held = email(otherId);
-          yield* store.create(from);
           yield* store.create(held);
           yield* expectFailure(
             "replace with a held value",
@@ -670,8 +671,7 @@ export const identifierStoreConformance = <E = never, R = never>(
         Effect.gen(function* () {
           const store = yield* Identifier.IdentifierStore;
           const userId = yield* newUser();
-          const current = email(userId);
-          yield* store.create(current);
+          const current = yield* store.create(email(userId));
           const stale: Identifier.Identifier = { ...current, value: `${uuid()}@example.test` };
           const to = email(userId);
           yield* expectEqual(
@@ -703,8 +703,7 @@ export const identifierStoreConformance = <E = never, R = never>(
           const store = yield* Identifier.IdentifierStore;
           const userId = yield* newUser();
           const otherId = yield* newUser();
-          const from = email(userId);
-          yield* store.create(from);
+          const from = yield* store.create(email(userId));
           const fresh = email(userId);
           yield* expectFailure(
             "replace for another user",
