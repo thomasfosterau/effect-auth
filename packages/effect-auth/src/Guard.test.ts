@@ -73,8 +73,12 @@ describe("requireRoleAtLeast", () => {
     for (const [minIndex, min] of Roles.rungs.entries()) {
       for (const [heldIndex, held] of Roles.rungs.entries()) {
         const exit = runGate(guards.requireRoleAtLeast(min), user(held));
-        if (heldIndex >= minIndex) expect(Exit.isSuccess(exit), `${held} ≥ ${min}`).toBe(true);
-        else expect(tagOf(exit), `${held} < ${min}`).toBe("Forbidden");
+        // At or above the minimum succeeds; below it fails with `Forbidden`.
+        const admitted = heldIndex >= minIndex;
+        expect(
+          admitted ? Exit.isSuccess(exit) : tagOf(exit),
+          admitted ? `${held} ≥ ${min}` : `${held} < ${min}`,
+        ).toBe(admitted ? true : "Forbidden");
       }
     }
   });

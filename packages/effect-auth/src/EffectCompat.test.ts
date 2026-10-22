@@ -66,9 +66,9 @@ describe("Effect floor compatibility", () => {
       OAUTH_ENCRYPT_TOKENS_SECRET: "token-secret",
     });
     const [device, mfa, oauth] = await Effect.runPromise(
-      Effect.all([trustedDeviceConfig, multiFactorConfig, oauthServiceOptionsConfig]).pipe(
-        Effect.provide(env),
-      ),
+      Effect.all([trustedDeviceConfig, multiFactorConfig, oauthServiceOptionsConfig], {
+        concurrency: 1,
+      }).pipe(Effect.provide(env)),
     );
     expect(Redacted.value(device.secret)).toBe("device-secret");
     expect(device.maxAge).toBe(30 * 24 * 60 * 60 * 1000);

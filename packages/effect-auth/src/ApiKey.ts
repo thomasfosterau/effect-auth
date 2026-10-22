@@ -16,7 +16,7 @@
  * @module api-key
  */
 
-import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { Array as Arr, Context, Crypto, Data, Effect, Layer, Record as Rec } from "effect";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { RateLimiter, RateLimitStore, type RateLimitConfig } from "./RateLimit.ts";
@@ -272,23 +272,17 @@ export const hashApiKey = hashToken;
 const hasRequiredPermissions = (
   granted: Record<string, readonly string[]> | undefined,
   required: Record<string, readonly string[]>,
-): boolean => {
-  for (const [resource, actions] of Object.entries(required)) {
-    if (actions.length === 0) {
-      continue;
+): boolean =>
+  Arr.every(Rec.toEntries(required), ([resource, actions]) => {
+    if (Arr.isReadonlyArrayEmpty(actions)) {
+      return true;
     }
     const grantedActions = granted?.[resource];
     if (!grantedActions) {
       return false;
     }
-    for (const action of actions) {
-      if (!grantedActions.includes(action)) {
-        return false;
-      }
-    }
-  }
-  return true;
-};
+    return Arr.every(actions, (action) => grantedActions.includes(action));
+  });
 
 /**
  * Create an API key service
@@ -441,8 +435,8 @@ export const make = (
           ...(options?.permissions !== undefined && { permissions: options.permissions }),
           metadata: options?.metadata ?? {},
           ...(options?.remaining !== undefined && { remaining: options.remaining }),
-          ...(hasRefill && { refillAmount: options!.refillAmount }),
-          ...(hasRefill && { refillInterval: options!.refillInterval }),
+          ...(hasRefill && { refillAmount: options.refillAmount }),
+          ...(hasRefill && { refillInterval: options.refillInterval }),
           ...(hasRefill && {
             lastRefillAt: now,
             ...(options?.remaining !== undefined && {
@@ -542,14 +536,15 @@ export const make = (
 
         const candidates = yield* store.listByUserId(userId);
 
-        let deleted = 0;
-        for (const apiKey of candidates) {
-          if (apiKey.expiresAt !== undefined && now > apiKey.expiresAt) {
-            yield* store.delete(apiKey.id);
-            deleted += 1;
-          }
-        }
-        return deleted;
+        const expired = Arr.filter(
+          candidates,
+          (apiKey) => apiKey.expiresAt !== undefined && now > apiKey.expiresAt,
+        );
+        yield* Effect.forEach(expired, (apiKey) => store.delete(apiKey.id), {
+          concurrency: 1,
+          discard: true,
+        });
+        return expired.length;
       }),
     };
   });

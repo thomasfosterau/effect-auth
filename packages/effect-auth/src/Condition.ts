@@ -17,7 +17,7 @@
  *
  * @module condition
  */
-import { Schema } from "effect";
+import { Array as Arr, Match, Predicate, Schema } from "effect";
 import * as Entity from "./Entity.ts";
 
 // ---------------------------------------------------------------------------
@@ -252,36 +252,40 @@ export type EvalResult<A> =
 const ok = <A>(value: A): EvalResult<A> => ({ ok: true, value });
 const err = <A>(message: string): EvalResult<A> => ({ ok: false, error: { message } });
 
-const describeOperand = (operand: Operand): string => {
-  switch (operand._tag) {
-    case "Lit":
-      return "literal";
-    case "Attr":
-      return `${operand.of}.${operand.path.join(".")}`;
-    case "SlotRef":
-      return operand.of;
-  }
-};
+const describeOperand = (operand: Operand): string =>
+  Match.valueTags(operand, {
+    Lit: () => "literal",
+    Attr: (attr) => `${attr.of}.${attr.path.join(".")}`,
+    SlotRef: (slot) => slot.of,
+  });
+
+/** The `typeof` of an attribute value, for error messages. */
+const typeName = (value: Entity.AttributeValue): string =>
+  Predicate.isString(value)
+    ? "string"
+    : Predicate.isNumber(value)
+      ? "number"
+      : Predicate.isBoolean(value)
+        ? "boolean"
+        : "object";
+
+/** The attribute record at `value`, or `null` when a path cannot descend into it. */
+const attributeRecord = (
+  value: Entity.AttributeValue | null,
+): { readonly [key: string]: Entity.AttributeValue } | null =>
+  value === null || !Predicate.isObject(value) || Entity.isEntityValue(value) ? null : value;
 
 const resolvePath = (
   root: Entity.AttributeValue | null,
   path: ReadonlyArray<string>,
   describe: string,
 ): EvalResult<Entity.AttributeValue> => {
-  let current: Entity.AttributeValue | null = root;
-  for (const segment of path) {
-    if (
-      current === null ||
-      typeof current !== "object" ||
-      Array.isArray(current) ||
-      Entity.isEntityValue(current)
-    ) {
-      return err(`attribute "${describe}" is absent`);
-    }
-    current =
-      segment in current ? (current as Record<string, Entity.AttributeValue>)[segment]! : null;
-  }
-  return current === null ? err(`attribute "${describe}" is absent`) : ok(current);
+  // `null` is absent: once a segment is missing (or not a record), it stays absent.
+  const resolved = Arr.reduce(path, root, (current: Entity.AttributeValue | null, segment) => {
+    const record = attributeRecord(current);
+    return record !== null && segment in record ? (record[segment] ?? null) : null;
+  });
+  return resolved === null ? err(`attribute "${describe}" is absent`) : ok(resolved);
 };
 
 const slotRoot = (
@@ -298,20 +302,13 @@ const evaluateOperand = (
   slice: Entity.EntitySlice,
   request: ConditionRequest,
   operand: Operand,
-): EvalResult<Entity.AttributeValue> => {
-  switch (operand._tag) {
-    case "Lit":
-      return ok(operand.value);
-    case "SlotRef":
-      return ok(Entity.entityValue(request[operand.of]));
-    case "Attr":
-      return resolvePath(
-        slotRoot(slice, request, operand.of),
-        operand.path,
-        describeOperand(operand),
-      );
-  }
-};
+): EvalResult<Entity.AttributeValue> =>
+  Match.valueTags(operand, {
+    Lit: (lit) => ok(lit.value),
+    SlotRef: (slot) => ok<Entity.AttributeValue>(Entity.entityValue(request[slot.of])),
+    Attr: (attr) =>
+      resolvePath(slotRoot(slice, request, attr.of), attr.path, describeOperand(attr)),
+  });
 
 /**
  * Evaluate a condition over a slice and request. Pure and total: the result
@@ -321,84 +318,73 @@ export const evaluate = (
   slice: Entity.EntitySlice,
   request: ConditionRequest,
   condition: Condition,
-): EvalResult<boolean> => {
-  switch (condition._tag) {
-    case "And": {
-      for (const inner of condition.conditions) {
-        const result = evaluate(slice, request, inner);
-        if (!result.ok) return result;
-        if (!result.value) return ok(false);
-      }
-      return ok(true);
-    }
-    case "Or": {
-      for (const inner of condition.conditions) {
-        const result = evaluate(slice, request, inner);
-        if (!result.ok) return result;
-        if (result.value) return ok(true);
-      }
-      return ok(false);
-    }
-    case "Not": {
-      const result = evaluate(slice, request, condition.condition);
+): EvalResult<boolean> =>
+  Match.valueTags(condition, {
+    // First error or first `false` wins; the rest are not evaluated.
+    And: ({ conditions }) =>
+      Arr.reduce(conditions, ok(true), (acc, inner) =>
+        acc.ok && acc.value ? evaluate(slice, request, inner) : acc,
+      ),
+    // First error or first `true` wins; the rest are not evaluated.
+    Or: ({ conditions }) =>
+      Arr.reduce(conditions, ok(false), (acc, inner) =>
+        acc.ok && !acc.value ? evaluate(slice, request, inner) : acc,
+      ),
+    Not: (not): EvalResult<boolean> => {
+      const result = evaluate(slice, request, not.condition);
       return result.ok ? ok(!result.value) : result;
-    }
-    case "Eq": {
-      const left = evaluateOperand(slice, request, condition.left);
+    },
+    Eq: (eq): EvalResult<boolean> => {
+      const left = evaluateOperand(slice, request, eq.left);
       if (!left.ok) return left;
-      const right = evaluateOperand(slice, request, condition.right);
+      const right = evaluateOperand(slice, request, eq.right);
       if (!right.ok) return right;
       return ok(Entity.attributeValueEquals(left.value, right.value));
-    }
-    case "Compare": {
-      const left = evaluateOperand(slice, request, condition.left);
+    },
+    Compare: (compare): EvalResult<boolean> => {
+      const left = evaluateOperand(slice, request, compare.left);
       if (!left.ok) return left;
-      const right = evaluateOperand(slice, request, condition.right);
+      const right = evaluateOperand(slice, request, compare.right);
       if (!right.ok) return right;
-      if (typeof left.value !== "number" || typeof right.value !== "number") {
+      const l = left.value;
+      const r = right.value;
+      if (!Predicate.isNumber(l) || !Predicate.isNumber(r)) {
         return err(
-          `comparison "${condition.op}" requires numbers (got ${typeof left.value} and ${typeof right.value})`,
+          `comparison "${compare.op}" requires numbers (got ${typeName(l)} and ${typeName(r)})`,
         );
       }
-      switch (condition.op) {
-        case "lt":
-          return ok(left.value < right.value);
-        case "lte":
-          return ok(left.value <= right.value);
-        case "gt":
-          return ok(left.value > right.value);
-        case "gte":
-          return ok(left.value >= right.value);
-      }
-    }
-    // eslint-disable-next-line no-fallthrough -- every Compare op returns above
-    case "Contains": {
-      const collection = evaluateOperand(slice, request, condition.collection);
+      return ok(
+        Match.value(compare.op).pipe(
+          Match.when("lt", () => l < r),
+          Match.when("lte", () => l <= r),
+          Match.when("gt", () => l > r),
+          Match.when("gte", () => l >= r),
+          Match.exhaustive,
+        ),
+      );
+    },
+    Contains: (contains): EvalResult<boolean> => {
+      const collection = evaluateOperand(slice, request, contains.collection);
       if (!collection.ok) return collection;
-      const value = evaluateOperand(slice, request, condition.value);
+      const value = evaluateOperand(slice, request, contains.value);
       if (!value.ok) return value;
       if (!Array.isArray(collection.value)) {
-        return err(`contains requires an array collection (got ${typeof collection.value})`);
+        return err(`contains requires an array collection (got ${typeName(collection.value)})`);
       }
       return ok(collection.value.some((item) => Entity.attributeValueEquals(item, value.value)));
-    }
-    case "In": {
-      const left = evaluateOperand(slice, request, condition.left);
+    },
+    In: (inCondition): EvalResult<boolean> => {
+      const left = evaluateOperand(slice, request, inCondition.left);
       if (!left.ok) return left;
-      const right = evaluateOperand(slice, request, condition.right);
+      const right = evaluateOperand(slice, request, inCondition.right);
       if (!right.ok) return right;
       if (!Entity.isEntityValue(left.value) || !Entity.isEntityValue(right.value)) {
         return err(`in requires entity operands`);
       }
       return ok(Entity.entityIn(slice, left.value.__entity, right.value.__entity));
-    }
-    case "Has": {
-      const result = resolvePath(
-        slotRoot(slice, request, condition.of),
-        condition.path,
-        condition.path.join("."),
-      );
+    },
+    Has: (has): EvalResult<boolean> => {
+      const result = resolvePath(slotRoot(slice, request, has.of), has.path, has.path.join("."));
       return ok(result.ok);
-    }
-  }
-};
+    },
+  });

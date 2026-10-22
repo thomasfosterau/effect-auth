@@ -18,7 +18,7 @@ import {
 } from "./Identifier.ts";
 import type * as Types from "./Types.ts";
 
-const user = (attributes: Record<string, unknown> = {}): Types.User => ({
+const user = (attributes: Types.Attributes = {}): Types.User => ({
   id: "u1",
   createdAt: new Date(),
   updatedAt: new Date(),

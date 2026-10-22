@@ -21,7 +21,7 @@
  * @module admin
  */
 
-import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { Context, Crypto, Data, Effect, Layer, Predicate, Record as Rec } from "effect";
 import * as Errors from "./Errors.ts";
 import { Hooks, makePlugin, type HookError } from "./Hooks.ts";
 import { IdentifierStore, type IdentifierType } from "./Identifier.ts";
@@ -176,6 +176,13 @@ export interface AdminConfig {
     | undefined;
 }
 
+/** A copy of `attributes` without the ban keys (`banned`, `banReason`, `banExpires`). */
+const withoutBanAttributes = (attributes: Types.Attributes): Types.Attributes =>
+  Rec.filter(
+    attributes,
+    (_, key) => key !== "banned" && key !== "banReason" && key !== "banExpires",
+  );
+
 /**
  * Whether a user is an administrator under the given config: either their id
  * is in `adminUserIds` or their `attributes.role` is one of `adminRoles`.
@@ -187,7 +194,7 @@ export const isAdmin = (user: Types.User, config: AdminConfig = {}): boolean => 
     return true;
   }
   const role = user.attributes["role"];
-  return typeof role === "string" && adminRoles.includes(role);
+  return Predicate.isString(role) && adminRoles.includes(role);
 };
 
 /**
@@ -199,7 +206,7 @@ export const isBanned = (user: Types.User): boolean => {
     return false;
   }
   const banExpires = user.attributes["banExpires"];
-  if (typeof banExpires === "number" && banExpires <= Date.now()) {
+  if (Predicate.isNumber(banExpires) && banExpires <= Date.now()) {
     return false;
   }
   return true;
@@ -452,17 +459,12 @@ export const make = (
 
         // Rebuild ban attributes from scratch so a stale `banExpires` from a
         // previous (temporary) ban cannot leak into a new permanent ban.
-        const attributes: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(user.attributes)) {
-          if (key !== "banned" && key !== "banReason" && key !== "banExpires") {
-            attributes[key] = value;
-          }
-        }
-        attributes["banned"] = true;
-        attributes["banReason"] = options.reason ?? defaultBanReason;
-        if (expiresIn !== undefined) {
-          attributes["banExpires"] = Date.now() + expiresIn;
-        }
+        const attributes: Types.Attributes = {
+          ...withoutBanAttributes(user.attributes),
+          banned: true,
+          banReason: options.reason ?? defaultBanReason,
+          ...(expiresIn !== undefined ? { banExpires: Date.now() + expiresIn } : {}),
+        };
 
         const banned = yield* userStore.update({
           ...user,
@@ -483,13 +485,10 @@ export const make = (
           return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
         }
 
-        const attributes: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(user.attributes)) {
-          if (key !== "banned" && key !== "banReason" && key !== "banExpires") {
-            attributes[key] = value;
-          }
-        }
-        attributes["banned"] = false;
+        const attributes: Types.Attributes = {
+          ...withoutBanAttributes(user.attributes),
+          banned: false,
+        };
 
         return yield* userStore.update({
           ...user,
@@ -543,15 +542,15 @@ export const make = (
       ) {
         yield* requireAdmin(actor);
 
-        const attributes: Record<string, unknown> = { ...input.attributes };
-        if (input.role !== undefined) {
-          attributes["role"] = input.role;
-        }
+        const attributes: Types.Attributes =
+          input.role !== undefined
+            ? { ...input.attributes, role: input.role }
+            : { ...input.attributes };
         // Whichever door the role came in by — `input.role` or a raw
         // `attributes.role` — it is checked against the configured roles.
         const role = attributes["role"];
         if (role !== undefined) {
-          if (typeof role !== "string") {
+          if (!Predicate.isString(role)) {
             return yield* new AdminError({ message: "role must be a string" });
           }
           yield* requireRole(role);
@@ -560,10 +559,13 @@ export const make = (
         // Normalise the extra identifiers before anything is written, so a
         // failing phone normaliser leaves no user behind, and each value
         // matches the normalised lookups the other flows make (#408).
-        const extraIdentifiers = yield* Effect.forEach(input.identifiers ?? [], (ident) =>
-          normalizeIdentifier(ident.type, ident.value).pipe(
-            Effect.map((value) => ({ ...ident, value })),
-          ),
+        const extraIdentifiers = yield* Effect.forEach(
+          input.identifiers ?? [],
+          (ident) =>
+            normalizeIdentifier(ident.type, ident.value).pipe(
+              Effect.map((value) => ({ ...ident, value })),
+            ),
+          { concurrency: 1 },
         );
 
         // Create the user with its primary email identifier.
@@ -589,20 +591,23 @@ export const make = (
           ),
         );
 
-        if (extraIdentifiers.length > 0) {
-          const now = new Date();
-          for (const ident of extraIdentifiers) {
-            yield* identifierStore.create({
-              id: yield* randomId(),
-              userId: user.id,
-              type: ident.type,
-              value: ident.value,
-              verified: ident.verified ?? false,
-              verifiedAt: ident.verified ? now : undefined,
-              createdAt: now,
-            });
-          }
-        }
+        const now = new Date();
+        yield* Effect.forEach(
+          extraIdentifiers,
+          (ident) =>
+            Effect.flatMap(randomId(), (id) =>
+              identifierStore.create({
+                id,
+                userId: user.id,
+                type: ident.type,
+                value: ident.value,
+                verified: ident.verified ?? false,
+                verifiedAt: ident.verified ? now : undefined,
+                createdAt: now,
+              }),
+            ),
+          { concurrency: 1, discard: true },
+        );
 
         if (input.password !== undefined) {
           const hashed = yield* hasher.hash(input.password);

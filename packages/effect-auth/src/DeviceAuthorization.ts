@@ -186,14 +186,13 @@ const randomCode = (
   length: number,
   alphabet: string,
 ): Effect.Effect<string> =>
-  Effect.gen(function* () {
-    let out = "";
-    for (let i = 0; i < length; i++) {
-      const index = yield* crypto.randomIntBetween(0, alphabet.length, { halfOpen: true });
-      out += alphabet[index];
-    }
-    return out;
-  });
+  Effect.replicateEffect(
+    Effect.map(crypto.randomIntBetween(0, alphabet.length, { halfOpen: true }), (index) =>
+      alphabet.charAt(index),
+    ),
+    length,
+    { concurrency: 1 },
+  ).pipe(Effect.map((chars) => chars.join("")));
 
 /** Format a raw code as two dash-separated halves, e.g. `BDWM-HQPK`. */
 const formatUserCode = (raw: string): string => {

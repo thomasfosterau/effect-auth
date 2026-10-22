@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Predicate, Schema } from "effect";
 import * as Cipher from "./Cipher.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
@@ -39,10 +39,12 @@ const JWKS = {
   keys: [{ ...publicKeyJwk, kid: KID, alg: "ES256" }],
 };
 
-const b64 = (value: unknown): string =>
-  Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 
-const signCredential = (claims: Record<string, unknown>): string => {
+const b64 = (value: Schema.Json): string =>
+  Buffer.from(encodeJson(value), "utf8").toString("base64url");
+
+const signCredential = (claims: Schema.JsonObject): string => {
   const header = { alg: "ES256", kid: KID, typ: "JWT" };
   const signingInput = `${b64(header)}.${b64(claims)}`;
   const signature = Cipher.signJws("ES256", Buffer.from(signingInput, "utf8"), privateKeyPem);
@@ -52,7 +54,7 @@ const signCredential = (claims: Record<string, unknown>): string => {
 /** Hash a nonce the same way GoogleOneTap.ts does (SHA-256 hex). */
 const hashNonce = hashToken;
 
-const validClaims = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+const validClaims = (overrides: Schema.JsonObject = {}): Schema.JsonObject => ({
   iss: "https://accounts.google.com",
   aud: CLIENT_ID,
   sub: "google-user-1",
@@ -68,15 +70,10 @@ const validClaims = (overrides: Record<string, unknown> = {}): Record<string, un
 /** Swap `globalThis.fetch` for a canned JWKS response while `thunk` runs. */
 const withJwks = async <A>(thunk: () => Promise<A>): Promise<A> => {
   const original = globalThis.fetch;
-  globalThis.fetch = (() =>
-    Promise.resolve(
-      new Response(JSON.stringify(JWKS), { headers: { "content-type": "application/json" } }),
-    )) as typeof fetch;
-  try {
-    return await thunk();
-  } finally {
+  globalThis.fetch = (() => Promise.resolve(Response.json(JWKS))) as typeof fetch;
+  return new Promise<A>((resolve) => resolve(thunk())).finally(() => {
     globalThis.fetch = original;
-  }
+  });
 };
 
 // ---------------------------------------------------------------------------
@@ -179,10 +176,13 @@ describe("GoogleOneTapService", () => {
     const nonce1 = "test-nonce-1";
     const nonce2 = "test-nonce-2";
     await Effect.runPromise(
-      Effect.all([
-        nonceStore.create(nonce1, Date.now() + 60_000),
-        nonceStore.create(nonce2, Date.now() + 60_000),
-      ]),
+      Effect.all(
+        [
+          nonceStore.create(nonce1, Date.now() + 60_000),
+          nonceStore.create(nonce2, Date.now() + 60_000),
+        ],
+        { concurrency: 1 },
+      ),
     );
 
     const { first, second } = await withJwks(() =>
@@ -487,11 +487,11 @@ const makeHttpFixture = () => {
 
 const get = (path: string): Request => new Request(`http://test${path}`, { method: "GET" });
 
-const post = (path: string, body: unknown): Request =>
+const post = (path: string, body: Schema.Json): Request =>
   new Request(`http://test${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: encodeJson(body),
   });
 
 describe("HTTP Google One Tap endpoint", () => {
@@ -500,7 +500,7 @@ describe("HTTP Google One Tap endpoint", () => {
     const res = await fx.handler(get("/sign-in/google-one-tap/nonce"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { nonce: string };
-    expect(typeof body.nonce).toBe("string");
+    expect(Predicate.isString(body.nonce)).toBe(true);
     expect(body.nonce.length).toBeGreaterThan(0);
   });
 

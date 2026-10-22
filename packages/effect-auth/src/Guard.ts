@@ -158,7 +158,7 @@
  *
  * @module guard
  */
-import { Context, Effect, Option, Schema } from "effect";
+import { Context, Data, Effect, Option, Predicate, Schema } from "effect";
 import * as Authorizer from "./Authorizer.ts";
 import * as Condition from "./Condition.ts";
 import type * as Errors from "./Errors.ts";
@@ -366,7 +366,12 @@ export interface GuardOptions<Id, User extends ViewerShape, Rung extends string>
   readonly ownedType?: string;
 }
 
-const axisName = (min: string | Ladder.Axis): string => (typeof min === "string" ? min : min.name);
+const axisName = (min: string | Ladder.Axis): string => (Predicate.isString(min) ? min : min.name);
+
+/** Thrown by {@link make} for a `principalType` it refuses. */
+class ReservedPrincipalTypeError extends Data.TaggedError("ReservedPrincipalTypeError")<{
+  readonly message: string;
+}> {}
 
 /**
  * Build the guard kit for one viewer service and one ladder.
@@ -381,9 +386,9 @@ export const make = <Id, User extends ViewerShape, Rung extends string>(
   const principalType = options.principalType ?? "User";
   const ownedType = options.ownedType ?? "Owned";
   if (principalType === Entity.systemType) {
-    throw new Error(
-      `Guard.make: principalType "${principalType}" is reserved for system principals; a viewer is a user`,
-    );
+    throw new ReservedPrincipalTypeError({
+      message: `Guard.make: principalType "${principalType}" is reserved for system principals; a viewer is a user`,
+    });
   }
   type Min = Rung | Ladder.Axis<Rung>;
 

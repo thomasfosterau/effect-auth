@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer, Order } from "effect";
 import {
   AccountManagementService,
   AccountManagementStore,
@@ -339,9 +339,10 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     expect(err).toBeInstanceOf(AuthError);
     // The email of record was replaced; the second address is still to release.
     expect(
-      userEmails(h, "user-1")
-        .map((email) => email.value)
-        .sort(),
+      Arr.sort(
+        userEmails(h, "user-1").map((email) => email.value),
+        Order.String,
+      ),
     ).toEqual([NEW_EMAIL, "alice@work.example.com"]);
 
     await run(h, (svc) => svc.confirmEmailChange(token));

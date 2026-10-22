@@ -40,7 +40,7 @@
  *
  * @module cacheability
  */
-import { Effect, Option } from "effect";
+import { Effect, Option, Predicate } from "effect";
 import type * as Guard from "./Guard.ts";
 import type * as Ladder from "./Ladder.ts";
 
@@ -78,10 +78,10 @@ export type ServeableAxis =
 export const publiclyServeable =
   (axes: ReadonlyArray<ServeableAxis>) =>
   (attributes: unknown): boolean => {
-    if (typeof attributes !== "object" || attributes === null || Array.isArray(attributes)) {
+    if (!Predicate.isObject(attributes)) {
       return false;
     }
-    const record = attributes as Readonly<Record<string, unknown>>;
+    const record = attributes;
     return axes.every((axis) => {
       const present = Object.prototype.hasOwnProperty.call(record, axis.attribute);
       const value = record[axis.attribute];

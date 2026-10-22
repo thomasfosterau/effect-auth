@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect, Layer } from "effect";
+import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
+import { Array as Arr, Context, Crypto, Effect, Layer, Order, Predicate, Result } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   AdminUserStore,
@@ -25,7 +25,7 @@ import { make, SessionService } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { type NewUserIdentifier, UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
-import type { Session, SessionConfig, User } from "./Types.ts";
+import type { Attributes, Session, SessionConfig, User } from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 
 const users = new Map<string, User>();
@@ -93,17 +93,29 @@ const userServiceStore = {
 /** Earliest email identifier value for a user, mirroring how a SQL store
  * would resolve the email-of-record from its identifier records. */
 const emailOf = (userId: string): string =>
-  Array.from(identifiers.values())
-    .filter((identifier) => identifier.userId === userId && identifier.type === "email")
-    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0]?.value ?? "";
+  Arr.sort(
+    Array.from(identifiers.values()).filter(
+      (identifier) => identifier.userId === userId && identifier.type === "email",
+    ),
+    Order.mapInput(Order.Number, (identifier: Identifier) => identifier.createdAt.getTime()),
+  )[0]?.value ?? "";
+
+/** `localeCompare` as an `Order`. */
+const localeOrder = Order.make<string>((a, b) => {
+  const c = a.localeCompare(b);
+  return c < 0 ? -1 : c > 0 ? 1 : 0;
+});
 
 const adminUserStore = {
   listUsers: (query: ListUsersQuery) =>
     Effect.sync(() => {
       const search = query.searchEmail?.toLowerCase();
-      const matching = Array.from(users.values())
-        .filter((user) => (search ? emailOf(user.id).toLowerCase().includes(search) : true))
-        .sort((a, b) => emailOf(a.id).localeCompare(emailOf(b.id)));
+      const matching = Arr.sort(
+        Array.from(users.values()).filter((user) =>
+          search ? emailOf(user.id).toLowerCase().includes(search) : true,
+        ),
+        Order.mapInput(localeOrder, (user: User) => emailOf(user.id)),
+      );
       const offset = query.offset ?? 0;
       const limit = query.limit ?? matching.length;
       return { users: matching.slice(offset, offset + limit), total: matching.length };
@@ -112,7 +124,7 @@ const adminUserStore = {
   createUser: (input: {
     name?: string;
     image?: string;
-    attributes?: Record<string, unknown>;
+    attributes?: Attributes;
     identifier?: NewUserIdentifier | undefined;
   }) =>
     Effect.sync(() => {
@@ -181,7 +193,7 @@ const makeTestContext = async (
   );
 };
 
-const seedUser = (id: string, email: string, attributes: Record<string, unknown> = {}): User => {
+const seedUser = (id: string, email: string, attributes: Attributes = {}): User => {
   const user: User = {
     id,
     createdAt: new Date(),
@@ -268,9 +280,8 @@ describe("AdminService", () => {
 
     for (const outcome of Object.values(result)) {
       expect(outcome._tag).toBe("Failure");
-      if (outcome._tag === "Failure") {
-        expect(outcome.failure._tag).toBe("AdminError");
-      }
+      assert(Predicate.isTagged(outcome, "Failure"));
+      expect(outcome.failure._tag).toBe("AdminError");
     }
   });
 
@@ -337,7 +348,7 @@ describe("AdminService", () => {
       const refused = await runService(testContext, { roles }, (service) =>
         Effect.flip(service.createUser(admin, input)),
       );
-      expect(refused._tag, JSON.stringify(input)).toBe("AdminError");
+      expect(refused._tag, input.email).toBe("AdminError");
     }
   });
 
@@ -388,8 +399,8 @@ describe("AdminService", () => {
 
     expect(banned.attributes["banReason"]).toBe("No reason");
     const banExpires = banned.attributes["banExpires"];
-    expect(typeof banExpires).toBe("number");
-    expect(banExpires as number).toBeGreaterThan(Date.now());
+    assert(Predicate.isNumber(banExpires));
+    expect(banExpires).toBeGreaterThan(Date.now());
     expect(isBanned(banned)).toBe(true);
   });
 
@@ -453,10 +464,9 @@ describe("AdminService", () => {
     const result = await Effect.runPromise(Effect.provide(program, testContext));
 
     expect(result.blocked._tag).toBe("Failure");
-    if (result.blocked._tag === "Failure") {
-      expect(result.blocked.failure._tag).toBe("UserBannedError");
-      expect(result.blocked.failure.message).toBe("Your account has been suspended");
-    }
+    assert(Result.isFailure(result.blocked));
+    expect(result.blocked.failure._tag).toBe("UserBannedError");
+    expect(result.blocked.failure.message).toBe("Your account has been suspended");
     expect(result.allowed.user.id).toBe("user-1");
     expect(result.lapsed._tag).toBe("Success");
   });
@@ -519,17 +529,16 @@ describe("AdminService", () => {
     expect(session.userId).toBe("user-1");
     expect(session.attributes["impersonatedBy"]).toBe("admin-1");
     const impersonationExpiresAt = session.attributes["impersonationExpiresAt"];
-    expect(typeof impersonationExpiresAt).toBe("number");
-    expect(impersonationExpiresAt as number).toBeGreaterThanOrEqual(before + 15 * 60 * 1000);
+    assert(Predicate.isNumber(impersonationExpiresAt));
+    expect(impersonationExpiresAt).toBeGreaterThanOrEqual(before + 15 * 60 * 1000);
     expect(sessions.has(hashToken(session.id))).toBe(true);
 
     const missingTarget = await runService(testContext, {}, (service) =>
       Effect.result(service.impersonateUser(admin, "ghost")),
     );
     expect(missingTarget._tag).toBe("Failure");
-    if (missingTarget._tag === "Failure") {
-      expect(missingTarget.failure._tag).toBe("UserNotFoundError");
-    }
+    assert(Result.isFailure(missingTarget));
+    expect(missingTarget.failure._tag).toBe("UserNotFoundError");
   });
 
   it("createUser: creates a user with role, identifiers, and hashed password", async () => {
@@ -600,9 +609,8 @@ describe("AdminService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("AdminError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("AdminError");
   });
 
   it("createUser: normalises the primary email before it is created and claimed", async () => {
@@ -627,9 +635,8 @@ describe("AdminService", () => {
     expect(createdWith[0]).toEqual({ type: "email", value: "carol@example.com", verified: false });
     // A case variant of a held address is the same address.
     expect(result.duplicate._tag).toBe("Failure");
-    if (result.duplicate._tag === "Failure") {
-      expect(result.duplicate.failure._tag).toBe("AdminError");
-    }
+    assert(Result.isFailure(result.duplicate));
+    expect(result.duplicate.failure._tag).toBe("AdminError");
   });
 
   it("createUser: normalises each extra identifier for its type before it is claimed (#408)", async () => {
@@ -745,7 +752,8 @@ describe("AdminService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") expect(result.failure._tag).toBe("AdminError");
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("AdminError");
     // No password, no extra identifier, and the owner's address is still unverified.
     expect(passwordHashes.get(owner.id)).toBe("owner-hash");
     expect(Array.from(identifiers.values()).filter((i) => i.userId === owner.id)).toEqual([
@@ -763,9 +771,8 @@ describe("AdminService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("AdminError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("AdminError");
   });
 
   it("setUserPassword: admin resets a user's password without current-password check", async () => {
@@ -817,9 +824,8 @@ describe("AdminService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("UserNotFoundError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("UserNotFoundError");
   });
 
   it("setUserPassword: authorization failure for non-admin", async () => {
@@ -832,9 +838,8 @@ describe("AdminService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("AdminError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("AdminError");
   });
 
   it("listUserSessions: returns only non-expired sessions for the target user", async () => {
@@ -880,9 +885,8 @@ describe("AdminService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("AdminError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("AdminError");
   });
 
   it("lists users with pagination and email search", async () => {

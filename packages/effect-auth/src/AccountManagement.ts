@@ -12,7 +12,7 @@
  * value (tokens are high-entropy random), anti-enumeration at the HTTP layer
  * (see `HttpServer.ts`), and session invalidation on sensitive changes.
  */
-import { Context, Crypto, Data, Effect, Layer } from "effect";
+import { Array as Arr, Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type * as Types from "./Types.ts";
@@ -360,11 +360,14 @@ export const make = (
         // failed release converges instead of leaving a previous address
         // behind. The replaced identifier is skipped: it is gone, and a store
         // that keeps one email per user reuses its id for the new address.
-        for (const id of held) {
-          if (id.type === "email" && id.value !== newEmail && id.id !== replaced) {
-            yield* identifiers.delete(id.id);
-          }
-        }
+        yield* Effect.forEach(
+          Arr.filter(
+            held,
+            (id) => id.type === "email" && id.value !== newEmail && id.id !== replaced,
+          ),
+          (id) => identifiers.delete(id.id),
+          { concurrency: 1, discard: true },
+        );
 
         const updated = yield* users.update({
           ...user,

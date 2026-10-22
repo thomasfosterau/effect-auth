@@ -9,7 +9,18 @@
  *
  * @module authorizer
  */
-import { Context, Effect, Layer, Option } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Effect,
+  HashMap,
+  Layer,
+  Match,
+  MutableHashSet,
+  Option,
+  Predicate,
+  Result,
+} from "effect";
 import * as Errors from "./Errors.ts";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
@@ -105,55 +116,48 @@ export class EntityResolver extends Context.Service<
 export const memoryEntityResolver = (
   entities: ReadonlyArray<Entity.Entity>,
 ): typeof EntityResolver.Service => {
-  const byKey = new Map(entities.map((e) => [Entity.refKey(e.ref), e]));
+  const byKey = HashMap.fromIterable(entities.map((e) => [Entity.refKey(e.ref), e] as const));
   return {
     resolve: (refs) =>
       Effect.sync(() => {
-        const out = new Map<string, Entity.Entity>();
-        const queue = [...refs];
-        while (queue.length > 0) {
-          const ref = queue.pop()!;
-          const key = Entity.refKey(ref);
-          if (out.has(key)) continue;
-          const found = byKey.get(key);
-          if (found === undefined) continue;
-          out.set(key, found);
-          queue.push(...found.parents);
-        }
-        return [...out.values()];
+        const seen = MutableHashSet.empty<string>();
+        // Depth-first over a stack of pending refs: each step pops one ref and
+        // emits its entity the first time it is found, queueing its parents.
+        const steps = Arr.unfold([...refs], (queue) =>
+          Option.map(
+            Option.fromUndefinedOr(queue.pop()),
+            (ref): readonly [Option.Option<Entity.Entity>, Array<Entity.EntityRef>] => {
+              const key = Entity.refKey(ref);
+              if (MutableHashSet.has(seen, key)) return [Option.none(), queue];
+              const found = HashMap.get(byKey, key);
+              if (Option.isNone(found)) return [Option.none(), queue];
+              MutableHashSet.add(seen, key);
+              queue.push(...found.value.parents);
+              return [found, queue];
+            },
+          ),
+        );
+        return Arr.getSomes(steps);
       }),
   };
 };
 
-const collectOperandRefs = (operand: Condition.Operand, out: Entity.EntityRef[]): void => {
-  if (operand._tag === "Lit" && Entity.isEntityValue(operand.value)) {
-    out.push(operand.value.__entity);
-  }
-};
+const operandRefs = (operand: Condition.Operand): ReadonlyArray<Entity.EntityRef> =>
+  Predicate.isTagged(operand, "Lit") && Entity.isEntityValue(operand.value)
+    ? [operand.value.__entity]
+    : [];
 
-const collectConditionRefs = (condition: Condition.Condition, out: Entity.EntityRef[]): void => {
-  switch (condition._tag) {
-    case "And":
-    case "Or":
-      for (const inner of condition.conditions) collectConditionRefs(inner, out);
-      return;
-    case "Not":
-      collectConditionRefs(condition.condition, out);
-      return;
-    case "Eq":
-    case "Compare":
-    case "In":
-      collectOperandRefs(condition.left, out);
-      collectOperandRefs(condition.right, out);
-      return;
-    case "Contains":
-      collectOperandRefs(condition.collection, out);
-      collectOperandRefs(condition.value, out);
-      return;
-    case "Has":
-      return;
-  }
-};
+const conditionRefs = (condition: Condition.Condition): ReadonlyArray<Entity.EntityRef> =>
+  Match.valueTags(condition, {
+    And: ({ conditions }) => Arr.flatMap(conditions, conditionRefs),
+    Or: ({ conditions }) => Arr.flatMap(conditions, conditionRefs),
+    Not: (not) => conditionRefs(not.condition),
+    Eq: ({ left, right }) => [...operandRefs(left), ...operandRefs(right)],
+    Compare: ({ left, right }) => [...operandRefs(left), ...operandRefs(right)],
+    In: ({ left, right }) => [...operandRefs(left), ...operandRefs(right)],
+    Contains: ({ collection, value }) => [...operandRefs(collection), ...operandRefs(value)],
+    Has: (): ReadonlyArray<Entity.EntityRef> => [],
+  });
 
 /**
  * The references a decision needs resolved: the request's principal, action
@@ -165,19 +169,27 @@ export const requestRefs = <E, R>(
   policies: ReadonlyArray<Policy.Policy<E, R>>,
   request: Policy.PolicyRequest,
 ): ReadonlyArray<Entity.EntityRef> => {
-  const refs: Entity.EntityRef[] = [request.principal, request.action, request.resource];
-  for (const policy of policies) {
-    if (policy._tag !== "DeclarativePolicy") continue;
-    for (const scope of [policy.principal, policy.action, policy.resource]) {
-      if (scope._tag === "eq" || scope._tag === "in") refs.push(scope.ref);
-    }
-    if (policy.when !== undefined) collectConditionRefs(policy.when, refs);
-  }
-  const seen = new Set<string>();
+  const refs: ReadonlyArray<Entity.EntityRef> = [
+    request.principal,
+    request.action,
+    request.resource,
+    ...Arr.flatMap(policies, (policy) => {
+      if (!Predicate.isTagged(policy, "DeclarativePolicy")) return [];
+      return [
+        ...Arr.filterMap([policy.principal, policy.action, policy.resource], (scope) =>
+          Predicate.isTagged(scope, "eq") || Predicate.isTagged(scope, "in")
+            ? Result.succeed(scope.ref)
+            : Result.failVoid,
+        ),
+        ...(policy.when !== undefined ? conditionRefs(policy.when) : []),
+      ];
+    }),
+  ];
+  const seen = MutableHashSet.empty<string>();
   return refs.filter((ref) => {
     const key = Entity.refKey(ref);
-    if (seen.has(key)) return false;
-    seen.add(key);
+    if (MutableHashSet.has(seen, key)) return false;
+    MutableHashSet.add(seen, key);
     return true;
   });
 };
@@ -194,7 +206,7 @@ export interface AuthorizeInput {
 }
 
 const toActionRef = (action: Entity.EntityRef | string): Entity.EntityRef =>
-  typeof action === "string" ? Entity.ref("Action", action) : action;
+  Predicate.isString(action) ? Entity.ref("Action", action) : action;
 
 /**
  * The audit record of a system principal's decision. A background job has no
@@ -312,11 +324,11 @@ export const make = <E = unknown>(
       config.model !== undefined ? AuthorizationModel.actionEntities(config.model) : [];
 
     if (config.model !== undefined) {
-      const declarative = config.policies.filter(
-        (policy): policy is Policy.DeclarativePolicy => policy._tag === "DeclarativePolicy",
+      const declarative = config.policies.filter((policy): policy is Policy.DeclarativePolicy =>
+        Predicate.isTagged(policy, "DeclarativePolicy"),
       );
       const issues = AuthorizationModel.validatePolicies(config.model, declarative);
-      if (issues.length > 0) {
+      if (Arr.isReadonlyArrayNonEmpty(issues)) {
         return yield* new PolicyValidationError({
           message: `Policy validation failed: ${issues
             .map((issue) => `[${issue.policyId}] ${issue.message}`)

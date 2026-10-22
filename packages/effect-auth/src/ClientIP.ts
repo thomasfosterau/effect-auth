@@ -8,12 +8,26 @@
  *
  * @module client-ip
  */
-import { Context, Effect, Layer, Option } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Data,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  String as Str,
+} from "effect";
 import { HttpServerRequest } from "effect/http";
 
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
+
+/** Thrown by `ClientIP.trustedHeader` for a malformed header name. */
+class InvalidHeaderNameError extends Data.TaggedError("InvalidHeaderNameError")<{
+  readonly message: string;
+}> {}
 
 /**
  * Trust forwarded-IP headers from a fixed number of proxy hops.
@@ -130,7 +144,9 @@ export class ClientIP extends Context.Service<ClientIP, { readonly ip: string | 
    */
   static trustedHeader(name: string): TrustedHeaderConfig {
     if (!headerNameRe.test(name))
-      throw new Error(`ClientIP.trustedHeader: "${name}" is not a valid HTTP header name`);
+      throw new InvalidHeaderNameError({
+        message: `ClientIP.trustedHeader: "${name}" is not a valid HTTP header name`,
+      });
     return { trustedHeader: name.toLowerCase() };
   }
 
@@ -163,7 +179,8 @@ const ipv4ToUint32 = (ip: string): number | undefined => {
   const parts = ip.split(".").map((n) => Number(n));
   if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255))
     return undefined;
-  return ((parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!) >>> 0;
+  const [a = 0, b = 0, c = 0, d = 0] = parts;
+  return ((a << 24) | (b << 16) | (c << 8) | d) >>> 0;
 };
 
 /**
@@ -177,12 +194,14 @@ const expandIPv6 = (ip: string): string | undefined => {
   if (zoneIdx >= 0) ip = ip.slice(0, zoneIdx);
 
   // IPv4-mapped: ::ffff:a.b.c.d or ::a.b.c.d
-  const v4m = ip.match(/^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/i);
-  if (v4m) {
-    const parts = v4m[1]!.split(".").map(Number);
+  const v4m = ip.match(/^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/i)?.[1];
+  if (v4m !== undefined) {
+    const parts = v4m.split(".").map(Number);
     if (parts.some((p) => p < 0 || p > 255)) return undefined;
-    const hi = ((parts[0]! << 8) | parts[1]!) >>> 0;
-    const lo = ((parts[2]! << 8) | parts[3]!) >>> 0;
+    // The pattern matched four dotted groups, so all four parts are present.
+    const [p0 = 0, p1 = 0, p2 = 0, p3 = 0] = parts;
+    const hi = ((p0 << 8) | p1) >>> 0;
+    const lo = ((p2 << 8) | p3) >>> 0;
     return `0000:0000:0000:0000:0000:ffff:${hi.toString(16).padStart(4, "0")}:${lo.toString(16).padStart(4, "0")}`;
   }
 
@@ -207,13 +226,8 @@ const expandIPv6 = (ip: string): string | undefined => {
 
   if (groups.length !== 8) return undefined;
 
-  const padded = groups.map((g) => {
-    if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
-    return g.padStart(4, "0");
-  });
-
-  if (padded.some((g) => g === null)) return undefined;
-  return (padded as string[]).join(":");
+  if (!groups.every((g) => /^[0-9a-fA-F]{1,4}$/.test(g))) return undefined;
+  return groups.map((g) => g.padStart(4, "0")).join(":");
 };
 
 /** A dotted-quad IPv4 address with no leading zeros in any octet. */
@@ -260,7 +274,8 @@ const parseIpLiteral = (raw: string): string | undefined => {
   const tail = s.slice(lastColon + 1);
   if (tail.includes(".")) {
     if (!strictIPv4Re.test(tail)) return undefined;
-    const n = ipv4ToUint32(tail)!;
+    const n = ipv4ToUint32(tail);
+    if (n === undefined) return undefined;
     body = `${s.slice(0, lastColon + 1)}${(n >>> 16).toString(16)}:${(n & 0xffff).toString(16)}`;
   }
   return isStrictIPv6(body) ? canonicalIPv6(body) : undefined;
@@ -273,30 +288,28 @@ const parseIpLiteral = (raw: string): string | undefined => {
  * dotted IPv4, as {@link normalizeIp} makes it on the socket path, so a
  * visitor gets the same rate-limit key however the address is written.
  */
-const canonicalIPv6 = (ip: string): string => {
-  const groups = expandIPv6(ip)!
-    .split(":")
-    .map((g) => parseInt(g, 16));
-  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
-    const hi = groups[6]!;
-    const lo = groups[7]!;
+const canonicalIPv6 = (ip: string): string | undefined => {
+  const expanded = expandIPv6(ip);
+  if (expanded === undefined) return undefined;
+  const groups = expanded.split(":").map((g) => parseInt(g, 16));
+  // `expandIPv6` yields exactly eight groups.
+  const [, , , , , g5, hi = 0, lo = 0] = groups;
+  if (groups.slice(0, 5).every((g) => g === 0) && g5 === 0xffff) {
     return `${hi >>> 8}.${hi & 0xff}.${lo >>> 8}.${lo & 0xff}`;
   }
-  let bestStart = -1;
-  let bestLength = 0;
-  for (let i = 0; i < 8;) {
-    if (groups[i] !== 0) {
-      i++;
-      continue;
-    }
-    let j = i;
-    while (j < 8 && groups[j] === 0) j++;
-    if (j - i > bestLength) {
-      bestStart = i;
-      bestLength = j - i;
-    }
-    i = j;
-  }
+  // The longest run of zero groups; a later run must be strictly longer to win.
+  const { bestStart, bestLength } = Arr.reduce(
+    groups,
+    { bestStart: -1, bestLength: 0, runStart: -1, runLength: 0 },
+    (acc, g, i) => {
+      if (g !== 0) return { ...acc, runLength: 0 };
+      const runStart = acc.runLength === 0 ? i : acc.runStart;
+      const runLength = acc.runLength + 1;
+      return runLength > acc.bestLength
+        ? { bestStart: runStart, bestLength: runLength, runStart, runLength }
+        : { ...acc, runStart, runLength };
+    },
+  );
   const hex = groups.map((g) => g.toString(16));
   if (bestLength < 2) return hex.join(":");
   return `${hex.slice(0, bestStart).join(":")}::${hex.slice(bestStart + bestLength).join(":")}`;
@@ -305,12 +318,11 @@ const canonicalIPv6 = (ip: string): string => {
 const ipv6ToBigInt = (ip: string): bigint | undefined => {
   const expanded = expandIPv6(ip);
   if (expanded === undefined) return undefined;
-  const groups = expanded.split(":");
-  let result = 0n;
-  for (const g of groups) {
-    result = (result << 16n) | BigInt(parseInt(g, 16));
-  }
-  return result;
+  return Arr.reduce(
+    expanded.split(":"),
+    0n,
+    (result, g) => (result << 16n) | BigInt(parseInt(g, 16)),
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -334,8 +346,8 @@ export const normalizeIp = (ip: string): string => {
   if (zoneIdx >= 0) s = s.slice(0, zoneIdx);
 
   // IPv4-mapped prefix
-  const v4m = s.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
-  if (v4m) return v4m[1]!;
+  const v4m = s.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i)?.[1];
+  if (v4m !== undefined) return v4m;
 
   return s.toLowerCase();
 };
@@ -428,7 +440,7 @@ export const resolveClientIP = (
     // taken; anything else falls back to the socket address.
     const name = config.trustedHeader.toLowerCase();
     const raw = Object.hasOwn(req.headers, name) ? req.headers[name] : undefined;
-    const fromHeader = typeof raw === "string" ? parseIpLiteral(raw) : undefined;
+    const fromHeader = Predicate.isString(raw) ? parseIpLiteral(raw) : undefined;
     return fromHeader ?? remoteIp;
   }
 
@@ -439,9 +451,9 @@ export const resolveClientIP = (
   const xffEntries = rawHeader
     .split(",")
     .map((s) => normalizeIp(s.trim()))
-    .filter((s) => s.length > 0);
+    .filter(Str.isNonEmpty);
 
-  if (xffEntries.length === 0) return remoteIp;
+  if (Arr.isReadonlyArrayEmpty(xffEntries)) return remoteIp;
 
   // Extended chain: leftmost = original client, rightmost = socket peer
   const chain = remoteIp !== undefined ? [...xffEntries, remoteIp] : xffEntries;
@@ -453,14 +465,13 @@ export const resolveClientIP = (
   }
 
   // trustedProxyCidrs: walk right-to-left, skip trusted proxies
-  for (let i = chain.length - 1; i >= 0; i--) {
-    const candidate = chain[i]!;
-    const trusted = config.trustedProxyCidrs.some((cidr) => cidrContains(cidr, candidate));
-    if (!trusted) return candidate;
-  }
-
-  // Every IP in the chain belongs to a trusted proxy — indeterminate
-  return undefined;
+  // Every IP in the chain belonging to a trusted proxy is indeterminate (undefined).
+  return Option.getOrUndefined(
+    Arr.findLast(
+      chain,
+      (candidate) => !config.trustedProxyCidrs.some((cidr) => cidrContains(cidr, candidate)),
+    ),
+  );
 };
 
 // ---------------------------------------------------------------------------

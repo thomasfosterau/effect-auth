@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect } from "effect";
+import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
+import { Context, Crypto, Effect, Result } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   type ApiKeyService,
@@ -7,7 +7,6 @@ import {
   hashApiKey,
   type ApiKey as ApiKeyRecord,
   type ApiKeyConfig,
-  type ApiKeyVerifyResult,
 } from "./ApiKey.ts";
 import * as ApiKey from "./ApiKey.ts";
 import { type RateLimitEntry, RateLimiter, RateLimitStore } from "./RateLimit.ts";
@@ -241,9 +240,8 @@ describe("ApiKeyService", () => {
     );
 
     expect(result.third._tag).toBe("Failure");
-    if (result.third._tag === "Failure") {
-      expect(result.third.failure._tag).toBe("ApiKeyError");
-    }
+    assert(Result.isFailure(result.third));
+    expect(result.third.failure._tag).toBe("ApiKeyError");
     expect(result.otherUser._tag).toBe("Success");
   });
 
@@ -282,9 +280,8 @@ describe("ApiKeyService", () => {
     );
 
     expect(result.foreignUpdate._tag).toBe("Failure");
-    if (result.foreignUpdate._tag === "Failure") {
-      expect(result.foreignUpdate.failure._tag).toBe("ApiKeyError");
-    }
+    assert(Result.isFailure(result.foreignUpdate));
+    expect(result.foreignUpdate.failure._tag).toBe("ApiKeyError");
     expect(result.foreignDelete._tag).toBe("Failure");
     expect(result.ownedUpdate.name).toBe("renamed");
     expect(result.afterDelete).toHaveLength(0);
@@ -396,7 +393,7 @@ describe("ApiKeyService", () => {
         });
 
         // Exhaust all uses
-        for (let i = 0; i < 10; i++) yield* service.verify(key);
+        yield* Effect.replicateEffect(service.verify(key), 10, { concurrency: 1, discard: true });
         const exhausted = yield* service.verify(key);
 
         // Simulate 4 intervals elapsed (4 * 3 = 12, capped at refillMax 10)
@@ -477,9 +474,7 @@ describe("ApiKeyService", () => {
           refillInterval: 60_000,
           // no remaining → unlimited
         });
-        const outcomes: ApiKeyVerifyResult[] = [];
-        for (let i = 0; i < 5; i++) outcomes.push(yield* service.verify(key));
-        return outcomes;
+        return yield* Effect.replicateEffect(service.verify(key), 5, { concurrency: 1 });
       }),
     );
 
@@ -495,11 +490,9 @@ describe("ApiKeyService", () => {
         Effect.gen(function* () {
           const service = yield* ApiKey.make();
           const { key } = yield* service.create("user-1");
-          const outcomes: ApiKeyVerifyResult[] = [];
-          for (let i = 0; i < 5; i++) {
-            outcomes.push(yield* service.verifyWithRateLimit(key));
-          }
-          return outcomes;
+          return yield* Effect.replicateEffect(service.verifyWithRateLimit(key), 5, {
+            concurrency: 1,
+          });
         }),
         testContext,
       ),

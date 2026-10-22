@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer, Order } from "effect";
 import * as Entity from "./Entity.ts";
 import * as Condition from "./Condition.ts";
 import * as Policy from "./Policy.ts";
@@ -48,7 +48,12 @@ describe("memoryEntityResolver", () => {
       Entity.entity(b, { parents: [a] }),
     ]);
     const result = await Effect.runPromise(resolver.resolve([a]));
-    expect(result.map((e) => e.ref).sort((x, y) => x.id.localeCompare(y.id))).toEqual([a, b]);
+    expect(
+      Arr.sort(
+        result.map((e) => e.ref),
+        Order.mapInput(Order.String, (ref: Entity.EntityRef) => ref.id),
+      ),
+    ).toEqual([a, b]);
   });
 });
 
