@@ -37,22 +37,36 @@ const purposeSubject = (purpose: EmailMessage["purpose"]): string => {
       return "Confirm account deletion";
     case "second-factor-otp":
       return "Your verification code";
+    case "existing-account":
+      return "Someone tried to sign up with your email address";
     default:
       return purpose.startsWith("email-otp:") ? "Your verification code" : "Action required";
   }
 };
+
+// The `"existing-account"` notice carries no params: it only tells the
+// address's holder that a sign-up was attempted with it.
+const EXISTING_ACCOUNT_TEXT = [
+  "Someone tried to create an account with this email address, but it already belongs to an account. Nothing about your account was changed.",
+  "If this was you, sign in instead, or reset your password if you have forgotten it.",
+  "If it wasn't you, you can ignore this email.",
+].join("\n\n");
 
 /**
  * The built-in renderer: a purpose-keyed subject line (e.g. "Your
  * verification code" for OTP purposes) and a plain-text body carrying
  * whatever the message's `params` hold — the OTP code when `params.otp` is
  * set, and a link when `params.url` (or, failing that, `params.token`) is
- * set. It has no HTML, no branding and no localization; it's a functional
+ * set. The `"existing-account"` notice gets a fixed body saying someone tried
+ * to sign up with the address and pointing at sign-in or password reset. It has no HTML, no branding and no localization; it's a functional
  * fallback, not a template system. Real applications should pass their own
  * `render` in {@link ResendEmailSenderConfig}.
  */
 export const defaultRender = (message: EmailMessage): RenderedEmail => {
   const subject = purposeSubject(message.purpose);
+  if (message.purpose === "existing-account") {
+    return { subject, text: EXISTING_ACCOUNT_TEXT };
+  }
   const { otp, token, url } = message.params;
 
   const lines: string[] = [];

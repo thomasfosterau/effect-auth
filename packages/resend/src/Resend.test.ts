@@ -64,6 +64,15 @@ describe("defaultRender", () => {
     expect(rendered.text).toContain("reset-token");
   });
 
+  it("tells the holder of an address that someone tried to sign up with it (#428)", () => {
+    const rendered = defaultRender({ to: "a@b.com", purpose: "existing-account", params: {} });
+    expect(rendered.subject).toBe("Someone tried to sign up with your email address");
+    expect(rendered.text).toContain("Someone tried to create an account with this email address");
+    expect(rendered.text).toContain("sign in");
+    expect(rendered.text).toContain("reset your password");
+    expect(rendered.text).not.toContain("Please continue in the app.");
+  });
+
   it("keys the subject off known purposes and falls back for unknown ones", () => {
     expect(defaultRender({ to: "a@b.com", purpose: "change-email", params: {} }).subject).toBe(
       "Confirm your new email address",
