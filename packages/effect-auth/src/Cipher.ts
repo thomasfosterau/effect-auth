@@ -10,7 +10,7 @@
  */
 
 import * as crypto from "node:crypto";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { AuthError } from "./Errors.ts";
 
 /**
@@ -187,17 +187,17 @@ export const aes256GcmSeal = (key: Uint8Array, plaintext: string): string => {
  *
  * @internal
  */
-export const aes256GcmOpen = (key: Uint8Array, sealed: string): string | null => {
-  try {
-    const buf = Buffer.from(sealed, "base64url");
-    if (buf.length < 29) return null;
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, buf.subarray(0, 12));
-    decipher.setAuthTag(buf.subarray(12, 28));
-    return Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString("utf8");
-  } catch {
-    return null;
-  }
-};
+export const aes256GcmOpen = (key: Uint8Array, sealed: string): string | null =>
+  Result.getOrElse(
+    Result.try((): string | null => {
+      const buf = Buffer.from(sealed, "base64url");
+      if (buf.length < 29) return null;
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, buf.subarray(0, 12));
+      decipher.setAuthTag(buf.subarray(12, 28));
+      return Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString("utf8");
+    }),
+    () => null,
+  );
 
 // ---------------------------------------------------------------------------
 // JWS (JSON Web Signature) asymmetric primitives — used by Jwt.ts and

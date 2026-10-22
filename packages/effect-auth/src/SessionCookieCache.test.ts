@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Redacted } from "effect";
 import {
   decodeSessionCacheCookie,
@@ -21,7 +21,7 @@ const cache: ResolvedSessionCache = {
 /** Encode, failing the test when the snapshot is refused. */
 const mustEncode = (...args: Parameters<typeof encodeSessionCacheCookie>): string => {
   const cookie = encodeSessionCacheCookie(...args);
-  if (cookie === undefined) throw new Error("encodeSessionCacheCookie refused the snapshot");
+  assert(cookie !== undefined, "encodeSessionCacheCookie refused the snapshot");
   return cookie;
 };
 
