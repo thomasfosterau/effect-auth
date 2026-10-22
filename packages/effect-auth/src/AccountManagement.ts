@@ -228,7 +228,10 @@ export const make = (
         // Uniqueness: reject if another account already owns the address.
         const existing = yield* identifiers.getByValue("email", newEmail);
         if (existing !== null && existing.userId !== userId) {
-          return yield* new Errors.EmailInUseError({ message: "Email already in use" });
+          return yield* new Errors.EmailInUseError({
+            message: "Email already in use",
+            email: newEmail,
+          });
         }
 
         const token = yield* generateToken();

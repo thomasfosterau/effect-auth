@@ -324,7 +324,9 @@ const storeContract = (engine: StoreEngine): void => {
           const hash = yield* emailPassword.getPasswordHash(created.id);
           const loaded = yield* users.get(created.id);
           const missing = yield* users.get("nope");
-          return { created, byEmail, missingEmail, hash, loaded, missing };
+          yield* emailPassword.clearPasswordHash(created.id);
+          const cleared = yield* emailPassword.getPasswordHash(created.id);
+          return { created, byEmail, missingEmail, hash, loaded, missing, cleared };
         }),
       );
       expect(result.byEmail?.userId).toBe(result.created.id);
@@ -333,6 +335,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.loaded?.name).toBe("Test User");
       expect(result.missingEmail).toBeNull();
       expect(result.hash).toBe("hash-1");
+      expect(result.cleared).toBeNull();
       expect(result.loaded?.createdAt).toBeInstanceOf(Date);
       expect(result.missing).toBeNull();
     });

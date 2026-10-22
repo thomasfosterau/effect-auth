@@ -91,6 +91,7 @@ const emailPasswordStore = {
 
   getPasswordHash: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
 
+  clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
   setPasswordHash: (userId: string, hash: string) =>
     Effect.sync(() => {
       passwordHashes.set(userId, hash);
@@ -805,6 +806,8 @@ describe("EmailPasswordService - dangling session protection", () => {
         return { user, created: true };
       }),
     getPasswordHash: (userId: string) => Effect.sync(() => localPasswordHashes.get(userId) ?? null),
+    clearPasswordHash: (userId: string) =>
+      Effect.sync(() => void localPasswordHashes.delete(userId)),
     setPasswordHash: (userId: string, hash: string) =>
       Effect.sync(() => {
         localPasswordHashes.set(userId, hash);

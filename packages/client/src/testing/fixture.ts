@@ -90,6 +90,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const emailPasswordStore: typeof Auth.Email.EmailPasswordStore.Service = {
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
+    clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
 

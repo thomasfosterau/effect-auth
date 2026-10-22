@@ -131,6 +131,7 @@ export const makeAppWriter = (
   const emailPasswordStore: typeof Email.EmailPasswordStore.Service = {
     createUser,
     getPasswordHash: (userId) => Effect.sync(() => hashes.get(userId) ?? null),
+    clearPasswordHash: (userId: string) => Effect.sync(() => void hashes.delete(userId)),
     setPasswordHash: (userId, hash) => Effect.sync(() => void hashes.set(userId, hash)),
   };
 

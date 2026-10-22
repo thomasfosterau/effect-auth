@@ -159,6 +159,19 @@ export class AuthLifecycleService extends Context.Service<
       | HookError
     >;
 
+    /**
+     * Verify an address from its verification token and, with
+     * `autoSignInAfterVerification`, sign its holder in.
+     *
+     * The first time an address is verified, the account's password is
+     * cleared and all its sessions are revoked before the address is marked
+     * verified. Its account was created by a sign-up that proved nothing
+     * about the address, so whoever chose that password may not be whoever
+     * holds the address (#425). The verifier then sets a password, with
+     * `EmailPasswordService.setPassword` from the session this issues or
+     * through a password reset, before anyone can sign in with one.
+     * Verifying an address already verified changes neither.
+     */
     readonly verifyEmail: (
       input: VerifyEmailInput,
     ) => Effect.Effect<
@@ -214,7 +227,9 @@ export const make = (
           Effect.map((r) => ({ recovered: false as const, result: r })),
           Effect.catchTag("EmailInUseError", (e) =>
             Effect.gen(function* () {
-              const email = normalizeEmail(input.email);
+              // The address `EmailPasswordService.signUp` found taken: the one
+              // its `beforeSignUp` hooks returned, not the raw input (#426).
+              const email = e.email ?? normalizeEmail(input.email);
               const identifier = yield* identifiers.getByValue("email", email);
               const existing = identifier === null ? null : yield* userStore.get(identifier.userId);
 
@@ -352,6 +367,17 @@ export const make = (
           return yield* new Errors.EmailVerificationError({
             message: "Verification token is no longer valid for this email address",
           });
+        }
+
+        // The address's first proof (#425). Until now no one had shown they
+        // own it, so the password and sessions on the account may be those of
+        // someone who signed up with it first. Clear both before marking the
+        // address verified, so the verifier is left the only one holding the
+        // account; a failure here leaves the token valid for retry, and a
+        // retry clears again.
+        if (!identifier.verified) {
+          yield* emailPassword.clearPassword(identifier.userId);
+          yield* sessionManager.invalidateUserSessions(identifier.userId);
         }
 
         // FIX 4: durable state change BEFORE burning the token.

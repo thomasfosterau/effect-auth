@@ -377,6 +377,7 @@ describe("Hooks - integration with EmailPasswordService", () => {
           return { user, created: true };
         }),
       getPasswordHash: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
+      clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
       setPasswordHash: (userId: string, hash: string) =>
         Effect.sync(() => {
           passwordHashes.set(userId, hash);
