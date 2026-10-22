@@ -118,6 +118,16 @@
       }
     ]
   },
+  "duplicates": {
+    "ignoredClones": [
+      "dup:dd241388:2",
+      "dup:0311d16d:2",
+      "dup:ceacb77f:2",
+      "dup:9b4cf9c1:2",
+      "dup:86e1ebad:2",
+      "dup:0ef59962:2"
+    ]
+  },
   "health": {
     "maxCyclomatic": 20,
     "maxCognitive": 15,
