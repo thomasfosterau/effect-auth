@@ -1,7 +1,7 @@
 # @thomasfosterau/effect-auth-resend
 
 `EmailSender` adapter for
-[`@thomasfosterau/effect-auth`](../effect-auth) backed by
+[`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth) backed by
 [Resend](https://resend.com)'s REST API. Talks to `POST /emails` with plain
 `fetch` — **no Resend SDK dependency**, so the runtime footprint is just core
 `effect-auth` and `effect`.
@@ -12,9 +12,11 @@
 pnpm add @thomasfosterau/effect-auth-resend @thomasfosterau/effect-auth effect
 ```
 
+`effect` (`>=4.0.0-rc.118`) is a peer dependency. The sender needs only a global `fetch` and imports no `node:` module.
+
 ## Usage
 
-Wire it through core's [`Delivery`](../effect-auth/src/Delivery.ts) module so
+Wire it through core's [`Delivery`](https://github.com/thomasfosterau/effect-auth/blob/trunk/packages/effect-auth/src/Delivery.ts) module so
 every feature's `sendEmail`/`sendMagicLink`/`sendVerificationOtp`/... callback
 is derived in one line:
 
@@ -24,7 +26,7 @@ import { EmailSender, emailCallbacks, IdentifierStore } from "@thomasfosterau/ef
 import { layer as resendLayer } from "@thomasfosterau/effect-auth-resend";
 
 // Resolve the secret through Config, then build the layer from the resolved config.
-const EmailLayer = Layer.unwrapEffect(
+const EmailLayer = Layer.unwrap(
   Effect.gen(function* () {
     const apiKey = yield* Config.Redacted("RESEND_API_KEY");
     return resendLayer({ apiKey, from: "App <noreply@example.com>" });
@@ -49,7 +51,7 @@ const program = Effect.gen(function* () {
 Or use the sender directly:
 
 ```ts
-import { Redacted } from "effect";
+import { Effect, Redacted } from "effect";
 import { resendEmailSender } from "@thomasfosterau/effect-auth-resend";
 
 const sender = resendEmailSender({
@@ -78,6 +80,11 @@ applications should supply their own `render`** for branded, localized email
 templates:
 
 ```ts
+import type { Redacted } from "effect";
+import { layer as resendLayer } from "@thomasfosterau/effect-auth-resend";
+
+declare const apiKey: Redacted.Redacted<string>;
+
 // `apiKey` is a `Redacted<string>`: resolve it with `yield* Config.Redacted(...)`
 // as above (or build one with `Redacted.make`), not the `Config` itself.
 resendLayer({
@@ -102,6 +109,11 @@ resendLayer({
 Pass `fetch` to inject a stub, and `baseUrl` to point at a local server:
 
 ```ts
+import { Redacted } from "effect";
+import { resendEmailSender } from "@thomasfosterau/effect-auth-resend";
+
+const myFetchStub: typeof fetch = async () => new Response(null, { status: 200 });
+
 resendEmailSender({
   apiKey: Redacted.make("test"),
   from: "test@example.com",

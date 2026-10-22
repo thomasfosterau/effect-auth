@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-auth-drizzle
 
-Storage layers for [`@thomasfosterau/effect-auth`](../effect-auth), built on
+Storage layers for [`@thomasfosterau/effect-auth`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/effect-auth), built on
 [Drizzle ORM](https://orm.drizzle.team) — **PostgreSQL, SQLite and MySQL**.
 
 Implements the three stores every sign-in flow touches:
@@ -12,7 +12,7 @@ Implements the three stores every sign-in flow touches:
 | `IdentifierStore` | `effect_auth_identifiers` | Email / username / phone claims, unique per pair       |
 
 This package **stands alone** — it does not wrap
-[`@thomasfosterau/effect-auth-sql`](../sql). It speaks drizzle's query builder
+[`@thomasfosterau/effect-auth-sql`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/sql). It speaks drizzle's query builder
 directly, so attribute bags and timestamps are round-tripped natively by the
 driver instead of being encoded into `TEXT`. If you want a driver-agnostic layer
 covering _every_ effect-auth store (OAuth, WebAuthn, rate limits, ...), reach
@@ -23,10 +23,10 @@ pipeline.
 ## Install
 
 ```sh
-pnpm add @thomasfosterau/effect-auth-drizzle drizzle-orm effect
+pnpm add @thomasfosterau/effect-auth-drizzle @thomasfosterau/effect-auth drizzle-orm effect
 ```
 
-`drizzle-orm` and `effect` are peer dependencies, as is your driver of choice (`pg`,
+`drizzle-orm` (`>=0.44.0`) and `effect` (`>=4.0.0-rc.118`) are peer dependencies (`@types/pg` is an optional one), as is your driver of choice (`pg`,
 `postgres`, `@neondatabase/serverless`, `@electric-sql/pglite`,
 `better-sqlite3`, `@libsql/client`, `mysql2`, ...).
 
@@ -74,14 +74,18 @@ yourself: `Drizzle.SessionStore.make()`, `Drizzle.UserStore.make()`,
 
 ### The export map
 
-| Export                                            | What it is                                                    |
-| ------------------------------------------------- | ------------------------------------------------------------- |
-| `layer(tables?)`                                  | All three stores at once                                      |
-| `databaseLayer(db)`, `DrizzleDatabase`            | The database seam                                             |
-| `SessionStore`, `UserStore`, `IdentifierStore`    | One namespace per store: `make`, `layer`, requests, resolvers |
-| `Requests`                                        | The batched read interface                                    |
-| `Pg`, `Sqlite`, `MySql`                           | One namespace per dialect: tables and DDL                     |
-| `TableNames`, `defaultTableNames`, `Tables`, rows | What the three dialects agree on                              |
+| Export                                                        | What it is                                                             |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `layer(schema?)`                                              | All three stores at once, over a dialect's `tables` or an `AuthSchema` |
+| `databaseLayer(db)`, `effectDatabaseLayer(db)`                | The database seam for Promise and Effect drivers (`DrizzleDatabase`)   |
+| `SessionStore`, `UserStore`, `IdentifierStore`                | One namespace per store: `make`, `layer`, requests, resolvers          |
+| `SingleTableIdentifierStore`                                  | The opt-in one-email-per-user store over your own `users` table        |
+| `Requests`                                                    | The batched read interface                                             |
+| `Pg`, `Sqlite`, `MySql`                                       | One namespace per dialect: tables, `defineTables`, DDL                 |
+| `defineSchema`, `fromTables`, `AuthSchema` and column types   | The stores pointed at tables you already have                          |
+| `TableNames`, `defaultTableNames`, `Tables`, row types        | What the three dialects agree on                                       |
+| `ladderCheck(column, ladder)`                                 | A role column's `CHECK` derived from an `Auth.Ladder`                  |
+| `ownedListFilter(columns)`, `isFollowerLayer`, `OwnedColumns` | `Auth.OwnedAccess` read scopes rendered as a drizzle `WHERE`           |
 
 ## Dialects
 
@@ -153,7 +157,7 @@ const requests = Drizzle.Requests.layer().pipe(Layer.provide(Drizzle.databaseLay
 const program = Effect.forEach(userIds, Drizzle.Requests.getUser, { concurrency: "unbounded" });
 //    ^ one SELECT ... WHERE id IN (...), however many ids
 
-program.pipe(Effect.provide(requests));
+export const users = program.pipe(Effect.provide(requests));
 ```
 
 | Constructor                                  | Request                 | Resolves to                 |
@@ -337,6 +341,93 @@ CREATE TABLE IF NOT EXISTS effect_auth_identifiers (
   KEY effect_auth_identifiers_user_id_idx (user_id)
 );
 ```
+
+## Adopting an existing schema: `defineSchema`
+
+`Pg.defineTables` renames the three tables but keeps this package's columns. An application adopting effect-auth in place, whose `users` table already has its own column names, `uuid` keys and foreign keys pointing at it, maps the stores onto its tables instead. `defineSchema` pairs each table with the column that holds each field the store needs, and `layer(schema)` (or any store's `layer(schema)`) runs the same queries over it:
+
+```ts
+import { Layer } from "effect";
+import { jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
+
+const appUsers = pgTable("users", {
+  userId: uuid("id").primaryKey(),
+  displayName: text("display_name"),
+  avatarUrl: text("avatar_url"),
+  meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+  role: text("role").notNull().default("user"),
+  created: timestamp("created_at", { withTimezone: true }).notNull(),
+  updated: timestamp("updated_at", { withTimezone: true }).notNull(),
+});
+
+const schema = Drizzle.defineSchema({
+  // This package's own sessions table, mapped one to one.
+  sessions: {
+    table: Drizzle.Pg.sessionsTable,
+    columns: {
+      id: "id",
+      userId: "userId",
+      expiresAt: "expiresAt",
+      createdAt: "createdAt",
+      lastActivityAt: "lastActivityAt",
+      attributes: "attributes",
+    },
+  },
+  users: {
+    table: appUsers,
+    columns: {
+      id: "userId",
+      name: "displayName",
+      image: "avatarUrl",
+      attributes: "meta",
+      createdAt: "created",
+      updatedAt: "updated",
+    },
+    // A real column surfaced as `user.attributes.role`.
+    promoted: { role: "role" },
+  },
+  identifiers: {
+    table: Drizzle.Pg.identifiersTable,
+    columns: {
+      id: "id",
+      userId: "userId",
+      type: "type",
+      value: "value",
+      verified: "verified",
+      verifiedAt: "verifiedAt",
+      createdAt: "createdAt",
+    },
+  },
+});
+
+export const stores = (db: Parameters<typeof Drizzle.databaseLayer>[0]) =>
+  Drizzle.layer(schema).pipe(Layer.provide(Drizzle.databaseLayer(db)));
+```
+
+The mapping is checked at compile time: naming a column whose selected type is not what the store needs (a `text` column for `expiresAt`, a nullable one for `id`) is a type error. What the mapping cannot check is on you: attribute bags must read back as objects (`jsonb().$type<Record<string, unknown>>()`), extra `NOT NULL` columns need database defaults, and the identifiers table must stay unique on `(type, value)`. A **promoted** attribute is the sole authority for its key: the store presents the column's value in `user.attributes`, ignores the same key in the bag, and leaves the key out when the column is `NULL`. A users table whose attributes are all promoted may omit `attributes`.
+
+## Authorization helpers
+
+Two renderings of core's authorization kernel into drizzle, so the database agrees with the policy.
+
+`ladderCheck(column, ladder)` is the body of a `CHECK` constraint allowing exactly the rungs of an `Auth.Ladder`, inlined as literals, so growing the ladder changes the generated DDL and a migration-drift check catches it:
+
+```ts
+import { check, pgTable, text } from "drizzle-orm/pg-core";
+import * as Auth from "@thomasfosterau/effect-auth";
+import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
+
+const Roles = Auth.Ladder.make(["user", "contributor", "moderator", "admin"]);
+
+export const users = pgTable(
+  "users",
+  { id: text("id").primaryKey(), role: text("role").notNull().default("user") },
+  (table) => [check("users_role_valid", Drizzle.ladderCheck(table.role, Roles))],
+);
+```
+
+`ownedListFilter(columns)(scope)` renders an `Auth.OwnedAccess` read scope (`yield* owned.readScope`) as a `WHERE` over an owned table's `owner`, `visibility` and optional `draft` columns: `undefined` for the `all` scope, published public rows for `public`, and for a signed-in member their own rows (drafts included) plus public rows plus followers-only rows of owners they follow. `isFollowerLayer({ isFollower, followingQuery })` provides `Auth.OwnedAccess.IsFollower` over your follow table; the follow set reaches the `WHERE` as an `owner IN (SELECT …)` subquery, never a materialised list. The test suite runs the filter and the kernel's per-row `canView` over one corpus in Postgres and requires them to agree on every row.
 
 ## Single-table identifiers (opt-in)
 

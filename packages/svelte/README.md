@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-auth-svelte
 
-Svelte bindings for [`@thomasfosterau/effect-auth-client`](../client): readable stores over the client's observable session store, plus unstyled form components for the usual authentication screens.
+Svelte bindings for [`@thomasfosterau/effect-auth-client`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/client): readable stores over the client's observable session store, plus unstyled form components for the usual authentication screens.
 
 ## Install
 
@@ -34,7 +34,7 @@ The stores implement Svelte's readable-store contract directly, so the `$store` 
 
 Subscribing to `sessionStore` triggers the initial `/session` fetch; every auth mutation on the client refreshes it.
 
-See [the client guide](../../docs/guides/client.md) for the rest of the client API.
+See [the client guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/client.md) for the rest of the client API.
 
 ## Forms
 
@@ -168,6 +168,13 @@ Every visible string is overridable through `labels`, including the button's pen
 ```svelte
 <SignUpForm labels={{ name: "Nom", email: "Courriel", submit: "Créer un compte" }} />
 ```
+
+## API
+
+- `sessionStore(client): Readable<SessionState>` and `listSessionsStore(client): ListSessionsStore` (`ListSessionsState` plus `refetch`); `Readable` is the readable-store contract they implement.
+- `setAuthClient(client)`, `getAuthClient()`, `authClientKey` (the context key).
+- Forms: `SignInForm`, `SignUpForm`, `PasswordResetRequestForm`, `PasswordResetConfirmForm`, `MagicLinkForm`, `EmailOtpForm`, with their `*FormProps` and `*Labels` types.
+- Shared form types: `AuthFormBaseProps`, `AuthFormClasses`, `AuthSuccess`, `StatusResponse`, `EmailOtpPurpose`, `FormFailure`.
 
 ## License
 

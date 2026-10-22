@@ -1,6 +1,6 @@
 # @thomasfosterau/effect-auth-react
 
-React bindings for [`@thomasfosterau/effect-auth-client`](../client): hooks over the client's observable session store, plus unstyled form components for the usual authentication screens.
+React bindings for [`@thomasfosterau/effect-auth-client`](https://github.com/thomasfosterau/effect-auth/tree/trunk/packages/client): hooks over the client's observable session store, plus unstyled form components for the usual authentication screens.
 
 ## Install
 
@@ -33,7 +33,7 @@ function Devices() {
 
 `useSession` reads the client's session store through `useSyncExternalStore`, so the first mounted hook triggers the initial `/session` fetch and every auth mutation on the client refreshes it.
 
-See [the client guide](../../docs/guides/client.md) for the rest of the client API.
+See [the client guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/client.md) for the rest of the client API.
 
 ## Forms
 
@@ -133,6 +133,14 @@ Every visible string is overridable through `labels`, including the button's pen
 ```tsx
 <SignUpForm labels={{ name: "Nom", email: "Courriel", submit: "Créer un compte" }} />
 ```
+
+## API
+
+- `useSession(client): SessionState` — the client's session store through `useSyncExternalStore`.
+- `useListSessions(client): ListSessionsState` — `{ data, isPending, error, refetch }` over `client.listSessions()`.
+- `AuthClientProvider` (`AuthClientProviderProps`: `client`, `children`), `useAuthClient()`.
+- Forms: `SignInForm`, `SignUpForm`, `PasswordResetRequestForm`, `PasswordResetConfirmForm`, `MagicLinkForm`, `EmailOtpForm`, each with its `*FormProps` and `*Labels` types.
+- Shared form types: `AuthFormBaseProps`, `AuthFormClasses`, `AuthSuccess`, `StatusResponse`.
 
 ## License
 
