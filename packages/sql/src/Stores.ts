@@ -29,7 +29,7 @@
  * bearer token.
  */
 
-import { Array as Arr, Effect, Layer, Order, Record as Rec, Schema } from "effect";
+import { Array as Arr, Clock, Effect, Layer, Order, Record as Rec, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
 
@@ -1058,6 +1058,61 @@ export const makeEmailOtpUserStore: Effect.Effect<
     createUser: (input) => users.create(input, "emailOtpUser.createUser"),
   } satisfies typeof Auth.Email.EmailOtpUserStore.Service;
 });
+
+// ---------------------------------------------------------------------------
+// purgeExpired
+// ---------------------------------------------------------------------------
+
+/**
+ * How many expired rows one {@link purgeExpired} run deleted, per table.
+ */
+export interface PurgeExpiredResult {
+  /** Rows deleted from `auth_magic_links`. */
+  readonly magicLinks: number;
+  /** Rows deleted from `auth_email_otps`. */
+  readonly emailOtps: number;
+}
+
+/**
+ * Delete the magic-link and email-OTP rows whose `expires_at` has passed;
+ * requires `SqlClient`.
+ *
+ * No store deletes these rows on its own: a record nobody redeems stays until
+ * a later send for the same address replaces it, and the sends that hide
+ * whether an account exists write one for any address. Schedule this from the
+ * host (a cron trigger on Workers, a timer on a long-lived server) so the
+ * tables stay bounded. An expired row is already refused by the services, so a
+ * purge changes no outcome; it only reclaims the space. Expiry is read from the
+ * `Clock`.
+ */
+export const purgeExpired: Effect.Effect<PurgeExpiredResult, Auth.AuthError, SqlClient.SqlClient> =
+  SqlClient.SqlClient.use((sql) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((now) =>
+        Effect.all(
+          {
+            magicLinks: allRows(
+              "purgeExpired.magicLinks",
+              sql<{
+                token: string;
+              }>`DELETE FROM auth_magic_links WHERE expires_at <= ${now} RETURNING token`,
+            ),
+            emailOtps: allRows(
+              "purgeExpired.emailOtps",
+              sql<{
+                email: string;
+              }>`DELETE FROM auth_email_otps WHERE expires_at <= ${now} RETURNING email`,
+            ),
+          },
+          { concurrency: 1 },
+        ),
+      ),
+      Effect.map(({ magicLinks, emailOtps }) => ({
+        magicLinks: magicLinks.length,
+        emailOtps: emailOtps.length,
+      })),
+    ),
+  );
 
 // ---------------------------------------------------------------------------
 // MultiFactorStore + PendingMultiFactorStore

@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Order, Schema } from "effect";
+import { Array as Arr, Clock, Effect, Layer, Order, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
 import { authTableNames } from "./AuthTables.ts";
 import * as D1Client from "./D1Client.ts";
-import { layer, migrate } from "./Storage.ts";
+import { layer, migrate, purgeExpired } from "./Storage.ts";
 import { makeTestD1 } from "./testShim.ts";
 
 /**
@@ -93,6 +93,33 @@ describe("D1-backed effect-auth storage", () => {
     expect(result.first).toBe(1);
     expect(result.second).toBe(2);
     expect(result.deleted).toBeNull();
+  });
+
+  it("purges expired magic links and email OTPs through the binding", async () => {
+    const database = makeTestD1();
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        yield* migrate(database);
+        yield* Effect.gen(function* () {
+          const links = yield* Auth.MagicLinkStore;
+          yield* links.create({
+            token: "stale",
+            email: "a@example.com",
+            createdAt: now - 600_000,
+            expiresAt: now - 1,
+          });
+          yield* links.create({
+            token: "live",
+            email: "b@example.com",
+            createdAt: now,
+            expiresAt: now + 300_000,
+          });
+        }).pipe(Effect.provide(layer(database)));
+        return yield* purgeExpired(database);
+      }),
+    );
+    expect(result).toEqual({ magicLinks: 1, emailOtps: 0 });
   });
 
   /**

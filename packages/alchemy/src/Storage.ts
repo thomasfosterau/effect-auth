@@ -46,3 +46,15 @@ export const layer = (database: D1Client.D1Database): Layer.Layer<AuthStores> =>
  */
 export const migrate = (database: D1Client.D1Database): Effect.Effect<void, Auth.AuthError> =>
   Sql.migrate.pipe(Effect.provide(D1Client.layer({ db: database })));
+
+/**
+ * Delete the expired magic-link and email-OTP rows from a D1 database, through
+ * `@thomasfosterau/effect-auth-sql`'s `purgeExpired`.
+ *
+ * Nothing else deletes them, so schedule this from the Worker (a cron
+ * trigger's `scheduled` handler) to keep those tables bounded (#420).
+ */
+export const purgeExpired = (
+  database: D1Client.D1Database,
+): Effect.Effect<Sql.PurgeExpiredResult, Auth.AuthError> =>
+  Sql.purgeExpired.pipe(Effect.provide(D1Client.layer({ db: database })));

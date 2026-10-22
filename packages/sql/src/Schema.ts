@@ -191,6 +191,9 @@ export const schemaStatements: readonly string[] = [
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS auth_api_keys_hash_idx ON auth_api_keys (key_hash)`,
   `CREATE INDEX IF NOT EXISTS auth_api_keys_user_idx ON auth_api_keys (user_id)`,
+  // `purgeExpired` deletes by expiry (#420).
+  `CREATE INDEX IF NOT EXISTS auth_magic_links_expires_idx ON auth_magic_links (expires_at)`,
+  `CREATE INDEX IF NOT EXISTS auth_email_otps_expires_idx ON auth_email_otps (expires_at)`,
 ];
 
 /**
