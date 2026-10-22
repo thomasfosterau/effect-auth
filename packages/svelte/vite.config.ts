@@ -19,5 +19,11 @@ export default defineConfig({
     // into `dist/`, tests included, so an unscoped scan would run each suite
     // twice.
     include: ["src/**/*.test.ts"],
+    // `@testing-library/svelte` ships `.svelte` sources. vite-plugin-svelte
+    // marks them for transformation by crawling the dependencies of the
+    // package vitest runs from, so the root `vp run test:coverage` run (which
+    // starts from the workspace root, not this package) needs it inlined
+    // explicitly.
+    server: { deps: { inline: [/@testing-library\/svelte/] } },
   },
 });

@@ -18,7 +18,12 @@
 # red. They move by hand as a set together with vite-plus, after checking the
 # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs. For the
 # same reason `@effect/tsgo` is excluded from the `effect` group's `@effect/*`
-# pattern.
+# pattern. `@vitest/coverage-istanbul` must equal the vitest that vite-plus
+# bundles, so it is ignored the same way. The `toolchain` group collects the
+# security updates of that whole move-together set into one PR.
+#
+# `cooldown` mirrors pnpm 11's default `minimumReleaseAge` (1440 minutes, one
+# day): Dependabot never proposes a release pnpm would refuse to install.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -37,6 +42,16 @@ updates:
       exclude:
         - "@thomasfosterau/*"
     groups:
+      toolchain:
+        applies-to: security-updates
+        patterns:
+          - "vite-plus"
+          - "vite"
+          - "vitest"
+          - "@vitest/*"
+          - "@effect/tsgo"
+          - "typescript"
+          - "@typescript/native"
       effect:
         patterns:
           - "effect"
@@ -87,6 +102,13 @@ updates:
             "version-update:semver-patch",
           ]
       - dependency-name: "vitest"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+      - dependency-name: "@vitest/coverage-istanbul"
         update-types:
           [
             "version-update:semver-major",

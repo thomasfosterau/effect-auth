@@ -165,4 +165,54 @@ export default defineConfig({
     // per-package types (e.g. @types/node globals).
     options: { typeAware: false, typeCheck: false },
   },
+  run: {
+    tasks: {
+      // Every package's unit suite under one Istanbul coverage map
+      // (`coverage/coverage-final.json`), which `fallow audit` reads for exact
+      // per-function CRAP scores (`health.coverage` in .fallowrc.json).
+      // Without it fallow estimates every function as uncovered, and any
+      // function with cyclomatic complexity ≥ 5 fails the gate on its own.
+      // Run it before `fallow audit` (the PreToolUse fallow gate never
+      // refreshes the map).
+      //
+      // One vitest process runs every package's suite (`test.projects`
+      // below), so no `{ from: "dependencies" }` edge builds the siblings a
+      // suite imports through `exports` (→ `dist/`): every package's `build`
+      // is named explicitly (cached, so a warm tree pays nothing), and a new
+      // package adds itself here. The alchemy runtime suite stays in its own
+      // `test:alchemy` task, as in `test:unit`.
+      "test:coverage": {
+        command:
+          "vp test run --coverage --exclude '**/node_modules/**' --exclude '**/dist/**' --exclude packages/alchemy/src/AuthSchema.test.ts",
+        dependsOn: [
+          "@thomasfosterau/effect-auth#build",
+          "@thomasfosterau/effect-auth-alchemy#build",
+          "@thomasfosterau/effect-auth-argon2#build",
+          "@thomasfosterau/effect-auth-client#build",
+          "@thomasfosterau/effect-auth-drizzle#build",
+          "@thomasfosterau/effect-auth-react#build",
+          "@thomasfosterau/effect-auth-resend#build",
+          "@thomasfosterau/effect-auth-saml#build",
+          "@thomasfosterau/effect-auth-solid#build",
+          "@thomasfosterau/effect-auth-sql#build",
+          "@thomasfosterau/effect-auth-svelte#build",
+          "@thomasfosterau/effect-auth-twilio#build",
+          "@thomasfosterau/effect-auth-vue#build",
+        ],
+        cache: false,
+      },
+    },
+  },
+  test: {
+    // One entry per package: each package's own vite.config.ts is a vitest
+    // project, so the root run and the root coverage map cover them all.
+    projects: ["packages/*/vite.config.ts"],
+    coverage: {
+      provider: "istanbul",
+      reporter: ["text-summary", "json-summary", "json"],
+      reportsDirectory: "./coverage",
+      include: ["packages/*/src/**/*.{ts,tsx,svelte,vue}"],
+      exclude: ["**/*.d.ts", "**/*.test.{ts,tsx}", "**/testing/**"],
+    },
+  },
 });

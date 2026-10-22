@@ -67,6 +67,10 @@ catalog:
   # Types for `semver` in `scripts/check-dist.ts` (checked by `vp run check:scripts`).
   "@types/semver": ^7.8.0
   "@vitejs/plugin-vue": ^6.0.10
+  # `vp run test:coverage`'s provider. Must equal the vitest that vite-plus
+  # bundles (see `vitest` below); vite-plus refuses to run coverage on a
+  # mismatch, so it moves with vite-plus.
+  "@vitest/coverage-istanbul": 5.0.5
   "@vue/test-utils": ^2.5.1
   alchemy: 2.0.0-beta.83
   better-sqlite3: ^13.0.3
@@ -81,6 +85,10 @@ catalog:
   # `vp exec effect-solutions …` — the Effect pattern guides AGENTS.md requires
   # consulting before writing Effect code.
   effect-solutions: ^0.5.3
+  # Dead-code, duplication and complexity audit: the PreToolUse fallow gate
+  # (.claude/hooks/fallow-gate.sh) and `fallow audit` (AGENTS.md, Verification).
+  # Config in .fallowrc.json.
+  fallow: 3.34.1
   hash-wasm: ^4.12.0
   jsdom: ^30.1.3
   react: ^19.3.1
@@ -173,6 +181,7 @@ overrides:
 allowBuilds:
   better-sqlite3: true
   esbuild: true
+  fallow: true
   msgpackr-extract: true
   workerd: false
 peerDependencyRules:
