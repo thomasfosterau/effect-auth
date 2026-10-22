@@ -30,7 +30,7 @@ import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
-import { normalizeEmail } from "./utils.ts";
+import { normalizeEmail, normalizeUsername } from "./utils.ts";
 import {
   createUserWithIdentifier,
   type CreateUserResult,
@@ -91,7 +91,10 @@ export interface AdminCreateUserInput {
   readonly attributes?: Record<string, unknown>;
   /**
    * Additional identifier records created via `IdentifierStore` (email,
-   * username, or phone), beyond the primary email.
+   * username, or phone), beyond the primary email. Each value is normalised
+   * for its type before it is stored, as the flows that look it up expect:
+   * an email or username trimmed and lower-cased, a phone number through
+   * {@link AdminConfig.normalizePhoneNumber}.
    */
   readonly identifiers?: ReadonlyArray<{
     readonly type: IdentifierType;
@@ -162,6 +165,15 @@ export interface AdminConfig {
    * see {@link AdminService.impersonateUser}.
    */
   readonly impersonationSessionDuration?: number;
+  /**
+   * Normalises a phone number in `AdminCreateUserInput.identifiers`. Pass the
+   * same function as `PhoneOtpConfig.normalizePhoneNumber`, so phone OTP
+   * finds the stored number. Default: trims whitespace only, as phone OTP's
+   * default does. A failure fails `createUser` before anything is written.
+   */
+  readonly normalizePhoneNumber?:
+    | ((raw: string) => Effect.Effect<string, Errors.AuthError>)
+    | undefined;
 }
 
 /**
@@ -356,6 +368,23 @@ export const make = (
             new AdminError({ message: `"${role}" is not a role this deployment defines` }),
           );
 
+    /** Normalise an identifier value as the flows that look it up do. */
+    const normalizeIdentifier = (
+      type: IdentifierType,
+      value: string,
+    ): Effect.Effect<string, Errors.AuthError> => {
+      switch (type) {
+        case "email":
+          return Effect.succeed(normalizeEmail(value));
+        case "username":
+          return Effect.succeed(normalizeUsername(value));
+        case "phone":
+          return config.normalizePhoneNumber !== undefined
+            ? config.normalizePhoneNumber(value)
+            : Effect.succeed(value.trim());
+      }
+    };
+
     const adminStore = yield* AdminUserStore;
     const userStore = yield* UserServiceStore;
     const sessionManager = yield* SessionService;
@@ -528,6 +557,15 @@ export const make = (
           yield* requireRole(role);
         }
 
+        // Normalise the extra identifiers before anything is written, so a
+        // failing phone normaliser leaves no user behind, and each value
+        // matches the normalised lookups the other flows make (#408).
+        const extraIdentifiers = yield* Effect.forEach(input.identifiers ?? [], (ident) =>
+          normalizeIdentifier(ident.type, ident.value).pipe(
+            Effect.map((value) => ({ ...ident, value })),
+          ),
+        );
+
         // Create the user with its primary email identifier.
         const emailVerified = input.emailVerified ?? false;
         const { user } = yield* createUserWithIdentifier(
@@ -551,9 +589,9 @@ export const make = (
           ),
         );
 
-        if (input.identifiers && input.identifiers.length > 0) {
+        if (extraIdentifiers.length > 0) {
           const now = new Date();
-          for (const ident of input.identifiers) {
+          for (const ident of extraIdentifiers) {
             yield* identifierStore.create({
               id: yield* randomId(),
               userId: user.id,

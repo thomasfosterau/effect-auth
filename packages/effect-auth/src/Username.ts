@@ -28,6 +28,7 @@ import {
 } from "./Identifier.ts";
 import { UserStore } from "./UserStore.ts";
 import { MultiAlgorithmVerifier, PasswordHasher } from "./password/Password.ts";
+import { normalizeUsername } from "./utils.ts";
 import { SessionService } from "./SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 
@@ -138,8 +139,6 @@ export class UsernameService extends Context.Service<
   static readonly layer = (config: UsernameConfig = {}) =>
     Layer.effect(UsernameService, make(config));
 }
-
-const normalizeUsername = (username: string): string => username.trim().toLowerCase();
 
 const DEFAULT_CHARSET = /^[a-zA-Z0-9_.]+$/;
 
