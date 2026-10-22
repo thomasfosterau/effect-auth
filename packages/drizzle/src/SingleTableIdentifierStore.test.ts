@@ -16,6 +16,8 @@ import { drizzle } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as Testing from "@thomasfosterau/effect-auth/testing";
+import { conformance } from "./testing/Conformance.ts";
 import { databaseLayer } from "./Database.ts";
 import { defineUsers, layer } from "./SingleTableIdentifierStore.ts";
 import {
@@ -247,3 +249,18 @@ describe("defineUsers: NOT NULL detection", () => {
     expect(strictMapping.emailNullable).toBe(false);
   });
 });
+
+// The core's published IdentifierStore suite over the single-table store: the
+// suite uses email identifiers only, and seeds each user's row with no address.
+conformance(
+  "single-table PostgreSQL",
+  Testing.identifierStoreConformance({
+    seedUser: (user) =>
+      Effect.promise(() =>
+        drizzle(client)
+          .insert(appUsers)
+          .values({ userId: user.id, createdAt: user.createdAt, updatedAt: user.updatedAt }),
+      ),
+  }),
+  (effect) => runWith(usersMapping, () => effect),
+);

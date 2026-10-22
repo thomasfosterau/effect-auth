@@ -10,6 +10,8 @@ import { drizzle } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
+import * as Testing from "@thomasfosterau/effect-auth/testing";
+import { conformance } from "./testing/Conformance.ts";
 import { databaseLayer } from "./Database.ts";
 import { layer as identifierStoreLayer } from "./IdentifierStore.ts";
 import { tables } from "./PgSchema.ts";
@@ -211,3 +213,8 @@ identifierStoreContract("IdentifierStore (multi-identifier)", {
   run: runWithDatabase,
   seedUsers: async () => {},
 });
+
+// The core's published IdentifierStore suite, over the same store.
+conformance("IdentifierStore (multi-identifier)", Testing.identifierStoreConformance(), (effect) =>
+  runWithDatabase(() => effect),
+);
