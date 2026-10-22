@@ -683,7 +683,7 @@ Errors are tagged (`Data.TaggedError`) and carry a stable `code`; the shared one
 
 - [The three-library boundary](../../docs/BOUNDARY.md): how this library relates to effect-jsonapi and legation.
 - [Architecture](../../docs/ARCHITECTURE.md), including the security model; [design decisions](../../docs/DESIGN.md) and [ADRs](../../docs/adr/README.md).
-- Guides: [bring your own store](../../docs/guides/byo-stores.md), [the browser client](../../docs/guides/client.md), [MCP provider](../../docs/guides/mcp-provider.md), [SCIM](../../docs/guides/scim.md), [auth as a separate service](../../docs/guides/split-auth-service.md), [migrating from Better Auth](../../docs/guides/better-auth-migration.md).
+- Guides: [bring your own store](../../docs/guides/byo-stores.md), [the browser client](../../docs/guides/client.md), [MCP provider](../../docs/guides/mcp-provider.md), [SCIM](../../docs/guides/scim.md), [auth as a separate service](../../docs/guides/split-auth-service.md), [rate limits and sessions on Durable Objects](../../docs/guides/workers-durable-objects.md), [migrating from Better Auth](../../docs/guides/better-auth-migration.md).
 - [Observability](../../docs/OBSERVABILITY.md): spans and metrics.
 
 ## License

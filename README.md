@@ -25,7 +25,7 @@ Batteries-included authentication and authorization for [Effect](https://effect.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) (module map and security model), [design decisions](docs/DESIGN.md), [ADRs](docs/adr/README.md) and the [domain vocabulary](docs/CONTEXT.md).
-- Guides in [docs/guides/](docs/guides/): bring your own store, the browser client, MCP provider, SCIM, auth as a separate service, migrating from Better Auth, migrating to the authorization kernel.
+- Guides in [docs/guides/](docs/guides/): bring your own store, the browser client, MCP provider, SCIM, auth as a separate service, rate limits and sessions on Cloudflare Durable Objects, migrating from Better Auth, migrating to the authorization kernel.
 
 ## Development
 
