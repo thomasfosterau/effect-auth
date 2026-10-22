@@ -21,6 +21,15 @@ export class UserServiceStore extends Context.Service<
  * @since 1.0.0
  * @category models
  */
+/**
+ * The default {@link UserServiceConfig.serverOnlyAttributes}: `role`, the rung
+ * the guards read.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const DEFAULT_SERVER_ONLY_ATTRIBUTES: ReadonlyArray<string> = ["role"];
+
 export interface UserServiceConfig {
   /**
    * Attribute keys `updateUserAttributes` refuses to write, whoever calls it
@@ -70,6 +79,15 @@ export class UserService extends Context.Service<
     ) => Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError>;
 
     readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
+
+    /**
+     * The attributes {@link UserServiceConfig.serverOnlyAttributes} declares
+     * server-only: the authorization-bearing ones. The session cookie cache
+     * never snapshots a user who holds one (see `SessionCookieCache`). An
+     * implementation that leaves it unset is read as
+     * {@link DEFAULT_SERVER_ONLY_ATTRIBUTES}.
+     */
+    readonly serverOnlyAttributes?: ReadonlyArray<string> | undefined;
   }
 >()("@effect-auth/UserService") {
   /**
@@ -94,9 +112,11 @@ export const make = (
 ): Effect.Effect<typeof UserService.Service, never, UserServiceStore> =>
   Effect.gen(function* () {
     const store = yield* UserServiceStore;
-    const serverOnly = new Set(config?.serverOnlyAttributes ?? ["role"]);
+    const serverOnlyAttributes = config?.serverOnlyAttributes ?? DEFAULT_SERVER_ONLY_ATTRIBUTES;
+    const serverOnly = new Set(serverOnlyAttributes);
 
     return {
+      serverOnlyAttributes,
       getUser: Effect.fn("UserService.getUser")((userId: string) => getUserOrFail(store, userId)),
 
       updateUserAttributes: Effect.fn("UserService.updateUserAttributes")(function* (

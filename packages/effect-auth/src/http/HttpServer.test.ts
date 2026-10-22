@@ -648,7 +648,11 @@ const handlerFor = (
     readonly features?: boolean;
     readonly prefix?: string;
     readonly trustedOrigins?: ReadonlyArray<string>;
-    readonly cache?: { readonly secret: string; readonly maxAge?: number };
+    readonly cache?: {
+      readonly secret: string;
+      readonly maxAge?: number;
+      readonly version?: string;
+    };
     readonly multiSession?: { readonly maximumSessions?: number };
     readonly maxBodySize?: number;
     readonly secure?: boolean;
@@ -665,6 +669,7 @@ const handlerFor = (
           enabled: true,
           secret: Redacted.make(options.cache.secret),
           ...(options.cache.maxAge !== undefined && { maxAge: options.cache.maxAge }),
+          ...(options.cache.version !== undefined && { version: options.cache.version }),
         },
       }),
       ...(options?.bearerMode !== undefined && { bearerMode: options.bearerMode }),
@@ -2372,6 +2377,42 @@ describe("HTTP session cookie cache", () => {
 
     const before = fixture.sessionStoreReads();
     const res = await handler(getRequest("/session", bothCookies(sid, data)));
+    expect(res.status).toBe(200);
+    expect(fixture.sessionStoreReads()).toBeGreaterThan(before);
+  });
+
+  it("never caches a user holding a server-only attribute, so each request reads the store (#194)", async () => {
+    // Every user this store creates holds `role`, the default server-only attribute.
+    const fixture = makeFixture({
+      emailPasswordStore: (base) => ({
+        ...base,
+        createUser: (input) => base.createUser({ ...input, attributes: { role: "admin" } }),
+      }),
+    });
+    const handler = handlerFor(fixture, { cache: { secret: SECRET } });
+    const sid = await signUp(handler, "admin@example.com");
+
+    const first = await handler(getRequest("/session", asCookie(sid)));
+    expect(first.status).toBe(200);
+    const body = (await first.json()) as { user: { attributes: Record<string, unknown> } };
+    expect(body.user.attributes["role"]).toBe("admin");
+    expect(dataCookieFromSetCookie(first.headers.get("set-cookie"))).toBeNull();
+
+    const before = fixture.sessionStoreReads();
+    await handler(getRequest("/session", asCookie(sid)));
+    expect(fixture.sessionStoreReads()).toBeGreaterThan(before);
+  });
+
+  it("rejects every outstanding cache cookie when the epoch changes (#194)", async () => {
+    const fixture = makeFixture();
+    const v1 = handlerFor(fixture, { cache: { secret: SECRET, version: "v1" } });
+    const sid = await signUp(v1, "epoch@example.com");
+    const first = await v1(getRequest("/session", asCookie(sid)));
+    const data = dataCookieFromSetCookie(first.headers.get("set-cookie"))!;
+
+    const v2 = handlerFor(fixture, { cache: { secret: SECRET, version: "v2" } });
+    const before = fixture.sessionStoreReads();
+    const res = await v2(getRequest("/session", bothCookies(sid, data)));
     expect(res.status).toBe(200);
     expect(fixture.sessionStoreReads()).toBeGreaterThan(before);
   });

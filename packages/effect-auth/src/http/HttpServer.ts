@@ -79,6 +79,7 @@ import { hashToken } from "../TokenHash.ts";
 import { GoogleOneTapService } from "../GoogleOneTap.ts";
 import {
   decodeSessionCacheCookie,
+  sessionCacheGateAttributes,
   encodeSessionCacheCookie,
   resolveSessionCache,
   type ResolvedSessionCache,
@@ -1199,7 +1200,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
               cache,
               Date.now(),
               resolved.session.id,
+              yield* sessionCacheGateAttributes,
             );
+            // A user holding a server-only attribute is never snapshotted.
+            if (value === undefined) return body;
             return yield* HttpServerResponse.json(body).pipe(
               Effect.flatMap((response) =>
                 HttpServerResponse.setCookie(
@@ -4112,7 +4116,8 @@ const resolveSession = (
       if (primaryId !== undefined) {
         const cached = request.cookies[dataCookieName(cfg)];
         if (cached !== undefined) {
-          const resolved = decodeSessionCacheCookie(cached, cfg.cache, Date.now(), primaryId);
+          const gate = yield* sessionCacheGateAttributes;
+          const resolved = decodeSessionCacheCookie(cached, cfg.cache, Date.now(), primaryId, gate);
           if (resolved !== null) return { resolved, cacheHit: true };
         }
       }

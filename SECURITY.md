@@ -19,3 +19,14 @@ Include what an attacker can do, the affected packages and versions, and steps o
 ## The security model
 
 What the library guarantees, what it leaves to the application, and the fail-open trade-off for session resolution are in [docs/ARCHITECTURE.md → Security Considerations](docs/ARCHITECTURE.md#security-considerations).
+
+## The session cookie cache is an authorization bound
+
+`cookie.cache` serves a request from a signed snapshot of the session and user, without reading the store, for up to `maxAge` (default 5 minutes). Within that window:
+
+- **a revoked session keeps working** from its cached cookie on the device that holds it, and
+- **a changed user is served as it was** when the cookie was issued.
+
+Authorization-bearing attributes are kept out of the window: a user holding any of `UserService`'s server-only attributes (`UserServiceConfig.serverOnlyAttributes`, default `["role"]`) is never snapshotted, and a cookie carrying one is never served, so a demoted admin's `role` always comes from the store. Keep `maxAge` short regardless.
+
+To invalidate every outstanding cache cookie at once (a role-ladder change, a session-shape change, a suspected compromise), change `cookie.cache.version`, and also revoke the affected accounts' sessions: a still-valid session is simply re-cached under the new version. Without `cookie.cache.encrypt: true` the cookie is signed but not encrypted, so the browser can read the session and user data it carries.
