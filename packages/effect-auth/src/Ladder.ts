@@ -1,6 +1,7 @@
 /**
- * An ordered role ladder: a totally ordered set of rungs, a rank function, the
- * one "at least this rung" comparison, and named capability axes over it.
+ * An ordered role ladder over the rungs `Rung`, least → most privileged: a
+ * totally ordered set of rungs, a rank function, the one "at least this rung"
+ * comparison, and named capability axes over it.
  *
  * This is the model the set-based RBAC in `Rbac.ts` cannot express. A user
  * holds exactly one rung (a single `role` string), and a capability is "that
@@ -39,39 +40,6 @@
  *
  * A usage example is on {@link make}, the entry point.
  *
- * @module ladder
- */
-
-/**
- * Anything that holds a rung. Structural on purpose: a server-side user record,
- * a client-side session user and a test fixture all satisfy it, so the server
- * guard and the browser UX gate share one comparison.
- *
- * @since 1.0.0
- * @category models
- */
-export interface RungHolder {
-  readonly role: string;
-}
-
-/**
- * A named capability axis: "this capability needs at least `min`". Built by
- * {@link Ladder.axis} / {@link Ladder.axes}; accepted wherever a rung is.
- *
- * @since 1.0.0
- * @category models
- */
-export interface Axis<Rung extends string = string> {
-  readonly _tag: "LadderAxis";
-  /** The axis name, for traces, policy ids and error messages. */
-  readonly name: string;
-  /** The lowest rung that satisfies the axis. */
-  readonly min: Rung;
-}
-
-/**
- * An ordered role ladder over the rungs `Rung`, least → most privileged.
- *
  * @since 1.0.0
  * @category models
  */
@@ -102,6 +70,33 @@ export interface Ladder<Rung extends string> {
   readonly axes: <const Declared extends Readonly<Record<string, NoInfer<Rung>>>>(
     declared: Declared,
   ) => { readonly [K in keyof Declared]: Axis<Rung> };
+}
+
+/**
+ * Anything that holds a rung. Structural on purpose: a server-side user record,
+ * a client-side session user and a test fixture all satisfy it, so the server
+ * guard and the browser UX gate share one comparison.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface RungHolder {
+  readonly role: string;
+}
+
+/**
+ * A named capability axis: "this capability needs at least `min`". Built by
+ * {@link Ladder.axis} / {@link Ladder.axes}; accepted wherever a rung is.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface Axis<Rung extends string = string> {
+  readonly _tag: "LadderAxis";
+  /** The axis name, for traces, policy ids and error messages. */
+  readonly name: string;
+  /** The lowest rung that satisfies the axis. */
+  readonly min: Rung;
 }
 
 /**
