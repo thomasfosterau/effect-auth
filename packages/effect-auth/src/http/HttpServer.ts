@@ -1,4 +1,5 @@
 import {
+  Array as Arr,
   Cause,
   Context,
   Effect,
@@ -6,10 +7,14 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Match,
   Option,
   Path,
+  Predicate,
+  Result,
   Scheduler,
   Scope,
+  String as Str,
 } from "effect";
 import { resolveMessage } from "../Messages.ts";
 import { HttpApiBuilder } from "effect/http-api";
@@ -291,7 +296,7 @@ const readDeviceSessionIds = (
   if (raw === undefined || raw === "") return [];
   // "." separates ids: safe inside a cookie value (session ids are hex /
   // base64url) and, unlike ",", it doesn't confuse Set-Cookie parsing.
-  return raw.split(".").filter((id) => id.length > 0);
+  return raw.split(".").filter(Str.isNonEmpty);
 };
 
 /**
@@ -710,7 +715,9 @@ const encodeApiKey = (k: ApiKey): S.ApiKeyView => ({
  * Log the real error server-side and return a generic 500 body so internal
  * implementation details are never exposed to clients.
  */
-const internalServerError = (e: unknown): Effect.Effect<never, S.InternalServerError, never> =>
+const internalServerError = (
+  e: Cause.YieldableError,
+): Effect.Effect<never, S.InternalServerError, never> =>
   Effect.logError("[effect-auth] internal error", e).pipe(
     Effect.flatMap(() =>
       Effect.fail(new S.InternalServerError({ message: "Internal server error" })),
@@ -824,7 +831,7 @@ const servicesConfigError = (
     options.allowMissingClientIp !== true
   ) {
     const keyed = clientAddressKeyedPlugins(hooks.value);
-    if (keyed.length > 0) {
+    if (Arr.isReadonlyArrayNonEmpty(keyed)) {
       return new ClientAddressConfigError({
         message:
           `${keyed.join(", ")} keys its limits on the client address, and a Web Request has none under Http.make or Http.makeAsync. ` +
@@ -861,7 +868,7 @@ const servicesConfigError = (
   if (Option.isSome(device) && device.value.allowMissingRateLimiter !== true) {
     configured.push("the device user-code limit (approve and deny)");
   }
-  if (configured.length === 0) return undefined;
+  if (Arr.isReadonlyArrayEmpty(configured)) return undefined;
   return new RateLimiterConfigError({
     message:
       `${configured.join(", ")} configured with no RateLimiter in services, so the limit could not run. ` +
@@ -919,18 +926,25 @@ class HeldDispatcher implements Scheduler.SchedulerDispatcher {
       const batch = this.queued.flatMap(([priority, tasks]) =>
         tasks.map((task) => [priority, task] as const),
       );
-      if (batch.length === 0) return ran;
+      if (Arr.isReadonlyArrayEmpty(batch)) return ran;
       ran = true;
       this.queued = [];
       let next = 0;
-      try {
-        while (next < batch.length && fiber.pollUnsafe() === undefined) batch[next++]![1]();
-      } finally {
-        // The batch's unrun tasks go back ahead of those scheduled since.
-        for (let i = batch.length - 1; i >= next; i--) {
-          this.enqueue(batch[i]![1], batch[i]![0], true);
-        }
-      }
+      // `every` stops at the first task that finds `fiber` finished; a task
+      // that throws stops the batch too, and the throw is rethrown below.
+      const outcome = Result.try(() =>
+        batch.every(([, task]) => {
+          if (fiber.pollUnsafe() !== undefined) return false;
+          next++;
+          task();
+          return true;
+        }),
+      );
+      // The batch's unrun tasks go back ahead of those scheduled since.
+      Arr.reverse(Arr.drop(batch, next)).forEach(([priority, task]) =>
+        this.enqueue(task, priority, true),
+      );
+      if (Result.isFailure(outcome)) throw outcome.failure;
     }
     return ran;
   }
@@ -941,14 +955,15 @@ class HeldDispatcher implements Scheduler.SchedulerDispatcher {
     this.target = target;
     const queued = this.queued;
     this.queued = [];
-    for (const [priority, tasks] of queued) {
-      for (const task of tasks) target.scheduleTask(task, priority);
-    }
+    queued.forEach(([priority, tasks]) =>
+      tasks.forEach((task) => target.scheduleTask(task, priority)),
+    );
   }
 
   private enqueue(task: () => void, priority: number, first: boolean): void {
-    let index = 0;
-    while (index < this.queued.length && this.queued[index]![0] < priority) index++;
+    // The first bucket at or above `priority`, or the end when there is none.
+    const found = this.queued.findIndex(([bucketPriority]) => bucketPriority >= priority);
+    const index = found === -1 ? this.queued.length : found;
     const bucket = this.queued[index];
     if (bucket !== undefined && bucket[0] === priority) {
       if (first) bucket[1].unshift(task);
@@ -957,6 +972,13 @@ class HeldDispatcher implements Scheduler.SchedulerDispatcher {
       this.queued.splice(index, 0, [priority, [task]]);
     }
   }
+}
+
+/** An effect {@link runSynchronously} runs: its fiber, and how to drive it. */
+interface SynchronousRun<A, E> {
+  readonly fiber: Fiber.Fiber<A, E>;
+  readonly run: () => boolean;
+  readonly release: () => void;
 }
 
 /**
@@ -977,13 +999,7 @@ class HeldDispatcher implements Scheduler.SchedulerDispatcher {
  * fiber still has queued to the default scheduler, so whatever is left running
  * carries on as it would without this.
  */
-const runSynchronously = <A, E>(
-  effect: Effect.Effect<A, E>,
-): {
-  readonly fiber: Fiber.Fiber<A, E>;
-  readonly run: () => boolean;
-  readonly release: () => void;
-} => {
+const runSynchronously = <A, E>(effect: Effect.Effect<A, E>): SynchronousRun<A, E> => {
   const base = new Scheduler.MixedScheduler();
   // Dispatchers made before the fiber's own is known: one is its, and the rest
   // belong to fibers it forked while it started.
@@ -1003,9 +1019,9 @@ const runSynchronously = <A, E>(
   // Reading it makes the fiber's dispatcher if it has none yet, so it is held.
   const own = fiber.currentDispatcher;
   started = true;
-  for (const dispatcher of held) {
+  held.forEach((dispatcher) => {
     if (dispatcher !== own) dispatcher.handOver(base.makeDispatcher());
-  }
+  });
   return {
     fiber,
     run: () => own instanceof HeldDispatcher && own.run(fiber),
@@ -1805,17 +1821,28 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           }
           const sessionManager = yield* SessionService;
           const active = sessionIdFromRequest(request, cfg);
-          const ids = new Set(readDeviceSessionIds(request, cfg));
-          if (active !== undefined) ids.add(active);
+          // Unique ids in first-seen order, with the active one last when new.
+          const ids = Arr.dedupe(
+            active === undefined
+              ? readDeviceSessionIds(request, cfg)
+              : [...readDeviceSessionIds(request, cfg), active],
+          );
 
-          const views: S.SessionWithUserView[] = [];
-          for (const id of ids) {
-            const resolved = yield* sessionManager
-              .validateSession(id)
-              .pipe(Effect.catch(() => Effect.succeed(null)));
-            if (resolved !== null) views.push(yield* encodeSessionWithUserView(resolved));
-          }
-          return views;
+          const views = yield* Effect.forEach(
+            ids,
+            (id) =>
+              sessionManager.validateSession(id).pipe(
+                Effect.map(Option.some),
+                Effect.catch(() => Effect.succeed(Option.none())),
+                Effect.flatMap((resolved) =>
+                  Option.isNone(resolved)
+                    ? Effect.succeed(Option.none<S.SessionWithUserView>())
+                    : Effect.map(encodeSessionWithUserView(resolved.value), Option.some),
+                ),
+              ),
+            { concurrency: 1 },
+          );
+          return Arr.getSomes(views);
         }),
       )
       .handle("multiSessionSetActive", ({ payload, request }) =>
@@ -2705,7 +2732,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 AuthError: (e) => internalServerError(e),
               }),
             );
-          const users = yield* Effect.forEach(result.users, encodeUserView);
+          const users = yield* Effect.forEach(result.users, encodeUserView, { concurrency: 1 });
           return { users, total: result.total };
         }),
       )
@@ -3575,7 +3602,9 @@ const scimConflict = (detail: string): S.ScimConflict =>
  * Log the real error and answer with a generic SCIM 500, so internals never
  * reach the IdP. The SCIM mirror of {@link internalServerError}.
  */
-const scimInternalError = (e: unknown): Effect.Effect<never, S.ScimInternalError, never> =>
+const scimInternalError = (
+  e: ScimError | Errors.AuthError,
+): Effect.Effect<never, S.ScimInternalError, never> =>
   Effect.logError("[effect-auth] internal error", e).pipe(
     Effect.flatMap(() =>
       Effect.fail(
@@ -3594,20 +3623,14 @@ const scimFailure = (
 ): Effect.Effect<
   never,
   S.ScimBadRequest | S.ScimUnauthorized | S.ScimNotFound | S.ScimConflict | S.ScimInternalError
-> => {
-  switch (e.status) {
-    case 400:
-      return Effect.fail(scimBadRequest(e.message, e.scimType));
-    case 401:
-      return Effect.fail(scimUnauthorized(e.message));
-    case 404:
-      return Effect.fail(scimNotFound(e.message));
-    case 409:
-      return Effect.fail(scimConflict(e.message));
-    default:
-      return scimInternalError(e);
-  }
-};
+> =>
+  Match.value(e.status).pipe(
+    Match.when(400, () => Effect.fail(scimBadRequest(e.message, e.scimType))),
+    Match.when(401, () => Effect.fail(scimUnauthorized(e.message))),
+    Match.when(404, () => Effect.fail(scimNotFound(e.message))),
+    Match.when(409, () => Effect.fail(scimConflict(e.message))),
+    Match.orElse(() => scimInternalError(e)),
+  );
 
 /** The catch-set every SCIM handler applies to a `ScimService` call. */
 const scimCatch = {
@@ -3624,22 +3647,23 @@ const scimCatch = {
  * unknown token gets the same 401 — the service answers uniformly so a caller
  * cannot probe which tokens exist.
  */
-const requireScim = (request: HttpServerRequest.HttpServerRequest) =>
-  Effect.gen(function* () {
-    const service = yield* Effect.serviceOption(ScimService);
-    if (Option.isNone(service)) {
-      return yield* scimNotFound("SCIM provisioning is not enabled");
-    }
-    const token = bearerToken(request);
-    if (token === undefined) {
-      return yield* scimUnauthorized("Missing SCIM provisioning token");
-    }
-    const connection = yield* service.value.authenticate(token).pipe(Effect.catchTags(scimCatch));
-    return { service: service.value, connection };
-  });
+const requireScim = Effect.fn("requireScim")(function* (
+  request: HttpServerRequest.HttpServerRequest,
+) {
+  const service = yield* Effect.serviceOption(ScimService);
+  if (Option.isNone(service)) {
+    return yield* scimNotFound("SCIM provisioning is not enabled");
+  }
+  const token = bearerToken(request);
+  if (token === undefined) {
+    return yield* scimUnauthorized("Missing SCIM provisioning token");
+  }
+  const connection = yield* service.value.authenticate(token).pipe(Effect.catchTags(scimCatch));
+  return { service: service.value, connection };
+});
 
 /** The discovery documents are static, so resolving the service is the only gate. */
-const requireScimService = Effect.gen(function* () {
+const requireScimService = Effect.fn("requireScimService")(function* () {
   const service = yield* Effect.serviceOption(ScimService);
   if (Option.isNone(service)) {
     return yield* scimNotFound("SCIM provisioning is not enabled");
@@ -3724,7 +3748,7 @@ const scimDisplayName = (payload: S.ScimUserPayload): string | undefined => {
   const parts = [name.givenName, name.familyName].filter(
     (part): part is string => part !== undefined && part.trim() !== "",
   );
-  return parts.length === 0 ? undefined : parts.join(" ");
+  return Arr.isReadonlyArrayEmpty(parts) ? undefined : parts.join(" ");
 };
 
 const toScimUserInput = (payload: S.ScimUserPayload): ScimUserInput => {
@@ -4018,15 +4042,15 @@ export const scimGroupLayer = () =>
         }),
       )
       .handle("scimServiceProviderConfig", () =>
-        Effect.map(requireScimService, (service) =>
+        Effect.map(requireScimService(), (service) =>
           scimServiceProviderConfig(service.baseUrl, service.maxPageSize),
         ),
       )
       .handle("scimResourceTypes", () =>
-        Effect.map(requireScimService, (service) => scimResourceTypes(service.baseUrl)),
+        Effect.map(requireScimService(), (service) => scimResourceTypes(service.baseUrl)),
       )
       .handle("scimSchemas", () =>
-        Effect.map(requireScimService, (service) => scimSchemas(service.baseUrl)),
+        Effect.map(requireScimService(), (service) => scimSchemas(service.baseUrl)),
       ),
   );
 
@@ -4335,7 +4359,7 @@ const matchesEndpointRule = (
   method: string,
 ): boolean => {
   if (rule.methods !== undefined && !rule.methods.includes(method.toUpperCase())) return false;
-  return typeof rule.path === "string" ? rule.path === pathname : rule.path.test(pathname);
+  return Predicate.isString(rule.path) ? rule.path === pathname : rule.path.test(pathname);
 };
 
 const findEndpointRule = (
@@ -4528,7 +4552,7 @@ const scalarReferenceHtml = `<!doctype html>
 `;
 
 const openApiJsonResponse = (): Response =>
-  new Response(JSON.stringify(getOpenApiSpec()), {
+  Response.json(getOpenApiSpec(), {
     status: 200,
     headers: { "content-type": "application/json" },
   });
@@ -4575,14 +4599,15 @@ const isTrustedRequest = (
   // server-to-server (curl, API clients) — allow through.
   const referer = request.headers.get("referer");
   if (referer === null) return true;
-  try {
-    const refererOrigin = new URL(referer).origin;
-    const requestOrigin = new URL(request.url).origin;
-    return refererOrigin === requestOrigin || trustedOrigins.includes(refererOrigin);
-  } catch {
+  return Result.getOrElse(
+    Result.try(() => {
+      const refererOrigin = new URL(referer).origin;
+      const requestOrigin = new URL(request.url).origin;
+      return refererOrigin === requestOrigin || trustedOrigins.includes(refererOrigin);
+    }),
     // Malformed Referer — reject to be safe.
-    return false;
-  }
+    () => false,
+  );
 };
 
 /**
@@ -4708,9 +4733,10 @@ const serve = (
 
   const web = HttpRouter.toWebHandler(appLayer, {
     // Cast to `Effect<..., never, never>` so TypeScript infers HR = never, keeping the
-    // `context` parameter of `web.handler` optional. The cast is safe: HttpServerRequest
-    // and Scope are always provided by the server infrastructure before middleware runs.
+    // `context` parameter of `web.handler` optional.
     middleware: (effect) =>
+      // SAFETY: HttpServerRequest and Scope are always provided by the server
+      // infrastructure before middleware runs, so the narrowed requirements hold.
       Effect.gen(function* () {
         const req = yield* HttpServerRequest.HttpServerRequest;
         const ip = resolveClientIP(req, options.trustedProxy);
@@ -4745,7 +4771,7 @@ const serve = (
             const denied = yield* rateLimiterOpt.value
               .consumeToken(`ip:${url.pathname}:${ip}`, limitConfig)
               .pipe(
-                Effect.as(null as null),
+                Effect.as(null),
                 Effect.catchTag("RateLimitError", (e) => Effect.succeed(e)),
                 Effect.catchTag("AuthError", () => Effect.succeed(null)),
               );
@@ -4763,7 +4789,7 @@ const serve = (
 
         // Provide the resolved ClientIP to all downstream effects (hooks, handlers)
         return yield* effect.pipe(Effect.provideService(ClientIP, { ip }));
-      }) as unknown as Effect.Effect<HttpServerResponse.HttpServerResponse, never, never>,
+      }) as Effect.Effect<HttpServerResponse.HttpServerResponse, never, never>,
   });
 
   const trustedOrigins = options.trustedOrigins ?? [];
@@ -4818,6 +4844,58 @@ const serve = (
   };
   const dispose = (): Promise<void> => web.dispose().then(() => Effect.runPromise(release));
   return { handler, dispose };
+};
+
+/**
+ * Check the `services` build `make` runs synchronously, and throw why it is
+ * refused, after releasing what it acquired. Returns when the build passed the
+ * check, or is still running without `strict`.
+ */
+const refuseUnservableBuild = (
+  build: SynchronousRun<Context.Context<AuthServices>, never>,
+  servicesScope: Scope.Closeable,
+  options: AuthWebHandlerOptions,
+): void => {
+  const servicesFiber = build.fiber;
+  let pending = false;
+  const refused = Result.getOrElse(
+    Result.try((): { readonly error: unknown } | undefined => {
+      build.run();
+      const built = servicesFiber.pollUnsafe();
+      if (built !== undefined) return refusedBuild(built, options);
+      if (options.strict !== true) return undefined;
+      pending = true;
+      return { error: pendingBuildError() };
+    }),
+    // A task of the build, or the check itself, threw: refuse the services
+    // all the same, and release what the build acquired.
+    (thrown) => ({ error: thrown }),
+  );
+  if (refused === undefined) return;
+  // Stop the build if it is still running (a no-op once it has an exit),
+  // then release what it acquired, as far as that runs synchronously. The
+  // interrupted build unwinds on its own fiber, whose tasks (a yield while
+  // it unwinds) wait in the build's dispatcher, so run both until the
+  // close has an exit or neither has a task left. What waits on
+  // asynchronous work (an uninterruptible acquire the interrupt waits for,
+  // an asynchronous finalizer) finishes after make throws.
+  const close = runSynchronously(
+    Fiber.interrupt(servicesFiber).pipe(Effect.andThen(releaseRefusedServices(servicesScope))),
+  );
+  const drained = Result.try(() => {
+    let progressed = true;
+    while (progressed && close.fiber.pollUnsafe() === undefined) {
+      const closeRan = close.run();
+      progressed = build.run() || closeRan;
+    }
+  });
+  close.release();
+  if (Result.isFailure(drained)) throw drained.failure;
+  // A build still running here may yet fail on its own account (a failed
+  // step whose finalizer is asynchronous): log that failure, which the
+  // thrown ServicesBuildPendingError cannot carry.
+  if (pending) Effect.runFork(logPendingBuildFailure(servicesFiber));
+  throw refused.error;
 };
 
 /**
@@ -4905,51 +4983,10 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
   const servicesScope = Scope.makeUnsafe();
   const build = runSynchronously(Layer.buildWithScope(options.services, servicesScope));
   const servicesFiber = build.fiber;
-  try {
-    let refused: { readonly error: unknown } | undefined;
-    let pending = false;
-    try {
-      build.run();
-      const built = servicesFiber.pollUnsafe();
-      if (built !== undefined) refused = refusedBuild(built, options);
-      else if (options.strict === true) {
-        pending = true;
-        refused = { error: pendingBuildError() };
-      }
-    } catch (thrown) {
-      // A task of the build, or the check itself, threw: refuse the services
-      // all the same, and release what the build acquired.
-      refused = { error: thrown };
-    }
-    if (refused !== undefined) {
-      // Stop the build if it is still running (a no-op once it has an exit),
-      // then release what it acquired, as far as that runs synchronously. The
-      // interrupted build unwinds on its own fiber, whose tasks (a yield while
-      // it unwinds) wait in the build's dispatcher, so run both until the
-      // close has an exit or neither has a task left. What waits on
-      // asynchronous work (an uninterruptible acquire the interrupt waits for,
-      // an asynchronous finalizer) finishes after make throws.
-      const close = runSynchronously(
-        Fiber.interrupt(servicesFiber).pipe(Effect.andThen(releaseRefusedServices(servicesScope))),
-      );
-      try {
-        let progressed = true;
-        while (progressed && close.fiber.pollUnsafe() === undefined) {
-          const closeRan = close.run();
-          progressed = build.run() || closeRan;
-        }
-      } finally {
-        close.release();
-      }
-      // A build still running here may yet fail on its own account (a failed
-      // step whose finalizer is asynchronous): log that failure, which the
-      // thrown ServicesBuildPendingError cannot carry.
-      if (pending) Effect.runFork(logPendingBuildFailure(servicesFiber));
-      throw refused.error;
-    }
-  } finally {
-    build.release();
-  }
+  // Release the build's dispatcher however the check ends, then rethrow.
+  const checked = Result.try(() => refuseUnservableBuild(build, servicesScope, options));
+  build.release();
+  if (Result.isFailure(checked)) throw checked.failure;
   // Still building, without strict (see "When make throws" above): the same
   // check runs as a layer when the build finishes, and fails the handler's
   // build instead.

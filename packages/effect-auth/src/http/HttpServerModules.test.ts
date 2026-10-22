@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Predicate, Schema } from "effect";
 import * as Cipher from "../Cipher.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
@@ -56,7 +56,7 @@ const makeFixture = () => {
   const apiKeys = new Map<string, ApiKey>();
   const jwtKeys: JwtKeyPair[] = [];
 
-  const seedUser = (id: string, email: string, attributes: Record<string, unknown> = {}) => {
+  const seedUser = (id: string, email: string, attributes: Types.Attributes = {}) => {
     const now = new Date();
     const user: Types.User = {
       id,
@@ -246,7 +246,7 @@ const makeFixture = () => {
         return { users: all.slice(offset, offset + limit), total };
       }),
 
-    createUser: (input: { name?: string; image?: string; attributes?: Record<string, unknown> }) =>
+    createUser: (input: { name?: string; image?: string; attributes?: Types.Attributes }) =>
       Effect.sync(() => {
         const id = `created-${Date.now()}`;
         const user: Types.User = {
@@ -359,33 +359,36 @@ const makeFixture = () => {
 
 const withCookie = (sessionId: string) => ({ cookie: `conduit_session=${sessionId}` });
 
+/** A JSON request body, as the wire carries it. */
+const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
 // Same raw session token, delivered as `Authorization: Bearer` instead of
 // the cookie — the "machine" credential path (`credentialClassFromRequest`).
-const jsonReqBearer = (path: string, body: unknown, sessionId: string): Request =>
+const jsonReqBearer = (path: string, body: Schema.Json, sessionId: string): Request =>
   new Request(`http://test${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${sessionId}` },
-    body: JSON.stringify(body),
+    body: toJson(body),
   });
 
-const jsonReq = (path: string, body: unknown, sessionId?: string): Request =>
+const jsonReq = (path: string, body: Schema.Json, sessionId?: string): Request =>
   new Request(`http://test${path}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(sessionId !== undefined ? withCookie(sessionId) : {}),
     },
-    body: JSON.stringify(body),
+    body: toJson(body),
   });
 
-const req = (method: string, path: string, sessionId?: string, body?: unknown): Request =>
+const req = (method: string, path: string, sessionId?: string, body?: Schema.Json): Request =>
   new Request(`http://test${path}`, {
     method,
     headers: {
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
       ...(sessionId !== undefined ? withCookie(sessionId) : {}),
     },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(body !== undefined ? { body: toJson(body) } : {}),
   });
 
 describe("HTTP organization endpoints", () => {
@@ -728,7 +731,7 @@ describe("HTTP api-key endpoints", () => {
     const created = await fx.handler(jsonReq("/api-keys", { name: "CI" }, sid));
     expect(created.status).toBe(200);
     const body = (await created.json()) as { key: string; apiKey: { id: string; name: string } };
-    expect(typeof body.key).toBe("string");
+    expect(Predicate.isString(body.key)).toBe(true);
     expect(body.apiKey.name).toBe("CI");
     const keyId = body.apiKey.id;
 
@@ -745,6 +748,11 @@ describe("HTTP api-key endpoints", () => {
   });
 });
 
+/** The parts of the JWKS, a JWS header and the JWT claims the JWT test reads. */
+const Jwks = Schema.Struct({ keys: Schema.Array(Schema.Record(Schema.String, Schema.Json)) });
+const JwsHeader = Schema.fromJsonString(Schema.Struct({ kid: Schema.String, alg: Schema.String }));
+const JwtClaims = Schema.fromJsonString(Schema.Struct({ sub: Schema.String, iss: Schema.String }));
+
 describe("HTTP JWT endpoints", () => {
   it("issues a token that verifies against the JWKS", async () => {
     const fx = makeFixture();
@@ -757,15 +765,14 @@ describe("HTTP JWT endpoints", () => {
 
     const jwksRes = await fx.handler(req("GET", "/jwks"));
     expect(jwksRes.status).toBe(200);
-    const { keys } = (await jwksRes.json()) as { keys: Array<Record<string, unknown>> };
+    const { keys } = Schema.decodeUnknownSync(Jwks)(await jwksRes.json());
     expect(keys.length).toBe(1);
 
     // Verify the ES256 signature against the published JWK.
     const [headerSeg, payloadSeg, sigSeg] = token.split(".") as [string, string, string];
-    const header = JSON.parse(Buffer.from(headerSeg, "base64url").toString("utf8")) as {
-      kid: string;
-      alg: string;
-    };
+    const header = Schema.decodeUnknownSync(JwsHeader)(
+      Buffer.from(headerSeg, "base64url").toString("utf8"),
+    );
     expect(header.alg).toBe("ES256");
     const jwk = keys.find((k) => k["kid"] === header.kid);
     expect(jwk).toBeDefined();
@@ -777,10 +784,9 @@ describe("HTTP JWT endpoints", () => {
     );
     expect(valid).toBe(true);
 
-    const payload = JSON.parse(Buffer.from(payloadSeg, "base64url").toString("utf8")) as {
-      sub: string;
-      iss: string;
-    };
+    const payload = Schema.decodeUnknownSync(JwtClaims)(
+      Buffer.from(payloadSeg, "base64url").toString("utf8"),
+    );
     expect(payload.sub).toBe("u");
     expect(payload.iss).toBe("https://auth.test");
   });

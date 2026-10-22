@@ -204,7 +204,7 @@
  * @module http/authorization-middleware
  */
 
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Predicate } from "effect";
 import { HttpApiMiddleware } from "effect/http-api";
 import { HttpRouter, HttpServerRequest } from "effect/http";
 import { Authorizer, CurrentPrincipal, type AuthorizeInput } from "../Authorizer.ts";
@@ -254,7 +254,7 @@ const resolveAuthorizeInput = <R>(
   input: AuthorizationMiddlewareInput<R>,
   request: HttpServerRequest.HttpServerRequest,
 ): Effect.Effect<AuthorizeInput, never, R> => {
-  if (typeof input !== "function") return Effect.succeed(input);
+  if (!Predicate.isFunction(input)) return Effect.succeed(input);
   const result = input(request);
   return Effect.isEffect(result) ? result : Effect.succeed(result);
 };
@@ -446,12 +446,16 @@ export const makeAuthorizationMiddleware = <const Id extends string, R = never>(
   name: GuardName<Id>,
   input: AuthorizationMiddlewareInput<R>,
 ): AuthorizationMiddlewareClass<R, Id> => {
-  const id = `@effect-auth/AuthorizationMiddleware/${name}#${_nextMiddlewareId++}`;
+  const id: string = `@effect-auth/AuthorizationMiddleware/${name}#${_nextMiddlewareId++}`;
+  // SAFETY: the guard's type-level key is its name, `Id`; the runtime key adds
+  // the namespace and the call counter (see `AuthorizationMiddlewareInstance`).
+  // Nothing reads the key's type back as the runtime string.
+  const key = id as Id;
 
   class AuthorizationMiddleware extends HttpApiMiddleware.Service<
     AuthorizationMiddleware,
     { requires: AuthorizationRequires<R> }
-  >()(id, { error: S.ForbiddenError }) {
+  >()(key, { error: S.ForbiddenError }) {
     /**
      * The `Layer` implementing this middleware instance. Provide it
      * alongside the application layer, next to wherever `AuthMiddleware`'s
@@ -459,54 +463,53 @@ export const makeAuthorizationMiddleware = <const Id extends string, R = never>(
      */
     static readonly layer: Layer.Layer<AuthorizationMiddleware> = Layer.succeed(
       AuthorizationMiddleware,
-      (handler, _opts) =>
-        Effect.gen(function* () {
-          const authorizer = yield* Authorizer;
-          const request = yield* HttpServerRequest.HttpServerRequest;
-          // `R` may name a service the router provides per request (see
-          // `AuthorizationRequires`). Widening the requirement back to
-          // `AuthorizationRequires<R>` is sound: `R` is covered by that union
-          // plus the router's `Provided`, and TypeScript can't split a generic `R`.
-          const authInput = yield* resolveAuthorizeInput(input, request) as Effect.Effect<
-            AuthorizeInput,
-            never,
-            AuthorizationRequires<R>
-          >;
+      Effect.fn("AuthorizationMiddleware")(function* (handler, _opts) {
+        const authorizer = yield* Authorizer;
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        // SAFETY: `R` may name a service the router provides per request (see
+        // `AuthorizationRequires`). Widening the requirement back to
+        // `AuthorizationRequires<R>` is sound: `R` is covered by that union
+        // plus the router's `Provided`, and TypeScript can't split a generic `R`.
+        const authInput = yield* resolveAuthorizeInput(input, request) as Effect.Effect<
+          AuthorizeInput,
+          never,
+          AuthorizationRequires<R>
+        >;
 
-          yield* authorizer.authorize(authInput).pipe(
-            Effect.catchTags({
-              AuthorizationDeniedError: (e) =>
-                Effect.logDebug("effect-auth: authorization denied", {
-                  reason: e.decision.reason,
-                  decision: e.decision,
-                }).pipe(
-                  Effect.andThen(
-                    Effect.fail(
-                      new S.Forbidden({
-                        message: `Not authorized: ${e.decision.reason}`,
-                        code: e.decision.reason,
-                      }),
-                    ),
+        yield* authorizer.authorize(authInput).pipe(
+          Effect.catchTags({
+            AuthorizationDeniedError: (e) =>
+              Effect.logDebug("effect-auth: authorization denied", {
+                reason: e.decision.reason,
+                decision: e.decision,
+              }).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    new S.Forbidden({
+                      message: `Not authorized: ${e.decision.reason}`,
+                      code: e.decision.reason,
+                    }),
                   ),
                 ),
-              AuthError: (e) =>
-                Effect.logError("effect-auth: authorization check failed", e).pipe(
-                  Effect.andThen(
-                    Effect.fail(
-                      new S.Forbidden({ message: "Not authorized: authorization check failed" }),
-                    ),
+              ),
+            AuthError: (e) =>
+              Effect.logError("effect-auth: authorization check failed", e).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    new S.Forbidden({ message: "Not authorized: authorization check failed" }),
                   ),
                 ),
-            }),
-          );
+              ),
+          }),
+        );
 
-          return yield* handler;
-        }),
+        return yield* handler;
+      }),
     );
   }
 
-  // The local class's Self brand can never equal the shared interface's —
+  // SAFETY: the local class's Self brand can never equal the shared interface's —
   // the cast erases only that brand. Runtime identity lives in the unique
   // tag id, which the cast does not touch; the type identity is `Id`.
-  return AuthorizationMiddleware as unknown as AuthorizationMiddlewareClass<R, Id>;
+  return AuthorizationMiddleware as AuthorizationMiddlewareClass<R, Id>;
 };

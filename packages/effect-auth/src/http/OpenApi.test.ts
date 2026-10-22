@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vite-plus/test";
-import { Layer } from "effect";
+import { describe, it, expect, onTestFinished } from "vite-plus/test";
+import { Array as Arr, Layer, Order, Schema } from "effect";
 import { getOpenApiSpec } from "./HttpApi.ts";
 import { type AuthServices } from "./HttpServer.ts";
 import * as HttpServer from "./HttpServer.ts";
@@ -167,14 +167,34 @@ describe("getOpenApiSpec", () => {
     const spec = getOpenApiSpec();
 
     const signUp = spec.paths["/sign-up"]?.post?.responses ?? {};
-    expect(Object.keys(signUp).sort()).toEqual(["200", "400", "403", "409", "429", "500"]);
+    expect(Arr.sort(Object.keys(signUp), Order.String)).toEqual([
+      "200",
+      "400",
+      "403",
+      "409",
+      "429",
+      "500",
+    ]);
 
     const signIn = spec.paths["/sign-in"]?.post?.responses ?? {};
-    expect(Object.keys(signIn).sort()).toEqual(["200", "400", "401", "403", "429", "500"]);
+    expect(Arr.sort(Object.keys(signIn), Order.String)).toEqual([
+      "200",
+      "400",
+      "401",
+      "403",
+      "429",
+      "500",
+    ]);
 
     const session = spec.paths["/session"]?.get?.responses ?? {};
-    expect(Object.keys(session).sort()).toEqual(["200", "401"]);
+    expect(Arr.sort(Object.keys(session), Order.String)).toEqual(["200", "401"]);
   });
+});
+
+/** The parts of the served `openapi.json` the docs-route tests read. */
+const OpenApiDocument = Schema.Struct({
+  openapi: Schema.String,
+  paths: Schema.Record(Schema.String, Schema.Json),
 });
 
 describe("HttpServer.make docs routes", () => {
@@ -184,33 +204,27 @@ describe("HttpServer.make docs routes", () => {
       prefix: "/api/auth",
       docs: true,
     });
-    try {
-      const jsonRes = await handler(new Request("http://test/api/auth/openapi.json"));
-      expect(jsonRes.status).toBe(200);
-      expect(jsonRes.headers.get("content-type")).toContain("application/json");
-      const doc = (await jsonRes.json()) as { openapi: string; paths: Record<string, unknown> };
-      expect(doc.openapi).toBe("3.1.0");
-      expect(Object.keys(doc.paths)).toContain("/sign-in");
+    onTestFinished(dispose);
+    const jsonRes = await handler(new Request("http://test/api/auth/openapi.json"));
+    expect(jsonRes.status).toBe(200);
+    expect(jsonRes.headers.get("content-type")).toContain("application/json");
+    const doc = Schema.decodeUnknownSync(OpenApiDocument)(await jsonRes.json());
+    expect(doc.openapi).toBe("3.1.0");
+    expect(Object.keys(doc.paths)).toContain("/sign-in");
 
-      const refRes = await handler(new Request("http://test/api/auth/reference"));
-      expect(refRes.status).toBe(200);
-      expect(refRes.headers.get("content-type")).toContain("text/html");
-      const html = await refRes.text();
-      expect(html).toContain("api-reference");
-      expect(html).toContain("openapi.json");
-    } finally {
-      await dispose();
-    }
+    const refRes = await handler(new Request("http://test/api/auth/reference"));
+    expect(refRes.status).toBe(200);
+    expect(refRes.headers.get("content-type")).toContain("text/html");
+    const html = await refRes.text();
+    expect(html).toContain("api-reference");
+    expect(html).toContain("openapi.json");
   });
 
   it("serves docs at the root when no prefix is configured", async () => {
     const { handler, dispose } = HttpServer.make({ services: stubServices(), docs: true });
-    try {
-      const res = await handler(new Request("http://test/openapi.json"));
-      expect(res.status).toBe(200);
-    } finally {
-      await dispose();
-    }
+    onTestFinished(dispose);
+    const res = await handler(new Request("http://test/openapi.json"));
+    expect(res.status).toBe(200);
   });
 
   it("does not expose docs routes when docs are disabled", async () => {
@@ -218,13 +232,10 @@ describe("HttpServer.make docs routes", () => {
       services: stubServices(),
       prefix: "/api/auth",
     });
-    try {
-      const jsonRes = await handler(new Request("http://test/api/auth/openapi.json"));
-      expect(jsonRes.status).toBe(404);
-      const refRes = await handler(new Request("http://test/api/auth/reference"));
-      expect(refRes.status).toBe(404);
-    } finally {
-      await dispose();
-    }
+    onTestFinished(dispose);
+    const jsonRes = await handler(new Request("http://test/api/auth/openapi.json"));
+    expect(jsonRes.status).toBe(404);
+    const refRes = await handler(new Request("http://test/api/auth/reference"));
+    expect(refRes.status).toBe(404);
   });
 });

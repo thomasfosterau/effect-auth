@@ -380,6 +380,11 @@ const validateToken = (
 // Layer factories
 // =============================================================================
 
+/** The arguments the security runtime passes to `AuthMiddleware`'s handler for one scheme. */
+type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Parameters<
+  AuthMiddleware["Service"][Scheme]
+>;
+
 /**
  * Build the `Layer` that implements `AuthMiddleware`.
  *
@@ -499,43 +504,45 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
     // `conduit_session` scheme handler: tried first by the security middleware
     // runtime. Reads the request directly so both the cookie AND Bearer/Token
     // header paths are covered, and the signed cookie cache is honoured.
-    conduit_session: (handler, _opts) =>
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const maybeResolved = yield* resolveSessionFromRequest(request, cfg);
-        if (Option.isNone(maybeResolved)) {
-          return yield* new S.Unauthorized({ message: "Not authenticated" });
-        }
-        const { session, user } = maybeResolved.value;
-        return yield* handler.pipe(
-          Effect.provideService(CurrentSession, session),
-          Effect.provideService(CurrentUser, user),
-          Effect.provideService(MaybeCurrentSession, maybeResolved),
-          Effect.provideService(CurrentPrincipal, principalOf(user)),
-          Effect.provideService(CurrentCredential, credentialClassFromRequest(request)),
-        );
-      }),
+    conduit_session: Effect.fn("AuthMiddleware.conduit_session")(function* (
+      ...[handler]: SchemeHandlerArgs<"conduit_session">
+    ) {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const maybeResolved = yield* resolveSessionFromRequest(request, cfg);
+      if (Option.isNone(maybeResolved)) {
+        return yield* new S.Unauthorized({ message: "Not authenticated" });
+      }
+      const { session, user } = maybeResolved.value;
+      return yield* handler.pipe(
+        Effect.provideService(CurrentSession, session),
+        Effect.provideService(CurrentUser, user),
+        Effect.provideService(MaybeCurrentSession, maybeResolved),
+        Effect.provideService(CurrentPrincipal, principalOf(user)),
+        Effect.provideService(CurrentCredential, credentialClassFromRequest(request)),
+      );
+    }),
 
     // `bearer` scheme handler: fallback tried when `conduit_session` fails.
     // At this point no valid session was found via cookie or bearer in the
     // primary path, so this re-validates the pre-decoded Bearer credential.
     // Reached only via the `Authorization` header, so the credential is
     // unconditionally "machine".
-    bearer: (handler, { credential }) =>
-      Effect.gen(function* () {
-        const token = Redacted.value(credential);
-        if (!token) {
-          return yield* new S.Unauthorized({ message: "Not authenticated" });
-        }
-        const resolved = yield* validateToken(token);
-        return yield* handler.pipe(
-          Effect.provideService(CurrentSession, resolved.session),
-          Effect.provideService(CurrentUser, resolved.user),
-          Effect.provideService(MaybeCurrentSession, Option.some(resolved)),
-          Effect.provideService(CurrentPrincipal, principalOf(resolved.user)),
-          Effect.provideService(CurrentCredential, "machine"),
-        );
-      }),
+    bearer: Effect.fn("AuthMiddleware.bearer")(function* (
+      ...[handler, { credential }]: SchemeHandlerArgs<"bearer">
+    ) {
+      const token = Redacted.value(credential);
+      if (!token) {
+        return yield* new S.Unauthorized({ message: "Not authenticated" });
+      }
+      const resolved = yield* validateToken(token);
+      return yield* handler.pipe(
+        Effect.provideService(CurrentSession, resolved.session),
+        Effect.provideService(CurrentUser, resolved.user),
+        Effect.provideService(MaybeCurrentSession, Option.some(resolved)),
+        Effect.provideService(CurrentPrincipal, principalOf(resolved.user)),
+        Effect.provideService(CurrentCredential, "machine"),
+      );
+    }),
   });
 };
 
@@ -657,8 +664,9 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
 export const optionalLayer = (config?: CookieConfig): Layer.Layer<OptionalAuthMiddleware> => {
   const cfg = resolveCookieConfig(config);
 
-  return Layer.succeed(OptionalAuthMiddleware, (handler, _opts) =>
-    Effect.gen(function* () {
+  return Layer.succeed(
+    OptionalAuthMiddleware,
+    Effect.fn("OptionalAuthMiddleware")(function* (handler, _opts) {
       const request = yield* HttpServerRequest.HttpServerRequest;
       const maybeResolved = yield* resolveSessionFromRequest(request, cfg).pipe(
         Effect.catch(() => Effect.succeed(Option.none<Types.SessionWithUser>())),
@@ -666,8 +674,9 @@ export const optionalLayer = (config?: CookieConfig): Layer.Layer<OptionalAuthMi
       // `CurrentPrincipal`/`CurrentCredential` only exist when someone is
       // actually authenticated, so they are added to the context but never
       // subtracted from the handler's requirements (see
-      // `OptionalAuthMiddleware`). Re-widening `R` after `provideService` is
-      // sound: providing a service only ever removes one.
+      // `OptionalAuthMiddleware`).
+      // SAFETY: re-widening `R` after `provideService` is sound: providing a
+      // service only ever removes one.
       const withPrincipal = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
         Option.isNone(maybeResolved)
           ? effect

@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vite-plus/test";
-import { Effect, Exit, Option } from "effect";
+import { assert, describe, it, expect } from "vite-plus/test";
+import { Effect, Exit, Option, Schema } from "effect";
 import { HttpClient } from "effect/http";
 import * as RemoteSession from "./RemoteSession.ts";
 import * as SessionResolution from "../SessionResolution.ts";
@@ -33,6 +33,9 @@ const sessionBody = {
   },
 };
 
+/** A JSON request or response body, as the wire carries it. */
+const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
 interface Recorded {
   readonly url: string;
   readonly method: string;
@@ -56,7 +59,7 @@ const spy = (respond: (request: Request) => Response | Promise<Response>) => {
 };
 
 const okSession = (setCookie: ReadonlyArray<string> = []) =>
-  new Response(JSON.stringify(sessionBody), {
+  new Response(toJson(sessionBody), {
     status: 200,
     headers: [
       ["content-type", "application/json"],
@@ -84,11 +87,8 @@ describe("RemoteSession session reads", () => {
 
     const result = await Effect.runPromise(client.read(inbound(withSession)));
 
-    expect(Option.isSome(result.session)).toBe(true);
-    const resolved = (result.session as Option.Some<never>).value as {
-      session: { id: string; expiresAt: Date };
-      user: { id: string; attributes: Record<string, unknown> };
-    };
+    assert(Option.isSome(result.session));
+    const resolved = result.session.value;
     expect(resolved.session.id).toBe("session-1");
     expect(resolved.user.id).toBe("user-42");
     expect(resolved.user.attributes.role).toBe("admin");
@@ -176,7 +176,7 @@ describe("RemoteSession session reads", () => {
   it("401 is 'nobody was signed in', not a fault — and still carries its cookies", async () => {
     const { fetcher } = spy(
       () =>
-        new Response(JSON.stringify({ message: "Not authenticated" }), {
+        new Response(toJson({ message: "Not authenticated" }), {
           status: 401,
           headers: [["set-cookie", "__Host-conduit_session=; Max-Age=0"]],
         }),
@@ -292,7 +292,7 @@ describe("RemoteSession.resolveAtEdge", () => {
 // ---------------------------------------------------------------------------
 
 const signInResponse = () =>
-  new Response(JSON.stringify({ user: { id: "user-42" } }), {
+  new Response(toJson({ user: { id: "user-42" } }), {
     status: 200,
     headers: [
       ["content-type", "application/json"],
@@ -300,6 +300,9 @@ const signInResponse = () =>
       ["set-cookie", "__Host-conduit_session_data=cache; Path=/; HttpOnly"],
     ],
   });
+
+/** The part of a relayed sign-in body the relay test reads. */
+const SignInBody = Schema.fromJsonString(Schema.Struct({ email: Schema.String }));
 
 describe("RemoteSession relay", () => {
   it("sign-in through an app-owned front door establishes a browser session", async () => {
@@ -313,7 +316,7 @@ describe("RemoteSession relay", () => {
         origin: "https://app.example.com",
         cookie: "__Host-conduit_session=stale",
       },
-      body: JSON.stringify({ email: "user@example.com", password: "hunter2hunter2" }),
+      body: toJson({ email: "user@example.com", password: "hunter2hunter2" }),
     });
 
     const response = await Effect.runPromise(client.relay(request, "/sign-in"));
@@ -324,7 +327,7 @@ describe("RemoteSession relay", () => {
     expect(calls[0]!.method).toBe("POST");
     expect(calls[0]!.headers["content-type"]).toBe("application/json");
     expect(calls[0]!.headers["origin"]).toBe("https://app.example.com");
-    expect(JSON.parse(calls[0]!.body).email).toBe("user@example.com");
+    expect(Schema.decodeUnknownSync(SignInBody)(calls[0]!.body).email).toBe("user@example.com");
 
     expect(response.status).toBe(200);
     expect(response.headers.getSetCookie()).toStrictEqual([

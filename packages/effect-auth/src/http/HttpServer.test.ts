@@ -1,5 +1,29 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test";
-import { Data, Deferred, Effect, Fiber, FileSystem, Layer, Logger, Path, Redacted } from "effect";
+import {
+  assert,
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  onTestFinished,
+} from "vite-plus/test";
+import {
+  Array as Arr,
+  Data,
+  Deferred,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  Logger,
+  Order,
+  Path,
+  Predicate,
+  Redacted,
+  Result,
+  Schema,
+} from "effect";
 import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { BEARER_TOKEN_HEADER, type AuthServices } from "./HttpServer.ts";
@@ -203,7 +227,7 @@ const makeFixture = (
   const createUser = (input: {
     readonly name?: string;
     readonly image?: string;
-    readonly attributes?: Record<string, unknown>;
+    readonly attributes?: Types.Attributes;
   }): Types.User => {
     const now = new Date();
     const user: Types.User = {
@@ -679,16 +703,38 @@ const handlerFor = (
     ...(options?.maxBodySize !== undefined && { maxBodySize: options.maxBodySize }),
   }).handler;
 
+/** A JSON request body, as the wire carries it. */
+const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+/** A JSON response body, parsed as the wire carried it. */
+const parseJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
+
+/** A promise that rejected; {@link promiseOrDie} dies with its `cause`. */
+class PromiseRejection extends Data.TaggedError("PromiseRejection")<{
+  readonly cause: unknown;
+}> {}
+
+/**
+ * Run a promise whose rejection is a defect, as `Effect.promise` does: the
+ * defect is the rejection value itself.
+ */
+const promiseOrDie = <A>(evaluate: () => Promise<A>): Effect.Effect<A> =>
+  Effect.tryPromise({ try: evaluate, catch: (cause) => new PromiseRejection({ cause }) }).pipe(
+    Effect.catchTag("PromiseRejection", (rejection) => Effect.die(rejection.cause)),
+  );
+
+/** A test failure raised where a test needs an error value of its own. */
+class TestFailure extends Data.TaggedError("TestFailure")<{ readonly message: string }> {}
+
 const jsonRequest = (
   path: string,
-  body: unknown,
+  body: Schema.Json | undefined,
   headers: Record<string, string> = {},
   method: string = "POST",
 ) =>
   new Request(`http://test${path}`, {
     method,
     headers: { "content-type": "application/json", ...headers },
-    ...(body !== undefined && { body: JSON.stringify(body) }),
+    ...(body !== undefined && { body: toJson(body) }),
   });
 
 const getRequest = (path: string, headers: Record<string, string> = {}) =>
@@ -699,7 +745,7 @@ const deleteRequest = (path: string, headers: Record<string, string> = {}) =>
 
 const sessionIdFromSetCookie = (setCookie: string | null): string => {
   const match = /conduit_session=([^;]+)/.exec(setCookie ?? "");
-  if (match === null) throw new Error(`no session cookie in: ${setCookie}`);
+  if (match === null) return assert.fail(`no session cookie in: ${setCookie}`);
   return match[1];
 };
 
@@ -727,8 +773,8 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
   type SignUpBody = {
-    readonly user: Record<string, unknown>;
-    readonly needsEmailVerification: unknown;
+    readonly user: Record<string, Schema.Json>;
+    readonly needsEmailVerification: Schema.Json;
   };
 
   const signUpAs = (handler: Handler, email: string) =>
@@ -749,8 +795,19 @@ describe("anti-enumeration sign-up over HTTP (#414)", () => {
    */
   const observe = async (res: Response) => {
     const body = (await res.json()) as SignUpBody;
-    const typeOf = (value: unknown) =>
-      value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+    // The JSON type of a body value: `typeof`'s name, with null and arrays apart.
+    const typeOf = (value: Schema.Json) =>
+      value === null
+        ? "null"
+        : Array.isArray(value)
+          ? "array"
+          : Predicate.isString(value)
+            ? "string"
+            : Predicate.isNumber(value)
+              ? "number"
+              : Predicate.isBoolean(value)
+                ? "boolean"
+                : "object";
     return {
       shape: {
         status: res.status,
@@ -917,8 +974,8 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
   };
 
   type SignUpBody = {
-    readonly user: Record<string, unknown>;
-    readonly needsEmailVerification: unknown;
+    readonly user: Record<string, Schema.Json>;
+    readonly needsEmailVerification: Schema.Json;
   };
 
   const lifecycles: ReadonlyArray<AuthLifecycleConfig> = [{}, { requireEmailVerification: true }];
@@ -960,7 +1017,7 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
         expect(text).not.toContain(value);
       }
 
-      const body = JSON.parse(text) as SignUpBody;
+      const body = parseJson(text) as SignUpBody;
       expect(body.needsEmailVerification).toBe(true);
       expect(Object.keys(body.user)).toEqual([
         "id",
@@ -983,10 +1040,9 @@ describe("sign-up for an address held unverified over HTTP (#421)", () => {
       // The verification is re-issued to the holder when sign-up sends one:
       // its token verifies the holder's address.
       expect(fixture.sentVerificationTokens).toHaveLength(verification ? 1 : 0);
-      if (verification) {
-        const verify = await handler(
-          jsonRequest("/email-verification/verify", { token: fixture.sentVerificationTokens[0] }),
-        );
+      // At most one token, checked above: verifying each verifies the one sent.
+      for (const token of fixture.sentVerificationTokens) {
+        const verify = await handler(jsonRequest("/email-verification/verify", { token }));
         expect(verify.status).toBe(200);
         const verified = (await verify.json()) as SignUpBody;
         expect(verified.user["id"]).toBe(holder.id);
@@ -1095,7 +1151,7 @@ describe("HTTP auth protocol", () => {
       new Request("https://example.com/sign-up", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: "a@b.com", password: PW }),
+        body: toJson({ email: "a@b.com", password: PW }),
       }),
     );
     expect(res.status).toBe(200);
@@ -1141,7 +1197,12 @@ describe("session management endpoints", () => {
     const res = await handler(getRequest("/sessions", asCookie(sid1)));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Array<{ id: string }>;
-    expect(body.map((s) => s.id).sort()).toEqual([hashToken(sid1), hashToken(sid2)].sort());
+    expect(
+      Arr.sort(
+        body.map((s) => s.id),
+        Order.String,
+      ),
+    ).toEqual(Arr.sort([hashToken(sid1), hashToken(sid2)], Order.String));
   });
 
   it("requires authentication to list sessions", async () => {
@@ -1471,7 +1532,7 @@ describe("CSRF protection (trusted origins)", () => {
       new Request("http://test/sign-up", {
         method: "POST",
         headers: { "content-type": "application/json", referer: "http://test/page" },
-        body: JSON.stringify({ email: "a@b.com", password: PW }),
+        body: toJson({ email: "a@b.com", password: PW }),
       }),
     );
     expect(sameReferer.status).toBe(200);
@@ -1484,7 +1545,7 @@ describe("CSRF protection (trusted origins)", () => {
           "content-type": "application/json",
           referer: "https://evil.example/page",
         },
-        body: JSON.stringify({ email: "b@b.com", password: PW }),
+        body: toJson({ email: "b@b.com", password: PW }),
       }),
     );
     expect(crossReferer.status).toBe(403);
@@ -1512,7 +1573,7 @@ describe("request body size limit", () => {
       new Request("http://test/sign-up", {
         method: "POST",
         headers: { "content-type": "application/json", "content-length": "101" },
-        body: JSON.stringify({ email: "a@b.com", password: PW }),
+        body: toJson({ email: "a@b.com", password: PW }),
       }),
     );
     expect(res.status).toBe(413);
@@ -1533,7 +1594,7 @@ describe("request body size limit", () => {
       new Request("http://test/sign-up", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: "a@b.com", password: PW }),
+        body: toJson({ email: "a@b.com", password: PW }),
       }),
     );
     // Should pass the size gate (no Content-Length) and either succeed or fail
@@ -2154,7 +2215,7 @@ describe("passwordless verify where send hides the account", () => {
   };
 
   const messageOf = (response: { readonly body: string }) =>
-    (JSON.parse(response.body) as { message?: string }).message;
+    (parseJson(response.body) as { message?: string }).message;
 
   it.each(flows.flatMap((flow) => verifySequences.map((sequence) => ({ ...flow, sequence }))))(
     "answers $sequence alike for every address: $flow (disableSignUp: true)",
@@ -2221,7 +2282,7 @@ describe("HTTP anonymous sign-in", () => {
     const sess = await handler(getRequest("/session", asCookie(sid)));
     expect(sess.status).toBe(200);
     const body = (await sess.json()) as {
-      user: { email?: string; attributes: Record<string, unknown> };
+      user: { email?: string; attributes: Record<string, Schema.Json> };
     };
     // Guest users have no login handle, so no derived email fields.
     expect(body.user.email).toBeUndefined();
@@ -2459,16 +2520,17 @@ describe("HTTP multi-session", () => {
     );
     const sidB = setCookieValue(b, "conduit_session")!;
     const multiB = setCookieValue(b, "conduit_session_multi")!;
-    expect(multiB.split(".").sort()).toEqual([sidA, sidB].sort());
+    expect(Arr.sort(multiB.split("."), Order.String)).toEqual(Arr.sort([sidA, sidB], Order.String));
 
     const deviceCookie = `conduit_session=${sidB}; conduit_session_multi=${multiB}`;
 
     // List returns both accounts.
     const list = await handler(getRequest("/multi-session/list", { cookie: deviceCookie }));
     expect(list.status).toBe(200);
-    const emails = ((await list.json()) as Array<{ user: { email: string } }>)
-      .map((s) => s.user.email)
-      .sort();
+    const emails = Arr.sort(
+      ((await list.json()) as Array<{ user: { email: string } }>).map((s) => s.user.email),
+      Order.String,
+    );
     expect(emails).toEqual(["a@example.com", "b@example.com"]);
 
     // Set active -> A: primary cookie swaps to A.
@@ -2638,7 +2700,7 @@ describe("bearer mode", () => {
     );
     expect(res.status).toBe(200);
     const token = res.headers.get(BEARER_TOKEN_HEADER);
-    expect(typeof token).toBe("string");
+    expect(Predicate.isString(token)).toBe(true);
     expect(token!.length).toBeGreaterThan(0);
   });
 
@@ -2666,7 +2728,7 @@ describe("bearer mode", () => {
     );
     expect(res.status).toBe(200);
     const token = res.headers.get(BEARER_TOKEN_HEADER);
-    expect(typeof token).toBe("string");
+    expect(Predicate.isString(token)).toBe(true);
     expect(token!.length).toBeGreaterThan(0);
   });
 
@@ -2678,7 +2740,7 @@ describe("bearer mode", () => {
     );
     expect(signUpRes.status).toBe(200);
     const signUpToken = signUpRes.headers.get(BEARER_TOKEN_HEADER);
-    expect(typeof signUpToken).toBe("string");
+    expect(Predicate.isString(signUpToken)).toBe(true);
     expect(signUpToken!.length).toBeGreaterThan(0);
 
     // Token from sign-up is usable as a bearer token
@@ -2723,7 +2785,7 @@ describe("bearer mode", () => {
     );
     expect(verifyRes.status).toBe(200);
     const bearerToken = verifyRes.headers.get(BEARER_TOKEN_HEADER);
-    expect(typeof bearerToken).toBe("string");
+    expect(Predicate.isString(bearerToken)).toBe(true);
     expect(bearerToken!.length).toBeGreaterThan(0);
 
     // Use the bearer token to fetch session
@@ -2879,7 +2941,7 @@ const handBuiltHandler = (services: Layer.Layer<AuthServices>): Handler => {
   // `Http.make` narrows its handler the same way.
   return HttpRouter.toWebHandler(api.pipe(Layer.provideMerge(services)), {
     disableLogger: true,
-  }).handler as unknown as (request: Request) => Promise<Response>;
+  }).handler as (request: Request) => Promise<Response>;
 };
 
 /** A hooks stack with `IPRateLimitPlugin` (one sign-in per hour per address). */
@@ -3027,7 +3089,7 @@ describe("rate limits need a RateLimiter when make is called (#389)", () => {
     // make cannot see services that finish building after it returns, so it
     // cannot throw. The same check then fails the build: every request rejects.
     const fixture = makeFixture();
-    const asyncStep = Layer.effectDiscard(Effect.promise(() => Promise.resolve()));
+    const asyncStep = Layer.effectDiscard(promiseOrDie(() => Promise.resolve()));
     const { handler } = HttpServer.make({
       services: Layer.merge(fixture.services, asyncStep) as Layer.Layer<AuthServices>,
       cookie: { secure: false },
@@ -3136,15 +3198,18 @@ describe("the exported group layers outside make refuse rather than skip (#389)"
   });
 });
 
-/** What `thunk` throws, or a failed assertion when it returns. */
-const thrownBy = (thunk: () => unknown): unknown => {
-  try {
-    thunk();
-  } catch (error) {
-    return error;
-  }
-  return expect.unreachable("expected a throw");
+/** A thrown or rejected value, checked to be the `Error` every refusal here is. */
+const thrownError = <A>(thrown: A): A & Error => {
+  assert(Predicate.isError(thrown), "expected an Error");
+  return thrown;
 };
+
+/** What `thunk` throws, or a failed assertion when it returns. */
+const thrownBy = (thunk: () => HttpServer.AuthWebHandler): Error =>
+  Result.match(Result.try(thunk), {
+    onSuccess: () => expect.unreachable("expected a throw"),
+    onFailure: thrownError,
+  });
 
 /** Let the event loop run a few macrotasks (setImmediate callbacks). */
 const macrotasks = async (count: number): Promise<void> => {
@@ -3169,7 +3234,8 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
             Effect.yieldNow,
             Effect.sync(() => {
               spins++;
-              if (!returned && spins >= BOUND) throw new Error("make waited on a forked fiber");
+              if (!returned && spins >= BOUND)
+                throw new TestFailure({ message: "make waited on a forked fiber" });
             }),
           ),
         ).pipe(Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true)))),
@@ -3215,13 +3281,14 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
             Effect.yieldNow,
             Effect.sync(() => {
               spins++;
-              if (!returned && spins >= BOUND) throw new Error("make waited on a forked fiber");
+              if (!returned && spins >= BOUND)
+                throw new TestFailure({ message: "make waited on a forked fiber" });
             }),
           ),
         ),
       ),
     );
-    const asyncStep = Layer.effectDiscard(Effect.promise(() => Promise.resolve()));
+    const asyncStep = Layer.effectDiscard(promiseOrDie(() => Promise.resolve()));
     const fixture = makeFixture();
 
     const { handler, dispose } = HttpServer.make({
@@ -3252,7 +3319,10 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     // provideMerge builds on the build's own fiber, which make runs to its exit
     // however many operations that takes, as Effect.runSync does.
     const long = Layer.effectDiscard(
-      Effect.forEach(Array.from({ length: 3000 }), () => Effect.void, { discard: true }),
+      Effect.forEach(Array.from({ length: 3000 }), () => Effect.void, {
+        concurrency: 1,
+        discard: true,
+      }),
     );
     expect(() =>
       HttpServer.make({
@@ -3341,7 +3411,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     const counted = Layer.effectDiscard(
       Effect.acquireRelease(Effect.void, () => Effect.sync(() => void released++)),
     );
-    const boom = new Error("unreadable hooks");
+    const boom = new TestFailure({ message: "unreadable hooks" });
     // A Hooks value whose client-address record throws when the check reads it.
     const throwingHooks = Layer.effect(
       Hooks,
@@ -3375,65 +3445,65 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
 
   it("finishes an asynchronous finalizer after make throws, and logs a failed release", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    try {
-      let released = false;
-      // Releasing waits on a promise, then fails.
-      const slowRelease = Layer.effectDiscard(
-        Effect.acquireRelease(Effect.void, () =>
-          Effect.promise(() => Promise.resolve()).pipe(
-            Effect.andThen(Effect.sync(() => void (released = true))),
-            Effect.andThen(Effect.die(new Error("release failed"))),
-          ),
-        ),
-      );
-      const fixture = makeFixture();
-
-      expect(() =>
-        HttpServer.make({
-          services: Layer.merge(fixture.services, slowRelease) as Layer.Layer<AuthServices>,
-          trustedProxy: ClientIP.cloudflare,
-          ipRateLimit: {},
-        }),
-      ).toThrow(RateLimiterConfigError);
-      // make threw before the finalizer's promise settled.
-      expect(released).toBe(false);
-      await macrotasks(3);
-      expect(released).toBe(true);
-      const logged = log.mock.calls.map((args) => args.map(String).join(" "));
-      expect(logged).toContainEqual(
-        expect.stringMatching(
-          /ERROR .*releasing the services Http\.make or Http\.makeAsync refused failed.*release failed/s,
-        ),
-      );
-    } finally {
+    onTestFinished(() => {
       log.mockRestore();
-    }
+    });
+    let released = false;
+    // Releasing waits on a promise, then fails.
+    const slowRelease = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () =>
+        promiseOrDie(() => Promise.resolve()).pipe(
+          Effect.andThen(Effect.sync(() => void (released = true))),
+          Effect.andThen(Effect.die(new TestFailure({ message: "release failed" }))),
+        ),
+      ),
+    );
+    const fixture = makeFixture();
+
+    expect(() =>
+      HttpServer.make({
+        services: Layer.merge(fixture.services, slowRelease) as Layer.Layer<AuthServices>,
+        trustedProxy: ClientIP.cloudflare,
+        ipRateLimit: {},
+      }),
+    ).toThrow(RateLimiterConfigError);
+    // make threw before the finalizer's promise settled.
+    expect(released).toBe(false);
+    await macrotasks(3);
+    expect(released).toBe(true);
+    const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+    expect(logged).toContainEqual(
+      expect.stringMatching(
+        /ERROR .*releasing the services Http\.make or Http\.makeAsync refused failed.*release failed/s,
+      ),
+    );
   });
 
   it("logs a release that fails synchronously, and throws the reason it refused the services", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    try {
-      const failingRelease = Layer.effectDiscard(
-        Effect.acquireRelease(Effect.void, () => Effect.die(new Error("release failed"))),
-      );
-      const fixture = makeFixture();
-
-      expect(() =>
-        HttpServer.make({
-          services: Layer.merge(fixture.services, failingRelease) as Layer.Layer<AuthServices>,
-          trustedProxy: ClientIP.cloudflare,
-          ipRateLimit: {},
-        }),
-      ).toThrow(RateLimiterConfigError);
-      const logged = log.mock.calls.map((args) => args.map(String).join(" "));
-      expect(logged).toContainEqual(
-        expect.stringMatching(
-          /ERROR .*releasing the services Http\.make or Http\.makeAsync refused failed.*release failed/s,
-        ),
-      );
-    } finally {
+    onTestFinished(() => {
       log.mockRestore();
-    }
+    });
+    const failingRelease = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () =>
+        Effect.die(new TestFailure({ message: "release failed" })),
+      ),
+    );
+    const fixture = makeFixture();
+
+    expect(() =>
+      HttpServer.make({
+        services: Layer.merge(fixture.services, failingRelease) as Layer.Layer<AuthServices>,
+        trustedProxy: ClientIP.cloudflare,
+        ipRateLimit: {},
+      }),
+    ).toThrow(RateLimiterConfigError);
+    const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+    expect(logged).toContainEqual(
+      expect.stringMatching(
+        /ERROR .*releasing the services Http\.make or Http\.makeAsync refused failed.*release failed/s,
+      ),
+    );
   });
 
   it("throws a typed failure of the services build from make, and releases what it built", () => {
@@ -3445,7 +3515,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     // provideMerge builds `counted` before the failing layer runs.
     const services = Layer.effectDiscard(Effect.fail(failure)).pipe(
       Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
-    ) as unknown as Layer.Layer<AuthServices>;
+    ) as Layer.Layer<AuthServices>;
 
     expect(thrownBy(() => HttpServer.make({ services, cookie: { secure: false } }))).toBe(failure);
     expect(released).toBe(1);
@@ -3456,7 +3526,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     const counted = Layer.effectDiscard(
       Effect.acquireRelease(Effect.void, () => Effect.sync(() => void released++)),
     );
-    const defect = new Error("services could not start");
+    const defect = new TestFailure({ message: "services could not start" });
     const services = Layer.effectDiscard(Effect.die(defect)).pipe(
       Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
     ) as Layer.Layer<AuthServices>;
@@ -3480,7 +3550,8 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
             Effect.yieldNow,
             Effect.sync(() => {
               spins++;
-              if (!thrown && spins >= BOUND) throw new Error("make waited on a forked fiber");
+              if (!thrown && spins >= BOUND)
+                throw new TestFailure({ message: "make waited on a forked fiber" });
             }),
           ),
         ),
@@ -3490,7 +3561,7 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
     const services = Layer.effectDiscard(Effect.fail(failure)).pipe(
       Layer.provideMerge(spinner),
       Layer.provideMerge(makeFixture().services),
-    ) as unknown as Layer.Layer<AuthServices>;
+    ) as Layer.Layer<AuthServices>;
 
     expect(thrownBy(() => HttpServer.make({ services, cookie: { secure: false } }))).toBe(failure);
     thrown = true;
@@ -3504,11 +3575,8 @@ describe("make builds services synchronously, up to their exit (#402)", () => {
 
 describe("makeAsync builds services fully before it resolves (#400)", () => {
   /** What `promise` rejects with, or a failed assertion when it resolves. */
-  const rejectionOf = (promise: Promise<unknown>): Promise<unknown> =>
-    promise.then(
-      () => expect.unreachable("expected a rejection"),
-      (error: unknown) => error,
-    );
+  const rejectionOf = (promise: Promise<HttpServer.AuthWebHandler>): Promise<Error> =>
+    promise.then(() => expect.unreachable("expected a rejection"), thrownError);
 
   const signIn = () => jsonRequest("/sign-in", { email: "nobody@example.com", password: PW });
 
@@ -3528,7 +3596,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
         Layer.merge(
           makeFixture().services,
           Layer.effectDiscard(
-            Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 1))),
+            promiseOrDie(() => new Promise<void>((resolve) => setTimeout(resolve, 1))),
           ),
         ) as Layer.Layer<AuthServices>,
     ],
@@ -3547,7 +3615,10 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
         Layer.mergeAll(
           makeFixture().services,
           Layer.effectDiscard(
-            Effect.forEach(Array.from({ length: 3000 }), () => Effect.void, { discard: true }),
+            Effect.forEach(Array.from({ length: 3000 }), () => Effect.void, {
+              concurrency: 1,
+              discard: true,
+            }),
           ),
         ) as Layer.Layer<AuthServices>,
     ],
@@ -3555,7 +3626,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       "a provideMerge chain with an asynchronous step",
       () =>
         Layer.effectDiscard(Effect.void).pipe(
-          Layer.provideMerge(Layer.effectDiscard(Effect.promise(() => Promise.resolve()))),
+          Layer.provideMerge(Layer.effectDiscard(promiseOrDie(() => Promise.resolve()))),
           Layer.provideMerge(makeFixture().services),
         ) as Layer.Layer<AuthServices>,
     ],
@@ -3591,7 +3662,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
   it("rejects ClientAddressConfigError for an IPRateLimitPlugin with no address source, built asynchronously", async () => {
     const services = Layer.merge(
       makeFixture({ hooks: ipRateLimitHooks() }).services,
-      Layer.effectDiscard(Effect.promise(() => Promise.resolve())),
+      Layer.effectDiscard(promiseOrDie(() => Promise.resolve())),
     ) as Layer.Layer<AuthServices>;
     const error = await rejectionOf(HttpServer.makeAsync({ services, cookie: { secure: false } }));
     expect(error).toBeInstanceOf(ClientAddressConfigError);
@@ -3616,7 +3687,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     let finishedAtRejection = -1;
     const slowRelease = Layer.effectDiscard(
       Effect.acquireRelease(Effect.void, () =>
-        Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 1))).pipe(
+        promiseOrDie(() => new Promise<void>((resolve) => setTimeout(resolve, 1))).pipe(
           Effect.andThen(Effect.sync(() => void released++)),
         ),
       ),
@@ -3625,7 +3696,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     const services = (): Layer.Layer<AuthServices> =>
       Layer.effectDiscard(Effect.fail(failure)).pipe(
         Layer.provideMerge(Layer.merge(makeFixture().services, slowRelease)),
-      ) as unknown as Layer.Layer<AuthServices>;
+      ) as Layer.Layer<AuthServices>;
 
     // Effect releases what the failed build acquired before the build ends, so
     // the asynchronous finalizer keeps make from seeing the failure.
@@ -3639,9 +3710,9 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       cookie: { secure: false },
     }).then(
       () => expect.unreachable("expected a rejection"),
-      (error: unknown) => {
+      (error) => {
         finishedAtRejection = released;
-        return error;
+        return thrownError(error);
       },
     );
     expect(error).toBe(failure);
@@ -3649,9 +3720,9 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
   });
 
   it("rejects with a defect of the services build as the defect itself", async () => {
-    const defect = new Error("services could not start");
+    const defect = new TestFailure({ message: "services could not start" });
     const services = Layer.effectDiscard(
-      Effect.promise(() => Promise.resolve()).pipe(Effect.andThen(Effect.die(defect))),
+      promiseOrDie(() => Promise.resolve()).pipe(Effect.andThen(Effect.die(defect))),
     ).pipe(Layer.provideMerge(makeFixture().services)) as Layer.Layer<AuthServices>;
     expect(await rejectionOf(HttpServer.makeAsync({ services, cookie: { secure: false } }))).toBe(
       defect,
@@ -3660,40 +3731,39 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
 
   it("releases what it built before it rejects, asynchronous finalizers included, and logs a failed release", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    try {
-      let released = 0;
-      let finishedAtRejection = -1;
-      const slowFailingRelease = Layer.effectDiscard(
-        Effect.acquireRelease(Effect.void, () =>
-          Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 1))).pipe(
-            Effect.andThen(Effect.sync(() => void released++)),
-            Effect.andThen(Effect.die(new Error("release failed"))),
-          ),
-        ),
-      );
-      const services = Layer.merge(
-        makeFixture().services,
-        slowFailingRelease,
-      ) as Layer.Layer<AuthServices>;
-
-      const error = await HttpServer.makeAsync({ services, ...limitWithoutLimiter }).then(
-        () => expect.unreachable("expected a rejection"),
-        (error: unknown) => {
-          finishedAtRejection = released;
-          return error;
-        },
-      );
-      expect(error).toBeInstanceOf(RateLimiterConfigError);
-      expect(finishedAtRejection).toBe(1);
-      const logged = log.mock.calls.map((args) => args.map(String).join(" "));
-      expect(logged).toContainEqual(
-        expect.stringMatching(
-          /ERROR .*releasing the services Http\.make or Http\.makeAsync refused failed.*release failed/s,
-        ),
-      );
-    } finally {
+    onTestFinished(() => {
       log.mockRestore();
-    }
+    });
+    let released = 0;
+    let finishedAtRejection = -1;
+    const slowFailingRelease = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () =>
+        promiseOrDie(() => new Promise<void>((resolve) => setTimeout(resolve, 1))).pipe(
+          Effect.andThen(Effect.sync(() => void released++)),
+          Effect.andThen(Effect.die(new TestFailure({ message: "release failed" }))),
+        ),
+      ),
+    );
+    const services = Layer.merge(
+      makeFixture().services,
+      slowFailingRelease,
+    ) as Layer.Layer<AuthServices>;
+
+    const error = await HttpServer.makeAsync({ services, ...limitWithoutLimiter }).then(
+      () => expect.unreachable("expected a rejection"),
+      (error) => {
+        finishedAtRejection = released;
+        return thrownError(error);
+      },
+    );
+    expect(error).toBeInstanceOf(RateLimiterConfigError);
+    expect(finishedAtRejection).toBe(1);
+    const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+    expect(logged).toContainEqual(
+      expect.stringMatching(
+        /ERROR .*releasing the services Http\.make or Http\.makeAsync refused failed.*release failed/s,
+      ),
+    );
   });
 
   it("rejects with what the startup check throws, and releases what it built", async () => {
@@ -3701,7 +3771,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     const counted = Layer.effectDiscard(
       Effect.acquireRelease(Effect.void, () => Effect.sync(() => void released++)),
     );
-    const boom = new Error("unreadable hooks");
+    const boom = new TestFailure({ message: "unreadable hooks" });
     const throwingHooks = Layer.effect(
       Hooks,
       Effect.gen(function* () {
@@ -3737,7 +3807,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
     let released = 0;
     const counted = Layer.effectDiscard(
       Effect.acquireRelease(
-        Effect.promise(() => Promise.resolve()).pipe(
+        promiseOrDie(() => Promise.resolve()).pipe(
           Effect.andThen(Effect.sync(() => void builds++)),
         ),
         () => Effect.sync(() => void released++),
@@ -3783,7 +3853,7 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
       services: Layer.mergeAll(
         makeFixture().services,
         busy,
-        Layer.effectDiscard(Effect.promise(() => Promise.resolve())),
+        Layer.effectDiscard(promiseOrDie(() => Promise.resolve())),
       ) as Layer.Layer<AuthServices>,
       cookie: { secure: false },
     });
@@ -3825,40 +3895,38 @@ describe("makeAsync builds services fully before it resolves (#400)", () => {
         while (counter.state.ticks < 3) yield* Effect.yieldNow;
       }),
     );
-    try {
-      const { dispose } = await HttpServer.makeAsync({
-        services: Layer.merge(makeFixture().services, forking) as Layer.Layer<AuthServices>,
-        cookie: { secure: false },
-      });
-      const atResolve = counter.state.ticks;
-      expect(atResolve).toBeGreaterThanOrEqual(3);
-      expect(interrupted).toBe(true);
-      await macrotasks(3);
-      expect(counter.state.ticks).toBe(atResolve);
-      await dispose();
-    } finally {
+    onTestFinished(() => {
       counter.state.stopped = true;
-    }
+    });
+    const { dispose } = await HttpServer.makeAsync({
+      services: Layer.merge(makeFixture().services, forking) as Layer.Layer<AuthServices>,
+      cookie: { secure: false },
+    });
+    const atResolve = counter.state.ticks;
+    expect(atResolve).toBeGreaterThanOrEqual(3);
+    expect(interrupted).toBe(true);
+    await macrotasks(3);
+    expect(counter.state.ticks).toBe(atResolve);
+    await dispose();
   });
 
   it("keeps a forkDetach loop running after the promise resolves, and dispose does not stop it", async () => {
     const counter = ticker();
     const detached = Layer.effectDiscard(Effect.forkDetach(counter.tick));
-    try {
-      const { dispose } = await HttpServer.makeAsync({
-        services: Layer.merge(makeFixture().services, detached) as Layer.Layer<AuthServices>,
-        cookie: { secure: false },
-      });
-      const atResolve = counter.state.ticks;
-      await untilTicks(counter.state, atResolve + 1);
-      expect(counter.state.ticks).toBeGreaterThan(atResolve);
-      await dispose();
-      const atDispose = counter.state.ticks;
-      await untilTicks(counter.state, atDispose + 1);
-      expect(counter.state.ticks).toBeGreaterThan(atDispose);
-    } finally {
+    onTestFinished(() => {
       counter.state.stopped = true;
-    }
+    });
+    const { dispose } = await HttpServer.makeAsync({
+      services: Layer.merge(makeFixture().services, detached) as Layer.Layer<AuthServices>,
+      cookie: { secure: false },
+    });
+    const atResolve = counter.state.ticks;
+    await untilTicks(counter.state, atResolve + 1);
+    expect(counter.state.ticks).toBeGreaterThan(atResolve);
+    await dispose();
+    const atDispose = counter.state.ticks;
+    await untilTicks(counter.state, atDispose + 1);
+    expect(counter.state.ticks).toBeGreaterThan(atDispose);
   });
 });
 
@@ -3880,7 +3948,7 @@ describe("make with strict (#416)", () => {
     [
       "an Effect.promise step",
       () =>
-        Layer.effectDiscard(Effect.promise(() => Promise.resolve())).pipe(
+        Layer.effectDiscard(promiseOrDie(() => Promise.resolve())).pipe(
           Layer.provideMerge(makeFixture().services),
         ) as Layer.Layer<AuthServices>,
     ],
@@ -3945,7 +4013,7 @@ describe("make with strict (#416)", () => {
     const failure = new BootError({ reason: "no database" });
     const failing = Layer.effectDiscard(Effect.fail(failure)).pipe(
       Layer.provideMerge(makeFixture().services),
-    ) as unknown as Layer.Layer<AuthServices>;
+    ) as Layer.Layer<AuthServices>;
     expect(
       thrownBy(() =>
         HttpServer.make({
@@ -4027,12 +4095,12 @@ describe("make with strict (#416)", () => {
     let released = false;
     const slowRelease = Layer.effectDiscard(
       Effect.acquireRelease(Effect.void, () =>
-        Effect.promise(() => Promise.resolve()).pipe(
+        promiseOrDie(() => Promise.resolve()).pipe(
           Effect.andThen(Effect.sync(() => void (released = true))),
         ),
       ),
     );
-    const services = Layer.effectDiscard(Effect.promise(() => Promise.resolve())).pipe(
+    const services = Layer.effectDiscard(promiseOrDie(() => Promise.resolve())).pipe(
       Layer.provideMerge(Layer.merge(makeFixture().services, slowRelease)),
     ) as Layer.Layer<AuthServices>;
 
@@ -4123,7 +4191,7 @@ describe("make with strict (#416)", () => {
     // its promise, and the whole release runs after make has thrown.
     const slowAcquire = Layer.effectDiscard(
       Effect.acquireRelease(
-        Effect.promise(() => Promise.resolve()).pipe(
+        promiseOrDie(() => Promise.resolve()).pipe(
           Effect.andThen(Effect.sync(() => void events.push("acquire 2"))),
         ),
         () => Effect.sync(() => void events.push("release 2")),
@@ -4146,52 +4214,50 @@ describe("make with strict (#416)", () => {
 
   it("logs the failure of a build whose finalizer is asynchronous, which the thrown error cannot carry", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    try {
-      let released = false;
-      // The step fails, and Effect runs its finalizer, which awaits, before the
-      // build ends: the build has no exit when make has run it synchronously.
-      const failing = Layer.effectDiscard(
-        Effect.acquireRelease(Effect.void, () =>
-          Effect.promise(() => Promise.resolve()).pipe(
-            Effect.andThen(Effect.sync(() => void (released = true))),
-          ),
-        ).pipe(Effect.andThen(Effect.fail(new BootError({ reason: "no database" })))),
-      ).pipe(Layer.provideMerge(makeFixture().services)) as unknown as Layer.Layer<AuthServices>;
-
-      expect(
-        thrownBy(() =>
-          HttpServer.make({ services: failing, cookie: { secure: false }, strict: true }),
-        ),
-      ).toBeInstanceOf(ServicesBuildPendingError);
-      expect(released).toBe(false);
-      await macrotasks(3);
-      expect(released).toBe(true);
-      const logged = log.mock.calls.map((args) => args.map(String).join(" "));
-      expect(logged).toContainEqual(
-        expect.stringMatching(
-          /ERROR .*refused with ServicesBuildPendingError \(strict\) failed.*BootError/s,
-        ),
-      );
-    } finally {
+    onTestFinished(() => {
       log.mockRestore();
-    }
+    });
+    let released = false;
+    // The step fails, and Effect runs its finalizer, which awaits, before the
+    // build ends: the build has no exit when make has run it synchronously.
+    const failing = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () =>
+        promiseOrDie(() => Promise.resolve()).pipe(
+          Effect.andThen(Effect.sync(() => void (released = true))),
+        ),
+      ).pipe(Effect.andThen(Effect.fail(new BootError({ reason: "no database" })))),
+    ).pipe(Layer.provideMerge(makeFixture().services)) as Layer.Layer<AuthServices>;
+
+    expect(
+      thrownBy(() =>
+        HttpServer.make({ services: failing, cookie: { secure: false }, strict: true }),
+      ),
+    ).toBeInstanceOf(ServicesBuildPendingError);
+    expect(released).toBe(false);
+    await macrotasks(3);
+    expect(released).toBe(true);
+    const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+    expect(logged).toContainEqual(
+      expect.stringMatching(
+        /ERROR .*refused with ServicesBuildPendingError \(strict\) failed.*BootError/s,
+      ),
+    );
   });
 
   it("logs nothing for a build that ends by the interrupt alone", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    try {
-      const services = Layer.effectDiscard(Effect.promise(() => Promise.resolve())).pipe(
-        Layer.provideMerge(makeFixture().services),
-      ) as Layer.Layer<AuthServices>;
-      expect(
-        thrownBy(() => HttpServer.make({ services, cookie: { secure: false }, strict: true })),
-      ).toBeInstanceOf(ServicesBuildPendingError);
-      await macrotasks(3);
-      const logged = log.mock.calls.map((args) => args.map(String).join(" "));
-      expect(logged).not.toContainEqual(expect.stringMatching(/ServicesBuildPendingError/));
-    } finally {
+    onTestFinished(() => {
       log.mockRestore();
-    }
+    });
+    const services = Layer.effectDiscard(promiseOrDie(() => Promise.resolve())).pipe(
+      Layer.provideMerge(makeFixture().services),
+    ) as Layer.Layer<AuthServices>;
+    expect(
+      thrownBy(() => HttpServer.make({ services, cookie: { secure: false }, strict: true })),
+    ).toBeInstanceOf(ServicesBuildPendingError);
+    await macrotasks(3);
+    const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+    expect(logged).not.toContainEqual(expect.stringMatching(/ServicesBuildPendingError/));
   });
 
   it("is the same class from the http subpath and as Http.ServicesBuildPendingError", () => {
