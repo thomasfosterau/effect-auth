@@ -65,12 +65,28 @@ export default defineConfig({
       // Code that predates the preset. Each rule sits at `warn` so its sites
       // stay reported; a new site is a defect, not headroom. Once a rule's
       // count reaches zero its line is deleted, so it is back at the preset's
-      // `error`. Counts and the remaining sites: #ALLOWANCE_ISSUE.
-      "effect/require-safety-comment-for-type-assertion": "warn",
+      // `error`. Counts (sources / tests) and the remaining sites:
+      // #ALLOWANCE_ISSUE.
+      // `Date.now()` / `new Date()` → `Clock` / `DateTime` changes how expiry
+      // logic sees time under `TestClock` (189 / 480).
       "effect/use-clock-service": "warn",
+      // Test fixtures' casts, plus the one unvalidated `JWT_ALGORITHM` cast
+      // (1 / 595).
+      "effect/require-safety-comment-for-type-assertion": "warn",
+      // Published types say `Record<string, unknown>` (session and user
+      // attributes, metadata, JWT claims, drizzle column types); narrowing
+      // them is an API change (60 / 0).
+      "effect/no-unsafe-dictionary-type": "warn",
+      // Public guards, decoders and error callbacks over genuinely unknown
+      // input (16 / 0, and 1 / 0 for `no-unknown-returns`).
+      "effect/no-unknown-parameters": "warn",
+      "effect/no-unknown-returns": "warn",
+      // Exported `Map` parameters and `ReadonlyMap` results (10 / 263).
       "effect/avoid-native-object-helpers": "warn",
+      // Two unbounded scheduler loops in `HttpServer.ts` (2 / 194).
       "effect/imperative-loops": "warn",
-      "effect/avoid-non-null-assertion": "warn",
+      // Exported Effect *values* built with `Effect.gen`, where `Effect.fn`
+      // would change the public type (12 / 178).
       "effect/prefer-effect-fn": "warn",
     },
     overrides: [
@@ -94,6 +110,12 @@ export default defineConfig({
         rules: { "effect/avoid-ts-ignore": "off" },
       },
       {
+        // Ported-code allowance for tests only (sources are at zero): the
+        // `!` on fixture lookups (265; #ALLOWANCE_ISSUE).
+        files: ["**/*.test.ts", "**/*.test.tsx", "**/testing/**"],
+        rules: { "effect/avoid-non-null-assertion": "warn" },
+      },
+      {
         // Plain Node tooling that runs no Effect (the dist smoke test and the
         // task-graph builders): native loops, `.length`, `JSON`, `Error`,
         // `try`/`catch` and synchronous `fs` are the idiom there.
@@ -114,13 +136,19 @@ export default defineConfig({
       },
       {
         // Code that imports nothing from `effect`: the framework bindings peer
-        // only their framework (AGENTS.md), and `./ladder` imports nothing at
-        // all because browser bundles load it (`ModuleGraph.test.ts`). The
+        // only their framework (AGENTS.md), the browser client's runtime is
+        // plain `fetch` with no Effect in the bundle (`Client.ts`), and
+        // `./ladder` imports nothing at all because browser bundles load it
+        // (`ModuleGraph.test.ts`). The
         // rules that steer to an `effect` module (`Array`, `Predicate`,
         // `Match`, `HashSet`, `Schema`, `Clock`) have no satisfiable fix
         // there, and the bindings throw plain `Error`s to framework code that
         // has no typed error channel.
-        files: ["packages/{react,svelte,solid,vue}/src/**", "packages/effect-auth/src/Ladder.ts"],
+        files: [
+          "packages/{react,svelte,solid,vue}/src/**",
+          "packages/client/src/Client.ts",
+          "packages/effect-auth/src/Ladder.ts",
+        ],
         rules: {
           "effect/avoid-direct-json": "off",
           "effect/avoid-direct-tag-checks": "off",
