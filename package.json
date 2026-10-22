@@ -15,7 +15,7 @@
   },
   "type": "module",
   "scripts": {
-    "prepare": "vp config --no-agent && effect-tsgo patch --typescript",
+    "prepare": "vp config --no-agent && effect-tsgo patch --typescript --oxlint",
     "build": "vp run -r build",
     "check": "vp run -r check && vp run check:scripts",
     "docs": "vp run --filter @thomasfosterau/effect-auth docs",
