@@ -1,4 +1,5 @@
 import { describe, it, expect, expectTypeOf } from "vite-plus/test";
+import { Array as Arr, Order } from "effect";
 import * as Auth from "../index.ts";
 import * as PasswordCluster from "./index.ts";
 import * as PasswordReset from "./PasswordReset.ts";
@@ -15,9 +16,10 @@ describe("password barrel", () => {
   });
 
   it("re-exports every other PasswordReset value", () => {
-    const expected = Object.keys(PasswordReset)
-      .filter((name) => name !== "make")
-      .sort();
+    const expected = Arr.sort(
+      Object.keys(PasswordReset).filter((name) => name !== "make"),
+      Order.String,
+    );
     expect(expected).toEqual([
       "PasswordResetService",
       "PasswordResetStore",

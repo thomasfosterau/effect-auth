@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vite-plus/test";
+import { describe, it, expect, vi, beforeEach, assert } from "vite-plus/test";
 import * as crypto from "node:crypto";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { PasswordHasher, scryptHasher } from "./Password.ts";
 
 // Pins scrypt's production defaults (N = 2^17, r = 8, p = 1) without running
@@ -95,9 +95,8 @@ describe("scrypt defaults", () => {
     const stored = `scrypt$${N}$${r}$${p}$${"00".repeat(16)}$${"00".repeat(64)}`;
     const result = await Effect.runPromise(Effect.result(scryptHasher().verify("pw", stored)));
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("HashingError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("HashingError");
     // Refused before any derivation: an unguarded verify would ask Node for
     // about 1 GB (p = 1000000) or 4 GiB (N = 2^20, r = 32).
     expect(scrypt).not.toHaveBeenCalled();

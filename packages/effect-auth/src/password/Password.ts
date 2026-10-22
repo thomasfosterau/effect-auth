@@ -8,7 +8,16 @@
  * - Extensible design for custom algorithms
  */
 
-import { Context, Effect, Layer } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  Result,
+  String as Str,
+} from "effect";
 import type * as Types from "../Types.ts";
 import * as Errors from "../Errors.ts";
 
@@ -100,8 +109,8 @@ export class MultiAlgorithmVerifier extends Context.Service<
  */
 const parseAlgorithm = (hash: string): Effect.Effect<string, Errors.HashingError> =>
   Effect.sync(() => {
-    const parts = hash.split("$");
-    if (parts.length < 2) {
+    const [first, second] = hash.split("$");
+    if (first === undefined || second === undefined) {
       return Effect.fail(
         new Errors.HashingError({
           message: "Invalid hash format: missing algorithm identifier",
@@ -111,7 +120,7 @@ const parseAlgorithm = (hash: string): Effect.Effect<string, Errors.HashingError
     // PHC-string hashes (e.g. Argon2's `$argon2id$v=19$...`) begin with `$`,
     // so the algorithm id is the second segment; the library's own
     // `algo$...` format (pbkdf2/scrypt) carries it in the first.
-    return Effect.succeed(parts[0] === "" ? parts[1]! : parts[0]!);
+    return Effect.succeed(first === "" ? second : first);
   }).pipe(Effect.flatten);
 
 /**
@@ -142,17 +151,21 @@ const parseAlgorithm = (hash: string): Effect.Effect<string, Errors.HashingError
 export const multiAlgorithmVerifier = (
   hashers: readonly (typeof PasswordHasher.Service)[],
 ): typeof MultiAlgorithmVerifier.Service => {
-  const hasherMap = new Map(hashers.map((h) => [h.algorithm, h]));
+  // The last hasher registered for an algorithm wins; the error lists each
+  // algorithm once, in first-registered order.
+  const findHasher = (algorithm: string) =>
+    Arr.findLast(hashers, (h) => h.algorithm === algorithm).pipe(Option.getOrUndefined);
+  const available = Arr.dedupe(Arr.map(hashers, (h) => h.algorithm));
 
   return {
     verify: (password, hash) =>
       Effect.gen(function* () {
         const algorithm = yield* parseAlgorithm(hash);
-        const hasher = hasherMap.get(algorithm);
+        const hasher = findHasher(algorithm);
 
         if (!hasher) {
           return yield* new Errors.HashingError({
-            message: `Unsupported algorithm: ${algorithm}. Available: ${Array.from(hasherMap.keys()).join(", ")}`,
+            message: `Unsupported algorithm: ${algorithm}. Available: ${available.join(", ")}`,
           });
         }
 
@@ -168,6 +181,34 @@ import * as crypto from "node:crypto";
 /** Parses a stored decimal parameter. Anything else (sign, hex, exponent, empty) is NaN. */
 const parseStoredParam = (text: string): number => (/^[0-9]+$/.test(text) ? Number(text) : NaN);
 const MAX_PASSWORD_BYTES = 1024;
+
+/** The `$`-separated fields of a stored hash, when there are exactly four. */
+const hashFields4 = (hash: string): readonly [string, string, string, string] | undefined => {
+  const [a, b, c, d, ...rest] = hash.split("$");
+  return a !== undefined &&
+    b !== undefined &&
+    c !== undefined &&
+    d !== undefined &&
+    Arr.isReadonlyArrayEmpty(rest)
+    ? [a, b, c, d]
+    : undefined;
+};
+
+/** The `$`-separated fields of a stored hash, when there are exactly six. */
+const hashFields6 = (
+  hash: string,
+): readonly [string, string, string, string, string, string] | undefined => {
+  const [a, b, c, d, e, f, ...rest] = hash.split("$");
+  return a !== undefined &&
+    b !== undefined &&
+    c !== undefined &&
+    d !== undefined &&
+    e !== undefined &&
+    f !== undefined &&
+    Arr.isReadonlyArrayEmpty(rest)
+    ? [a, b, c, d, e, f]
+    : undefined;
+};
 
 const pbkdf2 = (
   password: string,
@@ -253,15 +294,15 @@ export const pbkdf2Hasher = (options?: {
     algorithm: ALGORITHM,
 
     needsRehash: (hash: string): boolean => {
-      const parts = hash.split("$");
-      if (parts.length !== 4) return true;
-      const [algorithm, iterationsStr, , hashHex] = parts;
+      const fields = hashFields4(hash);
+      if (fields === undefined) return true;
+      const [algorithm, iterationsStr, , hashHex] = fields;
       if (algorithm !== ALGORITHM) return true;
-      const iters = parseStoredParam(iterationsStr!);
+      const iters = parseStoredParam(iterationsStr);
       // verify refuses this hash, so it has to be replaced.
       if (refusedIterations(iters) !== undefined || iters < ITERATIONS) return true;
       // Stored key length must match current KEY_LENGTH.
-      const storedKeyLen = Buffer.from(hashHex!, "hex").length;
+      const storedKeyLen = Buffer.from(hashHex, "hex").length;
       if (storedKeyLen !== KEY_LENGTH) return true;
       return false;
     },
@@ -269,13 +310,13 @@ export const pbkdf2Hasher = (options?: {
     hash: Effect.fn("effect-auth.password.hash", {
       attributes: { algorithm: ALGORITHM },
     })(function* (password: string) {
-      if (!password || typeof password !== "string") {
+      if (!password || !Predicate.isString(password)) {
         return yield* new Errors.HashingError({
           message: "Password must be a non-empty string",
         });
       }
 
-      if (password.length < 1) {
+      if (Str.isEmpty(password)) {
         return yield* new Errors.HashingError({
           message: "Password cannot be empty",
         });
@@ -318,13 +359,13 @@ export const pbkdf2Hasher = (options?: {
     verify: Effect.fn("effect-auth.password.verify", {
       attributes: { algorithm: ALGORITHM },
     })(function* (password: string, hash: string) {
-      if (!password || typeof password !== "string") {
+      if (!password || !Predicate.isString(password)) {
         return yield* new Errors.HashingError({
           message: "Password must be a non-empty string",
         });
       }
 
-      if (!hash || typeof hash !== "string") {
+      if (!hash || !Predicate.isString(hash)) {
         return yield* new Errors.HashingError({
           message: "Hash must be a non-empty string",
         });
@@ -335,15 +376,15 @@ export const pbkdf2Hasher = (options?: {
         return false;
       }
 
-      const parts = hash.split("$");
+      const fields = hashFields4(hash);
 
-      if (parts.length !== 4) {
+      if (fields === undefined) {
         return yield* new Errors.HashingError({
           message: "Invalid hash format",
         });
       }
 
-      const [algorithm, iterationsStr, saltHex, hashHex] = parts;
+      const [algorithm, iterationsStr, saltHex, hashHex] = fields;
 
       if (algorithm !== ALGORITHM) {
         return yield* new Errors.HashingError({
@@ -353,7 +394,7 @@ export const pbkdf2Hasher = (options?: {
 
       // Strict decimal parse, as for scrypt's N, r and p: `parseInt` would read
       // "1e9" as 1 and "600000abc" as 600000. Refused before the KDF, above the cap.
-      const iterCount = parseStoredParam(iterationsStr!);
+      const iterCount = parseStoredParam(iterationsStr);
       const refused = refusedIterations(iterCount);
       if (refused !== undefined) {
         return yield* new Errors.HashingError({
@@ -361,8 +402,8 @@ export const pbkdf2Hasher = (options?: {
         });
       }
 
-      const salt = Buffer.from(saltHex!, "hex");
-      const expectedHash = Buffer.from(hashHex!, "hex");
+      const salt = Buffer.from(saltHex, "hex");
+      const expectedHash = Buffer.from(hashHex, "hex");
 
       // Derive using the stored key length so hashes produced with an older
       // KEY_LENGTH value still verify correctly (needsRehash detects and
@@ -489,7 +530,7 @@ export const scryptHasher = (options?: {
             }),
           ),
         );
-      try {
+      const started = Result.try(() =>
         crypto.scrypt(
           password,
           salt,
@@ -505,11 +546,12 @@ export const scryptHasher = (options?: {
               resume(Effect.succeed(derivedKey));
             }
           },
-        );
-      } catch (error) {
+        ),
+      );
+      if (Result.isFailure(started)) {
         // Node rejects invalid parameters by throwing synchronously (a
         // RangeError). That is a typed failure too, not a defect.
-        fail(error);
+        fail(started.failure);
       }
     });
 
@@ -517,13 +559,13 @@ export const scryptHasher = (options?: {
     algorithm: ALGORITHM,
 
     needsRehash: (hash: string): boolean => {
-      const parts = hash.split("$");
-      if (parts.length !== 6) return true;
-      const [algorithm, costStr, blockSizeStr, parallelizationStr] = parts;
+      const fields = hashFields6(hash);
+      if (fields === undefined) return true;
+      const [algorithm, costStr, blockSizeStr, parallelizationStr] = fields;
       if (algorithm !== ALGORITHM) return true;
-      const N = parseStoredParam(costStr!);
-      const r = parseStoredParam(blockSizeStr!);
-      const p = parseStoredParam(parallelizationStr!);
+      const N = parseStoredParam(costStr);
+      const r = parseStoredParam(blockSizeStr);
+      const p = parseStoredParam(parallelizationStr);
       // verify refuses this hash, so it has to be replaced.
       if (refusedParams(N, r, p) !== undefined) return true;
       // Each parameter raises the cost, so only a weaker stored set is upgraded.
@@ -533,7 +575,7 @@ export const scryptHasher = (options?: {
     hash: Effect.fn("effect-auth.password.hash", {
       attributes: { algorithm: ALGORITHM },
     })(function* (password: string) {
-      if (!password || typeof password !== "string") {
+      if (!password || !Predicate.isString(password)) {
         return yield* new Errors.HashingError({
           message: "Password must be a non-empty string",
         });
@@ -568,13 +610,13 @@ export const scryptHasher = (options?: {
     verify: Effect.fn("effect-auth.password.verify", {
       attributes: { algorithm: ALGORITHM },
     })(function* (password: string, hash: string) {
-      if (!password || typeof password !== "string") {
+      if (!password || !Predicate.isString(password)) {
         return yield* new Errors.HashingError({
           message: "Password must be a non-empty string",
         });
       }
 
-      if (!hash || typeof hash !== "string") {
+      if (!hash || !Predicate.isString(hash)) {
         return yield* new Errors.HashingError({
           message: "Hash must be a non-empty string",
         });
@@ -585,14 +627,14 @@ export const scryptHasher = (options?: {
         return false;
       }
 
-      const parts = hash.split("$");
-      if (parts.length !== 6) {
+      const fields = hashFields6(hash);
+      if (fields === undefined) {
         return yield* new Errors.HashingError({
           message: "Invalid hash format",
         });
       }
 
-      const [algorithm, costStr, blockSizeStr, parallelizationStr, saltHex, hashHex] = parts;
+      const [algorithm, costStr, blockSizeStr, parallelizationStr, saltHex, hashHex] = fields;
 
       if (algorithm !== ALGORITHM) {
         return yield* new Errors.HashingError({
@@ -600,9 +642,9 @@ export const scryptHasher = (options?: {
         });
       }
 
-      const N = parseStoredParam(costStr!);
-      const r = parseStoredParam(blockSizeStr!);
-      const p = parseStoredParam(parallelizationStr!);
+      const N = parseStoredParam(costStr);
+      const r = parseStoredParam(blockSizeStr);
+      const p = parseStoredParam(parallelizationStr);
       // Refuse out-of-range parameters before the KDF. Node can still reject a
       // set within the caps (OpenSSL's own limits); the scrypt helper maps that
       // to a HashingError too.
@@ -611,8 +653,8 @@ export const scryptHasher = (options?: {
         return yield* new Errors.HashingError({ message: `Invalid hash parameters: ${refused}` });
       }
 
-      const salt = Buffer.from(saltHex!, "hex");
-      const expectedHash = Buffer.from(hashHex!, "hex");
+      const salt = Buffer.from(saltHex, "hex");
+      const expectedHash = Buffer.from(hashHex, "hex");
       const derivedKey = yield* scrypt(password, salt, N, r, p);
 
       if (derivedKey.length !== expectedHash.length) {

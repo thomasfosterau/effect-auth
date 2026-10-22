@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Crypto, Effect, Layer, Redacted } from "effect";
+import { Crypto, Effect, Layer, Predicate, Redacted, Schema } from "effect";
 import { AuthError, OAuthLastCredentialError, OAuthEmailMismatchError } from "../Errors.ts";
 import * as Cipher from "../Cipher.ts";
 import {
@@ -92,24 +92,29 @@ const withFetch = async <A>(
   const calls: Captured[] = [];
   const original = globalThis.fetch;
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input.toString();
+    const url = Predicate.isString(input) ? input : input.toString();
+    const body = init?.body;
     calls.push({
       url,
       method: init?.method ?? "GET",
       headers: new Headers(init?.headers),
-      body: typeof init?.body === "string" ? init.body : null,
+      body: Predicate.isString(body) ? body : null,
     });
     return Promise.resolve(handler(url, init));
   }) as typeof fetch;
-  try {
-    return await thunk(calls);
-  } finally {
+  return thunk(calls).finally(() => {
     globalThis.fetch = original;
-  }
+  });
 };
 
-const json = (value: unknown): Response =>
-  new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+/** Serializes any value as `JSON.stringify` does. */
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+/** Parses JSON text as `JSON.parse` does. */
+const decodeJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
+
+const json = <A>(value: A): Response =>
+  new Response(encodeJson(value), { headers: { "content-type": "application/json" } });
 
 const CLIENT = {
   clientId: "client-123",
@@ -292,7 +297,7 @@ describe("OAuth token exchange", () => {
 // --- Provider-specific profile mapping --------------------------------------
 
 describe("OAuth profile mapping", () => {
-  const getProfile = (provider: OAuthProvider, body: unknown, method = "GET") =>
+  const getProfile = <A>(provider: OAuthProvider, body: A, method = "GET") =>
     withFetch(
       () => json(body),
       async (calls) => {
@@ -473,26 +478,20 @@ describe("profile-mapping helpers (str / nested / profile / ProfileMap)", () => 
         avatar: "https://img/custom.jpg",
       };
 
-      const original = globalThis.fetch;
-      globalThis.fetch = (() =>
-        Promise.resolve(
-          new Response(JSON.stringify(rawPayload), {
-            headers: { "content-type": "application/json" },
-          }),
-        )) as typeof fetch;
-      try {
-        const info = await Effect.runPromise(
-          customProvider.getProfile({ access_token: "tok", token_type: "bearer" }),
-        );
-        expect(info).toMatchObject({
-          id: "c-1",
-          email: "custom@example.com",
-          name: "Custom User",
-          picture: "https://img/custom.jpg",
-        });
-      } finally {
-        globalThis.fetch = original;
-      }
+      await withFetch(
+        () => json(rawPayload),
+        async () => {
+          const info = await Effect.runPromise(
+            customProvider.getProfile({ access_token: "tok", token_type: "bearer" }),
+          );
+          expect(info).toMatchObject({
+            id: "c-1",
+            email: "custom@example.com",
+            name: "Custom User",
+            picture: "https://img/custom.jpg",
+          });
+        },
+      );
     });
   });
 });
@@ -536,13 +535,12 @@ const makeSigningKey = async (
   return { privateKey: keyPair.privateKey, jwks: { keys: [{ ...jwk, kid, alg, use: "sig" }] } };
 };
 
-const b64u = (obj: unknown): string =>
-  Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
+const b64u = <A>(obj: A): string => Buffer.from(encodeJson(obj), "utf8").toString("base64url");
 
 const signIdToken = async (
   alg: "RS256" | "ES256" | "EdDSA",
   key: CryptoKey,
-  claims: Record<string, unknown>,
+  claims: Schema.JsonObject,
   kid = "test-kid",
 ): Promise<string> => {
   const signingInput = `${b64u({ alg, kid, typ: "JWT" })}.${b64u(claims)}`;
@@ -768,8 +766,18 @@ describe("OAuth.appleClientSecret", () => {
     );
 
     const [headerSeg, payloadSeg, signatureSeg] = secret.split(".") as [string, string, string];
-    const header = JSON.parse(Buffer.from(headerSeg, "base64url").toString("utf8"));
-    const payload = JSON.parse(Buffer.from(payloadSeg, "base64url").toString("utf8"));
+    const header = decodeJson(Buffer.from(headerSeg, "base64url").toString("utf8"));
+    const payload = Schema.decodeSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          iss: Schema.String,
+          sub: Schema.String,
+          aud: Schema.String,
+          iat: Schema.Number,
+          exp: Schema.Number,
+        }),
+      ),
+    )(Buffer.from(payloadSeg, "base64url").toString("utf8"));
     expect(header).toMatchObject({ alg: "ES256", kid: "KEY123" });
     expect(payload).toMatchObject({
       iss: "TEAM123",
@@ -919,8 +927,9 @@ describe("OAuthService encryptTokens", () => {
 
     const newAccessToken = await withFetch(
       (_url, init) => {
-        if (typeof init?.body === "string") {
-          capturedRefreshToken = new URLSearchParams(init.body).get("refresh_token");
+        const body = init?.body;
+        if (Predicate.isString(body)) {
+          capturedRefreshToken = new URLSearchParams(body).get("refresh_token");
         }
         return json(tokenResp);
       },
@@ -1009,8 +1018,9 @@ describe("OAuthService encryptTokens", () => {
 
     await withFetch(
       (_url, init) => {
-        if (typeof init?.body === "string") {
-          capturedRefreshToken = new URLSearchParams(init.body).get("refresh_token");
+        const body = init?.body;
+        if (Predicate.isString(body)) {
+          capturedRefreshToken = new URLSearchParams(body).get("refresh_token");
         }
         return json(tokenResp);
       },

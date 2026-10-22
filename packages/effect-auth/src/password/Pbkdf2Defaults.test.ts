@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vite-plus/test";
+import { describe, it, expect, vi, beforeEach, assert } from "vite-plus/test";
 import * as crypto from "node:crypto";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { PasswordHasher, pbkdf2Hasher } from "./Password.ts";
 
 // Pins PBKDF2's production default (600,000 iterations) and the `iterations`
@@ -131,9 +131,8 @@ describe("pbkdf2 iterations option", () => {
         Effect.result(pbkdf2Hasher({ iterations }).hash("pw")),
       );
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
       expect(pbkdf2).not.toHaveBeenCalled();
     },
   );
@@ -155,9 +154,8 @@ describe("pbkdf2 stored iteration limit", () => {
       const hash = stored(count);
       const result = await Effect.runPromise(Effect.result(pbkdf2Hasher().verify("pw", hash)));
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
       // Refused before any derivation: an unguarded verify would run PBKDF2 at
       // this count, minutes of CPU at the top of the range.
       expect(pbkdf2).not.toHaveBeenCalled();
@@ -201,9 +199,8 @@ describe("pbkdf2 stored iteration limit", () => {
       for (const count of ["5000001", String(2 ** 31 - 1), "3000000000"]) {
         const result = await Effect.runPromise(Effect.result(hasher.verify("pw", stored(count))));
         expect(result._tag).toBe("Failure");
-        if (result._tag === "Failure") {
-          expect(result.failure._tag).toBe("HashingError");
-        }
+        assert(Result.isFailure(result));
+        expect(result.failure._tag).toBe("HashingError");
       }
       expect(pbkdf2).not.toHaveBeenCalled();
     },

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect } from "effect";
+import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
+import { Context, Crypto, Effect, Result } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
@@ -340,8 +340,7 @@ describe("PasswordResetService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("PasswordResetError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("PasswordResetError");
   });
 });

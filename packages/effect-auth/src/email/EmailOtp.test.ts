@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { EmailPasswordStore } from "./EmailPassword.ts";
 import { memoryEmailPasswordStore } from "../testing/MemoryStores.ts";
-import { Context, Crypto, Effect, Tracer } from "effect";
+import { Context, Crypto, Effect, Predicate, Result, Tracer } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
@@ -397,9 +397,8 @@ describe("EmailOtpService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("EmailOtpError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("EmailOtpError");
     expect(sessions.size).toBe(1);
   });
 
@@ -425,9 +424,8 @@ describe("EmailOtpService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("EmailOtpError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("EmailOtpError");
     expect(otpRecords.size).toBe(0);
     expect(sessions.size).toBe(0);
   });
@@ -459,9 +457,8 @@ describe("EmailOtpService", () => {
     expect(second._tag).toBe("Failure");
     expect(third._tag).toBe("Failure");
     expect(real._tag).toBe("Failure");
-    if (real._tag === "Failure") {
-      expect(real.failure._tag).toBe("EmailOtpError");
-    }
+    assert(Result.isFailure(real));
+    expect(real.failure._tag).toBe("EmailOtpError");
     expect(otpRecords.size).toBe(0);
     expect(sessions.size).toBe(0);
     expect(users.size).toBe(0);
@@ -531,9 +528,8 @@ describe("EmailOtpService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("EmailOtpError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("EmailOtpError");
     expect(users.size).toBe(0);
     expect(identifierRecords.size).toBe(0);
     expect(sessions.size).toBe(0);
@@ -603,9 +599,8 @@ describe("EmailOtpService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("EmailOtpError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("EmailOtpError");
     expect(sessions.size).toBe(0);
   });
 
@@ -626,11 +621,10 @@ describe("EmailOtpService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("ResendTooSoonError");
-      expect((result.failure as { retryAfter: number }).retryAfter).toBeGreaterThan(0);
-      expect((result.failure as { retryAfter: number }).retryAfter).toBeLessThanOrEqual(60_000);
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("ResendTooSoonError");
+    expect((result.failure as { retryAfter: number }).retryAfter).toBeGreaterThan(0);
+    expect((result.failure as { retryAfter: number }).retryAfter).toBeLessThanOrEqual(60_000);
     // The original OTP is preserved — no replacement was issued.
     expect(sentOtps.length).toBe(1);
     expect(otpRecords.size).toBe(1);
@@ -726,10 +720,13 @@ describe("EmailOtpService", () => {
           sendVerificationOtp: recordingSend,
         });
         const twice = (email: string) =>
-          Effect.all([
-            Effect.result(service.send(email, purpose)),
-            Effect.result(service.send(email, purpose)),
-          ]);
+          Effect.all(
+            [
+              Effect.result(service.send(email, purpose)),
+              Effect.result(service.send(email, purpose)),
+            ],
+            { concurrency: 1 },
+          );
         return {
           known: yield* twice("member@example.com"),
           unknown: yield* twice("missing@example.com"),
@@ -751,10 +748,10 @@ describe("EmailOtpService", () => {
       ]);
       for (const result of [known[1], unknown[1]]) {
         expect(result._tag).toBe("Failure");
-        if (result._tag === "Failure" && result.failure._tag === "ResendTooSoonError") {
-          expect(result.failure.retryAfter).toBeGreaterThan(0);
-          expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
-        }
+        assert(Result.isFailure(result));
+        assert(Predicate.isTagged(result.failure, "ResendTooSoonError"));
+        expect(result.failure.retryAfter).toBeGreaterThan(0);
+        expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
       }
       // Only the account holder is sent a code; the unknown email holds an
       // undelivered record as its cooldown marker.
@@ -1038,14 +1035,14 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
           sendVerificationOtp: recordingSend,
         });
         yield* service.send("member@example.com", "sign-in");
-        const seen: unknown[] = [];
         // Wrong codes past the limit, then one more against the deleted record.
-        for (let i = 0; i < maxAttempts + 1; i++) {
-          seen.push(
-            observable(yield* Effect.result(service.signIn("member@example.com", wrongCode))),
-          );
-        }
-        return seen;
+        return yield* Effect.replicateEffect(
+          Effect.result(service.signIn("member@example.com", wrongCode)).pipe(
+            Effect.map(observable),
+          ),
+          maxAttempts + 1,
+          { concurrency: 1 },
+        );
       }).pipe(Effect.provideService(Tracer.Tracer, tracer)),
     );
 

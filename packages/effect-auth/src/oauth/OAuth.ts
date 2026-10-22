@@ -5,7 +5,19 @@
  * and related data structures.
  */
 
-import { Config, Context, Crypto, Effect, Layer, Redacted } from "effect";
+import {
+  Array as Arr,
+  Config,
+  Context,
+  Crypto,
+  Data,
+  Effect,
+  Layer,
+  Predicate,
+  Record as Rec,
+  Redacted,
+  Schema,
+} from "effect";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
 import * as Obs from "../Observability.ts";
@@ -367,16 +379,51 @@ export const generateNonce = (): Effect.Effect<string, never, Crypto.Crypto> =>
     );
   });
 
-const decodeJwtSegment = (segment: string): Record<string, unknown> =>
-  JSON.parse(Buffer.from(segment, "base64url").toString("utf8")) as Record<string, unknown>;
+/** Decodes a JWT segment's JSON object; throws on invalid JSON or a non-object. */
+const decodeJwtSegmentJson = Schema.decodeSync(Schema.fromJsonString(Schema.JsonObject));
 
-/** A single JSON Web Key from a provider's JWKS document. */
-interface ProviderJwk {
-  readonly kid?: string;
-  readonly alg?: string;
-  readonly kty?: string;
-  readonly [key: string]: unknown;
-}
+const decodeJwtSegment = (segment: string): Schema.JsonObject =>
+  decodeJwtSegmentJson(Buffer.from(segment, "base64url").toString("utf8"));
+
+/** Serializes a JSON value, as `JSON.stringify` does. */
+const encodeJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
+/** A provider's JWKS document: its `keys` are JSON Web Keys. */
+const ProviderJwks = Schema.Struct({ keys: Schema.optional(Schema.Array(Schema.JsonObject)) });
+
+const decodeProviderJwks = Schema.decodeUnknownEffect(ProviderJwks);
+
+/** A rejected read of a response body; {@link readText} and {@link readBody} die with its cause. */
+class ResponseBodyError extends Data.TaggedError("ResponseBodyError")<{
+  readonly cause: unknown;
+}> {}
+
+/** Turns a failed body read back into a defect carrying the original rejection. */
+const dieWithCause = <A>(self: Effect.Effect<A, ResponseBodyError>): Effect.Effect<A> =>
+  self.pipe(Effect.catch((error) => Effect.die(error.cause)));
+
+/** A response body as text. A failed read is a defect. */
+const readText = (response: Response): Effect.Effect<string> =>
+  Effect.tryPromise({
+    try: () => response.text(),
+    catch: (cause) => new ResponseBodyError({ cause }),
+  }).pipe(dieWithCause);
+
+/** A response body parsed as JSON, unchecked. A failed read or an invalid body is a defect. */
+const readBody = (response: Response) =>
+  Effect.tryPromise({
+    try: () => response.json(),
+    catch: (cause) => new ResponseBodyError({ cause }),
+  }).pipe(dieWithCause);
+
+const decodeJson = Schema.decodeUnknownEffect(Schema.Json);
+
+/** A response body parsed as JSON. A failed read or an invalid body is a defect. */
+const readJson = (response: Response): Effect.Effect<Schema.Json> =>
+  readBody(response).pipe(Effect.flatMap(decodeJson), Effect.orDie);
+
+/** Whether a JSON value is an object (not an array or `null`). */
+const isJsonObject = (json: Schema.Json): json is Schema.JsonObject => Predicate.isObject(json);
 
 /**
  * Verify and decode an OIDC `id_token` (compact JWS) against a provider's
@@ -394,18 +441,29 @@ export const verifyIdToken = (
     readonly now?: number;
   },
 ): Effect.Effect<Record<string, unknown>, OAuthProviderError> =>
+  verifyIdTokenClaims(idToken, params);
+
+/** {@link verifyIdToken}, with the claims typed as the JSON object they are. */
+const verifyIdTokenClaims = (
+  idToken: string,
+  params: Parameters<typeof verifyIdToken>[1],
+): Effect.Effect<Schema.JsonObject, OAuthProviderError> =>
   Effect.gen(function* () {
     const fail = (message: string) =>
       new OAuthProviderError({ message, provider: params.provider });
 
-    const parts = idToken.split(".");
-    if (parts.length !== 3) {
+    const [headerSeg, payloadSeg, signatureSeg, ...rest] = idToken.split(".");
+    if (
+      headerSeg === undefined ||
+      payloadSeg === undefined ||
+      signatureSeg === undefined ||
+      Arr.isReadonlyArrayNonEmpty(rest)
+    ) {
       return yield* fail("Malformed id_token");
     }
-    const [headerSeg, payloadSeg, signatureSeg] = parts as [string, string, string];
 
     const { header, payload } = yield* Effect.try({
-      try: (): { header: Record<string, unknown>; payload: Record<string, unknown> } => ({
+      try: (): { header: Schema.JsonObject; payload: Schema.JsonObject } => ({
         header: decodeJwtSegment(headerSeg),
         payload: decodeJwtSegment(payloadSeg),
       }),
@@ -434,12 +492,20 @@ export const verifyIdToken = (
     if (!response.ok) {
       return yield* fail(`JWKS request failed with status ${response.status}`);
     }
-    const jwks = (yield* Effect.promise(() => response.json())) as {
-      keys?: readonly ProviderJwk[];
-    };
+    const jwks = yield* readJson(response).pipe(
+      Effect.flatMap(decodeProviderJwks),
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: `Invalid JWKS document for ${params.provider}`,
+            provider: params.provider,
+            cause,
+          }),
+      ),
+    );
     const keys = jwks.keys ?? [];
     const kid = header["kid"];
-    const jwk = keys.find((k) => k.kid === kid) ?? (keys.length === 1 ? keys[0] : undefined);
+    const jwk = keys.find((k) => k["kid"] === kid) ?? (keys.length === 1 ? keys[0] : undefined);
     if (!jwk) {
       return yield* fail("No matching JWKS key for id_token");
     }
@@ -472,7 +538,8 @@ export const verifyIdToken = (
       }
     }
     const nowSec = (params.now ?? Date.now()) / 1000;
-    if (typeof payload["exp"] === "number" && nowSec > payload["exp"]) {
+    const exp = payload["exp"];
+    if (Predicate.isNumber(exp) && nowSec > exp) {
       return yield* fail("id_token expired");
     }
     if (params.nonce !== undefined && payload["nonce"] !== params.nonce) {
@@ -483,16 +550,17 @@ export const verifyIdToken = (
   });
 
 /** Map OIDC id_token / userinfo claims to {@link OAuthUserInfo}. */
-const claimsToUserInfo = (claims: Record<string, unknown>): OAuthUserInfo => ({
-  ...claims,
-  id: String(claims["sub"] ?? claims["id"] ?? ""),
-  ...(typeof claims["email"] === "string" && { email: claims["email"] }),
-  ...(typeof claims["email_verified"] === "boolean" && {
-    email_verified: claims["email_verified"],
-  }),
-  ...(typeof claims["name"] === "string" && { name: claims["name"] }),
-  ...(typeof claims["picture"] === "string" && { picture: claims["picture"] }),
-});
+const claimsToUserInfo = (claims: Schema.JsonObject): OAuthUserInfo => {
+  const { email, email_verified, name, picture } = claims;
+  return {
+    ...claims,
+    id: String(claims["sub"] ?? claims["id"] ?? ""),
+    ...(Predicate.isString(email) && { email }),
+    ...(Predicate.isBoolean(email_verified) && { email_verified }),
+    ...(Predicate.isString(name) && { name }),
+    ...(Predicate.isString(picture) && { picture }),
+  };
+};
 
 /**
  * Create an OAuth provider
@@ -506,7 +574,8 @@ export const provider = (
 
   const getUserInfo = (accessToken: string): Effect.Effect<OAuthUserInfo, OAuthProviderError> =>
     Effect.gen(function* () {
-      if (!config.userInfoEndpoint) {
+      const userInfoEndpoint = config.userInfoEndpoint;
+      if (!userInfoEndpoint) {
         return yield* new OAuthProviderError({
           message: `Provider ${name} does not have a user info endpoint`,
           provider: name,
@@ -515,7 +584,7 @@ export const provider = (
 
       const response = yield* Effect.tryPromise({
         try: () =>
-          fetch(config.userInfoEndpoint!, {
+          fetch(userInfoEndpoint, {
             method: config.userInfoMethod ?? "GET",
             headers: {
               Authorization: `Bearer ${accessToken}`,
@@ -532,14 +601,20 @@ export const provider = (
       });
 
       if (!response.ok) {
-        const errorText = yield* Effect.promise(() => response.text());
+        const errorText = yield* readText(response);
         return yield* new OAuthProviderError({
           message: `User info request failed: ${errorText}`,
           provider: name,
         });
       }
 
-      const data = (yield* Effect.promise(() => response.json())) as Record<string, unknown>;
+      const data = yield* readJson(response);
+      if (!isJsonObject(data)) {
+        return yield* new OAuthProviderError({
+          message: `User info response from ${name} is not a JSON object`,
+          provider: name,
+        });
+      }
 
       return mapProfile(data);
     });
@@ -588,9 +663,9 @@ export const provider = (
         if (nonce) {
           params.set("nonce", nonce);
         }
-        for (const [key, value] of Object.entries(config.authorizationParams ?? {})) {
-          params.set(key, value);
-        }
+        Arr.forEach(Rec.toEntries(config.authorizationParams ?? {}), ([key, value]) =>
+          params.set(key, value),
+        );
 
         const url = `${config.authorizationEndpoint}?${params.toString()}`;
 
@@ -642,14 +717,16 @@ export const provider = (
         });
 
         if (!response.ok) {
-          const errorText = yield* Effect.promise(() => response.text());
+          const errorText = yield* readText(response);
           return yield* new OAuthProviderError({
             message: `Token exchange failed: ${errorText}`,
             provider: name,
           });
         }
 
-        const data = (yield* Effect.promise(() => response.json())) as OAuthTokenResponse;
+        // SAFETY: unvalidated, as before: a 2xx token endpoint answers with an
+        // RFC 6749 section 5.1 access token response, which this shape describes.
+        const data = (yield* readBody(response)) as OAuthTokenResponse;
 
         return data;
       }),
@@ -671,7 +748,7 @@ export const provider = (
               provider: name,
             });
           }
-          const claims = yield* verifyIdToken(tokens.id_token, {
+          const claims = yield* verifyIdTokenClaims(tokens.id_token, {
             provider: name,
             jwksEndpoint: config.jwksEndpoint,
             ...(config.issuer !== undefined && { issuer: config.issuer }),
@@ -1400,6 +1477,14 @@ export const make = (
             }
 
             const plainAccount = yield* decryptAccount(account);
+            // decryptAccount keeps the refresh token checked above; this only narrows it.
+            const refreshToken = plainAccount.refreshToken;
+            if (refreshToken === undefined) {
+              return yield* new OAuthNoRefreshTokenError({
+                message: `No refresh token available for ${provider}`,
+                provider,
+              });
+            }
 
             const providerInstance = providers[provider];
             if (!providerInstance) {
@@ -1415,7 +1500,7 @@ export const make = (
             const params = new URLSearchParams({
               [rConfig.clientIdParam ?? "client_id"]: rConfig.clientId,
               grant_type: "refresh_token",
-              refresh_token: plainAccount.refreshToken!,
+              refresh_token: refreshToken,
             });
             if (!rUseBasic) {
               params.set("client_secret", Redacted.value(rConfig.clientSecret));
@@ -1444,14 +1529,16 @@ export const make = (
             });
 
             if (!response.ok) {
-              const errorText = yield* Effect.promise(() => response.text());
+              const errorText = yield* readText(response);
               return yield* new OAuthProviderError({
                 message: `Token refresh failed: ${errorText}`,
                 provider,
               });
             }
 
-            const data = (yield* Effect.promise(() => response.json())) as OAuthTokenResponse;
+            // SAFETY: unvalidated, as before: a 2xx token endpoint answers with an
+            // RFC 6749 section 5.1 access token response, which this shape describes.
+            const data = (yield* readBody(response)) as OAuthTokenResponse;
 
             // Update account with new tokens
             const updatedAccount: OAuthAccount = {
@@ -1560,7 +1647,7 @@ export interface OAuthClientConfig {
 }
 
 /** Coerce a value to `string` — returns `undefined` for non-strings. */
-export const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+export const str = (v: unknown): string | undefined => (Predicate.isString(v) ? v : undefined);
 
 /**
  * Safely traverse a nested object by a chain of keys. Returns `undefined`
@@ -1572,7 +1659,7 @@ export const str = (v: unknown): string | undefined => (typeof v === "string" ? 
 export const nested = (v: unknown, ...path: string[]): unknown =>
   path.reduce<unknown>(
     (acc, key) =>
-      acc && typeof acc === "object" ? (acc as Record<string, unknown>)[key] : undefined,
+      Predicate.isObjectOrArray(acc) && Predicate.hasProperty(acc, key) ? acc[key] : undefined,
     v,
   );
 
@@ -1677,8 +1764,8 @@ export const appleClientSecret = (params: {
         aud: "https://appleid.apple.com",
         sub: params.clientId,
       };
-      const encode = (obj: unknown): string =>
-        Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
+      const encode = (obj: Schema.Json): string =>
+        Buffer.from(encodeJsonString(obj), "utf8").toString("base64url");
       const signingInput = `${encode(header)}.${encode(payload)}`;
       const signature = Buffer.from(
         Cipher.signJws("ES256", Buffer.from(signingInput), Redacted.value(params.privateKey)),
@@ -1726,6 +1813,8 @@ export const TwitterProvider = (config: OAuthClientConfig): OAuthProvider =>
       scopes: ["users.read", "tweet.read"],
       tokenAuthMethod: "basic",
       mapProfile: (raw) => {
+        // SAFETY: Twitter's users/me answers `{ data: user }`, the user an object;
+        // a missing envelope falls back to the (object) payload itself.
         const data = (raw["data"] ?? raw) as Record<string, unknown>;
         return profile(data, {
           id: data["id"],
@@ -1876,6 +1965,8 @@ export const NotionProvider = (config: OAuthClientConfig): OAuthProvider =>
       tokenAuthMethod: "basic",
       authorizationParams: { owner: "user" },
       mapProfile: (raw) => {
+        // SAFETY: Notion's users/me carries the user object at bot.owner.user;
+        // without it, the (object) payload itself is the user.
         const user = (nested(raw, "bot", "owner", "user") ?? raw) as Record<string, unknown>;
         return profile(raw, {
           id: user["id"] ?? raw["id"],
@@ -1939,6 +2030,8 @@ export const TikTokProvider = (config: OAuthClientConfig): OAuthProvider =>
         "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url",
       scopes: ["user.info.basic"],
       mapProfile: (raw) => {
+        // SAFETY: TikTok's user/info carries the user object at data.user;
+        // without it, the (object) payload itself is the user.
         const user = (nested(raw, "data", "user") ?? raw) as Record<string, unknown>;
         return profile(user, {
           id: user["open_id"] ?? user["id"],
@@ -1976,6 +2069,8 @@ export const KickProvider = (config: OAuthClientConfig): OAuthProvider =>
       scopes: ["user:read"],
       mapProfile: (raw) => {
         const data = raw["data"];
+        // SAFETY: Kick's users endpoint answers `{ data: [user] }`, each user an
+        // object; without the array, the (object) payload itself is the user.
         const user = (Array.isArray(data) ? data[0] : raw) as Record<string, unknown>;
         return profile(user, {
           id: user["user_id"] ?? user["id"],
@@ -2040,7 +2135,13 @@ export const discoverOAuthEndpoints = (
         provider: issuerUrl,
       });
     }
-    const doc = (yield* Effect.promise(() => response.json())) as Record<string, unknown>;
+    const doc = yield* readJson(response);
+    if (!isJsonObject(doc)) {
+      return yield* new OAuthProviderError({
+        message: "OIDC discovery document is not a JSON object",
+        provider: issuerUrl,
+      });
+    }
     const authorization = str(doc["authorization_endpoint"]);
     const token = str(doc["token_endpoint"]);
     if (!authorization || !token) {

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect, Layer } from "effect";
+import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
+import { Array as Arr, Context, Crypto, Effect, Layer, Order, Result } from "effect";
 import { Hooks, makePlugin, composePlugins } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import * as Errors from "../Errors.ts";
@@ -215,7 +215,8 @@ describe("EmailPasswordService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") expect(result.failure._tag).toBe("EmailInUseError");
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("EmailInUseError");
     // No password, session or second identifier landed on the owner.
     expect(passwordHashes.get(owner.id)).toBe("owner-hash");
     expect(sessions.size).toBe(0);
@@ -291,9 +292,8 @@ describe("EmailPasswordService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("InvalidCredentialsError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("InvalidCredentialsError");
   });
 
   it("should block sign-in for unverified email when required", async () => {
@@ -330,9 +330,8 @@ describe("EmailPasswordService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("EmailNotVerifiedError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("EmailNotVerifiedError");
   });
 });
 
@@ -710,9 +709,8 @@ describe("EmailPasswordService — migration and security hardening", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("InvalidCredentialsError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("InvalidCredentialsError");
   });
 
   it("returns InvalidCredentialsError (not defect) for an excessively long password on sign-in", async () => {
@@ -746,9 +744,8 @@ describe("EmailPasswordService — migration and security hardening", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("InvalidCredentialsError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("InvalidCredentialsError");
   });
 });
 
@@ -945,9 +942,8 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("EmailInUseError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("EmailInUseError");
   });
 
   it("antiEnumeration mode: fresh and duplicate sign-ups are indistinguishable", async () => {
@@ -978,7 +974,9 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
     expect(duplicate.session).toBeUndefined();
 
     // Same body shape: same set of top-level fields on both branches.
-    expect(Object.keys(duplicate).sort()).toEqual(Object.keys(fresh).sort());
+    expect(Arr.sort(Object.keys(duplicate), Order.String)).toEqual(
+      Arr.sort(Object.keys(fresh), Order.String),
+    );
     expect(fresh.method).toBe("email-password");
     expect(duplicate.method).toBe("email-password");
     expect(duplicate.identifier).toEqual({ type: "email", value: "shape@example.com" });
@@ -1064,7 +1062,9 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
     };
     const signUpTwice = (testStore: typeof EmailPasswordStore.Service) =>
       Effect.gen(function* () {
-        const testContext = yield* Effect.promise(() => makeTestContext(testStore));
+        const testContext = yield* Effect.tryPromise(() => makeTestContext(testStore)).pipe(
+          Effect.orDie,
+        );
         const service = yield* EmailPassword.make({ antiEnumeration: true }).pipe(
           Effect.provide(testContext),
         );
@@ -1151,7 +1151,9 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
       };
       const signUp = (testStore: typeof EmailPasswordStore.Service, email: string) =>
         Effect.gen(function* () {
-          const testContext = yield* Effect.promise(() => makeTestContext(testStore, spyHasher));
+          const testContext = yield* Effect.tryPromise(() =>
+            makeTestContext(testStore, spyHasher),
+          ).pipe(Effect.orDie);
           const service = yield* EmailPassword.make({ antiEnumeration: true }).pipe(
             Effect.provide(testContext),
           );
@@ -1171,8 +1173,12 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
 
       // Same shape as the pre-check duplicate, with no session.
       expect(result.session).toBeUndefined();
-      expect(Object.keys(result).sort()).toEqual(Object.keys(precheck).sort());
-      expect(Object.keys(result.user).sort()).toEqual(Object.keys(precheck.user).sort());
+      expect(Arr.sort(Object.keys(result), Order.String)).toEqual(
+        Arr.sort(Object.keys(precheck), Order.String),
+      );
+      expect(Arr.sort(Object.keys(result.user), Order.String)).toEqual(
+        Arr.sort(Object.keys(precheck.user), Order.String),
+      );
       expect(result.identifier).toEqual({ type: "email", value: "victim@example.com" });
       expect(result.method).toBe(precheck.method);
       expect(result.user.id).not.toBe(owner.id);

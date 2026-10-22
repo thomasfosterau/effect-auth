@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vite-plus/test";
-import { Context, Effect } from "effect";
+import { describe, it, expect, assert } from "vite-plus/test";
+import { Context, Effect, Result } from "effect";
 import { PasswordHasher } from "./Password.ts";
 import * as Password from "./Password.ts";
 
@@ -127,11 +127,10 @@ describe("Multi-Algorithm Password Hashing", () => {
       );
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-        expect(result.failure.message).toContain("Unsupported algorithm");
-        expect(result.failure.message).toContain("argon2");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
+      expect(result.failure.message).toContain("Unsupported algorithm");
+      expect(result.failure.message).toContain("argon2");
     });
 
     it("should support migration between algorithms", async () => {
@@ -187,9 +186,8 @@ describe("Multi-Algorithm Password Hashing", () => {
       );
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
     });
   });
 });

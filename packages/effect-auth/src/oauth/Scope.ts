@@ -7,7 +7,7 @@
  * either as a raw space-delimited string or as any iterable of scope strings.
  */
 
-import { Effect } from "effect";
+import { Array as Arr, Effect, Predicate, String as Str } from "effect";
 import * as Errors from "../Errors.ts";
 
 /**
@@ -15,21 +15,23 @@ import * as Errors from "../Errors.ts";
  * entries. Splitting on any run of whitespace tolerates extra spaces.
  */
 export const parseScopes = (scope: string): readonly string[] =>
-  scope.split(/\s+/).filter((s) => s.length > 0);
+  Arr.filter(scope.split(/\s+/), Str.isNonEmpty);
 
 /**
  * Format an iterable of scopes into a single space-delimited string.
  */
 export const formatScopes = (scopes: Iterable<string>): string => [...scopes].join(" ");
 
-const toSet = (granted: string | Iterable<string>): ReadonlySet<string> =>
-  new Set(typeof granted === "string" ? parseScopes(granted) : granted);
+// The granted scopes, deduplicated in first-seen order (the order
+// `grantedScopes` reports them in).
+const toScopeList = (granted: string | Iterable<string>): ReadonlyArray<string> =>
+  Arr.dedupe(Predicate.isString(granted) ? parseScopes(granted) : granted);
 
 /**
  * Check whether the granted scopes include the required scope.
  */
 export const hasScope = (granted: string | Iterable<string>, required: string): boolean =>
-  toSet(granted).has(required);
+  Arr.contains(toScopeList(granted), required);
 
 /**
  * Check whether the granted scopes include *all* of the required scopes.
@@ -39,13 +41,12 @@ export const hasAllScopes = (
   granted: string | Iterable<string>,
   required: Iterable<string>,
 ): boolean => {
-  const set = toSet(granted);
-  let count = 0;
-  for (const scope of required) {
-    count++;
-    if (!set.has(scope)) return false;
-  }
-  return count > 0;
+  const set = toScopeList(granted);
+  const requiredArr = Arr.fromIterable(required);
+  return (
+    Arr.isReadonlyArrayNonEmpty(requiredArr) &&
+    Arr.every(requiredArr, (scope) => Arr.contains(set, scope))
+  );
 };
 
 /**
@@ -56,11 +57,8 @@ export const hasAnyScope = (
   granted: string | Iterable<string>,
   required: Iterable<string>,
 ): boolean => {
-  const set = toSet(granted);
-  for (const scope of required) {
-    if (set.has(scope)) return true;
-  }
-  return false;
+  const set = toScopeList(granted);
+  return Arr.some(Arr.fromIterable(required), (scope) => Arr.contains(set, scope));
 };
 
 /**
@@ -77,7 +75,7 @@ export const requireScope = (
         new Errors.InsufficientScopeError({
           message: `Insufficient scope: requires "${required}"`,
           requiredScope: required,
-          grantedScopes: [...toSet(granted)],
+          grantedScopes: [...toScopeList(granted)],
         }),
       );
 
@@ -90,10 +88,10 @@ export const requireAllScopes = (
   granted: string | Iterable<string>,
   required: Iterable<string>,
 ): Effect.Effect<void, Errors.InsufficientScopeError> => {
-  const set = toSet(granted);
+  const set = toScopeList(granted);
   const requiredArr = [...required];
 
-  if (requiredArr.length === 0) {
+  if (Arr.isReadonlyArrayEmpty(requiredArr)) {
     return Effect.fail(
       new Errors.InsufficientScopeError({
         message: "Insufficient scope: no scopes provided",
@@ -103,14 +101,16 @@ export const requireAllScopes = (
     );
   }
 
-  const missing = requiredArr.filter((scope) => !set.has(scope));
-  return missing.length === 0
-    ? Effect.void
-    : Effect.fail(
+  const missing = Arr.filter(requiredArr, (scope) => !Arr.contains(set, scope));
+  return Arr.match(missing, {
+    onEmpty: () => Effect.void,
+    onNonEmpty: (missing) =>
+      Effect.fail(
         new Errors.InsufficientScopeError({
           message: `Insufficient scope: missing [${missing.join(", ")}]`,
           requiredScope: missing.join(" "),
           grantedScopes: [...set],
         }),
-      );
+      ),
+  });
 };

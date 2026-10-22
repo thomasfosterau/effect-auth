@@ -392,7 +392,10 @@ export const make = (
     // Cached decoy hash — computed on first signIn call so that unknown-user
     // attempts always perform the same hashing work as known-user ones.
     let cachedDecoyHash: string | undefined;
-    const getDecoyHash: Effect.Effect<string, Errors.HashingError> = Effect.gen(function* () {
+    const getDecoyHash = Effect.fn("getDecoyHash")(function* (): Effect.fn.Return<
+      string,
+      Errors.HashingError
+    > {
       if (cachedDecoyHash !== undefined) return cachedDecoyHash;
       const result = yield* passwordHasher.hash("effect-auth-decoy");
       cachedDecoyHash = result.hash;
@@ -550,7 +553,7 @@ export const make = (
           // MultiAlgorithmVerifier when present so that a hasher switch does not
           // lock out existing users.  Convert HashingError to false so sign-in
           // always returns InvalidCredentialsError and never a 500.
-          const hashToVerify = passwordHash ?? (yield* getDecoyHash);
+          const hashToVerify = passwordHash ?? (yield* getDecoyHash());
           const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
           const verifyEffect = Option.isSome(multiVerifier)
             ? multiVerifier.value.verify(input.password, hashToVerify)
@@ -558,7 +561,8 @@ export const make = (
           const isValid = yield* verifyEffect.pipe(
             Effect.catchTag("HashingError", () => Effect.succeed(false)),
           );
-          if (user === null || passwordHash === null || !isValid) {
+          // `user` is null exactly when `resolvedUser` is; checking both narrows both.
+          if (resolvedUser === null || user === null || passwordHash === null || !isValid) {
             return yield* new Errors.InvalidCredentialsError({
               message: "Invalid email or password",
             });
@@ -568,21 +572,21 @@ export const make = (
           // it outdated (e.g. iteration count raised, algorithm switched).  A
           // failure here must never abort sign-in — the user is already
           // authenticated at this point.
-          if (passwordHasher.needsRehash?.(passwordHash!)) {
+          if (passwordHasher.needsRehash?.(passwordHash)) {
             yield* passwordHasher.hash(input.password).pipe(
               Effect.flatMap((newHash) => store.setPasswordHash(user.id, newHash.hash)),
               Effect.ignore,
             );
           }
 
-          if (resolved.requireEmailVerification && !resolvedUser!.identifier.verified) {
+          if (resolved.requireEmailVerification && !resolvedUser.identifier.verified) {
             return yield* new Errors.EmailNotVerifiedError({
               message: "Email must be verified before sign-in",
               email,
             });
           }
 
-          const handle = { type: "email" as const, value: resolvedUser!.identifier.value };
+          const handle = { type: "email" as const, value: resolvedUser.identifier.value };
 
           // Second factor: when a gate is present and required for this user,
           // return a challenge instead of a session.

@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vite-plus/test";
-import { Context, Effect } from "effect";
+import { describe, it, expect, assert } from "vite-plus/test";
+import { Context, Effect, Result } from "effect";
 import { PasswordHasher, scryptHasher } from "./Password.ts";
 import * as Password from "./Password.ts";
 
@@ -103,9 +103,8 @@ describe("PasswordHasher", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("HashingError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("HashingError");
   });
 
   it("should fail cleanly on malformed iterations (not a RangeError defect)", async () => {
@@ -113,9 +112,8 @@ describe("PasswordHasher", () => {
     const malformed = "pbkdf2-sha256$notanumber$aaaa$bbbb";
     const result = await Effect.runPromise(Effect.result(hasher.verify("password", malformed)));
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("HashingError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("HashingError");
   });
 
   it.each([
@@ -130,9 +128,8 @@ describe("PasswordHasher", () => {
     const malformed = `pbkdf2-sha256$${count}$${"00".repeat(16)}$${"00".repeat(32)}`;
     const result = await Effect.runPromise(Effect.result(hasher.verify("password", malformed)));
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("HashingError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("HashingError");
     expect(hasher.needsRehash!(malformed)).toBe(true);
   });
 
@@ -140,9 +137,8 @@ describe("PasswordHasher", () => {
     const malformed = "pbkdf2-sha256$-1$aaaa$bbbb";
     const result = await Effect.runPromise(Effect.result(hasher.verify("password", malformed)));
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("HashingError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("HashingError");
   });
 
   it("should return false (not defect) for an absurdly long password in verify", async () => {
@@ -308,9 +304,8 @@ describe("scrypt stored parameter limits", () => {
         Effect.result(scryptHasher().verify("password", hash)),
       );
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
     },
   );
 
@@ -321,9 +316,8 @@ describe("scrypt stored parameter limits", () => {
       Effect.result(scryptHasher({ cost: 3 }).hash("password")),
     );
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("HashingError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("HashingError");
   });
 
   it("refuses to hash with a configuration its own verify would refuse", async () => {
@@ -333,9 +327,8 @@ describe("scrypt stored parameter limits", () => {
       Effect.result(scryptHasher({ cost: 1024, blockSize: 0 }).hash("password")),
     );
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("HashingError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("HashingError");
   });
 
   it("verifies its own hashes across valid configurations", async () => {

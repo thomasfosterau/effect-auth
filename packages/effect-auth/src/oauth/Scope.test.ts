@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vite-plus/test";
-import { Effect } from "effect";
+import { describe, it, expect, assert } from "vite-plus/test";
+import { Effect, Result } from "effect";
 import {
   parseScopes,
   formatScopes,
@@ -67,11 +67,10 @@ describe("Scope", () => {
       );
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("InsufficientScopeError");
-        expect(result.failure.requiredScope).toBe("write:repo");
-        expect(result.failure.grantedScopes).toEqual(["read:user"]);
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("InsufficientScopeError");
+      expect(result.failure.requiredScope).toBe("write:repo");
+      expect(result.failure.grantedScopes).toEqual(["read:user"]);
     });
   });
 
@@ -84,18 +83,16 @@ describe("Scope", () => {
       const result = await Effect.runPromise(Effect.result(requireAllScopes("a", ["a", "b", "c"])));
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("InsufficientScopeError");
-        expect(result.failure.requiredScope).toBe("b c");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("InsufficientScopeError");
+      expect(result.failure.requiredScope).toBe("b c");
     });
 
     it("denies on empty required list (fail-closed)", async () => {
       const result = await Effect.runPromise(Effect.result(requireAllScopes("a b c", [])));
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("InsufficientScopeError");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("InsufficientScopeError");
     });
   });
 });
