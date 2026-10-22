@@ -152,7 +152,7 @@ import {
   type CookieConfig,
   type ResolvedCookieConfig,
 } from "./HttpServer.ts";
-import { decodeSessionCacheCookie } from "../SessionCookieCache.ts";
+import { decodeSessionCacheCookie, sessionCacheGateAttributes } from "../SessionCookieCache.ts";
 
 // =============================================================================
 // Context services
@@ -336,7 +336,8 @@ const resolveSessionFromRequest = (
       if (primaryId !== undefined) {
         const cached = request.cookies[dataCookieName(cfg)];
         if (cached !== undefined) {
-          const resolved = decodeSessionCacheCookie(cached, cfg.cache, Date.now(), primaryId);
+          const gate = yield* sessionCacheGateAttributes;
+          const resolved = decodeSessionCacheCookie(cached, cfg.cache, Date.now(), primaryId, gate);
           if (resolved !== null) return Option.some(resolved);
         }
       }

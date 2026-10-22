@@ -14,6 +14,15 @@ const SESSION_ID = "sess_abc123";
 const cache: ResolvedSessionCache = {
   maxAge: 5 * 60 * 1000,
   secret: Redacted.make(SECRET),
+  version: "",
+  encryptionKey: undefined,
+};
+
+/** Encode, failing the test when the snapshot is refused. */
+const mustEncode = (...args: Parameters<typeof encodeSessionCacheCookie>): string => {
+  const cookie = encodeSessionCacheCookie(...args);
+  if (cookie === undefined) throw new Error("encodeSessionCacheCookie refused the snapshot");
+  return cookie;
 };
 
 const now = Date.now();
@@ -78,7 +87,7 @@ describe("resolveSessionCache", () => {
 
 describe("encode/decode round-trip", () => {
   it("decodes a freshly encoded cookie", () => {
-    const cookie = encodeSessionCacheCookie(value, cache, now, SESSION_ID);
+    const cookie = mustEncode(value, cache, now, SESSION_ID);
     const result = decodeSessionCacheCookie(cookie, cache, now, SESSION_ID);
     expect(result).not.toBeNull();
     expect(result!.session.id).toBe(SESSION_ID);
@@ -87,7 +96,7 @@ describe("encode/decode round-trip", () => {
   });
 
   it("preserves Date fields", () => {
-    const cookie = encodeSessionCacheCookie(value, cache, now, SESSION_ID);
+    const cookie = mustEncode(value, cache, now, SESSION_ID);
     const result = decodeSessionCacheCookie(cookie, cache, now, SESSION_ID);
     expect(result!.session.expiresAt).toBeInstanceOf(Date);
     expect(result!.session.createdAt).toBeInstanceOf(Date);
@@ -101,7 +110,7 @@ describe("encode/decode round-trip", () => {
       session: makeSession(),
       user: makeUser({ name: "Alice", image: "https://example.com/alice.png" }),
     };
-    const cookie = encodeSessionCacheCookie(withExtras, cache, now, SESSION_ID);
+    const cookie = mustEncode(withExtras, cache, now, SESSION_ID);
     const result = decodeSessionCacheCookie(cookie, cache, now, SESSION_ID);
     expect(result!.user.name).toBe("Alice");
     expect(result!.user.image).toBe("https://example.com/alice.png");
@@ -111,15 +120,15 @@ describe("encode/decode round-trip", () => {
 describe("signature verification", () => {
   it("rejects a forged cookie (different secret)", () => {
     const forgeryCache: ResolvedSessionCache = {
-      maxAge: cache.maxAge,
+      ...cache,
       secret: Redacted.make("b".repeat(32)),
     };
-    const cookie = encodeSessionCacheCookie(value, forgeryCache, now, SESSION_ID);
+    const cookie = mustEncode(value, forgeryCache, now, SESSION_ID);
     expect(decodeSessionCacheCookie(cookie, cache, now, SESSION_ID)).toBeNull();
   });
 
   it("rejects a tampered payload", () => {
-    const cookie = encodeSessionCacheCookie(value, cache, now, SESSION_ID);
+    const cookie = mustEncode(value, cache, now, SESSION_ID);
     const dot = cookie.lastIndexOf(".");
     const encoded = cookie.slice(0, dot);
     const sig = cookie.slice(dot + 1);
@@ -131,7 +140,7 @@ describe("signature verification", () => {
   });
 
   it("rejects a cookie with a detached signature", () => {
-    const cookie = encodeSessionCacheCookie(value, cache, now, SESSION_ID);
+    const cookie = mustEncode(value, cache, now, SESSION_ID);
     const dot = cookie.lastIndexOf(".");
     const encoded = cookie.slice(0, dot);
     const wrongSig = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -145,13 +154,13 @@ describe("signature verification", () => {
 
 describe("expiry", () => {
   it("rejects an expired cache entry (exp in past)", () => {
-    const cookie = encodeSessionCacheCookie(value, cache, now - cache.maxAge - 1, SESSION_ID);
+    const cookie = mustEncode(value, cache, now - cache.maxAge - 1, SESSION_ID);
     expect(decodeSessionCacheCookie(cookie, cache, now, SESSION_ID)).toBeNull();
   });
 
   it("rejects a cache entry whose underlying session has expired", () => {
     const expiredSession = makeSession({ expiresAt: new Date(now - 1000) });
-    const cookie = encodeSessionCacheCookie(
+    const cookie = mustEncode(
       { session: expiredSession, user: makeUser() },
       cache,
       now,
@@ -161,19 +170,19 @@ describe("expiry", () => {
   });
 
   it("accepts a cache entry that is about to expire (1 ms left)", () => {
-    const cookie = encodeSessionCacheCookie(value, cache, now - cache.maxAge + 1, SESSION_ID);
+    const cookie = mustEncode(value, cache, now - cache.maxAge + 1, SESSION_ID);
     expect(decodeSessionCacheCookie(cookie, cache, now, SESSION_ID)).not.toBeNull();
   });
 });
 
 describe("session-binding (sid)", () => {
   it("rejects when primarySessionId does not match the encoded sid", () => {
-    const cookie = encodeSessionCacheCookie(value, cache, now, SESSION_ID);
+    const cookie = mustEncode(value, cache, now, SESSION_ID);
     expect(decodeSessionCacheCookie(cookie, cache, now, "sess_other")).toBeNull();
   });
 
   it("accepts when primarySessionId matches", () => {
-    const cookie = encodeSessionCacheCookie(value, cache, now, SESSION_ID);
+    const cookie = mustEncode(value, cache, now, SESSION_ID);
     expect(decodeSessionCacheCookie(cookie, cache, now, SESSION_ID)).not.toBeNull();
   });
 
@@ -181,13 +190,96 @@ describe("session-binding (sid)", () => {
     const sessionA = "sess_aaa";
     const sessionB = "sess_bbb";
     // User had session A cached; primary cookie is now session B
-    const cookie = encodeSessionCacheCookie(value, cache, now, sessionA);
+    const cookie = mustEncode(value, cache, now, sessionA);
     expect(decodeSessionCacheCookie(cookie, cache, now, sessionB)).toBeNull();
   });
 
   it("rejects a stale cache after logout (empty primarySessionId)", () => {
-    const cookie = encodeSessionCacheCookie(value, cache, now, SESSION_ID);
+    const cookie = mustEncode(value, cache, now, SESSION_ID);
     // An empty string will never match a real session id
     expect(decodeSessionCacheCookie(cookie, cache, now, "")).toBeNull();
+  });
+});
+
+describe("cache epoch (#194)", () => {
+  const withVersion = (version: string): ResolvedSessionCache =>
+    resolveSessionCache({ enabled: true, secret: Redacted.make(SECRET), version })!;
+
+  it("rejects every cookie issued under another epoch", () => {
+    const cookie = mustEncode(value, withVersion("2026-10"), now, SESSION_ID);
+    expect(
+      decodeSessionCacheCookie(cookie, withVersion("2026-10"), now, SESSION_ID),
+    ).not.toBeNull();
+    expect(decodeSessionCacheCookie(cookie, withVersion("2026-11"), now, SESSION_ID)).toBeNull();
+  });
+
+  it("rejects a cookie with no epoch once one is set, and accepts it while none is", () => {
+    const cookie = mustEncode(value, cache, now, SESSION_ID);
+    expect(decodeSessionCacheCookie(cookie, cache, now, SESSION_ID)).not.toBeNull();
+    expect(decodeSessionCacheCookie(cookie, withVersion("v2"), now, SESSION_ID)).toBeNull();
+  });
+});
+
+describe("server-only attributes (#194)", () => {
+  const admin: Types.SessionWithUser = {
+    session: makeSession(),
+    user: makeUser({ attributes: { plan: "pro", role: "admin" } }),
+  };
+
+  it("never snapshots a user holding a server-only attribute (default role)", () => {
+    expect(encodeSessionCacheCookie(admin, cache, now, SESSION_ID)).toBeUndefined();
+  });
+
+  it("follows the configured list", () => {
+    const gate = new Set(["tier"]);
+    expect(encodeSessionCacheCookie(admin, cache, now, SESSION_ID, gate)).toBeDefined();
+    const tiered: Types.SessionWithUser = {
+      session: makeSession(),
+      user: makeUser({ attributes: { tier: "gold" } }),
+    };
+    expect(encodeSessionCacheCookie(tiered, cache, now, SESSION_ID, gate)).toBeUndefined();
+  });
+
+  it("never serves a cookie that carries one, so the request falls through to the store", () => {
+    // Issued while `role` was not server-only, then read with the default list.
+    const cookie = mustEncode(admin, cache, now, SESSION_ID, new Set());
+    expect(decodeSessionCacheCookie(cookie, cache, now, SESSION_ID, new Set())).not.toBeNull();
+    expect(decodeSessionCacheCookie(cookie, cache, now, SESSION_ID)).toBeNull();
+  });
+});
+
+describe("encryption (#194)", () => {
+  const encrypted = resolveSessionCache({
+    enabled: true,
+    secret: Redacted.make(SECRET),
+    encrypt: true,
+  })!;
+
+  it("round-trips, and the browser cannot read the payload", () => {
+    const cookie = mustEncode(value, encrypted, now, SESSION_ID);
+    const payload = cookie.slice(0, cookie.lastIndexOf("."));
+    expect(Buffer.from(payload.slice(1), "base64url").toString("utf8")).not.toContain("user_1");
+    expect(cookie).not.toContain(Buffer.from('"plan"').toString("base64url"));
+    const result = decodeSessionCacheCookie(cookie, encrypted, now, SESSION_ID);
+    expect(result?.user.attributes["plan"]).toBe("pro");
+  });
+
+  it("rejects a signed-only cookie when encryption is on, and an encrypted one when it is off", () => {
+    expect(
+      decodeSessionCacheCookie(
+        mustEncode(value, cache, now, SESSION_ID),
+        encrypted,
+        now,
+        SESSION_ID,
+      ),
+    ).toBeNull();
+    expect(
+      decodeSessionCacheCookie(
+        mustEncode(value, encrypted, now, SESSION_ID),
+        cache,
+        now,
+        SESSION_ID,
+      ),
+    ).toBeNull();
   });
 });

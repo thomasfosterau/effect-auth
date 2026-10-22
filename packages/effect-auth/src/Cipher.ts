@@ -161,6 +161,38 @@ export const hmac = (
   data: Uint8Array | string,
 ): Uint8Array => new Uint8Array(crypto.createHmac(algorithm, secret).update(data).digest());
 
+/**
+ * Synchronous AES-256-GCM seal under a 32-byte `key`:
+ * `base64url(iv[12] ‖ tag[16] ‖ ciphertext)`, the {@link aes256GcmCipher}
+ * format. For callers that cannot run an Effect (the session cookie cache).
+ *
+ * @internal
+ */
+export const aes256GcmSeal = (key: Uint8Array, plaintext: string): string => {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64url");
+};
+
+/**
+ * Open what {@link aes256GcmSeal} sealed, or `null` when it is malformed or
+ * fails authentication.
+ *
+ * @internal
+ */
+export const aes256GcmOpen = (key: Uint8Array, sealed: string): string | null => {
+  try {
+    const buf = Buffer.from(sealed, "base64url");
+    if (buf.length < 29) return null;
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, buf.subarray(0, 12));
+    decipher.setAuthTag(buf.subarray(12, 28));
+    return Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+};
+
 // ---------------------------------------------------------------------------
 // JWS (JSON Web Signature) asymmetric primitives — used by Jwt.ts and
 // oauth/OAuth.ts (signing/verifying compact JWS tokens).
