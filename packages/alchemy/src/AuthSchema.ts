@@ -39,7 +39,7 @@
  * {@link AuthSchemaProps.dropOnDelete}.
  */
 
-import { Clock, Data, Effect } from "effect";
+import { Array as Arr, Clock, Data, Effect, Record as Rec } from "effect";
 import { SqlClient, SqlError } from "effect/sql";
 import * as Sql from "@thomasfosterau/effect-auth-sql";
 import * as Provider from "alchemy/Provider";
@@ -131,6 +131,7 @@ const dropAuthTables = (database: D1Client.D1Database): Effect.Effect<void, SqlE
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* Effect.forEach(authTableNames, (name) => sql.unsafe(`DROP TABLE IF EXISTS ${name}`), {
+      concurrency: 1,
       discard: true,
     });
   }).pipe(Effect.provide(D1Client.layer({ db: database })));
@@ -200,12 +201,12 @@ export const AuthSchemaProvider = (options: AuthSchemaProviderOptions) => {
       const name = props.database ?? DEFAULT_DATABASE;
       const database = databases[name];
       if (database !== undefined) return Effect.succeed(database);
-      const registered = Object.keys(databases);
+      const registered = Rec.keys(databases);
       return Effect.fail(
         new UnknownDatabaseError({
           message:
             `AuthSchema '${id}' targets database '${name}', which AuthSchemaProvider ` +
-            `was not given. Registered: ${registered.length === 0 ? "(none)" : registered.join(", ")}. ` +
+            `was not given. Registered: ${Arr.match(registered, { onEmpty: () => "(none)", onNonEmpty: (names) => names.join(", ") })}. ` +
             "Pass the binding to AuthSchemaProvider — it must stay registered for " +
             "destroys too, which run from persisted state.",
           database: name,
@@ -219,13 +220,14 @@ export const AuthSchemaProvider = (options: AuthSchemaProviderOptions) => {
       resolve(id, olds).pipe(
         Effect.flatMap(listAuthTables),
         Effect.map((tables) =>
-          tables.length === 0
-            ? undefined
-            : {
-                tables,
-                statements: Sql.schemaStatements.length,
-                appliedAt: output?.appliedAt ?? 0,
-              },
+          Arr.match(tables, {
+            onEmpty: () => undefined,
+            onNonEmpty: (present) => ({
+              tables: present,
+              statements: Sql.schemaStatements.length,
+              appliedAt: output?.appliedAt ?? 0,
+            }),
+          }),
         ),
       ),
 

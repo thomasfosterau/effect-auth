@@ -507,7 +507,9 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
           const store = yield* Auth.IdentifierStore;
           yield* store.create(emailFor(USER.ada, "ada@example.com", true));
           yield* store.delete(USER.ada);
-          const cleared = yield* Effect.promise(() => harness.readUserRow(USER.ada));
+          const cleared = yield* Effect.orDie(
+            Effect.tryPromise(() => harness.readUserRow(USER.ada)),
+          );
           const afterDelete = yield* store.getByValue("email", "ada@example.com");
           const adaListed = yield* store.listByUser(USER.ada);
           // Once cleared, the address is free for another user to claim.
@@ -784,7 +786,9 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
               verifiedAt,
             }),
           );
-          const storedVerifiedAt = yield* Effect.promise(() => harness.readVerifiedAt(USER.ada));
+          const storedVerifiedAt = yield* Effect.orDie(
+            Effect.tryPromise(() => harness.readVerifiedAt(USER.ada)),
+          );
           const unverified = yield* store.replace(
             verified!,
             emailFor(USER.ada, "ada-other@example.com"),

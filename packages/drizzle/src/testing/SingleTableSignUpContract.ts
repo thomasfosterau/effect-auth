@@ -338,8 +338,9 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
       });
     });
 
-    if (nullable) {
-      it("a writer that leaves the address out still signs up: the claim writes it", async () => {
+    it.runIf(nullable)(
+      "a writer that leaves the address out still signs up: the claim writes it",
+      async () => {
         const writer = makeAppWriter(harness.insertUser, "omits");
 
         const { signedUp, signedIn } = await harness.run(() =>
@@ -357,9 +358,11 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
           emailVerified: false,
         });
         expect(signedIn.user.id).toBe(signedUp.user.id);
-      });
-    } else {
-      it("a writer that leaves the address out cannot insert the row: sign-up fails and nothing is written", async () => {
+      },
+    );
+    it.skipIf(nullable)(
+      "a writer that leaves the address out cannot insert the row: sign-up fails and nothing is written",
+      async () => {
         const writer = makeAppWriter(harness.insertUser, "omits");
 
         const error = await harness.run(() =>
@@ -370,6 +373,6 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
 
         expect(error).toBeInstanceOf(Auth.AuthError);
         expect(await harness.countUserRows()).toBe(0);
-      });
-    }
+      },
+    );
   });

@@ -14,6 +14,6 @@ const CREATE_TABLE = /create\s+table\s+if\s+not\s+exists\s+(\w+)/i;
  * `schemaStatements` so it cannot drift from the DDL that is actually applied.
  */
 export const authTableNames: readonly string[] = Sql.schemaStatements.flatMap((sql) => {
-  const match = CREATE_TABLE.exec(sql);
-  return match ? [match[1] as string] : [];
+  const name = CREATE_TABLE.exec(sql)?.[1];
+  return name === undefined ? [] : [name];
 });

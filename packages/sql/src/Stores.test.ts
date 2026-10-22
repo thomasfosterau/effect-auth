@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Stream } from "effect";
+import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+import { Array as Arr, Data, Effect, Layer, Order, Predicate, Stream } from "effect";
 import { SqlClient, SqlConnection, SqlError, Statement } from "effect/sql";
 import { Reactivity } from "effect/reactivity";
 import Database from "better-sqlite3";
@@ -21,11 +21,14 @@ import { migratedPglite } from "./testing/PgliteTemplate.ts";
 // the genuine tagged-template/compiler pipeline.
 // ---------------------------------------------------------------------------
 
+/** The failure the broken test connection reports. */
+class SimulatedFailure extends Data.TaggedError("SimulatedFailure")<{ readonly message: string }> {}
+
 const driverError = (cause: unknown): SqlError.SqlError =>
   new SqlError.SqlError({
     reason: new SqlError.UnknownError({
       cause,
-      message: cause instanceof Error ? cause.message : "sqlite error",
+      message: Predicate.isError(cause) ? cause.message : "sqlite error",
     }),
   });
 
@@ -173,9 +176,7 @@ const authTables: ReadonlyArray<string> = schemaStatements.flatMap((statement) =
 let database: PGlite | undefined;
 
 const openDatabase = (): PGlite => {
-  if (database === undefined) {
-    throw new Error("the PGlite database is opened in the suite's beforeAll");
-  }
+  assert(database !== undefined, "the PGlite database is opened in the suite's beforeAll");
   return database;
 };
 
@@ -307,7 +308,12 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.loaded?.attributes).toEqual({ device: "laptop" });
       expect(result.loaded?.expiresAt).toBeInstanceOf(Date);
       expect(result.updated.attributes).toEqual({ device: "phone" });
-      expect(result.listed.map((s) => s.id).sort()).toEqual(["sess-1", "sess-2"]);
+      expect(
+        Arr.sort(
+          result.listed.map((s) => s.id),
+          Order.String,
+        ),
+      ).toEqual(["sess-1", "sess-2"]);
       expect(result.missing).toBeNull();
       expect(result.other).toHaveLength(1);
     });
@@ -394,7 +400,12 @@ const storeContract = (engine: StoreEngine): void => {
       );
       const { slice, resolved } = result;
       // Only `User::` references are answered; the Widget is omitted.
-      expect(resolved.map((entity) => entity.ref.id).sort()).toEqual(["user-1", "user-2"]);
+      expect(
+        Arr.sort(
+          resolved.map((entity) => entity.ref.id),
+          Order.String,
+        ),
+      ).toEqual(["user-1", "user-2"]);
       expect(
         Auth.Entity.entityIn(slice, Auth.Entity.ref("User", "user-1"), Auth.Rbac.roleRef("admin")),
       ).toBe(true);
@@ -840,12 +851,18 @@ const storeContract = (engine: StoreEngine): void => {
 
       await run(
         Effect.gen(function* () {
-          for (const [table, columns] of Object.entries(timestampColumns)) {
-            const typeByCol = yield* engine.columnTypes(table);
-            for (const col of columns) {
-              expect(typeByCol[col], `${table}.${col}`).toBe("BIGINT");
-            }
-          }
+          yield* Effect.forEach(
+            Object.entries(timestampColumns),
+            ([table, columns]) =>
+              engine.columnTypes(table).pipe(
+                Effect.map((typeByCol) => {
+                  for (const col of columns) {
+                    expect(typeByCol[col], `${table}.${col}`).toBe("BIGINT");
+                  }
+                }),
+              ),
+            { concurrency: 1, discard: true },
+          );
         }),
       );
     });
@@ -1187,9 +1204,12 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.page.total).toBe(3);
       expect(result.page.users.map((u) => u.id)).toEqual([result.alice.id, result.bob.id]);
       expect(result.searched.total).toBe(2);
-      expect(result.searched.users.map((u) => u.id).sort()).toEqual(
-        [result.alice.id, result.bob.id].sort(),
-      );
+      expect(
+        Arr.sort(
+          result.searched.users.map((u) => u.id),
+          Order.String,
+        ),
+      ).toEqual(Arr.sort([result.alice.id, result.bob.id], Order.String));
       expect(result.searchedNarrow.total).toBe(1);
       expect(result.searchedNarrow.users[0]?.id).toBe(result.alice.id);
       expect(result.created.name).toBe("Carol");
@@ -1222,13 +1242,15 @@ const storeContract = (engine: StoreEngine): void => {
     });
 
     it("store gets surface AuthError (not defect) on SQL failure", async () => {
+      const simulatedFailure = () =>
+        driverError(new SimulatedFailure({ message: "simulated failure" }));
       const brokenConnection: SqlConnection.Connection = {
-        execute: () => Effect.fail(driverError(new Error("simulated failure"))),
-        executeRaw: () => Effect.fail(driverError(new Error("simulated failure"))),
-        executeStream: () => Stream.fail(driverError(new Error("simulated failure"))),
-        executeValues: () => Effect.fail(driverError(new Error("simulated failure"))),
-        executeValuesUnprepared: () => Effect.fail(driverError(new Error("simulated failure"))),
-        executeUnprepared: () => Effect.fail(driverError(new Error("simulated failure"))),
+        execute: () => Effect.fail(simulatedFailure()),
+        executeRaw: () => Effect.fail(simulatedFailure()),
+        executeStream: () => Stream.fail(simulatedFailure()),
+        executeValues: () => Effect.fail(simulatedFailure()),
+        executeValuesUnprepared: () => Effect.fail(simulatedFailure()),
+        executeUnprepared: () => Effect.fail(simulatedFailure()),
       };
       const brokenClientLayer = Layer.effect(
         SqlClient.SqlClient,

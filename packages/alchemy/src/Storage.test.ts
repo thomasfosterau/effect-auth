@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer, Order } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
@@ -42,7 +42,7 @@ describe("D1-backed effect-auth storage", () => {
         Effect.andThen(listTables.pipe(Effect.provide(D1Client.layer({ db: database })))),
       ),
     );
-    expect(tables).toEqual([...authTableNames].sort());
+    expect(tables).toEqual(Arr.sort(authTableNames, Order.String));
     expect(tables).toContain("auth_users");
     expect(tables).toContain("auth_sessions");
   });

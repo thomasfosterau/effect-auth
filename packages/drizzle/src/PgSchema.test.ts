@@ -106,23 +106,25 @@ const seedUser = (
   tables: Tables,
   row: Partial<Tables["users"]["$inferInsert"]> = {},
 ): Effect.Effect<string> =>
-  Effect.promise(async () => {
-    const id = row.id ?? "user-1";
-    await db
-      .insert(tables.users)
-      .values({
-        id,
-        name: null,
-        image: null,
-        passwordHash: null,
-        attributes: {},
-        createdAt: at(0),
-        updatedAt: at(0),
-        ...row,
-      })
-      .execute();
-    return id;
-  });
+  Effect.orDie(
+    Effect.tryPromise(async () => {
+      const id = row.id ?? "user-1";
+      await db
+        .insert(tables.users)
+        .values({
+          id,
+          name: null,
+          image: null,
+          passwordHash: null,
+          attributes: {},
+          createdAt: at(0),
+          updatedAt: at(0),
+          ...row,
+        })
+        .execute();
+      return id;
+    }),
+  );
 
 describe("Schema", () => {
   it("drives every store from custom table names", async () => {
@@ -137,14 +139,16 @@ describe("Schema", () => {
         yield* sessions.create(makeSession({ attributes: { via: "custom" } }));
         yield* identifiers.create(identifier());
 
-        const present = yield* Effect.promise(async () => {
-          const rows = await db.execute(
-            `SELECT table_name FROM information_schema.tables
+        const present = yield* Effect.orDie(
+          Effect.tryPromise(async () => {
+            const rows = await db.execute(
+              `SELECT table_name FROM information_schema.tables
                  WHERE table_schema = 'public' ORDER BY table_name`,
-          );
-          const list = Array.isArray(rows) ? rows : (rows as { rows: unknown[] }).rows;
-          return list.map((row) => (row as { table_name: string }).table_name);
-        });
+            );
+            const list = Array.isArray(rows) ? rows : (rows as { rows: unknown[] }).rows;
+            return list.map((row) => (row as { table_name: string }).table_name);
+          }),
+        );
 
         return {
           present,

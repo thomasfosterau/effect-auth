@@ -87,7 +87,14 @@
  * ```
  */
 
-import type { AnyColumn, Column, GetColumnData, Table } from "drizzle-orm";
+import { Record as Rec } from "effect";
+import {
+  getTableColumns,
+  type AnyColumn,
+  type Column,
+  type GetColumnData,
+  type Table,
+} from "drizzle-orm";
 import type * as Auth from "@thomasfosterau/effect-auth";
 import type { Tables } from "./Schema.ts";
 
@@ -288,17 +295,22 @@ export interface AuthSchemaSpec<
  * @internal
  */
 export const resolveTable = <TColumns>(spec: TableSpec<Table, object>): TableSchema<TColumns> => {
-  const source = spec.table as unknown as Readonly<Record<string, Column>>;
+  const source: Readonly<Record<string, Column>> = getTableColumns(spec.table);
+  // SAFETY: `TableSpec` types `columns` as a mapping whose every value is a
+  // `ColumnKey`, a string key of `spec.table` (or absent, for an optional field).
   const names = spec.columns as Readonly<Record<string, string>>;
-  const columns: Record<string, Column> = {};
-  for (const [field, key] of Object.entries(names)) {
-    // An optional field left unmapped (`users.attributes`) is simply absent.
-    if (key === undefined) continue;
-    columns[field] = source[key] as Column;
-  }
+  // An optional field left unmapped (`users.attributes`) is simply absent.
+  const columns = Rec.map(
+    Rec.filter(names, (key) => key !== undefined),
+    (key) => source[key],
+  );
   return {
     table: spec.table,
+    // SAFETY: each column was named through a `ColumnKey`, which checked at the
+    // caller's call site that it reads back as `TColumns` needs (see above).
     columns: columns as TColumns,
+    // SAFETY: `names` is the very mapping `columns` was resolved from, so its
+    // keys are `TColumns`' fields.
     names: names as Readonly<Record<keyof TColumns & string, string>>,
   };
 };
@@ -316,20 +328,18 @@ export const defineSchema = <
   TIdentifiers extends Table,
 >(
   spec: AuthSchemaSpec<TSessions, TUsers, TIdentifiers>,
-): AuthSchema => ({
-  _tag: "AuthSchema",
-  sessions: resolveTable<SessionColumns>(spec.sessions),
-  users: {
-    ...resolveTable<UserColumns>(spec.users),
-    promoted: Object.fromEntries(
-      Object.entries(spec.users.promoted ?? {}).map(([attribute, key]) => [
-        attribute,
-        (spec.users.table as unknown as Readonly<Record<string, Column>>)[key] as Column,
-      ]),
-    ),
-  },
-  identifiers: resolveTable<IdentifierColumns>(spec.identifiers),
-});
+): AuthSchema => {
+  const userColumns: Readonly<Record<string, Column>> = getTableColumns(spec.users.table);
+  return {
+    _tag: "AuthSchema",
+    sessions: resolveTable<SessionColumns>(spec.sessions),
+    users: {
+      ...resolveTable<UserColumns>(spec.users),
+      promoted: Rec.map(spec.users.promoted ?? {}, (key) => userColumns[key]),
+    },
+    identifiers: resolveTable<IdentifierColumns>(spec.identifiers),
+  };
+};
 
 /**
  * The identity mapping over this package's own tables: every field lives in the
@@ -394,10 +404,9 @@ export const resolveSchema = (input: SchemaInput): AuthSchema =>
 export const writeValues = <TColumns extends Readonly<Record<string, Column>>>(
   schema: TableSchema<TColumns>,
   values: Partial<{ readonly [K in keyof TColumns]: GetColumnData<TColumns[K], "query"> }>,
-): Record<string, unknown> => {
-  const row: Record<string, unknown> = {};
-  for (const [field, value] of Object.entries(values)) {
-    row[schema.names[field as keyof TColumns & string]] = value;
-  }
-  return row;
-};
+): Table["$inferInsert"] =>
+  Rec.mapKeys(
+    values,
+    // SAFETY: `values` is keyed by `TColumns`' fields, which are `names`' keys.
+    (field) => schema.names[field as keyof TColumns & string],
+  );

@@ -10,7 +10,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Predicate } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { defineSchema } from "./Columns.ts";
@@ -34,7 +34,7 @@ const usersWithBag = pgTable("users_with_bag", {
   id: uuid("id").primaryKey(),
   name: text("name"),
   image: text("image"),
-  meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+  meta: jsonb("meta").$type<Auth.Attributes>().notNull().default({}),
   role: text("role"),
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).notNull(),
@@ -45,7 +45,7 @@ const sessions = pgTable("sessions", {
   expiresAt: timestamp("expires_at", { mode: "date", withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
   lastActivityAt: timestamp("last_activity_at", { mode: "date", withTimezone: true }).notNull(),
-  attributes: jsonb("attributes").$type<Record<string, unknown>>().notNull().default({}),
+  attributes: jsonb("attributes").$type<Auth.Attributes>().notNull().default({}),
 });
 const identifiers = pgTable("identifiers", {
   id: uuid("id").primaryKey(),
@@ -133,7 +133,7 @@ const withBag = defineSchema({
 });
 
 /** Never called — compile-time assertions on the promoted mapping. */
-const promotedRejects = (): unknown =>
+const promotedRejects = () =>
   defineSchema({
     sessions: sessionSpec,
     users: {
@@ -187,7 +187,7 @@ const withDatabase = async <A>(
 
 describe("promoted attributes", () => {
   it("rejects a promoted column that does not read back as an attribute value", () => {
-    expect(typeof promotedRejects).toBe("function");
+    expect(Predicate.isFunction(promotedRejects)).toBe(true);
   });
 
   it("presents each promoted column in user.attributes, with no attribute bag at all", async () => {

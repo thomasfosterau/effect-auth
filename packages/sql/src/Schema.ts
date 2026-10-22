@@ -199,10 +199,9 @@ export const schemaStatements: readonly string[] = [
  * Run this once during provisioning, or on each cold start — every statement
  * uses `IF NOT EXISTS`, so repeated runs are no-ops.
  */
-export const migrate: Effect.Effect<void, Auth.AuthError, SqlClient.SqlClient> = Effect.gen(
-  function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* Effect.forEach(
+export const migrate: Effect.Effect<void, Auth.AuthError, SqlClient.SqlClient> =
+  SqlClient.SqlClient.use((sql) =>
+    Effect.forEach(
       schemaStatements,
       (statement) =>
         sql
@@ -212,7 +211,6 @@ export const migrate: Effect.Effect<void, Auth.AuthError, SqlClient.SqlClient> =
               (cause) => new Auth.AuthError({ message: "sql migrate failed", cause }),
             ),
           ),
-      { discard: true },
-    );
-  },
-);
+      { concurrency: 1, discard: true },
+    ),
+  );

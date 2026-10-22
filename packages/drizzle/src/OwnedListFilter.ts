@@ -57,7 +57,7 @@
  * @module owned-list-filter
  */
 import { and, eq, inArray, or, type SQL, type SQLWrapper } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Match, Predicate } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 /**
@@ -77,9 +77,9 @@ export interface OwnedColumns {
 }
 
 const isSqlWrapper = (value: unknown): value is SQLWrapper =>
-  typeof value === "object" &&
-  value !== null &&
-  typeof (value as { readonly getSQL?: unknown }).getSQL === "function";
+  Predicate.isObjectOrArray(value) &&
+  Predicate.hasProperty(value, "getSQL") &&
+  Predicate.isFunction(value.getSQL);
 
 /**
  * Render an owned-material read scope as a `WHERE` over `columns`.
@@ -94,27 +94,33 @@ export const ownedListFilter =
   (scope: Auth.OwnedAccess.OwnedReadScope): SQL | undefined => {
     const { owner, visibility, draft } = columns;
     const published = (clause: SQL): SQL =>
+      // SAFETY: `and` yields `undefined` only when every condition is; both are defined here.
       draft === undefined ? clause : (and(clause, eq(draft, false)) as SQL);
     const isPublic = published(eq(visibility, "public"));
 
-    switch (scope.kind) {
-      case "all":
-        return undefined;
-      case "public":
-        return isPublic;
-      case "member": {
-        const own = eq(owner, scope.userId);
-        const following = scope.following;
-        if (following._tag === "Nobody" || !isSqlWrapper(following.query)) {
-          return or(isPublic, own);
-        }
-        return or(
-          isPublic,
-          own,
-          published(and(eq(visibility, "followers"), inArray(owner, following.query)) as SQL),
-        );
-      }
-    }
+    return Match.value(scope).pipe(
+      Match.discriminatorsExhaustive("kind")({
+        all: (): SQL | undefined => undefined,
+        public: () => isPublic,
+        member: ({ userId, following }) => {
+          const own = eq(owner, userId);
+          // A follow set this renderer cannot nest reads as `Nobody`.
+          const followed = Match.value(following).pipe(
+            Match.tag("Subquery", ({ query }) => (isSqlWrapper(query) ? query : undefined)),
+            Match.orElse(() => undefined),
+          );
+          if (followed === undefined) {
+            return or(isPublic, own);
+          }
+          return or(
+            isPublic,
+            own,
+            // SAFETY: `and` yields `undefined` only when every condition is; both are defined here.
+            published(and(eq(visibility, "followers"), inArray(owner, followed)) as SQL),
+          );
+        },
+      }),
+    );
   };
 
 /**

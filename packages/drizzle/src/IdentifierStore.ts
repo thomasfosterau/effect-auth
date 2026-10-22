@@ -28,7 +28,17 @@
  */
 
 import { and, asc, eq, inArray, or } from "drizzle-orm";
-import { Effect, Exit, Layer, Request, RequestResolver } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Exit,
+  HashMap,
+  Layer,
+  Option,
+  Record as Rec,
+  Request,
+  RequestResolver,
+} from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import {
   type IdentifierColumns,
@@ -143,7 +153,7 @@ export const make = (
               .limit(1)
               .execute(),
           );
-          if (held.length === 0) return null;
+          if (Arr.isReadonlyArrayEmpty(held)) return null;
           yield* insert(to, "identifier.replace");
           yield* query("identifier.replace.release", (db) =>
             db.delete(table).where(eq(column.id, from.id)).execute(),
@@ -244,18 +254,13 @@ export const makeByValueResolver = (
 
     return RequestResolver.make<GetIdentifierByValue>((entries) =>
       Effect.gen(function* () {
-        const byType = new Map<Auth.IdentifierType, Set<string>>();
-        for (const entry of entries) {
-          const values = byType.get(entry.request.type);
-          if (values === undefined) {
-            byType.set(entry.request.type, new Set([entry.request.value]));
-          } else {
-            values.add(entry.request.value);
-          }
-        }
+        const byType = Arr.groupBy(entries, (entry): string => entry.request.type);
 
-        const clauses = Array.from(byType, ([type, values]) =>
-          and(eq(column.type, type), inArray(column.value, Array.from(values))),
+        const clauses = Rec.collect(byType, (_type, group) =>
+          and(
+            eq(column.type, group[0].request.type),
+            inArray(column.value, Arr.dedupe(group.map((entry) => entry.request.value))),
+          ),
         );
 
         const rows = yield* query("identifier.getByValueMany", (db) =>
@@ -266,14 +271,18 @@ export const makeByValueResolver = (
             .execute(),
         );
 
-        const byPair = new Map(
-          rows.map((row) => [pairKey(row.type, row.value), toIdentifier(row)]),
+        const byPair = HashMap.fromIterable(
+          rows.map((row) => [pairKey(row.type, row.value), toIdentifier(row)] as const),
         );
-        for (const entry of entries) {
+        Arr.forEach(entries, (entry) =>
           entry.completeUnsafe(
-            Exit.succeed(byPair.get(pairKey(entry.request.type, entry.request.value)) ?? null),
-          );
-        }
+            Exit.succeed(
+              Option.getOrNull(
+                HashMap.get(byPair, pairKey(entry.request.type, entry.request.value)),
+              ),
+            ),
+          ),
+        );
       }),
     );
   });
@@ -302,7 +311,7 @@ export const makeByUserResolver = (
 
     return RequestResolver.make<ListIdentifiersByUser>((entries) =>
       Effect.gen(function* () {
-        const userIds = Array.from(new Set(entries.map((entry) => entry.request.userId)));
+        const userIds = Arr.dedupe(entries.map((entry) => entry.request.userId));
         const rows = yield* query("identifier.listByUserMany", (db) =>
           db
             .select(column)
@@ -312,20 +321,16 @@ export const makeByUserResolver = (
             .execute(),
         );
 
-        const byUser = new Map<string, Array<Auth.Identifier>>();
-        for (const row of rows) {
-          const identifier = toIdentifier(row);
-          const existing = byUser.get(row.userId);
-          if (existing === undefined) {
-            byUser.set(row.userId, [identifier]);
-          } else {
-            existing.push(identifier);
-          }
-        }
+        const byUser = Rec.map(
+          Arr.groupBy(rows, (row) => row.userId),
+          (userRows) => userRows.map(toIdentifier),
+        );
 
-        for (const entry of entries) {
-          entry.completeUnsafe(Exit.succeed(byUser.get(entry.request.userId) ?? []));
-        }
+        Arr.forEach(entries, (entry) =>
+          entry.completeUnsafe(
+            Exit.succeed(Option.getOrElse(Rec.get(byUser, entry.request.userId), () => [])),
+          ),
+        );
       }),
     );
   });

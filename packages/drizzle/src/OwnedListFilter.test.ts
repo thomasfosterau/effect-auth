@@ -20,7 +20,7 @@ import { eq } from "drizzle-orm";
 import { boolean, pgTable, text } from "drizzle-orm/pg-core";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { Context, Effect, Option } from "effect";
+import { Context, Effect, Match, Option } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { isFollowerLayer, ownedListFilter } from "./OwnedListFilter.ts";
@@ -122,11 +122,13 @@ afterAll(async () => {
 const databaseFollowers = () =>
   isFollowerLayer({
     isFollower: (followerId, ownerId) =>
-      Effect.promise(() =>
-        db
-          .select({ ownerId: follows.ownerId })
-          .from(follows)
-          .where(eq(follows.followerId, followerId)),
+      Effect.orDie(
+        Effect.tryPromise(() =>
+          db
+            .select({ ownerId: follows.ownerId })
+            .from(follows)
+            .where(eq(follows.followerId, followerId)),
+        ),
       ).pipe(Effect.map((rows) => rows.some((row) => row.ownerId === ownerId))),
     followingQuery: (followerId) =>
       db.select({ id: follows.ownerId }).from(follows).where(eq(follows.followerId, followerId)),
@@ -142,14 +144,12 @@ const withSeam = <A>(
   const provided = effect.pipe(
     Effect.provide(Auth.SessionContext.viewerLayer(CurrentViewer, viewer)),
   );
-  switch (seam) {
-    case "absent":
-      return provided;
-    case "never":
-      return Effect.provide(provided, Auth.OwnedAccess.isFollowerNever);
-    case "database":
-      return Effect.provide(provided, databaseFollowers());
-  }
+  return Match.value(seam).pipe(
+    Match.when("absent", () => provided),
+    Match.when("never", () => Effect.provide(provided, Auth.OwnedAccess.isFollowerNever)),
+    Match.when("database", () => Effect.provide(provided, databaseFollowers())),
+    Match.exhaustive,
+  );
 };
 
 const describeViewer = (viewer: AppUser | null) =>

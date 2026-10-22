@@ -29,7 +29,7 @@ import type {
   PreparedQueryHKTBase,
 } from "drizzle-orm/mysql-core";
 import { drizzle, type MySqlRemoteDatabase } from "drizzle-orm/mysql-proxy";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Predicate, Schema } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { fromTables } from "./Columns.ts";
@@ -88,7 +88,7 @@ const projection = fromTables(tables);
  */
 const wireRow = (
   names: Readonly<Record<string, string>>,
-  values: Record<string, unknown>,
+  values: Readonly<Record<string, Schema.Json>>,
 ): ReadonlyArray<unknown> => Object.values(names).map((field) => values[field]);
 
 const run = <A, E>(
@@ -407,7 +407,7 @@ describe("MySQL / types", () => {
     ) => databaseLayer(db);
 
     expect(asAnyTables.sessions).toBe(tables.sessions);
-    expect(typeof anyMySqlHandle).toBe("function");
+    expect(Predicate.isFunction(anyMySqlHandle)).toBe(true);
   });
 
   it("produces rows interchangeable with the PostgreSQL ones", () => {
@@ -425,6 +425,6 @@ describe("MySQL / types", () => {
     };
 
     expect(fromMySql(session)).toBe(session);
-    expect(typeof fromPg).toBe("function");
+    expect(Predicate.isFunction(fromPg)).toBe(true);
   });
 });

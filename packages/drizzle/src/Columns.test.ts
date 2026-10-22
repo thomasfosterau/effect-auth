@@ -16,7 +16,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { eq, getTableName } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Predicate } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { type AuthSchema, defineSchema } from "./Columns.ts";
@@ -35,7 +35,7 @@ const appUsers = pgTable("account", {
   key: uuid("account_id").primaryKey(),
   displayName: text("full_name"),
   avatar: text("avatar_url"),
-  meta: jsonb("profile").$type<Record<string, unknown>>().notNull().default({}),
+  meta: jsonb("profile").$type<Auth.Attributes>().notNull().default({}),
   /** A column the stores know nothing about, with a database-level default. */
   role: text("role").notNull().default("member"),
   born: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
@@ -48,7 +48,7 @@ const appSessions = pgTable("login", {
   expires: timestamp("expires_at", { mode: "date", withTimezone: true }).notNull(),
   born: timestamp("started_at", { mode: "date", withTimezone: true }).notNull(),
   lastSeen: timestamp("last_seen_at", { mode: "date", withTimezone: true }).notNull(),
-  meta: jsonb("context").$type<Record<string, unknown>>().notNull().default({}),
+  meta: jsonb("context").$type<Auth.Attributes>().notNull().default({}),
   /** Another one, likewise defaulted. */
   origin: text("origin").notNull().default("web"),
 });
@@ -199,7 +199,7 @@ const runWithDatabase = <A, E>(
 // ---------------------------------------------------------------------------
 
 /** Never called — every line is a compile-time assertion. */
-const mappingRejects = (): unknown => [
+const mappingRejects = () => [
   defineSchema({
     sessions: {
       table: appSessions,
@@ -247,7 +247,7 @@ const mappingRejects = (): unknown => [
 
 describe("stores over an application's own schema", () => {
   it("rejects a mapping whose columns do not read back as the store needs", () => {
-    expect(typeof mappingRejects).toBe("function");
+    expect(Predicate.isFunction(mappingRejects)).toBe(true);
   });
 
   it("reads a user out of uuid-keyed columns under the application's names", async () => {
@@ -285,8 +285,10 @@ describe("stores over an application's own schema", () => {
 
         // The columns the stores know nothing about kept their defaults, which
         // is what makes an insert of "only the mapped columns" safe.
-        const rows = yield* Effect.promise(() =>
-          db.select().from(appSessions).where(eq(appSessions.digest, "digest-1")).execute(),
+        const rows = yield* Effect.orDie(
+          Effect.tryPromise(() =>
+            db.select().from(appSessions).where(eq(appSessions.digest, "digest-1")).execute(),
+          ),
         );
 
         yield* store.delete("digest-1");

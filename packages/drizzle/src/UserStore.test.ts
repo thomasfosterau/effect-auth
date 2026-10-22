@@ -53,23 +53,25 @@ const seedUser = (
   db: PgliteDatabase,
   row: Partial<Tables["users"]["$inferInsert"]> = {},
 ): Effect.Effect<string> =>
-  Effect.promise(async () => {
-    const id = row.id ?? "user-1";
-    await db
-      .insert(tables.users)
-      .values({
-        id,
-        name: null,
-        image: null,
-        passwordHash: null,
-        attributes: {},
-        createdAt: at(0),
-        updatedAt: at(0),
-        ...row,
-      })
-      .execute();
-    return id;
-  });
+  Effect.orDie(
+    Effect.tryPromise(async () => {
+      const id = row.id ?? "user-1";
+      await db
+        .insert(tables.users)
+        .values({
+          id,
+          name: null,
+          image: null,
+          passwordHash: null,
+          attributes: {},
+          createdAt: at(0),
+          updatedAt: at(0),
+          ...row,
+        })
+        .execute();
+      return id;
+    }),
+  );
 
 describe("UserStore", () => {
   it("maps rows to users, omitting absent optional fields", async () => {

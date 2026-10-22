@@ -18,20 +18,20 @@ const statement = (db: Database.Database, sql: string): D1PreparedStatement => {
   const withParams = (bound: ReadonlyArray<unknown>): D1PreparedStatement => ({
     bind: (...values: ReadonlyArray<unknown>) => withParams(values),
     all: <T = unknown>(): Promise<D1Result<T>> => {
-      const prepared = db.prepare(sql);
+      const prepared = db.prepare<unknown[], T>(sql);
       if (prepared.reader) {
-        return Promise.resolve({ results: prepared.all(...(bound as never[])) as T[] });
+        return Promise.resolve({ results: prepared.all(...bound) });
       }
-      prepared.run(...(bound as never[]));
-      return Promise.resolve({ results: [] as T[] });
+      prepared.run(...bound);
+      return Promise.resolve<D1Result<T>>({ results: [] });
     },
     raw: <T = unknown>(): Promise<ReadonlyArray<T>> => {
-      const prepared = db.prepare(sql);
+      const prepared = db.prepare<unknown[], T>(sql);
       if (prepared.reader) {
-        return Promise.resolve(prepared.raw(true).all(...(bound as never[])) as T[]);
+        return Promise.resolve(prepared.raw(true).all(...bound));
       }
-      prepared.run(...(bound as never[]));
-      return Promise.resolve([] as T[]);
+      prepared.run(...bound);
+      return Promise.resolve<ReadonlyArray<T>>([]);
     },
   });
   return withParams([]);

@@ -36,21 +36,15 @@ export const run = <A>(
   const toAuthError = (cause: unknown): Auth.AuthError =>
     new Auth.AuthError({ message: `drizzle ${label} failed`, cause });
 
-  return Effect.suspend(() => {
-    // Building the query can itself throw (a malformed `WHERE`, a column the
-    // handle does not know); that is the same class of failure as a rejection
-    // and surfaces the same way.
-    let result: DrizzleResult<A>;
-    try {
-      result = query();
-    } catch (cause) {
-      return Effect.fail(toAuthError(cause));
-    }
+  const execute = (result: DrizzleResult<A>): Effect.Effect<A, Auth.AuthError> =>
+    Effect.isEffect(result)
+      ? Effect.mapError(result, toAuthError)
+      : Effect.tryPromise({ try: () => result, catch: toAuthError });
 
-    return Effect.isEffect(result)
-      ? Effect.mapError(result as Effect.Effect<A, unknown>, toAuthError)
-      : Effect.tryPromise({ try: () => result as Promise<A>, catch: toAuthError });
-  });
+  // Building the query can itself throw (a malformed `WHERE`, a column the
+  // handle does not know); that is the same class of failure as a rejection
+  // and surfaces the same way.
+  return Effect.flatten(Effect.try({ try: () => execute(query()), catch: toAuthError }));
 };
 
 /**

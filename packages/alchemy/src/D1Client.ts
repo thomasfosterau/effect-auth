@@ -96,10 +96,10 @@ const makeConnection = (db: D1Database): SqlConnection.Connection => {
     Effect.tryPromise({
       try: async () => {
         if (TRANSACTION_CONTROL.test(sql)) return [];
-        return (await db
+        return await db
           .prepare(sql)
           .bind(...params)
-          .raw()) as ReadonlyArray<ReadonlyArray<unknown>>;
+          .raw<ReadonlyArray<unknown>>();
       },
       catch: (cause) => sqlError(cause, "Failed to execute statement", "execute"),
     });
@@ -111,7 +111,12 @@ const makeConnection = (db: D1Database): SqlConnection.Connection => {
   ) =>
     transformRows === undefined
       ? rows(sql, params)
-      : Effect.map(rows(sql, params), transformRows as (rows: ReadonlyArray<unknown>) => never);
+      : Effect.map(
+          rows(sql, params),
+          // SAFETY: `all()` returns one plain object per row, which is the `object`
+          // bound `transformRows` (the client's column-name transform) is generic over.
+          transformRows as (rows: ReadonlyArray<unknown>) => never,
+        );
 
   return {
     execute,

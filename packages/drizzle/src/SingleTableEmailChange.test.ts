@@ -141,10 +141,12 @@ const makeHarness = (
         return user;
       }),
     delete: (userId) =>
-      Effect.promise(async () => {
-        userMap.delete(userId);
-        await deleteRow(userId);
-      }),
+      Effect.orDie(
+        Effect.tryPromise(async () => {
+          userMap.delete(userId);
+          await deleteRow(userId);
+        }),
+      ),
   };
 
   const tokenStore: typeof Auth.AccountManagementStore.Service = {
@@ -242,11 +244,13 @@ describe("single-table IdentifierStore: email change", () => {
         (store) => ({
           ...store,
           replace: (from, to) =>
-            Effect.promise(() =>
-              drizzle(client)
-                .update(appUsers)
-                .set({ email: NEW, emailVerified: true })
-                .where(eq(appUsers.userId, USER.grace)),
+            Effect.orDie(
+              Effect.tryPromise(() =>
+                drizzle(client)
+                  .update(appUsers)
+                  .set({ email: NEW, emailVerified: true })
+                  .where(eq(appUsers.userId, USER.grace)),
+              ),
             ).pipe(Effect.andThen(store.replace(from, to))),
         }),
       );
@@ -271,11 +275,13 @@ describe("single-table IdentifierStore: email change", () => {
         (store) => ({
           ...store,
           replace: (from, to) =>
-            Effect.promise(() =>
-              drizzle(client)
-                .update(appUsers)
-                .set({ email: NEW, emailVerified: false })
-                .where(eq(appUsers.userId, USER.ada)),
+            Effect.orDie(
+              Effect.tryPromise(() =>
+                drizzle(client)
+                  .update(appUsers)
+                  .set({ email: NEW, emailVerified: false })
+                  .where(eq(appUsers.userId, USER.ada)),
+              ),
             ).pipe(Effect.andThen(store.replace(from, to))),
         }),
       );
@@ -330,11 +336,13 @@ describe("single-table IdentifierStore: email change", () => {
       const h = makeHarness(strictMapping, deleteStrictRow, (store) => ({
         ...store,
         replace: (from, to) =>
-          Effect.promise(() =>
-            drizzle(client)
-              .update(strictUsers)
-              .set({ email: NEW })
-              .where(eq(strictUsers.userId, USER.grace)),
+          Effect.orDie(
+            Effect.tryPromise(() =>
+              drizzle(client)
+                .update(strictUsers)
+                .set({ email: NEW })
+                .where(eq(strictUsers.userId, USER.grace)),
+            ),
           ).pipe(Effect.andThen(store.replace(from, to))),
       }));
       const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));
@@ -354,11 +362,13 @@ describe("single-table IdentifierStore: email change", () => {
       const h = makeHarness(strictMapping, deleteStrictRow, (store) => ({
         ...store,
         replace: (from, to) =>
-          Effect.promise(() =>
-            drizzle(client)
-              .update(strictUsers)
-              .set({ email: NEW, emailVerified: false })
-              .where(eq(strictUsers.userId, USER.ada)),
+          Effect.orDie(
+            Effect.tryPromise(() =>
+              drizzle(client)
+                .update(strictUsers)
+                .set({ email: NEW, emailVerified: false })
+                .where(eq(strictUsers.userId, USER.ada)),
+            ),
           ).pipe(Effect.andThen(store.replace(from, to))),
       }));
       const { token } = await h.run((svc) => svc.requestEmailChange(USER.ada, NEW));

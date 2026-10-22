@@ -20,7 +20,16 @@
  */
 
 import { asc, eq, inArray } from "drizzle-orm";
-import { Effect, Exit, Layer, Request, RequestResolver } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Exit,
+  HashMap,
+  Layer,
+  Option,
+  Request,
+  RequestResolver,
+} from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import {
   resolveSchema,
@@ -175,15 +184,15 @@ export const makeResolver = (
 
     return RequestResolver.make<GetSession>((entries) =>
       Effect.gen(function* () {
-        const ids = Array.from(new Set(entries.map((entry) => entry.request.id)));
+        const ids = Arr.dedupe(entries.map((entry) => entry.request.id));
         const rows = yield* query("session.getMany", (db) =>
           db.select(column).from(table).where(inArray(column.id, ids)).execute(),
         );
 
-        const byId = new Map(rows.map((row) => [row.id, toSession(row)]));
-        for (const entry of entries) {
-          entry.completeUnsafe(Exit.succeed(byId.get(entry.request.id) ?? null));
-        }
+        const byId = HashMap.fromIterable(rows.map((row) => [row.id, toSession(row)] as const));
+        Arr.forEach(entries, (entry) =>
+          entry.completeUnsafe(Exit.succeed(Option.getOrNull(HashMap.get(byId, entry.request.id)))),
+        );
       }),
     );
   });
