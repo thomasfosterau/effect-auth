@@ -28,6 +28,7 @@ import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
 import { anyEmailValue, IdentifierStore } from "../Identifier.ts";
 import { SessionService } from "../SessionService.ts";
+import { randomBase64UrlToken } from "../RandomToken.ts";
 
 /**
  * Two-factor error
@@ -368,12 +369,7 @@ export const make = (
      * Generate a cryptographically secure pending-challenge token
      */
     const generatePendingToken = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(32).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate pending token", cause }),
-        ),
-      );
+      randomBase64UrlToken(crypto, "Failed to generate pending token");
 
     /**
      * Generate a single plaintext backup code: 10 crypto-random hex characters

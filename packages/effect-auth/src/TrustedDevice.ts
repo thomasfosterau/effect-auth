@@ -54,6 +54,7 @@ import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { hashToken, timingSafeEqualBytes } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { MultiFactorService } from "./multifactor/MultiFactor.ts";
+import { randomBase64UrlToken } from "./RandomToken.ts";
 
 // ---------------------------------------------------------------------------
 // Record + Store
@@ -256,12 +257,7 @@ export const make = (
     const crypto = yield* Crypto.Crypto;
 
     const generateRawToken = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(32).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate device token", cause }),
-        ),
-      );
+      randomBase64UrlToken(crypto, "Failed to generate device token");
 
     return {
       issue: Effect.fn("TrustedDeviceService.issue")(function* (userId: string) {

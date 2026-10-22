@@ -428,6 +428,97 @@ describe("OidcProviderService", () => {
     expect(result.type).toBe("code");
     expect(new URL(result.redirectTo).searchParams.get("code")).toBeTruthy();
   });
+
+  describe("updateClient", () => {
+    it("applies every supplied field and keeps the rest", async () => {
+      const { layer, stores } = setup();
+      const service = await Effect.runPromise(
+        OidcProvider.make(config).pipe(Effect.provide(layer)),
+      );
+
+      const { before, updated } = await Effect.runPromise(
+        Effect.gen(function* () {
+          const { client } = yield* service.registerClient({
+            name: "App",
+            redirectUris: ["https://rp.test/callback"],
+          });
+          const updated = yield* service.updateClient(client.clientId, {
+            name: "Renamed",
+            redirectUris: ["https://rp.test/other"],
+            skipConsent: true,
+            disabled: true,
+            metadata: { team: "core" },
+          });
+          return { before: client, updated };
+        }).pipe(Effect.provide(layer)),
+      );
+
+      expect(updated.clientId).toBe(before.clientId);
+      expect(updated.name).toBe("Renamed");
+      expect(updated.redirectUris).toEqual(["https://rp.test/other"]);
+      expect(updated.skipConsent).toBe(true);
+      expect(updated.disabled).toBe(true);
+      expect(updated.metadata).toEqual({ team: "core" });
+      expect(updated.clientSecretHash).toBe(before.clientSecretHash);
+      expect(stores.clients.get(before.clientId)).toEqual(updated);
+    });
+
+    it("leaves the client unchanged, bar updatedAt, when no field is supplied", async () => {
+      const { layer } = setup();
+      const service = await Effect.runPromise(
+        OidcProvider.make(config).pipe(Effect.provide(layer)),
+      );
+
+      const { before, updated } = await Effect.runPromise(
+        Effect.gen(function* () {
+          const { client } = yield* service.registerClient({
+            name: "App",
+            redirectUris: ["https://rp.test/callback"],
+          });
+          const updated = yield* service.updateClient(client.clientId, {});
+          return { before: client, updated };
+        }).pipe(Effect.provide(layer)),
+      );
+
+      const { updatedAt: _beforeAt, ...beforeRest } = before;
+      const { updatedAt: _updatedAt, ...updatedRest } = updated;
+      expect(updatedRest).toEqual(beforeRest);
+    });
+
+    it("fails for an unknown client", async () => {
+      const { layer } = setup();
+      const service = await Effect.runPromise(
+        OidcProvider.make(config).pipe(Effect.provide(layer)),
+      );
+      const err = await Effect.runPromise(
+        Effect.flip(service.updateClient("nope", { name: "x" })).pipe(Effect.provide(layer)),
+      );
+      expect(err).toBeInstanceOf(OidcProviderError);
+      expect(err.message).toBe("Client not found");
+    });
+
+    it("refuses to update a trusted config client", async () => {
+      const { layer } = setup();
+      const service = await Effect.runPromise(
+        OidcProvider.make({
+          ...config,
+          trustedClients: [
+            {
+              clientId: "first-party",
+              clientSecret: Redacted.make("shh"),
+              name: "First Party",
+              redirectUris: ["https://fp.test/cb"],
+            },
+          ],
+        }).pipe(Effect.provide(layer)),
+      );
+      const err = await Effect.runPromise(
+        Effect.flip(service.updateClient("first-party", { name: "x" })).pipe(Effect.provide(layer)),
+      );
+      expect(err).toBeInstanceOf(OidcProviderError);
+      expect(err.message).toBe("Trusted clients are configured statically and cannot be updated");
+    });
+  });
 });
 
 // -----------------------------------------------------------------------------
@@ -2229,5 +2320,96 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
 
     expect(res.status).toBe(429);
     expect([...fx.rateLimitKeys]).toEqual([]);
+  });
+});
+describe("HTTP OIDC client administration: PATCH /oauth2/clients/:clientId", () => {
+  const patch = (path: string, body: Schema.Json, sessionId?: string): Request =>
+    new Request(`http://idp.test${path}`, {
+      method: "PATCH",
+      headers: {
+        ...FIXTURE_CLIENT_HEADERS,
+        "content-type": "application/json",
+        ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
+      },
+      body: encodeJson(body),
+    });
+
+  const registerClient = async (fx: ReturnType<typeof makeHttpFixture>, adminSid: string) => {
+    const registered = await fx.handler(
+      post("/oauth2/register", { name: "RP", redirectUris: ["https://rp.test/cb"] }, adminSid),
+    );
+    expect(registered.status).toBe(200);
+    // SAFETY: a 200 from /oauth2/register carries the registered client.
+    const { client } = (await registered.json()) as { client: { clientId: string } };
+    return client.clientId;
+  };
+
+  it("lets an admin update every field of a registered client", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+    const clientId = await registerClient(fx, adminSid);
+
+    const res = await fx.handler(
+      patch(
+        `/oauth2/clients/${clientId}`,
+        {
+          name: "Renamed RP",
+          redirectUris: ["https://rp.test/other"],
+          skipConsent: true,
+          disabled: true,
+          metadata: { team: "core" },
+        },
+        adminSid,
+      ),
+    );
+    expect(res.status).toBe(200);
+    // SAFETY: a 200 from the update endpoint carries the client view.
+    const body = (await res.json()) as {
+      clientId: string;
+      name: string;
+      redirectUris: ReadonlyArray<string>;
+      skipConsent: boolean;
+      disabled: boolean;
+    };
+    expect(body).toMatchObject({
+      clientId,
+      name: "Renamed RP",
+      redirectUris: ["https://rp.test/other"],
+      skipConsent: true,
+      disabled: true,
+    });
+  });
+
+  it("keeps the client's fields when the payload is empty", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+    const clientId = await registerClient(fx, adminSid);
+
+    const res = await fx.handler(patch(`/oauth2/clients/${clientId}`, {}, adminSid));
+    expect(res.status).toBe(200);
+    // SAFETY: a 200 from the update endpoint carries the client view.
+    const body = (await res.json()) as { name: string; redirectUris: ReadonlyArray<string> };
+    expect(body).toMatchObject({ name: "RP", redirectUris: ["https://rp.test/cb"] });
+  });
+
+  it("answers 400 for an unknown client", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+    const res = await fx.handler(patch("/oauth2/clients/nope", { name: "x" }, adminSid));
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses a non-admin with 403 and an anonymous caller with 401", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
+    const clientId = await registerClient(fx, adminSid);
+    const userSid = fx.makeSession(fx.seedUser("pleb@idp.test"));
+
+    const forbidden = await fx.handler(
+      patch(`/oauth2/clients/${clientId}`, { name: "x" }, userSid),
+    );
+    expect(forbidden.status).toBe(403);
+    const anonymous = await fx.handler(patch(`/oauth2/clients/${clientId}`, { name: "x" }));
+    expect(anonymous.status).toBe(401);
   });
 });

@@ -1295,6 +1295,19 @@ export const make = (
       });
 
     /**
+     * Load a domain claim the actor may manage: domains must be enabled, the
+     * actor must hold `domain:manage` in the organization, and the claim must
+     * belong to it.
+     */
+    const getManagedDomain = (actorUserId: string, organizationId: string, domainId: string) =>
+      Effect.gen(function* () {
+        const domainStore = yield* requireDomainStore();
+        yield* requireMemberPermission(actorUserId, organizationId, "domain:manage");
+        const domain = yield* getDomainOrFail(domainStore, organizationId, domainId);
+        return { domainStore, domain };
+      });
+
+    /**
      * Load a pending invitation addressed to one of `userId`'s email
      * identifiers, enforcing expiry. (Matching mirrors the pre-identifier
      * behavior: the identifier does not need to be verified.)
@@ -1892,9 +1905,11 @@ export const make = (
         organizationId: string,
         domainId: string,
       ) {
-        const domainStore = yield* requireDomainStore();
-        yield* requireMemberPermission(actorUserId, organizationId, "domain:manage");
-        const domain = yield* getDomainOrFail(domainStore, organizationId, domainId);
+        const { domainStore, domain } = yield* getManagedDomain(
+          actorUserId,
+          organizationId,
+          domainId,
+        );
         yield* domainStore.delete(domain.id);
       }),
 
@@ -1903,9 +1918,11 @@ export const make = (
         organizationId: string,
         domainId: string,
       ) {
-        const domainStore = yield* requireDomainStore();
-        yield* requireMemberPermission(actorUserId, organizationId, "domain:manage");
-        const domain = yield* getDomainOrFail(domainStore, organizationId, domainId);
+        const { domainStore, domain } = yield* getManagedDomain(
+          actorUserId,
+          organizationId,
+          domainId,
+        );
 
         if (domain.verificationState === "verified") return domain;
 

@@ -443,6 +443,56 @@ const decodeBase64urlIgnorePadding = (encoded: string): Uint8Array => {
 /** `JSON.parse`, as a schema: any JSON value. */
 const decodeJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
+/** Decode a base64url string property, throwing `message` when it is not one. */
+const base64urlProperty = (value: object, key: string, message: string): Uint8Array => {
+  const raw = Predicate.hasProperty(value, key) ? value[key] : undefined;
+  if (!Predicate.isString(raw)) {
+    throw new ClientDataParseError(message);
+  }
+  return Result.getOrThrowWith(
+    Result.try(() => decodeBase64urlIgnorePadding(raw)),
+    () => new ClientDataParseError(message),
+  );
+};
+
+/** The ceremony `type` of the client data. */
+const clientDataType = (parsed: object): ClientDataType => {
+  const rawType = Predicate.hasProperty(parsed, "type") ? parsed.type : undefined;
+  if (rawType === "webauthn.get") return ClientDataType.Get;
+  if (rawType === "webauthn.create") return ClientDataType.Create;
+  throw new ClientDataParseError("Missing or invalid property 'type'");
+};
+
+/** The optional `crossOrigin` flag, `false` when absent. */
+const clientDataCrossOrigin = (parsed: object): boolean => {
+  if (!Predicate.hasProperty(parsed, "crossOrigin")) return false;
+  if (!Predicate.isBoolean(parsed.crossOrigin)) {
+    throw new ClientDataParseError("Invalid property 'crossOrigin'");
+  }
+  return parsed.crossOrigin;
+};
+
+/** The `tokenBinding.status` value. */
+const tokenBindingStatus = (raw: object): TokenBindingStatus => {
+  const rawStatus = Predicate.hasProperty(raw, "status") ? raw.status : undefined;
+  if (rawStatus === "present") return TokenBindingStatus.Present;
+  if (rawStatus === "supported") return TokenBindingStatus.Supported;
+  throw new ClientDataParseError("Missing or invalid property 'tokenBinding.status'");
+};
+
+/** The optional `tokenBinding` member, `null` when absent. */
+const clientDataTokenBinding = (parsed: object): TokenBinding | null => {
+  if (!Predicate.hasProperty(parsed, "tokenBinding")) return null;
+  const raw = parsed.tokenBinding;
+  // Any non-null object, arrays included.
+  if (!Predicate.isObjectOrArray(raw)) {
+    throw new ClientDataParseError("Invalid property 'tokenBinding'");
+  }
+  const id = base64urlProperty(raw, "id", "Missing or invalid property 'tokenBinding.id'");
+  const status = tokenBindingStatus(raw);
+  return { id, status };
+};
+
 /** Parse and validate the `clientDataJSON` a client returns. */
 export function parseClientDataJSON(encoded: Uint8Array): ClientData {
   const parsed = Option.getOrThrowWith(
@@ -454,23 +504,11 @@ export function parseClientDataJSON(encoded: Uint8Array): ClientData {
     throw new ClientDataParseError("Invalid client data JSON");
   }
 
-  const rawType = Predicate.hasProperty(parsed, "type") ? parsed.type : undefined;
-  let type: ClientDataType;
-  if (rawType === "webauthn.get") {
-    type = ClientDataType.Get;
-  } else if (rawType === "webauthn.create") {
-    type = ClientDataType.Create;
-  } else {
-    throw new ClientDataParseError("Missing or invalid property 'type'");
-  }
-
-  const rawChallenge = Predicate.hasProperty(parsed, "challenge") ? parsed.challenge : undefined;
-  if (!Predicate.isString(rawChallenge)) {
-    throw new ClientDataParseError("Missing or invalid property 'challenge'");
-  }
-  const challenge = Result.getOrThrowWith(
-    Result.try(() => decodeBase64urlIgnorePadding(rawChallenge)),
-    () => new ClientDataParseError("Missing or invalid property 'challenge'"),
+  const type = clientDataType(parsed);
+  const challenge = base64urlProperty(
+    parsed,
+    "challenge",
+    "Missing or invalid property 'challenge'",
   );
 
   const origin = Predicate.hasProperty(parsed, "origin") ? parsed.origin : undefined;
@@ -478,40 +516,8 @@ export function parseClientDataJSON(encoded: Uint8Array): ClientData {
     throw new ClientDataParseError("Missing or invalid property 'origin'");
   }
 
-  let crossOrigin = false;
-  if (Predicate.hasProperty(parsed, "crossOrigin")) {
-    if (!Predicate.isBoolean(parsed.crossOrigin)) {
-      throw new ClientDataParseError("Invalid property 'crossOrigin'");
-    }
-    crossOrigin = parsed.crossOrigin;
-  }
-
-  let tokenBinding: TokenBinding | null = null;
-  if (Predicate.hasProperty(parsed, "tokenBinding")) {
-    const raw = parsed.tokenBinding;
-    // Any non-null object, arrays included.
-    if (!Predicate.isObjectOrArray(raw)) {
-      throw new ClientDataParseError("Invalid property 'tokenBinding'");
-    }
-    const rawId = Predicate.hasProperty(raw, "id") ? raw.id : undefined;
-    if (!Predicate.isString(rawId)) {
-      throw new ClientDataParseError("Missing or invalid property 'tokenBinding.id'");
-    }
-    const id = Result.getOrThrowWith(
-      Result.try(() => decodeBase64urlIgnorePadding(rawId)),
-      () => new ClientDataParseError("Missing or invalid property 'tokenBinding.id'"),
-    );
-    const rawStatus = Predicate.hasProperty(raw, "status") ? raw.status : undefined;
-    let status: TokenBindingStatus;
-    if (rawStatus === "present") {
-      status = TokenBindingStatus.Present;
-    } else if (rawStatus === "supported") {
-      status = TokenBindingStatus.Supported;
-    } else {
-      throw new ClientDataParseError("Missing or invalid property 'tokenBinding.status'");
-    }
-    tokenBinding = { id, status };
-  }
+  const crossOrigin = clientDataCrossOrigin(parsed);
+  const tokenBinding = clientDataTokenBinding(parsed);
 
   return { type, challenge, origin, crossOrigin, tokenBinding };
 }

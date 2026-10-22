@@ -17,17 +17,7 @@
  */
 
 import { eq, inArray } from "drizzle-orm";
-import {
-  Array as Arr,
-  Effect,
-  Exit,
-  HashMap,
-  Layer,
-  Option,
-  Record as Rec,
-  Request,
-  RequestResolver,
-} from "effect";
+import { Effect, Layer, Record as Rec, Request, RequestResolver } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import {
   type PromotedValue,
@@ -37,7 +27,7 @@ import {
   type UserSchema,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { makeQuery } from "./internal.ts";
+import { completeById, makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 // ---------------------------------------------------------------------------
@@ -176,18 +166,13 @@ export const makeResolver = (
     const toUser = makeToUser(users);
 
     return RequestResolver.make<UserRequest>((entries) =>
-      Effect.gen(function* () {
-        const ids = Arr.dedupe(entries.map((entry) => entry.request.id));
-        const rows = yield* query("user.getMany", (db) =>
-          db.select(projection).from(table).where(inArray(column.id, ids)).execute(),
-        );
-
-        const byId = HashMap.fromIterable(rows.map((row) => [row.id, row] as const));
-        Arr.forEach(entries, (entry) =>
-          entry.completeUnsafe(
-            Exit.succeed(Option.getOrNull(Option.map(HashMap.get(byId, entry.request.id), toUser))),
+      completeById(
+        entries,
+        (ids) =>
+          query("user.getMany", (db) =>
+            db.select(projection).from(table).where(inArray(column.id, ids)).execute(),
           ),
-        );
-      }),
+        toUser,
+      ),
     );
   });

@@ -48,7 +48,7 @@ import {
   writeValues,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { makeQuery } from "./internal.ts";
+import { makeQuery, type Query } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 // ---------------------------------------------------------------------------
@@ -227,6 +227,18 @@ export class ListIdentifiersByUser extends Request.TaggedClass("ListIdentifiersB
   Auth.AuthError
 > {}
 
+/**
+ * Build a resolver over the schema's identifiers table, with the per-query
+ * runner bound to the `DrizzleDatabase` in scope.
+ */
+const withIdentifierTable = <A>(
+  schema: SchemaInput,
+  build: (query: Query, identifiers: IdentifierSchema) => A,
+): Effect.Effect<A, never, DrizzleDatabase> =>
+  Effect.map(DrizzleDatabase, (handle) =>
+    build(makeQuery(handle), resolveSchema(schema).identifiers),
+  );
+
 /** `${type} ${value}` — the composite key, flattened for `Map` lookups. */
 const pairKey = (type: Auth.IdentifierType, value: string): string => `${type} ${value}`;
 
@@ -246,13 +258,8 @@ const pairKey = (type: Auth.IdentifierType, value: string): string => `${type} $
 export const makeByValueResolver = (
   schema: SchemaInput = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<GetIdentifierByValue>, never, DrizzleDatabase> =>
-  Effect.map(DrizzleDatabase, (handle) => {
-    const query = makeQuery(handle);
-    const identifiers: IdentifierSchema = resolveSchema(schema).identifiers;
-    const column = identifiers.columns;
-    const table = identifiers.table;
-
-    return RequestResolver.make<GetIdentifierByValue>((entries) =>
+  withIdentifierTable(schema, (query, { columns: column, table }) =>
+    RequestResolver.make<GetIdentifierByValue>((entries) =>
       Effect.gen(function* () {
         const byType = Arr.groupBy(entries, (entry): string => entry.request.type);
 
@@ -284,8 +291,8 @@ export const makeByValueResolver = (
           ),
         );
       }),
-    );
-  });
+    ),
+  );
 
 /**
  * A resolver that collapses every {@link ListIdentifiersByUser} in a batch into
@@ -303,13 +310,8 @@ export const makeByValueResolver = (
 export const makeByUserResolver = (
   schema: SchemaInput = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<ListIdentifiersByUser>, never, DrizzleDatabase> =>
-  Effect.map(DrizzleDatabase, (handle) => {
-    const query = makeQuery(handle);
-    const identifiers: IdentifierSchema = resolveSchema(schema).identifiers;
-    const column = identifiers.columns;
-    const table = identifiers.table;
-
-    return RequestResolver.make<ListIdentifiersByUser>((entries) =>
+  withIdentifierTable(schema, (query, { columns: column, table }) =>
+    RequestResolver.make<ListIdentifiersByUser>((entries) =>
       Effect.gen(function* () {
         const userIds = Arr.dedupe(entries.map((entry) => entry.request.userId));
         const rows = yield* query("identifier.listByUserMany", (db) =>
@@ -332,5 +334,5 @@ export const makeByUserResolver = (
           ),
         );
       }),
-    );
-  });
+    ),
+  );

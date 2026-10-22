@@ -33,6 +33,7 @@ import {
   String as Str,
 } from "effect";
 import { AuthError } from "./Errors.ts";
+import { randomBase64UrlToken } from "./RandomToken.ts";
 import { JwtService } from "./Jwt.ts";
 import * as Obs from "./Observability.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -861,11 +862,7 @@ export const make = (
     const jwt = yield* JwtService;
     const crypto = yield* Crypto.Crypto;
 
-    const randomToken = (): Effect.Effect<string, AuthError> =>
-      crypto.randomBytes(32).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError((cause) => new AuthError({ message: "Failed to generate token", cause })),
-      );
+    const randomToken = (): Effect.Effect<string, AuthError> => randomBase64UrlToken(crypto);
 
     const randomClientId = (): Effect.Effect<string, AuthError> =>
       crypto.randomBytes(16).pipe(

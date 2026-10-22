@@ -27,7 +27,8 @@ import {
   primaryEmail,
 } from "./Identifier.ts";
 import { UserStore } from "./UserStore.ts";
-import { MultiAlgorithmVerifier, PasswordHasher } from "./password/Password.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import { makeDecoyHash, verifyPasswordOrDecoy } from "./password/DecoyVerify.ts";
 import { normalizeUsername } from "./utils.ts";
 import { SessionService } from "./SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
@@ -171,16 +172,7 @@ const make = (
 
     // Cached decoy hash — computed on first signIn call so that unknown-username
     // attempts always perform the same hashing work as known-username ones.
-    let cachedDecoyHash: string | undefined;
-    const getDecoyHash = Effect.fn("UsernameService.getDecoyHash")(function* (): Effect.fn.Return<
-      string,
-      Errors.HashingError
-    > {
-      if (cachedDecoyHash !== undefined) return cachedDecoyHash;
-      const result = yield* passwordHasher.hash("effect-auth-decoy");
-      cachedDecoyHash = result.hash;
-      return cachedDecoyHash;
-    });
+    const getDecoyHash = makeDecoyHash(passwordHasher, "UsernameService.getDecoyHash");
 
     const validate = (raw: string): Effect.Effect<string, UsernameError> =>
       Effect.gen(function* () {
@@ -269,16 +261,12 @@ const make = (
         const passwordHash =
           user !== null ? yield* emailPasswordStore.getPasswordHash(user.id) : null;
         // Always verify against a real or decoy hash so timing is constant
-        // regardless of whether the account exists.  Route through
-        // MultiAlgorithmVerifier when present so that a hasher switch does not
-        // lock out existing users.
-        const hashToVerify = passwordHash ?? (yield* getDecoyHash());
-        const multiVerifier = yield* Effect.serviceOption(MultiAlgorithmVerifier);
-        const verifyEffect = Option.isSome(multiVerifier)
-          ? multiVerifier.value.verify(input.password, hashToVerify)
-          : passwordHasher.verify(input.password, hashToVerify);
-        const isValid = yield* verifyEffect.pipe(
-          Effect.catchTag("HashingError", () => Effect.succeed(false)),
+        // regardless of whether the account exists.
+        const isValid = yield* verifyPasswordOrDecoy(
+          passwordHasher,
+          input.password,
+          passwordHash,
+          getDecoyHash,
         );
         if (user === null || passwordHash === null || !isValid) {
           return yield* invalid();

@@ -738,6 +738,22 @@ const USER_CODE_RATE_LIMIT: RateLimitConfig = {
   blockDurationMs: 30 * 60 * 1000,
 };
 
+/**
+ * Consume one token from `key`'s bucket, answering `429` when the bucket is
+ * spent and `500` when the limiter's store fails.
+ */
+const consumeRateLimitToken = (
+  rateLimiter: typeof RateLimiter.Service,
+  key: string,
+  limit: RateLimitConfig,
+): Effect.Effect<void, S.TooManyRequests | S.InternalServerError, never> =>
+  rateLimiter.consumeToken(key, limit).pipe(
+    Effect.catchTags({
+      RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
+      AuthError: (e) => internalServerError(e),
+    }),
+  );
+
 const applyUserCodeRateLimit = (
   userCode: string,
   device: typeof DeviceAuthorizationService.Service,
@@ -750,12 +766,7 @@ const applyUserCodeRateLimit = (
       return yield* refuseWithoutRateLimiter("the device user-code limit");
     }
     const key = `device-user-code:${normalizeUserCode(userCode)}`;
-    yield* rateLimiterOpt.value.consumeToken(key, USER_CODE_RATE_LIMIT).pipe(
-      Effect.catchTag("RateLimitError", (e) =>
-        Effect.fail(new S.TooManyRequests({ message: e.message })),
-      ),
-      Effect.catchTag("AuthError", (e) => internalServerError(e)),
-    );
+    yield* consumeRateLimitToken(rateLimiterOpt.value, key, USER_CODE_RATE_LIMIT);
   });
 
 /**
@@ -800,12 +811,7 @@ const applyRegistrationRateLimit = (
     const clientIp = yield* Effect.serviceOption(ClientIP);
     const ip = Option.isSome(clientIp) ? clientIp.value.ip : undefined;
     if (ip === undefined) return yield* new S.TooManyRequests({ message: NO_CLIENT_ADDRESS });
-    yield* rateLimiterOpt.value.consumeToken(`oidc-register:${ip}`, limit).pipe(
-      Effect.catchTag("RateLimitError", (e) =>
-        Effect.fail(new S.TooManyRequests({ message: e.message })),
-      ),
-      Effect.catchTag("AuthError", (e) => internalServerError(e)),
-    );
+    yield* consumeRateLimitToken(rateLimiterOpt.value, `oidc-register:${ip}`, limit);
   });
 
 /**

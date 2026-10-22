@@ -16,6 +16,7 @@ import { Context, Crypto, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { randomBase64UrlToken } from "./RandomToken.ts";
 import { hashToken } from "./TokenHash.ts";
 import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
@@ -143,12 +144,7 @@ export const make = (
     const crypto = yield* Crypto.Crypto;
 
     const generateRawToken = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(32).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate token", cause }),
-        ),
-      );
+      randomBase64UrlToken(crypto);
 
     return {
       generate: Effect.fn("OneTimeTokenService.generate")(

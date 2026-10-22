@@ -27,6 +27,7 @@ import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 import { type HookError } from "./Hooks.ts";
 import { SessionService } from "./SessionService.ts";
+import { randomBase64UrlToken } from "./RandomToken.ts";
 
 /** Error raised by phone OTP verification failures. */
 export class PhoneOtpError extends Data.TaggedError("PhoneOtpError")<{
@@ -284,14 +285,10 @@ export const make = (
      * base64url-encoded. It is hashed into the marker record and then
      * discarded.
      */
-    const generateMarkerSecret: Effect.Effect<string, Errors.AuthError> = crypto
-      .randomBytes(32)
-      .pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate OTP marker", cause }),
-        ),
-      );
+    const generateMarkerSecret: Effect.Effect<string, Errors.AuthError> = randomBase64UrlToken(
+      crypto,
+      "Failed to generate OTP marker",
+    );
 
     const normalize = (raw: string): Effect.Effect<string, Errors.AuthError> =>
       config.normalizePhoneNumber !== undefined

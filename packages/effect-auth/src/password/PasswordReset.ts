@@ -8,6 +8,7 @@ import { PasswordHasher } from "./Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService } from "../SessionService.ts";
 import { normalizeEmail } from "../utils.ts";
+import { randomBase64UrlToken } from "../RandomToken.ts";
 
 /** A pending password reset, keyed by the SHA-256 digest of its token. */
 export interface PasswordResetToken {
@@ -143,12 +144,7 @@ export const make = (
     const crypto = yield* Crypto.Crypto;
 
     const generateResetToken = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(32).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate reset token", cause }),
-        ),
-      );
+      randomBase64UrlToken(crypto, "Failed to generate reset token");
 
     return {
       requestPasswordReset: Effect.fn("PasswordResetService.requestPasswordReset")(function* (

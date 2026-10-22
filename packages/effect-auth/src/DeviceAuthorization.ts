@@ -14,6 +14,7 @@ import type * as Types from "./Types.ts";
 import { SessionService } from "./SessionService.ts";
 import type { HookError } from "./Hooks.ts";
 import { hashToken } from "./TokenHash.ts";
+import { randomBase64UrlToken } from "./RandomToken.ts";
 
 /** Lifecycle status of a device authorization request. */
 export type DeviceAuthorizationStatus = "pending" | "approved" | "denied";
@@ -222,12 +223,7 @@ const make = (
     const crypto = yield* Crypto.Crypto;
 
     const generateDeviceCode = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(32).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate device code", cause }),
-        ),
-      );
+      randomBase64UrlToken(crypto, "Failed to generate device code");
 
     return {
       begin: Effect.fn("DeviceAuthorizationService.begin")(function* (options?: {

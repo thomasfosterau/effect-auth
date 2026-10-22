@@ -20,16 +20,7 @@
  */
 
 import { asc, eq, inArray } from "drizzle-orm";
-import {
-  Array as Arr,
-  Effect,
-  Exit,
-  HashMap,
-  Layer,
-  Option,
-  Request,
-  RequestResolver,
-} from "effect";
+import { Effect, Layer, Request, RequestResolver } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import {
   resolveSchema,
@@ -39,7 +30,7 @@ import {
   writeValues,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { makeQuery } from "./internal.ts";
+import { completeById, makeQuery } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 // ---------------------------------------------------------------------------
@@ -183,16 +174,13 @@ export const makeResolver = (
     const table = sessions.table;
 
     return RequestResolver.make<GetSession>((entries) =>
-      Effect.gen(function* () {
-        const ids = Arr.dedupe(entries.map((entry) => entry.request.id));
-        const rows = yield* query("session.getMany", (db) =>
-          db.select(column).from(table).where(inArray(column.id, ids)).execute(),
-        );
-
-        const byId = HashMap.fromIterable(rows.map((row) => [row.id, toSession(row)] as const));
-        Arr.forEach(entries, (entry) =>
-          entry.completeUnsafe(Exit.succeed(Option.getOrNull(HashMap.get(byId, entry.request.id)))),
-        );
-      }),
+      completeById(
+        entries,
+        (ids) =>
+          query("session.getMany", (db) =>
+            db.select(column).from(table).where(inArray(column.id, ids)).execute(),
+          ),
+        toSession,
+      ),
     );
   });

@@ -27,6 +27,7 @@ import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
 import { TrustedDeviceService } from "../TrustedDevice.ts";
 import * as TrustedDevice from "../TrustedDevice.ts";
 import type * as Types from "../Types.ts";
+import { randomBase64UrlToken } from "../RandomToken.ts";
 
 // ---------------------------------------------------------------------------
 // Error
@@ -170,12 +171,7 @@ export const make = (
       Effect.fail(new OtpSecondFactorError({ message: "Invalid or expired OTP" }));
 
     const generatePendingToken = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(32).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate pending token", cause }),
-        ),
-      );
+      randomBase64UrlToken(crypto, "Failed to generate pending token");
 
     return {
       begin: Effect.fn("OtpSecondFactorService.begin")(function* (user: Types.User) {

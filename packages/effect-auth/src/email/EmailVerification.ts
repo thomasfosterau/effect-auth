@@ -44,6 +44,7 @@ export interface EmailVerificationConfig {
  * @module email-verification
  */
 import { hashToken } from "../TokenHash.ts";
+import { randomBase64UrlToken } from "../RandomToken.ts";
 
 /**
  * Storage interface for email verifications
@@ -129,12 +130,7 @@ export class EmailVerificationService extends Context.Service<
 export const generateVerificationToken = (
   crypto: Crypto.Crypto,
 ): Effect.Effect<string, AuthError> =>
-  crypto.randomBytes(32).pipe(
-    Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-    Effect.mapError(
-      (cause) => new AuthError({ message: "Failed to generate verification token", cause }),
-    ),
-  );
+  randomBase64UrlToken(crypto, "Failed to generate verification token");
 
 /**
  * Create an email verification service

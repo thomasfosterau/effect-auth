@@ -8,16 +8,7 @@
  * - Extensible design for custom algorithms
  */
 
-import {
-  Array as Arr,
-  Context,
-  Effect,
-  Layer,
-  Option,
-  Predicate,
-  Result,
-  String as Str,
-} from "effect";
+import { Array as Arr, Context, Effect, Layer, Option, Predicate, Result } from "effect";
 import type * as Types from "../Types.ts";
 import * as Errors from "../Errors.ts";
 
@@ -223,6 +214,133 @@ const pbkdf2 = (
     );
   });
 
+/** Refuse a password `hash` will not hash: empty, not a string, or over the byte cap. */
+const refuseUnhashablePassword = (password: string): Effect.Effect<void, Errors.HashingError> => {
+  if (!password || !Predicate.isString(password)) {
+    return Effect.fail(
+      new Errors.HashingError({
+        message: "Password must be a non-empty string",
+      }),
+    );
+  }
+  if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+    return Effect.fail(
+      new Errors.HashingError({
+        message: "Password exceeds maximum length",
+      }),
+    );
+  }
+  return Effect.void;
+};
+
+/**
+ * The checks every `verify` runs before its KDF: both inputs are non-empty
+ * strings, the stored hash splits into the expected fields and names
+ * `algorithm`. `undefined` means the password is over the byte cap, which
+ * verifies as `false` without running the KDF (anti-DoS).
+ */
+const verifiableFields = <Fields extends ReadonlyArray<string>>(
+  password: string,
+  hash: string,
+  algorithm: string,
+  splitFields: (hash: string) => Fields | undefined,
+): Effect.Effect<Fields | undefined, Errors.HashingError> =>
+  Effect.gen(function* () {
+    if (!password || !Predicate.isString(password)) {
+      return yield* new Errors.HashingError({
+        message: "Password must be a non-empty string",
+      });
+    }
+
+    if (!hash || !Predicate.isString(hash)) {
+      return yield* new Errors.HashingError({
+        message: "Hash must be a non-empty string",
+      });
+    }
+
+    // Anti-DoS: bail out before the expensive KDF for absurdly long inputs.
+    if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+      return undefined;
+    }
+
+    const fields = splitFields(hash);
+    if (fields === undefined) {
+      return yield* new Errors.HashingError({
+        message: "Invalid hash format",
+      });
+    }
+
+    if (fields[0] !== algorithm) {
+      return yield* new Errors.HashingError({
+        message: `Unsupported algorithm: ${fields[0]}`,
+      });
+    }
+    return fields;
+  });
+
+/** Compare a derived key with the stored one in constant time. */
+const derivedKeyMatches = (derivedKey: Buffer, expectedHash: Buffer): boolean =>
+  derivedKey.length === expectedHash.length && crypto.timingSafeEqual(derivedKey, expectedHash);
+
+/**
+ * A hasher's `hash`: refuse an unhashable password, then let `encode` derive
+ * the key and format the stored hash string.
+ */
+const kdfHash = (
+  algorithm: string,
+  encode: (password: string) => Effect.Effect<string, Errors.HashingError>,
+) =>
+  Effect.fn("effect-auth.password.hash", {
+    attributes: { algorithm },
+  })(function* (password: string) {
+    yield* refuseUnhashablePassword(password);
+    const hash = yield* encode(password);
+    return { hash, algorithm };
+  });
+
+/** What a `verify` reads from a stored hash's fields before running its KDF. */
+interface StoredHash<Params> {
+  /** The KDF parameters the hash was written with. */
+  readonly params: Params;
+  /** Why the parameters are refused, or `undefined` when they are within the caps. */
+  readonly refused: string | undefined;
+  readonly saltHex: string;
+  readonly hashHex: string;
+}
+
+/**
+ * A hasher's `verify`: run the shared pre-KDF checks, refuse out-of-range
+ * stored parameters before the KDF, re-derive the key with `deriveKey`, and
+ * compare in constant time.
+ */
+const kdfVerify = <Fields extends ReadonlyArray<string>, Params>(
+  algorithm: string,
+  splitFields: (hash: string) => Fields | undefined,
+  readStored: (fields: Fields) => StoredHash<Params>,
+  deriveKey: (
+    password: string,
+    salt: Buffer,
+    keyLength: number,
+    params: Params,
+  ) => Effect.Effect<Buffer, Errors.HashingError>,
+) =>
+  Effect.fn("effect-auth.password.verify", {
+    attributes: { algorithm },
+  })(function* (password: string, hash: string) {
+    const fields = yield* verifiableFields(password, hash, algorithm, splitFields);
+    if (fields === undefined) return false;
+    const stored = readStored(fields);
+    if (stored.refused !== undefined) {
+      return yield* new Errors.HashingError({
+        message: `Invalid hash parameters: ${stored.refused}`,
+      });
+    }
+    const salt = Buffer.from(stored.saltHex, "hex");
+    const expectedHash = Buffer.from(stored.hashHex, "hex");
+    const derivedKey = yield* deriveKey(password, salt, expectedHash.length, stored.params);
+    return derivedKeyMatches(derivedKey, expectedHash);
+  });
+
 export type {
   /** Re-export of {@link Types.HashedPassword} for convenience. */
   HashedPassword,
@@ -307,123 +425,54 @@ export const pbkdf2Hasher = (options?: {
       return false;
     },
 
-    hash: Effect.fn("effect-auth.password.hash", {
-      attributes: { algorithm: ALGORITHM },
-    })(function* (password: string) {
-      if (!password || !Predicate.isString(password)) {
-        return yield* new Errors.HashingError({
-          message: "Password must be a non-empty string",
+    hash: kdfHash(ALGORITHM, (password) =>
+      Effect.gen(function* () {
+        // Never write a hash this hasher's own verify would refuse (Node rejects
+        // an out-of-range count only when it derives the key).
+        if (!iterationsUsable) {
+          return yield* new Errors.HashingError({
+            message: `Invalid PBKDF2 configuration: iterations must be an integer from 1 to ${PBKDF2_MAX_ITERATIONS}`,
+          });
+        }
+
+        const salt = crypto.randomBytes(SALT_LENGTH);
+
+        const derivedKey = yield* Effect.tryPromise({
+          try: () => pbkdf2(password, salt, ITERATIONS, KEY_LENGTH, "sha256"),
+          catch: (error) =>
+            new Errors.HashingError({
+              message: "Failed to hash password",
+              cause: error,
+            }),
         });
-      }
 
-      if (Str.isEmpty(password)) {
-        return yield* new Errors.HashingError({
-          message: "Password cannot be empty",
-        });
-      }
+        // Format: algorithm$iterations$salt$hash
+        return `${ALGORITHM}$${ITERATIONS}$${salt.toString("hex")}$${derivedKey.toString("hex")}`;
+      }),
+    ),
 
-      if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
-        return yield* new Errors.HashingError({
-          message: "Password exceeds maximum length",
-        });
-      }
-
-      // Never write a hash this hasher's own verify would refuse (Node rejects
-      // an out-of-range count only when it derives the key).
-      if (!iterationsUsable) {
-        return yield* new Errors.HashingError({
-          message: `Invalid PBKDF2 configuration: iterations must be an integer from 1 to ${PBKDF2_MAX_ITERATIONS}`,
-        });
-      }
-
-      const salt = crypto.randomBytes(SALT_LENGTH);
-
-      const derivedKey = yield* Effect.tryPromise({
-        try: () => pbkdf2(password, salt, ITERATIONS, KEY_LENGTH, "sha256"),
-        catch: (error) =>
-          new Errors.HashingError({
-            message: "Failed to hash password",
-            cause: error,
-          }),
-      });
-
-      // Format: algorithm$iterations$salt$hash
-      const hash = `${ALGORITHM}$${ITERATIONS}$${salt.toString("hex")}$${derivedKey.toString("hex")}`;
-
-      return {
-        hash,
-        algorithm: ALGORITHM,
-      };
-    }),
-
-    verify: Effect.fn("effect-auth.password.verify", {
-      attributes: { algorithm: ALGORITHM },
-    })(function* (password: string, hash: string) {
-      if (!password || !Predicate.isString(password)) {
-        return yield* new Errors.HashingError({
-          message: "Password must be a non-empty string",
-        });
-      }
-
-      if (!hash || !Predicate.isString(hash)) {
-        return yield* new Errors.HashingError({
-          message: "Hash must be a non-empty string",
-        });
-      }
-
-      // Anti-DoS: bail out before the expensive KDF for absurdly long inputs.
-      if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
-        return false;
-      }
-
-      const fields = hashFields4(hash);
-
-      if (fields === undefined) {
-        return yield* new Errors.HashingError({
-          message: "Invalid hash format",
-        });
-      }
-
-      const [algorithm, iterationsStr, saltHex, hashHex] = fields;
-
-      if (algorithm !== ALGORITHM) {
-        return yield* new Errors.HashingError({
-          message: `Unsupported algorithm: ${algorithm}`,
-        });
-      }
-
-      // Strict decimal parse, as for scrypt's N, r and p: `parseInt` would read
-      // "1e9" as 1 and "600000abc" as 600000. Refused before the KDF, above the cap.
-      const iterCount = parseStoredParam(iterationsStr);
-      const refused = refusedIterations(iterCount);
-      if (refused !== undefined) {
-        return yield* new Errors.HashingError({
-          message: `Invalid hash parameters: ${refused}`,
-        });
-      }
-
-      const salt = Buffer.from(saltHex, "hex");
-      const expectedHash = Buffer.from(hashHex, "hex");
-
+    verify: kdfVerify(
+      ALGORITHM,
+      hashFields4,
+      ([, iterationsStr, saltHex, hashHex]) => {
+        // Strict decimal parse, as for scrypt's N, r and p: `parseInt` would read
+        // "1e9" as 1 and "600000abc" as 600000. Refused before the KDF, above the cap.
+        const iterCount = parseStoredParam(iterationsStr);
+        return { params: iterCount, refused: refusedIterations(iterCount), saltHex, hashHex };
+      },
       // Derive using the stored key length so hashes produced with an older
       // KEY_LENGTH value still verify correctly (needsRehash detects and
       // upgrades them on the next successful login).
-      const derivedKey = yield* Effect.tryPromise({
-        try: () => pbkdf2(password, salt, iterCount, expectedHash.length, "sha256"),
-        catch: (error) =>
-          new Errors.HashingError({
-            message: "Failed to verify password",
-            cause: error,
-          }),
-      });
-
-      if (derivedKey.length !== expectedHash.length) {
-        return false;
-      }
-
-      // Use timing-safe comparison
-      return crypto.timingSafeEqual(derivedKey, expectedHash);
-    }),
+      (password, salt, keyLength, iterCount) =>
+        Effect.tryPromise({
+          try: () => pbkdf2(password, salt, iterCount, keyLength, "sha256"),
+          catch: (error) =>
+            new Errors.HashingError({
+              message: "Failed to verify password",
+              cause: error,
+            }),
+        }),
+    ),
   };
 };
 
@@ -572,97 +621,37 @@ export const scryptHasher = (options?: {
       return N < COST || r < BLOCK_SIZE || p < PARALLELIZATION;
     },
 
-    hash: Effect.fn("effect-auth.password.hash", {
-      attributes: { algorithm: ALGORITHM },
-    })(function* (password: string) {
-      if (!password || !Predicate.isString(password)) {
-        return yield* new Errors.HashingError({
-          message: "Password must be a non-empty string",
-        });
-      }
+    hash: kdfHash(ALGORITHM, (password) =>
+      Effect.gen(function* () {
+        // Never write a hash this hasher's own verify would refuse: Node accepts
+        // some configurations (blockSize 0) that the stored-hash checks reject.
+        const misconfigured = refusedParams(COST, BLOCK_SIZE, PARALLELIZATION);
+        if (misconfigured !== undefined) {
+          return yield* new Errors.HashingError({
+            message: `Invalid scrypt configuration: ${misconfigured}`,
+          });
+        }
 
-      if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
-        return yield* new Errors.HashingError({
-          message: "Password exceeds maximum length",
-        });
-      }
+        const salt = crypto.randomBytes(SALT_LENGTH);
+        const derivedKey = yield* scrypt(password, salt, COST, BLOCK_SIZE, PARALLELIZATION);
 
-      // Never write a hash this hasher's own verify would refuse: Node accepts
-      // some configurations (blockSize 0) that the stored-hash checks reject.
-      const misconfigured = refusedParams(COST, BLOCK_SIZE, PARALLELIZATION);
-      if (misconfigured !== undefined) {
-        return yield* new Errors.HashingError({
-          message: `Invalid scrypt configuration: ${misconfigured}`,
-        });
-      }
+        return `${ALGORITHM}$${COST}$${BLOCK_SIZE}$${PARALLELIZATION}$${salt.toString("hex")}$${derivedKey.toString("hex")}`;
+      }),
+    ),
 
-      const salt = crypto.randomBytes(SALT_LENGTH);
-      const derivedKey = yield* scrypt(password, salt, COST, BLOCK_SIZE, PARALLELIZATION);
-
-      const hash = `${ALGORITHM}$${COST}$${BLOCK_SIZE}$${PARALLELIZATION}$${salt.toString("hex")}$${derivedKey.toString("hex")}`;
-
-      return {
-        hash,
-        algorithm: ALGORITHM,
-      };
-    }),
-
-    verify: Effect.fn("effect-auth.password.verify", {
-      attributes: { algorithm: ALGORITHM },
-    })(function* (password: string, hash: string) {
-      if (!password || !Predicate.isString(password)) {
-        return yield* new Errors.HashingError({
-          message: "Password must be a non-empty string",
-        });
-      }
-
-      if (!hash || !Predicate.isString(hash)) {
-        return yield* new Errors.HashingError({
-          message: "Hash must be a non-empty string",
-        });
-      }
-
-      // Anti-DoS: bail out before the expensive KDF for absurdly long inputs.
-      if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
-        return false;
-      }
-
-      const fields = hashFields6(hash);
-      if (fields === undefined) {
-        return yield* new Errors.HashingError({
-          message: "Invalid hash format",
-        });
-      }
-
-      const [algorithm, costStr, blockSizeStr, parallelizationStr, saltHex, hashHex] = fields;
-
-      if (algorithm !== ALGORITHM) {
-        return yield* new Errors.HashingError({
-          message: `Unsupported algorithm: ${algorithm}`,
-        });
-      }
-
-      const N = parseStoredParam(costStr);
-      const r = parseStoredParam(blockSizeStr);
-      const p = parseStoredParam(parallelizationStr);
-      // Refuse out-of-range parameters before the KDF. Node can still reject a
-      // set within the caps (OpenSSL's own limits); the scrypt helper maps that
-      // to a HashingError too.
-      const refused = refusedParams(N, r, p);
-      if (refused !== undefined) {
-        return yield* new Errors.HashingError({ message: `Invalid hash parameters: ${refused}` });
-      }
-
-      const salt = Buffer.from(saltHex, "hex");
-      const expectedHash = Buffer.from(hashHex, "hex");
-      const derivedKey = yield* scrypt(password, salt, N, r, p);
-
-      if (derivedKey.length !== expectedHash.length) {
-        return false;
-      }
-
-      // Use timing-safe comparison
-      return crypto.timingSafeEqual(derivedKey, expectedHash);
-    }),
+    verify: kdfVerify(
+      ALGORITHM,
+      hashFields6,
+      ([, costStr, blockSizeStr, parallelizationStr, saltHex, hashHex]) => {
+        const N = parseStoredParam(costStr);
+        const r = parseStoredParam(blockSizeStr);
+        const p = parseStoredParam(parallelizationStr);
+        // Refuse out-of-range parameters before the KDF. Node can still reject a
+        // set within the caps (OpenSSL's own limits); the scrypt helper maps that
+        // to a HashingError too.
+        return { params: { N, r, p }, refused: refusedParams(N, r, p), saltHex, hashHex };
+      },
+      (password, salt, _keyLength, { N, r, p }) => scrypt(password, salt, N, r, p),
+    ),
   };
 };

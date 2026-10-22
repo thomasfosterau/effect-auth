@@ -9,7 +9,7 @@
  * @internal
  */
 
-import { Effect } from "effect";
+import { Array as Arr, Effect, Exit, HashMap, Option } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import type { AuthDatabase, DrizzleHandle, DrizzleResult } from "./Database.ts";
 import { defaultTableNames, type TableNames } from "./Schema.ts";
@@ -67,6 +67,36 @@ export const makeQuery =
 
 /** The per-query runner {@link makeQuery} produces. @internal */
 export type Query = ReturnType<typeof makeQuery>;
+
+/**
+ * One entry of a batch of by-id lookups: the request carries the id, and the
+ * entry is completed with the found value or `null`.
+ *
+ * @internal
+ */
+export interface ByIdEntry<A> {
+  readonly request: { readonly id: string };
+  completeUnsafe(exit: Exit.Exit<A | null>): void;
+}
+
+/**
+ * Answer a batch of by-id lookups with one query: dedupe the requested ids,
+ * fetch their rows with `fetchRows`, and complete each entry with its row's
+ * value, or `null` on a miss.
+ *
+ * @internal
+ */
+export const completeById = <Row extends { readonly id: string }, A, E>(
+  entries: ReadonlyArray<ByIdEntry<A>>,
+  fetchRows: (ids: Array<string>) => Effect.Effect<ReadonlyArray<Row>, E>,
+  toValue: (row: Row) => A,
+): Effect.Effect<void, E> =>
+  Effect.map(fetchRows(Arr.dedupe(entries.map((entry) => entry.request.id))), (rows) => {
+    const byId = HashMap.fromIterable(rows.map((row) => [row.id, toValue(row)] as const));
+    Arr.forEach(entries, (entry) =>
+      entry.completeUnsafe(Exit.succeed(Option.getOrNull(HashMap.get(byId, entry.request.id)))),
+    );
+  });
 
 /**
  * Fill in the `effect_auth_*` defaults for any table name the caller omitted.

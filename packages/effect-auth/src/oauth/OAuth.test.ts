@@ -1687,3 +1687,247 @@ describe("OAuthService linking controls", () => {
     expect(updates[0]).toMatchObject({ name: "Updated Name", image: "https://img/new.jpg" });
   });
 });
+describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
+  const github = OAuth.provider(
+    "github",
+    {
+      clientId: "c",
+      clientSecret: Redacted.make("s"),
+      redirectUri: "https://app/cb",
+      authorizationEndpoint: "https://github.example/authorize",
+      tokenEndpoint: "https://github.example/token",
+      userInfoEndpoint: "https://github.example/userinfo",
+      scopes: ["profile"],
+    },
+    false,
+  );
+
+  const makeStateStore = (...seed: ReadonlyArray<OAuthState>) => {
+    const states = new Map<string, OAuthState>(seed.map((s) => [s.state, s]));
+    const store: typeof OAuthStateStore.Service = {
+      create: (s) =>
+        Effect.sync(() => {
+          states.set(s.state, s);
+          return s;
+        }),
+      get: (k) => Effect.succeed(states.get(k) ?? null),
+      delete: (k) =>
+        Effect.sync(() => {
+          states.delete(k);
+        }),
+    };
+    return { states, store };
+  };
+
+  const makeAccounts = (...seed: ReadonlyArray<OAuthAccount>) => {
+    const accounts = new Map<string, OAuthAccount>(
+      seed.map((a) => [`${a.provider}:${a.providerId}`, a]),
+    );
+    const store: typeof OAuthAccountStore.Service = {
+      create: (a) =>
+        Effect.sync(() => {
+          accounts.set(`${a.provider}:${a.providerId}`, a);
+          return a;
+        }),
+      get: (p, id) => Effect.succeed(accounts.get(`${p}:${id}`) ?? null),
+      getByUserId: (uid) => Effect.succeed([...accounts.values()].filter((a) => a.userId === uid)),
+      update: (a) =>
+        Effect.sync(() => {
+          accounts.set(`${a.provider}:${a.providerId}`, a);
+          return a;
+        }),
+      linkToUser: () => Effect.void,
+      unlinkFromUser: () => Effect.void,
+      delete: () => Effect.void,
+    };
+    return { accounts, store };
+  };
+
+  // handleCallback and generateAuthorizationUrl touch only the state and
+  // account stores; the services below are resolved at construction only.
+  const unusedByCallbackLayer = Layer.mergeAll(
+    // SAFETY: never called by handleCallback or generateAuthorizationUrl.
+    Layer.succeed(OAuthUserStore)(undefined as never),
+    // SAFETY: never called by handleCallback or generateAuthorizationUrl.
+    Layer.succeed(IdentifierStore)(undefined as never),
+    // SAFETY: never called by handleCallback or generateAuthorizationUrl.
+    Layer.succeed(UserStore)(undefined as never),
+    // SAFETY: never called by handleCallback or generateAuthorizationUrl.
+    Layer.succeed(SessionService)(undefined as never),
+  );
+
+  const makeService = (
+    stateStore: typeof OAuthStateStore.Service,
+    accountStore: typeof OAuthAccountStore.Service = makeAccounts().store,
+  ) =>
+    Effect.runPromise(
+      OAuth.make({ github }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(OAuthStateStore)(stateStore),
+            Layer.succeed(OAuthAccountStore)(accountStore),
+            unusedByCallbackLayer,
+            PlatformCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
+  const liveState = (overrides?: Partial<OAuthState>): OAuthState => ({
+    state: "st-1",
+    provider: "github",
+    createdAt: 0,
+    // Far in the future: 2100-01-01.
+    expiresAt: 4_102_444_800_000,
+    ...overrides,
+  });
+
+  const providerFetch = <A>(
+    tokens: OAuthTokenResponse,
+    userInfo: {
+      readonly id: string;
+      readonly email?: string;
+      readonly name?: string;
+      readonly picture?: string;
+    },
+    thunk: () => Promise<A>,
+  ) => withFetch((url) => (url.includes("/token") ? json(tokens) : json(userInfo)), thunk);
+
+  describe("handleCallback", () => {
+    it("fails with OAuthStateNotFoundError for an unknown state", async () => {
+      const service = await makeService(makeStateStore().store);
+      const err = await Effect.runPromise(Effect.flip(service.handleCallback("nope", "code")));
+      expect(err._tag).toBe("OAuthStateNotFoundError");
+    });
+
+    it("fails with OAuthStateExpiredError and drops an expired state", async () => {
+      const { states, store } = makeStateStore(liveState({ expiresAt: 1 }));
+      const service = await makeService(store);
+      const err = await Effect.runPromise(Effect.flip(service.handleCallback("st-1", "code")));
+      expect(err._tag).toBe("OAuthStateExpiredError");
+      expect(states.has("st-1")).toBe(false);
+    });
+
+    it("fails with OAuthProviderError when the state names an unregistered provider", async () => {
+      const { store } = makeStateStore(liveState({ provider: "gitlab" }));
+      const service = await makeService(store);
+      const err = await Effect.runPromise(Effect.flip(service.handleCallback("st-1", "code")));
+      expect(err._tag).toBe("OAuthProviderError");
+    });
+
+    it("creates an unlinked account for a new provider identity", async () => {
+      const { states, store } = makeStateStore(liveState());
+      const accounts = makeAccounts();
+      const service = await makeService(store, accounts.store);
+
+      const result = await providerFetch(
+        { access_token: "at-1", token_type: "bearer" },
+        { id: "gh-9", email: "new@example.com", name: "New" },
+        () => Effect.runPromise(service.handleCallback("st-1", "code")),
+      );
+
+      expect(result.isNewUser).toBe(true);
+      expect(result.user).toBeUndefined();
+      expect(result.account).toMatchObject({
+        userId: "",
+        provider: "github",
+        providerId: "gh-9",
+        email: "new@example.com",
+        name: "New",
+        accessToken: "at-1",
+      });
+      expect(result.account.refreshToken).toBeUndefined();
+      expect(result.account.expiresAt).toBeUndefined();
+      expect(accounts.accounts.get("github:gh-9")).toEqual(result.account);
+      // The state is single-use.
+      expect(states.has("st-1")).toBe(false);
+    });
+
+    it("links a new account to linkToUserId and reports the user", async () => {
+      const { store } = makeStateStore(liveState());
+      const service = await makeService(store);
+
+      const result = await providerFetch(
+        { access_token: "at-1", token_type: "bearer", refresh_token: "rt-1", expires_in: 60 },
+        { id: "gh-9", email: "new@example.com", name: "New", picture: "https://img/p.png" },
+        () => Effect.runPromise(service.handleCallback("st-1", "code", { linkToUserId: "u-7" })),
+      );
+
+      expect(result.isNewUser).toBe(true);
+      expect(result.user).toEqual({ id: "u-7", email: "new@example.com", name: "New" });
+      expect(result.account).toMatchObject({
+        userId: "u-7",
+        picture: "https://img/p.png",
+        refreshToken: "rt-1",
+      });
+      expect(result.account.expiresAt).toBeGreaterThan(result.account.createdAt);
+    });
+
+    it("refreshes the tokens of an existing account", async () => {
+      const { store } = makeStateStore(liveState());
+      const existing: OAuthAccount = {
+        id: "acc-1",
+        userId: "u-1",
+        provider: "github",
+        providerId: "gh-9",
+        accessToken: "old-at",
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      const accounts = makeAccounts(existing);
+      const service = await makeService(store, accounts.store);
+
+      const result = await providerFetch(
+        { access_token: "new-at", token_type: "bearer", refresh_token: "rt-2", expires_in: 60 },
+        { id: "gh-9" },
+        () => Effect.runPromise(service.handleCallback("st-1", "code")),
+      );
+
+      expect(result.isNewUser).toBe(false);
+      expect(result.account).toMatchObject({
+        id: "acc-1",
+        userId: "u-1",
+        accessToken: "new-at",
+        refreshToken: "rt-2",
+      });
+      expect(result.account.updatedAt).toBeGreaterThan(1);
+      expect(accounts.accounts.get("github:gh-9")).toEqual(result.account);
+    });
+  });
+
+  describe("generateAuthorizationUrl", () => {
+    it("fails with OAuthProviderError for an unregistered provider", async () => {
+      const service = await makeService(makeStateStore().store);
+      const err = await Effect.runPromise(Effect.flip(service.generateAuthorizationUrl("gitlab")));
+      expect(err._tag).toBe("OAuthProviderError");
+    });
+
+    it("stores a state without returnTo by default, honouring custom scopes", async () => {
+      const { states, store } = makeStateStore();
+      const service = await makeService(store);
+      const result = await Effect.runPromise(
+        service.generateAuthorizationUrl("github", { scopes: ["read", "write"] }),
+      );
+      expect(new URL(result.url).searchParams.get("scope")).toBe("read write");
+      expect(states.get(result.state)?.returnTo).toBeUndefined();
+    });
+
+    it("records returnTo on the stored state", async () => {
+      const { states, store } = makeStateStore();
+      const service = await makeService(store);
+      const result = await Effect.runPromise(
+        service.generateAuthorizationUrl("github", { returnTo: "/after" }),
+      );
+      expect(states.get(result.state)).toMatchObject({ provider: "github", returnTo: "/after" });
+    });
+
+    it("fails with AuthError when the state vanishes before returnTo is recorded", async () => {
+      const { store } = makeStateStore();
+      const service = await makeService({ ...store, get: () => Effect.succeed(null) });
+      const err = await Effect.runPromise(
+        Effect.flip(service.generateAuthorizationUrl("github", { returnTo: "/after" })),
+      );
+      expect(err).toBeInstanceOf(AuthError);
+    });
+  });
+});

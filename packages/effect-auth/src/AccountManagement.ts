@@ -15,6 +15,7 @@
 import { Array as Arr, Context, Crypto, Data, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { randomBase64UrlToken } from "./RandomToken.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 import { SessionService } from "./SessionService.ts";
@@ -207,12 +208,7 @@ const make = (
     const crypto = yield* Crypto.Crypto;
 
     const generateToken = (): Effect.Effect<string, Errors.AuthError> =>
-      crypto.randomBytes(32).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("base64url")),
-        Effect.mapError(
-          (cause) => new Errors.AuthError({ message: "Failed to generate token", cause }),
-        ),
-      );
+      randomBase64UrlToken(crypto);
 
     return {
       requestEmailChange: Effect.fn("AccountManagementService.requestEmailChange")(function* (
