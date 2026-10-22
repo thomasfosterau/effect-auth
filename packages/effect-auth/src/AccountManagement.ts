@@ -188,7 +188,7 @@ export class AccountManagementService extends Context.Service<
     Layer.effect(AccountManagementService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
-export const make = (
+const make = (
   config: AccountManagementConfig,
 ): Effect.Effect<
   typeof AccountManagementService.Service,

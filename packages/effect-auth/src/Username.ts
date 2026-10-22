@@ -143,7 +143,7 @@ export class UsernameService extends Context.Service<
 
 const DEFAULT_CHARSET = /^[a-zA-Z0-9_.]+$/;
 
-export const make = (
+const make = (
   config: UsernameConfig = {},
 ): Effect.Effect<
   typeof UsernameService.Service,

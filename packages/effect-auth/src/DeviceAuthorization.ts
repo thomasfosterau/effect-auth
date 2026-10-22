@@ -204,7 +204,7 @@ const formatUserCode = (raw: string): string => {
 export const normalizeUserCode = (code: string): string =>
   code.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-export const make = (
+const make = (
   config: DeviceAuthorizationConfig,
 ): Effect.Effect<
   typeof DeviceAuthorizationService.Service,

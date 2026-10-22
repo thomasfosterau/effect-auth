@@ -224,13 +224,9 @@ export const coseAlgorithmES256 = -7;
 export const coseAlgorithmEdDSA = -8;
 /** COSE algorithm identifier for RSASSA-PKCS1-v1_5 w/ SHA-256. */
 export const coseAlgorithmRS256 = -257;
-/** COSE elliptic-curve identifier for P-256. */
-export const coseEllipticCurveP256 = 1;
-/** COSE elliptic-curve identifier for Ed25519. */
-export const coseEllipticCurveEd25519 = 6;
 
 /** COSE key types (`kty`), as their registered integer values. */
-export const COSEKeyType = {
+const COSEKeyType = {
   OKP: 1,
   EC2: 2,
   RSA: 3,
@@ -378,7 +374,7 @@ export const ClientDataType = {
 export type ClientDataType = (typeof ClientDataType)[keyof typeof ClientDataType];
 
 /** The `status` member of `clientDataJSON.tokenBinding`. */
-export const TokenBindingStatus = {
+const TokenBindingStatus = {
   Supported: 0,
   Present: 1,
 } as const;
@@ -613,7 +609,7 @@ export function parseAuthenticatorData(encoded: Uint8Array): AuthenticatorData {
 // ---------------------------------------------------------------------------
 
 /** Attestation statement formats defined by the WebAuthn registry. */
-export const AttestationStatementFormat = {
+const AttestationStatementFormat = {
   Packed: 0,
   TPM: 1,
   AndroidKey: 2,

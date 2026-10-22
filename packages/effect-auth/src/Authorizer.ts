@@ -313,7 +313,7 @@ export class Authorizer extends Context.Service<
     Layer.effect(Authorizer, make(config));
 }
 
-export const make = <E = unknown>(
+const make = <E = unknown>(
   config: AuthorizerConfig<E>,
 ): Effect.Effect<typeof Authorizer.Service, Errors.AuthError, never> =>
   Effect.gen(function* () {

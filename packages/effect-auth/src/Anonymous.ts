@@ -94,7 +94,7 @@ export class AnonymousService extends Context.Service<
 export const isAnonymousUser = (user: Types.User): boolean =>
   user.attributes["isAnonymous"] === true;
 
-export const make = (
+const make = (
   config: AnonymousConfig = {},
 ): Effect.Effect<typeof AnonymousService.Service, never, AnonymousUserStore | SessionService> =>
   Effect.gen(function* () {

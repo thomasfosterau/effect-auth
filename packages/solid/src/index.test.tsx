@@ -8,7 +8,7 @@ import {
   createSession,
   useAuthClient,
   useSession,
-} from "./index.jsx";
+} from "./index.ts";
 
 const EMAIL = "alice@solid.test";
 

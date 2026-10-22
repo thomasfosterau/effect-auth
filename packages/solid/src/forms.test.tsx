@@ -9,8 +9,8 @@ import {
   PasswordResetRequestForm,
   SignInForm,
   SignUpForm,
-} from "./index.jsx";
-import type { AuthSuccess, StatusResponse } from "./index.jsx";
+} from "./index.ts";
+import type { AuthSuccess, StatusResponse } from "./index.ts";
 
 const EMAIL = "alice@solid.test";
 const PW = "password-123";
