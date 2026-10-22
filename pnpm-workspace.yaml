@@ -52,7 +52,7 @@ catalog:
   # configures; older releases reject the key with an `unknownRuleName`
   # warning, which fails `tsc`. Read the `components` table in
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs before bumping any of them.
-  "@effect/tsgo": 0.53.5
+  "@effect/tsgo": 0.56.0
   "@electric-sql/pglite": ^0.5.10
   "@mpsuesser/oxlint-plugin-effect": ^0.6.0
   "@node-saml/node-saml": ^5.1.0
