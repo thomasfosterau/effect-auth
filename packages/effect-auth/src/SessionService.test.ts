@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Effect, Context, Layer } from "effect";
+import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
+import { Effect, Context, Layer, Result } from "effect";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { make } from "./SessionService.ts";
@@ -146,9 +146,10 @@ describe("SessionService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("SessionExpiredError");
-    }
+
+    assert(Result.isFailure(result));
+
+    expect(result.failure._tag).toBe("SessionExpiredError");
   });
 
   it("should invalidate a session", async () => {
@@ -170,9 +171,10 @@ describe("SessionService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("SessionNotFoundError");
-    }
+
+    assert(Result.isFailure(result));
+
+    expect(result.failure._tag).toBe("SessionNotFoundError");
   });
 
   it("create→validate round-trip: store keyed by hash, cookie carries raw token", async () => {
@@ -421,9 +423,10 @@ describe("SessionService", () => {
       );
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("SessionExpiredError");
-      }
+
+      assert(Result.isFailure(result));
+
+      expect(result.failure._tag).toBe("SessionExpiredError");
     });
   });
 

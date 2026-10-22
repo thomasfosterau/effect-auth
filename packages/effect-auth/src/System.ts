@@ -63,7 +63,7 @@
  *
  * @module system
  */
-import { Layer } from "effect";
+import { Data, Layer } from "effect";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Authorizer from "./Authorizer.ts";
 import * as Condition from "./Condition.ts";
@@ -79,6 +79,11 @@ import * as Policy from "./Policy.ts";
  */
 export const entityType = Entity.systemType;
 
+/** `ref` was given an empty (or all-whitespace) name. */
+class SystemPrincipalNameError extends Data.TaggedError("SystemPrincipalNameError")<{
+  readonly message: string;
+}> {}
+
 /**
  * The entity reference of the named system principal: `System::"<name>"`.
  *
@@ -90,7 +95,9 @@ export const entityType = Entity.systemType;
  */
 export const ref = (name: string): Entity.EntityRef => {
   if (name.trim() === "") {
-    throw new Error("System.ref: a system principal needs a non-empty name");
+    throw new SystemPrincipalNameError({
+      message: "System.ref: a system principal needs a non-empty name",
+    });
   }
   return Entity.ref(entityType, name);
 };

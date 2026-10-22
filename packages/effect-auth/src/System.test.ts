@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Exit, Logger, Option, Result, Schema } from "effect";
+import { assert, describe, expect, it } from "vite-plus/test";
+import { Context, Effect, Exit, Logger, Option, Predicate, Result, Schema } from "effect";
 import * as Condition from "./Condition.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Authorizer from "./Authorizer.ts";
@@ -93,13 +93,15 @@ const authorizeAs = (
     ),
   );
 
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 /** Collect every log record emitted while `effect` runs. */
 const captureLogs = <A, E>(effect: Effect.Effect<A, E>) => {
   const records: Array<{ readonly level: string; readonly text: string }> = [];
   const collector = Logger.make((options) => {
     records.push({
       level: String(options.logLevel),
-      text: JSON.stringify(options.message),
+      text: encodeJson(options.message),
     });
   });
   return Effect.runPromise(effect.pipe(Effect.provide(Logger.layer([collector])))).then(
@@ -161,9 +163,9 @@ describe("a system principal is denied by default", () => {
   it("a denial names the system principal and the reason", async () => {
     const failure = await authorizeAs(billing, [], "invoice:charge", invoice);
     expect(failure._tag).toBe("Failure");
-    if (failure._tag !== "Failure") return;
+    assert(Result.isFailure(failure));
     expect(failure.failure._tag).toBe("AuthorizationDeniedError");
-    if (failure.failure._tag !== "AuthorizationDeniedError") return;
+    assert(Predicate.isTagged(failure.failure, "AuthorizationDeniedError"));
     expect(failure.failure.message).toContain('System::"billing-cron"');
     expect(failure.failure.message).toContain("default-deny");
     expect(failure.failure.decision.determining).toEqual([]);

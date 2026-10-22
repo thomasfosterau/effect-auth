@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Cause, Effect, Exit, Option } from "effect";
+import { Cause, Effect, Exit, Option, Schema } from "effect";
 import { HttpServerRequest } from "effect/http";
 import type * as Types from "./Types.ts";
 import * as SessionResolution from "./SessionResolution.ts";
 import * as SessionCookies from "./SessionCookies.ts";
 import { resolveCookieConfig, sessionIdFromRequest } from "./http/HttpServer.ts";
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -164,7 +166,7 @@ describe("the edge predicate cannot desynchronise from the middleware", () => {
     { secure: false, path: "/api", name: "app_session" },
   ] as const;
 
-  it.each(configs.map((config) => [JSON.stringify(config), config] as const))(
+  it.each(configs.map((config) => [encodeJson(config), config] as const))(
     "%s — the name the predicate looks for is the name the middleware reads",
     (_label, config) => {
       const edgeName = SessionCookies.cookieNames(config).session;
@@ -174,7 +176,7 @@ describe("the edge predicate cannot desynchronise from the middleware", () => {
     },
   );
 
-  it.each(configs.map((config) => [JSON.stringify(config), config] as const))(
+  it.each(configs.map((config) => [encodeJson(config), config] as const))(
     "%s — a request the middleware can read is never classified as cookieless",
     (_label, config) => {
       const name = resolveCookieConfig(config).name;

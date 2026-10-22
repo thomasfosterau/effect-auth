@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, Crypto, Effect, Redacted } from "effect";
 import { AuthError } from "./Errors.ts";
+import type { SecondFactorGate } from "./email/EmailPassword.ts";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -189,10 +190,10 @@ describe("TrustedDeviceService", () => {
 // ---------------------------------------------------------------------------
 
 describe("TrustedDevice.gate", () => {
-  const innerRequired = {
+  const innerRequired: typeof SecondFactorGate.Service = {
     required: (_user: User) => Effect.succeed(true),
     begin: (_user: User) => Effect.fail(new AuthError({ message: "not exercised" })),
-  } as any;
+  };
 
   it("required returns false when a valid device token is in TrustedDeviceCookieRef", async () => {
     const program = Effect.gen(function* () {

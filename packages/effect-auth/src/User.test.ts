@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "vite-plus/test";
-import { Context, Effect } from "effect";
+import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
+import { Context, Effect, Result } from "effect";
 import { UserServiceStore } from "./User.ts";
 import * as User from "./User.ts";
 import {
@@ -172,8 +172,9 @@ describe("UserService", () => {
     const result = await Effect.runPromise(Effect.provide(program, makeTestContext()));
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("UserNotFoundError");
-    }
+
+    assert(Result.isFailure(result));
+
+    expect(result.failure._tag).toBe("UserNotFoundError");
   });
 });

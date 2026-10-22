@@ -1,4 +1,4 @@
-import { Context, Crypto, Effect, Layer } from "effect";
+import { Context, Crypto, Effect, Layer, Predicate } from "effect";
 import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
@@ -34,7 +34,7 @@ export const make = (
 
     return {
       createSession: Effect.fn("SessionService.createSession")(
-        (rawUserId: string, rawAttributes: Record<string, unknown> = {}) =>
+        (rawUserId: string, rawAttributes: Types.Attributes = {}) =>
           Effect.gen(function* () {
             const args = yield* hooks.beforeCreateSession({
               userId: rawUserId,
@@ -150,9 +150,9 @@ export const make = (
           Effect.withSpan(Obs.spanNames.validateSession),
           Effect.tap(() => Obs.recordSessionValidated("success")),
           Effect.tapError((e) =>
-            "_tag" in e && e._tag === "SessionNotFoundError"
+            Predicate.isTagged(e, "SessionNotFoundError")
               ? Obs.recordSessionValidated("not_found")
-              : "_tag" in e && e._tag === "SessionExpiredError"
+              : Predicate.isTagged(e, "SessionExpiredError")
                 ? Obs.recordSessionValidated("expired")
                 : Effect.void,
           ),
@@ -190,13 +190,13 @@ export const make = (
           // session.id values from the store are hashes; compare against hashed current token
           sessions.filter((session) => session.id !== currentHash),
           (session) => sessionStore.delete(session.id),
-          { discard: true },
+          { concurrency: 1, discard: true },
         );
       }),
 
       setSessionAttributes: Effect.fn("SessionService.setSessionAttributes")(function* (
         rawSessionId: string,
-        attributes: Record<string, unknown>,
+        attributes: Types.Attributes,
       ) {
         const tokenHash = hashToken(rawSessionId);
         const session = yield* sessionStore.get(tokenHash);
@@ -230,7 +230,7 @@ export class SessionService extends Context.Service<
      */
     readonly createSession: (
       userId: string,
-      attributes?: Record<string, unknown>,
+      attributes?: Types.Attributes,
     ) => Effect.Effect<Types.Session, Errors.AuthError | HookError>;
 
     /**
@@ -281,7 +281,7 @@ export class SessionService extends Context.Service<
      */
     readonly setSessionAttributes: (
       sessionId: string,
-      attributes: Record<string, unknown>,
+      attributes: Types.Attributes,
     ) => Effect.Effect<Types.Session, Errors.SessionNotFoundError | Errors.AuthError>;
   }
 >()("@effect-auth/SessionService") {

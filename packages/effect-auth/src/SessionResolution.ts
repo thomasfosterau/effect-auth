@@ -36,7 +36,7 @@
  *
  * @module session-resolution
  */
-import { Cause, Effect, Option } from "effect";
+import { Array as Arr, Cause, Effect, HashMap, Option, Predicate } from "effect";
 import { identity } from "effect/Function";
 import type { CredentialClass } from "./Authorizer.ts";
 import * as Observability from "./Observability.ts";
@@ -82,18 +82,31 @@ export interface CredentialSource {
 }
 
 /** Parse a `Cookie` header into a lookup. Returns `undefined` for absent names. */
-const parseCookieHeader = (raw: string | null | undefined): ReadonlyMap<string, string> => {
-  const out = new Map<string, string>();
-  if (raw === null || raw === undefined || raw === "") return out;
-  for (const pair of raw.split(";")) {
-    const eq = pair.indexOf("=");
-    if (eq === -1) continue;
-    const name = pair.slice(0, eq).trim();
-    if (name === "") continue;
-    // Only the first occurrence wins, matching how servers read cookie jars.
-    if (!out.has(name)) out.set(name, pair.slice(eq + 1).trim());
-  }
-  return out;
+const parseCookieHeader = (raw: string | null | undefined): HashMap.HashMap<string, string> =>
+  raw === null || raw === undefined || raw === ""
+    ? HashMap.empty()
+    : Arr.reduce(raw.split(";"), HashMap.empty<string, string>(), (out, pair) => {
+        const eq = pair.indexOf("=");
+        if (eq === -1) return out;
+        const name = pair.slice(0, eq).trim();
+        if (name === "") return out;
+        // Only the first occurrence wins, matching how servers read cookie jars.
+        return HashMap.has(out, name) ? out : HashMap.set(out, name, pair.slice(eq + 1).trim());
+      });
+
+type HeaderRecord = Record<string, string | ReadonlyArray<string> | undefined>;
+
+const isWebHeaders = (headers: Headers | HeaderRecord): headers is Headers =>
+  Predicate.isFunction(headers.get);
+
+const headerGetter = (
+  headers: Headers | HeaderRecord,
+): ((name: string) => string | null | undefined) => {
+  if (isWebHeaders(headers)) return (name) => headers.get(name);
+  return (name) => {
+    const value = headers[name.toLowerCase()];
+    return Predicate.isString(value) || Predicate.isUndefined(value) ? value : value[0];
+  };
 };
 
 /**
@@ -109,21 +122,13 @@ const parseCookieHeader = (raw: string | null | undefined): ReadonlyMap<string, 
 export const fromHeaders = (
   headers: Headers | Record<string, string | ReadonlyArray<string> | undefined>,
 ): CredentialSource => {
-  const get =
-    typeof (headers as Headers).get === "function"
-      ? (name: string) => (headers as Headers).get(name)
-      : (name: string) => {
-          const value = (headers as Record<string, string | ReadonlyArray<string> | undefined>)[
-            name.toLowerCase()
-          ];
-          return Array.isArray(value) ? value[0] : (value as string | undefined);
-        };
-  let cookies: ReadonlyMap<string, string> | undefined;
+  const get = headerGetter(headers);
+  let cookies: HashMap.HashMap<string, string> | undefined;
   return {
     header: get,
     cookie: (name) => {
       cookies ??= parseCookieHeader(get("cookie"));
-      return cookies.get(name);
+      return Option.getOrUndefined(HashMap.get(cookies, name));
     },
   };
 };
@@ -249,13 +254,15 @@ const bearerToken = (source: CredentialSource): string | undefined => {
 export const extractApiKey = (
   source: CredentialSource,
   config?: CredentialConfig,
-): string | undefined => {
-  for (const header of config?.apiKeyHeaders ?? DEFAULT_API_KEY_HEADERS) {
-    const value = source.header(header);
-    if (value !== null && value !== undefined && value !== "") return value;
-  }
-  return undefined;
-};
+): string | undefined =>
+  Option.getOrUndefined(
+    Arr.findFirst(config?.apiKeyHeaders ?? DEFAULT_API_KEY_HEADERS, (header) => {
+      const value = source.header(header);
+      return value !== null && value !== undefined && value !== ""
+        ? Option.some(value)
+        : Option.none();
+    }),
+  );
 
 /**
  * Read the session token off a request — the `Authorization: Bearer/Token`
@@ -326,7 +333,7 @@ export const detectCredential = (
   if (hasApiKey) kinds.push("api-key");
 
   return {
-    present: kinds.length > 0,
+    present: Arr.isReadonlyArrayNonEmpty(kinds),
     kinds,
     hasSessionCookie: hasCookie || hasCacheCookie,
     hasApiKey,
@@ -400,7 +407,7 @@ export interface ResolveOptions<E, R> {
 }
 
 const isPresent = (credential: CredentialPresence | boolean): boolean =>
-  typeof credential === "boolean" ? credential : credential.present;
+  Predicate.isBoolean(credential) ? credential : credential.present;
 
 const report = (outcome: AuthOutcome): Effect.Effect<void> =>
   Effect.andThen(

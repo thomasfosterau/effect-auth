@@ -58,7 +58,21 @@
  *
  * @module scim
  */
-import { Context, Crypto, Data, Effect, Layer } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Crypto,
+  Data,
+  Effect,
+  Layer,
+  Option,
+  Order,
+  Predicate,
+  Record as Rec,
+  Schema,
+  String as Str,
+} from "effect";
+import { flow } from "effect/Function";
 import * as Errors from "./Errors.ts";
 import { Hooks, makePlugin } from "./Hooks.ts";
 import {
@@ -209,6 +223,12 @@ export class ScimConnectionStore extends Context.Service<
   }
 >()("@effect-auth/ScimConnectionStore") {}
 
+/** Oldest first, by the epoch-millisecond `createdAt` every SCIM-listed record carries. */
+const byCreatedAt: Order.Order<{ readonly createdAt: number }> = Order.mapInput(
+  Order.Number,
+  (record) => record.createdAt,
+);
+
 /**
  * In-memory {@link ScimConnectionStore}, keyed by connection id. Single-process
  * only — good for tests and single-instance deployments.
@@ -226,9 +246,10 @@ export const memoryScimConnectionStore = (
     ),
   listByOrganization: (organizationId) =>
     Effect.sync(() =>
-      [...records.values()]
-        .filter((record) => record.organizationId === organizationId)
-        .sort((a, b) => a.createdAt - b.createdAt),
+      Arr.sort(
+        Arr.filter([...records.values()], (record) => record.organizationId === organizationId),
+        byCreatedAt,
+      ),
     ),
   update: (connection) => Effect.sync(() => (records.set(connection.id, connection), connection)),
   delete: (id) => Effect.sync(() => void records.delete(id)),
@@ -257,7 +278,7 @@ export class ScimUserStore extends Context.Service<
     readonly create: (input: {
       readonly name?: string;
       readonly image?: string;
-      readonly attributes?: Record<string, unknown>;
+      readonly attributes?: Types.Attributes;
       /**
        * The login handle the user is created with: a store that keeps it on
        * the user row writes it there on insert, and any other store ignores it
@@ -595,8 +616,10 @@ const parseFilter = (
       ),
     );
   }
-  const [, attribute, operator, doubleQuoted, singleQuoted] = match;
-  if (operator!.toLowerCase() !== "eq") {
+  // The attribute and operator groups are not optional in FILTER_PATTERN, so
+  // a match always fills them; the defaults only satisfy the index type.
+  const [, attribute = "", operator = "", doubleQuoted, singleQuoted] = match;
+  if (operator.toLowerCase() !== "eq") {
     return Effect.fail(
       badRequest(
         `Unsupported filter operator "${operator}": only \`eq\` is supported`,
@@ -604,7 +627,7 @@ const parseFilter = (
       ),
     );
   }
-  const canonical = supported.find((name) => name.toLowerCase() === attribute!.toLowerCase());
+  const canonical = supported.find((name) => name.toLowerCase() === attribute.toLowerCase());
   if (canonical === undefined) {
     return Effect.fail(
       badRequest(
@@ -625,53 +648,62 @@ const MEMBER_PATH_PATTERN = /^members\[\s*value\s+eq\s+(?:"([^"]*)"|'([^']*)')\s
 
 const normalizeEmail = (value: string): string => value.trim().toLowerCase();
 
-/** SCIM sends booleans as JSON booleans; Entra ID sometimes sends strings. */
-const asBoolean = (value: unknown): boolean | null => {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    const lowered = value.trim().toLowerCase();
-    if (lowered === "true") return true;
-    if (lowered === "false") return false;
-  }
-  return null;
+const parseBooleanString = (value: string): Option.Option<boolean> => {
+  const lowered = value.trim().toLowerCase();
+  return lowered === "true"
+    ? Option.some(true)
+    : lowered === "false"
+      ? Option.some(false)
+      : Option.none();
 };
 
-const asString = (value: unknown): string | null =>
-  typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+/** SCIM sends booleans as JSON booleans; Entra ID sometimes sends strings. */
+const asBoolean = flow(
+  Schema.decodeUnknownOption(Schema.Union([Schema.Boolean, Schema.String])),
+  Option.flatMap((value) =>
+    Predicate.isBoolean(value) ? Option.some(value) : parseBooleanString(value),
+  ),
+  Option.getOrNull,
+);
+
+const asString = flow(
+  Schema.decodeUnknownOption(Schema.String),
+  Option.map(Str.trim),
+  Option.filter(Str.isNonEmpty),
+  Option.getOrNull,
+);
+
+/**
+ * Read the strings out of a multi-valued patch value: an array, or a bare
+ * entry, where each entry is a string or an object with a string `value`.
+ */
+const stringEntries = (value: unknown): ReadonlyArray<string> => {
+  const entries: ReadonlyArray<unknown> = Array.isArray(value) ? value : [value];
+  return Arr.flatMap(entries, (entry) =>
+    Predicate.isString(entry)
+      ? [entry]
+      : Predicate.isObjectOrArray(entry) &&
+          Predicate.hasProperty(entry, "value") &&
+          Predicate.isString(entry.value)
+        ? [entry.value]
+        : [],
+  );
+};
 
 /** Read `emails`-shaped patch values: an array, or a bare object/string. */
-const emailValues = (value: unknown): ReadonlyArray<string> => {
-  const entries = Array.isArray(value) ? value : [value];
-  const out: string[] = [];
-  for (const entry of entries) {
-    if (typeof entry === "string") {
-      out.push(normalizeEmail(entry));
-      continue;
-    }
-    if (typeof entry === "object" && entry !== null) {
-      const candidate = (entry as { value?: unknown }).value;
-      if (typeof candidate === "string") out.push(normalizeEmail(candidate));
-    }
-  }
-  return out;
-};
+const emailValues = flow(stringEntries, Arr.map(normalizeEmail));
 
 /** Read `members`-shaped patch values into core user ids. */
-const memberValues = (value: unknown): ReadonlyArray<string> => {
-  const entries = Array.isArray(value) ? value : [value];
-  const out: string[] = [];
-  for (const entry of entries) {
-    if (typeof entry === "string") {
-      out.push(entry);
-      continue;
-    }
-    if (typeof entry === "object" && entry !== null) {
-      const candidate = (entry as { value?: unknown }).value;
-      if (typeof candidate === "string") out.push(candidate);
-    }
-  }
-  return out;
-};
+const memberValues = stringEntries;
+
+/** The PATCH ops SCIM defines. */
+type PatchOp = "add" | "remove" | "replace";
+
+/** One `path`/`value` pair of a PATCH operation, after path-less expansion. */
+interface PatchEntry {
+  readonly path: string;
+  readonly value: unknown;
+}
 
 export const make = (
   config: ScimConfig = {},
@@ -741,7 +773,7 @@ export const make = (
       const emails = emailIdentifiers(all);
       const pinned = user.attributes[SCIM_USERNAME_ATTRIBUTE];
       const userName =
-        typeof pinned === "string" && emails.some((e) => e.value === pinned)
+        Predicate.isString(pinned) && emails.some((e) => e.value === pinned)
           ? pinned
           : (primaryEmail(all)?.value ?? emails[0]?.value ?? user.id);
       const externalId = user.attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
@@ -749,7 +781,7 @@ export const make = (
         id: user.id,
         userName,
         ...(user.name !== undefined && { displayName: user.name }),
-        ...(typeof externalId === "string" && { externalId }),
+        ...(Predicate.isString(externalId) && { externalId }),
         emails: emails.map((identifier) => ({
           value: identifier.value,
           ...(identifier.value === userName && { primary: true }),
@@ -831,7 +863,7 @@ export const make = (
         ),
       );
 
-    const writeAttributes = (user: Types.User, attributes: Record<string, unknown>) =>
+    const writeAttributes = (user: Types.User, attributes: Types.Attributes) =>
       users.update({ ...user, attributes, updatedAt: new Date() });
 
     /**
@@ -879,6 +911,225 @@ export const make = (
         const existing = yield* orgs.listTeamMembers(teamId);
         if (existing.some((entry) => entry.userId === userId)) return;
         yield* orgs.addTeamMember(teamId, userId);
+      });
+
+    /**
+     * Make a team's membership exactly `desiredIds`: remove each current member
+     * not in it, then add the rest, in the order the IdP sent them.
+     */
+    const replaceTeamMembers = (
+      connection: ScimConnection,
+      teamId: string,
+      desiredIds: ReadonlyArray<string>,
+    ) =>
+      Effect.gen(function* () {
+        const existing = yield* orgs.listTeamMembers(teamId);
+        const missing = yield* Effect.reduce(
+          existing,
+          () => Arr.dedupe(desiredIds),
+          (remaining, member) =>
+            Effect.as(
+              Arr.contains(remaining, member.userId)
+                ? Effect.void
+                : orgs.removeTeamMember(teamId, member.userId),
+              Arr.filter(remaining, (id) => id !== member.userId),
+            ),
+        );
+        yield* Effect.forEach(
+          missing,
+          (userId) => addTeamMemberScoped(connection, teamId, userId),
+          { concurrency: 1, discard: true },
+        );
+      });
+
+    /** Apply one expanded PATCH entry to a user, returning the updated user. */
+    const patchUserEntry = (user: Types.User, op: PatchOp, { path, value }: PatchEntry) =>
+      Effect.gen(function* () {
+        const attribute = path.toLowerCase();
+
+        if (attribute === "active") {
+          const active = asBoolean(value);
+          if (active === null) {
+            return yield* badRequest("active must be a boolean", "invalidValue");
+          }
+          return active === isScimDeactivated(user) ? yield* setActive(user, active) : user;
+        }
+
+        if (attribute === "displayname") {
+          const name = asString(value);
+          return yield* users.update({
+            ...user,
+            ...(name === null ? {} : { name }),
+            updatedAt: new Date(),
+          });
+        }
+
+        if (attribute === "username") {
+          const email = asString(value);
+          if (email === null) {
+            return yield* badRequest("userName must be a non-empty string", "invalidValue");
+          }
+          return yield* renameUserName(user, normalizeEmail(email));
+        }
+
+        if (attribute === "externalid") {
+          const externalId = asString(value);
+          const attributes = { ...user.attributes };
+          if (op === "remove" || externalId === null) {
+            delete attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
+          } else {
+            attributes[SCIM_EXTERNAL_ID_ATTRIBUTE] = externalId;
+          }
+          return yield* writeAttributes(user, attributes);
+        }
+
+        if (attribute === "emails" || attribute.startsWith("emails[")) {
+          const values = emailValues(value);
+          if (op === "remove") {
+            const all = yield* identifiers.listByUser(user.id);
+            const userName = toUserResource(user, all).userName;
+            yield* Effect.forEach(
+              Arr.filter(
+                emailIdentifiers(all),
+                (identifier) =>
+                  // Never unclaim the address `userName` resolves to — that
+                  // would leave the resource without the handle it is keyed by.
+                  identifier.value !== userName &&
+                  (Arr.isReadonlyArrayEmpty(values) || values.includes(identifier.value)),
+              ),
+              (identifier) => identifiers.delete(identifier.id),
+              { concurrency: 1, discard: true },
+            );
+            return user;
+          }
+          yield* Effect.forEach(
+            Arr.filter(values, (email) => email !== ""),
+            (email) =>
+              Effect.gen(function* () {
+                const existing = yield* identifiers.getByValue("email", email);
+                if (existing !== null) {
+                  if (existing.userId === user.id) return;
+                  return yield* conflict(`The email "${email}" is already in use`);
+                }
+                yield* claimEmail(user.id, email);
+              }),
+            { concurrency: 1, discard: true },
+          );
+          return user;
+        }
+
+        return yield* badRequest(`Unsupported PATCH path "${path}"`, "invalidPath");
+      });
+
+    /** Apply one PATCH operation to a user, returning the updated user. */
+    const patchUserOperation = (user: Types.User, operation: ScimPatchOperation) =>
+      Effect.gen(function* () {
+        const op = operation.op.trim().toLowerCase();
+        if (op !== "add" && op !== "remove" && op !== "replace") {
+          return yield* badRequest(`Unsupported PATCH op "${operation.op}"`, "invalidSyntax");
+        }
+
+        // Entra ID omits `path` and sends an attribute map as the value.
+        // Expand it so both dialects go through one code path.
+        const expanded: ReadonlyArray<PatchEntry> =
+          operation.path === undefined || operation.path.trim() === ""
+            ? Predicate.isObject(operation.value)
+              ? Rec.collect(operation.value, (path, value) => ({ path, value }))
+              : []
+            : [{ path: operation.path.trim(), value: operation.value }];
+
+        if (Arr.isReadonlyArrayEmpty(expanded)) {
+          return yield* badRequest("PATCH operation has no usable path", "invalidPath");
+        }
+
+        return yield* Effect.reduce(
+          expanded,
+          () => user,
+          (current, entry) => patchUserEntry(current, op, entry),
+        );
+      });
+
+    /** Apply one PATCH operation to a team, returning the updated team. */
+    const patchGroupOperation = (
+      connection: ScimConnection,
+      groupId: string,
+      team: Team,
+      operation: ScimPatchOperation,
+    ) =>
+      Effect.gen(function* () {
+        const op = operation.op.trim().toLowerCase();
+        if (op !== "add" && op !== "remove" && op !== "replace") {
+          return yield* badRequest(`Unsupported PATCH op "${operation.op}"`, "invalidSyntax");
+        }
+        const path = (operation.path ?? "").trim();
+
+        // Path-less form: an attribute map, exactly as for users.
+        if (path === "") {
+          if (!Predicate.isObject(operation.value)) {
+            return yield* badRequest("PATCH operation has no usable path", "invalidPath");
+          }
+          const entries = operation.value;
+          const displayName = asString(entries["displayName"]);
+          if (displayName === null) {
+            return yield* badRequest("Unsupported path-less PATCH value", "invalidPath");
+          }
+          const renamed = yield* orgs.updateTeam({
+            ...team,
+            name: displayName,
+            updatedAt: Date.now(),
+          });
+          if (renamed === null) return yield* notFound(`Group "${groupId}" not found`);
+          return renamed;
+        }
+
+        if (path.toLowerCase() === "displayname") {
+          const displayName = asString(operation.value);
+          if (displayName === null) {
+            return yield* badRequest("displayName must be a non-empty string", "invalidValue");
+          }
+          const renamed = yield* orgs.updateTeam({
+            ...team,
+            name: displayName,
+            updatedAt: Date.now(),
+          });
+          if (renamed === null) return yield* notFound(`Group "${groupId}" not found`);
+          return renamed;
+        }
+
+        const pathFilter = MEMBER_PATH_PATTERN.exec(path);
+        if (pathFilter !== null) {
+          if (op !== "remove") {
+            return yield* badRequest(`Only \`remove\` is supported on "${path}"`, "invalidPath");
+          }
+          yield* orgs.removeTeamMember(team.id, pathFilter[1] ?? pathFilter[2] ?? "");
+          return team;
+        }
+
+        if (path.toLowerCase() === "members") {
+          const ids = memberValues(operation.value);
+          if (op === "remove") {
+            // `remove` with no value clears the membership entirely.
+            const targets = Arr.isReadonlyArrayEmpty(ids)
+              ? Arr.map(yield* orgs.listTeamMembers(team.id), (member) => member.userId)
+              : ids;
+            yield* Effect.forEach(targets, (userId) => orgs.removeTeamMember(team.id, userId), {
+              concurrency: 1,
+              discard: true,
+            });
+            return team;
+          }
+          if (op === "replace") {
+            yield* replaceTeamMembers(connection, team.id, ids);
+            return team;
+          }
+          yield* Effect.forEach(ids, (userId) => addTeamMemberScoped(connection, team.id, userId), {
+            concurrency: 1,
+            discard: true,
+          });
+          return team;
+        }
+
+        return yield* badRequest(`Unsupported PATCH path "${path}"`, "invalidPath");
       });
 
     return {
@@ -930,30 +1181,26 @@ export const make = (
         if (userName === "") {
           return yield* badRequest("userName is required", "invalidValue");
         }
-        const extras = [
-          ...new Set(
-            (input.emails ?? [])
-              .map((email) => normalizeEmail(email.value))
-              .filter((email) => email !== "" && email !== userName),
-          ),
-        ];
+        const extras = Arr.dedupe(
+          (input.emails ?? [])
+            .map((email) => normalizeEmail(email.value))
+            .filter((email) => email !== "" && email !== userName),
+        );
 
         // Check every address up front: a conflict discovered halfway through
         // would leave a user created with only some of its identifiers.
-        for (const email of [userName, ...extras]) {
-          const existing = yield* identifiers.getByValue("email", email);
-          if (existing !== null) {
-            return yield* conflict(`The email "${email}" is already in use`);
-          }
+        const taken = yield* Effect.findFirst([userName, ...extras], (email) =>
+          Effect.map(identifiers.getByValue("email", email), (existing) => existing !== null),
+        );
+        if (Option.isSome(taken)) {
+          return yield* conflict(`The email "${taken.value}" is already in use`);
         }
 
-        const attributes: Record<string, unknown> = {
+        const attributes: Types.Attributes = {
           [SCIM_USERNAME_ATTRIBUTE]: userName,
+          ...(input.externalId !== undefined && { [SCIM_EXTERNAL_ID_ATTRIBUTE]: input.externalId }),
+          ...(input.active === false && { [SCIM_DEACTIVATED_ATTRIBUTE]: true }),
         };
-        if (input.externalId !== undefined) {
-          attributes[SCIM_EXTERNAL_ID_ATTRIBUTE] = input.externalId;
-        }
-        if (input.active === false) attributes[SCIM_DEACTIVATED_ATTRIBUTE] = true;
 
         // `userName` is the user's primary address, created with the user;
         // the IdP is the system of record for its users' addresses.
@@ -972,9 +1219,10 @@ export const make = (
           ),
         );
 
-        for (const email of extras) {
-          yield* claimEmail(user.id, email);
-        }
+        yield* Effect.forEach(extras, (email) => claimEmail(user.id, email), {
+          concurrency: 1,
+          discard: true,
+        });
 
         const existingMember = yield* orgs.getMember(connection.organizationId, user.id);
         if (existingMember === null) {
@@ -1009,27 +1257,27 @@ export const make = (
             : yield* parseFilter(query.filter, ["userName", "externalId"]);
 
         const members = yield* orgs.listMembersByOrganization(connection.organizationId);
-        const ordered = [...members].sort((a, b) => a.createdAt - b.createdAt);
+        const ordered = Arr.sort(members, byCreatedAt);
 
-        const resources: ScimUserResource[] = [];
-        for (const member of ordered) {
-          const user = yield* users.get(member.userId);
-          // A membership row whose user is gone is stale, not an error.
-          if (user === null) continue;
-          const resource = yield* readUserResource(user);
-          if (parsed !== null) {
-            const actual =
-              parsed.attribute === "userName" ? resource.userName : resource.externalId;
-            if (parsed.attribute === "userName") {
-              if (actual?.toLowerCase() !== parsed.value.trim().toLowerCase()) continue;
-            } else if (actual !== parsed.value) {
-              continue;
-            }
-          }
-          resources.push(resource);
-        }
+        const matched = yield* Effect.forEach(
+          ordered,
+          (member) =>
+            Effect.gen(function* () {
+              const user = yield* users.get(member.userId);
+              // A membership row whose user is gone is stale, not an error.
+              if (user === null) return Option.none<ScimUserResource>();
+              const resource = yield* readUserResource(user);
+              if (parsed === null) return Option.some(resource);
+              const matches =
+                parsed.attribute === "userName"
+                  ? resource.userName.toLowerCase() === parsed.value.trim().toLowerCase()
+                  : resource.externalId === parsed.value;
+              return matches ? Option.some(resource) : Option.none<ScimUserResource>();
+            }),
+          { concurrency: 1 },
+        );
 
-        return paginate(resources, query);
+        return paginate(Arr.getSomes(matched), query);
       }),
 
       replaceUser: Effect.fn("ScimService.replaceUser")(function* (
@@ -1048,18 +1296,27 @@ export const make = (
         // `emails` is authoritative only when the IdP sent it; a PUT that omits
         // it is reconciling the profile, not clearing the address book.
         if (input.emails !== undefined) {
-          const desired = new Set([
+          const desired = Arr.dedupe([
             userName,
             ...input.emails.map((email) => normalizeEmail(email.value)).filter((e) => e !== ""),
           ]);
           const all = yield* identifiers.listByUser(current.id);
-          for (const identifier of emailIdentifiers(all)) {
-            if (!desired.has(identifier.value)) yield* identifiers.delete(identifier.id);
-            desired.delete(identifier.value);
-          }
-          for (const email of desired) {
-            yield* claimEmail(current.id, email);
-          }
+          const owner = current.id;
+          const missing = yield* Effect.reduce(
+            emailIdentifiers(all),
+            () => desired,
+            (remaining, identifier) =>
+              Effect.as(
+                Arr.contains(remaining, identifier.value)
+                  ? Effect.void
+                  : identifiers.delete(identifier.id),
+                Arr.filter(remaining, (email) => email !== identifier.value),
+              ),
+          );
+          yield* Effect.forEach(missing, (email) => claimEmail(owner, email), {
+            concurrency: 1,
+            discard: true,
+          });
         }
 
         const attributes = { ...current.attributes };
@@ -1087,106 +1344,9 @@ export const make = (
         userId: string,
         operations: ReadonlyArray<ScimPatchOperation>,
       ) {
-        let user = yield* requireUser(connection, userId);
-
-        for (const operation of operations) {
-          const op = operation.op.trim().toLowerCase();
-          if (op !== "add" && op !== "remove" && op !== "replace") {
-            return yield* badRequest(`Unsupported PATCH op "${operation.op}"`, "invalidSyntax");
-          }
-
-          // Entra ID omits `path` and sends an attribute map as the value.
-          // Expand it so both dialects go through one code path.
-          const expanded: ReadonlyArray<{ path: string; value: unknown }> =
-            operation.path === undefined || operation.path.trim() === ""
-              ? typeof operation.value === "object" &&
-                operation.value !== null &&
-                !Array.isArray(operation.value)
-                ? Object.entries(operation.value as Record<string, unknown>).map(
-                    ([path, value]) => ({ path, value }),
-                  )
-                : []
-              : [{ path: operation.path.trim(), value: operation.value }];
-
-          if (expanded.length === 0) {
-            return yield* badRequest("PATCH operation has no usable path", "invalidPath");
-          }
-
-          for (const { path, value } of expanded) {
-            const attribute = path.toLowerCase();
-
-            if (attribute === "active") {
-              const active = asBoolean(value);
-              if (active === null) {
-                return yield* badRequest("active must be a boolean", "invalidValue");
-              }
-              if (active === isScimDeactivated(user)) user = yield* setActive(user, active);
-              continue;
-            }
-
-            if (attribute === "displayname") {
-              const name = asString(value);
-              user = yield* users.update({
-                ...user,
-                ...(name === null ? {} : { name }),
-                updatedAt: new Date(),
-              });
-              continue;
-            }
-
-            if (attribute === "username") {
-              const email = asString(value);
-              if (email === null) {
-                return yield* badRequest("userName must be a non-empty string", "invalidValue");
-              }
-              user = yield* renameUserName(user, normalizeEmail(email));
-              continue;
-            }
-
-            if (attribute === "externalid") {
-              const externalId = asString(value);
-              const attributes = { ...user.attributes };
-              if (op === "remove" || externalId === null) {
-                delete attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
-              } else {
-                attributes[SCIM_EXTERNAL_ID_ATTRIBUTE] = externalId;
-              }
-              user = yield* writeAttributes(user, attributes);
-              continue;
-            }
-
-            if (attribute === "emails" || attribute.startsWith("emails[")) {
-              const values = emailValues(value);
-              if (op === "remove") {
-                const all = yield* identifiers.listByUser(user.id);
-                const userName = toUserResource(user, all).userName;
-                for (const identifier of emailIdentifiers(all)) {
-                  // Never unclaim the address `userName` resolves to — that
-                  // would leave the resource without the handle it is keyed by.
-                  if (identifier.value === userName) continue;
-                  if (values.length === 0 || values.includes(identifier.value)) {
-                    yield* identifiers.delete(identifier.id);
-                  }
-                }
-                continue;
-              }
-              for (const email of values) {
-                if (email === "") continue;
-                const existing = yield* identifiers.getByValue("email", email);
-                if (existing !== null) {
-                  if (existing.userId === user.id) continue;
-                  return yield* conflict(`The email "${email}" is already in use`);
-                }
-                yield* claimEmail(user.id, email);
-              }
-              continue;
-            }
-
-            return yield* badRequest(`Unsupported PATCH path "${path}"`, "invalidPath");
-          }
-        }
-
-        return yield* readUserResource(user);
+        const user = yield* requireUser(connection, userId);
+        const patched = yield* Effect.reduce(operations, () => user, patchUserOperation);
+        return yield* readUserResource(patched);
       }),
 
       deactivateUser: Effect.fn("ScimService.deactivateUser")(function* (
@@ -1213,9 +1373,11 @@ export const make = (
           createdAt: now,
           updatedAt: now,
         });
-        for (const member of input.members ?? []) {
-          yield* addTeamMemberScoped(connection, team.id, member.value);
-        }
+        yield* Effect.forEach(
+          input.members ?? [],
+          (member) => addTeamMemberScoped(connection, team.id, member.value),
+          { concurrency: 1, discard: true },
+        );
         return yield* toGroupResource(team);
       }),
 
@@ -1234,13 +1396,13 @@ export const make = (
           query?.filter === undefined ? null : yield* parseFilter(query.filter, ["displayName"]);
 
         const teams = yield* orgs.listTeams(connection.organizationId);
-        const ordered = [...teams].sort((a, b) => a.createdAt - b.createdAt);
+        const ordered = Arr.sort(teams, byCreatedAt);
 
-        const resources: ScimGroupResource[] = [];
-        for (const team of ordered) {
-          if (parsed !== null && team.name !== parsed.value) continue;
-          resources.push(yield* toGroupResource(team));
-        }
+        const resources = yield* Effect.forEach(
+          Arr.filter(ordered, (team) => parsed === null || team.name === parsed.value),
+          (team) => toGroupResource(team),
+          { concurrency: 1 },
+        );
         return paginate(resources, query);
       }),
 
@@ -1262,15 +1424,11 @@ export const make = (
         if (renamed === null) return yield* notFound(`Group "${groupId}" not found`);
 
         if (input.members !== undefined) {
-          const desired = new Set(input.members.map((member) => member.value));
-          const existing = yield* orgs.listTeamMembers(team.id);
-          for (const member of existing) {
-            if (!desired.has(member.userId)) yield* orgs.removeTeamMember(team.id, member.userId);
-            desired.delete(member.userId);
-          }
-          for (const userId of desired) {
-            yield* addTeamMemberScoped(connection, team.id, userId);
-          }
+          yield* replaceTeamMembers(
+            connection,
+            team.id,
+            input.members.map((member) => member.value),
+          );
         }
 
         return yield* toGroupResource(renamed);
@@ -1281,103 +1439,13 @@ export const make = (
         groupId: string,
         operations: ReadonlyArray<ScimPatchOperation>,
       ) {
-        let team = yield* requireTeam(connection, groupId);
-
-        for (const operation of operations) {
-          const op = operation.op.trim().toLowerCase();
-          if (op !== "add" && op !== "remove" && op !== "replace") {
-            return yield* badRequest(`Unsupported PATCH op "${operation.op}"`, "invalidSyntax");
-          }
-          const path = (operation.path ?? "").trim();
-
-          // Path-less form: an attribute map, exactly as for users.
-          if (path === "") {
-            if (
-              typeof operation.value !== "object" ||
-              operation.value === null ||
-              Array.isArray(operation.value)
-            ) {
-              return yield* badRequest("PATCH operation has no usable path", "invalidPath");
-            }
-            const entries = operation.value as Record<string, unknown>;
-            const displayName = asString(entries["displayName"]);
-            if (displayName === null) {
-              return yield* badRequest("Unsupported path-less PATCH value", "invalidPath");
-            }
-            const renamed = yield* orgs.updateTeam({
-              ...team,
-              name: displayName,
-              updatedAt: Date.now(),
-            });
-            if (renamed === null) return yield* notFound(`Group "${groupId}" not found`);
-            team = renamed;
-            continue;
-          }
-
-          if (path.toLowerCase() === "displayname") {
-            const displayName = asString(operation.value);
-            if (displayName === null) {
-              return yield* badRequest("displayName must be a non-empty string", "invalidValue");
-            }
-            const renamed = yield* orgs.updateTeam({
-              ...team,
-              name: displayName,
-              updatedAt: Date.now(),
-            });
-            if (renamed === null) return yield* notFound(`Group "${groupId}" not found`);
-            team = renamed;
-            continue;
-          }
-
-          const pathFilter = MEMBER_PATH_PATTERN.exec(path);
-          if (pathFilter !== null) {
-            if (op !== "remove") {
-              return yield* badRequest(`Only \`remove\` is supported on "${path}"`, "invalidPath");
-            }
-            yield* orgs.removeTeamMember(team.id, pathFilter[1] ?? pathFilter[2] ?? "");
-            continue;
-          }
-
-          if (path.toLowerCase() === "members") {
-            const ids = memberValues(operation.value);
-            if (op === "remove") {
-              if (ids.length === 0) {
-                // `remove` with no value clears the membership entirely.
-                const existing = yield* orgs.listTeamMembers(team.id);
-                for (const member of existing) {
-                  yield* orgs.removeTeamMember(team.id, member.userId);
-                }
-                continue;
-              }
-              for (const userId of ids) {
-                yield* orgs.removeTeamMember(team.id, userId);
-              }
-              continue;
-            }
-            if (op === "replace") {
-              const existing = yield* orgs.listTeamMembers(team.id);
-              const desired = new Set(ids);
-              for (const member of existing) {
-                if (!desired.has(member.userId)) {
-                  yield* orgs.removeTeamMember(team.id, member.userId);
-                }
-                desired.delete(member.userId);
-              }
-              for (const userId of desired) {
-                yield* addTeamMemberScoped(connection, team.id, userId);
-              }
-              continue;
-            }
-            for (const userId of ids) {
-              yield* addTeamMemberScoped(connection, team.id, userId);
-            }
-            continue;
-          }
-
-          return yield* badRequest(`Unsupported PATCH path "${path}"`, "invalidPath");
-        }
-
-        return yield* toGroupResource(team);
+        const team = yield* requireTeam(connection, groupId);
+        const patched = yield* Effect.reduce(
+          operations,
+          () => team,
+          (current, operation) => patchGroupOperation(connection, groupId, current, operation),
+        );
+        return yield* toGroupResource(patched);
       }),
 
       deleteGroup: Effect.fn("ScimService.deleteGroup")(function* (
