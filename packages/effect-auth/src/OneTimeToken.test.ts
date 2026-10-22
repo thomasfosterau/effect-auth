@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect } from "effect";
+import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
+import { Context, Crypto, Effect, Predicate, Result } from "effect";
 import {
   make as makeOneTimeTokenService,
   OneTimeTokenStore,
@@ -46,7 +46,7 @@ describe("OneTimeTokenService", () => {
         metadata: { purpose: "invite" },
       });
 
-      expect(typeof rawToken).toBe("string");
+      expect(Predicate.isString(rawToken)).toBe(true);
       expect(rawToken.length).toBeGreaterThan(0);
 
       const result = yield* service.verify(rawToken);
@@ -107,10 +107,9 @@ describe("OneTimeTokenService", () => {
     const result = await Effect.runPromise(Effect.provide(program, testContext));
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OneTimeTokenError");
-      expect(result.failure.message).toBe("Invalid or expired token");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("OneTimeTokenError");
+    expect(result.failure.message).toBe("Invalid or expired token");
   });
 
   it("should reject an expired token", async () => {
@@ -133,10 +132,9 @@ describe("OneTimeTokenService", () => {
     const result = await Effect.runPromise(Effect.provide(program, testContext));
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OneTimeTokenError");
-      expect(result.failure.message).toBe("Invalid or expired token");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("OneTimeTokenError");
+    expect(result.failure.message).toBe("Invalid or expired token");
     // Expired token is consumed (deleted) on lookup — store must be empty.
     expect(oneTimeTokens.size).toBe(0);
   });
@@ -152,11 +150,10 @@ describe("OneTimeTokenService", () => {
     const result = await Effect.runPromise(Effect.provide(program, testContext));
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OneTimeTokenError");
-      // Same generic message for all failure cases — no hint of why it failed.
-      expect(result.failure.message).toBe("Invalid or expired token");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("OneTimeTokenError");
+    // Same generic message for all failure cases — no hint of why it failed.
+    expect(result.failure.message).toBe("Invalid or expired token");
   });
 
   it("should respect custom expiresIn config", async () => {

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
-import { Context, Crypto, Effect } from "effect";
+import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
+import { Context, Crypto, Effect, Predicate, Result } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   getPhoneNumber,
@@ -360,11 +360,10 @@ describe("PhoneOtpService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("ResendTooSoonError");
-      expect((result.failure as { retryAfter: number }).retryAfter).toBeGreaterThan(0);
-      expect((result.failure as { retryAfter: number }).retryAfter).toBeLessThanOrEqual(60_000);
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("ResendTooSoonError");
+    expect((result.failure as { retryAfter: number }).retryAfter).toBeGreaterThan(0);
+    expect((result.failure as { retryAfter: number }).retryAfter).toBeLessThanOrEqual(60_000);
     // The original OTP is preserved — no replacement was issued.
     expect(sentOtps).toHaveLength(1);
     expect(records.has("+15559990001:sign-in")).toBe(true);
@@ -427,10 +426,13 @@ describe("PhoneOtpService", () => {
           sendOtp: recordingSend,
         });
         const twice = (phoneNumber: string) =>
-          Effect.all([
-            Effect.result(service.send(phoneNumber, "sign-in")),
-            Effect.result(service.send(phoneNumber, "sign-in")),
-          ]);
+          Effect.all(
+            [
+              Effect.result(service.send(phoneNumber, "sign-in")),
+              Effect.result(service.send(phoneNumber, "sign-in")),
+            ],
+            { concurrency: 1 },
+          );
         return { known: yield* twice("+15559990010"), unknown: yield* twice("+15559990011") };
       }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
     );
@@ -446,10 +448,10 @@ describe("PhoneOtpService", () => {
     ]);
     for (const result of [known[1], unknown[1]]) {
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure" && result.failure._tag === "ResendTooSoonError") {
-        expect(result.failure.retryAfter).toBeGreaterThan(0);
-        expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
-      }
+      assert(Result.isFailure(result));
+      assert(Predicate.isTagged(result.failure, "ResendTooSoonError"));
+      expect(result.failure.retryAfter).toBeGreaterThan(0);
+      expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
     }
     // Only the account holder is sent a code; the unknown number holds an
     // undelivered record as its cooldown marker.

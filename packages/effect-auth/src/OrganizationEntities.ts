@@ -87,7 +87,7 @@
  *
  * @module organization-entities
  */
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, HashSet, Layer, Match, Option, Predicate } from "effect";
 import type * as Errors from "./Errors.ts";
 import { OrganizationStore, isActiveMember } from "./Organization.ts";
 import * as Entity from "./Entity.ts";
@@ -168,34 +168,74 @@ export const organizationEntityResolver = (
     Effect.gen(function* () {
       const allMemberships = yield* store.listMembersByUser(userId);
       const memberships = allMemberships.filter(isActiveMember);
-      const parents: Entity.EntityRef[] = [];
-      for (const membership of memberships) {
-        parents.push(organizationRef(membership.organizationId));
-        parents.push(roleRef(membership.organizationId, membership.role));
-      }
-      const teamsPerOrganization = yield* Effect.forEach(memberships, (membership) =>
-        store.listTeamsForMember(membership.organizationId, userId),
+      const membershipParents = Arr.flatMap(memberships, (membership) => [
+        organizationRef(membership.organizationId),
+        roleRef(membership.organizationId, membership.role),
+      ]);
+      const teamsPerOrganization = yield* Effect.forEach(
+        memberships,
+        (membership) => store.listTeamsForMember(membership.organizationId, userId),
+        { concurrency: 1 },
       );
-      for (const teams of teamsPerOrganization) {
-        for (const team of teams) parents.push(teamRef(team.id));
-      }
-      return Entity.entity(userRef(userId), { parents });
+      const teamParents = Arr.flatMap(teamsPerOrganization, (teams) =>
+        Arr.map(teams, (team) => teamRef(team.id)),
+      );
+      return Entity.entity(userRef(userId), { parents: [...membershipParents, ...teamParents] });
     });
 
   const resolveOne = (
     ref: Entity.EntityRef,
-  ): Effect.Effect<Entity.Entity | null, Errors.AuthError> => {
-    switch (ref.type) {
-      case UserEntityType:
-        return resolveUser(ref.id);
-      case TeamEntityType:
-        return resolveTeam(ref.id);
-      case OrganizationEntityType:
-        return resolveOrganization(ref.id);
-      default:
-        return Effect.succeed(null);
-    }
+  ): Effect.Effect<Entity.Entity | null, Errors.AuthError> =>
+    Match.value(ref.type).pipe(
+      Match.when(UserEntityType, (): Effect.Effect<Entity.Entity | null, Errors.AuthError> =>
+        resolveUser(ref.id),
+      ),
+      Match.when(TeamEntityType, () => resolveTeam(ref.id)),
+      Match.when(OrganizationEntityType, () => resolveOrganization(ref.id)),
+      Match.orElse(() => Effect.succeed(null)),
+    );
+
+  /**
+   * One breadth-first layer: resolve the not-yet-seen refs of `frontier`, then
+   * recurse on their parents until no new refs remain.
+   */
+  const walk = (
+    frontier: ReadonlyArray<Entity.EntityRef>,
+    seen: HashSet.HashSet<string>,
+    resolved: ReadonlyArray<Entity.Entity>,
+  ): Effect.Effect<ReadonlyArray<Entity.Entity>, Errors.AuthError> => {
+    if (Arr.isReadonlyArrayEmpty(frontier)) return Effect.succeed(resolved);
+    const pending = Arr.filter(
+      Arr.dedupeWith(frontier, (a, b) => Entity.refKey(a) === Entity.refKey(b)),
+      (ref) => !HashSet.has(seen, Entity.refKey(ref)),
+    );
+    const nextSeen = Arr.reduce(pending, seen, (acc, ref) => HashSet.add(acc, Entity.refKey(ref)));
+    return Effect.flatMap(Effect.forEach(pending, resolveOne, { concurrency: 1 }), (entities) => {
+      const found = Arr.filter(entities, Predicate.isNotNull);
+      return walk(
+        Arr.flatMap(found, (entity) => entity.parents),
+        nextSeen,
+        [...resolved, ...found],
+      );
+    });
   };
+
+  /**
+   * Keyed by `refKey`: each key keeps its first position and its last entity
+   * (the `Map.set` semantics the breadth-first walk relies on).
+   */
+  const byKey = (entities: ReadonlyArray<Entity.Entity>): ReadonlyArray<Entity.Entity> =>
+    Arr.map(
+      Arr.dedupeWith(entities, (a, b) => Entity.refKey(a.ref) === Entity.refKey(b.ref)),
+      (first) =>
+        Option.getOrElse(
+          Arr.findLast(
+            entities,
+            (entity) => Entity.refKey(entity.ref) === Entity.refKey(first.ref),
+          ),
+          () => first,
+        ),
+    );
 
   return {
     resolve: Effect.fn("OrganizationEntities.resolve")(function* (
@@ -203,26 +243,7 @@ export const organizationEntityResolver = (
     ) {
       // Breadth-first over the parent DAG so the slice carries the ancestors
       // the resolver contract promises (a user's teams, a team's organization).
-      const resolved = new Map<string, Entity.Entity>();
-      const seen = new Set<string>();
-      let frontier = [...refs];
-      while (frontier.length > 0) {
-        const pending = frontier.filter((ref) => {
-          const key = Entity.refKey(ref);
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-        const entities = yield* Effect.forEach(pending, resolveOne);
-        const next: Entity.EntityRef[] = [];
-        for (const entity of entities) {
-          if (entity === null) continue;
-          resolved.set(Entity.refKey(entity.ref), entity);
-          next.push(...entity.parents);
-        }
-        frontier = next;
-      }
-      return [...resolved.values()];
+      return byKey(yield* walk(refs, HashSet.empty<string>(), []));
     }),
   };
 };

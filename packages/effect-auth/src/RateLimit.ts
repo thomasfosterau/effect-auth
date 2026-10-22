@@ -2,7 +2,7 @@
  * Rate limiting types for effect-auth
  */
 
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Predicate } from "effect";
 import { RateLimitError, type AuthError } from "./Errors.ts";
 import * as Obs from "./Observability.ts";
 
@@ -133,7 +133,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
           return true;
         }).pipe(
           Effect.tapError((e) =>
-            e._tag === "RateLimitError"
+            Predicate.isTagged(e, "RateLimitError")
               ? Obs.recordRateLimitHit(key.split(":")[0] ?? key)
               : Effect.void,
           ),
@@ -189,7 +189,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
           yield* store.increment(key, Math.ceil(config.windowMs / 1000));
         }).pipe(
           Effect.tapError((e) =>
-            e._tag === "RateLimitError"
+            Predicate.isTagged(e, "RateLimitError")
               ? Obs.recordRateLimitHit(key.split(":")[0] ?? key)
               : Effect.void,
           ),

@@ -37,7 +37,7 @@
  *
  * @module policy-store
  */
-import { Context, Effect, Schema } from "effect";
+import { Context, Effect, Match, Predicate, Schema } from "effect";
 import * as Errors from "./Errors.ts";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
@@ -71,7 +71,7 @@ export const inSlot: TemplateScope = { _tag: "inSlot" };
 
 /** Is this template scope a slot awaiting a link value? */
 export const isSlot = (scope: TemplateScope): boolean =>
-  scope._tag === "eqSlot" || scope._tag === "inSlot";
+  Predicate.isTagged(scope, "eqSlot") || Predicate.isTagged(scope, "inSlot");
 
 /**
  * A policy with slots. Same shape as {@link Policy.DeclarativePolicy} except
@@ -169,25 +169,27 @@ const substitute = (
   slot: "principal" | "resource",
   scope: TemplateScope,
   value: Entity.EntityRef | undefined,
-): Substitution => {
-  switch (scope._tag) {
-    case "eqSlot":
-      return value === undefined
+): Substitution =>
+  Match.value(scope).pipe(
+    Match.tag("eqSlot", (): Substitution =>
+      value === undefined
         ? { ok: false, message: `no value supplied for ?${slot}` }
-        : { ok: true, scope: Policy.eq(value) };
-    case "inSlot":
-      return value === undefined
+        : { ok: true, scope: Policy.eq(value) },
+    ),
+    Match.tag("inSlot", (): Substitution =>
+      value === undefined
         ? { ok: false, message: `no value supplied for ?${slot}` }
-        : { ok: true, scope: Policy.inScope(value) };
-    default:
-      return value === undefined
+        : { ok: true, scope: Policy.inScope(value) },
+    ),
+    Match.orElse((scope): Substitution =>
+      value === undefined
         ? { ok: true, scope }
         : {
             ok: false,
             message: `a ?${slot} value was supplied but the template has no ?${slot} slot`,
-          };
-  }
-};
+          },
+    ),
+  );
 
 /**
  * Substitute a link's slot values into its template, producing a
@@ -398,22 +400,26 @@ export const effectivePolicies = (
   Effect.gen(function* () {
     const stored = yield* store.listPolicies();
     const links = yield* store.listLinks();
-    const linked: Policy.DeclarativePolicy[] = [];
-    for (const link of links) {
-      const found = yield* store.getTemplate(link.templateId);
-      if (found === null) {
-        return yield* new Errors.AuthError({
-          message: `Template link "${link.id}" references unknown template "${link.templateId}"`,
-        });
-      }
-      const result = instantiate(found, link);
-      if (!result.ok) {
-        return yield* new Errors.AuthError({
-          message: `Template link "${link.id}" could not be instantiated: ${result.error.message}`,
-        });
-      }
-      linked.push(result.value);
-    }
+    const linked = yield* Effect.forEach(
+      links,
+      (link) =>
+        Effect.gen(function* () {
+          const found = yield* store.getTemplate(link.templateId);
+          if (found === null) {
+            return yield* new Errors.AuthError({
+              message: `Template link "${link.id}" references unknown template "${link.templateId}"`,
+            });
+          }
+          const result = instantiate(found, link);
+          if (!result.ok) {
+            return yield* new Errors.AuthError({
+              message: `Template link "${link.id}" could not be instantiated: ${result.error.message}`,
+            });
+          }
+          return result.value;
+        }),
+      { concurrency: 1 },
+    );
     return [...stored, ...linked];
   });
 
@@ -481,9 +487,9 @@ export const memoryPolicyStore = (
     deleteTemplate: (id) =>
       Effect.sync(() => {
         templates.delete(id);
-        for (const [linkId, link] of links.entries()) {
+        links.forEach((link, linkId) => {
           if (link.templateId === id) links.delete(linkId);
-        }
+        });
       }),
 
     listLinks: (templateId) =>
@@ -511,7 +517,10 @@ export const memoryPolicyStore = (
  */
 const erased = (value: PolicyTemplate): Policy.DeclarativePolicy => {
   const scope = (s: TemplateScope): Policy.Scope =>
-    s._tag === "eqSlot" || s._tag === "inSlot" ? Policy.any : s;
+    Match.value(s).pipe(
+      Match.tag("eqSlot", "inSlot", (): Policy.Scope => Policy.any),
+      Match.orElse((scope) => scope),
+    );
   return {
     _tag: "DeclarativePolicy",
     id: value.id,

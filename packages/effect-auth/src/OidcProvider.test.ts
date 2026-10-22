@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, FileSystem, Layer, Path, Redacted } from "effect";
+import { Effect, FileSystem, Layer, Path, Redacted, Schema } from "effect";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { Hooks } from "./Hooks.ts";
@@ -560,7 +560,7 @@ describe("OidcProviderService dynamic client registration", () => {
 
   it("rejects metadata the provider cannot honour with invalid_client_metadata", async () => {
     const { service } = setup({});
-    const cases: ReadonlyArray<Record<string, unknown>> = [
+    const cases: ReadonlyArray<Partial<OidcProvider.OidcClientMetadata>> = [
       { tokenEndpointAuthMethod: "private_key_jwt" },
       { grantTypes: ["client_credentials"] },
       { grantTypes: ["refresh_token"] },
@@ -800,7 +800,7 @@ const makeHttpFixture = (
   const oidc = makeOidcStores();
   let userSeq = 0;
 
-  const seedUser = (email: string, attributes: Record<string, unknown> = {}): string => {
+  const seedUser = (email: string, attributes: Types.User["attributes"] = {}): string => {
     const id = `u${++userSeq}`;
     const now = new Date();
     usersById.set(id, {
@@ -950,7 +950,11 @@ const makeHttpFixture = (
 
   const connection =
     options.connectAsynchronously === true
-      ? Layer.effectDiscard(Effect.promise(() => Promise.resolve()))
+      ? Layer.effectDiscard(
+          Effect.tryPromise({ try: () => Promise.resolve(), catch: () => "unreachable" }).pipe(
+            Effect.orDie,
+          ),
+        )
       : Layer.empty;
   // The connection is built first, so the OIDC layer builds after it returns.
   const withOidc = Layer.mergeAll(base, oidcLayer).pipe(
@@ -998,7 +1002,7 @@ const handBuiltHandler = (services: Layer.Layer<AuthServices>) => {
   // `Http.make` narrows its handler the same way.
   return HttpRouter.toWebHandler(api.pipe(Layer.provideMerge(services)), {
     disableLogger: true,
-  }).handler as unknown as (request: Request) => Promise<Response>;
+  }).handler as (request: Request) => Promise<Response>;
 };
 
 /**
@@ -1007,7 +1011,9 @@ const handBuiltHandler = (services: Layer.Layer<AuthServices>) => {
  */
 const FIXTURE_CLIENT_HEADERS = { "cf-connecting-ip": "203.0.113.10" };
 
-const post = (path: string, body: unknown, sessionId?: string): Request =>
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
+const post = (path: string, body: Schema.Json, sessionId?: string): Request =>
   new Request(`http://idp.test${path}`, {
     method: "POST",
     headers: {
@@ -1015,11 +1021,16 @@ const post = (path: string, body: unknown, sessionId?: string): Request =>
       "content-type": "application/json",
       ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
     },
-    body: JSON.stringify(body),
+    body: encodeJson(body),
   });
 
 /** JSON request with an optional `Authorization: Bearer` (registration tokens). */
-const jsonRequest = (method: string, path: string, body: unknown, bearer?: string): Request =>
+const jsonRequest = (
+  method: string,
+  path: string,
+  body: Schema.Json | undefined,
+  bearer?: string,
+): Request =>
   new Request(`http://idp.test${path}`, {
     method,
     headers: {
@@ -1027,7 +1038,8 @@ const jsonRequest = (method: string, path: string, body: unknown, bearer?: strin
       "content-type": "application/json",
       ...(bearer !== undefined ? { authorization: `Bearer ${bearer}` } : {}),
     },
-    body: JSON.stringify(body),
+    // `JSON.stringify(undefined)` is `undefined`: no body at all.
+    ...(body !== undefined && { body: encodeJson(body) }),
   });
 
 const get = (
@@ -1048,17 +1060,17 @@ const get = (
 };
 
 /** Swap `globalThis.fetch` for a canned JWKS response while `thunk` runs. */
-const withJwksFetch = async <A>(jwks: unknown, thunk: () => Promise<A>): Promise<A> => {
+const withJwksFetch = async <A>(jwks: Schema.Json, thunk: () => Promise<A>): Promise<A> => {
   const original = globalThis.fetch;
   globalThis.fetch = (() =>
     Promise.resolve(
-      new Response(JSON.stringify(jwks), { headers: { "content-type": "application/json" } }),
+      new Response(encodeJson(jwks), { headers: { "content-type": "application/json" } }),
     )) as typeof fetch;
-  try {
-    return await thunk();
-  } finally {
-    globalThis.fetch = original;
-  }
+  return Promise.resolve()
+    .then(thunk)
+    .finally(() => {
+      globalThis.fetch = original;
+    });
 };
 
 describe("HTTP OIDC provider endpoints", () => {
@@ -1157,7 +1169,7 @@ describe("HTTP OIDC provider endpoints", () => {
     // 4. Verify the id_token against the published JWKS.
     const jwksRes = await fx.handler(get("/.well-known/jwks.json"));
     expect(jwksRes.status).toBe(200);
-    const jwks = (await jwksRes.json()) as { keys: unknown[] };
+    const jwks = (await jwksRes.json()) as { keys: ReadonlyArray<Schema.Json> };
     expect(jwks.keys.length).toBeGreaterThan(0);
 
     const claims = await withJwksFetch(jwks, () =>
@@ -1178,7 +1190,7 @@ describe("HTTP OIDC provider endpoints", () => {
     // 5. UserInfo with the bearer access token.
     const userinfo = await fx.handler(get("/oauth2/userinfo", {}, { bearer: tokens.access_token }));
     expect(userinfo.status).toBe(200);
-    const info = (await userinfo.json()) as Record<string, unknown>;
+    const info = (await userinfo.json()) as Record<string, Schema.Json>;
     expect(info["sub"]).toBe(userId);
     expect(info["email"]).toBe("alice@idp.test");
     expect(info["name"]).toBe(`User ${userId}`);
@@ -1192,7 +1204,7 @@ describe("HTTP OIDC provider endpoints", () => {
       new Request("http://idp.test/oauth2/token", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Basic ${basic}` },
-        body: JSON.stringify({ grant_type: "refresh_token", refresh_token: tokens.refresh_token }),
+        body: encodeJson({ grant_type: "refresh_token", refresh_token: tokens.refresh_token }),
       }),
     );
     expect(refreshRes.status).toBe(200);
@@ -1445,7 +1457,7 @@ describe("HTTP OIDC provider endpoints", () => {
     const fx = makeHttpFixture();
     const res = await fx.handler(get("/.well-known/openid-configuration"));
     expect(res.status).toBe(200);
-    const doc = (await res.json()) as Record<string, unknown>;
+    const doc = (await res.json()) as Record<string, Schema.Json>;
     expect(doc["issuer"]).toBe(ISSUER);
     expect(doc["authorization_endpoint"]).toBe(`${ISSUER}/oauth2/authorize`);
     expect(doc["token_endpoint"]).toBe(`${ISSUER}/oauth2/token`);
@@ -1865,7 +1877,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     // The access token resolves the user's claims.
     const userinfo = await fx.handler(get("/oauth2/userinfo", {}, { bearer: tokens.access_token }));
     expect(userinfo.status).toBe(200);
-    expect(((await userinfo.json()) as Record<string, unknown>)["sub"]).toBe(userId);
+    expect(((await userinfo.json()) as Record<string, Schema.Json>)["sub"]).toBe(userId);
 
     // 4. The registered refresh_token grant works too.
     const refreshed = await fx.handler(
@@ -2054,7 +2066,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     const withoutDCR = makeHttpFixture();
     const base = await withoutDCR.handler(get("/.well-known/oauth-authorization-server"));
     expect(base.status).toBe(200);
-    const baseDoc = (await base.json()) as Record<string, unknown>;
+    const baseDoc = (await base.json()) as Record<string, Schema.Json>;
     expect(baseDoc["issuer"]).toBe(ISSUER);
     expect(baseDoc["authorization_endpoint"]).toBe(`${ISSUER}/oauth2/authorize`);
     expect(baseDoc["token_endpoint"]).toBe(`${ISSUER}/oauth2/token`);
@@ -2075,11 +2087,11 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     const withDCR = makeHttpFixture({ dynamicRegistration: {} });
     const doc = (await (
       await withDCR.handler(get("/.well-known/oauth-authorization-server"))
-    ).json()) as Record<string, unknown>;
+    ).json()) as Record<string, Schema.Json>;
     expect(doc["registration_endpoint"]).toBe(`${ISSUER}/register`);
     const oidcDoc = (await (
       await withDCR.handler(get("/.well-known/openid-configuration"))
-    ).json()) as Record<string, unknown>;
+    ).json()) as Record<string, Schema.Json>;
     expect(oidcDoc["registration_endpoint"]).toBe(`${ISSUER}/register`);
     expect(oidcDoc["userinfo_endpoint"]).toBe(`${ISSUER}/oauth2/userinfo`);
     expect(oidcDoc["claims_supported"]).toBeDefined();
@@ -2097,7 +2109,7 @@ describe("HTTP dynamic registration and the per-IP limit (#358)", () => {
     new Request("http://idp.test/register", {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify({
+      body: encodeJson({
         redirect_uris: ["http://127.0.0.1:9876/callback"],
         token_endpoint_auth_method: "none",
         client_name: "MCP Client",

@@ -59,7 +59,7 @@
  * @module rbac
  */
 
-import { Layer } from "effect";
+import { Array as Arr, Data, Layer, Record as Rec } from "effect";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import { Authorizer, EntityResolver, memoryEntityResolver } from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
@@ -126,31 +126,31 @@ export interface RbacConfig {
  * `principal in Role::"…"`, never reaches a system principal, whatever parents
  * a resolver gives it.)
  */
+class ReservedPrincipalTypeError extends Data.TaggedError("ReservedPrincipalTypeError")<{
+  readonly message: string;
+}> {}
+
 const principalTypeOf = (config: RbacConfig): string => {
   const principalType = config.principalType ?? DefaultPrincipalType;
   if (principalType === Entity.systemType) {
-    throw new Error(
-      `Rbac: principalType "${principalType}" is reserved for system principals, which hold no roles; grant a job with System.grant`,
-    );
+    throw new ReservedPrincipalTypeError({
+      message: `Rbac: principalType "${principalType}" is reserved for system principals, which hold no roles; grant a job with System.grant`,
+    });
   }
   return principalType;
 };
 
+const isMap = <V>(source: StringKeyed<V>): source is ReadonlyMap<string, V> =>
+  source instanceof Map;
+
 const entries = <V>(source: StringKeyed<V>): ReadonlyArray<readonly [string, V]> =>
-  source instanceof Map ? [...source.entries()] : Object.entries(source);
+  isMap(source) ? Arr.fromIterable(source) : Rec.toEntries(source);
 
 const lookup = <V>(source: StringKeyed<V>, key: string): V | undefined =>
-  source instanceof Map ? source.get(key) : (source as Record<string, V>)[key];
+  isMap(source) ? source.get(key) : source[key];
 
-const dedupeRefs = (refs: ReadonlyArray<Entity.EntityRef>): ReadonlyArray<Entity.EntityRef> => {
-  const seen = new Set<string>();
-  return refs.filter((ref) => {
-    const key = Entity.refKey(ref);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
+const dedupeRefs = (refs: ReadonlyArray<Entity.EntityRef>): ReadonlyArray<Entity.EntityRef> =>
+  Arr.dedupeWith(refs, (a, b) => Entity.refKey(a) === Entity.refKey(b));
 
 // ---------------------------------------------------------------------------
 // Policies
@@ -178,43 +178,35 @@ export const policyId = (role: string, permission: PermissionRef): string =>
  * matches its parent's policy through `in` instead of duplicating the grant.
  */
 export const policies = (config: RbacConfig): ReadonlyArray<Policy.DeclarativePolicy> => {
-  const byId = new Map<string, Policy.DeclarativePolicy>();
-  for (const [role, permissions] of entries(config.rolePermissions)) {
-    for (const permission of permissions) {
-      const id = policyId(role, permission);
-      if (byId.has(id)) continue;
-      byId.set(
+  const grants = Arr.flatMap(entries(config.rolePermissions), ([role, permissions]) =>
+    Arr.map(permissions, (permission) => ({ role, permission, id: policyId(role, permission) })),
+  );
+  return Arr.map(
+    Arr.dedupeWith(grants, (a, b) => a.id === b.id),
+    ({ role, permission, id }) =>
+      Policy.permit({
         id,
-        Policy.permit({
-          id,
-          principal: Policy.inScope(roleRef(role)),
-          action:
-            permission.action === "*"
-              ? Policy.any
-              : Policy.eq(Entity.ref(ActionEntityType, permission.action)),
-          resource: permission.resource === "*" ? Policy.any : Policy.isType(permission.resource),
-          description: `role "${role}" may ${formatPermission(permission)}`,
-        }),
-      );
-    }
-  }
-  return [...byId.values()];
+        principal: Policy.inScope(roleRef(role)),
+        action:
+          permission.action === "*"
+            ? Policy.any
+            : Policy.eq(Entity.ref(ActionEntityType, permission.action)),
+        resource: permission.resource === "*" ? Policy.any : Policy.isType(permission.resource),
+        description: `role "${role}" may ${formatPermission(permission)}`,
+      }),
+  );
 };
 
 // ---------------------------------------------------------------------------
 // Entities
 // ---------------------------------------------------------------------------
 
-const roleNames = (config: RbacConfig): ReadonlyArray<string> => {
-  const names = new Set<string>();
-  for (const [, roles] of entries(config.userRoles)) for (const role of roles) names.add(role);
-  for (const [role] of entries(config.rolePermissions)) names.add(role);
-  for (const [role, parents] of entries(config.roleHierarchy ?? {})) {
-    names.add(role);
-    for (const parent of parents) names.add(parent);
-  }
-  return [...names];
-};
+const roleNames = (config: RbacConfig): ReadonlyArray<string> =>
+  Arr.dedupe([
+    ...Arr.flatMap(entries(config.userRoles), ([, roles]) => roles),
+    ...Arr.map(entries(config.rolePermissions), ([role]) => role),
+    ...Arr.flatMap(entries(config.roleHierarchy ?? {}), ([role, parents]) => [role, ...parents]),
+  ]);
 
 /**
  * Project the configuration into entities: one principal per `userRoles` key
@@ -274,33 +266,40 @@ export const entityResolverLayer = (config: RbacConfig): Layer.Layer<EntityResol
  */
 export const model = (config: RbacConfig): AuthorizationModel.Model => {
   const principalType = principalTypeOf(config);
-  const resourceTypes = new Set<string>();
-  const actionResources = new Map<string, Set<string>>();
+  const grants = Arr.flatMap(entries(config.rolePermissions), ([, permissions]) => permissions);
+  const resourcesOf = (scoped: ReadonlyArray<PermissionRef>): Array<string> =>
+    Arr.dedupe(
+      Arr.map(
+        Arr.filter(scoped, ({ resource }) => resource !== "*"),
+        ({ resource }) => resource,
+      ),
+    );
+  const actions = Arr.dedupe(
+    Arr.map(
+      Arr.filter(grants, ({ action }) => action !== "*"),
+      ({ action }) => action,
+    ),
+  );
 
-  for (const [, permissions] of entries(config.rolePermissions)) {
-    for (const { resource, action } of permissions) {
-      if (resource !== "*") resourceTypes.add(resource);
-      if (action === "*") continue;
-      const resources = actionResources.get(action) ?? new Set<string>();
-      if (resource !== "*") resources.add(resource);
-      actionResources.set(action, resources);
-    }
-  }
-
-  const entityDecls: Record<string, AuthorizationModel.EntityTypeDecl> = {
+  const baseEntityDecls: Record<string, AuthorizationModel.EntityTypeDecl> = {
     [principalType]: { memberOf: [RoleEntityType] },
     [RoleEntityType]: { memberOf: [RoleEntityType] },
   };
-  for (const resource of resourceTypes) {
-    entityDecls[resource] ??= {};
-  }
+  const entityDecls = Arr.reduce(resourcesOf(grants), baseEntityDecls, (decls, resource) => {
+    decls[resource] ??= {};
+    return decls;
+  });
 
-  const actionDecls: Record<string, AuthorizationModel.ActionDecl> = {};
-  for (const [action, resources] of actionResources) {
-    actionDecls[action] = {
-      appliesTo: { principal: [principalType], resource: [...resources] },
+  const baseActionDecls: Record<string, AuthorizationModel.ActionDecl> = {};
+  const actionDecls = Arr.reduce(actions, baseActionDecls, (decls, action) => {
+    decls[action] = {
+      appliesTo: {
+        principal: [principalType],
+        resource: resourcesOf(Arr.filter(grants, (grant) => grant.action === action)),
+      },
     };
-  }
+    return decls;
+  });
 
   return { entities: entityDecls, actions: actionDecls };
 };

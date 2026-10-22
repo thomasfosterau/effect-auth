@@ -285,7 +285,8 @@ describe("declarative policies are data", () => {
     });
 
     const encoded = await Effect.runPromise(Schema.encodeEffect(Policy.DeclarativePolicy)(policy));
-    const json = JSON.parse(JSON.stringify(encoded)) as unknown;
+    const Json = Schema.fromJsonString(Schema.Unknown);
+    const json = Schema.decodeUnknownSync(Json)(Schema.encodeSync(Json)(encoded));
     const decoded = await Effect.runPromise(
       Schema.decodeUnknownEffect(Policy.DeclarativePolicy)(json),
     );

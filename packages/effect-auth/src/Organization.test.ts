@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect } from "effect";
+import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
+import { Array as Arr, Context, Crypto, Effect, Order, Result } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   IdentifierStore,
@@ -368,9 +368,8 @@ describe("OrganizationService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("OrganizationError");
     expect(organizations.size).toBe(1);
   });
 
@@ -386,9 +385,8 @@ describe("OrganizationService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("OrganizationError");
     expect(organizations.size).toBe(2);
   });
 
@@ -398,9 +396,8 @@ describe("OrganizationService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("OrganizationError");
     expect(organizations.size).toBe(0);
   });
 
@@ -453,9 +450,8 @@ describe("OrganizationService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("OrganizationError");
   });
 
   it("runs the invitation lifecycle: invite, send email, accept", async () => {
@@ -533,9 +529,8 @@ describe("OrganizationService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("OrganizationError");
     expect(Array.from(invitations.values())[0].status).toBe("pending");
   });
 
@@ -561,9 +556,8 @@ describe("OrganizationService", () => {
     );
 
     expect(result.accept._tag).toBe("Failure");
-    if (result.accept._tag === "Failure") {
-      expect(result.accept.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result.accept));
+    expect(result.accept.failure._tag).toBe("OrganizationError");
     // Expired invitations are excluded from the user's pending list
     expect(result.userInvitations).toHaveLength(0);
   });
@@ -865,7 +859,12 @@ describe("OrganizationService", () => {
     expect(result.engineering.createdAt).toBe(result.engineering.updatedAt);
     expect(result.added.userId).toBe("member-1");
     expect(result.added.teamId).toBe(result.engineering.id);
-    expect(result.listed.map((team) => team.name).sort()).toEqual(["Design", "Engineering"]);
+    expect(
+      Arr.sort(
+        result.listed.map((team) => team.name),
+        Order.String,
+      ),
+    ).toEqual(["Design", "Engineering"]);
     expect(result.teamMembership).toHaveLength(1);
     expect(result.teamMembership[0].userId).toBe("member-1");
     expect(result.forMember.map((team) => team.id)).toEqual([result.engineering.id]);
@@ -930,9 +929,8 @@ describe("OrganizationService", () => {
     );
 
     expect(result.memberCreates._tag).toBe("Failure");
-    if (result.memberCreates._tag === "Failure") {
-      expect(result.memberCreates.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result.memberCreates));
+    expect(result.memberCreates.failure._tag).toBe("OrganizationError");
     expect(result.adminCreates.name).toBe("Support");
     expect(result.memberUpdates._tag).toBe("Failure");
     expect(result.memberAdds._tag).toBe("Failure");
@@ -980,9 +978,8 @@ describe("OrganizationService", () => {
     );
 
     expect(result.outsider._tag).toBe("Failure");
-    if (result.outsider._tag === "Failure") {
-      expect(result.outsider.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result.outsider));
+    expect(result.outsider.failure._tag).toBe("OrganizationError");
     expect(result.otherOrgMember._tag).toBe("Failure");
     expect(result.duplicate._tag).toBe("Failure");
     expect(result.missingTeam._tag).toBe("Failure");
@@ -1078,9 +1075,8 @@ describe("OrganizationService", () => {
     );
 
     expect(result.update._tag).toBe("Failure");
-    if (result.update._tag === "Failure") {
-      expect(result.update.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result.update));
+    expect(result.update.failure._tag).toBe("OrganizationError");
     expect(result.remove._tag).toBe("Failure");
     expect(result.list._tag).toBe("Failure");
   });
@@ -1267,9 +1263,8 @@ describe("OrganizationService", () => {
     );
 
     expect(result.redefine._tag).toBe("Failure");
-    if (result.redefine._tag === "Failure") {
-      expect(result.redefine.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result.redefine));
+    expect(result.redefine.failure._tag).toBe("OrganizationError");
     expect(result.remove._tag).toBe("Failure");
     expect(result.stillManagesRoles).toBe(true);
     expect(result.listed).toHaveLength(0);
@@ -1472,9 +1467,8 @@ describe("OrganizationService - member status", () => {
     expect(result.byAdmin._tag).toBe("Failure");
     expect(result.first.status).toBe("inactive");
     expect(result.last._tag).toBe("Failure");
-    if (result.last._tag === "Failure") {
-      expect(result.last.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result.last));
+    expect(result.last.failure._tag).toBe("OrganizationError");
     expect(result.demoteLast._tag).toBe("Failure");
   });
 
@@ -1587,9 +1581,8 @@ describe("OrganizationService - default role", () => {
 
     expect(result.byAdmin._tag).toBe("Failure");
     expect(result.undefinedRole._tag).toBe("Failure");
-    if (result.undefinedRole._tag === "Failure") {
-      expect(result.undefinedRole.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result.undefinedRole));
+    expect(result.undefinedRole.failure._tag).toBe("OrganizationError");
     expect(result.staticRole.defaultRole).toBe("admin");
   });
 });
@@ -1684,9 +1677,8 @@ describe("OrganizationService - invitations", () => {
     );
 
     expect(result.unknown._tag).toBe("Failure");
-    if (result.unknown._tag === "Failure") {
-      expect(result.unknown.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result.unknown));
+    expect(result.unknown.failure._tag).toBe("OrganizationError");
     expect(result.resendAccepted._tag).toBe("Failure");
     expect(result.resendCanceled._tag).toBe("Failure");
     expect(result.byPlainMember._tag).toBe("Failure");
@@ -1784,10 +1776,12 @@ describe("OrganizationService - domains", () => {
     );
 
     expect(result.reclaimed.organizationId).toBeTypeOf("string");
-    expect(result.keptDomains.map((domain) => domain.domain).sort()).toEqual([
-      "acme.test",
-      "keep.test",
-    ]);
+    expect(
+      Arr.sort(
+        result.keptDomains.map((domain) => domain.domain),
+        Order.String,
+      ),
+    ).toEqual(["acme.test", "keep.test"]);
   });
 
   it("verifies a DNS claim through the DomainVerifier, and records a failed check", async () => {
@@ -1810,9 +1804,8 @@ describe("OrganizationService - domains", () => {
     );
 
     expect(result.withoutVerifier._tag).toBe("Failure");
-    if (result.withoutVerifier._tag === "Failure") {
-      expect(result.withoutVerifier.failure._tag).toBe("OrganizationError");
-    }
+    assert(Result.isFailure(result.withoutVerifier));
+    expect(result.withoutVerifier.failure._tag).toBe("OrganizationError");
 
     // Same claim, now with a verifier that does not find the record yet.
     const failed = await runServiceWithVerifier({}, stubDomainVerifier([], seen), (service) =>

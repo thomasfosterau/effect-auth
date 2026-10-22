@@ -40,7 +40,7 @@
  *
  * @module policy
  */
-import { Data, Effect, Schema } from "effect";
+import { Array as Arr, Data, Effect, Match, Predicate, Schema } from "effect";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import type * as Ladder from "./Ladder.ts";
@@ -112,17 +112,13 @@ export const isType = (entityType: string): Scope => ({ _tag: "is", entityType }
  * `System::"…"` reference, or `is("System")`. Only such a scope lets a permit
  * reach a system principal.
  */
-const namesSystem = (scope: Scope): boolean => {
-  switch (scope._tag) {
-    case "any":
-      return false;
-    case "eq":
-    case "in":
-      return scope.ref.type === Entity.systemType;
-    case "is":
-      return scope.entityType === Entity.systemType;
-  }
-};
+const namesSystem = (scope: Scope): boolean =>
+  Match.valueTags(scope, {
+    any: () => false,
+    eq: ({ ref }) => ref.type === Entity.systemType,
+    in: ({ ref }) => ref.type === Entity.systemType,
+    is: ({ entityType }) => entityType === Entity.systemType,
+  });
 
 /**
  * Whether a permit is barred from a request's principal: the principal is a
@@ -137,18 +133,13 @@ const permitBarredFromSystem = (
   principal.type === Entity.systemType &&
   (principalScope === undefined || !namesSystem(principalScope));
 
-const scopeMatches = (slice: Entity.EntitySlice, scope: Scope, ref: Entity.EntityRef): boolean => {
-  switch (scope._tag) {
-    case "any":
-      return true;
-    case "eq":
-      return Entity.refEquals(scope.ref, ref);
-    case "in":
-      return Entity.entityIn(slice, ref, scope.ref);
-    case "is":
-      return ref.type === scope.entityType;
-  }
-};
+const scopeMatches = (slice: Entity.EntitySlice, scope: Scope, ref: Entity.EntityRef): boolean =>
+  Match.valueTags(scope, {
+    any: () => true,
+    eq: (scoped) => Entity.refEquals(scoped.ref, ref),
+    in: (scoped) => Entity.entityIn(slice, ref, scoped.ref),
+    is: (scoped) => ref.type === scoped.entityType,
+  });
 
 // ---------------------------------------------------------------------------
 // Policies
@@ -354,7 +345,7 @@ export const roleAtLeast = <Rung extends string>(
   },
 ): DeclarativePolicy => {
   const ladderCondition = roleAtLeastCondition(ladder, min, options);
-  const name = typeof min === "string" ? min : min.name;
+  const name = Predicate.isString(min) ? min : min.name;
   return permit({
     id: options?.id ?? `ladder:${name}`,
     ...(options?.principal !== undefined ? { principal: options.principal } : {}),
@@ -412,13 +403,13 @@ const combineOutcomes = (outcomes: ReadonlyArray<PolicyOutcome>): Decision => {
     (outcome) =>
       outcome.effect === "forbid" && (outcome.result === "matched" || outcome.result === "error"),
   );
-  if (denying.length > 0) {
+  if (Arr.isReadonlyArrayNonEmpty(denying)) {
     return { allowed: false, reason: "forbid", determining: denying, outcomes };
   }
   const permitting = outcomes.filter(
     (outcome) => outcome.effect === "permit" && outcome.result === "matched",
   );
-  if (permitting.length > 0) {
+  if (Arr.isReadonlyArrayNonEmpty(permitting)) {
     return { allowed: true, reason: "permit", determining: permitting, outcomes };
   }
   return { allowed: false, reason: "default-deny", determining: [], outcomes };
@@ -481,35 +472,39 @@ export const decide = <E, R>(
   req: PolicyRequest,
   slice: Entity.EntitySlice = Entity.emptySlice,
 ): Effect.Effect<Decision, never, R> =>
-  Effect.forEach(policies, (policy): Effect.Effect<PolicyOutcome, never, R> => {
-    if (policy._tag === "DeclarativePolicy") {
-      return Effect.succeed(evaluateDeclarative(slice, req, policy));
-    }
-    // A custom permit cannot name a system principal in a way the kernel can
-    // see, so it never reaches one; its predicate is not run for it.
-    if (policy.effect === "permit" && permitBarredFromSystem(req.principal, undefined)) {
-      return Effect.succeed<PolicyOutcome>({
-        policyId: policy.id,
-        effect: policy.effect,
-        result: "not-matched",
-      });
-    }
-    return policy.predicate(req, slice).pipe(
-      Effect.map((matched): PolicyOutcome => ({
-        policyId: policy.id,
-        effect: policy.effect,
-        result: matched ? "matched" : "not-matched",
-      })),
-      Effect.catch((error) =>
-        Effect.succeed<PolicyOutcome>({
+  Effect.forEach(
+    policies,
+    (policy): Effect.Effect<PolicyOutcome, never, R> => {
+      if (Predicate.isTagged(policy, "DeclarativePolicy")) {
+        return Effect.succeed(evaluateDeclarative(slice, req, policy));
+      }
+      // A custom permit cannot name a system principal in a way the kernel can
+      // see, so it never reaches one; its predicate is not run for it.
+      if (policy.effect === "permit" && permitBarredFromSystem(req.principal, undefined)) {
+        return Effect.succeed<PolicyOutcome>({
           policyId: policy.id,
           effect: policy.effect,
-          result: "error",
-          error: String(error),
-        }),
-      ),
-    );
-  }).pipe(Effect.map(combineOutcomes));
+          result: "not-matched",
+        });
+      }
+      return policy.predicate(req, slice).pipe(
+        Effect.map((matched): PolicyOutcome => ({
+          policyId: policy.id,
+          effect: policy.effect,
+          result: matched ? "matched" : "not-matched",
+        })),
+        Effect.catch((error) =>
+          Effect.succeed<PolicyOutcome>({
+            policyId: policy.id,
+            effect: policy.effect,
+            result: "error",
+            error: String(error),
+          }),
+        ),
+      );
+    },
+    { concurrency: 1 },
+  ).pipe(Effect.map(combineOutcomes));
 
 /** Decide and return only whether the request is allowed. */
 export const check = <E, R>(
