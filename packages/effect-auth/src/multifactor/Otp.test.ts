@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vite-plus/test";
-import { Effect } from "effect";
+import { assert, describe, it, expect } from "vite-plus/test";
+import { Effect, Predicate, Result } from "effect";
 import * as Otp from "./Otp.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 
@@ -21,7 +21,7 @@ describe("OTP Secret Generation", () => {
   it("should generate base32-encoded secret", async () => {
     const secret = await Effect.runPromise(Otp.generateBase32Secret(PlatformCrypto.instance, 20));
 
-    expect(typeof secret).toBe("string");
+    expect(Predicate.isString(secret)).toBe(true);
     expect(secret.length).toBeGreaterThan(0);
     // Base32 should only contain A-Z and 2-7
     expect(/^[A-Z2-7]+$/.test(secret)).toBe(true);
@@ -371,10 +371,9 @@ describe("Input Validation and Edge Cases", () => {
       );
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-        expect(result.failure.message).toContain("at least 16 bytes");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
+      expect(result.failure.message).toContain("at least 16 bytes");
     });
 
     it("should reject negative length", async () => {
@@ -383,9 +382,8 @@ describe("Input Validation and Edge Cases", () => {
       );
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
     });
 
     it("should reject non-integer length", async () => {
@@ -394,9 +392,8 @@ describe("Input Validation and Edge Cases", () => {
       );
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
     });
   });
 
@@ -405,19 +402,17 @@ describe("Input Validation and Edge Cases", () => {
       const result = await Effect.runPromise(Effect.result(Otp.generateHotp(validSecret, -1)));
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-        expect(result.failure.message).toContain("non-negative");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
+      expect(result.failure.message).toContain("non-negative");
     });
 
     it("should reject non-integer counter", async () => {
       const result = await Effect.runPromise(Effect.result(Otp.generateHotp(validSecret, 1.5)));
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
     });
 
     it("should reject digits less than 6", async () => {
@@ -426,10 +421,9 @@ describe("Input Validation and Edge Cases", () => {
       );
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-        expect(result.failure.message).toContain("between 6 and 8");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
+      expect(result.failure.message).toContain("between 6 and 8");
     });
 
     it("should reject digits greater than 8", async () => {
@@ -438,30 +432,27 @@ describe("Input Validation and Edge Cases", () => {
       );
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-        expect(result.failure.message).toContain("between 6 and 8");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
+      expect(result.failure.message).toContain("between 6 and 8");
     });
 
     it("should reject empty string secret", async () => {
       const result = await Effect.runPromise(Effect.result(Otp.generateHotp("", 0)));
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-        expect(result.failure.message).toContain("non-empty");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
+      expect(result.failure.message).toContain("non-empty");
     });
 
     it("should reject empty buffer secret", async () => {
       const result = await Effect.runPromise(Effect.result(Otp.generateHotp(Buffer.from([]), 0)));
 
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect(result.failure._tag).toBe("HashingError");
-        expect(result.failure.message).toContain("cannot be empty");
-      }
+      assert(Result.isFailure(result));
+      expect(result.failure._tag).toBe("HashingError");
+      expect(result.failure.message).toContain("cannot be empty");
     });
   });
 
@@ -547,12 +538,20 @@ describe("Input Validation and Edge Cases", () => {
     });
 
     it("should reject non-string secret", () => {
+      // `generateOtpUri` as a JavaScript caller sees it: nothing checks that
+      // `secret` is a string. Method parameters are bivariant, so the module
+      // itself satisfies this wider signature without a cast.
+      const untyped: {
+        generateOtpUri(
+          params: Omit<Otp.OtpUriParams, "secret"> & { readonly secret: string | number },
+        ): string;
+      } = Otp;
       expect(() => {
-        Otp.generateOtpUri({
+        untyped.generateOtpUri({
           type: "totp",
           label: "test@example.com",
           issuer: "Test",
-          secret: 123 as any,
+          secret: 123,
         });
       }).toThrow("must be a string");
     });

@@ -5,7 +5,7 @@
  * Never published (`tsconfig.json` excludes this file; the rest of `src/testing/`
  * is the public `./testing` subpath).
  */
-import { Crypto, Effect } from "effect";
+import { Array as Arr, Crypto, Effect, Predicate } from "effect";
 import { vi } from "vite-plus/test";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 
@@ -18,9 +18,9 @@ export const observable = (
         readonly failure: { readonly _tag: string; readonly message: string };
       },
 ) =>
-  result._tag === "Success"
-    ? { _tag: "Success" }
-    : { _tag: "Failure", error: result.failure._tag, message: result.failure.message };
+  Predicate.isTagged(result, "Failure")
+    ? { _tag: "Failure", error: result.failure._tag, message: result.failure.message }
+    : { _tag: "Success" };
 
 /**
  * A deterministic `Crypto` whose every random byte is 0. Every random integer
@@ -73,16 +73,22 @@ export const runVerifySequence = <E extends { readonly _tag: string; readonly me
       yield* Effect.orDie(options.send);
     }
     const record = Effect.sync(options.record);
-    const steps: Array<{ readonly answer: unknown; readonly record: RecordState | null }> = [
-      { answer: "sent", record: yield* record },
-    ];
+    const sent: { readonly answer: unknown; readonly record: RecordState | null } = {
+      answer: "sent",
+      record: yield* record,
+    };
     if (sequence === "expired code") {
       yield* Effect.sync(() => vi.setSystemTime(Date.now() + options.expiresIn + 1));
     }
     const tries = sequence === "wrong codes" ? options.maxAttempts + 1 : 2;
-    for (let i = 0; i < tries; i++) {
-      const result = yield* Effect.result(options.verify);
-      steps.push({ answer: observable(result), record: yield* record });
-    }
-    return steps;
+    const attempts = yield* Effect.forEach(
+      Arr.makeBy(tries, () => options.verify),
+      (verify) =>
+        Effect.gen(function* () {
+          const result = yield* Effect.result(verify);
+          return { answer: observable(result), record: yield* record };
+        }),
+      { concurrency: 1 },
+    );
+    return [sent, ...attempts];
   });

@@ -3,7 +3,7 @@
  * Following Copenhagen/Oslo guidelines for WebAuthn implementation.
  */
 
-import { Context, Crypto, Effect, Layer } from "effect";
+import { Array as Arr, Context, Crypto, Data, Effect, Layer } from "effect";
 import {
   parseAttestationObject,
   parseClientDataJSON,
@@ -233,11 +233,9 @@ export class CredentialStore extends Context.Service<
  */
 export function base64UrlDecode(str: string): Uint8Array {
   // Convert base64url to base64
-  let base64 = str.replace(/-/g, "+").replace(/_/g, "/");
+  const unpadded = str.replace(/-/g, "+").replace(/_/g, "/");
   // Add padding if needed
-  while (base64.length % 4 !== 0) {
-    base64 += "=";
-  }
+  const base64 = unpadded.padEnd(unpadded.length + ((4 - (unpadded.length % 4)) % 4), "=");
   return new Uint8Array(Buffer.from(base64, "base64"));
 }
 
@@ -397,7 +395,7 @@ export const make = (
             const publicKey = authenticatorData.credential.publicKey;
             const algorithm = publicKey.algorithm();
 
-            if (!(SUPPORTED_COSE_ALGORITHMS as readonly number[]).includes(algorithm)) {
+            if (!Arr.some(SUPPORTED_COSE_ALGORITHMS, (supported) => supported === algorithm)) {
               return yield* new Errors.WebAuthnVerificationError({
                 message: `Unsupported algorithm: ${algorithm}. Supported: ES256 (-7), RS256 (-257), EdDSA (-8).`,
               });
@@ -721,6 +719,11 @@ export class WebAuthnService extends Context.Service<
     Layer.effect(WebAuthnService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
+/** A COSE algorithm outside {@link SUPPORTED_COSE_ALGORITHMS} reached key handling. */
+class UnsupportedAlgorithmError extends Data.TaggedError("UnsupportedAlgorithmError")<{
+  readonly message: string;
+}> {}
+
 const b64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
 
 /**
@@ -729,7 +732,7 @@ const b64url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base6
  * EdDSA credentials share one storage format and one verification path.
  */
 function serializePublicKey(publicKey: COSEPublicKey, algorithm: number): Uint8Array {
-  let jwk: Record<string, unknown>;
+  let jwk: Parameters<typeof Cipher.jwkToSpkiDer>[0];
   if (algorithm === coseAlgorithmES256) {
     const ec2 = publicKey.ec2();
     jwk = {
@@ -749,7 +752,7 @@ function serializePublicKey(publicKey: COSEPublicKey, algorithm: number): Uint8A
     const okp = publicKey.okp();
     jwk = { kty: "OKP", crv: "Ed25519", x: b64url(okp.x) };
   } else {
-    throw new Error(`Unsupported algorithm: ${algorithm}`);
+    throw new UnsupportedAlgorithmError({ message: `Unsupported algorithm: ${algorithm}` });
   }
   return Cipher.jwkToSpkiDer(jwk);
 }
@@ -761,11 +764,7 @@ function bigintToBytes(value: bigint, minLength?: number): Uint8Array {
   const hex = value.toString(16);
   const paddedHex = hex.length % 2 === 0 ? hex : "0" + hex;
   const finalHex = paddedHex.padStart(minLength ? minLength * 2 : 0, "0");
-  const bytes = new Uint8Array(finalHex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(finalHex.substring(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
+  return new Uint8Array(Buffer.from(finalHex, "hex"));
 }
 
 /**
@@ -809,7 +808,7 @@ function verifySignature(
           // Ed25519 hashes internally; the digest algorithm must be null.
           return Cipher.verifyDerSignature(null, publicKeyDer, message, signature);
         }
-        throw new Error(`Unsupported algorithm: ${algorithm}`);
+        throw new UnsupportedAlgorithmError({ message: `Unsupported algorithm: ${algorithm}` });
       },
       catch: (error) =>
         new Errors.WebAuthnVerificationError({

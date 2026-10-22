@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect, Redacted } from "effect";
+import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
+import { Context, Crypto, Effect, Redacted, Result } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService, make as makeSessionService } from "../SessionService.ts";
@@ -258,9 +258,8 @@ describe("MultiFactorService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("MultiFactorError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("MultiFactorError");
     expect(multiFactorRecords.get("user-2fa-2")?.verified).toBe(false);
   });
 
@@ -278,9 +277,8 @@ describe("MultiFactorService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("InvalidCredentialsError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("InvalidCredentialsError");
     expect(multiFactorRecords.size).toBe(0);
   });
 
@@ -310,9 +308,8 @@ describe("MultiFactorService", () => {
     );
 
     expect(wrongPassword._tag).toBe("Failure");
-    if (wrongPassword._tag === "Failure") {
-      expect(wrongPassword.failure._tag).toBe("InvalidCredentialsError");
-    }
+    assert(Result.isFailure(wrongPassword));
+    expect(wrongPassword.failure._tag).toBe("InvalidCredentialsError");
     expect(stillEnabled).toBe(true);
     expect(enabledAfterDisable).toBe(false);
     expect(multiFactorRecords.size).toBe(0);
@@ -372,9 +369,8 @@ describe("MultiFactorService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("MultiFactorError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("MultiFactorError");
     expect(sessions.size).toBe(0);
     // Expired tokens are deleted eagerly
     expect(pendingChallenges.size).toBe(0);
@@ -405,9 +401,8 @@ describe("MultiFactorService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("MultiFactorError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("MultiFactorError");
     // Only the first verification created a session
     expect(sessions.size).toBe(1);
   });
@@ -439,9 +434,8 @@ describe("MultiFactorService", () => {
     );
 
     expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(result.failure._tag).toBe("MultiFactorError");
-    }
+    assert(Result.isFailure(result));
+    expect(result.failure._tag).toBe("MultiFactorError");
     // Only the first challenge produced a session
     expect(sessions.size).toBe(1);
   });
@@ -478,9 +472,8 @@ describe("MultiFactorService", () => {
 
     expect(firstUse.userId).toBe("user-2fa-8");
     expect(reuse._tag).toBe("Failure");
-    if (reuse._tag === "Failure") {
-      expect(reuse.failure._tag).toBe("MultiFactorError");
-    }
+    assert(Result.isFailure(reuse));
+    expect(reuse.failure._tag).toBe("MultiFactorError");
     expect(secondUse.userId).toBe("user-2fa-8");
     expect(sessions.size).toBe(2);
     expect(multiFactorRecords.get("user-2fa-8")?.backupCodes).toHaveLength(8);
@@ -520,9 +513,8 @@ describe("MultiFactorService", () => {
       );
 
     expect(wrongPassword._tag).toBe("Failure");
-    if (wrongPassword._tag === "Failure") {
-      expect(wrongPassword.failure._tag).toBe("InvalidCredentialsError");
-    }
+    assert(Result.isFailure(wrongPassword));
+    expect(wrongPassword.failure._tag).toBe("InvalidCredentialsError");
     expect(newCodes).toHaveLength(4);
     expect(newCodes).not.toEqual(oldCodes);
     expect(oldCodeResult._tag).toBe("Failure");
@@ -550,13 +542,11 @@ describe("MultiFactorService", () => {
     );
 
     expect(withoutRecord._tag).toBe("Failure");
-    if (withoutRecord._tag === "Failure") {
-      expect(withoutRecord.failure._tag).toBe("MultiFactorError");
-    }
+    assert(Result.isFailure(withoutRecord));
+    expect(withoutRecord.failure._tag).toBe("MultiFactorError");
     expect(unverified._tag).toBe("Failure");
-    if (unverified._tag === "Failure") {
-      expect(unverified.failure._tag).toBe("MultiFactorError");
-    }
+    assert(Result.isFailure(unverified));
+    expect(unverified.failure._tag).toBe("MultiFactorError");
     expect(pendingChallenges.size).toBe(0);
   });
 });
