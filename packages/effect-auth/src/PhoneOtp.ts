@@ -30,6 +30,7 @@ import {
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
+import { makeDetachedSend } from "./DeliveryScheduler.ts";
 import { type HookError } from "./Hooks.ts";
 import { SessionService } from "./SessionService.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
@@ -272,6 +273,7 @@ export const make = (
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const crypto = yield* Crypto.Crypto;
+    const detached = yield* makeDetachedSend;
 
     /** Generate a numeric OTP with crypto-secure, unbiased randomness. */
     const generateOtp = (length: number): Effect.Effect<string> =>
@@ -421,6 +423,12 @@ export const make = (
           return;
         }
 
+        // With sign-up disabled, only a known number gets a code, so an inline
+        // send would answer it later, and fail it when the vendor does: the
+        // send goes off the response path (#196).
+        if (hidesAccount(purpose)) {
+          return yield* detached(`phone-otp:${purpose}`, config.sendOtp(phoneNumber, otp, purpose));
+        }
         yield* Effect.catch(config.sendOtp(phoneNumber, otp, purpose), (error) =>
           Effect.fail(
             new PhoneOtpError({ message: `Failed to send OTP to ${phoneNumber}`, cause: error }),

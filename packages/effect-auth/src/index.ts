@@ -24,6 +24,7 @@ export * from "./TokenHash.ts";
 export * from "./Identifier.ts";
 export * from "./Cipher.ts";
 export * from "./Delivery.ts";
+export * from "./DeliveryScheduler.ts";
 export * from "./Messages.ts";
 export * from "./utils.ts";
 

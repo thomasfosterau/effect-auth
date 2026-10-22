@@ -14,6 +14,11 @@
  * parameters (token, OTP code, ...), and renders/sends however it likes —
  * template selection is keyed off `purpose`.
  *
+ * Each derived callback awaits its send, so a failed send fails the flow that
+ * made it. The flows that hide whether an account exists hand their send to
+ * the host's `DeliveryScheduler` instead (see `DeliveryScheduler.ts`), whatever
+ * callback they were given.
+ *
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer, Queue } from "effect"
@@ -40,7 +45,7 @@
  *   yield* send.sendMagicLink("ada@example.com", "magic-token")
  *   yield* send.sendVerificationEmail("ada@example.com", "verify-token")
  *
- *   // Delivery is dispatched off the response path, so read the two messages back.
+ *   // Each callback awaits its send, so both messages are on the outbox.
  *   const messages = [yield* Queue.take(outbox), yield* Queue.take(outbox)]
  *   assert.deepEqual(
  *     messages.find((m) => m.purpose === "magic-link"),
@@ -61,9 +66,8 @@
  *
  * @module delivery
  */
-import { Context, Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
-import * as Obs from "./Observability.ts";
 import type * as Types from "./Types.ts";
 import type { EmailOtpPurpose } from "./email/EmailOtp.ts";
 import type { PhoneOtpPurpose } from "./PhoneOtp.ts";
@@ -109,6 +113,17 @@ export interface SmsMessage {
 // Sender services
 // ---------------------------------------------------------------------------
 
+/** The logging transports' one line per message: recipient and purpose, never `params`. */
+const logUnsent = (
+  channel: "email" | "sms",
+  message: EmailMessage | SmsMessage,
+): Effect.Effect<void> =>
+  Effect.logWarning("[effect-auth] delivery not sent (logging transport)", {
+    channel,
+    to: message.to,
+    purpose: message.purpose,
+  });
+
 /**
  * The single contract an email-delivery adapter implements. Failures are
  * `AuthError` with the underlying provider error as `cause`.
@@ -118,7 +133,17 @@ export class EmailSender extends Context.Service<
   {
     readonly send: (message: EmailMessage) => Effect.Effect<void, Errors.AuthError>;
   }
->()("@effect-auth/EmailSender") {}
+>()("@effect-auth/EmailSender") {
+  /**
+   * A transport that sends nothing and logs each message's recipient and
+   * purpose at warning level (never its `params`, which hold the token or
+   * code). For development only, opted into explicitly: every flow that waits
+   * on a message (a magic link, a code, a reset link) is a lockout behind it.
+   */
+  static readonly logging: Layer.Layer<EmailSender> = Layer.succeed(EmailSender, {
+    send: (message) => logUnsent("email", message),
+  });
+}
 
 /** The single contract an SMS-delivery adapter implements. */
 export class SmsSender extends Context.Service<
@@ -126,45 +151,12 @@ export class SmsSender extends Context.Service<
   {
     readonly send: (message: SmsMessage) => Effect.Effect<void, Errors.AuthError>;
   }
->()("@effect-auth/SmsSender") {}
-
-// ---------------------------------------------------------------------------
-// Off-response-path dispatch
-// ---------------------------------------------------------------------------
-
-/**
- * Dispatch a send on its own detached fiber instead of awaiting it inline.
- *
- * Every delivery flow (verification email, magic link, OTP, ...) sends on
- * only one of its branches, or sends a different message on each. E.g.
- * sign-up's fresh-registration branch mails a verification link, while its
- * duplicate-registration branch mails the optional existing-account notice
- * (and nothing when that is unset). Awaiting the vendor
- * round-trip inline before answering the caller makes that difference in
- * work itself a timing oracle, exactly the asymmetry `EmailPasswordConfig`'s
- * `antiEnumeration` mode closes at the response-body level. `forkDetach`
- * (rather than `forkChild`) is required here: a child fiber is interrupted
- * when its parent — the request's fiber — completes, which for a
- * `Effect.sync`-only test double happens before the fiber is even
- * scheduled; a detached fiber outlives the request and actually finishes
- * the send.
- *
- * The outcome is never surfaced to the caller — a failed send must not fail
- * the flow that triggered it — so it is logged and counted here instead;
- * that log/metric pair is the only place a failed send is observable.
- */
-const dispatch = <E>(purpose: DeliveryPurpose, send: Effect.Effect<void, E>): Effect.Effect<void> =>
-  send.pipe(
-    Effect.tap(() => Obs.recordDeliverySend(purpose, "success")),
-    Effect.tapError((cause) =>
-      Effect.logError("[effect-auth] delivery send failed", { purpose, cause }).pipe(
-        Effect.andThen(Obs.recordDeliverySend(purpose, "failure")),
-      ),
-    ),
-    Effect.ignore,
-    Effect.forkDetach,
-    Effect.asVoid,
-  );
+>()("@effect-auth/SmsSender") {
+  /** The SMS counterpart of {@link EmailSender.logging}: logs, sends nothing. */
+  static readonly logging: Layer.Layer<SmsSender> = Layer.succeed(SmsSender, {
+    send: (message) => logUnsent("sms", message),
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Per-feature callback derivation
@@ -182,10 +174,7 @@ export const emailCallbacks = (
 ) => ({
   /** `EmailVerificationConfig.sendEmail` */
   sendVerificationEmail: (to: string, token: string) =>
-    dispatch(
-      "email-verification",
-      sender.send({ to, purpose: "email-verification", params: { token } }),
-    ),
+    sender.send({ to, purpose: "email-verification", params: { token } }),
 
   /**
    * `AuthLifecycleConfig.sendExistingAccountNotice`: tells an address's holder
@@ -193,25 +182,19 @@ export const emailCallbacks = (
    * is empty.
    */
   sendExistingAccountNotice: (to: string) =>
-    dispatch("existing-account", sender.send({ to, purpose: "existing-account", params: {} })),
+    sender.send({ to, purpose: "existing-account", params: {} }),
 
   /** `MagicLinkConfig.sendMagicLink` */
   sendMagicLink: (email: string, token: string) =>
-    dispatch("magic-link", sender.send({ to: email, purpose: "magic-link", params: { token } })),
+    sender.send({ to: email, purpose: "magic-link", params: { token } }),
 
   /** `EmailOtpConfig.sendVerificationOtp` */
   sendVerificationOtp: (email: string, otp: string, purpose: EmailOtpPurpose) =>
-    dispatch(
-      `email-otp:${purpose}`,
-      sender.send({ to: email, purpose: `email-otp:${purpose}`, params: { otp } }),
-    ),
+    sender.send({ to: email, purpose: `email-otp:${purpose}`, params: { otp } }),
 
   /** `PasswordResetConfig.sendResetPassword` */
   sendResetPassword: (email: string, token: string) =>
-    dispatch(
-      "password-reset",
-      sender.send({ to: email, purpose: "password-reset", params: { token } }),
-    ),
+    sender.send({ to: email, purpose: "password-reset", params: { token } }),
 
   /** `AccountManagementConfig.sendChangeEmailVerification` (sent to the NEW address) */
   sendChangeEmailVerification: (params: {
@@ -219,14 +202,11 @@ export const emailCallbacks = (
     readonly newEmail: string;
     readonly token: string;
   }) =>
-    dispatch(
-      "change-email",
-      sender.send({
-        to: params.newEmail,
-        purpose: "change-email",
-        params: { token: params.token },
-      }),
-    ),
+    sender.send({
+      to: params.newEmail,
+      purpose: "change-email",
+      params: { token: params.token },
+    }),
 
   /** `AccountManagementConfig.sendDeleteAccountVerification` */
   sendDeleteAccountVerification: (params: {
@@ -238,14 +218,11 @@ export const emailCallbacks = (
       ? Effect.fail(
           new Errors.AuthError({ message: "User has no email for account-deletion delivery" }),
         )
-      : dispatch(
-          "delete-account",
-          sender.send({
-            to: params.email,
-            purpose: "delete-account",
-            params: { token: params.token },
-          }),
-        ),
+      : sender.send({
+          to: params.email,
+          purpose: "delete-account",
+          params: { token: params.token },
+        }),
 
   /** `OtpSecondFactorConfig.sendOtp`, delivering the code to the user's email identifier. */
   sendSecondFactorOtp: (user: Types.User, otp: string) =>
@@ -254,10 +231,7 @@ export const emailCallbacks = (
       if (email === null) {
         return yield* new Errors.AuthError({ message: "User has no email for second-factor OTP" });
       }
-      yield* dispatch(
-        "second-factor-otp",
-        sender.send({ to: email, purpose: "second-factor-otp", params: { otp } }),
-      );
+      yield* sender.send({ to: email, purpose: "second-factor-otp", params: { otp } });
     }),
 });
 
@@ -271,10 +245,7 @@ export const smsCallbacks = (
 ) => ({
   /** `PhoneOtpConfig.sendOtp` */
   sendPhoneOtp: (phoneNumber: string, otp: string, purpose: PhoneOtpPurpose) =>
-    dispatch(
-      `phone-otp:${purpose}`,
-      sender.send({ to: phoneNumber, purpose: `phone-otp:${purpose}`, params: { otp } }),
-    ),
+    sender.send({ to: phoneNumber, purpose: `phone-otp:${purpose}`, params: { otp } }),
 
   /**
    * `OtpSecondFactorConfig.sendOtp`, delivering the code to the user's
@@ -289,9 +260,6 @@ export const smsCallbacks = (
           message: "User has no phone number for second-factor OTP",
         });
       }
-      yield* dispatch(
-        "second-factor-otp",
-        sender.send({ to: phoneNumber, purpose: "second-factor-otp", params: { otp } }),
-      );
+      yield* sender.send({ to: phoneNumber, purpose: "second-factor-otp", params: { otp } });
     }),
 });

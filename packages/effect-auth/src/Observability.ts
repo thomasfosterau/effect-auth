@@ -142,10 +142,10 @@ export const oidcTokenRequests = Metric.counter("effect_auth_oidc_token_requests
 });
 
 /**
- * Delivery sends dispatched off the response path (see `Delivery.ts`).
+ * Delivery sends dispatched off the response path (see `DeliveryScheduler.ts`).
  * Attributes: `{ purpose, outcome }`. Since these sends are never awaited by
- * their caller, this counter — together with the error log emitted
- * alongside it — is the only way a failed send is observed.
+ * their caller, this counter, the error log emitted alongside it and the
+ * `afterDeliveryFailure` hook are how a failed send is observed.
  */
 export const deliverySends = Metric.counter("effect_auth_delivery_sends_total", {
   description: "Delivery sends dispatched off the response path — tagged by purpose and outcome",

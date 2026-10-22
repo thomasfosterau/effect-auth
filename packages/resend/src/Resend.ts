@@ -9,7 +9,7 @@
  *
  * @module resend/resend
  */
-import { Array as Arr, Data, Effect, Layer, Match, Redacted, Schema } from "effect";
+import { Array as Arr, Config, Data, Effect, Layer, Match, Redacted, Schema } from "effect";
 import { AuthError, EmailSender, type EmailMessage } from "@thomasfosterau/effect-auth";
 
 // ---------------------------------------------------------------------------
@@ -200,3 +200,45 @@ export const resendEmailSender = (config: ResendEmailSenderConfig): typeof Email
  */
 export const layer = (config: ResendEmailSenderConfig): Layer.Layer<EmailSender> =>
   Layer.succeed(EmailSender, resendEmailSender(config));
+
+/** Configuration for {@link layerConfig}: {@link ResendEmailSenderConfig} with the key read from `Config`. */
+export interface ResendLayerConfig extends Omit<ResendEmailSenderConfig, "apiKey"> {
+  /**
+   * Where the API key comes from. Defaults to the `RESEND_API_KEY` variable,
+   * which must be set and non-empty.
+   */
+  readonly apiKey?: Config.Config<Redacted.Redacted<string>> | undefined;
+}
+
+/** `RESEND_API_KEY`, required and non-empty. */
+const defaultApiKey: Config.Config<Redacted.Redacted<string>> = Config.schema(
+  Schema.Redacted(Schema.NonEmptyString),
+  "RESEND_API_KEY",
+);
+
+/**
+ * A `Layer` providing {@link EmailSender} backed by {@link resendEmailSender},
+ * with the API key read from `Config` (`RESEND_API_KEY` by default).
+ *
+ * A missing or empty key fails the layer's construction with a `ConfigError`,
+ * so the application fails at boot rather than dropping mail: a silently
+ * unsent magic link, code or reset link is a lockout. There is no no-op
+ * fallback; for development without a key, provide core's
+ * `EmailSender.logging` instead, explicitly.
+ *
+ * @example
+ * ```ts
+ * import { layerConfig } from "@thomasfosterau/effect-auth-resend";
+ *
+ * // Fails at boot when RESEND_API_KEY is unset or empty.
+ * const EmailLayer = layerConfig({ from: "App <noreply@example.com>" });
+ * ```
+ */
+export const layerConfig = ({
+  apiKey = defaultApiKey,
+  ...config
+}: ResendLayerConfig): Layer.Layer<EmailSender, Config.ConfigError> =>
+  Layer.effect(
+    EmailSender,
+    Effect.map(apiKey, (key) => resendEmailSender({ ...config, apiKey: key })),
+  );

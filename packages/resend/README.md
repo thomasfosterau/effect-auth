@@ -21,17 +21,12 @@ every feature's `sendEmail`/`sendMagicLink`/`sendVerificationOtp`/... callback
 is derived in one line:
 
 ```ts
-import { Config, Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { EmailSender, emailCallbacks, IdentifierStore } from "@thomasfosterau/effect-auth";
-import { layer as resendLayer } from "@thomasfosterau/effect-auth-resend";
+import { layerConfig } from "@thomasfosterau/effect-auth-resend";
 
-// Resolve the secret through Config, then build the layer from the resolved config.
-const EmailLayer = Layer.unwrap(
-  Effect.gen(function* () {
-    const apiKey = yield* Config.Redacted("RESEND_API_KEY");
-    return resendLayer({ apiKey, from: "App <noreply@example.com>" });
-  }),
-);
+// Reads RESEND_API_KEY; the layer fails to build when it is missing or empty.
+const EmailLayer = layerConfig({ from: "App <noreply@example.com>" });
 
 const program = Effect.gen(function* () {
   const sender = yield* EmailSender; // provided by EmailLayer
@@ -122,6 +117,10 @@ resendEmailSender({
 });
 ```
 
+## A missing API key
+
+A missing key fails at boot, not with a silently dropped message. `layerConfig` reads `RESEND_API_KEY` (or the `Config` you pass as `apiKey`), and a missing or empty value fails the layer's construction with a `ConfigError`, so the application never starts without a key. There is no no-op fallback, because a dropped magic link, code or reset link locks the user out. For local development without a key, provide core's `EmailSender.logging` in place of this layer. It logs each message's recipient and purpose and sends nothing, and you have to opt into it explicitly. `layer(config)` takes the key as a value, and you are responsible for not passing an empty one.
+
 ## Errors
 
 Every failure — network error or a non-2xx response — surfaces as an
@@ -132,6 +131,7 @@ key is never included in any error.
 
 - `resendEmailSender(config)` — build the `EmailSender` service directly.
 - `layer(config)` — the same, as a `Layer<EmailSender>`.
+- `layerConfig(config)` — a `Layer<EmailSender, ConfigError>` that reads the key from `Config` (`RESEND_API_KEY` by default) and fails to build when it is missing or empty (`ResendLayerConfig`).
 - `defaultRender(message)` — the built-in renderer, exported for reuse/testing.
 - `ResendEmailSenderConfig`, `RenderedEmail` — config and render-result types.
 

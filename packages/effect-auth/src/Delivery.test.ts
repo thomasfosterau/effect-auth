@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Metric } from "effect";
+import { Effect, Layer, Logger, Schema } from "effect";
 import {
   EmailSender,
   SmsSender,
@@ -9,7 +9,6 @@ import {
   type SmsMessage,
 } from "./Delivery.ts";
 import { AuthError } from "./Errors.ts";
-import * as Obs from "./Observability.ts";
 import {
   makeIdentifier,
   memoryIdentifierStore,
@@ -54,19 +53,6 @@ const failingEmailSender: typeof EmailSender.Service = {
   send: () => Effect.fail(new AuthError({ message: "provider down" })),
 };
 
-/**
- * Every send in `emailCallbacks`/`smsCallbacks` now runs on its own detached
- * fiber (see `dispatch` in `Delivery.ts`) instead of being awaited inline,
- * so the callback's own promise settles before the send necessarily has.
- * Give the scheduler a few real turns to run the forked fiber before
- * asserting on its side effects.
- */
-const flushDispatched = async (turns = 10): Promise<void> => {
-  for (let i = 0; i < turns; i++) {
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-};
-
 describe("emailCallbacks", () => {
   it("routes every email flow through the sender with stable purposes", async () => {
     const { sent, sender } = captureEmailSender();
@@ -91,8 +77,6 @@ describe("emailCallbacks", () => {
     );
     await Effect.runPromise(cb.sendSecondFactorOtp(user(), "654321"));
     await Effect.runPromise(cb.sendExistingAccountNotice("e@example.com"));
-
-    await flushDispatched();
 
     expect(sent).toEqual([
       { to: "a@example.com", purpose: "email-verification", params: { token: "tok-1" } },
@@ -122,43 +106,16 @@ describe("emailCallbacks", () => {
     expect(deleteError).toBeInstanceOf(AuthError);
     expect(deleteError.message).toMatch(/no email/);
 
-    await flushDispatched();
     expect(sent).toEqual([]);
   });
 
-  it("does not await the send — the caller returns even if the send never resolves", async () => {
-    const neverSender: typeof EmailSender.Service = { send: () => Effect.never };
-    const cb = emailCallbacks(neverSender, identifierStoreWith());
-
-    // If the send were awaited inline (the pre-fix behaviour), this would
-    // hang forever. Racing against a short timeout proves it doesn't.
-    const outcome = await Promise.race([
-      Effect.runPromise(cb.sendVerificationEmail("a@example.com", "t")).then(
-        () => "resolved" as const,
-      ),
-      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 250)),
-    ]);
-
-    expect(outcome).toBe("resolved");
-  });
-
-  it("swallows sender failures instead of surfacing them to the caller, but still counts them", async () => {
+  it("awaits the send, so a failed send fails the caller", async () => {
     const cb = emailCallbacks(failingEmailSender, identifierStoreWith());
-    const failureMetric = Metric.withAttributes(Obs.deliverySends, {
-      purpose: "email-verification",
-      outcome: "failure",
-    });
-    const before = await Effect.runPromise(Metric.value(failureMetric));
 
-    // A send that fails must not fail the flow that triggered it.
-    const outcome = await Effect.runPromise(cb.sendVerificationEmail("a@example.com", "t"));
-    expect(outcome).toBeUndefined();
+    const error = await Effect.runPromise(Effect.flip(cb.sendMagicLink("a@example.com", "t")));
 
-    await flushDispatched();
-
-    // ...but it must still be observable somewhere.
-    const after = await Effect.runPromise(Metric.value(failureMetric));
-    expect(after.count).toBe(before.count + 1);
+    expect(error).toBeInstanceOf(AuthError);
+    expect(error.message).toBe("provider down");
   });
 });
 
@@ -173,8 +130,6 @@ describe("smsCallbacks", () => {
     await Effect.runPromise(cb.sendPhoneOtp("+15551234567", "111222", "sign-in"));
     await Effect.runPromise(cb.sendSecondFactorOtp(user(), "333444"));
 
-    await flushDispatched();
-
     expect(sent).toEqual([
       { to: "+15551234567", purpose: "phone-otp:sign-in", params: { otp: "111222" } },
       { to: "+15559876543", purpose: "second-factor-otp", params: { otp: "333444" } },
@@ -188,5 +143,39 @@ describe("smsCallbacks", () => {
     const error = await Effect.runPromise(Effect.flip(cb.sendSecondFactorOtp(user(), "1")));
     expect(error).toBeInstanceOf(AuthError);
     expect(error.message).toMatch(/no phone number/);
+  });
+});
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+describe("logging transports", () => {
+  it("send nothing and log the recipient and purpose, never the params", async () => {
+    const lines: unknown[] = [];
+    const capture = Logger.layer([Logger.make(({ message }) => void lines.push(message))]);
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const email = yield* EmailSender;
+        const sms = yield* SmsSender;
+        yield* email.send({
+          to: "a@example.com",
+          purpose: "magic-link",
+          params: { token: "secret-token" },
+        });
+        yield* sms.send({
+          to: "+61400000000",
+          purpose: "phone-otp:sign-in",
+          params: { otp: "123456" },
+        });
+      }).pipe(Effect.provide(Layer.mergeAll(EmailSender.logging, SmsSender.logging, capture))),
+    );
+
+    const logged = encodeJson(lines);
+    expect(lines).toHaveLength(2);
+    expect(logged).toContain("a@example.com");
+    expect(logged).toContain("magic-link");
+    expect(logged).toContain("phone-otp:sign-in");
+    expect(logged).not.toContain("secret-token");
+    expect(logged).not.toContain("123456");
   });
 });

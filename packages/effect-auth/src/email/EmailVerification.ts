@@ -4,6 +4,7 @@
 
 import { Context, Crypto, Effect, Layer } from "effect";
 import { AuthError, EmailVerificationError, type RateLimitError } from "../Errors.ts";
+import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 
@@ -61,6 +62,17 @@ export class EmailVerificationStore extends Context.Service<
   }
 >()("@effect-auth/EmailVerificationStore") {}
 
+/** Options for {@link EmailVerificationService} `createVerification` and `resendVerification`. */
+export interface CreateVerificationOptions {
+  /**
+   * Hand the send to the host's `DeliveryScheduler` instead of awaiting it, so
+   * a failed send does not fail the call. Sign-up sets it: under
+   * `antiEnumeration` an address another user holds is answered without this
+   * send, so an inline one would make a fresh sign-up slower than a duplicate.
+   */
+  readonly offResponsePath?: boolean | undefined;
+}
+
 /**
  * Email verification service
  */
@@ -70,6 +82,7 @@ export class EmailVerificationService extends Context.Service<
     readonly createVerification: (
       userId: string,
       email: string,
+      options?: CreateVerificationOptions | undefined,
     ) => Effect.Effect<
       { token: string; expiresAt: number },
       AuthError | EmailVerificationError | HookError
@@ -111,6 +124,7 @@ export class EmailVerificationService extends Context.Service<
     readonly resendVerification: (
       userId: string,
       email: string,
+      options?: CreateVerificationOptions | undefined,
     ) => Effect.Effect<
       { token: string; expiresAt: number },
       AuthError | RateLimitError | EmailVerificationError | HookError
@@ -147,10 +161,12 @@ export const make = (
     const store = yield* EmailVerificationStore;
     const hooks = yield* Hooks;
     const crypto = yield* Crypto.Crypto;
+    const detached = yield* makeDetachedSend;
 
     const createVerification = Effect.fn("EmailVerificationService.createVerification")(function* (
       rawUserId: string,
       rawEmail: string,
+      options?: CreateVerificationOptions,
     ) {
       const { userId, email } = yield* hooks.beforeCreateVerification({
         userId: rawUserId,
@@ -171,14 +187,18 @@ export const make = (
       yield* store.create(verification);
 
       // Send verification email with the raw token.
-      yield* Effect.catch(config.sendEmail(email, rawToken), (error) =>
-        Effect.fail(
-          new EmailVerificationError({
-            message: `Failed to send verification email to ${email}`,
-            cause: error,
-          }),
-        ),
-      );
+      if (options?.offResponsePath === true) {
+        yield* detached("email-verification", config.sendEmail(email, rawToken));
+      } else {
+        yield* Effect.catch(config.sendEmail(email, rawToken), (error) =>
+          Effect.fail(
+            new EmailVerificationError({
+              message: `Failed to send verification email to ${email}`,
+              cause: error,
+            }),
+          ),
+        );
+      }
 
       yield* hooks.afterCreateVerification({ userId, email });
 
@@ -254,10 +274,11 @@ export const make = (
       resendVerification: Effect.fn("EmailVerificationService.resendVerification")(function* (
         userId: string,
         email: string,
+        options?: CreateVerificationOptions,
       ) {
         // Invalidate outstanding tokens so only the latest one is usable.
         yield* store.deleteByUserId(userId);
-        return yield* createVerification(userId, email);
+        return yield* createVerification(userId, email, options);
       }),
     };
   });

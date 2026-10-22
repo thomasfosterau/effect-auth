@@ -14,12 +14,20 @@
 import { Effect } from "effect";
 import type { AuthResult } from "../email/EmailPassword.ts";
 import * as Entity from "../Entity.ts";
-import { Hooks, makePlugin, type SessionRef, type WriteEvent } from "../Hooks.ts";
+import {
+  type DeliveryFailure,
+  Hooks,
+  makePlugin,
+  type SessionRef,
+  type WriteEvent,
+} from "../Hooks.ts";
 
 /**
  * Logs `afterSignUp`, `afterSignIn` and `afterSignOut`, and `afterWrite` as
  * `auth.write` with the acting principal (`User::"<id>"` or
- * `System::"<name>"`), the action and the resource.
+ * `System::"<name>"`), the action and the resource. A send run off the response
+ * path that failed (`afterDeliveryFailure`) is logged as `auth.deliveryFailure`
+ * at warning level, with its purpose and the sender's error.
  *
  * `Layer<Hooks, never, Hooks>` - no dependencies (uses Effect's built-in
  * logger). Configured with `isolateTaps: true` so audit failures never break
@@ -45,6 +53,12 @@ export const AuditPlugin = makePlugin(
         system: event.principal.type === Entity.systemType,
         action: event.action,
         resource: Entity.formatRef(event.resource),
+      }),
+    ),
+    afterDeliveryFailure: Hooks.tap((failure: DeliveryFailure) =>
+      Effect.logWarning("auth.deliveryFailure", {
+        purpose: failure.purpose,
+        cause: failure.cause,
       }),
     ),
   },

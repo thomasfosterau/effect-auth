@@ -17,6 +17,7 @@ import {
   type NewUserIdentifier,
   UserStore,
 } from "./UserStore.ts";
+import { makeDetachedSend } from "./DeliveryScheduler.ts";
 import { type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
@@ -215,6 +216,7 @@ export const make = (
     const sessionManager = yield* SessionService;
     const passwords = yield* EmailPasswordStore;
     const crypto = yield* Crypto.Crypto;
+    const detached = yield* makeDetachedSend;
 
     return {
       send: Effect.fn("MagicLinkService.send")(function* (rawEmail: string) {
@@ -270,6 +272,14 @@ export const make = (
           return;
         }
 
+        // With sign-up disabled, only a known address gets the link, so an
+        // inline send would answer it later (and fail it when the vendor does)
+        // than an unknown one: the send goes off the response path. With
+        // sign-up enabled every address gets one, and a failed send is the
+        // caller's to see (#196).
+        if (disableSignUp) {
+          return yield* detached("magic-link", config.sendMagicLink(email, rawToken));
+        }
         yield* Effect.catch(config.sendMagicLink(email, rawToken), (error) =>
           Effect.fail(
             new Errors.MagicLinkError({

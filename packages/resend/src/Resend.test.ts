@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Data, Effect, Predicate, Redacted, Schema } from "effect";
+import { ConfigProvider, Data, Effect, Layer, Predicate, Redacted, Schema } from "effect";
 import { EmailSender, type EmailMessage } from "@thomasfosterau/effect-auth";
-import { defaultRender, layer, resendEmailSender } from "./index.ts";
+import { defaultRender, layer, layerConfig, resendEmailSender } from "./index.ts";
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
 
@@ -236,5 +236,43 @@ describe("layer", () => {
 
     await run(Effect.provide(program, layer({ ...baseConfig, fetch })));
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("layerConfig", () => {
+  const withEnv = (env: Record<string, string>) =>
+    ConfigProvider.layer(ConfigProvider.fromEnvRecord(env));
+  const sendOne = EmailSender.use((sender) =>
+    sender.send({ to: "a@b.com", purpose: "magic-link", params: { token: "t" } }),
+  );
+
+  it("reads RESEND_API_KEY and sends with it", async () => {
+    const { fetch, calls } = stubFetch(new Response(null, { status: 200 }));
+    const live = layerConfig({ from: baseConfig.from, fetch }).pipe(
+      Layer.provide(withEnv({ RESEND_API_KEY: "re_from_env" })),
+    );
+
+    await run(Effect.provide(sendOne, live));
+
+    expect(calls).toHaveLength(1);
+    expect(new Headers(calls[0]?.init.headers).get("authorization")).toBe("Bearer re_from_env");
+  });
+
+  it("fails at construction, sending nothing, when the key is missing or empty", async () => {
+    const { fetch, calls } = stubFetch(new Response(null, { status: 200 }));
+    const build = (env: Record<string, string>) =>
+      Effect.flip(
+        Effect.provide(
+          sendOne,
+          layerConfig({ from: baseConfig.from, fetch }).pipe(Layer.provide(withEnv(env))),
+        ),
+      );
+
+    const missing = await run(build({}));
+    const empty = await run(build({ RESEND_API_KEY: "" }));
+
+    expect(missing._tag).toBe("ConfigError");
+    expect(empty._tag).toBe("ConfigError");
+    expect(calls).toHaveLength(0);
   });
 });

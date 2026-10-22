@@ -27,6 +27,7 @@ export {
   EmailPasswordService,
 } from "./EmailPassword.ts";
 export {
+  type CreateVerificationOptions,
   type EmailVerification,
   type EmailVerificationResult,
   type EmailVerificationConfig,

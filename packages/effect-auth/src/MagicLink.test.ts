@@ -1,7 +1,7 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { Array as Arr, Context, Crypto, Effect, Order, Predicate, Result } from "effect";
+import { Array as Arr, Context, Crypto, Effect, Layer, Order, Predicate, Result } from "effect";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
@@ -23,6 +23,10 @@ import { UserStore } from "./UserStore.ts";
 import { hashToken } from "./TokenHash.ts";
 import type { Session, User, SessionConfig } from "./Types.ts";
 import { observable } from "./testing/Passwordless.ts";
+import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
+
+/** The no-op hooks, with the detached sends run in place so a test reads them on return. */
+const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
 
 const users = new Map<string, User>();
 const identifierRecords = new Map<string, Identifier>();
@@ -171,7 +175,7 @@ const makeTestContext = async () => {
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
         Context.make(Crypto.Crypto, PlatformCrypto.instance),
       ),
-    ).pipe(Effect.provide(Hooks.Default)),
+    ).pipe(Effect.provide(TestHooks)),
   );
 
   return Context.merge(
@@ -220,9 +224,7 @@ describe("MagicLinkService", () => {
       yield* service.send("new@example.com");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentLinks.length).toBe(1);
     expect(sentLinks[0]?.email).toBe("new@example.com");
@@ -243,9 +245,7 @@ describe("MagicLinkService", () => {
       yield* service.send("  Person@Example.COM  ");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentLinks.length).toBe(1);
     expect(sentLinks[0]?.email).toBe("person@example.com");
@@ -260,9 +260,7 @@ describe("MagicLinkService", () => {
       yield* service.send("repeat@example.com");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentLinks.length).toBe(2);
     // Only the latest token remains usable. Compare by hash (store key).
@@ -284,9 +282,7 @@ describe("MagicLinkService", () => {
 
     // Anti-enumeration: succeeds without sending, and stores an undelivered
     // marker token as it would a link's (#417).
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentLinks.length).toBe(0);
     expect([...magicLinkTokens.values()].map((token) => token.email)).toEqual([
@@ -310,7 +306,7 @@ describe("MagicLinkService", () => {
     });
 
     const { knownOps, unknownOps } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(unknownOps).toEqual(knownOps);
@@ -337,9 +333,7 @@ describe("MagicLinkService", () => {
       yield* service.send("member@example.com");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentLinks.length).toBe(1);
     expect(magicLinkTokens.size).toBe(1);
@@ -357,7 +351,7 @@ describe("MagicLinkService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     // Magic link proves email ownership, so the new user's email identifier
@@ -395,7 +389,7 @@ describe("MagicLinkService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result.user.id).toBe("user-known");
@@ -431,7 +425,7 @@ describe("MagicLinkService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     // The holder of the address is signed in; the squatter's password and
@@ -456,9 +450,7 @@ describe("MagicLinkService", () => {
       return yield* service.verify(sentLinks[0]!.token);
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(passwordHashes.get("user-owner")).toBe("owner-hash");
   });
@@ -480,7 +472,7 @@ describe("MagicLinkService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -502,7 +494,7 @@ describe("MagicLinkService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -521,7 +513,7 @@ describe("MagicLinkService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -548,7 +540,7 @@ describe("MagicLinkService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -572,7 +564,7 @@ describe("MagicLinkService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -605,9 +597,7 @@ describe("MagicLinkService", () => {
       yield* service.send("user@example.com");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     // A fresh link was issued after the cooldown elapsed.
     expect(sentLinks.length).toBe(1);
@@ -626,9 +616,7 @@ describe("MagicLinkService", () => {
       yield* service.send("repeat@example.com");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentLinks.length).toBe(2);
     expect(magicLinkTokens.size).toBe(1);
@@ -658,7 +646,7 @@ describe("MagicLinkService", () => {
     });
 
     const { known, unknown } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(unknown.map(observable)).toEqual(known.map(observable));

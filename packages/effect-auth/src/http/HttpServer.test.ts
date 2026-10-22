@@ -115,6 +115,7 @@ import { NormalizeEmailPlugin } from "../plugins/NormalizeEmail.ts";
 import { AuthApi } from "./HttpApi.ts";
 import { RateLimiter, RateLimitStore, type RateLimitEntry } from "../RateLimit.ts";
 import { verifySequences, wrongCode } from "../testing/Passwordless.ts";
+import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
 
 const HOUR = 60 * 60 * 1000;
 const SESSION_CONFIG: Types.SessionConfig = {
@@ -344,6 +345,8 @@ const makeFixture = (
     Layer.succeed(PasswordResetUserStore)(passwordResetUserStore),
     Layer.succeed(UserServiceStore)(userServiceStore),
     options.hooks ?? Hooks.Default,
+    // Detached sends run in place, so a test reads them as the response returns.
+    inlineDeliveryScheduler,
   );
 
   const sessionServiceLayer = SessionService.layer(SESSION_CONFIG).pipe(Layer.provide(storeLayer));
