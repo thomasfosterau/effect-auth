@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { Context, Crypto, Effect, Layer } from "effect";
 import { Hooks } from "./Hooks.ts";
-import { AuthError, EmailVerificationError } from "./Errors.ts";
+import { AuthError, EmailVerificationError, InvalidCredentialsError } from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as AuthLifecycle from "./AuthLifecycle.ts";
 import {
@@ -113,6 +113,7 @@ const emailPasswordStore = {
 
   getPasswordHash: (userId: string) => Effect.sync(() => passwordHashes.get(userId) ?? null),
 
+  clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
   setPasswordHash: (userId: string, hash: string) =>
     Effect.sync(() => {
       passwordHashes.set(userId, hash);
@@ -170,7 +171,7 @@ const makeTestContext = async (
   options: {
     /** Replaces the verification `sendEmail`, which by default records into `sentEmails`. */
     readonly sendEmail?: EmailVerificationConfig["sendEmail"] | undefined;
-    /** The `Hooks` the verification service runs. Default `Hooks.Default`. */
+    /** The `Hooks` the verification and email-password services run. Default `Hooks.Default`. */
     readonly hooks?: Layer.Layer<Hooks> | undefined;
   } = {},
 ) => {
@@ -218,7 +219,7 @@ const makeTestContext = async (
           ),
         ),
       ),
-    ).pipe(Effect.provide(Hooks.Default)),
+    ).pipe(Effect.provide(options.hooks ?? Hooks.Default)),
   );
 
   const userService = await Effect.runPromise(
@@ -673,5 +674,204 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
     expect(describeError(errors.held)).toEqual(describeError(errors.fresh));
     expect(errors.held._tag).toBe("EmailVerificationError");
     expect(errors.held.message).toBe(`Failed to send verification email to ${HELD}`);
+  });
+});
+
+describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", () => {
+  const VICTIM = "victim@example.com";
+  const ATTACKER_PASSWORD = "attacker-password-123";
+  const VICTIM_PASSWORD = "victim-password-123";
+
+  beforeEach(() => {
+    users.clear();
+    identifierRecords.clear();
+    passwordHashes.clear();
+    sessions.clear();
+    verifications.clear();
+    sentEmails.splice(0, sentEmails.length);
+  });
+
+  it("a squatter's password and sessions do not survive the victim's verification", async () => {
+    const context = await makeTestContext({ requireEmailVerification: true });
+    const sessionsOf = (userId: string) =>
+      [...sessions.values()].filter((session) => session.userId === userId).length;
+
+    const outcome = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
+        const manager = yield* SessionService;
+        const emailPassword = yield* EmailPasswordService;
+
+        // 1. The attacker signs up with the victim's address and a password
+        //    they know; the address stays unverified. They also hold a session.
+        const squat = yield* service.signUp({ email: VICTIM, password: ATTACKER_PASSWORD });
+        yield* manager.createSession(squat.user.id);
+        const squatterSessions = sessionsOf(squat.user.id);
+
+        // 2. The victim signs up with their own address and password; the
+        //    recovered branch answers as if it went through and re-sends a link.
+        const recovered = yield* service.signUp({ email: VICTIM, password: VICTIM_PASSWORD });
+        const link = sentEmails.at(-1)!;
+
+        // 3. The victim follows the link and is signed into the account.
+        const verified = yield* service.verifyEmail({ token: link.token });
+
+        // 4. The attacker's password no longer signs in.
+        const attackerSignIn = yield* Effect.flip(
+          service.signIn({ email: VICTIM, password: ATTACKER_PASSWORD }),
+        );
+        const sessionsAfterVerify = sessionsOf(squat.user.id);
+
+        // The verifier sets their own password from the session it issued.
+        yield* emailPassword.setPassword(squat.user.id, VICTIM_PASSWORD);
+        const victimSignIn = yield* service.signIn({ email: VICTIM, password: VICTIM_PASSWORD });
+
+        return {
+          squat,
+          squatterSessions,
+          recovered,
+          link,
+          verified,
+          attackerSignIn,
+          sessionsAfterVerify,
+          victimSignIn,
+        };
+      }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+    );
+
+    expect(outcome.squatterSessions).toBe(1);
+    expect(outcome.recovered.needsEmailVerification).toBe(true);
+    expect(outcome.link.email).toBe(VICTIM);
+    expect(outcome.verified.user.id).toBe(outcome.squat.user.id);
+    expect(outcome.verified.session).toBeDefined();
+    expect(outcome.attackerSignIn).toBeInstanceOf(InvalidCredentialsError);
+    // Only the session the verification issued is left.
+    expect(outcome.sessionsAfterVerify).toBe(1);
+    expect(outcome.victimSignIn.user.id).toBe(outcome.squat.user.id);
+  });
+
+  it("without auto sign-in, the first proof still clears the password and revokes every session", async () => {
+    const context = await makeTestContext();
+    const user: User = {
+      id: "user-1",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(user.id, user);
+    addEmailIdentifier(user.id, VICTIM, false);
+    passwordHashes.set(user.id, "squatter-hash");
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const manager = yield* SessionService;
+        yield* manager.createSession(user.id);
+        const verification = yield* EmailVerificationService;
+        const { token } = yield* verification.createVerification(user.id, VICTIM);
+        const service = yield* AuthLifecycle.make({ autoSignInAfterVerification: false });
+        return yield* service.verifyEmail({ token });
+      }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+    );
+
+    expect(result.session).toBeUndefined();
+    expect(passwordHashes.has(user.id)).toBe(false);
+    expect(sessions.size).toBe(0);
+    expect(findEmailIdentifier(VICTIM)?.verified).toBe(true);
+  });
+
+  it("verifying an address already verified leaves the password and sessions alone", async () => {
+    const context = await makeTestContext();
+    const user: User = {
+      id: "user-1",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      attributes: {},
+    };
+    users.set(user.id, user);
+    addEmailIdentifier(user.id, VICTIM, true);
+    passwordHashes.set(user.id, "owner-hash");
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const manager = yield* SessionService;
+        yield* manager.createSession(user.id);
+        const verification = yield* EmailVerificationService;
+        const { token } = yield* verification.createVerification(user.id, VICTIM);
+        const service = yield* AuthLifecycle.make();
+        const result = yield* service.verifyEmail({ token });
+        return result;
+      }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+    );
+
+    expect(passwordHashes.get(user.id)).toBe("owner-hash");
+    // The session held before and the one the verification issued.
+    expect(sessions.size).toBe(2);
+    expect(result.session).toBeDefined();
+  });
+});
+
+describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hooks chose (#426)", () => {
+  const PASSWORD = "strong-password-123";
+
+  beforeEach(() => {
+    users.clear();
+    identifierRecords.clear();
+    passwordHashes.clear();
+    sessions.clear();
+    verifications.clear();
+    sentEmails.splice(0, sentEmails.length);
+  });
+
+  /** A `Hooks` layer whose `beforeSignUp` strips a `+tag` from the address. */
+  const stripTagHooks = Layer.effect(
+    Hooks,
+    Effect.gen(function* () {
+      const base = yield* Hooks;
+      return {
+        ...base,
+        beforeSignUp: (input) =>
+          Effect.succeed({ ...input, email: input.email.replace(/\+[^@]*@/, "@") }),
+      } satisfies typeof Hooks.Service;
+    }),
+  ).pipe(Layer.provide(Hooks.Default));
+
+  const seed = (id: string, email: string, verified: boolean) => {
+    users.set(id, { id, createdAt: new Date(), updatedAt: new Date(), attributes: {} });
+    addEmailIdentifier(id, email, verified);
+  };
+
+  const signUp = async (email: string) => {
+    const context = await makeTestContext({}, { hooks: stripTagHooks });
+    return Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
+        return yield* Effect.result(service.signUp({ email, password: PASSWORD }));
+      }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+    );
+  };
+
+  it("re-issues the verification of the rewritten address's unverified holder", async () => {
+    seed("user-rewritten", "alice@example.com", false);
+
+    const result = await signUp("alice+promo@example.com");
+
+    expect(result._tag).toBe("Success");
+    if (result._tag !== "Success") return;
+    expect(result.success.identifier).toEqual({ type: "email", value: "alice@example.com" });
+    expect(sentEmails.map((sent) => sent.email)).toEqual(["alice@example.com"]);
+    expect([...verifications.values()].map((v) => v.userId)).toEqual(["user-rewritten"]);
+  });
+
+  it("fails with EmailInUseError when the rewritten address is held verified, whoever holds the raw one", async () => {
+    seed("user-raw", "alice+promo@example.com", false);
+    seed("user-rewritten", "alice@example.com", true);
+
+    const result = await signUp("alice+promo@example.com");
+
+    expect(result._tag).toBe("Failure");
+    if (result._tag !== "Failure") return;
+    expect(result.failure._tag).toBe("EmailInUseError");
+    expect(sentEmails).toEqual([]);
+    expect(verifications.size).toBe(0);
   });
 });

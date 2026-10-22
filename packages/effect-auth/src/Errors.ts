@@ -175,6 +175,12 @@ export class EmailNotVerifiedError extends Data.TaggedError("EmailNotVerifiedErr
  */
 export class EmailInUseError extends Data.TaggedError("EmailInUseError")<{
   readonly message: string;
+  /**
+   * The normalized address found taken: for a sign-up, the one the
+   * `beforeSignUp` hooks returned, which can differ from the submitted one.
+   * Never sent over HTTP.
+   */
+  readonly email?: string | undefined;
 }> {
   get code(): typeof ErrorCode.EMAIL_IN_USE {
     return ErrorCode.EMAIL_IN_USE;

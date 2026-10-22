@@ -171,10 +171,21 @@ const userQueries = (sql: SqlClient.SqlClient) => {
   const setPasswordHash = (userId: string, hash: string, label: string) =>
     asVoid(label, sql`UPDATE auth_users SET password_hash = ${hash} WHERE id = ${userId}`);
 
+  const clearPasswordHash = (userId: string, label: string) =>
+    asVoid(label, sql`UPDATE auth_users SET password_hash = NULL WHERE id = ${userId}`);
+
   const hasPassword = (userId: string, label: string) =>
     getById(userId, label).pipe(Effect.map((row) => row?.password_hash != null));
 
-  return { getById, findById, requireById, create, setPasswordHash, hasPassword };
+  return {
+    getById,
+    findById,
+    requireById,
+    create,
+    setPasswordHash,
+    clearPasswordHash,
+    hasPassword,
+  };
 };
 
 // ---------------------------------------------------------------------------
@@ -304,6 +315,8 @@ export const makeEmailPasswordStore: Effect.Effect<
         .pipe(Effect.map((row) => row?.password_hash ?? null)),
     setPasswordHash: (userId, hash) =>
       users.setPasswordHash(userId, hash, "emailPassword.setPasswordHash"),
+    clearPasswordHash: (userId) =>
+      users.clearPasswordHash(userId, "emailPassword.clearPasswordHash"),
   } satisfies typeof Auth.Email.EmailPasswordStore.Service;
 });
 

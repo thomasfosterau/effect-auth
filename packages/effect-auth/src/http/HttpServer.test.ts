@@ -253,6 +253,7 @@ const makeFixture = (
   const baseEmailPasswordStore: typeof EmailPasswordStore.Service = {
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
+    clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
   const emailPasswordStore =

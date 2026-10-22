@@ -37,6 +37,7 @@ const makeFixture = () => {
         return { user, created: true };
       }),
     getPasswordHash: (userId) => Effect.sync(() => passwordHashes.get(userId) ?? null),
+    clearPasswordHash: (userId: string) => Effect.sync(() => void passwordHashes.delete(userId)),
     setPasswordHash: (userId, hash) => Effect.sync(() => void passwordHashes.set(userId, hash)),
   };
   const sessionStore: typeof SessionStore.Service = {

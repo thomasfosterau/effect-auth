@@ -72,6 +72,15 @@ export class EmailPasswordStore extends Context.Service<
       userId: string,
       hash: string,
     ) => Effect.Effect<void, Errors.AuthError>;
+
+    /**
+     * Remove the user's password, so `getPasswordHash` returns `null` and the
+     * account has no password to sign in with. A no-op when it has none.
+     * `AuthLifecycleService.verifyEmail` calls it through
+     * {@link EmailPasswordService.clearPassword} on an address's first
+     * verification.
+     */
+    readonly clearPasswordHash: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/EmailPasswordStore") {}
 
@@ -318,6 +327,13 @@ export class EmailPasswordService extends Context.Service<
       | Errors.PasswordPolicyError
       | Errors.PasswordAlreadySetError
     >;
+
+    /**
+     * Remove the user's password, if it has one. Afterwards password sign-in
+     * fails for the account until a password is set again, through
+     * {@link setPassword} or a password reset. Revokes no sessions.
+     */
+    readonly clearPassword: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/EmailPasswordService") {
   /**
@@ -397,6 +413,7 @@ export const make = (
         if (!resolved.antiEnumeration) {
           return yield* new Errors.EmailInUseError({
             message: "A user with this email already exists",
+            email,
           });
         }
         yield* passwordHasher.hash(input.password);
@@ -662,6 +679,10 @@ export const make = (
 
         const hashedPassword = yield* passwordHasher.hash(newPassword);
         yield* store.setPasswordHash(userId, hashedPassword.hash);
+      }),
+
+      clearPassword: Effect.fn("EmailPasswordService.clearPassword")(function* (userId: string) {
+        yield* store.clearPasswordHash(userId);
       }),
     };
   });
