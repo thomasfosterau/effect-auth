@@ -65,6 +65,28 @@ export class IdentifierTakenError extends Data.TaggedError("IdentifierTakenError
   readonly identifierType: IdentifierType;
 }> {}
 
+/**
+ * Raised by an {@link IdentifierStore} `create` that refuses an identifier it
+ * cannot hold, on purpose rather than through a failure: a store that keeps one
+ * email per user refuses a second one, and a store that keeps emails only
+ * refuses any other type. The request is well-formed and no other user holds
+ * the value; this store's shape rules it out. The value is omitted, as in
+ * {@link IdentifierTakenError}.
+ */
+export class IdentifierRefusedError extends Data.TaggedError("IdentifierRefusedError")<{
+  readonly message: string;
+  readonly identifierType: IdentifierType;
+}> {}
+
+/**
+ * The `AuthError` a flow reports for an {@link IdentifierRefusedError} it does
+ * not pass on. Outside SCIM a refusal means the host wired a store that cannot
+ * serve the flow (phone sign-in over an emails-only store), which the client
+ * cannot correct.
+ */
+export const refusalAuthError = (error: IdentifierRefusedError): Errors.AuthError =>
+  new Errors.AuthError({ message: error.message, cause: error });
+
 // ---------------------------------------------------------------------------
 // Store contract (D3 conventions: null on miss, AuthError for infra failures)
 // ---------------------------------------------------------------------------
@@ -90,8 +112,14 @@ export class IdentifierStore extends Context.Service<
       userId: string,
     ) => Effect.Effect<ReadonlyArray<Identifier>, Errors.AuthError>;
 
-    /** Persist a new identifier record. */
-    readonly create: (identifier: Identifier) => Effect.Effect<Identifier, Errors.AuthError>;
+    /**
+     * Persist a new identifier record. A store that cannot hold the identifier
+     * by its own shape (one email per user, emails only) refuses it with
+     * {@link IdentifierRefusedError}; infrastructure failures are `AuthError`.
+     */
+    readonly create: (
+      identifier: Identifier,
+    ) => Effect.Effect<Identifier, Errors.AuthError | IdentifierRefusedError>;
 
     /**
      * Swap one of a user's identifiers for a new value: claim `to` and release
@@ -275,7 +303,7 @@ export const replaceInputError = (from: Identifier, to: Identifier): Errors.Auth
 export const claimIdentifier = (
   store: typeof IdentifierStore.Service,
   identifier: Identifier,
-): Effect.Effect<Identifier, Errors.AuthError | IdentifierTakenError> =>
+): Effect.Effect<Identifier, Errors.AuthError | IdentifierTakenError | IdentifierRefusedError> =>
   Effect.gen(function* () {
     const existing = yield* store.getByValue(identifier.type, identifier.value);
     if (existing !== null) {
@@ -287,7 +315,12 @@ export const claimIdentifier = (
     return yield* store.create(identifier).pipe(
       Effect.catchTag(
         "AuthError",
-        (error): Effect.Effect<Identifier, Errors.AuthError | IdentifierTakenError> =>
+        (
+          error,
+        ): Effect.Effect<
+          Identifier,
+          Errors.AuthError | IdentifierTakenError | IdentifierRefusedError
+        > =>
           Effect.gen(function* () {
             // The unique index may have rejected a concurrent claim — re-check
             // so the caller sees a conflict, not an infrastructure error.

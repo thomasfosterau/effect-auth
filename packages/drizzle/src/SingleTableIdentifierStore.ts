@@ -14,9 +14,10 @@
  *
  * A user has at most **one** identifier, and it is always of type `email`. The
  * store cannot hold a second address, a username or a phone number, and says so
- * with an `AuthError` rather than silently dropping the write. Core flows that
- * need several identifiers at once fail on this store; SCIM's add-then-remove
- * when a `userName` changes is one. Email change works: it goes through
+ * with an `IdentifierRefusedError` rather than silently dropping the write. Core
+ * flows that need several identifiers at once fail on this store; SCIM's
+ * add-then-remove when a `userName` changes is one, answered with `409
+ * uniqueness`. Email change works: it goes through
  * `replace`, which rewrites the row's address in one `UPDATE`, on a nullable
  * column and a NOT NULL one alike.
  *
@@ -61,8 +62,9 @@
  * - `getByValue("email", value)` is a lookup on `users.email`. Any other type
  *   resolves to `null`: the table holds no such identifiers.
  * - `listByUser` returns the user's email identifier, or `[]`.
- * - `create` refuses any type but `email` (`AuthError`), refuses a user with no
- *   row or one that already holds an email (`AuthError`), and otherwise writes
+ * - `create` refuses any type but `email` and a user that already holds an
+ *   email (`IdentifierRefusedError`), fails for a user with no row
+ *   (`AuthError`), and otherwise writes
  *   `users.email`, `users.email_verified` and, when mapped,
  *   `users.email_verified_at` on that row. The uniqueness of `users.email` is
  *   what rejects an address claimed by another user; the driver error surfaces
@@ -352,8 +354,9 @@ export const make = (
       create: (identifier) => {
         if (identifier.type !== "email") {
           return Effect.fail(
-            new Auth.AuthError({
+            new Auth.IdentifierRefusedError({
               message: `the single-table IdentifierStore holds email identifiers only; a ${identifier.type} identifier needs the multi-identifier store`,
+              identifierType: identifier.type,
             }),
           );
         }
@@ -365,9 +368,10 @@ export const make = (
             });
           }
           if (current.email !== null) {
-            return yield* new Auth.AuthError({
+            return yield* new Auth.IdentifierRefusedError({
               message:
                 "the single-table IdentifierStore allows one email identifier per user, and this user already has one",
+              identifierType: "email",
             });
           }
 

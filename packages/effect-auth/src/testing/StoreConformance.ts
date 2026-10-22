@@ -200,7 +200,11 @@ const suite = <E, R, S>(
     readonly name: string;
     readonly run: (
       newUser: () => Effect.Effect<string, E, R>,
-    ) => Effect.Effect<void, Mismatch | Errors.AuthError | E, R | S>;
+    ) => Effect.Effect<
+      void,
+      Mismatch | Errors.AuthError | Identifier.IdentifierRefusedError | E,
+      R | S
+    >;
   }>,
 ): ConformanceSuite<E, R | S> => {
   const newUser = (): Effect.Effect<string, E, R> => {
@@ -213,7 +217,9 @@ const suite = <E, R, S>(
     cases: cases.map(({ name, run }) => ({
       name,
       run: Effect.mapError(run(newUser), (error) =>
-        error instanceof Mismatch
+        // A store that refuses an identifier a case writes cannot serve the
+        // contract the suite checks.
+        error instanceof Mismatch || error instanceof Identifier.IdentifierRefusedError
           ? new ConformanceError({
               message: `${contract}: ${name}: ${error.message}`,
               contract,

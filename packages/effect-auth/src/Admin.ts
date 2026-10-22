@@ -24,7 +24,7 @@
 import { Context, Crypto, Data, Effect, Layer, Match, Predicate, Record as Rec } from "effect";
 import * as Errors from "./Errors.ts";
 import { Hooks, makePlugin, type HookError } from "./Hooks.ts";
-import { IdentifierStore, type IdentifierType } from "./Identifier.ts";
+import { IdentifierStore, type IdentifierType, refusalAuthError } from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
@@ -595,15 +595,21 @@ export const make = (
           extraIdentifiers,
           (ident) =>
             Effect.flatMap(randomId(), (id) =>
-              identifierStore.create({
-                id,
-                userId: user.id,
-                type: ident.type,
-                value: ident.value,
-                verified: ident.verified ?? false,
-                verifiedAt: ident.verified ? now : undefined,
-                createdAt: now,
-              }),
+              identifierStore
+                .create({
+                  id,
+                  userId: user.id,
+                  type: ident.type,
+                  value: ident.value,
+                  verified: ident.verified ?? false,
+                  verifiedAt: ident.verified ? now : undefined,
+                  createdAt: now,
+                })
+                .pipe(
+                  Effect.catchTag("IdentifierRefusedError", (error) =>
+                    Effect.fail(refusalAuthError(error)),
+                  ),
+                ),
             ),
           { concurrency: 1, discard: true },
         );

@@ -26,6 +26,7 @@ import {
   claimIdentifier,
   IdentifierStore,
   makeIdentifier,
+  refusalAuthError,
   replaceIdentifier,
   type Identifier,
 } from "./Identifier.ts";
@@ -297,7 +298,11 @@ const make = (
           });
           const outcome = yield* (
             current === null
-              ? claimIdentifier(identifiers, next)
+              ? claimIdentifier(identifiers, next).pipe(
+                  Effect.catchTag("IdentifierRefusedError", (error) =>
+                    Effect.fail(refusalAuthError(error)),
+                  ),
+                )
               : replaceIdentifier(identifiers, current, next)
           ).pipe(
             Effect.map((identifier) => ({ identifier, converged: null })),

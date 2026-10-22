@@ -292,9 +292,11 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       replace: (from, to) => {
         if (failRelease) {
           failRelease = false;
-          return store
-            .create(to)
-            .pipe(Effect.andThen(Effect.fail(new AuthError({ message: "store unavailable" }))));
+          return store.create(to).pipe(
+            // The memory store holds every identifier type; it never refuses.
+            Effect.catchTag("IdentifierRefusedError", Effect.die),
+            Effect.andThen(Effect.fail(new AuthError({ message: "store unavailable" }))),
+          );
         }
         return store.replace(from, to);
       },

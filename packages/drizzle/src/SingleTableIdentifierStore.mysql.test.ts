@@ -214,7 +214,7 @@ describe("single-table MySQL / statements", () => {
       }),
     );
 
-    expect(error._tag).toBe("AuthError");
+    expect(error._tag).toBe("IdentifierRefusedError");
     expect(proxy.statements).toEqual([]);
   });
 

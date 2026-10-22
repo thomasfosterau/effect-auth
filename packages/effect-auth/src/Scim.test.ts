@@ -7,6 +7,7 @@ import { Hooks } from "./Hooks.ts";
 import { type AuthServices } from "./http/HttpServer.ts";
 import * as HttpServer from "./http/HttpServer.ts";
 import {
+  IdentifierRefusedError,
   IdentifierStore,
   memoryIdentifierStore,
   makeIdentifier,
@@ -49,10 +50,28 @@ const ORG_B = "org-b";
  * members and teams — and dies loudly on the rest, so a test that accidentally
  * exercises an unmapped path fails instead of quietly succeeding.
  */
-const makeStores = () => {
+const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } = {}) => {
   const usersById = new Map<string, Types.User>();
   const identifierRecords = new Map<string, Identifier>();
-  const identifiers = memoryIdentifierStore(identifierRecords);
+  const memory = memoryIdentifierStore(identifierRecords);
+  // `oneEmailPerUser` refuses a user's second address as a single-table store
+  // (effect-auth-drizzle's `SingleTableIdentifierStore`) does.
+  const identifiers: typeof IdentifierStore.Service = options.oneEmailPerUser
+    ? {
+        ...memory,
+        create: (identifier) =>
+          Effect.flatMap(memory.listByUser(identifier.userId), (held) =>
+            held.some((existing) => existing.type === "email")
+              ? Effect.fail(
+                  new IdentifierRefusedError({
+                    message: "this store allows one email identifier per user",
+                    identifierType: identifier.type,
+                  }),
+                )
+              : memory.create(identifier),
+          ),
+      }
+    : memory;
   const connectionRecords = new Map<string, ScimConnection>();
   const organizations = new Map<string, Organization>();
   const members: Member[] = [];
@@ -277,8 +296,11 @@ const makeStores = () => {
 };
 
 /** Build the service plus a connection for each of two organizations. */
-const makeFixture = async (config: Scim.ScimConfig = {}) => {
-  const stores = makeStores();
+const makeFixture = async (
+  config: Scim.ScimConfig = {},
+  storeOptions: Parameters<typeof makeStores>[0] = {},
+) => {
+  const stores = makeStores(storeOptions);
   const service = await Effect.runPromise(Scim.make(config).pipe(Effect.provide(stores.layer)));
   const run = <A, E>(effect: Effect.Effect<A, E, never>): Promise<A> => Effect.runPromise(effect);
   const a = await run(service.createConnection(ORG_A));
@@ -553,6 +575,25 @@ describe("ScimService — users", () => {
     expect(patched.userName).toBe("ada.lovelace@acme.test");
     expect(patched.emails.map((e) => e.value)).toEqual(["ada.lovelace@acme.test"]);
     expect(await fx.run(fx.identifiers.getByValue("email", "ada@acme.test"))).toBeNull();
+  });
+
+  it("answers a userName change a one-email store refuses with 409 uniqueness, keeping the old name", async () => {
+    const fx = await makeFixture({}, { oneEmailPerUser: true });
+    const ada = await fx.run(fx.service.createUser(fx.a.connection, ADA));
+
+    const error = await fx.run(
+      Effect.flip(
+        fx.service.patchUser(fx.a.connection, ada.id, [
+          { op: "replace", path: "userName", value: "ada.lovelace@acme.test" },
+        ]),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(ScimError);
+    expect(error).toMatchObject({ status: 409, scimType: "uniqueness" });
+    const after = await fx.run(fx.service.getUser(fx.a.connection, ada.id));
+    expect(after.userName).toBe("ada@acme.test");
+    expect(after.emails.map((e) => e.value)).toEqual(["ada@acme.test"]);
   });
 
   it("keeps userName pinned when an older secondary email exists", async () => {
@@ -919,8 +960,11 @@ describe("ScimDeactivatedPlugin", () => {
 // --- HTTP layer --------------------------------------------------------------
 
 /** A web handler wired with the SCIM endpoints over the in-memory stores. */
-const makeHttpFixture = async (config: Scim.ScimConfig = {}) => {
-  const stores = makeStores();
+const makeHttpFixture = async (
+  config: Scim.ScimConfig = {},
+  storeOptions: Parameters<typeof makeStores>[0] = {},
+) => {
+  const stores = makeStores(storeOptions);
 
   // Members the SCIM handlers never touch, but `AuthServices` requires.
   // `SessionService` and `IdentifierStore` come from `stores.layer` for real.
@@ -1163,7 +1207,9 @@ describe("HTTP SCIM endpoints", () => {
     const created = await fx.handler(
       scimReq("POST", "/Users", { token: fx.token, body: { userName: "ada@acme.test" } }),
     );
-    const user = (await created.json()) as ScimUserBody;
+    const user = Schema.decodeUnknownSync(Schema.Struct({ id: Schema.String }))(
+      await created.json(),
+    );
 
     // Org B's token is valid, but the resource is not its to see.
     const foreign = await fx.handler(scimReq("GET", `/Users/${user.id}`, { token: fx.otherToken }));
@@ -1231,6 +1277,28 @@ describe("HTTP SCIM endpoints", () => {
     );
     expect(replaced.status).toBe(200);
     expect(((await replaced.json()) as ScimUserBody).displayName).toBe("Ada Lovelace");
+  });
+
+  it("answers a userName change a one-email store refuses with 409 uniqueness, not 500", async () => {
+    const fx = await makeHttpFixture({}, { oneEmailPerUser: true });
+    const created = await fx.handler(
+      scimReq("POST", "/Users", { token: fx.token, body: { userName: "ada@acme.test" } }),
+    );
+    const user = Schema.decodeUnknownSync(Schema.Struct({ id: Schema.String }))(
+      await created.json(),
+    );
+
+    const renamed = await fx.handler(
+      scimReq("PATCH", `/Users/${user.id}`, {
+        token: fx.token,
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "replace", path: "userName", value: "ada.lovelace@acme.test" }],
+        },
+      }),
+    );
+    expect(renamed.status).toBe(409);
+    expect(await renamed.json()).toMatchObject({ status: "409", scimType: "uniqueness" });
   });
 
   it("serves the three discovery documents without a token", async () => {

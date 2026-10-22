@@ -15,7 +15,12 @@
  */
 import { Array as Arr, Context, Crypto, Data, Effect, Layer, Order } from "effect";
 import * as Errors from "./Errors.ts";
-import { claimIdentifier, IdentifierStore, makeIdentifier } from "./Identifier.ts";
+import {
+  claimIdentifier,
+  IdentifierStore,
+  makeIdentifier,
+  refusalAuthError,
+} from "./Identifier.ts";
 import {
   createUserWithIdentifier,
   type CreateUserResult,
@@ -487,9 +492,11 @@ export const make = (
               verifiedAt: new Date(),
             }),
           ).pipe(
-            Effect.catchTag("IdentifierTakenError", () =>
-              Effect.fail(new PhoneOtpError({ message: "This phone number is already in use" })),
-            ),
+            Effect.catchTags({
+              IdentifierTakenError: () =>
+                Effect.fail(new PhoneOtpError({ message: "This phone number is already in use" })),
+              IdentifierRefusedError: (error) => Effect.fail(refusalAuthError(error)),
+            }),
           );
         } else if (!existing.verified) {
           yield* identifiers.setVerified(existing.id, new Date());

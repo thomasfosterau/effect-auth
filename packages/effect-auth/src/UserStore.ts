@@ -8,6 +8,7 @@ import {
   IdentifierTakenError,
   type IdentifierType,
   makeIdentifier,
+  refusalAuthError,
 } from "./Identifier.ts";
 
 /**
@@ -149,15 +150,19 @@ export const createUserWithIdentifier = <E, R>(
         ...(identifier.verifiedAt !== undefined && { verifiedAt: identifier.verifiedAt }),
       }),
     ).pipe(
-      Effect.catchTag("IdentifierTakenError", (taken) =>
-        Effect.gen(function* () {
-          const held = yield* store.getByValue(identifier.type, identifier.value);
-          if (held === null || held.userId !== user.id) return yield* taken;
-          if (!identifier.verified || held.verified) return held;
-          const verified = yield* store.setVerified(held.id, identifier.verifiedAt ?? new Date());
-          return verified ?? held;
-        }),
-      ),
+      Effect.catchTags({
+        IdentifierTakenError: (taken) =>
+          Effect.gen(function* () {
+            const held = yield* store.getByValue(identifier.type, identifier.value);
+            if (held === null || held.userId !== user.id) return yield* taken;
+            if (!identifier.verified || held.verified) return held;
+            const verified = yield* store.setVerified(held.id, identifier.verifiedAt ?? new Date());
+            return verified ?? held;
+          }),
+        // A store that cannot hold the first identifier cannot serve this
+        // sign-up at all: a wiring fault, not a request the client can fix.
+        IdentifierRefusedError: (error) => Effect.fail(refusalAuthError(error)),
+      }),
     );
     return { user, identifier: claimed };
   });

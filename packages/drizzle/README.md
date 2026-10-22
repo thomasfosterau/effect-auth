@@ -440,7 +440,7 @@ to migrate onto.
 
 The trade-off is that a user has **one identifier, and it is an email**. The
 store does not hold a second address, a username or a phone number, and refuses
-them with an `AuthError` rather than dropping the write.
+them with an `IdentifierRefusedError` rather than dropping the write.
 
 ```ts
 import { Layer } from "effect";
@@ -673,8 +673,8 @@ A user whose `email` is `NULL` holds no identifier.
 ### Method behaviour
 
 - `getByValue` looks up `email`. Any other type returns `null`.
-- `create` refuses a type other than `email`, a user with no row, and a user
-  that already holds an address. A duplicate address owned by another user
+- `create` refuses a type other than `email`, and a user that already holds an
+  address, with `IdentifierRefusedError`; a user with no row is an `AuthError`. A duplicate address owned by another user
   fails through the unique index as `AuthError`, which `claimIdentifier` reports
   as `IdentifierTakenError`, as it does for the default store.
 - `replace` rewrites the row's address in one statement,
@@ -703,10 +703,11 @@ address.
   don't apply to this store. `Requests.getUser` and `Requests.getSession` are
   unaffected.
 - **SCIM `userName` change.** It adds the new address before it removes the old
-  one, so the store refuses it with an `AuthError`. The SCIM route answers that
-  with a `500` today, not a client error.
+  one, so the store refuses it with an `IdentifierRefusedError`, and the SCIM
+  route answers `409` with `scimType: "uniqueness"`.
 - **Admin `identifiers[]` extras, and the username and phone-number flows.** This
-  store holds only email identifiers, so these are refused with an `AuthError`.
+  store holds only email identifiers, so these are refused. Those flows report
+  the refusal as an `AuthError`: the store cannot serve them at all.
 
 ## Store semantics
 
