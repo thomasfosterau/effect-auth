@@ -270,6 +270,8 @@ await Effect.runPromise(
 
 `expectRefusesAnonymous`, `expectRefusesBelow` and `expectAllowsOwner` check one case each.
 
+The store-contract conformance suites (`sessionStoreConformance`, `userStoreConformance`, `identifierStoreConformance`, `apiKeyStoreConformance`) check a bring-your-own store against the semantics its contract states. Each suite is a list of cases, and each case is an `Effect` that fails with `ConformanceError` on a mismatch. The suites import no test runner. Register the cases with your own, as the [bring-your-own-store guide](../../docs/guides/byo-stores.md#7-check-your-store-against-the-contract) shows.
+
 ## Passwords
 
 ```typescript
@@ -702,7 +704,7 @@ Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in:
 | `@thomasfosterau/effect-auth/plugins`     | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization  |
 | `@thomasfosterau/effect-auth/http`        | `Auth.Http`        | The HTTP contract, the mountable handler, the typed Effect client, `AuthMiddleware`                                |
 | `@thomasfosterau/effect-auth/ladder`      | —                  | An ordered role ladder for browser UX gates; imports nothing, not even `effect`                                    |
-| `@thomasfosterau/effect-auth/testing`     | —                  | Test helpers: run as a fixture principal, UUID fixture users, guard-negative assertions; not on the root           |
+| `@thomasfosterau/effect-auth/testing`     | —                  | Test helpers: run as a fixture principal, fixture users, guard assertions, store conformance suites                |
 
 Errors are tagged (`Data.TaggedError`) and carry a stable `code`; the shared ones are flat root exports: `AuthError` (infrastructure failure only), `InvalidCredentialsError`, `SessionNotFoundError`, `SessionExpiredError`, `UserNotFoundError`, `PermissionDeniedError`, `HashingError`, `ChallengeNotFoundError`, `ChallengeExpiredError`, `CredentialNotFoundError`, `WebAuthnVerificationError`, `OAuthStateNotFoundError`, `OAuthStateExpiredError`, `OAuthProviderError`, `RateLimitError`, `EmailVerificationError`, `MagicLinkError`, `PasswordResetError`, and more. The HTTP API maps them to status codes (`RateLimitError` → 429, `AuthError` → 500).
 

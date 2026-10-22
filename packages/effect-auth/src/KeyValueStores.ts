@@ -657,7 +657,18 @@ export const identifierStoreKV: Effect.Effect<
           .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
       }),
 
-    create: (identifier) => create(identifier, "identifier.create"),
+    // `(type, value)` is unique: a claimed pair is refused with `AuthError`, as
+    // a unique index would refuse it, so `claimIdentifier` reports it as taken.
+    // A read before the write, so two concurrent creates can still both land.
+    create: (identifier) =>
+      Effect.gen(function* () {
+        if ((yield* getByValue(identifier.type, identifier.value, "identifier.create")) !== null) {
+          return yield* new Errors.AuthError({
+            message: `Identifier (${identifier.type}) already exists`,
+          });
+        }
+        return yield* create(identifier, "identifier.create");
+      }),
 
     // A KeyValueStore has no transactions: the replacement is claimed before
     // the old record is released, so a failure in between leaves the user
