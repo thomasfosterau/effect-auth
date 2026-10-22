@@ -45,6 +45,7 @@
 import { Context, Effect, Layer } from "effect";
 import type * as Errors from "./Errors.ts";
 import type { AuthResult, SignInInput, SignUpInput } from "./email/EmailPassword.ts";
+import type { EntityRef } from "./Entity.ts";
 import type { EmailVerificationResult } from "./email/EmailVerification.ts";
 import type { PasswordResetResult } from "./password/PasswordReset.ts";
 import type * as Types from "./Types.ts";
@@ -101,6 +102,26 @@ export interface EmailRef {
 }
 
 /**
+ * Named arguments for the `afterWrite` hook: a write the application made, and
+ * the principal that made it. The application fires it with
+ * {@link recordWrite} after the write commits, so an audit plugin records
+ * unattended writes as well as a person's: a background job never signs in,
+ * so the sign-in, sign-up and sign-out events never name it.
+ */
+export interface WriteEvent {
+  /**
+   * The acting principal: the viewer's entity (`User::"<id>"`, as
+   * `Guard.Guards.principal` builds it) or a system principal
+   * (`System::"<name>"`, as `Guard.requireSystem` yields it).
+   */
+  readonly principal: EntityRef;
+  /** The action performed, as the `Action::"<action>"` id the gate decided. */
+  readonly action: string;
+  /** The resource written. */
+  readonly resource: EntityRef;
+}
+
+/**
  * A **transform** hook: maps a value to a new value of the same type.
  *
  * Returning a modified value mutates what flows downstream; failing in the
@@ -142,6 +163,7 @@ const makeNoopHooks = (): typeof Hooks.Service => ({
   afterCreateVerification: identity,
   beforeVerifyEmail: identity,
   afterVerifyEmail: identity,
+  afterWrite: identity,
 });
 
 /**
@@ -202,6 +224,8 @@ export class Hooks extends Context.Service<
     readonly afterCreateVerification: Tap<CreateVerificationArgs>;
     readonly beforeVerifyEmail: Transform<VerifyEmailArgs>;
     readonly afterVerifyEmail: Tap<EmailVerificationResult>;
+    /** A write the application made, fired by {@link recordWrite}. */
+    readonly afterWrite: Tap<WriteEvent>;
   }
 >()("@effect-auth/Hooks") {
   /** No-op base layer: identity for every hook point. */
@@ -261,6 +285,7 @@ const AFTER_HOOK_KEYS: ReadonlySet<string> = new Set([
   "afterResetPassword",
   "afterCreateVerification",
   "afterVerifyEmail",
+  "afterWrite",
 ]);
 
 /**
@@ -430,3 +455,36 @@ export const composePlugins = <RIn = never>(
     RIn | Hooks
   >;
 };
+
+/**
+ * Fire the `afterWrite` hook for a write the application made: call it after
+ * the write commits, naming the principal that made it. Effect-auth makes no
+ * application writes itself, so this is the one place the event comes from.
+ * `AuditPlugin` logs it as `auth.write`.
+ *
+ * @example
+ * ```ts
+ * import { Effect, Layer } from "effect"
+ * import * as Auth from "@thomasfosterau/effect-auth"
+ * import { AuditPlugin } from "@thomasfosterau/effect-auth/plugins"
+ *
+ * const chargeInvoice = (id: string) =>
+ *   Effect.gen(function* () {
+ *     // ...the write itself...
+ *     yield* Auth.recordWrite({
+ *       principal: Auth.System.ref("billing-cron"),
+ *       action: "invoice:charge",
+ *       resource: Auth.Entity.ref("Invoice", id),
+ *     })
+ *   })
+ *
+ * await Effect.runPromise(
+ *   chargeInvoice("inv-1").pipe(Effect.provide(AuditPlugin.pipe(Layer.provide(Auth.Hooks.Default)))),
+ * )
+ * ```
+ */
+export const recordWrite = (event: WriteEvent): Effect.Effect<void, HookError, Hooks> =>
+  Effect.gen(function* () {
+    const hooks = yield* Hooks;
+    yield* hooks.afterWrite(event);
+  });
