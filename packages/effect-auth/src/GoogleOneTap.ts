@@ -31,6 +31,8 @@ import type { AuthError } from "./Errors.ts";
 import type { HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { proveAddress } from "./FirstProof.ts";
 import { OAuthUserStore, generateNonce, verifyIdToken } from "./oauth/OAuth.ts";
 import { IdentifierStore } from "./Identifier.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
@@ -107,7 +109,12 @@ export interface GoogleOneTapSignInResult {
 /**
  * Google One Tap sign-in: issues a nonce, verifies the One Tap credential against Google's JWKS, and signs in by the verified email.
  *
- * Requires `GoogleOneTapNonceStore`, `OAuthUserStore`, `UserStore`, `IdentifierStore` and `SessionService`.
+ * Requires `GoogleOneTapNonceStore`, `OAuthUserStore`, `UserStore`, `IdentifierStore`, `SessionService` and `EmailPasswordStore`.
+ *
+ * Promoting an address held unverified to verified first clears the
+ * account's password and revokes its sessions, through `EmailPasswordStore`
+ * (#440): the account was created by a sign-up that proved nothing about the
+ * address, so its password may be someone else's.
  */
 export class GoogleOneTapService extends Context.Service<
   GoogleOneTapService,
@@ -162,6 +169,7 @@ export const make = (
   | IdentifierStore
   | UserStore
   | SessionService
+  | EmailPasswordStore
   | Crypto.Crypto
 > =>
   Effect.gen(function* () {
@@ -174,6 +182,7 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
+    const passwords = yield* EmailPasswordStore;
     const crypto = yield* Crypto.Crypto;
 
     return {
@@ -250,7 +259,9 @@ export const make = (
           );
           user = created.user;
         } else if (identifier !== null && !identifier.verified) {
-          yield* identifiers.setVerified(identifier.id, new Date());
+          // Google verified the address: clear what an earlier, unproven
+          // sign-up left on the account before promoting it (#440).
+          yield* proveAddress({ identifiers, passwords, sessions: sessionManager }, identifier);
         }
 
         const session = yield* sessionManager.createSession(user.id);

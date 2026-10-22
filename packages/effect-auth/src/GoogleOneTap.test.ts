@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
+import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
 import { Effect, Layer } from "effect";
 import * as Cipher from "./Cipher.ts";
 import { UserNotFoundError } from "./Errors.ts";
@@ -10,13 +11,18 @@ import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
-import { EmailPasswordService } from "./email/EmailPassword.ts";
+import { EmailPasswordService, EmailPasswordStore } from "./email/EmailPassword.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";
 import { PasswordResetService } from "./password/PasswordReset.ts";
 import { type AuthServices } from "./http/HttpServer.ts";
 import * as HttpServer from "./http/HttpServer.ts";
-import { IdentifierStore, memoryIdentifierStore, type Identifier } from "./Identifier.ts";
+import {
+  IdentifierStore,
+  makeIdentifier,
+  memoryIdentifierStore,
+  type Identifier,
+} from "./Identifier.ts";
 import { type OAuthCreateUserInput, OAuthUserStore } from "./oauth/OAuth.ts";
 import { GoogleOneTapError, GoogleOneTapService, GoogleOneTapNonceStore } from "./GoogleOneTap.ts";
 import * as GoogleOneTap from "./GoogleOneTap.ts";
@@ -126,6 +132,7 @@ const makeStores = () => {
   const coreUserStore: typeof UserStore.Service = {
     get: (userId) => Effect.sync(() => users.get(userId) ?? null),
   };
+  const sessionsCleared: Array<string> = [];
   const sessionManager: typeof SessionService.Service = {
     createSession: (userId) =>
       Effect.succeed({
@@ -138,24 +145,28 @@ const makeStores = () => {
       }),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
-    invalidateUserSessions: () => Effect.void,
+    invalidateUserSessions: (userId) => Effect.sync(() => void sessionsCleared.push(userId)),
     listSessions: () => Effect.succeed([]),
     revokeOtherSessions: () => Effect.void,
     setSessionAttributes: () => Effect.die("unused"),
   };
 
   const nonceStore = makeMemoryNonceStore();
+  const passwordHashes = new Map<string, string>();
 
   const layer = Layer.mergeAll(
     Layer.succeed(OAuthUserStore)(userStore),
     Layer.succeed(IdentifierStore)(identifiers),
     Layer.succeed(UserStore)(coreUserStore),
     Layer.succeed(SessionService)(sessionManager),
+    Layer.succeed(EmailPasswordStore)(
+      memoryEmailPasswordStore({ users: new Map(), passwordHashes }),
+    ),
     Layer.succeed(GoogleOneTapNonceStore)(nonceStore),
     Hooks.Default,
     PlatformCrypto.layer,
   );
-  return { layer, users, identifiers, createdWith, nonceStore };
+  return { layer, users, identifiers, createdWith, nonceStore, passwordHashes, sessionsCleared };
 };
 
 describe("GoogleOneTapService", () => {
@@ -273,6 +284,37 @@ describe("GoogleOneTapService", () => {
       );
       expect(err).toBeInstanceOf(GoogleOneTapError);
     }
+  });
+
+  it("clears a squatter's password and sessions when Google proves the address (#440)", async () => {
+    const { layer, users, identifiers, nonceStore, passwordHashes, sessionsCleared } = makeStores();
+    // A squatter signed up with the address and a password they know; it was
+    // never verified.
+    const now = new Date();
+    users.set("user-squat", { id: "user-squat", createdAt: now, updatedAt: now, attributes: {} });
+    await Effect.runPromise(
+      identifiers.create(
+        makeIdentifier({ userId: "user-squat", type: "email", value: "alice@gmail.test" }),
+      ),
+    );
+    passwordHashes.set("user-squat", "squatter-hash");
+
+    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
+    const nonce = "squat-nonce";
+    await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
+    const result = await withJwks(() =>
+      Effect.runPromise(
+        service
+          .signIn(signCredential(validClaims({ nonce: hashNonce(nonce) })), nonce)
+          .pipe(Effect.provide(layer)),
+      ),
+    );
+
+    expect(result.user.id).toBe("user-squat");
+    expect(passwordHashes.has("user-squat")).toBe(false);
+    expect(sessionsCleared).toEqual(["user-squat"]);
+    const identifier = await Effect.runPromise(identifiers.getByValue("email", "alice@gmail.test"));
+    expect(identifier?.verified).toBe(true);
   });
 
   it("rejects a replayed id_token (nonce already consumed)", async () => {
@@ -418,6 +460,7 @@ const makeHttpFixture = () => {
     Layer.succeed(IdentifierStore)(identifierStore),
     Layer.succeed(UserStore)(userStore),
     Layer.succeed(GoogleOneTapNonceStore)(nonceStore),
+    Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     sessionServiceLayer,
   );
 
