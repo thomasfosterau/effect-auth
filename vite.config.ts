@@ -68,25 +68,25 @@ export default defineConfig({
       // `error`. Counts (sources / tests) and the remaining sites:
       // #443.
       // `Date.now()` / `new Date()` → `Clock` / `DateTime` changes how expiry
-      // logic sees time under `TestClock` (189 / 480).
+      // logic sees time under `TestClock` (182 / 499).
       "effect/use-clock-service": "warn",
       // Test fixtures' casts, plus the one unvalidated `JWT_ALGORITHM` cast
-      // (1 / 595).
+      // (1 / 599).
       "effect/require-safety-comment-for-type-assertion": "warn",
       // Published types say `Record<string, unknown>` (session and user
       // attributes, metadata, JWT claims, drizzle column types); narrowing
       // them is an API change (60 / 0).
       "effect/no-unsafe-dictionary-type": "warn",
       // Public guards, decoders and error callbacks over genuinely unknown
-      // input (16 / 0, and 1 / 0 for `no-unknown-returns`).
+      // input (16 / 4, and 1 / 1 for `no-unknown-returns`).
       "effect/no-unknown-parameters": "warn",
       "effect/no-unknown-returns": "warn",
-      // Exported `Map` parameters and `ReadonlyMap` results (10 / 263).
+      // Exported `Map` parameters and `ReadonlyMap` results (10 / 284).
       "effect/avoid-native-object-helpers": "warn",
-      // Two unbounded scheduler loops in `HttpServer.ts` (2 / 194).
+      // Two unbounded scheduler loops in `HttpServer.ts` (2 / 206).
       "effect/imperative-loops": "warn",
       // Exported Effect *values* built with `Effect.gen`, where `Effect.fn`
-      // would change the public type (12 / 178).
+      // would change the public type (12 / 183).
       "effect/prefer-effect-fn": "warn",
     },
     overrides: [
@@ -111,7 +111,7 @@ export default defineConfig({
       },
       {
         // Ported-code allowance for tests only (sources are at zero): the
-        // `!` on fixture lookups (265; #443).
+        // `!` on fixture lookups (270; #443).
         files: ["**/*.test.ts", "**/*.test.tsx", "**/testing/**"],
         rules: { "effect/avoid-non-null-assertion": "warn" },
       },
