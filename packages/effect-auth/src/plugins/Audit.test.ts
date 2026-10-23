@@ -7,9 +7,9 @@ import { AuditPlugin } from "./Audit.ts";
 
 /** Run `effect` under the Audit plugin, collecting every log record's message. */
 const captureLogs = <A, E>(effect: Effect.Effect<A, E, Hooks>) => {
-  const records: Array<ReadonlyArray<unknown>> = [];
+  const records: Array<unknown> = [];
   const collector = Logger.make((options) => {
-    records.push(options.message as ReadonlyArray<unknown>);
+    records.push(options.message);
   });
   return Effect.runPromise(
     effect.pipe(

@@ -78,7 +78,7 @@ const runWith =
     Effect.runPromise(
       build().pipe(
         Effect.provide(layer(users).pipe(Layer.provide(databaseLayer(drizzle(client))))),
-      ) as Effect.Effect<A, E>,
+      ),
     );
 
 signUpContract("single-table PostgreSQL", false, {
@@ -86,8 +86,13 @@ signUpContract("single-table PostgreSQL", false, {
   insertUser: async (row: UserRowInsert) => {
     await drizzle(client)
       .insert(strictUsers)
-      // A row without an address sends NULL, which the column's NOT NULL refuses.
-      .values({ ...row, userId: row.id, email: row.email as string });
+      .values({
+        ...row,
+        userId: row.id,
+        // SAFETY: deliberately unchecked: a row without an address must reach the
+        // database as NULL, which the column's NOT NULL refuses.
+        email: row.email as string,
+      });
   },
   readUserRow: async (userId) => {
     const rows = await drizzle(client)

@@ -388,10 +388,7 @@ describe("ClientIP.cloudflare (opt-in single trusted header)", () => {
   });
 
   it("reads only an own header property, never an inherited one", () => {
-    const inherited = Object.create({ "cf-connecting-ip": "203.0.113.7" }) as Record<
-      string,
-      string
-    >;
+    const inherited: Record<string, string> = Object.create({ "cf-connecting-ip": "203.0.113.7" });
     expect(resolveClientIP(edge(inherited), ClientIP.cloudflare)).toBe("10.0.0.50");
   });
 

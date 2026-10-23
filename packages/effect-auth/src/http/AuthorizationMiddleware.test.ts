@@ -120,7 +120,7 @@ const runGate = <Id extends string>(
     Effect.provide(Layer.mergeAll(Guard.layer, options.overrideAuthorizerLayer ?? authorizerLayer)),
   );
 
-  // The no-principal case leaves `CurrentPrincipal` deliberately unprovided to
+  // SAFETY: the no-principal case leaves `CurrentPrincipal` deliberately unprovided to
   // prove the gate fails closed rather than silently allowing; that is a
   // runtime defect, so the requirement is erased here — in one documented
   // place — rather than with a cast at every call site. Only the context is
@@ -140,7 +140,7 @@ describe("makeAuthorizationMiddleware – allow path", () => {
   it("the resource owner is authorized and the handler runs unchanged", async () => {
     const Guard = makeAuthorizationMiddleware("Guard", { action: readDoc, resource: doc1 });
     const response = await Effect.runPromise(runGate(Guard, { principal: alice }));
-    expect((response as HttpServerResponse.HttpServerResponse).status).toBe(200);
+    expect(response.status).toBe(200);
   });
 });
 
@@ -223,7 +223,7 @@ describe("makeAuthorizationMiddleware – dynamic AuthorizeInput", () => {
         request: makeWebRequest({ "x-doc-id": "doc-1" }),
       }),
     );
-    expect((response as HttpServerResponse.HttpServerResponse).status).toBe(200);
+    expect(response.status).toBe(200);
   });
 
   it("sync function-of-request: the resource differs per request (deny — alice does not own doc-2)", async () => {
@@ -250,7 +250,7 @@ describe("makeAuthorizationMiddleware – dynamic AuthorizeInput", () => {
         request: makeWebRequest({ "x-doc-id": "doc-2" }),
       }),
     );
-    expect((allowedResponse as HttpServerResponse.HttpServerResponse).status).toBe(200);
+    expect(allowedResponse.status).toBe(200);
 
     const deniedError = await Effect.runPromise(
       runGate(byHeaderEffectful, {
@@ -456,9 +456,11 @@ describe("makeAuthorizationMiddleware – guard names", () => {
   });
 
   it("a widened name is a compile error: string, a template pattern and a union each widen the guard's type", () => {
-    const dynamicName = "RequireA" as string;
-    const patternName = "RequireAGuard" as `${string}Guard`;
-    const unionName = "RequireA" as "RequireA" | "RequireB";
+    // Each name is typed as the explicit argument says, not as its literal.
+    const widen = <T extends string>(name: T): T => name;
+    const dynamicName = widen<string>("RequireA");
+    const patternName = widen<`${string}Guard`>("RequireAGuard");
+    const unionName = widen<"RequireA" | "RequireB">("RequireA");
     // The calls only need to type-check; each one is a valid runtime call too.
     // @ts-expect-error -- `string` widens the guard's type.
     void makeAuthorizationMiddleware(dynamicName, input);

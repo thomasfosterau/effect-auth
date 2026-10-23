@@ -27,11 +27,9 @@ import { oauthServiceOptionsConfig } from "./oauth/OAuth.ts";
  * `TRUSTED_DEVICE_MAX_AGE_MS` falls back to its default.
  */
 
-const resolve = <A, E>(config: Config.Config<A>, env: Record<string, string>) =>
+const resolve = <A>(config: Config.Config<A>, env: Record<string, string>) =>
   Effect.runPromiseExit(
-    config.pipe(
-      Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
-    ) as Effect.Effect<A, E>,
+    config.pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))),
   );
 
 describe("empty environment variables", () => {
@@ -46,7 +44,7 @@ describe("empty environment variables", () => {
     ["OAUTH_ENCRYPT_TOKENS_SECRET", oauthServiceOptionsConfig, {}],
     ["TWO_FACTOR_ENCRYPT_SECRET", multiFactorConfig, mfEnv],
   ] as const)("%s='' is a configuration error naming the variable", async (name, config, base) => {
-    const exit = await resolve(config as Config.Config<unknown>, { ...base, [name]: "" });
+    const exit = await resolve<unknown>(config, { ...base, [name]: "" });
     expect(exit._tag).toBe("Failure");
     expect(failureMessage(exit)).toContain(name);
     expect(failureMessage(exit)).toContain("set but empty");

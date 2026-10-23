@@ -122,7 +122,8 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
       expect(result.duplicate.cause).toBeDefined();
 
       expect(result.claim._tag).toBe("IdentifierTakenError");
-      expect((result.claim as Auth.IdentifierTakenError).identifierType).toBe("email");
+      assert.instanceOf(result.claim, Auth.IdentifierTakenError);
+      expect(result.claim.identifierType).toBe("email");
 
       expect(result.free.userId).toBe(USER.grace);
       // The loser never took the address from its owner.
@@ -268,7 +269,8 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
 
       expect(result.refused._tag).toBe("AuthError");
       expect(result.taken._tag).toBe("IdentifierTakenError");
-      expect((result.taken as Auth.IdentifierTakenError).identifierType).toBe("email");
+      assert.instanceOf(result.taken, Auth.IdentifierTakenError);
+      expect(result.taken.identifierType).toBe("email");
       expect(result.adaListed.map((identifier) => [identifier.value, identifier.verified])).toEqual(
         [["ada@example.com", true]],
       );

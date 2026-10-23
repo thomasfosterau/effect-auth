@@ -22,7 +22,10 @@ type StubOf<T> = T extends (...args: infer A) => infer R
 
 /** Any subset of the client's members; the code under test touches only the ones a test supplies. */
 type ClientStub = StubOf<AuthClient>;
-const stub = <T extends ClientStub>(shape: T): T & AuthClient => shape as T & AuthClient;
+const stub = <T extends ClientStub>(shape: T): T & AuthClient =>
+  // SAFETY: the code under test touches only the members a test supplies; reaching
+  // for a missing one throws, so a stub cannot let a test pass by omission.
+  shape as T & AuthClient;
 
 const AUTH_SUCCESS: AuthSuccess = {
   user: { id: "user-1", email: "alice@vue.test", createdAt: 0, updatedAt: 0, attributes: {} },
@@ -42,6 +45,8 @@ const withClient = (
 ) =>
   mount(component, {
     props,
+    // SAFETY: `authClientKey` is a `Symbol.for` symbol at runtime (`context.ts`);
+    // its `InjectionKey` type lacks only the primitive `symbol` a computed key needs.
     global: { provide: { [authClientKey as symbol]: client } },
   });
 
@@ -71,7 +76,7 @@ const submit = async (wrapper: VueWrapper): Promise<void> => {
 const button = (wrapper: VueWrapper) => wrapper.get("button[type='submit']");
 
 const emitted = (wrapper: VueWrapper, event: string): unknown[][] =>
-  (wrapper.emitted(event) ?? []) as unknown[][];
+  wrapper.emitted<unknown[]>(event) ?? [];
 
 describe("client resolution", () => {
   it("throws a message naming every way to supply a client", () => {

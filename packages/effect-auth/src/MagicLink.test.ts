@@ -616,8 +616,9 @@ describe("MagicLinkService", () => {
     expect(result._tag).toBe("Failure");
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("ResendTooSoonError");
-    expect((result.failure as { retryAfter: number }).retryAfter).toBeGreaterThan(0);
-    expect((result.failure as { retryAfter: number }).retryAfter).toBeLessThanOrEqual(60_000);
+    assert(result.failure._tag === "ResendTooSoonError");
+    expect(result.failure.retryAfter).toBeGreaterThan(0);
+    expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
     // The original token is preserved — no replacement was issued.
     expect(sentLinks.length).toBe(1);
     expect(magicLinkTokens.size).toBe(1);

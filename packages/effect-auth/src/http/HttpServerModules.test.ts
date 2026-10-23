@@ -10,7 +10,7 @@ import { hashToken } from "../TokenHash.ts";
 import { UserServiceStore, UserService } from "../User.ts";
 import { Hooks } from "../Hooks.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
-import { EmailPasswordStore } from "../email/EmailPassword.ts";
+import { EmailPasswordService, EmailPasswordStore } from "../email/EmailPassword.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { EmailVerificationService, EmailVerificationStore } from "../email/EmailVerification.ts";
 import {
@@ -113,7 +113,7 @@ const makeFixture = () => {
     delete: (userId: string) => Effect.sync(() => void usersById.delete(userId)),
   };
 
-  const sessionStore = {
+  const sessionStore: typeof SessionStore.Service = {
     create: (session: Types.Session) =>
       Effect.sync(() => {
         sessions.set(session.id, session);
@@ -301,9 +301,11 @@ const makeFixture = () => {
   };
 
   // Stage 0: raw stores + Hooks + dummy layers for AuthServices members these
-  // tests never exercise (org/admin/api-key/jwt handlers never touch them).
+  // tests never exercise.
+  // SAFETY: the `undefined` services complete `AuthServices` for `HttpServer.make`;
+  // the org/admin/api-key/jwt handlers these tests drive never touch them.
   const storesLayer = Layer.mergeAll(
-    Layer.succeed(SessionStore)(sessionStore as never),
+    Layer.succeed(SessionStore)(sessionStore),
     Layer.succeed(UserStore)(userStore),
     Layer.succeed(UserServiceStore)(userServiceStore),
     Layer.succeed(OrganizationStore)(orgStore),
@@ -314,6 +316,7 @@ const makeFixture = () => {
     Layer.succeed(IdentifierStore)(memoryIdentifierStore(identifierRecords)),
     Hooks.Default,
     Layer.succeed(AuthLifecycleService)(undefined as never),
+    Layer.succeed(EmailPasswordService)(undefined as never),
     Layer.succeed(EmailPasswordStore)(undefined as never),
     Layer.succeed(PasswordHasher)(undefined as never),
     Layer.succeed(EmailVerificationService)(undefined as never),
@@ -347,13 +350,13 @@ const makeFixture = () => {
     Layer.provide(stage1),
   );
 
-  const services = Layer.mergeAll(
+  const services: Layer.Layer<AuthServices> = Layer.mergeAll(
     stage1,
     organizationServiceLayer,
     adminServiceLayer,
     apiKeyServiceLayer,
     jwtServiceLayer,
-  ) as Layer.Layer<AuthServices>;
+  );
   const { handler } = HttpServer.make({ services, cookie: { secure: false } });
 
   return { handler, seedUser, makeSession, sessions };
@@ -363,6 +366,19 @@ const withCookie = (sessionId: string) => ({ cookie: `conduit_session=${sessionI
 
 /** A JSON request body, as the wire carries it. */
 const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
+/** A JSON response body, decoded against the shape the test reads from it. */
+const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
+  response: Response,
+  schema: S,
+): Promise<S["Type"]> => Schema.decodeUnknownSync(schema)(await response.json());
+
+// The response bodies several tests read.
+const IdBody = Schema.Struct({ id: Schema.String });
+const IdListBody = Schema.Array(IdBody);
+const NameBody = Schema.Struct({ name: Schema.String });
+/** A JSON array, read for its length. */
+const ListBody = Schema.Array(Schema.Unknown);
 
 // Same raw session token, delivered as `Authorization: Bearer` instead of
 // the cookie — the "machine" credential path (`credentialClassFromRequest`).
@@ -404,21 +420,24 @@ describe("HTTP organization endpoints", () => {
       jsonReq("/organization/create", { name: "Acme", slug: "acme" }, sid),
     );
     expect(created.status).toBe(200);
-    const org = (await created.json()) as { id: string; slug: string };
+    const org = await jsonBody(created, Schema.Struct({ id: Schema.String, slug: Schema.String }));
     expect(org.slug).toBe("acme");
 
     // Full org includes the creator as an owner member.
     const full = await fx.handler(req("GET", `/organization/${org.id}`, sid));
     expect(full.status).toBe(200);
-    const fullBody = (await full.json()) as {
-      organization: { id: string };
-      members: Array<{ userId: string; role: string }>;
-    };
+    const fullBody = await jsonBody(
+      full,
+      Schema.Struct({
+        organization: Schema.Struct({ id: Schema.String }),
+        members: Schema.Array(Schema.Struct({ userId: Schema.String, role: Schema.String })),
+      }),
+    );
     expect(fullBody.members).toEqual([{ ...fullBody.members[0], userId: "u1", role: "owner" }]);
 
     // List shows the org.
     const list = await fx.handler(req("GET", "/organizations", sid));
-    expect(((await list.json()) as Array<{ id: string }>).map((o) => o.id)).toEqual([org.id]);
+    expect((await jsonBody(list, IdListBody)).map((o) => o.id)).toEqual([org.id]);
 
     // Invite a member.
     const invited = await fx.handler(
@@ -430,13 +449,13 @@ describe("HTTP organization endpoints", () => {
     );
     expect(invited.status).toBe(200);
     const listInv = await fx.handler(req("GET", `/organization/${org.id}/invitations`, sid));
-    expect(((await listInv.json()) as unknown[]).length).toBe(1);
+    expect((await jsonBody(listInv, ListBody)).length).toBe(1);
 
     // Update.
     const updated = await fx.handler(
       req("PATCH", `/organization/${org.id}`, sid, { name: "Acme Inc" }),
     );
-    expect(((await updated.json()) as { name: string }).name).toBe("Acme Inc");
+    expect((await jsonBody(updated, NameBody)).name).toBe("Acme Inc");
 
     // Set active organization (stored on the session).
     const active = await fx.handler(
@@ -460,7 +479,7 @@ describe("HTTP organization endpoints", () => {
     const created = await fx.handler(
       jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
     );
-    const org = (await created.json()) as { id: string };
+    const org = await jsonBody(created, IdBody);
 
     const res = await fx.handler(
       req("PATCH", `/organization/${org.id}`, strangerSid, { name: "Hijack" }),
@@ -484,7 +503,7 @@ describe("HTTP organization endpoints", () => {
     const created = await fx.handler(
       jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
     );
-    const org = (await created.json()) as { id: string };
+    const org = await jsonBody(created, IdBody);
     await fx.handler(
       jsonReq(`/organization/${org.id}/members`, { userId: "member", role: "member" }, ownerSid),
     );
@@ -494,50 +513,55 @@ describe("HTTP organization endpoints", () => {
       jsonReq(`/organization/${org.id}/teams`, { name: "Engineering" }, ownerSid),
     );
     expect(teamRes.status).toBe(200);
-    const team = (await teamRes.json()) as { id: string; name: string; organizationId: string };
+    const team = await jsonBody(
+      teamRes,
+      Schema.Struct({ id: Schema.String, name: Schema.String, organizationId: Schema.String }),
+    );
     expect(team.name).toBe("Engineering");
     expect(team.organizationId).toBe(org.id);
 
     // Any organization member may list.
     const listed = await fx.handler(req("GET", `/organization/${org.id}/teams`, memberSid));
-    expect(((await listed.json()) as Array<{ id: string }>).map((t) => t.id)).toEqual([team.id]);
+    expect((await jsonBody(listed, IdListBody)).map((t) => t.id)).toEqual([team.id]);
 
     // Add + list team members.
     const added = await fx.handler(
       jsonReq(`/teams/${team.id}/members`, { userId: "member" }, ownerSid),
     );
     expect(added.status).toBe(200);
-    expect((await added.json()) as { userId: string }).toMatchObject({
+    expect(await added.json()).toMatchObject({
       teamId: team.id,
       userId: "member",
     });
 
     const teamMembersRes = await fx.handler(req("GET", `/teams/${team.id}/members`, memberSid));
     expect(
-      ((await teamMembersRes.json()) as Array<{ userId: string }>).map((m) => m.userId),
+      (await jsonBody(teamMembersRes, Schema.Array(Schema.Struct({ userId: Schema.String })))).map(
+        (m) => m.userId,
+      ),
     ).toEqual(["member"]);
 
     const forMember = await fx.handler(
       req("GET", `/organization/${org.id}/members/member/teams`, memberSid),
     );
-    expect(((await forMember.json()) as Array<{ id: string }>).map((t) => t.id)).toEqual([team.id]);
+    expect((await jsonBody(forMember, IdListBody)).map((t) => t.id)).toEqual([team.id]);
 
     // Rename.
     const renamed = await fx.handler(
       req("PATCH", `/teams/${team.id}`, ownerSid, { name: "Platform" }),
     );
-    expect(((await renamed.json()) as { name: string }).name).toBe("Platform");
+    expect((await jsonBody(renamed, NameBody)).name).toBe("Platform");
 
     // Remove the team member, then the team.
     const removed = await fx.handler(req("DELETE", `/teams/${team.id}/members/member`, ownerSid));
     expect(removed.status).toBe(204);
     const emptied = await fx.handler(req("GET", `/teams/${team.id}/members`, ownerSid));
-    expect(((await emptied.json()) as unknown[]).length).toBe(0);
+    expect((await jsonBody(emptied, ListBody)).length).toBe(0);
 
     const deleted = await fx.handler(req("DELETE", `/teams/${team.id}`, ownerSid));
     expect(deleted.status).toBe(204);
     const afterDelete = await fx.handler(req("GET", `/organization/${org.id}/teams`, ownerSid));
-    expect(((await afterDelete.json()) as unknown[]).length).toBe(0);
+    expect((await jsonBody(afterDelete, ListBody)).length).toBe(0);
   });
 
   it("manages custom organization roles", async () => {
@@ -550,7 +574,7 @@ describe("HTTP organization endpoints", () => {
     const created = await fx.handler(
       jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
     );
-    const org = (await created.json()) as { id: string };
+    const org = await jsonBody(created, IdBody);
     await fx.handler(
       jsonReq(`/organization/${org.id}/members`, { userId: "member", role: "member" }, ownerSid),
     );
@@ -562,7 +586,7 @@ describe("HTTP organization endpoints", () => {
       }),
     );
     expect(upserted.status).toBe(200);
-    expect((await upserted.json()) as { role: string }).toMatchObject({
+    expect(await upserted.json()).toMatchObject({
       organizationId: org.id,
       role: "member",
       permissions: ["team:create"],
@@ -571,9 +595,11 @@ describe("HTTP organization endpoints", () => {
     // Any member may list the definitions...
     const listed = await fx.handler(req("GET", `/organization/${org.id}/roles`, memberSid));
     expect(listed.status).toBe(200);
-    expect(((await listed.json()) as Array<{ role: string }>).map((r) => r.role)).toEqual([
-      "member",
-    ]);
+    expect(
+      (await jsonBody(listed, Schema.Array(Schema.Struct({ role: Schema.String })))).map(
+        (r) => r.role,
+      ),
+    ).toEqual(["member"]);
 
     // ...and the new permission is live for that member.
     const teamRes = await fx.handler(
@@ -602,7 +628,7 @@ describe("HTTP organization endpoints", () => {
     const created = await fx.handler(
       jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
     );
-    const org = (await created.json()) as { id: string };
+    const org = await jsonBody(created, IdBody);
     await fx.handler(
       jsonReq(`/organization/${org.id}/members`, { userId: "admin", role: "admin" }, ownerSid),
     );
@@ -642,7 +668,7 @@ describe("HTTP organization endpoints", () => {
     const created = await fx.handler(
       jsonReq("/organization/create", { name: "Acme", slug: "acme" }, ownerSid),
     );
-    const org = (await created.json()) as { id: string };
+    const org = await jsonBody(created, IdBody);
     await fx.handler(
       jsonReq(`/organization/${org.id}/members`, { userId: "member", role: "member" }, ownerSid),
     );
@@ -655,7 +681,7 @@ describe("HTTP organization endpoints", () => {
     const teamRes = await fx.handler(
       jsonReq(`/organization/${org.id}/teams`, { name: "Engineering" }, ownerSid),
     );
-    const team = (await teamRes.json()) as { id: string };
+    const team = await jsonBody(teamRes, IdBody);
 
     const deniedAdd = await fx.handler(
       jsonReq(`/teams/${team.id}/members`, { userId: "member" }, memberSid),
@@ -684,9 +710,14 @@ describe("HTTP admin endpoints", () => {
       jsonReq("/admin/users/ban", { userId: "victim", reason: "spam" }, adminSid),
     );
     expect(banned.status).toBe(200);
-    expect(((await banned.json()) as { attributes: { banned: boolean } }).attributes.banned).toBe(
-      true,
-    );
+    expect(
+      (
+        await jsonBody(
+          banned,
+          Schema.Struct({ attributes: Schema.Struct({ banned: Schema.Boolean }) }),
+        )
+      ).attributes.banned,
+    ).toBe(true);
 
     // The victim's session was revoked.
     const check = await fx.handler(req("GET", "/session", victimSid));
@@ -702,9 +733,10 @@ describe("HTTP admin endpoints", () => {
       jsonReq("/admin/users/set-role", { userId: "u", role: "moderator" }, adminSid),
     );
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { attributes: { role: string } }).attributes.role).toBe(
-      "moderator",
-    );
+    expect(
+      (await jsonBody(res, Schema.Struct({ attributes: Schema.Struct({ role: Schema.String }) })))
+        .attributes.role,
+    ).toBe("moderator");
   });
 });
 
@@ -732,27 +764,37 @@ describe("HTTP api-key endpoints", () => {
 
     const created = await fx.handler(jsonReq("/api-keys", { name: "CI" }, sid));
     expect(created.status).toBe(200);
-    const body = (await created.json()) as { key: string; apiKey: { id: string; name: string } };
+    const body = await jsonBody(
+      created,
+      Schema.Struct({
+        key: Schema.String,
+        apiKey: Schema.Struct({ id: Schema.String, name: Schema.String }),
+      }),
+    );
     expect(Predicate.isString(body.key)).toBe(true);
     expect(body.apiKey.name).toBe("CI");
     const keyId = body.apiKey.id;
 
     const list = await fx.handler(req("GET", "/api-keys", sid));
-    expect(((await list.json()) as unknown[]).length).toBe(1);
+    expect((await jsonBody(list, ListBody)).length).toBe(1);
 
     const updated = await fx.handler(req("PATCH", `/api-keys/${keyId}`, sid, { enabled: false }));
-    expect(((await updated.json()) as { enabled: boolean }).enabled).toBe(false);
+    expect((await jsonBody(updated, Schema.Struct({ enabled: Schema.Boolean }))).enabled).toBe(
+      false,
+    );
 
     const deleted = await fx.handler(req("DELETE", `/api-keys/${keyId}`, sid));
     expect(deleted.status).toBe(204);
     const empty = await fx.handler(req("GET", "/api-keys", sid));
-    expect(((await empty.json()) as unknown[]).length).toBe(0);
+    expect((await jsonBody(empty, ListBody)).length).toBe(0);
   });
 });
 
 /** The parts of the JWKS, a JWS header and the JWT claims the JWT test reads. */
 const Jwks = Schema.Struct({ keys: Schema.Array(Schema.Record(Schema.String, Schema.Json)) });
 const JwsHeader = Schema.fromJsonString(Schema.Struct({ kid: Schema.String, alg: Schema.String }));
+/** A compact JWS: header, payload and signature. */
+const JwsSegments = Schema.Tuple([Schema.String, Schema.String, Schema.String]);
 const JwtClaims = Schema.fromJsonString(Schema.Struct({ sub: Schema.String, iss: Schema.String }));
 
 describe("HTTP JWT endpoints", () => {
@@ -763,7 +805,7 @@ describe("HTTP JWT endpoints", () => {
 
     const tokenRes = await fx.handler(req("GET", "/token", sid));
     expect(tokenRes.status).toBe(200);
-    const { token } = (await tokenRes.json()) as { token: string };
+    const { token } = await jsonBody(tokenRes, Schema.Struct({ token: Schema.String }));
 
     const jwksRes = await fx.handler(req("GET", "/jwks"));
     expect(jwksRes.status).toBe(200);
@@ -771,7 +813,7 @@ describe("HTTP JWT endpoints", () => {
     expect(keys.length).toBe(1);
 
     // Verify the ES256 signature against the published JWK.
-    const [headerSeg, payloadSeg, sigSeg] = token.split(".") as [string, string, string];
+    const [headerSeg, payloadSeg, sigSeg] = Schema.decodeUnknownSync(JwsSegments)(token.split("."));
     const header = Schema.decodeUnknownSync(JwsHeader)(
       Buffer.from(headerSeg, "base64url").toString("utf8"),
     );

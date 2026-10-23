@@ -1,7 +1,7 @@
 import { assert, describe, it, expect, beforeEach, beforeAll, afterAll } from "vite-plus/test";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { Array as Arr, Context, Crypto, Effect, Redacted, Result, Schema } from "effect";
+import { Array as Arr, Context, Crypto, Effect, Predicate, Redacted, Result, Schema } from "effect";
 import { generateKeyPair, JwtKeyStore, type JwtConfig, type JwtKeyPair } from "./Jwt.ts";
 import * as Jwt from "./Jwt.ts";
 import * as Cipher from "./Cipher.ts";
@@ -13,6 +13,10 @@ const decodeJsonObject = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
 );
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+/** A compact JWS's header, payload and signature segments. */
+const jwsSegments = Schema.decodeUnknownSync(
+  Schema.Tuple([Schema.String, Schema.String, Schema.String]),
+);
 
 const keyPairs: JwtKeyPair[] = [];
 
@@ -110,7 +114,7 @@ describe("JwtService", () => {
         const service = yield* Jwt.make(baseConfig);
         const { token } = yield* service.sign(user);
 
-        const [header, payload, signature] = token.split(".") as [string, string, string];
+        const [header, payload, signature] = jwsSegments(token.split("."));
         const forgedPayload = Buffer.from(
           encodeJson({
             ...decodeJsonObject(Buffer.from(payload, "base64url").toString("utf8")),
@@ -553,7 +557,12 @@ describe("RemoteJwksVerifier", () => {
     });
 
     await new Promise<void>((resolve) => server.listen(0, () => resolve()));
-    const addr = server.address() as { port: number };
+    const addr = server.address();
+    // A server listening on a TCP port reports an `AddressInfo`.
+    assert(
+      Predicate.isNotNull(addr) && !Predicate.isString(addr),
+      "the JWKS server listens on a port",
+    );
     jwksUrl = `http://127.0.0.1:${addr.port}/.well-known/jwks.json`;
   });
 
@@ -579,7 +588,7 @@ describe("RemoteJwksVerifier", () => {
   });
 
   it("should reject a tampered token", async () => {
-    const [hdr, pay, sig] = signedToken.split(".") as [string, string, string];
+    const [hdr, pay, sig] = jwsSegments(signedToken.split("."));
     const forgedPay = Buffer.from(
       encodeJson({
         ...decodeJsonObject(Buffer.from(pay, "base64url").toString("utf8")),
@@ -607,7 +616,7 @@ describe("RemoteJwksVerifier", () => {
 
   it("should reject a token with an unknown kid", async () => {
     // Replace the kid in the header with one that doesn't exist in the JWKS.
-    const [hdr, pay, sig] = signedToken.split(".") as [string, string, string];
+    const [hdr, pay, sig] = jwsSegments(signedToken.split("."));
     const parsedHeader = decodeJsonObject(Buffer.from(hdr, "base64url").toString("utf8"));
     const badHeader = Buffer.from(encodeJson({ ...parsedHeader, kid: "no-such-kid" })).toString(
       "base64url",

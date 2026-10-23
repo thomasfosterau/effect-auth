@@ -142,7 +142,7 @@ const run = (): Promise<Observed> => {
       Effect.provide(
         Layer.mergeAll(EffectPglite.DefaultServices, PgliteClient.layer({ liveClient: client })),
       ),
-    ) as Effect.Effect<Observed, unknown>,
+    ),
   );
 };
 

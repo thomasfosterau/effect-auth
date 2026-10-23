@@ -19,9 +19,7 @@ const run = <A, E>(
 ): Promise<A> => {
   const database = makeTestD1();
   const stores = layer(database).pipe(Layer.provideMerge(D1Client.layer({ db: database })));
-  return Effect.runPromise(
-    migrate(database).pipe(Effect.andThen(effect), Effect.provide(stores)) as Effect.Effect<A, E>,
-  );
+  return Effect.runPromise(migrate(database).pipe(Effect.andThen(effect), Effect.provide(stores)));
 };
 
 describe("D1-backed effect-auth storage", () => {

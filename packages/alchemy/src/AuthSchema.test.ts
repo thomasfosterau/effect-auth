@@ -22,7 +22,7 @@ import { ProfileStoreLive } from "alchemy/Auth/Profile";
 import { LoggingCli } from "alchemy/Cli/LoggingCli";
 import * as Plan from "alchemy/Plan";
 import { Stack } from "alchemy/Stack";
-import { make as makeStack } from "alchemy/Stack";
+import { make as makeStack, type StackServices } from "alchemy/Stack";
 import { Stage } from "alchemy/Stage";
 import * as State from "alchemy/State";
 import { AuthSchema, AuthSchemaProvider, authTableNames } from "./AuthSchema.ts";
@@ -59,7 +59,7 @@ const platform = Layer.mergeAll(
     makeDirectory: () => Effect.void,
     chmod: () => Effect.void,
     writeFileString: () => Effect.void,
-  } as never),
+  }),
   Path.layer,
   FetchHttpClient.layer,
 );
@@ -92,8 +92,10 @@ const makeEngine = (
   const state = Layer.succeed(State.State, State.InMemoryService(store));
   const providers = AuthSchemaProvider(options);
 
-  const withRuntime = <A>(effect: Effect.Effect<A, unknown, never>): Promise<A> =>
+  const withRuntime = <A>(effect: Effect.Effect<A, unknown, Stage>): Promise<A> =>
     Effect.runPromise(
+      // SAFETY: `LoggingCli` asks for a `Terminal` only to prompt in `approvePlan`;
+      // these deploys call `apply` directly and never ask for approval.
       effect.pipe(
         Effect.provide(Layer.succeed(Stage, STAGE)),
         provideFreshArtifactStore,
@@ -118,15 +120,19 @@ const makeEngine = (
     /** The engine's persisted state, so another engine can pick it up. */
     store,
     /** `alchemy deploy` for one program. */
-    deploy: <A>(program: Effect.Effect<A, never, never>): Promise<typeof DeployOutput.Type> =>
+    deploy: <A, E, R extends Layer.Success<typeof providers> | StackServices>(
+      program: Effect.Effect<A, E, R>,
+    ): Promise<typeof DeployOutput.Type> =>
       withRuntime(
+        // SAFETY: `withRuntime` provides the engine services a deploy uses, and
+        // `compiled.services` is the whole context the stack was built in, its
+        // `State` and providers among it. `Stack.make` also declares
+        // `ChildProcessSpawner`, `Crypto` and `Interaction`, which an `AuthSchema`
+        // deploy never reaches: one that did would fail with a missing-service defect.
         program.pipe(
-          makeStack({ name: STACK, providers, state } as never) as never,
-          Effect.flatMap((compiled: { services: Layer.Layer<never> }) =>
-            Plan.make(compiled as never).pipe(
-              Effect.flatMap(apply),
-              Effect.provide(compiled.services),
-            ),
+          makeStack({ name: STACK, providers, state }),
+          Effect.flatMap((compiled) =>
+            Plan.make(compiled).pipe(Effect.flatMap(apply), Effect.provide(compiled.services)),
           ),
           Effect.flatMap(Schema.decodeUnknownEffect(DeployOutput)),
         ) as Effect.Effect<typeof DeployOutput.Type, unknown, never>,
@@ -141,14 +147,14 @@ const makeEngine = (
           bindings: {},
           actions: {},
           output: {},
-        } as never).pipe(
+        }).pipe(
           Effect.flatMap(apply),
           Effect.asVoid,
           // Ordered provides again: `providers` and the `Stack` layer are
           // resolved against the state layer provided first.
           // @effect-diagnostics-next-line multipleEffectProvide:off
           Effect.provide(state),
-          Effect.provide(providers as Layer.Layer<never>),
+          Effect.provide(providers),
           Effect.provide(
             Layer.succeed(Stack, {
               name: STACK,
@@ -156,9 +162,9 @@ const makeEngine = (
               resources: {},
               bindings: {},
               actions: {},
-            } as never),
+            }),
           ),
-        ) as Effect.Effect<void, unknown, never>,
+        ),
       ),
   };
 };
@@ -180,7 +186,7 @@ const countUsers = (database: D1Client.D1Database): Promise<number> =>
       const sql = yield* SqlClient.SqlClient;
       const rows = yield* sql<{ readonly n: number }>`SELECT count(*) AS n FROM auth_users`;
       return rows[0]?.n ?? 0;
-    }).pipe(Effect.provide(D1Client.layer({ db: database }))) as Effect.Effect<number>,
+    }).pipe(Effect.provide(D1Client.layer({ db: database }))),
   );
 
 const insertUser = (database: D1Client.D1Database): Promise<void> =>
@@ -188,7 +194,7 @@ const insertUser = (database: D1Client.D1Database): Promise<void> =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* sql`INSERT INTO auth_users (id, created_at, updated_at) VALUES ('u1', 1, 1)`;
-    }).pipe(Effect.provide(D1Client.layer({ db: database }))) as Effect.Effect<void>,
+    }).pipe(Effect.provide(D1Client.layer({ db: database }))),
   );
 
 describe("AuthSchema resource", () => {
@@ -213,7 +219,7 @@ describe("AuthSchema resource", () => {
     const engine = makeEngine({ database });
     const program = AuthSchema("auth-schema");
 
-    const created = await engine.deploy(program as never);
+    const created = await engine.deploy(program);
     assert(created !== undefined);
     expect(created.tables).toEqual(sortedTableNames);
     expect(created.statements).toBeGreaterThan(0);
@@ -221,7 +227,7 @@ describe("AuthSchema resource", () => {
 
     // Data written between deploys must survive the next reconcile.
     await insertUser(database);
-    await engine.deploy(program as never);
+    await engine.deploy(program);
     expect(await countUsers(database)).toBe(1);
     expect(await tablesIn(database)).toEqual(sortedTableNames);
 
@@ -236,7 +242,7 @@ describe("AuthSchema resource", () => {
     const engine = makeEngine({ database });
     const program = AuthSchema("auth-schema", { dropOnDelete: true });
 
-    await engine.deploy(program as never);
+    await engine.deploy(program);
     expect(await tablesIn(database)).toEqual(sortedTableNames);
 
     await engine.destroy();
@@ -252,7 +258,7 @@ describe("AuthSchema resource", () => {
       Effect.gen(function* () {
         yield* AuthSchema("primary-auth", { database: "primary" });
         yield* AuthSchema("tenant-auth", { database: "tenants", dropOnDelete: true });
-      }) as never,
+      }),
     );
     expect(await tablesIn(primary)).toEqual(sortedTableNames);
     expect(await tablesIn(tenants)).toEqual(sortedTableNames);
@@ -266,9 +272,7 @@ describe("AuthSchema resource", () => {
   it("fails the destroy rather than silently skipping an unregistered database", async () => {
     const database = makeTestD1();
     const engine = makeEngine({ databases: { primary: database } });
-    await engine.deploy(
-      AuthSchema("auth-schema", { database: "primary", dropOnDelete: true }) as never,
-    );
+    await engine.deploy(AuthSchema("auth-schema", { database: "primary", dropOnDelete: true }));
 
     // The stack is torn down by a provider that no longer holds the binding:
     // dropping is impossible, so the destroy must fail loudly and leave the

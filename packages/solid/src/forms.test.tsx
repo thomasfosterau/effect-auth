@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import type { AuthClient } from "@thomasfosterau/effect-auth-client";
 import {
@@ -34,7 +34,10 @@ type StubOf<T> = T extends (...args: infer A) => infer R
 
 /** Any subset of the client's members; the code under test touches only the ones a test supplies. */
 type ClientStub = StubOf<AuthClient>;
-const stub = (methods: ClientStub): AuthClient => methods as AuthClient;
+const stub = (methods: ClientStub): AuthClient =>
+  // SAFETY: the code under test touches only the members a test supplies; reaching
+  // for a missing one throws, so a stub cannot let a test pass by omission.
+  methods as AuthClient;
 
 /** A promise plus the handles to settle it, for driving the pending state. */
 const deferred = <T,>() => {
@@ -51,12 +54,21 @@ const type = (label: string, value: string): void => {
   fireEvent.input(screen.getByLabelText(label), { target: { value } });
 };
 
-const submit = (container: HTMLElement): void => {
-  fireEvent.submit(container.querySelector("form") as HTMLFormElement);
+const formIn = (container: HTMLElement): HTMLFormElement => {
+  const form = container.querySelector("form");
+  assert.instanceOf(form, HTMLFormElement);
+  return form;
 };
 
-const submitButton = (container: HTMLElement): HTMLButtonElement =>
-  container.querySelector(".ea-submit") as HTMLButtonElement;
+const submit = (container: HTMLElement): void => {
+  fireEvent.submit(formIn(container));
+};
+
+const submitButton = (container: HTMLElement): HTMLButtonElement => {
+  const button = container.querySelector(".ea-submit");
+  assert.instanceOf(button, HTMLButtonElement);
+  return button;
+};
 
 describe("SignInForm", () => {
   it("submits email + password to signIn and fires onSuccess", async () => {
@@ -162,9 +174,11 @@ describe("SignInForm", () => {
     ));
 
     const [first, second] = Array.from(container.querySelectorAll("form"));
-    fireEvent.submit(first as HTMLFormElement);
+    assert.instanceOf(first, HTMLFormElement);
+    assert.instanceOf(second, HTMLFormElement);
+    fireEvent.submit(first);
     await waitFor(() => expect(calls).toEqual(["context"]));
-    fireEvent.submit(second as HTMLFormElement);
+    fireEvent.submit(second);
     await waitFor(() => expect(calls).toEqual(["context", "prop"]));
   });
 
@@ -178,7 +192,7 @@ describe("SignInForm", () => {
       />
     ));
 
-    const form = container.querySelector("form") as HTMLFormElement;
+    const form = formIn(container);
     expect(form.className).toBe("ea-form ea-sign-in my-card");
     expect(container.querySelector(".btn.btn-primary")?.textContent).toBe("Log in");
     // Unmentioned labels and elements keep their defaults.

@@ -143,9 +143,9 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     setSessionAttributes: () => Effect.die("unused"),
   };
 
-  const unused = () => Effect.die("unused") as never;
+  const unused = () => Effect.die("unused");
 
-  const orgStore = {
+  const orgStore: typeof OrganizationStore.Service = {
     createMember: (m: Member) => Effect.sync(() => (members.push(m), m)),
     getMember: (organizationId: string, userId: string) =>
       Effect.succeed(
@@ -255,7 +255,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     Layer.succeed(IdentifierStore)(identifiers),
     Layer.succeed(UserStore)(coreUserStore),
     Layer.succeed(UserServiceStore)(userServiceStore),
-    Layer.succeed(OrganizationStore)(orgStore as never),
+    Layer.succeed(OrganizationStore)(orgStore),
     Layer.succeed(SessionService)(sessionManager),
     Hooks.Default,
     PlatformCrypto.layer,
@@ -327,16 +327,19 @@ describe("ScimService — connections", () => {
 
     await fx.run(fx.service.revokeConnection(fx.a.connection.id));
     const err = await fx.run(Effect.flip(fx.service.authenticate(fx.a.token)));
-    expect((err as ScimError).status).toBe(401);
+    assert.instanceOf(err, ScimError);
+    expect(err.status).toBe(401);
   });
 
   it("answers 401 the same way for an empty and an unknown token", async () => {
     const fx = await makeFixture();
     const empty = await fx.run(Effect.flip(fx.service.authenticate("")));
     const unknown = await fx.run(Effect.flip(fx.service.authenticate("not-a-token")));
-    expect((empty as ScimError).status).toBe(401);
-    expect((unknown as ScimError).status).toBe(401);
-    expect((empty as ScimError).message).toBe((unknown as ScimError).message);
+    assert.instanceOf(empty, ScimError);
+    expect(empty.status).toBe(401);
+    assert.instanceOf(unknown, ScimError);
+    expect(unknown.status).toBe(401);
+    expect(empty.message).toBe(unknown.message);
   });
 
   it("lists an organization's connections without leaking other tenants'", async () => {
@@ -412,8 +415,9 @@ describe("ScimService — users", () => {
     await fx.run(fx.service.createUser(fx.a.connection, ADA));
 
     const err = await fx.run(Effect.flip(fx.service.createUser(fx.a.connection, ADA)));
-    expect((err as ScimError).status).toBe(409);
-    expect((err as ScimError).scimType).toBe("uniqueness");
+    assert.instanceOf(err, ScimError);
+    expect(err.status).toBe(409);
+    expect(err.scimType).toBe("uniqueness");
     // The pre-flight check runs before the user row, so no orphan is left.
     expect(fx.usersById.size).toBe(1);
   });
@@ -423,8 +427,9 @@ describe("ScimService — users", () => {
     const err = await fx.run(
       Effect.flip(fx.service.createUser(fx.a.connection, { userName: " " })),
     );
-    expect((err as ScimError).status).toBe(400);
-    expect((err as ScimError).scimType).toBe("invalidValue");
+    assert.instanceOf(err, ScimError);
+    expect(err.status).toBe(400);
+    expect(err.scimType).toBe("invalidValue");
   });
 
   it("keeps organizations apart: a connection cannot read another org's user", async () => {
@@ -434,7 +439,8 @@ describe("ScimService — users", () => {
     // Org B's connection sees the id as absent — not forbidden, absent — so it
     // cannot use the status code to enumerate the rest of the directory.
     const err = await fx.run(Effect.flip(fx.service.getUser(fx.b.connection, ada.id)));
-    expect((err as ScimError).status).toBe(404);
+    assert.instanceOf(err, ScimError);
+    expect(err.status).toBe(404);
 
     const listed = await fx.run(fx.service.listUsers(fx.b.connection));
     expect(listed.totalResults).toBe(0);
@@ -447,9 +453,11 @@ describe("ScimService — users", () => {
         ]),
       ),
     );
-    expect((patchErr as ScimError).status).toBe(404);
+    assert.instanceOf(patchErr, ScimError);
+    expect(patchErr.status).toBe(404);
     const deleteErr = await fx.run(Effect.flip(fx.service.deactivateUser(fx.b.connection, ada.id)));
-    expect((deleteErr as ScimError).status).toBe(404);
+    assert.instanceOf(deleteErr, ScimError);
+    expect(deleteErr.status).toBe(404);
     const stored = fx.usersById.get(ada.id);
     assert(stored !== undefined, "ada is still stored");
     expect(Scim.isScimDeactivated(stored)).toBe(false);
@@ -496,8 +504,9 @@ describe("ScimService — users", () => {
       async (previous, filter) => {
         await previous;
         const err = await fx.run(Effect.flip(fx.service.listUsers(fx.a.connection, { filter })));
-        expect((err as ScimError).status).toBe(400);
-        expect((err as ScimError).scimType).toBe("invalidFilter");
+        assert.instanceOf(err, ScimError);
+        expect(err.status).toBe(400);
+        expect(err.scimType).toBe("invalidFilter");
       },
     );
   });
@@ -670,7 +679,8 @@ describe("ScimService — users", () => {
         ]),
       ),
     );
-    expect((err as ScimError).status).toBe(409);
+    assert.instanceOf(err, ScimError);
+    expect(err.status).toBe(409);
   });
 
   it("rejects an unsupported patch path with 400 invalidPath", async () => {
@@ -684,8 +694,9 @@ describe("ScimService — users", () => {
         ]),
       ),
     );
-    expect((err as ScimError).status).toBe(400);
-    expect((err as ScimError).scimType).toBe("invalidPath");
+    assert.instanceOf(err, ScimError);
+    expect(err.status).toBe(400);
+    expect(err.scimType).toBe("invalidPath");
   });
 
   it("replaces a user with PUT, treating emails as authoritative only when sent", async () => {
@@ -802,8 +813,9 @@ describe("ScimService — groups", () => {
         }),
       ),
     );
-    expect((err as ScimError).status).toBe(400);
-    expect((err as ScimError).scimType).toBe("invalidValue");
+    assert.instanceOf(err, ScimError);
+    expect(err.status).toBe(400);
+    expect(err.scimType).toBe("invalidValue");
   });
 
   it("cannot see or delete another organization's group", async () => {
@@ -813,9 +825,11 @@ describe("ScimService — groups", () => {
     );
 
     const err = await fx.run(Effect.flip(fx.service.getGroup(fx.b.connection, group.id)));
-    expect((err as ScimError).status).toBe(404);
+    assert.instanceOf(err, ScimError);
+    expect(err.status).toBe(404);
     const deleteErr = await fx.run(Effect.flip(fx.service.deleteGroup(fx.b.connection, group.id)));
-    expect((deleteErr as ScimError).status).toBe(404);
+    assert.instanceOf(deleteErr, ScimError);
+    expect(deleteErr.status).toBe(404);
     expect(fx.teams.has(group.id)).toBe(true);
 
     expect((await fx.run(fx.service.listGroups(fx.b.connection))).totalResults).toBe(0);
@@ -907,7 +921,8 @@ describe("ScimService — groups", () => {
     const badFilter = await fx.run(
       Effect.flip(fx.service.listGroups(fx.a.connection, { filter: 'members eq "x"' })),
     );
-    expect((badFilter as ScimError).scimType).toBe("invalidFilter");
+    assert.instanceOf(badFilter, ScimError);
+    expect(badFilter.scimType).toBe("invalidFilter");
 
     await fx.run(fx.service.deleteGroup(fx.a.connection, engineering.id));
     expect(fx.teams.has(engineering.id)).toBe(false);
@@ -973,8 +988,9 @@ const makeHttpFixture = async (
 ) => {
   const stores = makeStores(storeOptions);
 
-  // Members the SCIM handlers never touch, but `AuthServices` requires.
-  // `SessionService` and `IdentifierStore` come from `stores.layer` for real.
+  // SAFETY: these complete `AuthServices` for `HttpServer.make`, and the SCIM
+  // handlers never touch them. `SessionService` and `IdentifierStore` come from
+  // `stores.layer` for real.
   const base = Layer.mergeAll(
     Layer.succeed(AuthLifecycleService)(undefined as never),
     Layer.succeed(EmailPasswordService)(undefined as never),
@@ -986,12 +1002,8 @@ const makeHttpFixture = async (
   );
 
   const scimServiceLayer = ScimService.layer(config).pipe(Layer.provide(stores.layer));
-  const withScim = Layer.mergeAll(
-    stores.layer,
-    base,
-    scimServiceLayer,
-  ) as Layer.Layer<AuthServices>;
-  const withoutScim = Layer.mergeAll(stores.layer, base) as Layer.Layer<AuthServices>;
+  const withScim: Layer.Layer<AuthServices> = Layer.mergeAll(stores.layer, base, scimServiceLayer);
+  const withoutScim: Layer.Layer<AuthServices> = Layer.mergeAll(stores.layer, base);
 
   const service = await Effect.runPromise(Scim.make(config).pipe(Effect.provide(stores.layer)));
   const connection = await Effect.runPromise(service.createConnection(ORG_A));
@@ -1023,31 +1035,49 @@ const scimReq = (
     ...(options.body !== undefined ? { body: encodeJson(options.body) } : {}),
   });
 
-interface ScimUserBody {
-  readonly schemas: ReadonlyArray<string>;
-  readonly id: string;
-  readonly userName: string;
-  readonly displayName?: string;
-  readonly externalId?: string;
-  readonly emails: ReadonlyArray<{ value: string; primary?: boolean }>;
-  readonly active: boolean;
-  readonly meta: { resourceType: string; location: string; created: string; lastModified: string };
-}
+/** A JSON response body, decoded against the shape the test reads from it. */
+const jsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
+  response: Response,
+  schema: S,
+): Promise<S["Type"]> => Schema.decodeUnknownSync(schema)(await response.json());
 
-interface ScimListBody<A> {
-  readonly schemas: ReadonlyArray<string>;
-  readonly totalResults: number;
-  readonly startIndex: number;
-  readonly itemsPerPage: number;
-  readonly Resources: ReadonlyArray<A>;
-}
+const ScimUserBody = Schema.Struct({
+  schemas: Schema.Array(Schema.String),
+  id: Schema.String,
+  userName: Schema.String,
+  displayName: Schema.optional(Schema.String),
+  externalId: Schema.optional(Schema.String),
+  emails: Schema.Array(
+    Schema.Struct({ value: Schema.String, primary: Schema.optional(Schema.Boolean) }),
+  ),
+  active: Schema.Boolean,
+  meta: Schema.Struct({
+    resourceType: Schema.String,
+    location: Schema.String,
+    created: Schema.String,
+    lastModified: Schema.String,
+  }),
+});
 
-interface ScimErrorBody {
-  readonly schemas: ReadonlyArray<string>;
-  readonly status: string;
-  readonly scimType?: string;
-  readonly detail?: string;
-}
+/** A SCIM list response whose resources decode as `resource`. */
+const ScimListBody = <S extends Schema.Constraint>(resource: S) =>
+  Schema.Struct({
+    schemas: Schema.Array(Schema.String),
+    totalResults: Schema.Number,
+    startIndex: Schema.Number,
+    itemsPerPage: Schema.Number,
+    Resources: Schema.Array(resource),
+  });
+
+const ScimErrorBody = Schema.Struct({
+  schemas: Schema.Array(Schema.String),
+  status: Schema.String,
+  scimType: Schema.optional(Schema.String),
+  detail: Schema.optional(Schema.String),
+});
+
+/** A body's own fields, as the wire carried them. */
+const JsonFields = Schema.Record(Schema.String, Schema.Json);
 
 describe("HTTP SCIM endpoints", () => {
   it("gates every route on the provisioning token", async () => {
@@ -1055,7 +1085,7 @@ describe("HTTP SCIM endpoints", () => {
 
     const anonymous = await fx.handler(scimReq("GET", "/Users"));
     expect(anonymous.status).toBe(401);
-    const body = (await anonymous.json()) as ScimErrorBody;
+    const body = await jsonBody(anonymous, ScimErrorBody);
     expect(body.schemas).toEqual(["urn:ietf:params:scim:api:messages:2.0:Error"]);
     expect(body.status).toBe("401");
     expect(anonymous.headers.get("content-type")).toContain("application/scim+json");
@@ -1071,7 +1101,7 @@ describe("HTTP SCIM endpoints", () => {
     const fx = await makeHttpFixture();
     const res = await fx.handlerWithoutScim(scimReq("GET", "/Users", { token: fx.token }));
     expect(res.status).toBe(404);
-    const body = (await res.json()) as ScimErrorBody;
+    const body = await jsonBody(res, ScimErrorBody);
     expect(body.status).toBe("404");
     expect(body.detail).toMatch(/not enabled/);
   });
@@ -1086,7 +1116,7 @@ describe("HTTP SCIM endpoints", () => {
       }),
     );
     expect(probe.status).toBe(200);
-    expect(((await probe.json()) as ScimListBody<ScimUserBody>).totalResults).toBe(0);
+    expect((await jsonBody(probe, ScimListBody(ScimUserBody))).totalResults).toBe(0);
 
     // 2. Not found, so it creates them — with `name` but no `displayName`.
     const created = await fx.handler(
@@ -1104,7 +1134,7 @@ describe("HTTP SCIM endpoints", () => {
     );
     expect(created.status).toBe(201);
     expect(created.headers.get("content-type")).toContain("application/scim+json");
-    const user = (await created.json()) as ScimUserBody;
+    const user = await jsonBody(created, ScimUserBody);
     expect(user.schemas).toEqual(["urn:ietf:params:scim:schemas:core:2.0:User"]);
     expect(user.userName).toBe("ada@acme.test");
     // `name` was folded into a display name.
@@ -1118,16 +1148,14 @@ describe("HTTP SCIM endpoints", () => {
       scimReq("POST", "/Users", { token: fx.token, body: { userName: "ada@acme.test" } }),
     );
     expect(duplicate.status).toBe(409);
-    const conflict = (await duplicate.json()) as ScimErrorBody;
+    const conflictJson: unknown = await duplicate.json();
+    const conflict = Schema.decodeUnknownSync(ScimErrorBody)(conflictJson);
     expect(conflict.status).toBe("409");
     expect(conflict.scimType).toBe("uniqueness");
     // The body is RFC 7644 §3.12 verbatim — no repo-specific members.
-    expect(Arr.sort(Object.keys(conflict), Order.String)).toEqual([
-      "detail",
-      "schemas",
-      "scimType",
-      "status",
-    ]);
+    expect(
+      Arr.sort(Object.keys(Schema.decodeUnknownSync(JsonFields)(conflictJson)), Order.String),
+    ).toEqual(["detail", "schemas", "scimType", "status"]);
 
     // 4. The filter now finds them.
     const found = await fx.handler(
@@ -1135,7 +1163,7 @@ describe("HTTP SCIM endpoints", () => {
         token: fx.token,
       }),
     );
-    const list = (await found.json()) as ScimListBody<ScimUserBody>;
+    const list = await jsonBody(found, ScimListBody(ScimUserBody));
     expect(list.schemas).toEqual(["urn:ietf:params:scim:api:messages:2.0:ListResponse"]);
     expect(list.totalResults).toBe(1);
     expect(list.startIndex).toBe(1);
@@ -1145,7 +1173,7 @@ describe("HTTP SCIM endpoints", () => {
     // 5. A single read by id.
     const read = await fx.handler(scimReq("GET", `/Users/${user.id}`, { token: fx.token }));
     expect(read.status).toBe(200);
-    expect(((await read.json()) as ScimUserBody).userName).toBe("ada@acme.test");
+    expect((await jsonBody(read, ScimUserBody)).userName).toBe("ada@acme.test");
 
     // 6. Ada leaves: Okta deactivates rather than deletes.
     const deactivated = await fx.handler(
@@ -1158,7 +1186,7 @@ describe("HTTP SCIM endpoints", () => {
       }),
     );
     expect(deactivated.status).toBe(200);
-    expect(((await deactivated.json()) as ScimUserBody).active).toBe(false);
+    expect((await jsonBody(deactivated, ScimUserBody)).active).toBe(false);
 
     // 7. Groups: create one, then push a member into it.
     const group = await fx.handler(
@@ -1171,7 +1199,10 @@ describe("HTTP SCIM endpoints", () => {
       }),
     );
     expect(group.status).toBe(201);
-    const groupBody = (await group.json()) as { id: string; displayName: string; members: [] };
+    const groupBody = await jsonBody(
+      group,
+      Schema.Struct({ id: Schema.String, displayName: Schema.String, members: Schema.Tuple([]) }),
+    );
     expect(groupBody.displayName).toBe("Engineering");
     expect(groupBody.members).toEqual([]);
 
@@ -1185,10 +1216,13 @@ describe("HTTP SCIM endpoints", () => {
       }),
     );
     expect(withMember.status).toBe(200);
-    const patchedGroup = (await withMember.json()) as {
-      members: ReadonlyArray<{ value: string }>;
-      meta: { resourceType: string };
-    };
+    const patchedGroup = await jsonBody(
+      withMember,
+      Schema.Struct({
+        members: Schema.Array(Schema.Struct({ value: Schema.String })),
+        meta: Schema.Struct({ resourceType: Schema.String }),
+      }),
+    );
     expect(patchedGroup.members.map((m) => m.value)).toEqual([user.id]);
     expect(patchedGroup.meta.resourceType).toBe("Group");
 
@@ -1197,7 +1231,7 @@ describe("HTTP SCIM endpoints", () => {
     expect(removed.status).toBe(204);
     const after = await fx.handler(scimReq("GET", `/Users/${user.id}`, { token: fx.token }));
     expect(after.status).toBe(200);
-    expect(((await after.json()) as ScimUserBody).active).toBe(false);
+    expect((await jsonBody(after, ScimUserBody)).active).toBe(false);
 
     // 9. Deleting the group leaves the user in place.
     const groupGone = await fx.handler(
@@ -1223,7 +1257,7 @@ describe("HTTP SCIM endpoints", () => {
     expect(foreign.status).toBe(404);
 
     const list = await fx.handler(scimReq("GET", "/Users", { token: fx.otherToken }));
-    expect(((await list.json()) as ScimListBody<ScimUserBody>).totalResults).toBe(0);
+    expect((await jsonBody(list, ScimListBody(ScimUserBody))).totalResults).toBe(0);
   });
 
   it("rejects an unusable filter and unusable pagination with 400", async () => {
@@ -1235,11 +1269,11 @@ describe("HTTP SCIM endpoints", () => {
       }),
     );
     expect(badFilter.status).toBe(400);
-    expect(((await badFilter.json()) as ScimErrorBody).scimType).toBe("invalidFilter");
+    expect((await jsonBody(badFilter, ScimErrorBody)).scimType).toBe("invalidFilter");
 
     const badCount = await fx.handler(scimReq("GET", "/Users?count=lots", { token: fx.token }));
     expect(badCount.status).toBe(400);
-    expect(((await badCount.json()) as ScimErrorBody).scimType).toBe("invalidValue");
+    expect((await jsonBody(badCount, ScimErrorBody)).scimType).toBe("invalidValue");
   });
 
   it("paginates over the wire", async () => {
@@ -1254,7 +1288,7 @@ describe("HTTP SCIM endpoints", () => {
     const page = await fx.handler(
       scimReq("GET", "/Users?startIndex=2&count=2", { token: fx.token }),
     );
-    const body = (await page.json()) as ScimListBody<ScimUserBody>;
+    const body = await jsonBody(page, ScimListBody(ScimUserBody));
     expect(body.totalResults).toBe(3);
     expect(body.startIndex).toBe(2);
     expect(body.itemsPerPage).toBe(2);
@@ -1269,7 +1303,7 @@ describe("HTTP SCIM endpoints", () => {
         body: { userName: "ada@acme.test", displayName: "Ada" },
       }),
     );
-    const user = (await created.json()) as ScimUserBody;
+    const user = await jsonBody(created, ScimUserBody);
 
     const replaced = await fx.handler(
       scimReq("PUT", `/Users/${user.id}`, {
@@ -1284,7 +1318,7 @@ describe("HTTP SCIM endpoints", () => {
       }),
     );
     expect(replaced.status).toBe(200);
-    expect(((await replaced.json()) as ScimUserBody).displayName).toBe("Ada Lovelace");
+    expect((await jsonBody(replaced, ScimUserBody)).displayName).toBe("Ada Lovelace");
   });
 
   it("answers a userName change a one-email store refuses with 409 uniqueness, not 500", async () => {
@@ -1315,13 +1349,16 @@ describe("HTTP SCIM endpoints", () => {
     const config = await fx.handler(scimReq("GET", "/ServiceProviderConfig"));
     expect(config.status).toBe(200);
     expect(config.headers.get("content-type")).toContain("application/scim+json");
-    const configBody = (await config.json()) as {
-      schemas: ReadonlyArray<string>;
-      patch: { supported: boolean };
-      bulk: { supported: boolean };
-      filter: { supported: boolean; maxResults: number };
-      authenticationSchemes: ReadonlyArray<{ type: string }>;
-    };
+    const configBody = await jsonBody(
+      config,
+      Schema.Struct({
+        schemas: Schema.Array(Schema.String),
+        patch: Schema.Struct({ supported: Schema.Boolean }),
+        bulk: Schema.Struct({ supported: Schema.Boolean }),
+        filter: JsonFields,
+        authenticationSchemes: Schema.Array(Schema.Struct({ type: Schema.String })),
+      }),
+    );
     expect(configBody.schemas).toEqual([
       "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig",
     ]);
@@ -1333,17 +1370,25 @@ describe("HTTP SCIM endpoints", () => {
 
     const types = await fx.handler(scimReq("GET", "/ResourceTypes"));
     expect(types.status).toBe(200);
-    const typesBody = (await types.json()) as ScimListBody<{ id: string; endpoint: string }>;
+    const typesBody = await jsonBody(
+      types,
+      ScimListBody(Schema.Struct({ id: Schema.String, endpoint: Schema.String })),
+    );
     expect(typesBody.schemas).toEqual(["urn:ietf:params:scim:api:messages:2.0:ListResponse"]);
     expect(typesBody.Resources.map((r) => r.id)).toEqual(["User", "Group"]);
     expect(typesBody.Resources.map((r) => r.endpoint)).toEqual(["/Users", "/Groups"]);
 
     const schemas = await fx.handler(scimReq("GET", "/Schemas"));
     expect(schemas.status).toBe(200);
-    const schemasBody = (await schemas.json()) as ScimListBody<{
-      id: string;
-      attributes: ReadonlyArray<{ name: string }>;
-    }>;
+    const schemasBody = await jsonBody(
+      schemas,
+      ScimListBody(
+        Schema.Struct({
+          id: Schema.String,
+          attributes: Schema.Array(Schema.Struct({ name: Schema.String })),
+        }),
+      ),
+    );
     expect(schemasBody.Resources.map((r) => r.id)).toEqual([
       "urn:ietf:params:scim:schemas:core:2.0:User",
       "urn:ietf:params:scim:schemas:core:2.0:Group",

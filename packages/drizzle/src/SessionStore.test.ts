@@ -42,7 +42,7 @@ const runWithDatabase = <A, E>(build: () => Effect.Effect<A, E, Auth.SessionStor
   Effect.runPromise(
     build().pipe(
       Effect.provide(sessionStoreLayer(tables).pipe(Layer.provide(databaseLayer(drizzle(client))))),
-    ) as Effect.Effect<A, E>,
+    ),
   );
 
 const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);

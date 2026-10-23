@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { Effect, Layer } from "effect";
 import {
   AnonymousService,
@@ -175,16 +175,16 @@ describe("Anonymous", () => {
       attributes: {},
     };
     const err = await runFail(h, (svc) => svc.linkAccount(notAnon, target));
-    expect(err).toBeInstanceOf(InvalidInputError);
-    expect((err as InvalidInputError).field).toBe("anonymousUser");
+    assert.instanceOf(err, InvalidInputError);
+    expect(err.field).toBe("anonymousUser");
   });
 
   it("linkAccount rejects when anonymousUser.id === newUser.id", async () => {
     const h = makeHarness();
     const { user: anon } = await run(h, (svc) => svc.signInAnonymous());
     const err = await runFail(h, (svc) => svc.linkAccount(anon, anon));
-    expect(err).toBeInstanceOf(InvalidInputError);
-    expect((err as InvalidInputError).field).toBe("newUser");
+    assert.instanceOf(err, InvalidInputError);
+    expect(err.field).toBe("newUser");
   });
 
   it("linkAccount is idempotent: a second call is a no-op", async () => {

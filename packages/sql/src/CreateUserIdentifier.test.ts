@@ -30,7 +30,7 @@ const run = <A, E>(program: Effect.Effect<A, E, Stores>): Promise<A> =>
   Effect.runPromise(
     program.pipe(
       Effect.provide(layer.pipe(Layer.provide(PgliteClient.layer({ liveClient: database })))),
-    ) as Effect.Effect<A, E>,
+    ),
   );
 
 const identifierFor = (value: string): Auth.NewUserIdentifier => ({

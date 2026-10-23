@@ -19,7 +19,7 @@ import { IdentifierStoreKV } from "./KeyValueStores.ts";
 const testLayer = () => IdentifierStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory));
 
 const run = <A, E>(effect: Effect.Effect<A, E, IdentifierStore>): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(testLayer())) as Effect.Effect<A, E>);
+  Effect.runPromise(effect.pipe(Effect.provide(testLayer())));
 
 const now = new Date("2026-07-04T00:00:00.000Z");
 
@@ -264,7 +264,7 @@ const replaceStores: ReadonlyArray<readonly [string, () => Layer.Layer<Identifie
 
 Arr.forEach(replaceStores, ([label, makeLayer]) => {
   const runOn = <A, E>(effect: Effect.Effect<A, E, IdentifierStore>): Promise<A> =>
-    Effect.runPromise(effect.pipe(Effect.provide(makeLayer())) as Effect.Effect<A, E>);
+    Effect.runPromise(effect.pipe(Effect.provide(makeLayer())));
   const email = (userId: string, value: string, verified = false) =>
     makeIdentifier({ userId, type: "email", value, verified });
 

@@ -73,17 +73,20 @@ const runWith =
   (users: SingleTableUsers) =>
   <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
     Effect.runPromise(
-      build().pipe(
-        Effect.provide(layer(users).pipe(Layer.provide(databaseLayer(db)))),
-      ) as Effect.Effect<A, E>,
+      build().pipe(Effect.provide(layer(users).pipe(Layer.provide(databaseLayer(db))))),
     );
 
 signUpContract("single-table SQLite", false, {
   run: runWith(strictMapping),
   insertUser: async (row: UserRowInsert) => {
     db.insert(strictUsers)
-      // A row without an address sends NULL, which the column's NOT NULL refuses.
-      .values({ ...row, userId: row.id, email: row.email as string })
+      .values({
+        ...row,
+        userId: row.id,
+        // SAFETY: deliberately unchecked: a row without an address must reach the
+        // database as NULL, which the column's NOT NULL refuses.
+        email: row.email as string,
+      })
       .run();
   },
   readUserRow: async (userId) =>

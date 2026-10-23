@@ -34,6 +34,7 @@ import {
   Deferred,
   Effect,
   Layer,
+  Option,
   Predicate,
   Redacted,
   Ref,
@@ -59,6 +60,9 @@ export class JwtError extends Data.TaggedError("JwtError")<{
  * Supported signing algorithms
  */
 export type JwtAlgorithm = "ES256" | "EdDSA";
+
+/** The supported signing algorithms, as read from `JWT_ALGORITHM`. */
+const JwtAlgorithm = Schema.Literals(["ES256", "EdDSA"]);
 
 /**
  * A signing key pair.
@@ -224,9 +228,11 @@ export const jwtServiceConfig = Config.all({
   issuer: Config.String("JWT_ISSUER"),
   audience: Config.String("JWT_AUDIENCE").pipe(Config.orElse(() => Config.succeed(undefined))),
   expiresIn: Config.Int("JWT_EXPIRES_IN_MS").pipe(Config.orElse(() => Config.succeed(undefined))),
-  algorithm: Config.String("JWT_ALGORITHM").pipe(
-    Config.map((s) => s as JwtAlgorithm),
-    Config.orElse(() => Config.succeed(undefined)),
+  // Unset is the default algorithm; a value that names no supported algorithm
+  // fails the config rather than reaching `make` (#443).
+  algorithm: Config.schema(JwtAlgorithm, "JWT_ALGORITHM").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
   ),
   clockSkewLeeway: Config.Int("JWT_CLOCK_SKEW_LEEWAY_MS").pipe(
     Config.orElse(() => Config.succeed(undefined)),

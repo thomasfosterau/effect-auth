@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import {
   act,
   cleanup,
@@ -36,7 +36,10 @@ type StubOf<T> = T extends (...args: infer A) => infer R
 
 /** Any subset of the client's members; the code under test touches only the ones a test supplies. */
 type ClientStub = StubOf<AuthClient>;
-const stub = (methods: ClientStub): AuthClient => methods as AuthClient;
+const stub = (methods: ClientStub): AuthClient =>
+  // SAFETY: the code under test touches only the members a test supplies; reaching
+  // for a missing one throws, so a stub cannot let a test pass by omission.
+  methods as AuthClient;
 
 /** A recording stand-in for one client method. */
 const spy = <T,>(result: () => Promise<T>) => {
@@ -83,8 +86,17 @@ const fill = (label: string | RegExp, value: string): void => {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 };
 
-const input = (label: string | RegExp): HTMLInputElement =>
-  screen.getByLabelText(label) as HTMLInputElement;
+const input = (label: string | RegExp): HTMLInputElement => {
+  const element = screen.getByLabelText(label);
+  assert.instanceOf(element, HTMLInputElement);
+  return element;
+};
+
+const buttonNamed = (name: string): HTMLButtonElement => {
+  const element = screen.getByRole("button", { name });
+  assert.instanceOf(element, HTMLButtonElement);
+  return element;
+};
 
 describe("AuthClientProvider / useAuthClient", () => {
   it("throws a directive error when used outside a provider", () => {
@@ -232,7 +244,7 @@ describe("SignInForm", () => {
     fill("Password", "pw");
     submit(container);
 
-    const button = screen.getByRole("button", { name: "Signing in…" }) as HTMLButtonElement;
+    const button = buttonNamed("Signing in…");
     expect(button.disabled).toBe(true);
     expect(form(container).getAttribute("aria-busy")).toBe("true");
     expect(input("Email").disabled).toBe(true);
@@ -241,11 +253,7 @@ describe("SignInForm", () => {
       gate.settle(SUCCESS);
     });
 
-    await waitFor(() =>
-      expect((screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement).disabled).toBe(
-        false,
-      ),
-    );
+    await waitFor(() => expect(buttonNamed("Sign in").disabled).toBe(false));
     expect(form(container).getAttribute("aria-busy")).toBeNull();
     cleanup();
   });
@@ -340,9 +348,7 @@ describe("SignUpForm", () => {
     fill("Password", "pw");
     submit(container);
 
-    expect(
-      (screen.getByRole("button", { name: "Creating account…" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    expect(buttonNamed("Creating account…").disabled).toBe(true);
 
     await act(async () => {
       gate.settle(SUCCESS);
@@ -407,9 +413,7 @@ describe("PasswordResetRequestForm", () => {
 
     fill("Email", "a@b.test");
     submit(container);
-    expect((screen.getByRole("button", { name: "Sending…" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(buttonNamed("Sending…").disabled).toBe(true);
 
     await act(async () => {
       gate.settle(STATUS);
@@ -499,9 +503,7 @@ describe("PasswordResetConfirmForm", () => {
     fill("New password", "pw");
     fill("Confirm new password", "pw");
     submit(container);
-    expect((screen.getByRole("button", { name: "Resetting…" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(buttonNamed("Resetting…").disabled).toBe(true);
 
     await act(async () => {
       gate.settle(STATUS);
@@ -565,9 +567,7 @@ describe("MagicLinkForm", () => {
 
     fill("Email", "a@b.test");
     submit(container);
-    expect((screen.getByRole("button", { name: "Sending…" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(buttonNamed("Sending…").disabled).toBe(true);
 
     await act(async () => {
       gate.settle(STATUS);
@@ -674,9 +674,7 @@ describe("EmailOtpForm", () => {
 
     fill("Email", "a@b.test");
     submit(container);
-    expect((screen.getByRole("button", { name: "Sending…" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(buttonNamed("Sending…").disabled).toBe(true);
 
     await act(async () => {
       sendGate.settle(STATUS);
@@ -685,9 +683,7 @@ describe("EmailOtpForm", () => {
     const code = await screen.findByLabelText("Sign-in code");
     fireEvent.change(code, { target: { value: "123456" } });
     submit(container);
-    expect((screen.getByRole("button", { name: "Verifying…" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(buttonNamed("Verifying…").disabled).toBe(true);
 
     await act(async () => {
       verifyGate.settle(SUCCESS);

@@ -102,9 +102,12 @@ describe("hasAtLeast", () => {
   });
 
   it("fails closed even against an off-ladder minimum smuggled in by a cast", () => {
-    expect(Roles.hasAtLeast({ role: "nope" }, "also-nope" as Role)).toBe(false);
-    expect(Roles.hasAtLeast({ role: "admin" }, "also-nope" as Role)).toBe(true);
-    expect(Roles.atOrAbove("also-nope" as Role)).toEqual([]);
+    // SAFETY: deliberately false: the cast smuggles in a value that is not a rung,
+    // which is what an untyped caller could pass; the test checks the runtime.
+    const offLadder = "also-nope" as Role;
+    expect(Roles.hasAtLeast({ role: "nope" }, offLadder)).toBe(false);
+    expect(Roles.hasAtLeast({ role: "admin" }, offLadder)).toBe(true);
+    expect(Roles.atOrAbove(offLadder)).toEqual([]);
   });
 });
 
@@ -121,6 +124,8 @@ describe("axes", () => {
   });
 
   it("refuse a rung that is not on the ladder", () => {
+    // SAFETY: deliberately false: "moderater" is a typo an untyped caller could
+    // make, and the test checks that `axis` refuses it at runtime.
     expect(() => Roles.axis("typo", "moderater" as Role)).toThrow(
       /"moderater", which is not a rung/,
     );

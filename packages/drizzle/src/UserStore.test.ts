@@ -40,9 +40,7 @@ const runWithDatabase = <A, E>(
 ): Promise<A> => {
   const db = drizzle(client);
   return Effect.runPromise(
-    build(db).pipe(
-      Effect.provide(userStoreLayer(tables).pipe(Layer.provide(databaseLayer(db)))),
-    ) as Effect.Effect<A, E>,
+    build(db).pipe(Effect.provide(userStoreLayer(tables).pipe(Layer.provide(databaseLayer(db))))),
   );
 };
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { assert, describe, it, expect } from "vite-plus/test";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import type { AuthClient } from "@thomasfosterau/effect-auth-client";
 import { authClientKey } from "../context.ts";
@@ -32,7 +32,22 @@ type StubOf<T> = T extends (...args: infer A) => infer R
 
 /** Any subset of the client's members; the code under test touches only the ones a test supplies. */
 type ClientStub = StubOf<AuthClient>;
-const stub = (methods: ClientStub): AuthClient => methods as AuthClient;
+const stub = (methods: ClientStub): AuthClient =>
+  // SAFETY: the code under test touches only the members a test supplies; reaching
+  // for a missing one throws, so a stub cannot let a test pass by omission.
+  methods as AuthClient;
+
+const inputLabelled = (label: string): HTMLInputElement => {
+  const element = screen.getByLabelText(label);
+  assert.instanceOf(element, HTMLInputElement);
+  return element;
+};
+
+const buttonNamed = (name: string): HTMLButtonElement => {
+  const element = screen.getByRole("button", { name });
+  assert.instanceOf(element, HTMLButtonElement);
+  return element;
+};
 
 /** Put a client in Svelte context, the way `setAuthClient` does. */
 const withClient = (client: AuthClient) => new Map<unknown, unknown>([[authClientKey, client]]);
@@ -158,17 +173,13 @@ describe("SignInForm", () => {
 
     await fireEvent.submit(form);
 
-    const button = screen.getByRole("button", { name: "Signing in…" });
-    expect((button as HTMLButtonElement).disabled).toBe(true);
+    const button = buttonNamed("Signing in…");
+    expect(button.disabled).toBe(true);
     expect(form.getAttribute("aria-busy")).toBe("true");
-    expect((screen.getByLabelText("Email") as HTMLInputElement).disabled).toBe(true);
+    expect(inputLabelled("Email").disabled).toBe(true);
 
     gate.resolve(authSuccess);
-    await waitFor(() =>
-      expect((screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement).disabled).toBe(
-        false,
-      ),
-    );
+    await waitFor(() => expect(buttonNamed("Sign in").disabled).toBe(false));
     expect(form.getAttribute("aria-busy")).toBeNull();
   });
 
@@ -200,7 +211,7 @@ describe("SignUpForm", () => {
     const { container } = render(SignUpForm, { props: {}, context: withClient(client) });
 
     expect(screen.getByLabelText("Password").getAttribute("autocomplete")).toBe("new-password");
-    expect((screen.getByLabelText("Name") as HTMLInputElement).required).toBe(false);
+    expect(inputLabelled("Name").required).toBe(false);
 
     await type("Email", EMAIL);
     await type("Password", PW);
@@ -427,11 +438,11 @@ describe("EmailOtpForm", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Use a different email" }));
 
     await waitFor(() => expect(formOf(container).dataset["step"]).toBe("request"));
-    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(EMAIL);
+    expect(inputLabelled("Email").value).toBe(EMAIL);
 
     await fireEvent.submit(formOf(container));
     await waitFor(() => expect(formOf(container).dataset["step"]).toBe("verify"));
-    expect((screen.getByLabelText("Sign-in code") as HTMLInputElement).value).toBe("");
+    expect(inputLabelled("Sign-in code").value).toBe("");
   });
 
   it("disables the submit button while the code is being sent", async () => {
@@ -441,9 +452,7 @@ describe("EmailOtpForm", () => {
     });
 
     await fireEvent.submit(formOf(container));
-    expect((screen.getByRole("button", { name: "Sending…" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(buttonNamed("Sending…").disabled).toBe(true);
 
     gate.resolve(ok);
     await waitFor(() => expect(formOf(container).dataset["step"]).toBe("verify"));

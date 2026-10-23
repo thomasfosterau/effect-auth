@@ -18,8 +18,8 @@ import { UserService, UserServiceStore } from "../User.ts";
 import { Hooks } from "../Hooks.ts";
 
 /**
- * The docs routes are intercepted before the API router runs, so the handlers'
- * services are never exercised here — no-op stubs satisfy the types.
+ * SAFETY: the docs routes are intercepted before the API router runs, so the
+ * handlers' services are never exercised here — `undefined` stubs satisfy the types.
  */
 const stubServices = (): Layer.Layer<AuthServices> =>
   Layer.mergeAll(

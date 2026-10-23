@@ -8,7 +8,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { Effect, Layer } from "effect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+import { assert, afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
 import { conformance } from "./testing/Conformance.ts";
@@ -45,7 +45,7 @@ const runWithDatabase = <A, E>(
       Effect.provide(
         identifierStoreLayer(tables).pipe(Layer.provide(databaseLayer(drizzle(client)))),
       ),
-    ) as Effect.Effect<A, E>,
+    ),
   );
 
 const at = (offsetMs: number): Date => new Date(Date.UTC(2026, 0, 1) + offsetMs);
@@ -124,7 +124,8 @@ describe("IdentifierStore", () => {
     expect(result.duplicate.cause).toBeDefined();
 
     expect(result.claim._tag).toBe("IdentifierTakenError");
-    expect((result.claim as Auth.IdentifierTakenError).identifierType).toBe("email");
+    assert.instanceOf(result.claim, Auth.IdentifierTakenError);
+    expect(result.claim.identifierType).toBe("email");
 
     expect(result.free.id).toBe("identifier-4");
     // The loser never overwrote the original owner.

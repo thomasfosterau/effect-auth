@@ -216,10 +216,7 @@ describe("promoted attributes", () => {
               concurrency: "unbounded",
             }),
           ] as const;
-        }).pipe(Effect.provide(stores)) as Effect.Effect<
-          readonly [Auth.User | null, Auth.User | null, ReadonlyArray<Auth.User | null>],
-          Auth.AuthError
-        >,
+        }).pipe(Effect.provide(stores)),
       );
     });
 
@@ -249,9 +246,7 @@ describe("promoted attributes", () => {
         Effect.gen(function* () {
           const store = yield* Auth.UserStore;
           return [yield* store.get(ids.moderator), yield* store.get(ids.plain)] as const;
-        }).pipe(
-          Effect.provide(storesLayer(withBag).pipe(Layer.provide(databaseLayer(db)))),
-        ) as Effect.Effect<readonly [Auth.User | null, Auth.User | null], Auth.AuthError>,
+        }).pipe(Effect.provide(storesLayer(withBag).pipe(Layer.provide(databaseLayer(db))))),
       );
     });
 

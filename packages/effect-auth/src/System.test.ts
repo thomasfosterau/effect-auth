@@ -120,10 +120,13 @@ const captureLogs = <A, E>(effect: Effect.Effect<A, E>) => {
 };
 
 /** The error tag of a failed exit, or `undefined`. */
+/** A failure's `_tag`; a failure without one fails the test. */
+const decodeTagged = Schema.decodeUnknownSync(Schema.Struct({ _tag: Schema.String }));
+
 const tagOf = (exit: Exit.Exit<unknown, unknown>): string | undefined =>
   Exit.isFailure(exit)
     ? Option.getOrUndefined(
-        Option.map(Exit.findErrorOption(exit), (error) => (error as { _tag: string })._tag),
+        Option.map(Exit.findErrorOption(exit), (error) => decodeTagged(error)._tag),
       )
     : undefined;
 
@@ -556,8 +559,8 @@ describe("a system principal is denied under every library policy set with no gr
 
   it("a bare Policy.permit and a Policy.custom permit do not reach it", async () => {
     const bare = [Policy.permit({ id: "everything" })];
-    const custom = [
-      Policy.custom({ id: "always", predicate: () => Effect.succeed(true) }) as Policy.Policy,
+    const custom: ReadonlyArray<Policy.Policy> = [
+      Policy.custom({ id: "always", predicate: () => Effect.succeed(true) }),
     ];
     expect(await allowedActions(billing, bare, invoice)).toEqual([]);
     expect(await allowedActions(billing, custom, invoice)).toEqual([]);
@@ -650,11 +653,11 @@ describe("with an explicit grant, a system principal gets exactly that (#377)", 
       action: Policy.eq(Entity.ref("Action", "invoice:charge")),
     });
     expect(await decideAs(billing, [...charge, freeze], "invoice:charge", invoice)).toBe(false);
-    const customFreeze = Policy.custom({
+    const customFreeze: Policy.Policy = Policy.custom({
       id: "custom-freeze",
       effect: "forbid",
       predicate: () => Effect.succeed(true),
-    }) as Policy.Policy;
+    });
     expect(await decideAs(billing, [...charge, customFreeze], "invoice:charge", invoice)).toBe(
       false,
     );

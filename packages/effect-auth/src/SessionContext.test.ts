@@ -190,8 +190,8 @@ describe("SessionContext.anonymousLayer", () => {
 // ---------------------------------------------------------------------------
 
 describe("SessionContext.layer", () => {
-  it.each([
-    ["a resolved session", resolved as Parameters<typeof SessionContext.layer>[0], true],
+  it.each<[string, Parameters<typeof SessionContext.layer>[0], boolean]>([
+    ["a resolved session", resolved, true],
     ["an Option.some", Option.some(resolved), true],
     ["an Option.none", Option.none<Types.SessionWithUser>(), false],
     ["null", null, false],

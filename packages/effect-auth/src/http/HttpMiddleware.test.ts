@@ -131,6 +131,8 @@ describe("HttpMiddleware.layer – conduit_session handler", () => {
   const runCookiePath = (request: HttpServerRequest.HttpServerRequest, handler: AuthHandler) =>
     Effect.gen(function* () {
       const svc = yield* AuthMiddleware;
+      // SAFETY: the handler is called with the stand-in endpoint, which it ignores,
+      // and reads only `HttpServerRequest` of `HttpRouter.Provided` (see `MiddlewareResult`).
       const applied = svc.conduit_session(handler, {
         ...standIn,
         credential: Redacted.make(""),
@@ -255,6 +257,8 @@ describe("HttpMiddleware.layer – bearer handler", () => {
   const runBearerPath = (token: string, handler: AuthHandler) =>
     Effect.gen(function* () {
       const svc = yield* AuthMiddleware;
+      // SAFETY: the handler is called with the stand-in endpoint, which it ignores;
+      // the bearer path reads nothing of `HttpRouter.Provided` (see `MiddlewareResult`).
       const applied = svc.bearer(handler, {
         ...standIn,
         credential: Redacted.make(token),
@@ -321,6 +325,8 @@ describe("HttpMiddleware.optionalLayer", () => {
     const maybeCell = cell<Option.Option<Types.SessionWithUser>>();
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
+      // SAFETY: the handler is called with the stand-in endpoint, which it ignores,
+      // and reads only `HttpServerRequest` of `HttpRouter.Provided` (see `MiddlewareResult`).
       const applied = svc(
         Effect.gen(function* () {
           maybeCell.value = yield* MaybeCurrentSession;
@@ -336,9 +342,9 @@ describe("HttpMiddleware.optionalLayer", () => {
   it("valid session cookie → Option.some with session and user", async () => {
     const { maybeCell, effect } = runOptional(makeWebRequest({ cookie: RAW_TOKEN }));
     await Effect.runPromise(effect);
-    assert(maybeCell.value !== undefined, "the handler ran");
-    expect(Option.isSome(maybeCell.value)).toBe(true);
-    const resolved = (maybeCell.value as Option.Some<Types.SessionWithUser>).value;
+    const maybe = maybeCell.value;
+    assert(maybe !== undefined && Option.isSome(maybe), "the session resolved");
+    const resolved = maybe.value;
     expect(resolved.session.id).toBe(RAW_TOKEN);
     expect(resolved.user.id).toBe(USER_ID);
   });
@@ -348,9 +354,9 @@ describe("HttpMiddleware.optionalLayer", () => {
       makeWebRequest({ authorization: `Bearer ${RAW_TOKEN}` }),
     );
     await Effect.runPromise(effect);
-    assert(maybeCell.value !== undefined, "the handler ran");
-    expect(Option.isSome(maybeCell.value)).toBe(true);
-    const resolved = (maybeCell.value as Option.Some<Types.SessionWithUser>).value;
+    const maybe = maybeCell.value;
+    assert(maybe !== undefined && Option.isSome(maybe), "the session resolved");
+    const resolved = maybe.value;
     expect(resolved.user.id).toBe(USER_ID);
   });
 
@@ -375,6 +381,8 @@ describe("HttpMiddleware.optionalLayer", () => {
     const principalCell = cell<Option.Option<Entity.EntityRef>>();
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
+      // SAFETY: the handler is called with the stand-in endpoint, which it ignores,
+      // and reads only `HttpServerRequest` of `HttpRouter.Provided` (see `MiddlewareResult`).
       const applied = svc(
         Effect.gen(function* () {
           principalCell.value = yield* Effect.serviceOption(CurrentPrincipal);
@@ -390,11 +398,9 @@ describe("HttpMiddleware.optionalLayer", () => {
   it("valid session → CurrentPrincipal is in context", async () => {
     const { principalCell, effect } = runOptionalPrincipal(makeWebRequest({ cookie: RAW_TOKEN }));
     await Effect.runPromise(effect);
-    assert(principalCell.value !== undefined, "the handler ran");
-    expect(Option.isSome(principalCell.value)).toBe(true);
-    expect((principalCell.value as Option.Some<Entity.EntityRef>).value).toEqual(
-      Entity.ref("User", USER_ID),
-    );
+    const principal = principalCell.value;
+    assert(principal !== undefined && Option.isSome(principal), "a principal is in context");
+    expect(principal.value).toEqual(Entity.ref("User", USER_ID));
   });
 
   it("no session → CurrentPrincipal is absent (anonymous, not a failure)", async () => {
@@ -433,6 +439,8 @@ describe("MaybeCurrentSession is provided by both middlewares", () => {
 
     const effect = Effect.gen(function* () {
       const svc = yield* AuthMiddleware;
+      // SAFETY: the handler is called with the stand-in endpoint, which it ignores,
+      // and reads only `HttpServerRequest` of `HttpRouter.Provided` (see `MiddlewareResult`).
       const applied = svc.conduit_session(
         Effect.gen(function* () {
           roleCell.value = yield* viewerRole;
@@ -460,6 +468,8 @@ describe("MaybeCurrentSession is provided by both middlewares", () => {
 
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
+      // SAFETY: the handler is called with the stand-in endpoint, which it ignores,
+      // and reads only `HttpServerRequest` of `HttpRouter.Provided` (see `MiddlewareResult`).
       const applied = svc(
         Effect.gen(function* () {
           roleCell.value = yield* viewerRole;
