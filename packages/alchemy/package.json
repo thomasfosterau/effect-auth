@@ -1,7 +1,7 @@
 {
   "name": "@thomasfosterau/effect-auth-alchemy",
   "version": "0.1.0",
-  "description": "Alchemy v2 AuthSchema resource and Cloudflare D1 storage wiring for effect-auth.",
+  "description": "Alchemy v2 AuthSchema resource, and Cloudflare D1 and Postgres (Hyperdrive) storage wiring, for effect-auth.",
   "keywords": [
     "alchemy",
     "auth",
@@ -10,8 +10,10 @@
     "d1",
     "effect",
     "effect-auth",
+    "hyperdrive",
     "iac",
     "infrastructure",
+    "postgres",
     "schema",
     "sql",
     "sqlite"
@@ -38,6 +40,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./postgres": {
+      "types": "./dist/Postgres.d.ts",
+      "import": "./dist/Postgres.js"
     }
   },
   "publishConfig": {
@@ -48,6 +54,9 @@
     "@thomasfosterau/effect-auth-sql": "workspace:*"
   },
   "devDependencies": {
+    "@effect/sql-pg": "catalog:",
+    "@effect/sql-pglite": "catalog:",
+    "@electric-sql/pglite": "catalog:",
     "@types/better-sqlite3": "catalog:",
     "@types/node": "catalog:",
     "alchemy": "catalog:",
@@ -56,8 +65,14 @@
     "typescript": "catalog:"
   },
   "peerDependencies": {
+    "@effect/sql-pg": "catalog:alchemy-peers",
     "alchemy": "catalog:peers",
     "effect": "catalog:alchemy-peers"
+  },
+  "peerDependenciesMeta": {
+    "@effect/sql-pg": {
+      "optional": true
+    }
   },
   "engines": {
     "node": "^20.19.0 || ^22.18.0 || >=24.11.0"

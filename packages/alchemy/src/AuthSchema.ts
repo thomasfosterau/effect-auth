@@ -1,6 +1,6 @@
 /**
  * `AuthSchema` — an Alchemy v2 resource that keeps the effect-auth schema
- * reconciled inside a Cloudflare D1 database.
+ * reconciled inside a Cloudflare D1 database or a Postgres database.
  *
  * {@link AuthSchema} is built with Alchemy's own `Resource` constructor and
  * {@link AuthSchemaProvider} with Alchemy's own `Provider.succeed`, exactly
@@ -10,7 +10,9 @@
  *
  * The DDL is not this package's either: it is
  * `@thomasfosterau/effect-auth-sql`'s `schemaStatements`, run through the
- * `SqlClient` that {@link D1Client} builds from the binding.
+ * `SqlClient` that {@link D1Client} builds from a D1 binding, or the one a
+ * {@link PostgresDatabase} carries (`Postgres.database(url)` from
+ * `@thomasfosterau/effect-auth-alchemy/postgres`).
  *
  * ### Where the D1 binding lives
  *
@@ -39,14 +41,13 @@
  * {@link AuthSchemaProps.dropOnDelete}.
  */
 
-import { Array as Arr, Clock, Data, Effect, Record as Rec } from "effect";
+import { Array as Arr, Clock, Data, Effect, type Layer, Predicate, Record as Rec } from "effect";
 import { SqlClient, SqlError } from "effect/sql";
 import * as Sql from "@thomasfosterau/effect-auth-sql";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
 import { authTableNames } from "./AuthTables.ts";
 import * as D1Client from "./D1Client.ts";
-import { migrate } from "./Storage.ts";
 
 /** Every table the effect-auth schema creates (defined alchemy-free in `AuthTables.ts`). */
 export { authTableNames };
@@ -111,33 +112,72 @@ export class UnknownDatabaseError extends Data.TaggedError("UnknownDatabaseError
 }> {}
 
 /**
+ * A Postgres database an {@link AuthSchemaProvider} reconciles: the
+ * `SqlClient` layer each lifecycle operation connects with. Build one with
+ * `Postgres.database(url)` from `@thomasfosterau/effect-auth-alchemy/postgres`,
+ * or with {@link postgresDatabase} over any Postgres `SqlClient` layer.
+ */
+export interface PostgresDatabase {
+  readonly _tag: "PostgresDatabase";
+  readonly client: Layer.Layer<SqlClient.SqlClient, SqlError.SqlError>;
+}
+
+/**
+ * A Postgres database for {@link AuthSchemaProvider}, over any layer that
+ * provides a Postgres `SqlClient`. The layer is built once per lifecycle
+ * operation, so it should connect rather than hold a connection.
+ */
+export const postgresDatabase = (
+  client: Layer.Layer<SqlClient.SqlClient, SqlError.SqlError>,
+): PostgresDatabase => ({ _tag: "PostgresDatabase", client });
+
+/** A database {@link AuthSchemaProvider} can reconcile: a D1 binding or a Postgres database. */
+export type AuthSchemaDatabase = D1Client.D1Database | PostgresDatabase;
+
+const isPostgres = (database: AuthSchemaDatabase): database is PostgresDatabase =>
+  Predicate.isTagged(database, "PostgresDatabase");
+
+const clientOf = (database: AuthSchemaDatabase) =>
+  isPostgres(database) ? database.client : D1Client.layer({ db: database });
+
+/**
  * The auth tables that currently exist, sorted. `_` is escaped so the `LIKE`
  * pattern matches a literal underscore and never the application's own tables.
+ * Postgres reads the current schema only, the one the DDL created them in.
  */
 const listAuthTables = (
-  database: D1Client.D1Database,
+  database: AuthSchemaDatabase,
 ): Effect.Effect<readonly string[], SqlError.SqlError> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql<{ readonly name: string }>`
-      SELECT name FROM sqlite_master
-      WHERE type = 'table' AND name LIKE ${"auth\\_%"} ESCAPE '\\'
-      ORDER BY name`;
+    const rows = isPostgres(database)
+      ? yield* sql<{ readonly name: string }>`
+          SELECT table_name AS name FROM information_schema.tables
+          WHERE table_schema = current_schema() AND table_name LIKE ${"auth\\_%"} ESCAPE '\\'
+          ORDER BY table_name`
+      : yield* sql<{ readonly name: string }>`
+          SELECT name FROM sqlite_master
+          WHERE type = 'table' AND name LIKE ${"auth\\_%"} ESCAPE '\\'
+          ORDER BY name`;
     return rows.map((row) => row.name);
-  }).pipe(Effect.provide(D1Client.layer({ db: database })));
+  }).pipe(Effect.provide(clientOf(database)));
 
 /** Drop every auth table. Idempotent (`DROP TABLE IF EXISTS`). */
-const dropAuthTables = (database: D1Client.D1Database): Effect.Effect<void, SqlError.SqlError> =>
+const dropAuthTables = (database: AuthSchemaDatabase): Effect.Effect<void, SqlError.SqlError> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* Effect.forEach(authTableNames, (name) => sql.unsafe(`DROP TABLE IF EXISTS ${name}`), {
       concurrency: 1,
       discard: true,
     });
-  }).pipe(Effect.provide(D1Client.layer({ db: database })));
+  }).pipe(Effect.provide(clientOf(database)));
+
+/** Apply effect-auth-sql's DDL. Every statement is `IF NOT EXISTS`. */
+const migrate = (database: AuthSchemaDatabase) =>
+  Sql.migrate.pipe(Effect.provide(clientOf(database)));
 
 const observe = (
-  database: D1Client.D1Database,
+  database: AuthSchemaDatabase,
   appliedAt: number,
 ): Effect.Effect<AuthSchemaAttributes, SqlError.SqlError> =>
   listAuthTables(database).pipe(
@@ -149,31 +189,41 @@ const observe = (
   );
 
 /**
- * The live D1 bindings an {@link AuthSchemaProvider} drives.
+ * The databases an {@link AuthSchemaProvider} drives: live D1 bindings, or
+ * {@link PostgresDatabase}s.
  *
  * Either one database for the whole stack, or several keyed by the name each
  * resource selects with {@link AuthSchemaProps.database}.
  */
 export type AuthSchemaProviderOptions =
   | {
-      /** The binding every {@link AuthSchema} with no `database` prop uses. */
-      readonly database: D1Client.D1Database;
+      /** The database every {@link AuthSchema} with no `database` prop uses. */
+      readonly database: AuthSchemaDatabase;
     }
   | {
-      /** Bindings by name, selected per resource with `database`. */
-      readonly databases: Readonly<Record<string, D1Client.D1Database>>;
+      /** Databases by name, selected per resource with `database`. */
+      readonly databases: Readonly<Record<string, AuthSchemaDatabase>>;
     };
 
 /**
  * The provider that drives the {@link AuthSchema} lifecycle, as a `Layer`.
  * Provide it to your stack alongside the other providers, with the D1
- * binding(s) it should reconcile:
+ * binding(s) or Postgres database(s) it should reconcile:
  *
  * ```ts
  * Alchemy.Stack("app", {
  *   providers: Layer.mergeAll(Cloudflare.providers(), AuthSchemaProvider({ database: db })),
  *   state: Cloudflare.state(),
  * }, program);
+ * ```
+ *
+ * A Postgres database is reached by URL, since a Hyperdrive binding only
+ * exists inside a Worker:
+ *
+ * ```ts
+ * import * as Postgres from "@thomasfosterau/effect-auth-alchemy/postgres";
+ *
+ * AuthSchemaProvider({ database: Postgres.database(Redacted.make(process.env.DATABASE_URL)) });
  * ```
  *
  * Several databases in one stack are registered by name, and each resource
@@ -190,13 +240,13 @@ export type AuthSchemaProviderOptions =
  * cannot travel in props.
  */
 export const AuthSchemaProvider = (options: AuthSchemaProviderOptions) => {
-  const databases: Readonly<Record<string, D1Client.D1Database>> =
+  const databases: Readonly<Record<string, AuthSchemaDatabase>> =
     "database" in options ? { [DEFAULT_DATABASE]: options.database } : options.databases;
 
   const resolve = (
     id: string,
     props: AuthSchemaProps,
-  ): Effect.Effect<D1Client.D1Database, UnknownDatabaseError> =>
+  ): Effect.Effect<AuthSchemaDatabase, UnknownDatabaseError> =>
     Effect.suspend(() => {
       const name = props.database ?? DEFAULT_DATABASE;
       const database = databases[name];

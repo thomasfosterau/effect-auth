@@ -20,7 +20,9 @@ export default defineConfig({
     build: "tsc",
     check: `tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vp test --typecheck --run --exclude ${alchemyRuntimeSuite}`,
     test: `vp test run --exclude ${alchemyRuntimeSuite}`,
-    extra: { "test:alchemy": `vp test run ${alchemyRuntimeSuite}` },
+    // The Postgres suite needs a server (`DATABASE_URL`), which the CI job
+    // that runs `test:alchemy` starts; without one its cases skip.
+    extra: { "test:alchemy": `vp test run ${alchemyRuntimeSuite} src/Postgres.test.ts` },
   }),
   test: {
     globals: true,

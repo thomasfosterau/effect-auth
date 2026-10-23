@@ -70,12 +70,32 @@ jobs:
   # package's `test:alchemy` task), kept in its own job so an alchemy break
   # shows up on its own line. alchemy 2.0.0-beta.80 is the first release that
   # imports only `effect/*` paths (effect-auth#250). Do not skip the test.
+  #
+  # The job also runs a Postgres server, so `test:alchemy`'s Postgres cases
+  # (`AuthSchema` and the `./postgres` stores over `@effect/sql-pg`, #184) run
+  # against a real server rather than skipping.
   alchemy:
     name: "Alchemy runtime"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: auth
+          POSTGRES_PASSWORD: auth
+          POSTGRES_DB: auth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U auth"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://auth:auth@localhost:5432/auth
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -222,7 +222,7 @@ Better Auth's generic `verification` table backs email verification, password re
 
 Be honest with yourself about these before committing:
 
-- **No CLI and no schema generation.** Better Auth's `generate`/`migrate` inspect your config and emit a schema. effect-auth ships a fixed DDL list in `packages/sql` and otherwise expects you to own your migrations.
+- **No CLI and no schema generation.** Better Auth's `generate`/`migrate` inspect your config and emit a schema. effect-auth ships a fixed DDL list in `packages/sql` and otherwise expects you to own your migrations. An Alchemy app can let the `AuthSchema` resource reconcile that DDL on every deploy, on D1 or on Postgres over Hyperdrive; [Auth as an internal Worker on Alchemy](alchemy-internal-worker.md#living-with-drizzle-kit-migrations) covers how that sits beside drizzle-kit migrations.
 - **No social OAuth HTTP endpoints and no passkey HTTP endpoints.** Both features exist as services with full functionality; the routes are yours to mount. This is the largest single chunk of work in a typical migration.
 - **No `auth.api.*` server-side call surface.** The equivalent is calling the service directly inside an `Effect`, which means your call sites become Effects (or `Effect.runPromise` boundaries).
 - **You must adopt Effect.** Layers, `Context.Service`, typed error channels and `Effect.gen` are not an implementation detail you can ignore — they are the API. This is the real cost of the migration and it is not small.

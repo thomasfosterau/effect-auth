@@ -13,6 +13,7 @@
     "packages/client/src/index.ts",
     "packages/client/src/testing/fixture.ts",
     "packages/{alchemy,argon2,drizzle,react,resend,saml,solid,sql,svelte,twilio,vue}/src/index.ts",
+    "packages/alchemy/src/Postgres.ts",
     "packages/*/src/testing/PgliteTemplate.setup.ts",
     "packages/*/src/**/*.test.{ts,tsx}",
     "packages/svelte/scripts/postbuild.mjs",
