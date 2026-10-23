@@ -19,8 +19,8 @@ import { AuthError, EmailSender, type EmailMessage } from "@thomasfosterau/effec
 /** The rendered content Resend's `/emails` endpoint expects, minus routing fields. */
 export interface RenderedEmail {
   readonly subject: string;
-  readonly html?: string;
-  readonly text?: string;
+  readonly html?: string | undefined;
+  readonly text?: string | undefined;
 }
 
 const purposeSubject = (purpose: EmailMessage["purpose"]): string =>
