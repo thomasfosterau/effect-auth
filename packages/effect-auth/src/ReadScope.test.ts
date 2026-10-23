@@ -8,7 +8,7 @@
  * is held to the same corpus in effect-auth-sql's `ReadScope.test.ts`.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Context, Option } from "effect";
+import { Array as Arr, Context, Match, Option, Predicate } from "effect";
 import * as Condition from "./Condition.ts";
 import * as Entity from "./Entity.ts";
 import * as Guard from "./Guard.ts";
@@ -44,12 +44,12 @@ const binding: ReadScope.Binding = {
 };
 
 /** A row of the corpus, as a database holds it: `null` is a NULL column. */
-interface CorpusRow {
+type CorpusRow = {
   readonly id: string;
   readonly owner: string | null;
   readonly visibility: string | null;
   readonly draft: boolean | null;
-}
+};
 
 const users = ["u-admin", "u-moderator", "u-member", "u-other", "u-stranger"] as const;
 const corpus: ReadonlyArray<CorpusRow> = Arr.flatMap([...users, null], (owner) =>
@@ -122,7 +122,10 @@ const compileFor = (
 };
 
 const exact = (compiled: ReadScope.Compiled): ReadScope.ReadScope => {
-  assert(compiled._tag === "Exact", `inexact: ${compiled._tag === "Inexact" ? compiled.reasons.join("; ") : ""}`);
+  assert(
+    Predicate.isTagged(compiled, "Exact"),
+    `inexact: ${Predicate.isTagged(compiled, "Inexact") ? compiled.reasons.join("; ") : ""}`,
+  );
   return compiled.scope;
 };
 
@@ -131,7 +134,10 @@ const scopeAllows = (scope: ReadScope.ReadScope, viewer: AppUser | null, row: Co
     scope,
     { owner: row.owner, visibility: row.visibility, draft: row.draft },
     (set, value) =>
-      set === "following" && viewer !== null && typeof value === "string" && followsEdge(viewer.id, value),
+      set === "following" &&
+      viewer !== null &&
+      Predicate.isString(value) &&
+      followsEdge(viewer.id, value),
   );
 
 /** Require the compiled scope and the kernel to agree on every row, for every viewer. */
@@ -148,6 +154,18 @@ const expectAgreement = (policies: ReadonlyArray<Policy.DeclarativePolicy>): voi
   expect(disagreements).toEqual([]);
 };
 
+/** Every text literal a predicate compares with. */
+const literalTexts = (predicate: ReadScope.Predicate): ReadonlyArray<string> =>
+  Match.valueTags(predicate, {
+    And: ({ predicates }) => Arr.flatMap(predicates, literalTexts),
+    Or: ({ predicates }) => Arr.flatMap(predicates, literalTexts),
+    Not: ({ predicate: inner }) => literalTexts(inner),
+    Eq: ({ value }) => (Predicate.isString(value.value) ? [value.value] : []),
+    Compare: ({ value }) => (Predicate.isString(value.value) ? [value.value] : []),
+    IsNull: () => [],
+    InSet: () => [],
+  });
+
 describe("ReadScope.compile", () => {
   it("agrees with the kernel on the owned-material policies, absent attributes included", () => {
     expectAgreement(owned.policies);
@@ -161,16 +179,22 @@ describe("ReadScope.compile", () => {
 
   it("returns Deny when no permit applies", () => {
     const policies = [
-      Policy.permit({ id: "admins", principal: Policy.isType("Nobody"), resource: Policy.isType("Owned") }),
+      Policy.permit({
+        id: "admins",
+        principal: Policy.isType("Nobody"),
+        resource: Policy.isType("Owned"),
+      }),
     ];
     expect(exact(compileFor(policies, { id: "u-member", role: "user" }))).toEqual(ReadScope.deny);
   });
 
   it("compiles the follower arm to a named set, never to members", () => {
     const scope = exact(compileFor(owned.policies, { id: "u-other", role: "contributor" }));
-    assert(scope._tag === "Filter");
+    assert(Predicate.isTagged(scope, "Filter"));
     expect(scope.sets).toEqual(["following"]);
-    expect(JSON.stringify(scope.predicate)).not.toContain("u-member");
+    expect(ReadScope.attributes(scope.predicate)).toEqual(["draft", "owner", "visibility"]);
+    // The follow set travels by name; no member id is inlined as a literal.
+    expect(literalTexts(scope.predicate)).not.toContain("u-member");
   });
 
   it("agrees with the kernel when a forbid reads an absent attribute", () => {
@@ -216,7 +240,7 @@ describe("ReadScope.compile", () => {
       ],
       { id: "u-member", role: "user" },
     );
-    assert(compiled._tag === "Inexact");
+    assert(Predicate.isTagged(compiled, "Inexact"));
     expect(compiled.reasons.join("\n")).toContain("tagged");
   });
 
@@ -244,10 +268,17 @@ describe("ReadScope.withoutSets", () => {
     // Every row the narrowed scope admits, the original admits with the set full.
     const widened = Arr.filter(
       corpus,
-      (row) => ReadScope.matches(narrowed, row, () => true) && !ReadScope.matches(scope, row, () => true),
+      (row) =>
+        ReadScope.matches(narrowed, row, () => true) && !ReadScope.matches(scope, row, () => true),
     );
     expect(widened).toEqual([]);
-    expect(ReadScope.matches(narrowed, { owner: "u-member", visibility: "followers", draft: false }, () => true)).toBe(false);
+    expect(
+      ReadScope.matches(
+        narrowed,
+        { owner: "u-member", visibility: "followers", draft: false },
+        () => true,
+      ),
+    ).toBe(false);
   });
 
   it("narrows a set under a forbid to Deny rather than dropping the forbid", () => {

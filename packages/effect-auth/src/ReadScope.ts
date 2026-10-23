@@ -285,10 +285,11 @@ type Expr = Predicate | boolean;
 
 const conjunction = (parts: ReadonlyArray<Expr>): Expr => {
   if (parts.includes(false)) return false;
-  const terms = Arr.flatMap(
-    Arr.filter(parts, (part): part is Predicate => part !== true),
-    (part): ReadonlyArray<Predicate> => (part._tag === "And" ? part.predicates : [part]),
-  );
+  const terms = parts
+    .filter((part): part is Predicate => part !== true)
+    .flatMap((part): ReadonlyArray<Predicate> =>
+      P.isTagged(part, "And") ? part.predicates : [part],
+    );
   return Arr.match(terms, {
     onEmpty: (): Expr => true,
     onNonEmpty: (all): Expr =>
@@ -298,10 +299,11 @@ const conjunction = (parts: ReadonlyArray<Expr>): Expr => {
 
 const disjunction = (parts: ReadonlyArray<Expr>): Expr => {
   if (parts.includes(true)) return true;
-  const terms = Arr.flatMap(
-    Arr.filter(parts, (part): part is Predicate => part !== false),
-    (part): ReadonlyArray<Predicate> => (part._tag === "Or" ? part.predicates : [part]),
-  );
+  const terms = parts
+    .filter((part): part is Predicate => part !== false)
+    .flatMap((part): ReadonlyArray<Predicate> =>
+      P.isTagged(part, "Or") ? part.predicates : [part],
+    );
   return Arr.match(terms, {
     onEmpty: (): Expr => false,
     onNonEmpty: (all): Expr =>
@@ -310,7 +312,11 @@ const disjunction = (parts: ReadonlyArray<Expr>): Expr => {
 };
 
 const negation = (part: Expr): Expr =>
-  P.isBoolean(part) ? !part : part._tag === "Not" ? part.predicate : { _tag: "Not", predicate: part };
+  P.isBoolean(part)
+    ? !part
+    : P.isTagged(part, "Not")
+      ? part.predicate
+      : { _tag: "Not", predicate: part };
 
 const setsOf = (predicate: Predicate): ReadonlyArray<string> =>
   Match.valueTags(predicate, {
@@ -479,7 +485,13 @@ const equalsAtom = (name: string, kind: AttributeKind, value: Entity.AttributeVa
 };
 
 const numericScalar = (kind: AttributeKind, value: number): Scalar | null =>
-  kind === "Integer" ? integer(value) : kind === "Double" ? double(value) : kind === "Instant" ? instant(value) : null;
+  kind === "Integer"
+    ? integer(value)
+    : kind === "Double"
+      ? double(value)
+      : kind === "Instant"
+        ? instant(value)
+        : null;
 
 interface Env {
   readonly binding: Binding;
@@ -498,15 +510,16 @@ const resolveOperand = (env: Env, operand: Condition.Operand): Operand =>
       if (attr.of === "resource") {
         const [name, ...rest] = attr.path;
         const kind = name === undefined ? undefined : env.binding.attributes[name];
-        return kind === undefined || name === undefined || rest.length > 0
+        return kind === undefined || name === undefined || Arr.isReadonlyArrayNonEmpty(rest)
           ? unsupported(`resource.${attr.path.join(".")} is not a bound attribute`)
           : { _tag: "Attribute", name, kind };
       }
       const [head, ...rest] = attr.path;
-      const fact = attr.of === "context" && head !== undefined ? env.binding.setFacts?.[head] : undefined;
+      const fact =
+        attr.of === "context" && head !== undefined ? env.binding.setFacts?.[head] : undefined;
       if (fact !== undefined) {
         // A set fact is a boolean: it has no fields to read.
-        return rest.length === 0 ? { _tag: "Fact", fact } : { _tag: "Absent" };
+        return Arr.isReadonlyArrayEmpty(rest) ? { _tag: "Fact", fact } : { _tag: "Absent" };
       }
       const evaluated = Condition.evaluateOperand(env.slice, env.request, attr);
       return evaluated.ok ? { _tag: "Known", value: evaluated.value } : { _tag: "Absent" };
@@ -518,7 +531,7 @@ const flip = (op: Compare["op"]): Compare["op"] =>
 
 /** `Eq` with one side bound to a row: the attribute or the set fact against a known value. */
 const equalsRow = (row: Operand, value: Entity.AttributeValue): Partial => {
-  if (row._tag === "Fact") {
+  if (P.isTagged(row, "Fact")) {
     const inSet = member(row.fact);
     return value === true
       ? decided({ t: inSet, f: negation(inSet), e: false })
@@ -526,7 +539,7 @@ const equalsRow = (row: Operand, value: Entity.AttributeValue): Partial => {
         ? decided({ t: negation(inSet), f: inSet, e: false })
         : constant(false);
   }
-  if (row._tag !== "Attribute") return unsupported("internal: not a row operand");
+  if (!P.isTagged(row, "Attribute")) return unsupported("internal: not a row operand");
   const atom = equalsAtom(row.name, row.kind, value);
   return decided({
     t: atom,
@@ -538,7 +551,7 @@ const equalsRow = (row: Operand, value: Entity.AttributeValue): Partial => {
 /** `Compare` with the attribute on the left: `attribute op value`. */
 const compareRow = (row: Operand, op: Compare["op"], value: Entity.AttributeValue): Partial => {
   // A set fact is a boolean, never a number: the comparison errors.
-  if (row._tag !== "Attribute") return errored;
+  if (!P.isTagged(row, "Attribute")) return errored;
   const scalar = P.isNumber(value) ? numericScalar(row.kind, value) : null;
   if (scalar === null) return errored;
   const atom: Predicate = { _tag: "Compare", op, attribute: row.name, value: scalar };
@@ -549,20 +562,21 @@ const compareRow = (row: Operand, op: Compare["op"], value: Entity.AttributeValu
   });
 };
 
-const isRow = (operand: Operand): boolean => operand._tag === "Attribute" || operand._tag === "Fact";
+const isRow = (operand: Operand): boolean =>
+  P.isTagged(operand, "Attribute") || P.isTagged(operand, "Fact");
 
 const binary = (
   left: Operand,
   right: Operand,
   onRow: (row: Operand, value: Entity.AttributeValue, rowOnLeft: boolean) => Partial,
 ): Partial => {
-  if (left._tag === "Unsupported") return left;
-  if (right._tag === "Unsupported") return right;
+  if (P.isTagged(left, "Unsupported")) return left;
+  if (P.isTagged(right, "Unsupported")) return right;
   // Either side failing to evaluate makes the whole comparison an error, on every row.
-  if (left._tag === "Absent" || right._tag === "Absent") return errored;
+  if (P.isTagged(left, "Absent") || P.isTagged(right, "Absent")) return errored;
   if (isRow(left) && isRow(right)) return unsupported("a comparison between two row values");
-  if (left._tag === "Known" && isRow(right)) return onRow(right, left.value, false);
-  if (right._tag === "Known" && isRow(left)) return onRow(left, right.value, true);
+  if (P.isTagged(left, "Known") && isRow(right)) return onRow(right, left.value, false);
+  if (P.isTagged(right, "Known") && isRow(left)) return onRow(left, right.value, true);
   return unsupported("internal: a comparison with no row operand");
 };
 
@@ -595,10 +609,14 @@ const combine = (
   step: (acc: Outcomes, next: Outcomes) => Outcomes,
   initial: Outcomes,
 ): Partial => {
-  const reasons = Arr.flatMap(parts, (part) => (part._tag === "Unsupported" ? part.reasons : []));
+  const reasons = Arr.flatMap(parts, (part) =>
+    P.isTagged(part, "Unsupported") ? part.reasons : [],
+  );
   if (Arr.isReadonlyArrayNonEmpty(reasons)) return { _tag: "Unsupported", reasons };
   return decided(
-    Arr.reduce(parts, initial, (acc, part) => (part._tag === "Ok" ? step(acc, part.outcomes) : acc)),
+    Arr.reduce(parts, initial, (acc, part) =>
+      P.isTagged(part, "Ok") ? step(acc, part.outcomes) : acc,
+    ),
   );
 };
 
@@ -636,7 +654,7 @@ const partial = (env: Env, condition: Condition.Condition): Partial => {
       ),
     Not: ({ condition: inner }): Partial => {
       const result = partial(env, inner);
-      return result._tag === "Ok"
+      return P.isTagged(result, "Ok")
         ? decided({ t: result.outcomes.f, f: result.outcomes.t, e: result.outcomes.e })
         : result;
     },
@@ -652,9 +670,9 @@ const partial = (env: Env, condition: Condition.Condition): Partial => {
     In: () => unsupported("entity-hierarchy `in` over a row value"),
     Has: ({ of, path }): Partial => {
       const [head, ...rest] = path;
-      if (of === "context") return constant(rest.length === 0);
+      if (of === "context") return constant(Arr.isReadonlyArrayEmpty(rest));
       const kind = head === undefined ? undefined : env.binding.attributes[head];
-      return kind === undefined || head === undefined || rest.length > 0
+      return kind === undefined || head === undefined || Arr.isReadonlyArrayNonEmpty(rest)
         ? unsupported(`resource.${path.join(".")} is not a bound attribute`)
         : decided({ t: present(head), f: isNull(head), e: false });
     },
@@ -667,7 +685,7 @@ const placeholder = (binding: Binding): Entity.EntityRef => Entity.ref(binding.r
 /** Whether a policy's principal and action scopes apply, decided by the kernel itself. */
 const scopesApply = (env: Env, policy: Policy.DeclarativePolicy): boolean =>
   Policy.decidePure(
-    [Struct.omit({ ...policy, resource: Policy.any }, "when")],
+    [{ ...Struct.omit(policy, ["when"]), resource: Policy.any }],
     env.request,
     env.slice,
   ).outcomes.some((outcome) => outcome.result === "matched");
@@ -690,9 +708,12 @@ const policyOutcomes = (env: Env, policy: Policy.DeclarativePolicy): Partial => 
   }
   if (policy.when === undefined) return constant(true);
   const outcomes = partial(env, policy.when);
-  return outcomes._tag === "Ok"
+  return P.isTagged(outcomes, "Ok")
     ? outcomes
-    : { _tag: "Unsupported", reasons: Arr.map(outcomes.reasons, (reason) => `policy ${policy.id}: ${reason}`) };
+    : {
+        _tag: "Unsupported",
+        reasons: Arr.map(outcomes.reasons, (reason) => `policy ${policy.id}: ${reason}`),
+      };
 };
 
 /**
@@ -722,21 +743,28 @@ export const compile = (
     }),
     slice: request.slice ?? Entity.emptySlice,
   };
-  const evaluated = Arr.map(policies, (policy) => ({ policy, outcome: policyOutcomes(env, policy) }));
+  const evaluated = Arr.map(policies, (policy) => ({
+    policy,
+    outcome: policyOutcomes(env, policy),
+  }));
   const reasons = Arr.flatMap(evaluated, ({ outcome }) =>
-    outcome._tag === "Unsupported" ? outcome.reasons : [],
+    P.isTagged(outcome, "Unsupported") ? outcome.reasons : [],
   );
   if (Arr.isReadonlyArrayNonEmpty(reasons)) return { _tag: "Inexact", reasons };
   const ok = Arr.flatMap(evaluated, ({ policy, outcome }) =>
-    outcome._tag === "Ok" ? [{ effect: policy.effect, outcomes: outcome.outcomes }] : [],
+    P.isTagged(outcome, "Ok") ? [{ effect: policy.effect, outcomes: outcome.outcomes }] : [],
   );
   // A matched permit grants; a matched or errored forbid denies, and wins.
   const permitted = disjunction(
-    Arr.map(Arr.filter(ok, ({ effect }) => effect === "permit"), ({ outcomes }) => outcomes.t),
+    Arr.map(
+      Arr.filter(ok, ({ effect }) => effect === "permit"),
+      ({ outcomes }) => outcomes.t,
+    ),
   );
   const forbidden = disjunction(
-    Arr.map(Arr.filter(ok, ({ effect }) => effect === "forbid"), ({ outcomes }) =>
-      disjunction([outcomes.t, outcomes.e]),
+    Arr.map(
+      Arr.filter(ok, ({ effect }) => effect === "forbid"),
+      ({ outcomes }) => disjunction([outcomes.t, outcomes.e]),
     ),
   );
   return { _tag: "Exact", scope: toScope(conjunction([permitted, negation(forbidden)])) };
@@ -756,7 +784,11 @@ export const compile = (
  */
 export type Row = Readonly<Record<string, string | number | boolean | null | undefined>>;
 
-const holds = (predicate: Predicate, row: Row, inSet: (set: string, value: string | number | boolean) => boolean): boolean =>
+const holds = (
+  predicate: Predicate,
+  row: Row,
+  inSet: (set: string, value: string | number | boolean) => boolean,
+): boolean =>
   Match.valueTags(predicate, {
     And: ({ predicates }) => predicates.every((inner) => holds(inner, row, inSet)),
     Or: ({ predicates }) => predicates.some((inner) => holds(inner, row, inSet)),
@@ -819,5 +851,5 @@ export const withoutSets = (scope: ReadScope, isAvailable: (set: string) => bool
       IsNull: (atom): Expr => atom,
       InSet: (atom): Expr => (isAvailable(atom.set) ? atom : !positive),
     });
-  return scope._tag === "Filter" ? toScope(narrow(scope.predicate, true)) : scope;
+  return P.isTagged(scope, "Filter") ? toScope(narrow(scope.predicate, true)) : scope;
 };
