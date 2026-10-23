@@ -65,7 +65,7 @@ const toError = (error: PersistenceRateLimiter.RateLimiterError): RateLimitError
     return new RateLimitError({
       message: "Rate limit exceeded",
       key: reason.key,
-      retryAfter: Duration.toMillis(reason.retryAfter),
+      retryAfter: reason.retryAfter,
     });
   }
   return new AuthError({ message: reason.message });

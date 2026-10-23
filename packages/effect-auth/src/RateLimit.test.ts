@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Clock, Effect, Layer, Result } from "effect";
+import { Clock, Duration, Effect, Layer, Result } from "effect";
 import { TestClock } from "effect/testing";
 import { make, type RateLimitConfig, type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
 import { RateLimitError } from "./Errors.ts";
@@ -165,7 +165,7 @@ describe("RateLimiter.consumeToken", () => {
     expect(stored.get("full")?.blockedUntil).toBeGreaterThan(0);
   });
 
-  it("reports retryAfter in seconds until the window resets", async () => {
+  it("reports retryAfter as the Duration until the window resets", async () => {
     const { layer } = makeStore();
     const error = await Effect.runPromise(
       Effect.gen(function* () {
@@ -175,6 +175,6 @@ describe("RateLimiter.consumeToken", () => {
         return yield* Effect.flip(consume(layer, "timed", { maxRequests: 1, windowMs: 60_000 }));
       }).pipe(Effect.provide(TestClock.layer())),
     );
-    expect(error).toMatchObject({ retryAfter: 45 });
+    expect(error.retryAfter && Duration.toMillis(error.retryAfter)).toBe(45_000);
   });
 });

@@ -4,6 +4,7 @@ import {
   Clock,
   Context,
   DateTime,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -4801,12 +4802,23 @@ const serve = (
                 Effect.catchTag("AuthError", () => Effect.succeed(null)),
               );
             if (denied !== null) {
+              // `Retry-After` (and the body's `retryAfter`) are whole seconds,
+              // rounded up so a client that waits that long is not refused.
+              const retryAfterSeconds =
+                denied.retryAfter === undefined
+                  ? undefined
+                  : Math.ceil(Duration.toSeconds(denied.retryAfter));
               return HttpServerResponse.jsonUnsafe(
                 {
                   message: "Too many requests",
-                  ...(denied.retryAfter !== undefined && { retryAfter: denied.retryAfter }),
+                  ...(retryAfterSeconds !== undefined && { retryAfter: retryAfterSeconds }),
                 },
-                { status: 429 },
+                {
+                  status: 429,
+                  ...(retryAfterSeconds !== undefined && {
+                    headers: { "retry-after": String(retryAfterSeconds) },
+                  }),
+                },
               );
             }
           }

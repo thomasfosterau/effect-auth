@@ -2,7 +2,7 @@
  * Rate limiting types for effect-auth
  */
 
-import { Clock, Context, Effect, Layer, Predicate } from "effect";
+import { Clock, Context, Duration, Effect, Layer, Predicate } from "effect";
 import { RateLimitError, type AuthError } from "./Errors.ts";
 import * as Obs from "./Observability.ts";
 
@@ -107,6 +107,10 @@ const recordRateLimitHit =
       ),
     );
 
+/** The time from `now` until `until` (both epoch milliseconds), never negative. */
+const retryAfter = (until: number, now: number): Duration.Duration =>
+  Duration.millis(Math.max(0, until - now));
+
 /**
  * Create a rate limiter service
  */
@@ -126,7 +130,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
             return yield* new RateLimitError({
               message: `Rate limit exceeded for ${key}`,
               key,
-              retryAfter: Math.ceil((entry.blockedUntil - now) / 1000),
+              retryAfter: retryAfter(entry.blockedUntil, now),
             });
           }
 
@@ -150,7 +154,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
             return yield* new RateLimitError({
               message: `Rate limit exceeded for ${key}`,
               key,
-              retryAfter: Math.ceil((entry.resetAt - now) / 1000),
+              retryAfter: retryAfter(entry.resetAt, now),
             });
           }
 
@@ -169,7 +173,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
             return yield* new RateLimitError({
               message: `Rate limit exceeded for ${key}`,
               key,
-              retryAfter: Math.ceil((entry.blockedUntil - now) / 1000),
+              retryAfter: retryAfter(entry.blockedUntil, now),
             });
           }
 
@@ -197,7 +201,7 @@ export const make = (): Effect.Effect<typeof RateLimiter.Service, never, RateLim
           return yield* new RateLimitError({
             message: `Rate limit exceeded for ${key}`,
             key,
-            retryAfter: Math.max(0, Math.ceil((resetAt - now) / 1000)),
+            retryAfter: retryAfter(resetAt, now),
           });
         }).pipe(recordRateLimitHit(key)),
       ),
