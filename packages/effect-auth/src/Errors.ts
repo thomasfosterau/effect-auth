@@ -283,11 +283,13 @@ export class CaptchaError extends Data.TaggedError("CaptchaError")<{
 
 /**
  * Account is temporarily locked due to too many failed sign-in attempts.
- * Raised by the `AccountLockoutPlugin`.
+ * Raised by the `AccountLockoutPlugin`. `retryAfter`, when present, is how
+ * long the lock has left to run; an HTTP layer that sends it as a
+ * `Retry-After` header rounds it up to whole seconds.
  */
 export class AccountLockedError extends Data.TaggedError("AccountLockedError")<{
   readonly message: string;
-  readonly retryAfter?: number;
+  readonly retryAfter?: Duration.Duration | undefined;
 }> {
   get code(): typeof ErrorCode.ACCOUNT_LOCKED {
     return ErrorCode.ACCOUNT_LOCKED;
@@ -540,13 +542,14 @@ export class OAuthEmailMismatchError extends Data.TaggedError("OAuthEmailMismatc
 
 /**
  * Resend requested before the per-identifier cooldown window has elapsed.
- * `retryAfter` is the number of milliseconds the caller must wait before
- * sending again. Raised by the passwordless send paths when `resendCooldown`
- * is configured in the flow config.
+ * `retryAfter` is how long the caller must wait before sending again; an HTTP
+ * layer that sends it as a `Retry-After` header rounds it up to whole seconds.
+ * Raised by the passwordless send paths when `resendCooldown` is configured in
+ * the flow config.
  */
 export class ResendTooSoonError extends Data.TaggedError("ResendTooSoonError")<{
   readonly message: string;
-  readonly retryAfter: number;
+  readonly retryAfter: Duration.Duration;
 }> {
   get code(): typeof ErrorCode.RESEND_TOO_SOON {
     return ErrorCode.RESEND_TOO_SOON;

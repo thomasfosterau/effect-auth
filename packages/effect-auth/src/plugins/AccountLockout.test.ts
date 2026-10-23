@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, Layer } from "effect";
+import { DateTime, Duration, Effect, Layer } from "effect";
 import { Hooks, type HookError } from "../Hooks.ts";
 import {
   AccountLockoutPlugin,
@@ -73,6 +73,17 @@ describe("AccountLockoutPlugin", () => {
     // The next attempt is short-circuited while locked.
     const blocked = await h.beforeSignInResult("user@example.com");
     expect(blocked).toBeInstanceOf(AccountLockedError);
+  });
+
+  it("reports the time left on the lock as a Duration", async () => {
+    const h = makeHarness({ maxAttempts: 1, lockoutDurationMs: 60_000 });
+    await h.beforeSignIn("user@example.com");
+
+    const blocked = await h.beforeSignInResult("user@example.com");
+    assert(blocked instanceof AccountLockedError, "the identifier is locked");
+    assert(blocked.retryAfter !== undefined, "the lock reports its remaining time");
+    expect(Duration.toMillis(blocked.retryAfter)).toBeGreaterThan(0);
+    expect(Duration.toMillis(blocked.retryAfter)).toBeLessThanOrEqual(60_000);
   });
 
   it("unlocks once the lockout window elapses", async () => {

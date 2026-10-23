@@ -39,7 +39,7 @@
  *
  * @module plugins/account-lockout
  */
-import { Clock, Context, Effect } from "effect";
+import { Clock, Context, Duration, Effect } from "effect";
 import type { SignInInput, AuthResult } from "../email/EmailPassword.ts";
 import * as Errors from "../Errors.ts";
 import { makePlugin } from "../Hooks.ts";
@@ -200,6 +200,7 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
             ) {
               return yield* new Errors.AccountLockedError({
                 message: "Account temporarily locked due to too many failed sign-in attempts",
+                retryAfter: Duration.millis(existing.lockedUntil - now),
               });
             }
 

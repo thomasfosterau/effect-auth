@@ -1,5 +1,15 @@
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
-import { Array as Arr, Context, Crypto, DateTime, Effect, Layer, Predicate, Result } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Crypto,
+  DateTime,
+  Duration,
+  Effect,
+  Layer,
+  Predicate,
+  Result,
+} from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   getPhoneNumber,
@@ -378,8 +388,8 @@ describe("PhoneOtpService", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("ResendTooSoonError");
     assert(result.failure._tag === "ResendTooSoonError");
-    expect(result.failure.retryAfter).toBeGreaterThan(0);
-    expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
+    expect(Duration.toMillis(result.failure.retryAfter)).toBeGreaterThan(0);
+    expect(Duration.toMillis(result.failure.retryAfter)).toBeLessThanOrEqual(60_000);
     // The original OTP is preserved — no replacement was issued.
     expect(sentOtps).toHaveLength(1);
     expect(records.has("+15559990001:sign-in")).toBe(true);
@@ -466,8 +476,8 @@ describe("PhoneOtpService", () => {
       expect(result._tag).toBe("Failure");
       assert(Result.isFailure(result));
       assert(Predicate.isTagged(result.failure, "ResendTooSoonError"));
-      expect(result.failure.retryAfter).toBeGreaterThan(0);
-      expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
+      expect(Duration.toMillis(result.failure.retryAfter)).toBeGreaterThan(0);
+      expect(Duration.toMillis(result.failure.retryAfter)).toBeLessThanOrEqual(60_000);
     });
     // Only the account holder is sent a code; the unknown number holds an
     // undelivered record as its cooldown marker.
