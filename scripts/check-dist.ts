@@ -27,8 +27,9 @@
  *
  *   vp run check:dist [-- --effect <version> | catalog] [--keep]
  *
- * Third-party peers are installed the same way. `alchemy` (beside
- * effect-auth-alchemy) and `drizzle-orm` (beside effect-auth-drizzle) go in at
+ * Third-party peers are installed the same way. `alchemy` and `@effect/sql-pg`
+ * (beside effect-auth-alchemy; the latter is its `./postgres` entry's optional
+ * peer) and `drizzle-orm` (beside effect-auth-drizzle) go in at
  * `semver.minVersion` of the range the packed manifest declares for them, so a
  * default run proves each peer floor the way it proves `effect`. The floor must
  * be a version npm publishes: a strict bound such as `>X` can name one that was
@@ -135,7 +136,9 @@ const allTargets: ReadonlyArray<Target> = [
   { dir: "twilio" },
   { dir: "saml" },
   { dir: "drizzle", peers: ["drizzle-orm"] },
-  { dir: "alchemy", peers: ["alchemy"] },
+  // `@effect/sql-pg` is the optional peer of the `./postgres` entry: installed
+  // at its floor so that entry imports like the rest.
+  { dir: "alchemy", peers: ["alchemy", "@effect/sql-pg"] },
 ];
 
 const arg = (flag: string): string | undefined => {
