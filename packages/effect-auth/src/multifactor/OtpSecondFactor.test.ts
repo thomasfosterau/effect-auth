@@ -128,18 +128,19 @@ describe("OtpSecondFactorService", () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* OtpSecondFactor.make({
-        sendOtp: (user, otp) =>
-          Effect.sync(() => {
-            sentOtps.push({ user, otp });
-          }),
-      });
-      return yield* service.begin(testUser);
-    });
-
     const challenge = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* OtpSecondFactor.make({
+            sendOtp: (user, otp) =>
+              Effect.sync(() => {
+                sentOtps.push({ user, otp });
+              }),
+          });
+          return yield* service.begin(testUser);
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(challenge.token).toBeDefined();
@@ -158,19 +159,20 @@ describe("OtpSecondFactorService", () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* OtpSecondFactor.make({
-        sendOtp: (user, otp) =>
-          Effect.sync(() => {
-            sentOtps.push({ user, otp });
-          }),
-      });
-      const challenge = yield* service.begin(testUser);
-      return yield* service.verify(challenge.token, recorded(sentOtps).otp);
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* OtpSecondFactor.make({
+            sendOtp: (user, otp) =>
+              Effect.sync(() => {
+                sentOtps.push({ user, otp });
+              }),
+          });
+          const challenge = yield* service.begin(testUser);
+          return yield* service.verify(challenge.token, recorded(sentOtps).otp);
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result.userId).toBe(testUser.id);
@@ -183,20 +185,21 @@ describe("OtpSecondFactorService", () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* OtpSecondFactor.make({
-        sendOtp: (user, otp) =>
-          Effect.sync(() => {
-            sentOtps.push({ user, otp });
-          }),
-      });
-      const challenge = yield* service.begin(testUser);
-      yield* service.verify(challenge.token, recorded(sentOtps).otp);
-      return yield* Effect.result(service.verify(challenge.token, recorded(sentOtps).otp));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* OtpSecondFactor.make({
+            sendOtp: (user, otp) =>
+              Effect.sync(() => {
+                sentOtps.push({ user, otp });
+              }),
+          });
+          const challenge = yield* service.begin(testUser);
+          yield* service.verify(challenge.token, recorded(sentOtps).otp);
+          return yield* Effect.result(service.verify(challenge.token, recorded(sentOtps).otp));
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -208,19 +211,20 @@ describe("OtpSecondFactorService", () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* OtpSecondFactor.make({
-        sendOtp: (user, otp) =>
-          Effect.sync(() => {
-            sentOtps.push({ user, otp });
-          }),
-      });
-      const challenge = yield* service.begin(testUser);
-      return yield* Effect.result(service.verify(challenge.token, "000000"));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* OtpSecondFactor.make({
+            sendOtp: (user, otp) =>
+              Effect.sync(() => {
+                sentOtps.push({ user, otp });
+              }),
+          });
+          const challenge = yield* service.begin(testUser);
+          return yield* Effect.result(service.verify(challenge.token, "000000"));
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -235,25 +239,26 @@ describe("OtpSecondFactorService", () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* OtpSecondFactor.make({
-        maxAttempts: 3,
-        sendOtp: (user, otp) =>
-          Effect.sync(() => {
-            sentOtps.push({ user, otp });
-          }),
-      });
-      const challenge = yield* service.begin(testUser);
-
-      const r1 = yield* Effect.result(service.verify(challenge.token, "000001"));
-      const r2 = yield* Effect.result(service.verify(challenge.token, "000002"));
-      const r3 = yield* Effect.result(service.verify(challenge.token, "000003"));
-
-      return { r1, r2, r3 };
-    });
-
     const { r1, r2, r3 } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* OtpSecondFactor.make({
+            maxAttempts: 3,
+            sendOtp: (user, otp) =>
+              Effect.sync(() => {
+                sentOtps.push({ user, otp });
+              }),
+          });
+          const challenge = yield* service.begin(testUser);
+
+          const r1 = yield* Effect.result(service.verify(challenge.token, "000001"));
+          const r2 = yield* Effect.result(service.verify(challenge.token, "000002"));
+          const r3 = yield* Effect.result(service.verify(challenge.token, "000003"));
+
+          return { r1, r2, r3 };
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(r1._tag).toBe("Failure");
@@ -270,21 +275,22 @@ describe("OtpSecondFactorService", () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* OtpSecondFactor.make({
-        expiresIn: 1, // 1 ms → immediately expired
-        sendOtp: (user, otp) =>
-          Effect.sync(() => {
-            sentOtps.push({ user, otp });
-          }),
-      });
-      const challenge = yield* service.begin(testUser);
-      yield* Effect.sleep("5 millis");
-      return yield* Effect.result(service.verify(challenge.token, recorded(sentOtps).otp));
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* OtpSecondFactor.make({
+            expiresIn: 1, // 1 ms → immediately expired
+            sendOtp: (user, otp) =>
+              Effect.sync(() => {
+                sentOtps.push({ user, otp });
+              }),
+          });
+          const challenge = yield* service.begin(testUser);
+          yield* Effect.sleep("5 millis");
+          return yield* Effect.result(service.verify(challenge.token, recorded(sentOtps).otp));
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -299,19 +305,20 @@ describe("OtpSecondFactorService", () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* OtpSecondFactor.make({
-        otpLength: 8,
-        sendOtp: (user, otp) =>
-          Effect.sync(() => {
-            sentOtps.push({ user, otp });
-          }),
-      });
-      return yield* service.begin(testUser);
-    });
-
     await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* OtpSecondFactor.make({
+            otpLength: 8,
+            sendOtp: (user, otp) =>
+              Effect.sync(() => {
+                sentOtps.push({ user, otp });
+              }),
+          });
+          return yield* service.begin(testUser);
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(recorded(sentOtps).otp).toMatch(/^\d{8}$/);
@@ -321,29 +328,30 @@ describe("OtpSecondFactorService", () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* OtpSecondFactor.make({
-        sendOtp: (user, otp) =>
-          Effect.sync(() => {
-            sentOtps.push({ user, otp });
-          }),
-      });
-
-      // Step 1: begin second factor (simulates what the gate's begin() does)
-      const challenge = yield* service.begin(testUser);
-      expect(challenge.token).toBeDefined();
-      expect(sentOtps).toHaveLength(1);
-
-      // Step 2: verify with the delivered OTP
-      const result = yield* service.verify(challenge.token, recorded(sentOtps).otp, {
-        sessionAttributes: { device: "mobile" },
-      });
-
-      return result;
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* OtpSecondFactor.make({
+            sendOtp: (user, otp) =>
+              Effect.sync(() => {
+                sentOtps.push({ user, otp });
+              }),
+          });
+
+          // Step 1: begin second factor (simulates what the gate's begin() does)
+          const challenge = yield* service.begin(testUser);
+          expect(challenge.token).toBeDefined();
+          expect(sentOtps).toHaveLength(1);
+
+          // Step 2: verify with the delivered OTP
+          const result = yield* service.verify(challenge.token, recorded(sentOtps).otp, {
+            sessionAttributes: { device: "mobile" },
+          });
+
+          return result;
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(result.userId).toBe(testUser.id);

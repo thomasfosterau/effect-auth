@@ -89,9 +89,7 @@ export const rateLimiterPersistence: Effect.Effect<
   typeof RateLimiter.Service,
   never,
   PersistenceRateLimiter.RateLimiter
-> = Effect.gen(function* () {
-  const limiter = yield* PersistenceRateLimiter.RateLimiter;
-
+> = PersistenceRateLimiter.RateLimiter.useSync((limiter) => {
   const impl: typeof RateLimiter.Service = {
     consumeToken: (key, config) =>
       limiter

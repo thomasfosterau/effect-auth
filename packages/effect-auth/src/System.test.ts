@@ -118,9 +118,7 @@ const tagOf = (exit: Exit.Exit<unknown, unknown>): string | undefined =>
     : undefined;
 
 /** The principal the current execution holds. */
-const currentPrincipal = Effect.gen(function* () {
-  return yield* Authorizer.CurrentPrincipal;
-});
+const currentPrincipal = Effect.service(Authorizer.CurrentPrincipal);
 
 describe("System.ref", () => {
   it("names the reserved System type, with the given name as its id", () => {

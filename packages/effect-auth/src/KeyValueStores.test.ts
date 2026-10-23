@@ -348,19 +348,6 @@ describe("KeyValueStores", () => {
   describe("integration: EmailVerificationService over EmailVerificationStoreKV", () => {
     it("creates, resends and verifies tokens end-to-end", async () => {
       const sent: Array<{ to: string; token: string }> = [];
-      const program = Effect.gen(function* () {
-        const service = yield* EmailVerification.make({
-          sendEmail: (to, token) => Effect.sync(() => void sent.push({ to, token })),
-        });
-        const first = yield* service.createVerification("user-1", "user-1@example.com");
-        // Resend invalidates the first token and issues a new one.
-        const second = yield* service.resendVerification("user-1", "user-1@example.com");
-        const staleResult = yield* Effect.flip(service.verifyToken(first.token));
-        const result = yield* service.verifyToken(second.token);
-        // One-time use: verifying again fails.
-        const reused = yield* Effect.flip(service.verifyToken(second.token));
-        return { staleResult, result, reused };
-      });
 
       const layer = Layer.mergeAll(
         EmailVerificationStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
@@ -369,7 +356,21 @@ describe("KeyValueStores", () => {
       );
       // The flipped verifications leave failure types in the error channel;
       // any unexpected failure should crash the test, so treat them as defects.
-      const outcome = await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.orDie));
+      const outcome = await Effect.runPromise(
+        Effect.gen(function* () {
+          const service = yield* EmailVerification.make({
+            sendEmail: (to, token) => Effect.sync(() => void sent.push({ to, token })),
+          });
+          const first = yield* service.createVerification("user-1", "user-1@example.com");
+          // Resend invalidates the first token and issues a new one.
+          const second = yield* service.resendVerification("user-1", "user-1@example.com");
+          const staleResult = yield* Effect.flip(service.verifyToken(first.token));
+          const result = yield* service.verifyToken(second.token);
+          // One-time use: verifying again fails.
+          const reused = yield* Effect.flip(service.verifyToken(second.token));
+          return { staleResult, result, reused };
+        }).pipe(Effect.provide(layer), Effect.orDie),
+      );
 
       expect(sent).toHaveLength(2);
       expect(outcome.staleResult._tag).toBe("EmailVerificationError");

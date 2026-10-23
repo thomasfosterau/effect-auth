@@ -234,12 +234,15 @@ describe("layer", () => {
   it("provides the EmailSender service", async () => {
     const { fetch, calls } = stubFetch(new Response(null, { status: 200 }));
 
-    const program = Effect.gen(function* () {
-      const sender = yield* EmailSender;
-      yield* sender.send({ to: "a@b.com", purpose: "magic-link", params: { token: "t" } });
-    });
-
-    await run(Effect.provide(program, layer({ ...baseConfig, fetch })));
+    await run(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sender = yield* EmailSender;
+          yield* sender.send({ to: "a@b.com", purpose: "magic-link", params: { token: "t" } });
+        }),
+        layer({ ...baseConfig, fetch }),
+      ),
+    );
     expect(calls).toHaveLength(1);
   });
 });

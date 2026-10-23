@@ -201,11 +201,15 @@ describe("PhoneOtpService", () => {
 
   it("sends a numeric OTP and stores only its hash", async () => {
     const testContext = await makeTestContext();
-    const program = Effect.gen(function* () {
-      const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
-      yield* service.send("+15551230000", "sign-in");
-    });
-    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
+          yield* service.send("+15551230000", "sign-in");
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
 
     expect(sentOtps).toHaveLength(1);
     const otp = recorded(sentOtps).otp;

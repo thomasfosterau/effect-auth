@@ -1311,22 +1311,20 @@ const storeContract = (engine: StoreEngine): void => {
         }),
       ).pipe(Layer.provide(Reactivity.layer));
 
-      const program = Effect.gen(function* () {
-        const challenges = yield* Auth.MultiFactor.ChallengeStore;
-        const credentials = yield* Auth.MultiFactor.CredentialStore;
-        const rateLimits = yield* Auth.RateLimitStore;
-        const apiKeys = yield* Auth.ApiKeyStore;
-        const adminUsers = yield* Auth.AdminUserStore;
-        const e1 = yield* Effect.flip(challenges.get(new Uint8Array([1, 2, 3])));
-        const e2 = yield* Effect.flip(credentials.get("cred-id"));
-        const e3 = yield* Effect.flip(rateLimits.get("key"));
-        const e4 = yield* Effect.flip(apiKeys.get("key-id"));
-        const e5 = yield* Effect.flip(adminUsers.listUsers({}));
-        return { e1, e2, e3, e4, e5 };
-      });
-
       const result = await Effect.runPromise(
-        program.pipe(Effect.provide(layer.pipe(Layer.provideMerge(brokenClientLayer)))),
+        Effect.gen(function* () {
+          const challenges = yield* Auth.MultiFactor.ChallengeStore;
+          const credentials = yield* Auth.MultiFactor.CredentialStore;
+          const rateLimits = yield* Auth.RateLimitStore;
+          const apiKeys = yield* Auth.ApiKeyStore;
+          const adminUsers = yield* Auth.AdminUserStore;
+          const e1 = yield* Effect.flip(challenges.get(new Uint8Array([1, 2, 3])));
+          const e2 = yield* Effect.flip(credentials.get("cred-id"));
+          const e3 = yield* Effect.flip(rateLimits.get("key"));
+          const e4 = yield* Effect.flip(apiKeys.get("key-id"));
+          const e5 = yield* Effect.flip(adminUsers.listUsers({}));
+          return { e1, e2, e3, e4, e5 };
+        }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(brokenClientLayer)))),
       );
 
       expect(result.e1._tag).toBe("AuthError");

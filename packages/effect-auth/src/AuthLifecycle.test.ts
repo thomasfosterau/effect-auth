@@ -279,20 +279,21 @@ describe("AuthLifecycleService", () => {
   it("should sign up and require verification when configured", async () => {
     const testContext = await makeTestContext();
 
-    const program = Effect.gen(function* () {
-      const service = yield* AuthLifecycle.make({
-        requireEmailVerification: true,
-      });
-
-      return yield* service.signUp({
-        email: "new@example.com",
-        password: "strong-password-123",
-        name: "New User",
-      });
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* AuthLifecycle.make({
+            requireEmailVerification: true,
+          });
+
+          return yield* service.signUp({
+            email: "new@example.com",
+            password: "strong-password-123",
+            name: "New User",
+          });
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result.needsEmailVerification).toBe(true);
@@ -321,18 +322,19 @@ describe("AuthLifecycleService", () => {
     users.set(pending.id, pending);
     addEmailIdentifier(pending.id, "pending@example.com", false);
 
-    const program = Effect.gen(function* () {
-      const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
-      return yield* service.signUp({
-        email: "  Pending@Example.com ",
-        password: "strong-password-123",
-        name: "Probe",
-        attributes: { plan: "free" },
-      });
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
+          return yield* service.signUp({
+            email: "  Pending@Example.com ",
+            password: "strong-password-123",
+            name: "Probe",
+            attributes: { plan: "free" },
+          });
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     // The answer is a stand-in built from the caller's own input: a fresh id,
@@ -368,13 +370,19 @@ describe("AuthLifecycleService", () => {
     users.set(holder.id, holder);
     addEmailIdentifier(holder.id, "held@example.com", true);
 
-    const program = Effect.gen(function* () {
-      const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
-      return yield* service.signUp({ email: "held@example.com", password: "strong-password-123" });
-    });
-
     const error = await Effect.runPromise(
-      Effect.flip(Effect.provide(program, testContext)).pipe(Effect.provide(TestHooks)),
+      Effect.flip(
+        Effect.provide(
+          Effect.gen(function* () {
+            const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
+            return yield* service.signUp({
+              email: "held@example.com",
+              password: "strong-password-123",
+            });
+          }),
+          testContext,
+        ),
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(error._tag).toBe("EmailInUseError");
@@ -398,20 +406,21 @@ describe("AuthLifecycleService", () => {
     addEmailIdentifier(user.id, "signin@example.com", false);
     passwordHashes.set(user.id, hashResult.hash);
 
-    const program = Effect.gen(function* () {
-      const service = yield* AuthLifecycle.make({
-        requireEmailVerification: true,
-        sendOnSignIn: true,
-      });
-
-      return yield* service.signIn({
-        email: "signin@example.com",
-        password: "password-123",
-      });
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* AuthLifecycle.make({
+            requireEmailVerification: true,
+            sendOnSignIn: true,
+          });
+
+          return yield* service.signIn({
+            email: "signin@example.com",
+            password: "password-123",
+          });
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result.needsEmailVerification).toBe(true);
@@ -445,15 +454,16 @@ describe("AuthLifecycleService", () => {
       ).pipe(Effect.provide(TestHooks)),
     );
 
-    const program = Effect.gen(function* () {
-      const service = yield* AuthLifecycle.make({
-        autoSignInAfterVerification: true,
-      });
-      return yield* service.verifyEmail({ token });
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* AuthLifecycle.make({
+            autoSignInAfterVerification: true,
+          });
+          return yield* service.verifyEmail({ token });
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result.user.id).toBe(user.id);
@@ -480,19 +490,20 @@ describe("AuthLifecycleService", () => {
     addEmailIdentifier(user.id, "verified@example.com", true);
     passwordHashes.set(user.id, hashResult.hash);
 
-    const program = Effect.gen(function* () {
-      const service = yield* AuthLifecycle.make({
-        requireEmailVerification: true,
-      });
-
-      return yield* service.signIn({
-        email: "verified@example.com",
-        password: "verified-password-123",
-      });
-    });
-
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* AuthLifecycle.make({
+            requireEmailVerification: true,
+          });
+
+          return yield* service.signIn({
+            email: "verified@example.com",
+            password: "verified-password-123",
+          });
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result.needsEmailVerification).toBe(false);

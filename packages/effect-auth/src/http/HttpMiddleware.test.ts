@@ -143,14 +143,16 @@ describe("HttpMiddleware.layer – conduit_session handler", () => {
   it("valid session cookie → CurrentSession and CurrentUser are provided", async () => {
     const sessionCell = cell<Types.Session>();
     const userCell = cell<Types.User>();
-    const handler = Effect.gen(function* () {
-      sessionCell.value = yield* CurrentSession;
-      userCell.value = yield* CurrentUser;
-      return ok;
-    });
 
     const exit = await Effect.runPromiseExit(
-      runCookiePath(makeWebRequest({ cookie: RAW_TOKEN }), handler),
+      runCookiePath(
+        makeWebRequest({ cookie: RAW_TOKEN }),
+        Effect.gen(function* () {
+          sessionCell.value = yield* CurrentSession;
+          userCell.value = yield* CurrentUser;
+          return ok;
+        }),
+      ),
     );
 
     expect(Exit.isSuccess(exit)).toBe(true);
@@ -174,13 +176,15 @@ describe("HttpMiddleware.layer – conduit_session handler", () => {
 
   it('valid session cookie → CurrentPrincipal is provided as User::"<id>"', async () => {
     const principalCell = cell<Entity.EntityRef>();
-    const handler = Effect.gen(function* () {
-      principalCell.value = yield* CurrentPrincipal;
-      return ok;
-    });
 
     const exit = await Effect.runPromiseExit(
-      runCookiePath(makeWebRequest({ cookie: RAW_TOKEN }), handler),
+      runCookiePath(
+        makeWebRequest({ cookie: RAW_TOKEN }),
+        Effect.gen(function* () {
+          principalCell.value = yield* CurrentPrincipal;
+          return ok;
+        }),
+      ),
     );
 
     expect(Exit.isSuccess(exit)).toBe(true);
@@ -225,13 +229,15 @@ describe("HttpMiddleware.layer – conduit_session handler", () => {
 
   it("Bearer Authorization header is also checked in conduit_session path", async () => {
     const userCell = cell<Types.User>();
-    const handler = Effect.gen(function* () {
-      userCell.value = yield* CurrentUser;
-      return ok;
-    });
 
     const exit = await Effect.runPromiseExit(
-      runCookiePath(makeWebRequest({ authorization: `Bearer ${RAW_TOKEN}` }), handler),
+      runCookiePath(
+        makeWebRequest({ authorization: `Bearer ${RAW_TOKEN}` }),
+        Effect.gen(function* () {
+          userCell.value = yield* CurrentUser;
+          return ok;
+        }),
+      ),
     );
 
     expect(Exit.isSuccess(exit)).toBe(true);
@@ -259,13 +265,17 @@ describe("HttpMiddleware.layer – bearer handler", () => {
   it("valid Bearer token → CurrentSession and CurrentUser are provided", async () => {
     const sessionCell = cell<Types.Session>();
     const userCell = cell<Types.User>();
-    const handler = Effect.gen(function* () {
-      sessionCell.value = yield* CurrentSession;
-      userCell.value = yield* CurrentUser;
-      return ok;
-    });
 
-    const exit = await Effect.runPromiseExit(runBearerPath(RAW_TOKEN, handler));
+    const exit = await Effect.runPromiseExit(
+      runBearerPath(
+        RAW_TOKEN,
+        Effect.gen(function* () {
+          sessionCell.value = yield* CurrentSession;
+          userCell.value = yield* CurrentUser;
+          return ok;
+        }),
+      ),
+    );
 
     expect(Exit.isSuccess(exit)).toBe(true);
     expect(sessionCell.value?.userId).toBe(USER_ID);
@@ -274,12 +284,16 @@ describe("HttpMiddleware.layer – bearer handler", () => {
 
   it("valid Bearer token → CurrentPrincipal is provided", async () => {
     const principalCell = cell<Entity.EntityRef>();
-    const handler = Effect.gen(function* () {
-      principalCell.value = yield* CurrentPrincipal;
-      return ok;
-    });
 
-    const exit = await Effect.runPromiseExit(runBearerPath(RAW_TOKEN, handler));
+    const exit = await Effect.runPromiseExit(
+      runBearerPath(
+        RAW_TOKEN,
+        Effect.gen(function* () {
+          principalCell.value = yield* CurrentPrincipal;
+          return ok;
+        }),
+      ),
+    );
 
     expect(Exit.isSuccess(exit)).toBe(true);
     expect(principalCell.value).toEqual(Entity.ref("User", USER_ID));
@@ -305,16 +319,15 @@ describe("HttpMiddleware.optionalLayer", () => {
 
   const runOptional = (request: HttpServerRequest.HttpServerRequest) => {
     const maybeCell = cell<Option.Option<Types.SessionWithUser>>();
-    const handler = Effect.gen(function* () {
-      maybeCell.value = yield* MaybeCurrentSession;
-      return ok;
-    });
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
-      const applied = svc(handler, standIn) as MiddlewareResult<
-        typeof ok,
-        PerRequestServices | HttpServerRequest.HttpServerRequest
-      >;
+      const applied = svc(
+        Effect.gen(function* () {
+          maybeCell.value = yield* MaybeCurrentSession;
+          return ok;
+        }),
+        standIn,
+      ) as MiddlewareResult<typeof ok, PerRequestServices | HttpServerRequest.HttpServerRequest>;
       yield* applied.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
     }).pipe(Effect.provide(Layer.mergeAll(optionalLayer, baseLayer)));
     return { maybeCell, effect };
@@ -360,16 +373,15 @@ describe("HttpMiddleware.optionalLayer", () => {
   // resolved — so handlers read it with `Effect.serviceOption`.
   const runOptionalPrincipal = (request: HttpServerRequest.HttpServerRequest) => {
     const principalCell = cell<Option.Option<Entity.EntityRef>>();
-    const handler = Effect.gen(function* () {
-      principalCell.value = yield* Effect.serviceOption(CurrentPrincipal);
-      return ok;
-    });
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
-      const applied = svc(handler, standIn) as MiddlewareResult<
-        typeof ok,
-        PerRequestServices | HttpServerRequest.HttpServerRequest
-      >;
+      const applied = svc(
+        Effect.gen(function* () {
+          principalCell.value = yield* Effect.serviceOption(CurrentPrincipal);
+          return ok;
+        }),
+        standIn,
+      ) as MiddlewareResult<typeof ok, PerRequestServices | HttpServerRequest.HttpServerRequest>;
       yield* applied.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
     }).pipe(Effect.provide(Layer.mergeAll(optionalLayer, baseLayer)));
     return { principalCell, effect };
@@ -418,17 +430,19 @@ describe("MaybeCurrentSession is provided by both middlewares", () => {
 
   it("AuthMiddleware provides it as Option.some, so read-path code runs under required auth", async () => {
     const roleCell = cell<string>();
-    const handler = Effect.gen(function* () {
-      roleCell.value = yield* viewerRole;
-      return ok;
-    });
 
     const effect = Effect.gen(function* () {
       const svc = yield* AuthMiddleware;
-      const applied = svc.conduit_session(handler, {
-        ...standIn,
-        credential: Redacted.make(""),
-      }) as MiddlewareResult<typeof ok, PerRequestServices | HttpServerRequest.HttpServerRequest>;
+      const applied = svc.conduit_session(
+        Effect.gen(function* () {
+          roleCell.value = yield* viewerRole;
+          return ok;
+        }),
+        {
+          ...standIn,
+          credential: Redacted.make(""),
+        },
+      ) as MiddlewareResult<typeof ok, PerRequestServices | HttpServerRequest.HttpServerRequest>;
       yield* applied.pipe(
         Effect.provideService(
           HttpServerRequest.HttpServerRequest,
@@ -443,17 +457,16 @@ describe("MaybeCurrentSession is provided by both middlewares", () => {
 
   it("OptionalAuthMiddleware runs the same effect and answers anonymous", async () => {
     const roleCell = cell<string>();
-    const handler = Effect.gen(function* () {
-      roleCell.value = yield* viewerRole;
-      return ok;
-    });
 
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
-      const applied = svc(handler, standIn) as MiddlewareResult<
-        typeof ok,
-        PerRequestServices | HttpServerRequest.HttpServerRequest
-      >;
+      const applied = svc(
+        Effect.gen(function* () {
+          roleCell.value = yield* viewerRole;
+          return ok;
+        }),
+        standIn,
+      ) as MiddlewareResult<typeof ok, PerRequestServices | HttpServerRequest.HttpServerRequest>;
       yield* applied.pipe(
         Effect.provideService(HttpServerRequest.HttpServerRequest, makeWebRequest()),
       );

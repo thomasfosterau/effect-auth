@@ -108,32 +108,18 @@ describe("databaseLayer doors", () => {
      * seam still insisted on a `Promise`, `run` would reject the value rather
      * than run it, and none of the assertions below would be reachable.
      */
-    const program = Effect.gen(function* () {
-      const db = yield* EffectPglite.make();
-
-      const work: Effect.Effect<
-        {
-          readonly created: Auth.Session;
-          readonly read: Auth.Session | null;
-          readonly afterDelete: Auth.Session | null;
-        },
-        Auth.AuthError,
-        StoreServices
-      > = Effect.gen(function* () {
-        const sessions = yield* Auth.SessionStore;
-        const created = yield* sessions.create(makeSession("effect-driver", "user-1"));
-        const read = yield* sessions.get("effect-driver");
-        yield* sessions.delete("effect-driver");
-        return { created, read, afterDelete: yield* sessions.get("effect-driver") };
-      });
-
-      return yield* work.pipe(
-        Effect.provide(storesLayer(tables).pipe(Layer.provide(effectDatabaseLayer(db)))),
-      );
-    });
-
     const result = await Effect.runPromise(
-      program.pipe(
+      Effect.gen(function* () {
+        const db = yield* EffectPglite.make();
+
+        return yield* Effect.gen(function* () {
+          const sessions = yield* Auth.SessionStore;
+          const created = yield* sessions.create(makeSession("effect-driver", "user-1"));
+          const read = yield* sessions.get("effect-driver");
+          yield* sessions.delete("effect-driver");
+          return { created, read, afterDelete: yield* sessions.get("effect-driver") };
+        }).pipe(Effect.provide(storesLayer(tables).pipe(Layer.provide(effectDatabaseLayer(db)))));
+      }).pipe(
         Effect.provide(
           Layer.mergeAll(
             EffectPglite.DefaultServices,
@@ -207,37 +193,35 @@ describe("overlapping requests", () => {
     await seed(firstDb, "first-request");
     await seed(secondDb, "second-request");
 
-    const program = Effect.gen(function* () {
-      // Each request reads, waits for the other to have read too, then reads
-      // again — so the two are provably in flight at the same time.
-      const firstHasRead = yield* Latch.make(false);
-      const secondHasRead = yield* Latch.make(false);
-
-      const request = (
-        db: PgliteDatabase,
-        arrived: Latch.Latch,
-        other: Latch.Latch,
-      ): Effect.Effect<ReadonlyArray<Auth.Session | null>, Auth.AuthError, StoreServices> =>
-        Effect.gen(function* () {
-          const sessions = yield* Auth.SessionStore;
-          const before = yield* sessions.get("shared");
-          yield* Latch.open(arrived);
-          yield* other.await;
-          const after = yield* sessions.get("shared");
-          return [before, after];
-        }).pipe(Effect.provide(Context.make(RequestDatabase, db)));
-
-      return yield* Effect.all(
-        [
-          request(firstDb, firstHasRead, secondHasRead),
-          request(secondDb, secondHasRead, firstHasRead),
-        ],
-        { concurrency: "unbounded" },
-      );
-    });
-
     const [firstReads, secondReads] = await Effect.runPromise(
-      program.pipe(Effect.provide(stores)) as Effect.Effect<
+      Effect.gen(function* () {
+        // Each request reads, waits for the other to have read too, then reads
+        // again — so the two are provably in flight at the same time.
+        const firstHasRead = yield* Latch.make(false);
+        const secondHasRead = yield* Latch.make(false);
+
+        const request = (
+          db: PgliteDatabase,
+          arrived: Latch.Latch,
+          other: Latch.Latch,
+        ): Effect.Effect<ReadonlyArray<Auth.Session | null>, Auth.AuthError, StoreServices> =>
+          Effect.gen(function* () {
+            const sessions = yield* Auth.SessionStore;
+            const before = yield* sessions.get("shared");
+            yield* Latch.open(arrived);
+            yield* other.await;
+            const after = yield* sessions.get("shared");
+            return [before, after];
+          }).pipe(Effect.provide(Context.make(RequestDatabase, db)));
+
+        return yield* Effect.all(
+          [
+            request(firstDb, firstHasRead, secondHasRead),
+            request(secondDb, secondHasRead, firstHasRead),
+          ],
+          { concurrency: "unbounded" },
+        );
+      }).pipe(Effect.provide(stores)) as Effect.Effect<
         readonly [ReadonlyArray<Auth.Session | null>, ReadonlyArray<Auth.Session | null>],
         unknown
       >,

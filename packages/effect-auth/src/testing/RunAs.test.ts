@@ -14,14 +14,16 @@ import * as Testing from "./index.ts";
 const createdAt = new Date("2026-01-01T00:00:00.000Z");
 const ada: Types.User = { id: "u-ada", createdAt, updatedAt: createdAt, attributes: {} };
 
-const whoAmI = Effect.gen(function* () {
-  const principal = yield* Authorizer.CurrentPrincipal;
-  const credential = yield* Authorizer.CurrentCredential;
-  const user = yield* SessionContext.CurrentUser;
-  const session = yield* SessionContext.CurrentSession;
-  const maybe = yield* SessionContext.MaybeCurrentSession;
-  return { principal, credential, user, session, maybe };
-});
+const whoAmI = Effect.all(
+  {
+    principal: Effect.service(Authorizer.CurrentPrincipal),
+    credential: Effect.service(Authorizer.CurrentCredential),
+    user: Effect.service(SessionContext.CurrentUser),
+    session: Effect.service(SessionContext.CurrentSession),
+    maybe: Effect.service(SessionContext.MaybeCurrentSession),
+  },
+  { concurrency: 1 },
+);
 
 describe("runAs", () => {
   it("runs an effect as a signed-in fixture user with the middleware's full context", async () => {
@@ -36,13 +38,14 @@ describe("runAs", () => {
   });
 
   it("runs an effect anonymously for null", async () => {
-    const program = Effect.gen(function* () {
-      return {
-        authenticated: yield* SessionContext.isAuthenticated,
-        user: yield* Effect.exit(SessionContext.requireCurrentUser),
-      };
-    });
-    const seen = await Effect.runPromise(program.pipe(Testing.runAs(null)));
+    const seen = await Effect.runPromise(
+      Effect.gen(function* () {
+        return {
+          authenticated: yield* SessionContext.isAuthenticated,
+          user: yield* Effect.exit(SessionContext.requireCurrentUser),
+        };
+      }).pipe(Testing.runAs(null)),
+    );
 
     expect(seen.authenticated).toBe(false);
     expect(Exit.isFailure(seen.user)).toBe(true);
@@ -144,14 +147,13 @@ describe("runAsViewer", () => {
   });
 
   it("gives the viewer, the session context and the principal one identity", async () => {
-    const program = Effect.gen(function* () {
-      const viewer = yield* CurrentViewer;
-      const principal = yield* Authorizer.CurrentPrincipal;
-      const resolved = yield* SessionContext.MaybeCurrentSession;
-      return { viewer, principal, resolved };
-    });
     const seen = await Effect.runPromise(
-      program.pipe(Testing.runAsViewer(CurrentViewer, moderator)),
+      Effect.gen(function* () {
+        const viewer = yield* CurrentViewer;
+        const principal = yield* Authorizer.CurrentPrincipal;
+        const resolved = yield* SessionContext.MaybeCurrentSession;
+        return { viewer, principal, resolved };
+      }).pipe(Testing.runAsViewer(CurrentViewer, moderator)),
     );
 
     expect(seen.viewer).toEqual(Option.some(moderator));
@@ -164,13 +166,14 @@ describe("runAsViewer", () => {
   });
 
   it("runs anonymously with the viewer and the session context both empty", async () => {
-    const program = Effect.gen(function* () {
-      return {
-        viewer: yield* CurrentViewer,
-        authenticated: yield* SessionContext.isAuthenticated,
-      };
-    });
-    const seen = await Effect.runPromise(program.pipe(Testing.runAsViewer(CurrentViewer, null)));
+    const seen = await Effect.runPromise(
+      Effect.gen(function* () {
+        return {
+          viewer: yield* CurrentViewer,
+          authenticated: yield* SessionContext.isAuthenticated,
+        };
+      }).pipe(Testing.runAsViewer(CurrentViewer, null)),
+    );
 
     expect(seen).toEqual({ viewer: Option.none(), authenticated: false });
   });

@@ -60,11 +60,15 @@ describe("scrypt defaults", () => {
   });
 
   it("PasswordHasher.layerScrypt() uses the same defaults", async () => {
-    const program = Effect.gen(function* () {
-      const hasher = yield* PasswordHasher;
-      return yield* hasher.hash("default-params");
-    });
-    const { hash } = await Effect.runPromise(Effect.provide(program, PasswordHasher.layerScrypt()));
+    const { hash } = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const hasher = yield* PasswordHasher;
+          return yield* hasher.hash("default-params");
+        }),
+        PasswordHasher.layerScrypt(),
+      ),
+    );
     expectDefaultHash(hash);
   });
 

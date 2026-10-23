@@ -326,17 +326,19 @@ export const make = <Id, User extends Guard.ViewerShape, Rung extends string>(
       return follows && decide(viewer, row, true);
     });
 
-  const readScope: Effect.Effect<OwnedReadScope, never, Id> = Effect.gen(function* () {
-    const viewer = yield* guards.viewer;
-    if (Option.isNone(viewer)) return { kind: "public" } as const;
-    if (guards.decideRole(viewer.value, viewPrivate)) return { kind: "all" } as const;
-    const seam = yield* Effect.serviceOption(IsFollower);
-    return {
-      kind: "member",
-      userId: viewer.value.id,
-      following: Option.isNone(seam) ? nobody : seam.value.following(viewer.value.id),
-    } as const;
-  });
+  const readScope: Effect.Effect<OwnedReadScope, never, Id> = Effect.flatMap(
+    guards.viewer,
+    (viewer): Effect.Effect<OwnedReadScope> => {
+      if (Option.isNone(viewer)) return Effect.succeed({ kind: "public" });
+      if (guards.decideRole(viewer.value, viewPrivate)) return Effect.succeed({ kind: "all" });
+      const userId = viewer.value.id;
+      return Effect.map(Effect.serviceOption(IsFollower), (seam) => ({
+        kind: "member",
+        userId,
+        following: Option.isNone(seam) ? nobody : seam.value.following(userId),
+      }));
+    },
+  );
 
   return { canView, readScope, policies };
 };
