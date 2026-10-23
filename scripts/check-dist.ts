@@ -135,6 +135,7 @@ const allTargets: ReadonlyArray<Target> = [
   { dir: "resend" },
   { dir: "twilio" },
   { dir: "saml" },
+  { dir: "sveltekit" },
   { dir: "drizzle", peers: ["drizzle-orm"] },
   // `@effect/sql-pg` is the optional peer of the `./postgres` entry: installed
   // at its floor so that entry imports like the rest.
