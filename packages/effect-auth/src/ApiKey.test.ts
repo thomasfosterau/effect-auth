@@ -58,15 +58,20 @@ const rateLimitStore = {
       rateLimitEntries.set(key, entry);
     }),
 
-  increment: (key: string, _ttl: number) =>
-    Effect.sync(() => {
-      const entry = rateLimitEntries.get(key);
-      const count = (entry?.count ?? 0) + 1;
-      if (entry) {
-        rateLimitEntries.set(key, { ...entry, count });
-      }
-      return count;
-    }),
+  increment: (key: string, ttl: number) =>
+    // Starts a new window when there is none or it has expired, as the
+    // RateLimitStore contract requires (#455).
+    Effect.flatMap(Clock.currentTimeMillis, (now) =>
+      Effect.sync(() => {
+        const entry = rateLimitEntries.get(key);
+        const next: RateLimitEntry =
+          entry === undefined || now >= entry.resetAt
+            ? { key, count: 1, resetAt: now + ttl * 1000 }
+            : { ...entry, count: entry.count + 1 };
+        rateLimitEntries.set(key, next);
+        return next.count;
+      }),
+    ),
 
   delete: (key: string) =>
     Effect.sync(() => {
