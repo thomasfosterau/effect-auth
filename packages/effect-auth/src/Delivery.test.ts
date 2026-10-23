@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer, Logger, Schema } from "effect";
+import { Array as Arr, Effect, Layer, Logger, Schema } from "effect";
 import {
   EmailSender,
   SmsSender,
@@ -29,7 +29,7 @@ const identifierStoreWith = (
   ...entries: Array<{ type: IdentifierType; value: string; verified?: boolean }>
 ) => {
   const records = new Map<string, Identifier>();
-  for (const entry of entries) {
+  Arr.forEach(entries, (entry) => {
     const identifier = makeIdentifier({
       userId: "u1",
       type: entry.type,
@@ -37,7 +37,7 @@ const identifierStoreWith = (
       verified: entry.verified ?? true,
     });
     records.set(identifier.id, identifier);
-  }
+  });
   return memoryIdentifierStore(records);
 };
 

@@ -6,7 +6,7 @@
  * Excluded from the published build (see `tsconfig.json`).
  */
 import * as Auth from "@thomasfosterau/effect-auth";
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer } from "effect";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -77,7 +77,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        for (const [id, session] of sessions) if (session.userId === userId) sessions.delete(id);
+        sessions.forEach((session, id) => {
+          if (session.userId === userId) sessions.delete(id);
+        });
       }),
     listByUserId: (userId) =>
       Effect.sync(() => [...sessions.values()].filter((session) => session.userId === userId)),
@@ -110,8 +112,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     delete: (token) => Effect.sync(() => void verifications.delete(token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        for (const [token, v] of verifications)
+        verifications.forEach((v, token) => {
           if (v.userId === userId) verifications.delete(token);
+        });
       }),
   };
 
@@ -121,7 +124,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     delete: (token) => Effect.sync(() => void resets.delete(token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        for (const [token, reset] of resets) if (reset.userId === userId) resets.delete(token);
+        resets.forEach((reset, token) => {
+          if (reset.userId === userId) resets.delete(token);
+        });
       }),
   };
 
@@ -192,7 +197,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     delete: (token) => Effect.sync(() => void accountTokens.delete(token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        for (const [t, rec] of accountTokens) if (rec.userId === userId) accountTokens.delete(t);
+        accountTokens.forEach((rec, t) => {
+          if (rec.userId === userId) accountTokens.delete(t);
+        });
       }),
   };
 
@@ -298,6 +305,10 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const invitations = new Map<string, Auth.Invitation>();
   const teams = new Map<string, Auth.Team>();
   const teamMembers: Auth.TeamMember[] = [];
+  const removeTeamMembers = (teamId: string): void => {
+    const kept = teamMembers.filter((m) => m.teamId !== teamId);
+    teamMembers.splice(0, teamMembers.length, ...kept);
+  };
   const orgRoles = new Map<string, Auth.OrgRole>();
   const domainRecords = new Map<string, Auth.OrganizationDomain>();
   /** Domains whose DNS TXT record the stub verifier should "find". */
@@ -312,16 +323,14 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     deleteOrganization: (id) =>
       Effect.sync(() => {
         orgs.delete(id);
-        for (const [key, role] of orgRoles) {
+        orgRoles.forEach((role, key) => {
           if (role.organizationId === id) orgRoles.delete(key);
-        }
-        for (const [teamId, team] of teams) {
-          if (team.organizationId !== id) continue;
+        });
+        teams.forEach((team, teamId) => {
+          if (team.organizationId !== id) return;
           teams.delete(teamId);
-          for (let i = teamMembers.length - 1; i >= 0; i--) {
-            if (teamMembers[i]?.teamId === teamId) teamMembers.splice(i, 1);
-          }
-        }
+          removeTeamMembers(teamId);
+        });
       }),
     createMember: (member) => Effect.sync(() => (members.push(member), member)),
     getMember: (organizationId, userId) =>
@@ -364,9 +373,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     deleteTeam: (teamId) =>
       Effect.sync(() => {
         teams.delete(teamId);
-        for (let i = teamMembers.length - 1; i >= 0; i--) {
-          if (teamMembers[i]?.teamId === teamId) teamMembers.splice(i, 1);
-        }
+        removeTeamMembers(teamId);
       }),
     listTeams: (organizationId) =>
       Effect.succeed([...teams.values()].filter((t) => t.organizationId === organizationId)),
@@ -494,10 +501,10 @@ export const makeCookieJarFetch = (
       );
     }
     const response = await handler(request);
-    for (const setCookie of response.headers.getSetCookie()) {
+    Arr.forEach(response.headers.getSetCookie(), (setCookie) => {
       const [pair = ""] = setCookie.split(";");
       const eq = pair.indexOf("=");
-      if (eq <= 0) continue;
+      if (eq <= 0) return;
       const name = pair.slice(0, eq).trim();
       const value = pair.slice(eq + 1).trim();
       if (value === "" || setCookie.toLowerCase().includes("max-age=0")) {
@@ -505,7 +512,7 @@ export const makeCookieJarFetch = (
       } else {
         jar.set(name, value);
       }
-    }
+    });
     return response;
   }) as typeof globalThis.fetch;
 };

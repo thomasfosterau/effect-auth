@@ -64,11 +64,11 @@ const sessionStore = {
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      for (const [id, session] of sessions.entries()) {
+      sessions.forEach((session, id) => {
         if (session.userId === userId) {
           sessions.delete(id);
         }
-      }
+      });
     }),
 
   listByUserId: (userId: string) =>
@@ -102,11 +102,11 @@ const passwordResetStore = {
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      for (const [token, reset] of resetTokens.entries()) {
+      resetTokens.forEach((reset, token) => {
         if (reset.userId === userId) {
           resetTokens.delete(token);
         }
-      }
+      });
     }),
 };
 

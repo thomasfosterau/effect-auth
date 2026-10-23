@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
+import { Array as Arr } from "effect";
 import { access, readFile } from "node:fs/promises";
 import * as path from "node:path";
 
@@ -37,24 +38,22 @@ interface ModuleGraph {
 const walkModuleGraph = async (entry: string): Promise<ModuleGraph> => {
   const visited = new Set<string>();
   const externalSpecifiers = new Set<string>();
-  const queue = [entry];
-
-  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
-    if (visited.has(file)) continue;
+  const visit = async (file: string): Promise<void> => {
+    if (visited.has(file)) return;
     visited.add(file);
 
     const source = await readFile(file, "utf8");
-    for (const specifier of extractSpecifiers(source)) {
+    await Arr.reduce(extractSpecifiers(source), Promise.resolve(), async (previous, specifier) => {
+      await previous;
       if (!isRelativeSpecifier(specifier)) {
         externalSpecifiers.add(specifier);
-        continue;
+        return;
       }
       const resolved = path.resolve(path.dirname(file), specifier);
-      if ((await exists(resolved)) && !visited.has(resolved)) {
-        queue.push(resolved);
-      }
-    }
-  }
+      if (await exists(resolved)) await visit(resolved);
+    });
+  };
+  await visit(entry);
 
   return { files: visited, externalSpecifiers };
 };

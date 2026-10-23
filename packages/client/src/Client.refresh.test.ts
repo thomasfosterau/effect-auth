@@ -27,9 +27,9 @@ class FakeBroadcastChannel {
   }
 
   postMessage(data: { readonly data: Auth.Http.SessionWithUserView | null }): void {
-    for (const peer of FakeBroadcastChannel._channels.get(this.name) ?? []) {
+    FakeBroadcastChannel._channels.get(this.name)?.forEach((peer) => {
       if (peer !== this) peer.onmessage?.(new MessageEvent("message", { data }));
-    }
+    });
   }
 
   close(): void {

@@ -85,11 +85,11 @@ const sessionStore = {
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      for (const [id, session] of sessions.entries()) {
+      sessions.forEach((session, id) => {
         if (session.userId === userId) {
           sessions.delete(id);
         }
-      }
+      });
     }),
 
   listByUserId: (userId: string) =>
@@ -140,11 +140,11 @@ const emailVerificationStore = {
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      for (const [token, verification] of verifications.entries()) {
+      verifications.forEach((verification, token) => {
         if (verification.userId === userId) {
           verifications.delete(token);
         }
-      }
+      });
     }),
 };
 

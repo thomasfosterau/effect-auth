@@ -4,7 +4,7 @@
  * `@thomasfosterau/effect-auth-drizzle`, the DDL `CHECK`).
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Schema } from "effect";
+import { Array as Arr, Schema } from "effect";
 import * as Ladder from "./Ladder.ts";
 import * as LadderSchema from "./LadderSchema.ts";
 
@@ -14,13 +14,15 @@ describe("LadderSchema.rung", () => {
   const decode = Schema.decodeUnknownExit(LadderSchema.rung(Roles));
 
   it("accepts every rung", () => {
-    for (const role of Roles.rungs) expect(decode(role)._tag).toBe("Success");
+    Arr.forEach(Roles.rungs, (role) => {
+      expect(decode(role)._tag).toBe("Success");
+    });
   });
 
   it("refuses anything off the ladder", () => {
-    for (const notARung of ["", "ADMIN", "superadmin", null, 3, undefined]) {
+    Arr.forEach(["", "ADMIN", "superadmin", null, 3, undefined], (notARung) => {
       expect(decode(notARung)._tag, String(notARung)).toBe("Failure");
-    }
+    });
   });
 
   it("types a decoded role as the ladder's rung union", () => {

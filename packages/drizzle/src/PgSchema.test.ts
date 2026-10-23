@@ -7,7 +7,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { getTableName } from "drizzle-orm";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
-import { Effect, Layer } from "effect";
+import { Array as Arr, Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -51,9 +51,10 @@ beforeAll(async () => {
       .map((table) => getTableName(table))
       .join(", ")}`,
   );
-  for (const statement of migrationStatements(names)) {
+  await Arr.reduce(migrationStatements(names), Promise.resolve(), async (previous, statement) => {
+    await previous;
     await client.exec(statement);
-  }
+  });
   db = drizzle(client);
 });
 

@@ -9,7 +9,7 @@
  * not have is a test failure rather than a passing refactor.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Schema } from "effect";
+import { Array as Arr, Effect, Schema } from "effect";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Entity from "./Entity.ts";
 import * as Ladder from "./Ladder.ts";
@@ -60,10 +60,10 @@ describe("rank", () => {
   });
 
   it("ranks a string that is not a rung below every real rung (fails closed)", () => {
-    for (const notARung of NOT_RUNGS) {
+    Arr.forEach(NOT_RUNGS, (notARung) => {
       expect(Roles.rank(notARung)).toBe(-1);
       expect(Roles.isRung(notARung)).toBe(false);
-    }
+    });
     expect(Roles.isRung(3)).toBe(false);
     expect(Roles.isRung("moderator")).toBe(true);
   });
@@ -71,32 +71,34 @@ describe("rank", () => {
 
 describe("hasAtLeast", () => {
   it("is true for every rung at or above the minimum, false below (all 4×4 pairs)", () => {
-    for (const held of Roles.rungs) {
-      for (const min of Roles.rungs) {
+    Arr.forEach(Roles.rungs, (held) => {
+      Arr.forEach(Roles.rungs, (min) => {
         expect(Roles.hasAtLeast({ role: held }, min), `${held} ≥ ${min}`).toBe(
           Roles.rank(held) >= Roles.rank(min),
         );
-      }
-    }
+      });
+    });
   });
 
   it("is reflexive — every rung satisfies itself", () => {
-    for (const role of Roles.rungs) expect(Roles.hasAtLeast({ role }, role)).toBe(true);
+    Arr.forEach(Roles.rungs, (role) => {
+      expect(Roles.hasAtLeast({ role }, role)).toBe(true);
+    });
   });
 
   it("denies an anonymous viewer at every rung and every axis", () => {
-    for (const min of [...Roles.rungs, ...Object.values(Axes)]) {
+    Arr.forEach([...Roles.rungs, ...Object.values(Axes)], (min) => {
       expect(Roles.hasAtLeast(null, min)).toBe(false);
       expect(Roles.hasAtLeast(undefined, min)).toBe(false);
-    }
+    });
   });
 
   it("denies a role string that is not on the ladder, at every rung and every axis", () => {
-    for (const min of [...Roles.rungs, ...Object.values(Axes)]) {
-      for (const notARung of NOT_RUNGS) {
+    Arr.forEach([...Roles.rungs, ...Object.values(Axes)], (min) => {
+      Arr.forEach(NOT_RUNGS, (notARung) => {
         expect(Roles.hasAtLeast({ role: notARung }, min)).toBe(false);
-      }
-    }
+      });
+    });
   });
 
   it("fails closed even against an off-ladder minimum smuggled in by a cast", () => {
@@ -125,10 +127,10 @@ describe("axes", () => {
   });
 
   it("the base rung satisfies none of them, and the top rung satisfies all", () => {
-    for (const axis of Object.values(Axes)) {
+    Arr.forEach(Object.values(Axes), (axis) => {
       expect(Roles.hasAtLeast({ role: "admin" }, axis)).toBe(true);
       expect(Roles.hasAtLeast({ role: "user" }, axis)).toBe(false);
-    }
+    });
   });
 
   it("stay separate questions: a contributor writes the corpus but cannot moderate", () => {
@@ -174,14 +176,14 @@ const decide = (policy: Policy.DeclarativePolicy, role: string | undefined) =>
 
 describe("Policy.roleAtLeast", () => {
   it("agrees with hasAtLeast on every rung × axis pair, and on off-ladder roles", () => {
-    for (const axis of Object.values(Axes)) {
+    Arr.forEach(Object.values(Axes), (axis) => {
       const policy = Policy.roleAtLeast(Roles, axis);
-      for (const role of [...Roles.rungs, ...NOT_RUNGS]) {
+      Arr.forEach([...Roles.rungs, ...NOT_RUNGS], (role) => {
         expect(decide(policy, role).allowed, `${role} on ${axis.name}`).toBe(
           Roles.hasAtLeast({ role }, axis),
         );
-      }
-    }
+      });
+    });
   });
 
   it("denies a principal with no role attribute (the anonymous / unknown-entity case)", () => {

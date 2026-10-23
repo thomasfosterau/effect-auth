@@ -60,7 +60,9 @@ const sessionStore: typeof SessionStore.Service = {
   delete: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
-      for (const [id, s] of sessions) if (s.userId === userId) sessions.delete(id);
+      sessions.forEach((s, id) => {
+        if (s.userId === userId) sessions.delete(id);
+      });
     }),
   listByUserId: (userId) =>
     Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),

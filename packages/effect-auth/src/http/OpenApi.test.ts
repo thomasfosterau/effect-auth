@@ -156,9 +156,9 @@ describe("getOpenApiSpec", () => {
   it("contains every endpoint path", () => {
     const spec = getOpenApiSpec();
     const paths = Object.keys(spec.paths);
-    for (const p of EXPECTED_PATHS) {
+    Arr.forEach(EXPECTED_PATHS, (p) => {
       expect(paths).toContain(p);
-    }
+    });
     // No endpoint should be missing from the document.
     expect(paths.length).toBe(EXPECTED_PATHS.length);
   });

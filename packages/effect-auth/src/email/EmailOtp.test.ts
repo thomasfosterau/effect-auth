@@ -1,7 +1,7 @@
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { EmailPasswordStore } from "./EmailPassword.ts";
 import { memoryEmailPasswordStore } from "../testing/MemoryStores.ts";
-import { Context, Crypto, Effect, Layer, Predicate, Result, Tracer } from "effect";
+import { Array as Arr, Context, Crypto, Effect, Layer, Predicate, Result, Tracer } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
@@ -78,11 +78,11 @@ const sessionStore = {
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      for (const [id, session] of sessions.entries()) {
+      sessions.forEach((session, id) => {
         if (session.userId === userId) {
           sessions.delete(id);
         }
-      }
+      });
     }),
 
   listByUserId: (userId: string) =>
@@ -787,13 +787,13 @@ describe("EmailOtpService", () => {
           message: "Please wait before requesting another OTP",
         },
       ]);
-      for (const result of [known[1], unknown[1]]) {
+      Arr.forEach([known[1], unknown[1]], (result) => {
         expect(result._tag).toBe("Failure");
         assert(Result.isFailure(result));
         assert(Predicate.isTagged(result.failure, "ResendTooSoonError"));
         expect(result.failure.retryAfter).toBeGreaterThan(0);
         expect(result.failure.retryAfter).toBeLessThanOrEqual(60_000);
-      }
+      });
       // Only the account holder is sent a code; the unknown email holds an
       // undelivered record as its cooldown marker.
       expect(sentOtps.map((sent) => sent.email)).toEqual(["member@example.com"]);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect } from "effect";
+import { Array as Arr, Effect, Option } from "effect";
 import { AuthError } from "./Errors.ts";
 import {
   type Identifier,
@@ -26,10 +26,12 @@ const rowWriter = (records: Map<string, Identifier>, id: string, written?: Parti
   const create = (identifier: NewUserIdentifier) =>
     Effect.suspend(() => {
       inputs.push(identifier);
-      for (const held of records.values()) {
-        if (held.type === identifier.type && held.value === identifier.value) {
-          return Effect.fail(new AuthError({ message: "unique index on users.email" }));
-        }
+      const taken = Arr.findFirst(
+        records.values(),
+        (held) => held.type === identifier.type && held.value === identifier.value,
+      );
+      if (Option.isSome(taken)) {
+        return Effect.fail(new AuthError({ message: "unique index on users.email" }));
       }
       records.set(id, {
         id,
@@ -53,12 +55,13 @@ const rowWriter = (records: Map<string, Identifier>, id: string, written?: Parti
 const findOrCreateWriter = (records: Map<string, Identifier>, id: string) => {
   const create = (identifier: NewUserIdentifier) =>
     Effect.sync(() => {
-      for (const held of records.values()) {
-        if (held.type === identifier.type && held.value === identifier.value) {
-          return { user: makeUser(held.userId), created: false };
-        }
-      }
-      return { user: makeUser(id), created: true };
+      const held = Arr.findFirst(
+        records.values(),
+        (record) => record.type === identifier.type && record.value === identifier.value,
+      );
+      return Option.isSome(held)
+        ? { user: makeUser(held.value.userId), created: false }
+        : { user: makeUser(id), created: true };
     });
   return { create };
 };

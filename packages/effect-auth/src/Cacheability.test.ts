@@ -10,7 +10,7 @@
  * needs — and every representation it refuses is hidden from someone.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Layer, Option } from "effect";
+import { Array as Arr, Context, Effect, Layer, Option } from "effect";
 import * as Cacheability from "./Cacheability.ts";
 import * as Guard from "./Guard.ts";
 import * as Ladder from "./Ladder.ts";
@@ -90,9 +90,9 @@ describe("publiclyServeable", () => {
   });
 
   it("refuses a present axis whose value is anything but the serveable literal", () => {
-    for (const visibility of ["private", "followers", "", null, "PUBLIC", "unlisted"]) {
+    Arr.forEach(["private", "followers", "", null, "PUBLIC", "unlisted"], (visibility) => {
       expect(serveable({ visibility }), String(visibility)).toBe(false);
-    }
+    });
     expect(serveable({ visibility: "public", moderationState: "pending" })).toBe(false);
     expect(serveable({ visibility: "public", moderationState: null })).toBe(false);
     expect(serveable({ visibility: "public", draft: true })).toBe(false);
@@ -110,9 +110,9 @@ describe("publiclyServeable", () => {
   });
 
   it("refuses anything that is not an attribute record", () => {
-    for (const notARecord of [null, undefined, "public", 1, [], ["public"]]) {
+    Arr.forEach([null, undefined, "public", 1, [], ["public"]], (notARecord) => {
       expect(serveable(notARecord)).toBe(false);
-    }
+    });
   });
 });
 
@@ -138,8 +138,8 @@ describe("OwnedAccess.serveableAxes", () => {
     );
 
   it("admit a row exactly when every viewer, anonymous included, may see it", () => {
-    for (const visibility of ["public", "followers", "private"] as const) {
-      for (const draft of [undefined, false, true]) {
+    Arr.forEach(["public", "followers", "private"] as const, (visibility) => {
+      Arr.forEach([undefined, false, true], (draft) => {
         const row: OwnedAccess.OwnedRow = {
           ownerId: "owner",
           visibility,
@@ -147,8 +147,8 @@ describe("OwnedAccess.serveableAxes", () => {
         };
         const attributes = { visibility, ...(draft === undefined ? {} : { draft }) };
         expect(serveable(attributes), `${visibility}/${String(draft)}`).toBe(visibleToAll(row));
-      }
-    }
+      });
+    });
   });
 
   it("refuse an owned representation whose projection dropped visibility", () => {

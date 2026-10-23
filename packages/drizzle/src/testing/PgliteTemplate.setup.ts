@@ -38,9 +38,10 @@ export default async function setup(project: TestProject): Promise<() => Promise
   // a large part of its bytes. No test reads WAL, so nothing observable changes (#324).
   const client = await PGlite.create({ initDbStartParams: ["--wal-segsize=1"] });
   const migrateAndDump = async (): Promise<void> => {
-    for (const statement of migrationStatements()) {
+    await migrationStatements().reduce(async (previous, statement) => {
+      await previous;
       await client.exec(statement);
-    }
+    }, Promise.resolve());
     const dump = await client.dumpDataDir("none");
     await writeFile(template, new Uint8Array(await dump.arrayBuffer()));
   };

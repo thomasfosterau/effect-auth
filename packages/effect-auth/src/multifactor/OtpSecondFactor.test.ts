@@ -63,9 +63,9 @@ const sessionStore = {
     }),
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      for (const [id, s] of sessions.entries()) {
+      sessions.forEach((s, id) => {
         if (s.userId === userId) sessions.delete(id);
-      }
+      });
     }),
   listByUserId: (userId: string) =>
     Effect.sync(() => Array.from(sessions.values()).filter((s) => s.userId === userId)),

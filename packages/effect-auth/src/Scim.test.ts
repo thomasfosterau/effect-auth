@@ -133,9 +133,9 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     invalidateSession: (sessionId) => Effect.sync(() => void sessions.delete(sessionId)),
     invalidateUserSessions: (userId) =>
       Effect.sync(() => {
-        for (const [id, session] of sessions) {
+        sessions.forEach((session, id) => {
           if (session.userId === userId) sessions.delete(id);
-        }
+        });
       }),
     listSessions: (userId) =>
       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),
@@ -164,9 +164,8 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     deleteTeam: (teamId: string) =>
       Effect.sync(() => {
         teams.delete(teamId);
-        for (let i = teamMembers.length - 1; i >= 0; i--) {
-          if (teamMembers[i]?.teamId === teamId) teamMembers.splice(i, 1);
-        }
+        const kept = teamMembers.filter((m) => m.teamId !== teamId);
+        teamMembers.splice(0, teamMembers.length, ...kept);
       }),
     listTeams: (organizationId: string) =>
       Effect.succeed([...teams.values()].filter((t) => t.organizationId === organizationId)),
@@ -491,18 +490,24 @@ describe("ScimService — users", () => {
     const fx = await makeFixture();
     await fx.run(fx.service.createUser(fx.a.connection, ADA));
 
-    for (const filter of ['displayName eq "Ada"', 'userName co "ada"', "userName pr"]) {
-      const err = await fx.run(Effect.flip(fx.service.listUsers(fx.a.connection, { filter })));
-      expect((err as ScimError).status).toBe(400);
-      expect((err as ScimError).scimType).toBe("invalidFilter");
-    }
+    await Arr.reduce(
+      ['displayName eq "Ada"', 'userName co "ada"', "userName pr"],
+      Promise.resolve(),
+      async (previous, filter) => {
+        await previous;
+        const err = await fx.run(Effect.flip(fx.service.listUsers(fx.a.connection, { filter })));
+        expect((err as ScimError).status).toBe(400);
+        expect((err as ScimError).scimType).toBe("invalidFilter");
+      },
+    );
   });
 
   it("paginates with a 1-based startIndex and a capped count", async () => {
     const fx = await makeFixture({ maxPageSize: 2 });
-    for (const name of ["a", "b", "c"]) {
+    await Arr.reduce(["a", "b", "c"], Promise.resolve(), async (previous, name) => {
+      await previous;
       await fx.run(fx.service.createUser(fx.a.connection, { userName: `${name}@acme.test` }));
-    }
+    });
 
     const first = await fx.run(fx.service.listUsers(fx.a.connection, { startIndex: 1, count: 2 }));
     expect(first.totalResults).toBe(3);
@@ -1239,11 +1244,12 @@ describe("HTTP SCIM endpoints", () => {
 
   it("paginates over the wire", async () => {
     const fx = await makeHttpFixture();
-    for (const name of ["a", "b", "c"]) {
+    await Arr.reduce(["a", "b", "c"], Promise.resolve(), async (previous, name) => {
+      await previous;
       await fx.handler(
         scimReq("POST", "/Users", { token: fx.token, body: { userName: `${name}@acme.test` } }),
       );
-    }
+    });
 
     const page = await fx.handler(
       scimReq("GET", "/Users?startIndex=2&count=2", { token: fx.token }),

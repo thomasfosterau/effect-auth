@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect, Layer, Predicate } from "effect";
+import { Array as Arr, Effect, Layer, Predicate } from "effect";
 import * as Auth from "./index.ts";
 
 /**
@@ -34,9 +34,9 @@ describe("static service layers", () => {
       ["AuthLifecycleService", Auth.AuthLifecycleService],
       ["OidcProviderService", Auth.OidcProviderService],
     ];
-    for (const [name, service] of services) {
+    Arr.forEach(services, ([name, service]) => {
       expect(Predicate.isFunction(service.layer), `${name}.layer`).toBe(true);
-    }
+    });
   });
 
   it("SessionService.layer builds a working session manager", async () => {

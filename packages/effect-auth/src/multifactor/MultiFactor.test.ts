@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { Context, Crypto, Effect, Redacted, Result } from "effect";
+import { Array as Arr, Context, Crypto, Effect, Redacted, Result } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService, make as makeSessionService } from "../SessionService.ts";
@@ -54,11 +54,11 @@ const sessionStore = {
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      for (const [id, session] of sessions.entries()) {
+      sessions.forEach((session, id) => {
         if (session.userId === userId) {
           sessions.delete(id);
         }
-      }
+      });
     }),
 
   listByUserId: (userId: string) =>
@@ -229,16 +229,16 @@ describe("MultiFactorService", () => {
     expect(enableResult.totpUri).toContain("TestApp");
     expect(enableResult.totpUri).toContain(encodeURIComponent("totp@example.com"));
     expect(enableResult.backupCodes).toHaveLength(10);
-    for (const code of enableResult.backupCodes) {
+    Arr.forEach(enableResult.backupCodes, (code) => {
       expect(code).toMatch(/^[0-9a-f]{5}-[0-9a-f]{5}$/);
-    }
+    });
 
     // Backup codes are stored hashed, never in plaintext
     const record = multiFactorRecords.get("user-2fa-1");
     expect(record?.verified).toBe(true);
-    for (const plaintext of enableResult.backupCodes) {
+    Arr.forEach(enableResult.backupCodes, (plaintext) => {
       expect(record?.backupCodes).not.toContain(plaintext);
-    }
+    });
 
     expect(enabledBeforeConfirm).toBe(false);
     expect(enabledAfterConfirm).toBe(true);

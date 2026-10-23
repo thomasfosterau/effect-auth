@@ -25,12 +25,12 @@ describe("password barrel", () => {
       "PasswordResetStore",
       "PasswordResetUserStore",
     ]);
-    for (const name of expected) {
+    Arr.forEach(expected, (name) => {
       expect(PasswordCluster).toHaveProperty(
         name,
         PasswordReset[name as keyof typeof PasswordReset],
       );
-    }
+    });
     expect(Auth.Password.PasswordResetService).toBe(PasswordReset.PasswordResetService);
   });
 

@@ -927,32 +927,40 @@ class HeldDispatcher implements Scheduler.SchedulerDispatcher {
    * ran a task.
    */
   run(fiber: Fiber.Fiber<unknown, unknown>): boolean {
-    let ran = false;
-    while (this.target === undefined && fiber.pollUnsafe() === undefined) {
-      const batch = this.queued.flatMap(([priority, tasks]) =>
-        tasks.map((task) => [priority, task] as const),
-      );
-      if (Arr.isReadonlyArrayEmpty(batch)) return ran;
-      ran = true;
-      this.queued = [];
-      let next = 0;
-      // `every` stops at the first task that finds `fiber` finished; a task
-      // that throws stops the batch too, and the throw is rethrown below.
-      const outcome = Result.try(() =>
-        batch.every(([, task]) => {
-          if (fiber.pollUnsafe() !== undefined) return false;
-          next++;
-          task();
-          return true;
-        }),
-      );
-      // The batch's unrun tasks go back ahead of those scheduled since.
-      Arr.reverse(Arr.drop(batch, next)).forEach(([priority, task]) =>
-        this.enqueue(task, priority, true),
-      );
-      if (Result.isFailure(outcome)) throw outcome.failure;
-    }
-    return ran;
+    // `unfold` steps one batch at a time, so the batch count never grows the
+    // stack.
+    const batches = Arr.unfold(undefined, () =>
+      this.target === undefined && fiber.pollUnsafe() === undefined
+        ? Option.map(this.runBatch(fiber), (ran) => [ran, undefined] as const)
+        : Option.none(),
+    );
+    return Arr.isReadonlyArrayNonEmpty(batches);
+  }
+
+  /** Run what is queued as one batch; `None` when nothing is queued. */
+  private runBatch(fiber: Fiber.Fiber<unknown, unknown>): Option.Option<true> {
+    const batch = this.queued.flatMap(([priority, tasks]) =>
+      tasks.map((task) => [priority, task] as const),
+    );
+    if (Arr.isReadonlyArrayEmpty(batch)) return Option.none();
+    this.queued = [];
+    let next = 0;
+    // `every` stops at the first task that finds `fiber` finished; a task
+    // that throws stops the batch too, and the throw is rethrown below.
+    const outcome = Result.try(() =>
+      batch.every(([, task]) => {
+        if (fiber.pollUnsafe() !== undefined) return false;
+        next++;
+        task();
+        return true;
+      }),
+    );
+    // The batch's unrun tasks go back ahead of those scheduled since.
+    Arr.reverse(Arr.drop(batch, next)).forEach(([priority, task]) =>
+      this.enqueue(task, priority, true),
+    );
+    if (Result.isFailure(outcome)) throw outcome.failure;
+    return Option.some(true);
   }
 
   /** Move the queued tasks, and every task scheduled from now on, to `target`. */
@@ -4888,13 +4896,19 @@ const refuseUnservableBuild = (
   const close = runSynchronously(
     Fiber.interrupt(servicesFiber).pipe(Effect.andThen(releaseRefusedServices(servicesScope))),
   );
-  const drained = Result.try(() => {
-    let progressed = true;
-    while (progressed && close.fiber.pollUnsafe() === undefined) {
-      const closeRan = close.run();
-      progressed = build.run() || closeRan;
-    }
-  });
+  // One round runs the close's tasks, then the build's; `unfold` repeats it
+  // while a round ran anything, without growing the stack.
+  const round = (): boolean => {
+    const closeRan = close.run();
+    return build.run() || closeRan;
+  };
+  const drained = Result.try(() =>
+    Arr.unfold(true, (progressed) =>
+      progressed && close.fiber.pollUnsafe() === undefined
+        ? Option.some([undefined, round()] as const)
+        : Option.none(),
+    ),
+  );
   close.release();
   if (Result.isFailure(drained)) throw drained.failure;
   // A build still running here may yet fail on its own account (a failed

@@ -986,7 +986,9 @@ const makeHttpFixture = () => {
     delete: (id: string) => Effect.sync(() => void sessions.delete(id)),
     deleteByUserId: (userId: string) =>
       Effect.sync(() => {
-        for (const [id, s] of sessions) if (s.userId === userId) sessions.delete(id);
+        sessions.forEach((s, id) => {
+          if (s.userId === userId) sessions.delete(id);
+        });
       }),
     listByUserId: (userId: string) =>
       Effect.sync(() => [...sessions.values()].filter((s) => s.userId === userId)),

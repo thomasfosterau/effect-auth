@@ -54,13 +54,15 @@ describe("ladderCheck", () => {
   });
 
   it("is enforced by Postgres: every rung is accepted, anything else refused", async () => {
-    for (const role of Roles.rungs) {
+    await Roles.rungs.reduce(async (previous, role) => {
+      await previous;
       await client.query("insert into users (id, role) values ($1, $2)", [`u-${role}`, role]);
-    }
-    for (const notARung of ["superadmin", "ADMIN", ""]) {
+    }, Promise.resolve());
+    await ["superadmin", "ADMIN", ""].reduce(async (previous, notARung) => {
+      await previous;
       await expect(
         client.query("insert into users (id, role) values ($1, $2)", [`x-${notARung}`, notARung]),
       ).rejects.toThrow(/users_role_valid/);
-    }
+    }, Promise.resolve());
   });
 });

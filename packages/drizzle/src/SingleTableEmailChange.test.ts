@@ -159,7 +159,9 @@ const makeHarness = (
     delete: (token) => Effect.sync(() => void tokens.delete(token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {
-        for (const [t, rec] of tokens) if (rec.userId === userId) tokens.delete(t);
+        tokens.forEach((rec, t) => {
+          if (rec.userId === userId) tokens.delete(t);
+        });
       }),
   };
 

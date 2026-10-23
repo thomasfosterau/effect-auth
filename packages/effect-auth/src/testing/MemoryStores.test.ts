@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Redacted } from "effect";
+import { Array as Arr, Effect, Layer, Redacted } from "effect";
 import { EmailPasswordService } from "../email/EmailPassword.ts";
 import { Hooks } from "../Hooks.ts";
 import { IdentifierStore, memoryIdentifierStore } from "../Identifier.ts";
@@ -22,11 +22,11 @@ const register = <E, R>(
   layer: () => Layer.Layer<R>,
 ): void => {
   describe(`${suite.contract} conformance over the memory store`, () => {
-    for (const testCase of suite.cases) {
+    Arr.forEach(suite.cases, (testCase) => {
       it(testCase.name, () =>
         Effect.runPromise(testCase.run.pipe(Effect.provide(layer())) as Effect.Effect<void>),
       );
-    }
+    });
   });
 };
 

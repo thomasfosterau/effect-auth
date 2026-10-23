@@ -16,7 +16,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { eq, getTableName } from "drizzle-orm";
-import { Effect, Layer, Predicate } from "effect";
+import { Array as Arr, Effect, Layer, Predicate } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { type AuthSchema, defineSchema } from "./Columns.ts";
@@ -155,9 +155,10 @@ let client: PGlite;
 
 beforeAll(async () => {
   client = await migratedPglite();
-  for (const statement of appMigration) {
+  await Arr.reduce(appMigration, Promise.resolve(), async (previous, statement) => {
+    await previous;
     await client.exec(statement);
-  }
+  });
 });
 
 afterAll(async () => {

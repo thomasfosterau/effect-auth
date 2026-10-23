@@ -57,11 +57,11 @@ const sessionStore = {
 
   deleteByUserId: (userId: string) =>
     Effect.sync(() => {
-      for (const [id, session] of sessions.entries()) {
+      sessions.forEach((session, id) => {
         if (session.userId === userId) {
           sessions.delete(id);
         }
-      }
+      });
     }),
 
   listByUserId: (userId: string) =>
@@ -278,11 +278,11 @@ describe("AdminService", () => {
       }),
     );
 
-    for (const outcome of Object.values(result)) {
+    Arr.forEach(Object.values(result), (outcome) => {
       expect(outcome._tag).toBe("Failure");
       assert(Predicate.isTagged(outcome, "Failure"));
       expect(outcome.failure._tag).toBe("AdminError");
-    }
+    });
   });
 
   it("grants admin via attributes.role, adminRoles, and adminUserIds", async () => {
@@ -342,16 +342,21 @@ describe("AdminService", () => {
     const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
     const roles = Ladder.make(["user", "admin"]);
 
-    for (const input of [
-      { email: "a@example.com", role: "root" },
-      { email: "b@example.com", attributes: { role: "root" } },
-      { email: "c@example.com", attributes: { role: 7 } },
-    ]) {
-      const refused = await runService(testContext, { roles }, (service) =>
-        Effect.flip(service.createUser(admin, input)),
-      );
-      expect(refused._tag, input.email).toBe("AdminError");
-    }
+    await Arr.reduce(
+      [
+        { email: "a@example.com", role: "root" },
+        { email: "b@example.com", attributes: { role: "root" } },
+        { email: "c@example.com", attributes: { role: 7 } },
+      ],
+      Promise.resolve(),
+      async (previous, input) => {
+        await previous;
+        const refused = await runService(testContext, { roles }, (service) =>
+          Effect.flip(service.createUser(admin, input)),
+        );
+        expect(refused._tag, input.email).toBe("AdminError");
+      },
+    );
   });
 
   it("bans a user, revokes their sessions, and blocks re-banning edge cases", async () => {

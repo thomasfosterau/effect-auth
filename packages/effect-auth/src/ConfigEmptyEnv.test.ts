@@ -70,7 +70,9 @@ describe("empty environment variables", () => {
     const jwt = await resolve(jwtServiceConfig, jwtEnv);
     const oauth = await resolve(oauthServiceOptionsConfig, {});
     const mf = await resolve(multiFactorConfig, mfEnv);
-    for (const exit of [jwt, oauth, mf]) expect(exit._tag).toBe("Success");
+    Arr.forEach([jwt, oauth, mf], (exit) => {
+      expect(exit._tag).toBe("Success");
+    });
     assert(Exit.isSuccess(jwt));
     expect(jwt.value.encryptPrivateKey).toBeUndefined();
     assert(Exit.isSuccess(oauth));

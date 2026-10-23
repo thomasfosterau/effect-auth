@@ -12,7 +12,7 @@
  * every viewer.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Exit, Layer, Logger, Option, Schema } from "effect";
+import { Array as Arr, Context, Effect, Exit, Layer, Logger, Option, Schema } from "effect";
 import * as Authorizer from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
 import * as Guard from "./Guard.ts";
@@ -70,8 +70,8 @@ const tagOf = (exit: Exit.Exit<unknown, unknown>): string | undefined =>
 
 describe("requireRoleAtLeast", () => {
   it("admits every rung at or above the minimum and refuses the rest", () => {
-    for (const [minIndex, min] of Roles.rungs.entries()) {
-      for (const [heldIndex, held] of Roles.rungs.entries()) {
+    Arr.forEach(Roles.rungs, (min, minIndex) => {
+      Arr.forEach(Roles.rungs, (held, heldIndex) => {
         const exit = runGate(guards.requireRoleAtLeast(min), user(held));
         // At or above the minimum succeeds; below it fails with `Forbidden`.
         const admitted = heldIndex >= minIndex;
@@ -79,8 +79,8 @@ describe("requireRoleAtLeast", () => {
           admitted ? Exit.isSuccess(exit) : tagOf(exit),
           admitted ? `${held} ≥ ${min}` : `${held} < ${min}`,
         ).toBe(admitted ? true : "Forbidden");
-      }
-    }
+      });
+    });
   });
 
   it("yields the viewer itself — the application's own type — on success", () => {
@@ -89,9 +89,9 @@ describe("requireRoleAtLeast", () => {
   });
 
   it("fails Unauthorized (not Forbidden) for an anonymous request, at every rung", () => {
-    for (const min of Roles.rungs) {
+    Arr.forEach(Roles.rungs, (min) => {
       expect(tagOf(runGate(guards.requireRoleAtLeast(min), null))).toBe("Unauthorized");
-    }
+    });
   });
 
   it("refuses a role string that is not on the ladder even at the lowest rung", () => {
@@ -106,26 +106,26 @@ describe("the named gates", () => {
     ["requireAdmin", requireAdmin, ["admin"]],
   ] as const;
 
-  for (const [name, gate, admitted] of cases) {
+  Arr.forEach(cases, ([name, gate, admitted]) => {
     it(`${name} admits exactly ${admitted.join(" / ")}`, () => {
-      for (const held of Roles.rungs) {
+      Arr.forEach(Roles.rungs, (held) => {
         expect(Exit.isSuccess(runGate(gate, user(held))), `${name} for ${held}`).toBe(
           (admitted as ReadonlyArray<string>).includes(held),
         );
-      }
+      });
       expect(tagOf(runGate(gate, null))).toBe("Unauthorized");
       expect(tagOf(runGate(gate, user("superadmin")))).toBe("Forbidden");
     });
-  }
+  });
 });
 
 describe("requireUser", () => {
   it("returns the viewer for every rung — no ladder comparison", () => {
-    for (const role of Roles.rungs) {
+    Arr.forEach(Roles.rungs, (role) => {
       const viewer = user(role);
       const exit = runGate(guards.requireUser, viewer);
       expect(Exit.isSuccess(exit) && exit.value).toBe(viewer);
-    }
+    });
   });
 
   it("admits a signed-in viewer whose role is off the ladder: signed in is not a rung", () => {
@@ -165,21 +165,21 @@ describe("requireOwnerOrRole (the owned-material write gate)", () => {
 describe("the read-path predicates", () => {
   it("hasRoleAtLeast answers each axis, and false for anonymous (never fails)", () => {
     // canViewDeletedE / canViewPrivateE in the applications: moderator and above.
-    for (const axis of [Axes.viewDeleted, Axes.viewPrivate]) {
+    Arr.forEach([Axes.viewDeleted, Axes.viewPrivate], (axis) => {
       expect(run(guards.hasRoleAtLeast(axis), admin)).toBe(true);
       expect(run(guards.hasRoleAtLeast(axis), moderator)).toBe(true);
       expect(run(guards.hasRoleAtLeast(axis), contributor)).toBe(false);
       expect(run(guards.hasRoleAtLeast(axis), member)).toBe(false);
       expect(run(guards.hasRoleAtLeast(axis), null)).toBe(false);
-    }
+    });
   });
 
   it("isAdminViewer asks for the admin rung literally — no lower rung satisfies it", () => {
     const isAdminViewer = guards.hasRoleAtLeast("admin");
     expect(run(isAdminViewer, admin)).toBe(true);
-    for (const viewer of [moderator, contributor, member, null]) {
+    Arr.forEach([moderator, contributor, member, null], (viewer) => {
       expect(run(isAdminViewer, viewer)).toBe(false);
-    }
+    });
   });
 
   it("isOwnerOrRole mirrors requireOwnerOrRole without failing", () => {
@@ -211,19 +211,19 @@ describe("guards and the policy kernel", () => {
   });
 
   it("each gate and its predicate agree on every viewer and every axis", () => {
-    for (const axis of Object.values(Axes)) {
-      for (const viewer of viewers) {
+    Arr.forEach(Object.values(Axes), (axis) => {
+      Arr.forEach(viewers, (viewer) => {
         const gateAdmits = Exit.isSuccess(runGate(guards.requireRoleAtLeast(axis), viewer));
         expect(run(guards.hasRoleAtLeast(axis), viewer)).toBe(gateAdmits);
         expect(guards.decideRole(viewer, axis)).toBe(gateAdmits);
-      }
-      for (const viewer of viewers) {
+      });
+      Arr.forEach(viewers, (viewer) => {
         const gateAdmits = Exit.isSuccess(
           runGate(guards.requireOwnerOrRole(member.id, axis), viewer),
         );
         expect(run(guards.isOwnerOrRole(member.id, axis), viewer)).toBe(gateAdmits);
-      }
-    }
+      });
+    });
   });
 
   it("an Authorizer handed the kit's own policies decides exactly as the gates do", () => {
@@ -252,17 +252,17 @@ describe("guards and the policy kernel", () => {
     const doc = Entity.entity(Entity.ref("Owned", "doc-1"), {
       attributes: { owner: Entity.entityValue(Entity.ref("User", member.id)) },
     });
-    for (const axis of Object.values(Axes)) {
-      for (const viewer of viewers) {
-        if (viewer === null) continue;
+    Arr.forEach(Object.values(Axes), (axis) => {
+      Arr.forEach(viewers, (viewer) => {
+        if (viewer === null) return;
         expect(decideWithAuthorizer(viewer, guards.policies.roleAtLeast(axis), doc)).toBe(
           guards.decideRole(viewer, axis),
         );
         expect(decideWithAuthorizer(viewer, guards.policies.ownerOrRole(axis), doc)).toBe(
           guards.decideOwnerOrRole(viewer, member.id, axis),
         );
-      }
-    }
+      });
+    });
   });
 });
 
@@ -348,14 +348,14 @@ describe("the viewer seam (SessionContext)", () => {
   });
 
   it("viewerLayer accepts the app's user, an Option of one, or null", () => {
-    for (const given of [member, Option.some(member)]) {
+    Arr.forEach([member, Option.some(member)], (given) => {
       const layer = SessionContext.viewerLayer(CurrentViewer, given);
       expect(Effect.runSync(Effect.provide(guards.viewer, layer))).toEqual(Option.some(member));
-    }
-    for (const given of [null, undefined, Option.none<AppUser>()]) {
+    });
+    Arr.forEach([null, undefined, Option.none<AppUser>()], (given) => {
       const layer = SessionContext.viewerLayer(CurrentViewer, given);
       expect(Effect.runSync(Effect.provide(guards.viewer, layer))).toEqual(Option.none());
-    }
+    });
   });
 });
 

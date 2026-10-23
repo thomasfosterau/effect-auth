@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vite-plus/test";
 import { memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
-import { Effect, Layer, Predicate, Schema } from "effect";
+import { Array as Arr, Effect, Layer, Predicate, Schema } from "effect";
 import * as Cipher from "./Cipher.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
@@ -245,9 +245,10 @@ describe("GoogleOneTapService", () => {
     const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
 
     const nonces = ["n1", "n2", "n3", "n4", "n5"];
-    for (const n of nonces) {
+    await Arr.reduce(nonces, Promise.resolve(), async (previous, n) => {
+      await previous;
       await Effect.runPromise(nonceStore.create(n, Date.now() + 60_000));
-    }
+    });
 
     const cases: [string, string][] = [
       [
@@ -274,7 +275,8 @@ describe("GoogleOneTapService", () => {
       ],
     ];
 
-    for (const [credential, nonce] of cases) {
+    await Arr.reduce(cases, Promise.resolve(), async (previous, [credential, nonce]) => {
+      await previous;
       // Re-create nonce if already consumed by a previous failure
       await Effect.runPromise(nonceStore.create(nonce, Date.now() + 60_000));
       const err = await withJwks(() =>
@@ -283,7 +285,7 @@ describe("GoogleOneTapService", () => {
         ),
       );
       expect(err).toBeInstanceOf(GoogleOneTapError);
-    }
+    });
   });
 
   it("clears a squatter's password and sessions when Google proves the address (#440)", async () => {

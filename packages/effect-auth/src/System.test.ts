@@ -1,5 +1,15 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Exit, Logger, Option, Predicate, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Context,
+  Effect,
+  Exit,
+  Logger,
+  Option,
+  Predicate,
+  Result,
+  Schema,
+} from "effect";
 import * as Condition from "./Condition.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Authorizer from "./Authorizer.ts";
@@ -412,11 +422,12 @@ const allowedActions = async (
   context: Readonly<Record<string, Entity.AttributeValue>> = {},
 ): Promise<ReadonlyArray<string>> => {
   const allowed: string[] = [];
-  for (const action of everyAction) {
+  await Arr.reduce(everyAction, Promise.resolve(), async (previous, action) => {
+    await previous;
     if (await decideAs(principal, policies, action, resource, resolved, context)) {
       allowed.push(action);
     }
-  }
+  });
   return allowed;
 };
 
@@ -441,23 +452,28 @@ describe("a system principal is denied under every library policy set with no gr
   it("OwnedAccess.policies: no action on a public, followers, private or draft row", async () => {
     // Every arm's condition holds for the system principal: the row is public,
     // it is the owner, it holds the viewPrivate rung, and it follows the owner.
-    for (const [visibility, draft] of [
-      ["public", false],
-      ["followers", false],
-      ["private", false],
-      ["public", true],
-    ] as const) {
-      const ownedBySystem = ownedRow("by-system", billing, visibility, draft);
-      expect(
-        await allowedActions(
-          billing,
-          owned.policies,
-          ownedBySystem.ref,
-          [ownedBySystem, billingAsAdmin],
-          { follows: true },
-        ),
-      ).toEqual([]);
-    }
+    await Arr.reduce(
+      [
+        ["public", false],
+        ["followers", false],
+        ["private", false],
+        ["public", true],
+      ] as const,
+      Promise.resolve(),
+      async (previous, [visibility, draft]) => {
+        await previous;
+        const ownedBySystem = ownedRow("by-system", billing, visibility, draft);
+        expect(
+          await allowedActions(
+            billing,
+            owned.policies,
+            ownedBySystem.ref,
+            [ownedBySystem, billingAsAdmin],
+            { follows: true },
+          ),
+        ).toEqual([]);
+      },
+    );
   });
 
   it("OwnedAccess.policies: a user is allowed reads on owned rows and no other action (#387)", async () => {
