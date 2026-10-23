@@ -33,7 +33,7 @@
  * default run proves each peer floor the way it proves `effect`. The floor must
  * be a version npm publishes: a strict bound such as `>X` can name one that was
  * never released, and the check fails then, naming the package, peer, range
- * and computed version, rather than letting npm fail with an unclear error. When
+ * and computed version, rather than letting the install fail with an unclear error. When
  * several packages in one project declare the same peer, the highest floor is
  * installed, and the post-install check proves every declared range holds.
  * The log prints each peer version it installs and why.
@@ -49,8 +49,14 @@
  * `--keep` leaves the scratch projects on disk (the path is printed) instead of
  * deleting them, for debugging a failure.
  *
- * The install uses `--legacy-peer-deps`, which installs an `effect` that a
- * peer range rejects without complaint, so after each install the check reads
+ * Each scratch project is installed with pnpm, as a pnpm consumer would
+ * install it, and is its own pnpm workspace: its `package.json` carries the
+ * workspace's `packageManager` (so a global pnpm of another major switches to
+ * the pinned one rather than installing with its own defaults) and its
+ * `pnpm-workspace.yaml` holds the settings the check relies on (see
+ * `workspaceYaml`). It installs with `autoInstallPeers: false` and
+ * `strictPeerDependencies: false`, which installs an `effect` that a peer
+ * range rejects without complaint, so after each install the check reads
  * the `effect` range every one of our packages and every peer installed
  * beside them (such as `alchemy`) declares, and fails if the installed
  * `effect` misses one. It also checks each installed peer against the range
@@ -156,14 +162,41 @@ const keep = process.argv.includes("--keep");
 const run = (cmd: string, args: ReadonlyArray<string>, cwd: string): string =>
   execFileSync(cmd, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
 
+/** The workspace's `packageManager` (`pnpm@<version>`), given to every scratch project. */
+const packageManager = (() => {
+  // SAFETY: the root manifest is this repository's own `package.json`.
+  const value = (
+    JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      packageManager?: string;
+    }
+  ).packageManager;
+  if (!value?.startsWith("pnpm@"))
+    throw new Error("the root package.json pins no pnpm packageManager");
+  return value;
+})();
+
+/**
+ * The `pnpm-workspace.yaml` of a scratch project, as JSON (a YAML subset).
+ * `overrides` resolves every sibling, wherever it is depended on, to its
+ * tarball; with `autoInstallPeers: false` and `strictPeerDependencies: false`
+ * pnpm installs exactly the `effect` and peers the manifest names, in range or
+ * not (npm's `--legacy-peer-deps`), and the checks after the install judge it.
+ */
+const workspaceYaml = (overrides: Record<string, string>): string =>
+  JSON.stringify(
+    { packages: ["."], autoInstallPeers: false, strictPeerDependencies: false, overrides },
+    null,
+    2,
+  );
+
 const publishedCache = new Map<string, ReadonlyArray<string>>();
 
-/** Every version of `name` npm publishes, read once per package. */
+/** Every version of `name` the registry publishes, read once per package. */
 const publishedVersions = (name: string): ReadonlyArray<string> => {
   let versions = publishedCache.get(name);
   if (!versions) {
-    const parsed: unknown = JSON.parse(run("npm", ["view", name, "versions", "--json"], root));
-    // npm prints a lone version as a string and several as an array.
+    const parsed: unknown = JSON.parse(run("pnpm", ["view", name, "versions", "--json"], root));
+    // A lone version prints as a string and several as an array.
     versions = [parsed].flat().map(String);
     publishedCache.set(name, versions);
   }
@@ -189,14 +222,16 @@ const floorOf = (owner: string, peer: string, range: string): string => {
 };
 
 /**
- * Every installed copy of `effect`. `npm ls` exits non-zero for any unmet
- * peer in the tree (a transitive dependency wanting a newer `effect`, say),
- * which is not what is being asked here, so only its output is used.
+ * Every installed copy of `effect`, as the real path of each directory pnpm
+ * linked it from (`node_modules/.pnpm/effect@<version>/node_modules/effect`),
+ * so one copy reached along several paths is listed once per path but under
+ * one name. Should `pnpm list` exit non-zero (over the tree's peers, say), its
+ * output is still the answer, so only that is used.
  */
 const listEffectCopies = (cwd: string): ReadonlyArray<string> => {
   let out: string;
   try {
-    out = run("npm", ["ls", "effect", "--all", "--parseable"], cwd);
+    out = run("pnpm", ["list", "effect", "--depth", "Infinity", "--parseable"], cwd);
   } catch (error) {
     // `execFileSync` attaches the child's captured output to the error it
     // throws for a failed child.
@@ -560,22 +595,17 @@ try {
             ...Object.fromEntries([...peerVersions].map(([peer, { version }]) => [peer, version])),
             ...Object.fromEntries(names.map((name) => [name, siblings[name]])),
           },
-          overrides: siblings,
+          packageManager,
         },
         null,
         2,
       ),
     );
+    writeFileSync(join(project, "pnpm-workspace.yaml"), workspaceYaml(siblings));
+    // No lockfile exists to freeze (pnpm freezes by default under CI).
     run(
-      "npm",
-      [
-        "install",
-        "--no-audit",
-        "--no-fund",
-        "--ignore-scripts",
-        "--legacy-peer-deps",
-        "--loglevel=error",
-      ],
+      "pnpm",
+      ["install", "--no-frozen-lockfile", "--ignore-scripts", "--reporter=append-only"],
       project,
     );
 
@@ -592,7 +622,7 @@ try {
     if (new Set(copies).size !== 1) {
       throw new Error(`expected one copy of effect, found:\n${copies.join("\n")}`);
     }
-    // `--legacy-peer-deps` installed whatever `effect` was asked for, in
+    // pnpm installed whatever `effect` was asked for (no peer is enforced), in
     // range or not, so prove the installed one is in every range that counts.
     const unmet = unmetEffectRanges(project, installed, [...Object.keys(siblings), ...peers]);
     if (unmet.length > 0) {
