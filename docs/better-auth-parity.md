@@ -104,7 +104,9 @@ as a design rule:
 - **Framework adapters (Next/Nuxt/SvelteKit/…):** not now. The Web-standard handler
   plus `HttpApiMiddleware` already mount everywhere; if dedicated packages ever prove
   necessary they slot in as `packages/<framework>` without touching core. Until then,
-  framework support is a docs/examples problem (M7).
+  framework support is a docs/examples problem (M7). **Reversed for SvelteKit** ([ADR-0021](adr/0021-sveltekit-server-adapter.md),
+  #200): three apps on SvelteKit each re-wrote the same `handle` hook and form-action glue,
+  and the copies drifted, so `packages/sveltekit` now ships them. Other frameworks stay deferred.
 
 ### 2.5 Authorization as a first-class pillar
 

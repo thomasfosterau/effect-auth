@@ -476,6 +476,22 @@ importers:
         specifier: 'catalog:'
         version: '@typescript/typescript6@6.0.2'
 
+  packages/sveltekit:
+    dependencies:
+      '@thomasfosterau/effect-auth':
+        specifier: workspace:*
+        version: link:../effect-auth
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.5
+      effect:
+        specifier: 4.0.0
+        version: 4.0.0
+      typescript:
+        specifier: 'catalog:'
+        version: '@typescript/typescript6@6.0.2'
+
   packages/twilio:
     dependencies:
       '@thomasfosterau/effect-auth':

@@ -215,6 +215,7 @@ export default defineConfig({
           "@thomasfosterau/effect-auth-solid#build",
           "@thomasfosterau/effect-auth-sql#build",
           "@thomasfosterau/effect-auth-svelte#build",
+          "@thomasfosterau/effect-auth-sveltekit#build",
           "@thomasfosterau/effect-auth-twilio#build",
           "@thomasfosterau/effect-auth-vue#build",
         ],

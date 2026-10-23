@@ -14,6 +14,7 @@ Batteries-included authentication and authorization for [Effect](https://effect.
 | [`@thomasfosterau/effect-auth-svelte`](packages/svelte)   | Svelte bindings and form components over the client                                                         |
 | [`@thomasfosterau/effect-auth-vue`](packages/vue)         | Vue composables and form components over the client                                                         |
 | [`@thomasfosterau/effect-auth-solid`](packages/solid)     | Solid primitives and form components over the client                                                        |
+| [`@thomasfosterau/effect-auth-sveltekit`](packages/sveltekit) | SvelteKit server adapter: the `handle` hook and the credential form actions                              |
 | [`@thomasfosterau/effect-auth-sql`](packages/sql)         | Driver-agnostic SQL storage layers (`effect/sql`)                                                           |
 | [`@thomasfosterau/effect-auth-drizzle`](packages/drizzle) | Drizzle storage layers for PostgreSQL, SQLite and MySQL                                                     |
 | [`@thomasfosterau/effect-auth-alchemy`](packages/alchemy) | Alchemy v2 `AuthSchema` resource and D1 storage layers                                                      |
