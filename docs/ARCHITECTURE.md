@@ -183,7 +183,9 @@ directories, each with its own `index.ts` barrel and matching
   `OneTimeToken.ts`, `Scim.ts` (SCIM 2.0, see
   [guides/scim.md](guides/scim.md)), `Saml.ts` (the `SamlVerifier` seam that
   `effect-auth-saml` implements), `Delivery.ts` (the `EmailSender` /
-  `SmsSender` seams the delivery adapters implement).
+  `SmsSender` seams the delivery adapters implement), `DeliveryScheduler.ts`
+  (the host seam that runs the sends of the flows that hide whether an
+  account exists off the response path).
 - **Storage helpers** (root): `KeyValueStores.ts` — layers implementing the
   ephemeral stores (OAuth state, WebAuthn challenges, rate limits,
   tokens/OTPs, pending multi-factor) over `effect/persistence`

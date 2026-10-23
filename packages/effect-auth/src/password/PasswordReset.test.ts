@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
-import { Context, Crypto, Effect, Result } from "effect";
+import { Context, Crypto, Effect, Layer, Result } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
@@ -21,6 +21,10 @@ import { PasswordHasher } from "./Password.ts";
 import * as Password from "./Password.ts";
 import { hashToken } from "../TokenHash.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
+import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
+
+/** The no-op hooks, with the detached sends run in place so a test reads them on return. */
+const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
 
 const users = new Map<string, User>();
 const identifierRecords = new Map<string, Identifier>();
@@ -121,7 +125,7 @@ const makeTestContext = async () => {
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
         Context.make(Crypto.Crypto, PlatformCrypto.instance),
       ),
-    ).pipe(Effect.provide(Hooks.Default)),
+    ).pipe(Effect.provide(TestHooks)),
   );
 
   return Context.merge(
@@ -181,9 +185,7 @@ describe("PasswordResetService", () => {
       yield* service.requestPasswordReset("reset@example.com");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentEmails.length).toBe(1);
     expect(sentEmails[0]?.email).toBe("reset@example.com");
@@ -201,9 +203,7 @@ describe("PasswordResetService", () => {
       yield* service.requestPasswordReset("missing@example.com");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentEmails.length).toBe(0);
     expect(resetTokens.size).toBe(0);
@@ -255,7 +255,7 @@ describe("PasswordResetService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     const updatedHash = passwordHashes.get(user.id);
@@ -312,7 +312,7 @@ describe("PasswordResetService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     const updatedHash = passwordHashes.get(user.id);
@@ -336,7 +336,7 @@ describe("PasswordResetService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");

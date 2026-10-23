@@ -17,6 +17,7 @@ import {
   type NewUserIdentifier,
   UserStore,
 } from "../UserStore.ts";
+import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import type { HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { randomBase64UrlToken } from "../RandomToken.ts";
@@ -314,6 +315,7 @@ export const make = (
     const sessionManager = yield* SessionService;
     const passwords = yield* EmailPasswordStore;
     const crypto = yield* Crypto.Crypto;
+    const detached = yield* makeDetachedSend;
 
     /**
      * Whether `send` hides, for this purpose, whether the email has an
@@ -446,6 +448,16 @@ export const make = (
           return;
         }
 
+        // Where only a known address gets a code (sign-in with sign-up
+        // disabled, forget-password), an inline send would answer it later,
+        // and fail it when the vendor does: the send goes off the response
+        // path. Elsewhere a failed send is the caller's to see (#196).
+        if (hidesAccount(purpose)) {
+          return yield* detached(
+            `email-otp:${purpose}`,
+            config.sendVerificationOtp(email, otp, purpose),
+          );
+        }
         yield* Effect.catch(config.sendVerificationOtp(email, otp, purpose), (error) =>
           Effect.fail(
             new EmailOtpError({

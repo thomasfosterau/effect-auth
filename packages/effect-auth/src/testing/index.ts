@@ -16,6 +16,7 @@ export {
   sessionFor,
   viewerLayerAs,
 } from "./RunAs.ts";
+export { inlineDeliveryScheduler } from "./Delivery.ts";
 export {
   type FixtureUserOptions,
   type FixtureUsers,

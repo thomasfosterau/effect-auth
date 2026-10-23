@@ -566,6 +566,43 @@ const verifyEmail = (token: string) =>
 export { EmailVerificationLive, sendVerification, verifyEmail };
 ```
 
+## Delivery
+
+An adapter implements `EmailSender` / `SmsSender` once (`@thomasfosterau/effect-auth-resend`, `@thomasfosterau/effect-auth-twilio`), and `emailCallbacks` / `smsCallbacks` derive every feature's send callback from it. Each derived callback awaits its send. A flow that hides whether an account exists hands its send to the host's `DeliveryScheduler` instead, whichever callback it was given. In that flow only a known address gets a message, so an inline send would answer that address later than an unknown one, and answer a vendor failure with an error the unknown address never sees.
+
+| Flow                                                                                | Send                  | Why                                                                                                                                                                                                                               |
+| ----------------------------------------------------------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sign-up: verification email and existing-account notice                             | off the response path | Under `antiEnumeration` a fresh address gets the verification email and a held one the notice (or nothing), so neither answer may wait on the vendor. The send is advisory: a lost one is resent from `/email-verification/send`. |
+| Magic link with `disableSignUp`                                                     | off the response path | Only a known address gets the link.                                                                                                                                                                                               |
+| Email OTP `sign-in` with `disableSignUp`, and `forget-password`                     | off the response path | Only a known address gets the code.                                                                                                                                                                                               |
+| Phone OTP `sign-in` with `disableSignUp`                                            | off the response path | Only a known number gets the code.                                                                                                                                                                                                |
+| Password reset request                                                              | off the response path | Only a known address gets the link.                                                                                                                                                                                               |
+| Magic link and OTP sign-in with sign-up enabled, OTP `email-verification`           | inline                | Every address gets the message, and the user is waiting on it: a failed send is answered, not dropped.                                                                                                                            |
+| Verification email sent directly (`createVerification`, `/email-verification/send`) | inline                | No account is being hidden.                                                                                                                                                                                                       |
+| Change email, delete account, second-factor OTP, organization invitations           | inline                | The caller is signed in; nothing is hidden.                                                                                                                                                                                       |
+
+A send off the response path never fails the request. Its failure is logged, counted on `effect_auth_delivery_sends_total` (by purpose and outcome) and passed to the `afterDeliveryFailure` hook, which `AuditPlugin` logs as `auth.deliveryFailure`. The message's parameters (its token or code) are in none of them.
+
+Without a `DeliveryScheduler`, those sends run on a detached fiber, which a long-lived server runs to completion. Workers can drop that fiber once the response is returned, so on Workers provide `DeliveryScheduler.waitUntil` per request:
+
+```ts
+import { Effect } from "effect";
+import * as Auth from "@thomasfosterau/effect-auth";
+
+// `ctx` is the Worker's ExecutionContext; the scheduler is read per call, so
+// providing it per request is enough even when the services are built once.
+declare const ctx: { waitUntil(promise: Promise<unknown>): void };
+declare const handle: Effect.Effect<Response>;
+
+const response = handle.pipe(
+  Effect.provide(Auth.DeliveryScheduler.waitUntil((promise) => ctx.waitUntil(promise))),
+);
+```
+
+Detaching does not make the two sign-up answers identical: the fresh branch still writes a verification record that the duplicate branch does not.
+
+**No-op transports.** `EmailSender.logging` and `SmsSender.logging` send nothing and log each message's recipient and purpose. They are for development only, and you opt into them explicitly. Behind them, every flow that waits on a message (magic link, OTP, password reset) is a lockout. The sign-up verification email tolerates being dropped only while verification is advisory, that is, while `requireEmailVerification` does not gate sign-in. effect-auth-resend's `layerConfig` fails at boot when its key is missing rather than falling back to one.
+
 ## Rate limiting
 
 ```typescript

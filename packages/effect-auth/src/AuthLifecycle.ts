@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import * as Errors from "./Errors.ts";
 import { normalizeEmail } from "./utils.ts";
+import { makeDetachedSend } from "./DeliveryScheduler.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import {
   answeredByStandIn,
@@ -48,23 +49,20 @@ export interface AuthLifecycleConfig {
    * verification hooks, and sends this notice in place of the link. It sends
    * only where a fresh sign-up sends a verification email
    * (`requireEmailVerification`, with `sendOnSignUp` left on), so each of the
-   * two answers makes one send. A failed notice fails the sign-up with the
-   * same `EmailVerificationError` a failed verification send does.
+   * two answers makes one send.
    *
-   * Pair the notice with the verification send on one transport, ideally both
-   * derived from `emailCallbacks`. Those sends go through the same detached
-   * dispatch, so neither puts a vendor round-trip on the response path, and a
-   * failed send is logged and counted rather than answered. Hand-written
-   * callbacks that await their vendor put one round-trip on each answer's
-   * response path.
+   * Sign-up hands both sends, this notice and the fresh branch's verification
+   * email, to the host's `DeliveryScheduler` (`DeliveryScheduler.ts`) rather
+   * than awaiting them, whichever callbacks they come from. Neither answer
+   * waits on the vendor, and a failed send never fails the sign-up: it is
+   * logged, counted on `effect_auth_delivery_sends_total` and passed to the
+   * `afterDeliveryFailure` hook. On Workers, provide
+   * `DeliveryScheduler.waitUntil` so the runtime keeps the send alive past the
+   * response.
    *
-   * Unset, such a sign-up sends nothing. With the notice unset and an inline
-   * `sendEmail`, a vendor outage answers `500` for a fresh sign-up (its
-   * verification send fails) and `200` for a held address (nothing is sent).
-   * Likewise, a notice that fails where the verification send does not (for
-   * example a renderer with no `"existing-account"` case) answers `500` for
-   * held addresses only. When the notice is set, each answer makes one send,
-   * so an awaited `sendEmail` costs both answers one round-trip each.
+   * Unset, such a sign-up sends nothing. The notice is optional: the two
+   * answers still match on status and timing, and differ only in that the
+   * fresh branch writes a verification record the duplicate branch does not.
    *
    * `beforeCreateVerification` and `afterCreateVerification`, and anything
    * they enforce (throttling, captcha, bans), apply only to the fresh branch's
@@ -215,6 +213,7 @@ export const make = (
     const verification = yield* EmailVerificationService;
     const userService = yield* UserService;
     const sessionManager = yield* SessionService;
+    const detached = yield* makeDetachedSend;
 
     return {
       signUp: Effect.fn("AuthLifecycleService.signUp")(function* (input: SignUpInput) {
@@ -240,7 +239,9 @@ export const make = (
               // Unverified duplicate: resend to the holder (also invalidates
               // stale tokens, matching FIX 5 behaviour).
               if (sendOnSignUp) {
-                yield* verification.resendVerification(existing.id, identifier.value);
+                yield* verification.resendVerification(existing.id, identifier.value, {
+                  offResponsePath: true,
+                });
               }
 
               // The caller has proven nothing about the address, so the answer
@@ -280,22 +281,17 @@ export const make = (
           // by a stand-in no row backs: a verification record for it would
           // point at no user, and its link would reach the address's holder
           // and never verify. That holder gets the existing-account notice
-          // instead, so each answer makes one send, and a failed notice fails
-          // as a failed verification send does.
+          // instead, so each answer makes one send. Both sends go off the
+          // response path, so neither answer waits on the vendor or fails
+          // with it, which would tell the two apart (#196).
           if (yield* answeredByStandIn(identifiers, userStore, result, input.email)) {
             if (config.sendExistingAccountNotice !== undefined) {
-              yield* config.sendExistingAccountNotice(email).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new Errors.EmailVerificationError({
-                      message: `Failed to send verification email to ${email}`,
-                      cause,
-                    }),
-                ),
-              );
+              yield* detached("existing-account", config.sendExistingAccountNotice(email));
             }
           } else {
-            yield* verification.createVerification(result.user.id, email);
+            yield* verification.createVerification(result.user.id, email, {
+              offResponsePath: true,
+            });
           }
         }
 

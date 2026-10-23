@@ -1,7 +1,7 @@
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { EmailPasswordStore } from "./EmailPassword.ts";
 import { memoryEmailPasswordStore } from "../testing/MemoryStores.ts";
-import { Context, Crypto, Effect, Predicate, Result, Tracer } from "effect";
+import { Context, Crypto, Effect, Layer, Predicate, Result, Tracer } from "effect";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
@@ -32,6 +32,10 @@ import {
   wrongCode,
   zeroCrypto,
 } from "../testing/Passwordless.ts";
+import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
+
+/** The no-op hooks, with the detached sends run in place so a test reads them on return. */
+const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
 
 const users = new Map<string, User>();
 const identifierRecords = new Map<string, Identifier>();
@@ -178,7 +182,7 @@ const makeTestContext = async () => {
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
         Context.make(Crypto.Crypto, PlatformCrypto.instance),
       ),
-    ).pipe(Effect.provide(Hooks.Default)),
+    ).pipe(Effect.provide(TestHooks)),
   );
 
   return Context.merge(
@@ -227,9 +231,7 @@ describe("EmailOtpService", () => {
       yield* service.send("new@example.com", "sign-in");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentOtps.length).toBe(1);
     const sent = sentOtps[0]!;
@@ -256,9 +258,7 @@ describe("EmailOtpService", () => {
       yield* service.send("repeat@example.com", "sign-in");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentOtps.length).toBe(2);
     expect(sentOtps[0]?.otp).toMatch(/^\d{8}$/);
@@ -279,7 +279,7 @@ describe("EmailOtpService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     // The OTP proves email ownership, so the new user's email identifier is
@@ -316,7 +316,7 @@ describe("EmailOtpService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result.user.id).toBe("user-known");
@@ -349,7 +349,7 @@ describe("EmailOtpService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     // The holder of the address is signed in; the squatter's password and
@@ -374,9 +374,7 @@ describe("EmailOtpService", () => {
       return yield* service.signIn("victim@example.com", sentOtps[0]!.otp);
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(passwordHashes.get("user-owner")).toBe("owner-hash");
   });
@@ -393,7 +391,7 @@ describe("EmailOtpService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -420,7 +418,7 @@ describe("EmailOtpService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -450,7 +448,7 @@ describe("EmailOtpService", () => {
     });
 
     const { first, second, third, real } = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(first._tag).toBe("Failure");
@@ -475,7 +473,7 @@ describe("EmailOtpService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(findEmailIdentifier("fumble@example.com")?.userId).toBe(result.user.id);
@@ -495,9 +493,7 @@ describe("EmailOtpService", () => {
 
     // Anti-enumeration: succeeds without sending, and stores an undelivered
     // marker record as it would a code (#417).
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentOtps.length).toBe(0);
     expect(otpRecords.get("stranger@example.com:sign-in")?.attempts).toBe(0);
@@ -524,7 +520,7 @@ describe("EmailOtpService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -552,9 +548,7 @@ describe("EmailOtpService", () => {
       yield* service.send("member@example.com", "forget-password");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     // Anti-enumeration: both calls succeed, only the existing user gets a code,
     // and the missing email holds an undelivered marker record (#417).
@@ -575,7 +569,7 @@ describe("EmailOtpService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result).toEqual({ email: "verify@example.com", verified: true });
@@ -595,7 +589,7 @@ describe("EmailOtpService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -617,7 +611,7 @@ describe("EmailOtpService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -651,9 +645,7 @@ describe("EmailOtpService", () => {
       yield* service.send("user@example.com", "sign-in");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     // A fresh OTP was issued after the cooldown elapsed.
     expect(sentOtps.length).toBe(1);
@@ -675,9 +667,7 @@ describe("EmailOtpService", () => {
       yield* service.send("user@example.com", "email-verification");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentOtps.length).toBe(2);
     expect(otpRecords.size).toBe(2);
@@ -692,9 +682,7 @@ describe("EmailOtpService", () => {
       yield* service.send("repeat@example.com", "sign-in");
     });
 
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentOtps.length).toBe(2);
     expect(otpRecords.size).toBe(1);
@@ -734,7 +722,7 @@ describe("EmailOtpService", () => {
       });
 
       const { known, unknown } = await Effect.runPromise(
-        Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+        Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
       );
 
       expect(unknown.map(observable)).toEqual(known.map(observable));
@@ -794,7 +782,7 @@ describe("EmailOtpService", () => {
       });
 
       const { marker, error } = await Effect.runPromise(
-        Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+        Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
       );
 
       // The stub draws only the all-zero code, as the account holder's shows.
@@ -885,7 +873,7 @@ describe("EmailOtpService verification where send hides the account (#417)", () 
     >,
   ) =>
     makeTestContext().then((context) =>
-      Effect.runPromise(Effect.provide(program, context).pipe(Effect.provide(Hooks.Default))),
+      Effect.runPromise(Effect.provide(program, context).pipe(Effect.provide(TestHooks))),
     );
 
   it.each(hidden.flatMap((config) => verifySequences.map((sequence) => ({ ...config, sequence }))))(

@@ -122,6 +122,19 @@ export interface WriteEvent {
 }
 
 /**
+ * Named arguments for the `afterDeliveryFailure` hook: a send run off the
+ * response path failed (see `Delivery.makeDetachedSend`). It never reaches the
+ * caller, so this hook and the delivery metric are where it is seen. The
+ * message's parameters (its token or code) are not included.
+ */
+export interface DeliveryFailure {
+  /** The message's purpose tag (`Delivery.DeliveryPurpose`). */
+  readonly purpose: string;
+  /** What the send failed with: the sender's error, as it reported it. */
+  readonly cause: unknown;
+}
+
+/**
  * A **transform** hook: maps a value to a new value of the same type.
  *
  * Returning a modified value mutates what flows downstream; failing in the
@@ -164,6 +177,7 @@ const makeNoopHooks = (): typeof Hooks.Service => ({
   beforeVerifyEmail: identity,
   afterVerifyEmail: identity,
   afterWrite: identity,
+  afterDeliveryFailure: identity,
 });
 
 /**
@@ -226,6 +240,8 @@ export class Hooks extends Context.Service<
     readonly afterVerifyEmail: Tap<EmailVerificationResult>;
     /** A write the application made, fired by {@link recordWrite}. */
     readonly afterWrite: Tap<WriteEvent>;
+    /** A send run off the response path failed; see {@link DeliveryFailure}. */
+    readonly afterDeliveryFailure: Tap<DeliveryFailure>;
   }
 >()("@effect-auth/Hooks") {
   /** No-op base layer: identity for every hook point. */
@@ -405,6 +421,12 @@ const wrapHooks = (
       isolateTaps,
     ),
     afterWrite: wrapHook("afterWrite", inner.afterWrite, impls.afterWrite, isolateTaps),
+    afterDeliveryFailure: wrapHook(
+      "afterDeliveryFailure",
+      inner.afterDeliveryFailure,
+      impls.afterDeliveryFailure,
+      isolateTaps,
+    ),
   };
 };
 

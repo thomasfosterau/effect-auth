@@ -1,6 +1,6 @@
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
 import { Context, Crypto, Effect, Layer, Result } from "effect";
-import { Hooks } from "./Hooks.ts";
+import { type DeliveryFailure, Hooks, makePlugin } from "./Hooks.ts";
 import { AuthError, EmailVerificationError, InvalidCredentialsError } from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as AuthLifecycle from "./AuthLifecycle.ts";
@@ -32,6 +32,10 @@ import {
   type EmailPasswordConfig,
 } from "./email/EmailPassword.ts";
 import * as EmailPassword from "./email/EmailPassword.ts";
+import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
+
+/** The no-op hooks, with the detached sends run in place so a test reads them on return. */
+const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
 
 const users = new Map<string, User>();
 const identifierRecords = new Map<string, Identifier>();
@@ -186,7 +190,7 @@ const makeTestContext = async (
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
         cryptoContext,
       ),
-    ).pipe(Effect.provide(Hooks.Default)),
+    ).pipe(Effect.provide(TestHooks)),
   );
 
   const emailVerificationService = await Effect.runPromise(
@@ -288,7 +292,7 @@ describe("AuthLifecycleService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result.needsEmailVerification).toBe(true);
@@ -328,7 +332,7 @@ describe("AuthLifecycleService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     // The answer is a stand-in built from the caller's own input: a fresh id,
@@ -370,7 +374,7 @@ describe("AuthLifecycleService", () => {
     });
 
     const error = await Effect.runPromise(
-      Effect.flip(Effect.provide(program, testContext)).pipe(Effect.provide(Hooks.Default)),
+      Effect.flip(Effect.provide(program, testContext)).pipe(Effect.provide(TestHooks)),
     );
 
     expect(error._tag).toBe("EmailInUseError");
@@ -407,7 +411,7 @@ describe("AuthLifecycleService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result.needsEmailVerification).toBe(true);
@@ -438,7 +442,7 @@ describe("AuthLifecycleService", () => {
           return created.token;
         }),
         testContext,
-      ).pipe(Effect.provide(Hooks.Default)),
+      ).pipe(Effect.provide(TestHooks)),
     );
 
     const program = Effect.gen(function* () {
@@ -449,7 +453,7 @@ describe("AuthLifecycleService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result.user.id).toBe(user.id);
@@ -488,7 +492,7 @@ describe("AuthLifecycleService", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
+      Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)),
     );
 
     expect(result.needsEmailVerification).toBe(false);
@@ -534,7 +538,7 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
       const fresh = yield* service.signUp({ email: FRESH, password: PASSWORD, name: "Probe" });
       const held = yield* service.signUp({ email: HELD, password: PASSWORD, name: "Probe" });
       return { fresh, held };
-    }).pipe(Effect.provide(context), Effect.provide(Hooks.Default));
+    }).pipe(Effect.provide(context), Effect.provide(TestHooks));
 
   /** A `Hooks` layer recording the user id each verification hook sees. */
   const recordingVerificationHooks = (calls: Array<readonly [string, string]>) =>
@@ -608,7 +612,7 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
         Effect.gen(function* () {
           const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
           return yield* service.verifyEmail({ token: sentEmails[0]!.token });
-        }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+        }).pipe(Effect.provide(context), Effect.provide(TestHooks)),
       );
       expect(verifiedResult.user.id).toBe(fresh.user.id);
     },
@@ -644,36 +648,45 @@ describe("AuthLifecycleService.signUp for a held address under antiEnumeration (
     expect(verifications.size).toBe(0);
   });
 
-  it("a failed notice fails the sign-up as a failed verification send does", async () => {
+  it("a failed send fails neither answer; both failures reach afterDeliveryFailure (#196)", async () => {
     seedHolder(true);
+    const failures: DeliveryFailure[] = [];
+    const recording = makePlugin({
+      afterDeliveryFailure: Hooks.tap((failure: DeliveryFailure) =>
+        Effect.sync(() => void failures.push(failure)),
+      ),
+    }).pipe(Layer.provide(Hooks.Default));
     const context = await makeTestContext(
       { antiEnumeration: true },
       {
         sendEmail: () =>
           Effect.fail(new EmailVerificationError({ message: "provider down (verification)" })),
+        hooks: recording,
       },
     );
 
-    const errors = await Effect.runPromise(
+    const results = await Effect.runPromise(
       Effect.gen(function* () {
         const service = yield* AuthLifecycle.make({
           requireEmailVerification: true,
           sendExistingAccountNotice: () =>
             Effect.fail(new AuthError({ message: "provider down (notice)" })),
         });
-        const fresh = yield* Effect.flip(service.signUp({ email: FRESH, password: PASSWORD }));
-        const held = yield* Effect.flip(service.signUp({ email: HELD, password: PASSWORD }));
+        const fresh = yield* service.signUp({ email: FRESH, password: PASSWORD });
+        const held = yield* service.signUp({ email: HELD, password: PASSWORD });
         return { fresh, held };
-      }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+      }).pipe(
+        Effect.provide(context),
+        Effect.provide(Layer.merge(recording, inlineDeliveryScheduler)),
+      ),
     );
 
-    const describeError = (error: { readonly _tag: string; readonly message: string }) => ({
-      tag: error._tag,
-      message: error.message.replace(FRESH, "<address>").replace(HELD, "<address>"),
-    });
-    expect(describeError(errors.held)).toEqual(describeError(errors.fresh));
-    expect(errors.held._tag).toBe("EmailVerificationError");
-    expect(errors.held.message).toBe(`Failed to send verification email to ${HELD}`);
+    expect(results.fresh.needsEmailVerification).toBe(true);
+    expect(results.held.needsEmailVerification).toBe(true);
+    expect(failures.map((failure) => failure.purpose).toSorted()).toEqual([
+      "email-verification",
+      "existing-account",
+    ]);
   });
 });
 
@@ -736,7 +749,7 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
           sessionsAfterVerify,
           victimSignIn,
         };
-      }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(context), Effect.provide(TestHooks)),
     );
 
     expect(outcome.squatterSessions).toBe(1);
@@ -770,7 +783,7 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
         const { token } = yield* verification.createVerification(user.id, VICTIM);
         const service = yield* AuthLifecycle.make({ autoSignInAfterVerification: false });
         return yield* service.verifyEmail({ token });
-      }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(context), Effect.provide(TestHooks)),
     );
 
     expect(result.session).toBeUndefined();
@@ -800,7 +813,7 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof (#425)", 
         const service = yield* AuthLifecycle.make();
         const result = yield* service.verifyEmail({ token });
         return result;
-      }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(context), Effect.provide(TestHooks)),
     );
 
     expect(passwordHashes.get(user.id)).toBe("owner-hash");
@@ -846,7 +859,7 @@ describe("AuthLifecycleService.signUp recovers the address the beforeSignUp hook
       Effect.gen(function* () {
         const service = yield* AuthLifecycle.make({ requireEmailVerification: true });
         return yield* Effect.result(service.signUp({ email, password: PASSWORD }));
-      }).pipe(Effect.provide(context), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(context), Effect.provide(TestHooks)),
     );
   };
 

@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
-import { Context, Crypto, Effect, Predicate, Result } from "effect";
+import { Context, Crypto, Effect, Layer, Predicate, Result } from "effect";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   getPhoneNumber,
@@ -30,6 +30,10 @@ import {
   wrongCode,
   zeroCrypto,
 } from "./testing/Passwordless.ts";
+import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
+
+/** The no-op hooks, with the detached sends run in place so a test reads them on return. */
+const TestHooks = Layer.merge(Hooks.Default, inlineDeliveryScheduler);
 
 // --- in-memory state ---------------------------------------------------------
 const users = new Map<string, Types.User>();
@@ -154,7 +158,7 @@ const makeTestContext = async () => {
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
         Context.make(Crypto.Crypto, PlatformCrypto.instance),
       ),
-    ).pipe(Effect.provide(Hooks.Default)),
+    ).pipe(Effect.provide(TestHooks)),
   );
   return Context.merge(
     Context.merge(
@@ -194,9 +198,7 @@ describe("PhoneOtpService", () => {
       const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
       yield* service.send("+15551230000", "sign-in");
     });
-    await Effect.runPromise(
-      Effect.provide(program, testContext).pipe(Effect.provide(Hooks.Default)),
-    );
+    await Effect.runPromise(Effect.provide(program, testContext).pipe(Effect.provide(TestHooks)));
 
     expect(sentOtps).toHaveLength(1);
     const otp = sentOtps[0]!.otp;
@@ -215,7 +217,7 @@ describe("PhoneOtpService", () => {
         return yield* service.signIn("+15551231111", sentOtps[0]!.otp, {
           sessionAttributes: { device: "cli" },
         });
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
 
     expect(await phoneNumberOf(result.user.id)).toBe("+15551231111");
@@ -240,7 +242,7 @@ describe("PhoneOtpService", () => {
         const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
         yield* service.send("+15551232222", "sign-in");
         return yield* service.signIn("+15551232222", sentOtps[0]!.otp);
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
 
     expect(users.size).toBe(before);
@@ -256,7 +258,7 @@ describe("PhoneOtpService", () => {
         const otp = sentOtps[0]!.otp;
         yield* service.signIn("+15551233333", otp);
         return yield* Effect.result(service.signIn("+15551233333", otp));
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
     expect(result._tag).toBe("Failure");
   });
@@ -275,7 +277,7 @@ describe("PhoneOtpService", () => {
       Effect.gen(function* () {
         const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
         return yield* Effect.result(service.signIn("+15551234444", "123456"));
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
     expect(result._tag).toBe("Failure");
     expect(records.has("+15551234444:sign-in")).toBe(false);
@@ -292,7 +294,7 @@ describe("PhoneOtpService", () => {
         const c = yield* Effect.result(service.signIn("+15551235555", "000002"));
         const real = yield* Effect.result(service.signIn("+15551235555", sentOtps[0]!.otp));
         return [a._tag, b._tag, c._tag, real._tag];
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
     expect(outcome).toEqual(["Failure", "Failure", "Failure", "Failure"]);
   });
@@ -306,7 +308,7 @@ describe("PhoneOtpService", () => {
           disableSignUp: true,
         });
         yield* service.send("+15551236666", "sign-in");
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
     expect(sentOtps).toHaveLength(0);
     // An undelivered marker record stands in for the code (#417).
@@ -323,7 +325,7 @@ describe("PhoneOtpService", () => {
         const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
         yield* service.send("+15551237777", "phone-verification");
         return yield* service.verifyPhoneNumber(created.id, "+15551237777", sentOtps[0]!.otp);
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
     expect(updated.id).toBe(created.id);
     const identifier = await Effect.runPromise(identifiers.getByValue("phone", "+15551237777"));
@@ -341,7 +343,7 @@ describe("PhoneOtpService", () => {
         });
         yield* service.send("+1 (555) 123-8888", "sign-in");
         return yield* service.signIn("+15551238888", sentOtps[0]!.otp);
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
     expect(await phoneNumberOf(result.user.id)).toBe("+15551238888");
   });
@@ -356,7 +358,7 @@ describe("PhoneOtpService", () => {
         });
         yield* service.send("+15559990001", "sign-in");
         return yield* Effect.result(service.send("+15559990001", "sign-in"));
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
 
     expect(result._tag).toBe("Failure");
@@ -389,7 +391,7 @@ describe("PhoneOtpService", () => {
           resendCooldown: 60_000,
         });
         yield* service.send("+15559990002", "sign-in");
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
 
     // A fresh OTP was issued after the cooldown elapsed.
@@ -406,7 +408,7 @@ describe("PhoneOtpService", () => {
         const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
         yield* service.send("+15559990003", "sign-in");
         yield* service.send("+15559990003", "sign-in");
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
     expect(sentOtps).toHaveLength(2);
     expect(records.has("+15559990003:sign-in")).toBe(true);
@@ -434,7 +436,7 @@ describe("PhoneOtpService", () => {
             { concurrency: 1 },
           );
         return { known: yield* twice("+15559990010"), unknown: yield* twice("+15559990011") };
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
 
     expect(unknown.map(observable)).toEqual(known.map(observable));
@@ -482,7 +484,7 @@ describe("PhoneOtpService", () => {
         const marker = records.get(key("+15559990021", "sign-in"));
         const error = yield* Effect.flip(service.signIn("+15559990021", guess));
         return { marker, error };
-      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+      }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
 
     // The stub draws only the all-zero code, as the account holder's shows.
@@ -565,7 +567,7 @@ describe("PhoneOtpService verification where send hides the account (#417)", () 
     >,
   ) =>
     makeTestContext().then((context) =>
-      Effect.runPromise(program.pipe(Effect.provide(context), Effect.provide(Hooks.Default))),
+      Effect.runPromise(program.pipe(Effect.provide(context), Effect.provide(TestHooks))),
     );
 
   it.each(verifySequences)("answers %s alike for every number", async (sequence) => {

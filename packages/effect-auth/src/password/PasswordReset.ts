@@ -3,6 +3,7 @@ import * as Errors from "../Errors.ts";
 import { IdentifierStore, resolveUserByIdentifier } from "../Identifier.ts";
 import { UserStore } from "../UserStore.ts";
 import { hashToken } from "../TokenHash.ts";
+import { makeDetachedSend } from "../DeliveryScheduler.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import { PasswordHasher } from "./Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -142,6 +143,7 @@ export const make = (
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
     const crypto = yield* Crypto.Crypto;
+    const detached = yield* makeDetachedSend;
 
     const generateResetToken = (): Effect.Effect<string, Errors.AuthError> =>
       randomBase64UrlToken(crypto, "Failed to generate reset token");
@@ -187,14 +189,10 @@ export const make = (
 
         yield* resetStore.create(reset);
 
-        yield* Effect.catch(config.sendResetPassword(normalizedEmail, rawToken), (error) =>
-          Effect.fail(
-            new Errors.PasswordResetError({
-              message: `Failed to send reset password email to ${normalizedEmail}`,
-              cause: error,
-            }),
-          ),
-        );
+        // Only a known address gets a link, so an inline send would answer it
+        // later, and fail it when the vendor does, than an unknown one: the
+        // send goes off the response path (#196).
+        yield* detached("password-reset", config.sendResetPassword(normalizedEmail, rawToken));
 
         yield* hooks.afterRequestPasswordReset({ email: normalizedEmail });
       }),

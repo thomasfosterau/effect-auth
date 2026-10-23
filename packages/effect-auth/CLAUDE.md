@@ -31,6 +31,7 @@ Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `User
 - **Errors**: domain errors are `Data.TaggedError` with a stable `code` (`Errors.ts` when two modules raise them, else module-local); HTTP-boundary errors are the `Schema.TaggedError` classes in `http/HttpApiSchema.ts` with fixed statuses (`RateLimitError` → 429, `AuthError` → 500). Nothing subclasses `AuthError`.
 - **Bearer secrets are stored as SHA-256 digests** (`hashToken` and its wrappers, ADR-0004): session ids, magic-link, email-verification, password-reset and one-time tokens, device codes, API keys, OIDC codes and tokens, email / phone OTPs, backup codes. The raw value goes to the user once; the digest is the store key.
 - **Secrets compare in constant time** with `constantTimeHashEqual` / `timingSafeEqualBytes` (`TokenHash.ts`).
+- **A send that would reveal whether an account exists never sits on the response path**: those flows hand it to `DeliveryScheduler` (`makeDetachedSend`), and its failure goes to the `afterDeliveryFailure` hook and the delivery metric, never to the caller. Every other send is awaited (#196).
 - **Randomness comes from the `Crypto.Crypto` service** (default `PlatformCrypto.layer`, Web Crypto); never `Math.random`. Direct `node:crypto` stays in `password/Password.ts` (scrypt), `TokenHash.ts` and `Cipher.ts`.
 - **Session ids are 160 bits** (`crypto.randomBytes(20)` in `SessionService.ts`), with active and idle expiry.
 - **Sign-in does constant work**: password verification runs against a cached decoy hash when the account does not exist.
@@ -48,7 +49,7 @@ Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `User
 - **Account** — a User's link to one Provider; the `credential` provider holds the password hash.
 - **Identifier** — a login handle (`email`, `username`, `phone`) in the `IdentifierStore`, unique per `(type, value)`; not a User field (DESIGN.md D12).
 - **Hooks / plugin** — `before*` / `after*` hook points; a plugin is a layer composed with `composePlugins` (first-party ones keep the `*Plugin` suffix).
-- **Seam** — a service the core declares and an adapter implements: `PasswordHasher`, `EmailSender`, `SmsSender`, `SamlVerifier`, `SecondFactorGate`, `EntityResolver`, `IsFollower`.
+- **Seam** — a service the core declares and an adapter or the host implements: `PasswordHasher`, `EmailSender`, `SmsSender`, `DeliveryScheduler`, `SamlVerifier`, `SecondFactorGate`, `EntityResolver`, `IsFollower`.
 - **Principal / entity** — the kernel's typed references (`Type::"id"`); a **system principal** is `System::"<name>"`.
 - **Ladder / rung / axis** — an ordered role list, one role per user, and a named "this rung or above" capability.
 - **Fail-open / fail-closed resolution** — `SessionResolution.resolveFailOpen` turns a session-service fault into an anonymous request reported as `degraded`; `resolve` fails. Neither is the default.
