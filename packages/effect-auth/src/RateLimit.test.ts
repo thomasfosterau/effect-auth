@@ -175,6 +175,8 @@ describe("RateLimiter.consumeToken", () => {
         return yield* Effect.flip(consume(layer, "timed", { maxRequests: 1, windowMs: 60_000 }));
       }).pipe(Effect.provide(TestClock.layer())),
     );
-    expect(error.retryAfter && Duration.toMillis(error.retryAfter)).toBe(45_000);
+    expect(error).toBeInstanceOf(RateLimitError);
+    const retryAfter = error instanceof RateLimitError ? error.retryAfter : undefined;
+    expect(retryAfter && Duration.toMillis(retryAfter)).toBe(45_000);
   });
 });
